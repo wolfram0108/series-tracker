@@ -514,7 +514,7 @@ def delete_series(series_id):
         app.logger.warning("routes", f"Удаление записей торрентов для сериала {series_id} из qBittorrent.")
         hashes_to_delete = [t['qb_hash'] for t in torrents_to_delete if t.get('qb_hash')]
         if hashes_to_delete:
-            qb_client = QBittorrentClient(AuthManager(app.db, app.logger), app.db, app.logger)
+            qb_client = QBittorrentClient(app.auth_manager, app.db, app.logger)
             qb_client.delete_torrents(hashes_to_delete, delete_files=False)
             app.logger.info("routes", f"Удалено {len(hashes_to_delete)} записей торрентов из qBittorrent для сериала {series_id}.")
 
@@ -633,7 +633,7 @@ def reset_torrents(series_id):
         # 2. Удаляем из qBittorrent
         hashes_to_delete = [t['qb_hash'] for t in torrents_to_delete if t.get('qb_hash')]
         if hashes_to_delete:
-            qb_client = QBittorrentClient(AuthManager(app.db, app.logger), app.db, app.logger)
+            qb_client = QBittorrentClient(app.auth_manager, app.db, app.logger)
             qb_client.delete_torrents(hashes_to_delete, delete_files=True)
             app.logger.info("series_api", f"Удалено {len(hashes_to_delete)} торрентов из qBittorrent для series_id {series_id}.")
 

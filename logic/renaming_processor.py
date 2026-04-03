@@ -27,7 +27,7 @@ def process_and_rename_torrent_files(flask_app: Flask, series_id: int, qb_hash: 
     profile_id = series['parser_profile_id']
     engine = RuleEngine(db, logger)
     formatter = FilenameFormatter(logger)
-    auth_manager = AuthManager(db, logger)
+    auth_manager = flask_app.auth_manager
     qb_client = QBittorrentClient(auth_manager, db, logger)
     
     # Получаем список файлов из qBittorrent

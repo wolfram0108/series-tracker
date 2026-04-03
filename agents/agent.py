@@ -295,7 +295,7 @@ class Agent(threading.Thread):
         rid = 0
         
         with self.app.app_context():
-            auth_manager = AuthManager(self.db, self.logger)
+            auth_manager = self.app.auth_manager
             self.qb_client = QBittorrentClient(auth_manager, self.db, self.logger)
             self._recover_tasks(self.qb_client)
 

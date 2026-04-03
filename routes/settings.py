@@ -90,7 +90,7 @@ def parse_url():
     url = data['url']
     
     try:
-        auth_manager = AuthManager(app.db, app.logger)
+        auth_manager = app.auth_manager
 
         resolver = TrackerResolver(app.db)
         tracker_info = resolver.get_tracker_by_url(url)

@@ -16,6 +16,7 @@ from agents.renaming_agent import RenamingAgent
 from routes import init_all_routes
 from debug_manager import DebugManager
 from status_manager import StatusManager
+from auth import AuthManager
 
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
@@ -28,6 +29,7 @@ set_db_for_logging(app.db)
 
 app.debug_manager = DebugManager(app.db)
 app.sse_broadcaster = sse_broadcaster
+app.auth_manager = AuthManager(app.db, app.logger)
 app.status_manager = StatusManager(app, app.db, app.sse_broadcaster, app.logger)
 
 init_all_routes(app)

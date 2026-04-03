@@ -211,9 +211,9 @@ def perform_series_scan(series_id: int, status_manager: StatusManager, flask_app
                 return {"success": True, "message": "Сканирование и планирование для VK-сериала завершены."}
             
             else:
-                auth_manager = AuthManager(flask_app.db, flask_app.logger)
+                auth_manager = flask_app.auth_manager
                 if flask_app.debug_manager.is_debug_enabled('auth'):
-                    flask_app.logger.debug("auth", f"[Scanner] Создан ЕДИНЫЙ AuthManager ID: {id(auth_manager)} для всего сканирования.")
+                    flask_app.logger.debug("auth", f"[Scanner] Используется ГЛОБАЛЬНЫЙ AuthManager ID: {id(auth_manager)} для сканирования.")
 
                 resolver = TrackerResolver(flask_app.db)
                 tracker_info = resolver.get_tracker_by_url(series['url'])
