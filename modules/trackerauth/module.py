@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import time
 from typing import Any
 
@@ -28,6 +27,7 @@ from core.db import Database
 from core.envelope import Envelope
 
 from .providers import PROVIDERS, TrackerLoginError
+from .repository import TrackerAuthRepository
 
 LOGIN_MIN_INTERVAL = 300.0  # секунд между логинами на один трекер
 
@@ -36,7 +36,7 @@ class TrackerauthModule(BaseModule):
     name = "trackerauth"
 
     def __init__(self, bus, db: Database) -> None:
-        self.db = db
+        self.repo = TrackerAuthRepository(db)
         self._sessions: dict[tuple[str, str], requests.Session] = {}
         self._last_login: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
@@ -45,34 +45,10 @@ class TrackerauthModule(BaseModule):
     def register(self) -> None:
         self.handle("trackerauth.fetch", self.on_fetch)
 
-    # --- персистентность сессий (Р-4) -------------------------------------------
-
-    async def _load_cookies(self, service: str, domain: str) -> dict | None:
-        row = await self.db.fetch_one(
-            "SELECT cookies_json FROM tracker_sessions "
-            "WHERE service=? AND domain=?", (service, domain))
-        return json.loads(row["cookies_json"]) if row else None
-
-    async def _save_cookies(self, service: str, domain: str,
-                            session: requests.Session, *,
-                            logged_in: bool) -> None:
-        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        await self.db.execute(
-            "INSERT INTO tracker_sessions "
-            "(service, domain, cookies_json, last_login_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT(service, domain) DO UPDATE SET "
-            "cookies_json=excluded.cookies_json, updated_at=excluded.updated_at"
-            + (", last_login_at=excluded.last_login_at" if logged_in else ""),
-            (service, domain, json.dumps(session.cookies.get_dict()),
-             now if logged_in else None, now))
-
     # --- сессии и логин ------------------------------------------------------------
 
     async def _credentials(self, service: str) -> dict:
-        row = await self.db.fetch_one(
-            "SELECT username, password, url FROM auth WHERE auth_type=?",
-            (service,))
+        row = await self.repo.get_credentials(service)
         if not row:
             raise TrackerLoginError(f"в БД нет учётных данных для {service}")
         return row
@@ -86,7 +62,7 @@ class TrackerauthModule(BaseModule):
 
         session = (provider.make_session()
                    if hasattr(provider, "make_session") else requests.Session())
-        cookies = await self._load_cookies(service, domain)
+        cookies = await self.repo.load_cookies(service, domain)
         if cookies:
             for name, value in cookies.items():
                 session.cookies.set(name, value, domain=domain)
@@ -109,7 +85,7 @@ class TrackerauthModule(BaseModule):
         session.cookies.clear()
         self.log.info("логин на %s/%s", service, domain)
         await asyncio.to_thread(provider.login, session, credentials, url)
-        await self._save_cookies(service, domain, session, logged_in=True)
+        await self.repo.save_cookies(service, domain, session, logged_in=True)
 
     # --- fetch ----------------------------------------------------------------------
 
@@ -134,7 +110,7 @@ class TrackerauthModule(BaseModule):
                     raise TrackerLoginError(
                         f"{service}: после релогина всё ещё разлогинены")
             domain = provider.normalize_domain(url)
-            await self._save_cookies(service, domain, session,
+            await self.repo.save_cookies(service, domain, session,
                                      logged_in=False)
             return self._pack(resp)
 

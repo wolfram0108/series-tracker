@@ -1,0 +1,149 @@
+"""Тесты модулей settings, metadata, library (этап 2)."""
+import subprocess
+import sys
+
+import httpx
+import pytest
+
+from core import BaseModule, Bus, BusRequestError, Runner
+from core.db import Database
+from modules.library import LibraryModule
+from modules.metadata import MetadataModule
+from modules.settings import SettingsModule
+
+
+@pytest.fixture
+def db_path(tmp_path):
+    path = tmp_path / "test.db"
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
+                   env={"ST_DB_URL": f"sqlite:///{path}",
+                        "PATH": "/usr/bin:/bin"},
+                   cwd=".", check=True, capture_output=True)
+    return str(path)
+
+
+class Probe(BaseModule):
+    name = "probe"
+
+
+@pytest.fixture
+async def system(db_path):
+    bus = Bus()
+    db = Database(db_path)
+    modules = [SettingsModule(bus, db), MetadataModule(bus),
+               LibraryModule(bus), Probe(bus)]
+    runner = Runner(bus, modules)
+    await runner.start()
+    yield bus, db, modules
+    await runner.stop()
+
+
+def _probe(modules) -> Probe:
+    return modules[-1]
+
+
+# --- settings -------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_settings_set_get_and_event(system):
+    bus, _, modules = system
+    probe = _probe(modules)
+    sub = bus.subscribe("settings.changed")
+
+    await probe.request("settings.value.set",
+                        {"key": "tmdb_token", "value": "т0кен"}, timeout=5)
+    reply = await probe.request("settings.value.get",
+                                {"key": "tmdb_token"}, timeout=5)
+    assert reply["value"] == "т0кен"
+
+    env = sub.queue.get_nowait()
+    assert env.topic == "settings.changed"
+    assert env.payload == {"key": "tmdb_token", "value": "т0кен"}
+
+
+@pytest.mark.asyncio
+async def test_settings_get_missing_returns_none(system):
+    _, _, modules = system
+    reply = await _probe(modules).request("settings.value.get",
+                                          {"key": "нет такого"}, timeout=5)
+    assert reply["value"] is None
+
+
+# --- metadata -------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_metadata_search_formats_results(system, monkeypatch):
+    _, _, modules = system
+    probe = _probe(modules)
+    await probe.request("settings.value.set",
+                        {"key": "tmdb_token", "value": "x"}, timeout=5)
+
+    async def fake_get(self, path, **kwargs):
+        assert path == "/search/tv"
+        return httpx.Response(200, json={"results": [{
+            "id": 4638, "name": "Во все тяжкие",
+            "original_name": "Breaking Bad",
+            "first_air_date": "2008-01-20",
+            "poster_path": "/p.jpg", "overview": "химия"}]},
+            request=httpx.Request("GET", "http://t"))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    reply = await probe.request("metadata.search",
+                                {"query": "breaking"}, timeout=5)
+    assert reply["results"] == [{
+        "id": 4638, "name": "Во все тяжкие",
+        "original_name": "Breaking Bad", "year": "2008",
+        "poster_path": "/p.jpg", "overview": "химия"}]
+
+
+@pytest.mark.asyncio
+async def test_metadata_without_token_fails_loudly(system):
+    _, _, modules = system
+    with pytest.raises(BusRequestError, match="токен TMDB"):
+        await _probe(modules).request("metadata.search",
+                                      {"query": "x"}, timeout=5)
+
+
+# --- library --------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_library_lists_only_directories_sorted(system, tmp_path):
+    _, _, modules = system
+    (tmp_path / "b_dir").mkdir()
+    (tmp_path / "A_dir").mkdir()
+    (tmp_path / "file.mkv").write_text("x")
+
+    reply = await _probe(modules).request(
+        "library.directories.list", {"path": str(tmp_path)}, timeout=5)
+    assert [i["name"] for i in reply["items"]] == ["A_dir", "b_dir"]
+    assert all(i["type"] == "directory" for i in reply["items"])
+
+
+@pytest.mark.asyncio
+async def test_library_allowed_roots_enforced(db_path, tmp_path):
+    bus = Bus()
+    modules = [LibraryModule(bus, allowed_roots=[str(tmp_path)]), Probe(bus)]
+    runner = Runner(bus, modules)
+    await runner.start()
+    try:
+        probe = modules[-1]
+        ok = await probe.request("library.directories.list",
+                                 {"path": str(tmp_path)}, timeout=5)
+        assert ok["path"] == str(tmp_path)
+        with pytest.raises(BusRequestError, match="запрещён"):
+            await probe.request("library.directories.list",
+                                {"path": "/etc"}, timeout=5)
+        # обход через .. нормализуется ДО проверки
+        with pytest.raises(BusRequestError, match="запрещён"):
+            await probe.request("library.directories.list",
+                                {"path": f"{tmp_path}/../../etc"}, timeout=5)
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_library_missing_path(system):
+    _, _, modules = system
+    with pytest.raises(BusRequestError, match="не каталог"):
+        await _probe(modules).request("library.directories.list",
+                                      {"path": "/нет/такого"}, timeout=5)
