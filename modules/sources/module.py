@@ -81,12 +81,14 @@ class SourcesModule(BaseModule):
         lock = self._locks.setdefault(service, asyncio.Lock())
         async with lock:
             await self._polite(service)
-            result = await self._parse_by_service(service, url)
+            result = await self._parse_by_service(service, url,
+                                                  tracker["mirrors"])
         result["service"] = service
         result["ui_features"] = tracker["ui_features"]
         return result
 
-    async def _parse_by_service(self, service: str, url: str) -> dict:
+    async def _parse_by_service(self, service: str, url: str,
+                                mirrors: list[str]) -> dict:
         if service == "anilibria":
             alias = anilibria.alias_from_url(url)
             api = anilibria.api_base_from_url(url)
@@ -95,14 +97,10 @@ class SourcesModule(BaseModule):
             return anilibria.release_to_result(resp.json())
 
         if service in ("kinozal", "rutracker"):
-            reply = await self.request("trackerauth.fetch", {
-                "service": service, "url": url, "timeout": 20}, timeout=60)
-            if reply["status"] != 200:
-                raise SourceParseError(
-                    f"{service}: HTTP {reply['status']} на {url}")
             parse = (parsers.kinozal_parse if service == "kinozal"
                      else parsers.rutracker_parse)
-            return parse(reply["text"], url)
+            return await self._parse_with_mirrors(service, url, mirrors,
+                                                  parse)
 
         if service in ("astar", "anilibria_tv"):
             # Функции разбора готовы (parsers.astar_parse /
@@ -112,6 +110,38 @@ class SourcesModule(BaseModule):
                 "этапе 6 (Playwright на стенде); см. revision.md Р-9")
 
         raise SourceParseError(f"нет реализации для трекера {service}")
+
+    async def _parse_with_mirrors(self, service: str, url: str,
+                                  mirrors: list[str], parse) -> dict:
+        """Фоллбэк зеркал живёт здесь, а не в scan: владелец таблицы
+        trackers и доставки страниц — sources (Р-7). Пробуем исходный
+        URL, затем остальные зеркала; неудача всех — громкая ошибка со
+        списком попыток. Результат несёт фактический URL ('url')."""
+        from urllib.parse import urlparse
+        original = urlparse(url)
+        candidates = [url] + [original._replace(netloc=m).geturl()
+                              for m in mirrors if m and m != original.netloc]
+        errors = []
+        for attempt_url in candidates:
+            try:
+                reply = await self.request("trackerauth.fetch", {
+                    "service": service, "url": attempt_url, "timeout": 20},
+                    timeout=60)
+                if reply["status"] != 200:
+                    raise SourceParseError(f"HTTP {reply['status']}")
+                result = parse(reply["text"], attempt_url)
+                result["url"] = attempt_url
+                if attempt_url != url:
+                    self.log.info("%s: основной URL не сработал, страница "
+                                  "получена с зеркала %s", service,
+                                  urlparse(attempt_url).netloc)
+                return result
+            except Exception as exc:  # сеть, HTTP, разбор — пробуем дальше
+                errors.append(f"{urlparse(attempt_url).netloc}: {exc}")
+                self.log.warning("%s: зеркало не сработало — %s", service,
+                                 errors[-1])
+        raise SourceParseError(
+            f"{service}: не сработало ни одно зеркало ({'; '.join(errors)})")
 
     # --- VK (находка 15: официальный API, токен живёт в trackerauth) -------------------
 

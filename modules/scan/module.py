@@ -1,0 +1,473 @@
+"""Модуль scan — оркестратор сканирования (ревизия scanner.py +
+расписание из MonitoringAgent).
+
+Queries:
+  scan.series.run {series_id, force_replace?} → {tasks_created | vk-сводка}
+      Повторный запуск при идущем скане сериала — ошибка («уже запущен»,
+      находка 27).
+
+Commands:
+  scan.all.start {} — проход по всем сериалам с auto_scan_enabled
+      (то же делает внутренний планировщик по расписанию из settings).
+
+События (исходящие):
+  scan.plan.updated {series_id} — план VK-загрузок пересчитан; владелец
+      download_tasks (downloads) подписан: усыновление файлов и создание
+      задач — его зона.
+  scan.status.changed {scanner_enabled, scan_interval, is_scanning,
+      is_awaiting_tasks, next_scan_time} — состояние планировщика
+      (контракт старого scanner_status_update).
+  series.status.contribution — свёртка scanning/error (Р-11); носитель
+      ошибки — scan_tasks.status='error'.
+
+События (входящие):
+  torrents.queue.changed {count} — опустошение конвейера: после полного
+      прохода следующий скан назначается, когда count=0.
+
+Контракты будущих модулей (тесты фиксируют их фейками):
+  renaming.reprocess {series_id} (query) — переобработка имён перед
+      сканом (вместо sleep-поллинга, находка 16);
+  torrents.db.active {series_id} (query) → активные торренты серии
+      (сверенные с qBittorrent);
+  torrents.db.deactivate_all {series_id} (query) — для force_replace;
+  torrents.register {series_id, torrent, qb_hash, link_type, replaces}
+      (query, идемпотентен) — фиксация раздачи + запуск конвейера +
+      замена старой.
+
+Ресьюмабельность (настоящая, вместо находки 26): план замен — в
+scan_tasks ДО выполнения; добавления идемпотентны (локальный infohash,
+Р-2: повторное добавление = existed); on_start продолжает незавершённые
+задачи с места обрыва.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+from datetime import datetime, timedelta, timezone
+
+from core import BaseModule, BusRequestError
+from core.db import Database
+from core.envelope import Envelope
+
+from . import ids
+from .planner import build_plan
+from .repository import ScanRepository
+
+# Режим замены раздач по трекерам (ревизия находки 28 — вместо
+# подстроки в оркестраторе). fixed: новая раздача заменяет активную с
+# теми же episodes; rolling: при единственной активной заменяется она,
+# при нескольких — осознанно не заменяем (неоднозначно, что устарело).
+REPLACE_MODE = {"astar": "fixed"}
+DEFAULT_REPLACE_MODE = "rolling"
+
+_NO_HANDLER = "нет обработчика"
+
+
+class ScanError(RuntimeError):
+    pass
+
+
+class ScanModule(BaseModule):
+    name = "scan"
+
+    def __init__(self, bus, db: Database, *,
+                 scheduler_tick: float | None = 10.0) -> None:
+        self.repo = ScanRepository(db)
+        self._tick = scheduler_tick  # None — без планировщика (тесты)
+        self._running: set[int] = set()
+        self._scan_all_running = False
+        self._awaiting_pipeline = False
+        super().__init__(bus)
+
+    def register(self) -> None:
+        # concurrent: долгий скан одного сериала не должен блокировать
+        # очередь запросов к модулю (защита от гонки — set _running).
+        self.handle("scan.series.run", self.on_run, concurrent=True)
+        self.handle("scan.all.start", self.on_scan_all)
+        self.handle("torrents.queue.changed", self.on_queue_changed)
+
+    async def on_start(self) -> None:
+        # Носители прошлых ошибок — в свёртку (Р-11: поставщик публикует
+        # вклад при старте после reconcile).
+        for task in await self.repo.error_tasks():
+            self._contribute(task["series_id"], scanning=False, error=True)
+        # Настоящий resume незавершённых задач (вместо удаления).
+        for task in await self.repo.incomplete_tasks():
+            self.log.info("возобновление прерванного скана: задача %d, "
+                          "сериал %d", task["id"], task["series_id"])
+            self._spawn(self._resume_task(task))
+        if self._tick is not None:
+            self._spawn(self._scheduler_loop())
+
+    def _spawn(self, coro) -> None:
+        self._tasks.append(asyncio.create_task(coro))
+
+    # --- запуск сканов ---------------------------------------------------------
+
+    async def on_run(self, env: Envelope) -> dict:
+        p = env.payload
+        return await self._run_series(int(p["series_id"]),
+                                      bool(p.get("force_replace")))
+
+    async def on_scan_all(self, env: Envelope) -> None:
+        if self._scan_all_running:
+            self.log.warning("полный проход уже идёт — повтор отклонён")
+            return
+        self._spawn(self._scan_all())
+
+    async def _run_series(self, series_id: int, force: bool = False) -> dict:
+        if series_id in self._running:
+            raise ScanError(f"скан сериала {series_id} уже запущен")
+        self._running.add(series_id)
+        self._contribute(series_id, scanning=True, error=False)
+        try:
+            series = await self.request("catalog.series.get",
+                                        {"series_id": series_id})
+            if not series.get("parser_profile_id"):
+                raise ScanError(
+                    f"для сериала «{series.get('name')}» не назначен "
+                    "профиль правил")
+            # Прошлая ошибка сбрасывается новым сканом (Р-11).
+            await self.repo.delete_error_tasks(series_id)
+            await self._reprocess_names(series_id)
+            if series["source_type"] == "vk_video":
+                result = await self._scan_vk(series)
+            else:
+                result = await self._scan_torrents(series, force)
+            self._contribute(series_id, scanning=False, error=False)
+            return result
+        except Exception as exc:
+            # Носитель ошибки: error-запись в scan_tasks, если её не
+            # оставила торрент-фаза.
+            if not await self._has_error_task(series_id):
+                task_id = await self.repo.create_task(series_id, [])
+                await self.repo.set_error(task_id, str(exc))
+            self._contribute(series_id, scanning=False, error=True)
+            raise
+        finally:
+            self._running.discard(series_id)
+
+    async def _has_error_task(self, series_id: int) -> bool:
+        return any(t["series_id"] == series_id
+                   for t in await self.repo.error_tasks())
+
+    async def _reprocess_names(self, series_id: int) -> None:
+        """Переобработка имён до скана — request/reply вместо
+        create+sleep-поллинга до 600 с (находка 16)."""
+        try:
+            await self.request("renaming.reprocess", {"series_id": series_id},
+                               timeout=600)
+        except BusRequestError as exc:
+            if _NO_HANDLER in str(exc):
+                self.log.warning("модуль renaming ещё не подключён — "
+                                 "переобработка перед сканом пропущена")
+            else:
+                raise
+
+    # --- VK-ветка ---------------------------------------------------------------
+
+    async def _scan_vk(self, series: dict) -> dict:
+        series_id = series["id"]
+        channel_url, _, query = series["url"].partition("|")
+        reply = await self.request("sources.vk.scan", {
+            "channel_url": channel_url, "query": query,
+            "search_mode": series.get("vk_search_mode") or "search"},
+            timeout=900)
+        videos = reply["videos"]
+
+        applied = await self.request("rules.apply", {
+            "profile_id": series["parser_profile_id"],
+            "titles": [v["title"] for v in videos]}, timeout=300)
+        candidates = self._vk_candidates(series_id, videos,
+                                         applied["results"])
+        stats = await self.repo.upsert_candidates(series_id, candidates)
+        self.log.info("VK-скан %d: кандидатов %d (добавлено %d, обновлено "
+                      "%d, удалено фантомов %d)", series_id, len(candidates),
+                      stats["added"], stats["updated"], stats["deleted"])
+
+        plan_input = await self.repo.candidates(series_id)
+        plan = build_plan(plan_input, self._quality_priority(series))
+        await self.repo.set_plan_statuses(plan)
+        in_plan = sum(1 for s in plan.values() if s.startswith("in_plan"))
+        self.publish_event("scan.plan.updated", {"series_id": series_id})
+        return {"source_type": "vk_video", "candidates": stats,
+                "in_plan": in_plan}
+
+    @staticmethod
+    def _quality_priority(series: dict) -> list[int]:
+        try:
+            return json.loads(series.get("vk_quality_priority") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @staticmethod
+    def _vk_candidates(series_id: int, videos: list[dict],
+                       results: list[dict]) -> list[dict]:
+        """Видео + извлечения правил -> строки media_items. Кандидат
+        обязан иметь извлечённый episode или start (семантика
+        оригинала); даты — naive UTC '%Y-%m-%d %H:%M:%S' (формат
+        хранения прод-БД)."""
+        candidates = []
+        for video, outcome in zip(videos, results):
+            extracted = outcome.get("extracted") or {}
+            if outcome.get("excluded"):
+                continue
+            if extracted.get("episode") is None \
+                    and extracted.get("start") is None:
+                continue
+            pub = datetime.fromisoformat(
+                video["publication_date"].replace("Z", "+00:00"))
+            item = {
+                "series_id": series_id,
+                "unique_id": ids.media_unique_id(video["url"], pub, series_id),
+                "source_url": video["url"],
+                "publication_date": pub.astimezone(timezone.utc)
+                                       .strftime("%Y-%m-%d %H:%M:%S"),
+                "resolution": video.get("resolution"),
+                "source_title": video["title"],
+                "season": extracted.get("season"),
+                "voiceover_tag": extracted.get("voiceover"),
+            }
+            if extracted.get("episode") is not None:
+                item["episode_start"] = extracted["episode"]
+            else:
+                item["episode_start"] = extracted["start"]
+                if extracted.get("end") is not None:
+                    item["episode_end"] = extracted["end"]
+            candidates.append(item)
+        return candidates
+
+    # --- торрент-ветка -------------------------------------------------------------
+
+    async def _scan_torrents(self, series: dict, force: bool) -> dict:
+        series_id = series["id"]
+        if force:
+            self.log.warning("force_replace: все активные торренты "
+                             "сериала %d будут заменены", series_id)
+            await self.request("torrents.db.deactivate_all",
+                               {"series_id": series_id}, timeout=120)
+        active = await self.request("torrents.db.active",
+                                    {"series_id": series_id}, timeout=60)
+
+        parsed = await self.request("sources.parse", {"url": series["url"]},
+                                    timeout=300)
+        plan_items = self._replace_plan(series, parsed, active)
+        if not plan_items:
+            self.log.info("сериал %d: новых раздач нет", series_id)
+            return {"source_type": "torrent", "tasks_created": 0}
+
+        task_id = await self.repo.create_task(series_id, plan_items)
+        return await self._execute_torrent_task(
+            task_id, series, plan_items, {})
+
+    def _replace_plan(self, series: dict, parsed: dict,
+                      active: list[dict]) -> list[dict]:
+        """Факты парсера + активные раздачи -> план замен."""
+        releases = []
+        for r in parsed.get("releases", []):
+            link_for_id = r.get("link") or r.get("magnet")
+            if not link_for_id:
+                continue
+            releases.append({**r, "torrent_id": ids.torrent_id(
+                link_for_id, r.get("date_marker"))})
+
+        if series.get("quality"):
+            wanted = {q.strip() for q in series["quality"].split(";")
+                      if q.strip()}
+            releases = [r for r in releases if r.get("quality") in wanted]
+
+        mode = REPLACE_MODE.get(parsed.get("service", ""),
+                                DEFAULT_REPLACE_MODE)
+        active_ids = {t["torrent_id"] for t in active}
+        plan = []
+        for rel in releases:
+            if rel["torrent_id"] in active_ids:
+                continue  # дата не менялась — раздача уже у нас
+            old = None
+            if mode == "fixed":
+                old = next((t for t in active
+                            if t.get("episodes") == rel.get("episodes")), None)
+            elif mode == "rolling" and len(active) == 1:
+                old = active[0]
+            plan.append({
+                "site_torrent": {
+                    "torrent_id": rel["torrent_id"],
+                    "link": rel.get("link"),
+                    "magnet": rel.get("magnet"),
+                    "date_time": rel.get("date_marker"),
+                    "quality": rel.get("quality"),
+                    "episodes": rel.get("episodes"),
+                },
+                "old": ({"torrent_id": old["torrent_id"],
+                         "qb_hash": old.get("qb_hash"),
+                         "db_id": old.get("id")} if old else None),
+            })
+        return plan
+
+    async def _execute_torrent_task(self, task_id: int, series: dict,
+                                    plan_items: list[dict],
+                                    results: dict) -> dict:
+        """Выполнение журнала: каждый шаг идемпотентен, результаты
+        фиксируются по мере — после падения продолжаем отсюда же."""
+        series_id = series["id"]
+        try:
+            for idx, item in enumerate(plan_items):
+                if str(idx) in results:
+                    continue  # сделано до падения
+                st = item["site_torrent"]
+                add_payload: dict = {"save_path": series["save_path"],
+                                     "paused": True}
+                if st.get("link"):
+                    file_reply = await self.request(
+                        "sources.torrent_file.get",
+                        {"url": st["link"], "torrent_id": st["torrent_id"]},
+                        timeout=180)
+                    add_payload["content_b64"] = file_reply["content_b64"]
+                else:
+                    add_payload["magnet"] = st["magnet"]
+                added = await self.request("torrents.add", add_payload,
+                                           timeout=120)
+                results[str(idx)] = {"hash": added["hash"],
+                                     "link_type": added["link_type"]}
+                await self.repo.update_results(task_id, results)
+
+            if not results:
+                raise ScanError("не удалось добавить ни одной раздачи")
+
+            for idx_str, res in results.items():
+                item = plan_items[int(idx_str)]
+                await self.request("torrents.register", {
+                    "series_id": series_id,
+                    "torrent": item["site_torrent"],
+                    "qb_hash": res["hash"],
+                    "link_type": res["link_type"],
+                    "replaces": item["old"]}, timeout=120)
+
+            await self.repo.delete_task(task_id)
+            return {"source_type": "torrent",
+                    "tasks_created": len(results)}
+        except Exception as exc:
+            await self.repo.set_error(task_id, str(exc))
+            raise
+
+    async def _resume_task(self, task: dict) -> None:
+        series_id = task["series_id"]
+        if series_id in self._running:
+            return
+        self._running.add(series_id)
+        self._contribute(series_id, scanning=True, error=False)
+        try:
+            series = await self.request("catalog.series.get",
+                                        {"series_id": series_id})
+            await self._execute_torrent_task(
+                task["id"], series, task["task_data"],
+                dict(task["results_data"]))
+            self._contribute(series_id, scanning=False, error=False)
+        except Exception:
+            self.log.exception("возобновление задачи %d не удалось",
+                               task["id"])
+            self._contribute(series_id, scanning=False, error=True)
+        finally:
+            self._running.discard(series_id)
+
+    # --- свёртка статусов (Р-11) ------------------------------------------------
+
+    def _contribute(self, series_id: int, *, scanning: bool,
+                    error: bool) -> None:
+        self.publish_event("series.status.contribution", {
+            "source": "scan", "series_id": series_id,
+            "flags": {"scanning": scanning, "error": error}})
+
+    # --- планировщик автосканирования ----------------------------------------------
+
+    async def _scheduler_loop(self) -> None:
+        await self._broadcast_status()
+        while True:
+            await asyncio.sleep(self._tick)
+            try:
+                await self._scheduler_tick()
+            except Exception:  # noqa: BLE001 — цикл не должен умирать
+                self.log.exception("ошибка такта планировщика")
+
+    async def _scheduler_tick(self) -> None:
+        if self._scan_all_running or self._awaiting_pipeline:
+            return
+        if await self._setting("scanner_agent_enabled", "false") != "true":
+            return
+        next_ts = await self._setting("next_scan_timestamp", None)
+        if not next_ts:
+            return
+        next_time = datetime.fromisoformat(next_ts)
+        if next_time.tzinfo is None:
+            next_time = next_time.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) >= next_time:
+            self.log.info("настало время планового сканирования")
+            self._spawn(self._scan_all())
+
+    async def _scan_all(self) -> None:
+        self._scan_all_running = True
+        await self._broadcast_status()
+        try:
+            all_series = await self.request("catalog.series.list", {},
+                                            timeout=30)
+            for s in all_series:
+                if not s.get("auto_scan_enabled"):
+                    continue
+                try:
+                    await self._run_series(s["id"])
+                except Exception as exc:  # noqa: BLE001 — проход не прерываем
+                    self.log.error("автоскан сериала %d: %s", s["id"], exc)
+        finally:
+            self._scan_all_running = False
+            self._awaiting_pipeline = True
+            await self._broadcast_status()
+            await self._check_pipeline_empty()
+
+    async def _check_pipeline_empty(self) -> None:
+        """После прохода: если конвейер уже пуст — назначить следующий
+        скан сразу, не дожидаясь события."""
+        try:
+            queue = await self.request("torrents.queue.get", {}, timeout=10)
+            count = queue.get("count", 0) if isinstance(queue, dict) \
+                else len(queue)
+        except BusRequestError as exc:
+            if _NO_HANDLER not in str(exc):
+                raise
+            self.log.warning("конвейер torrents ещё не подключён — "
+                             "следующий скан назначается сразу")
+            count = 0
+        if count == 0:
+            await self._schedule_next()
+
+    async def on_queue_changed(self, env: Envelope) -> None:
+        if self._awaiting_pipeline and env.payload.get("count", 0) == 0:
+            self.log.info("конвейер опустел — назначаю следующий скан")
+            await self._schedule_next()
+
+    async def _schedule_next(self) -> None:
+        self._awaiting_pipeline = False
+        interval = int(await self._setting("scan_interval_minutes", "60"))
+        next_time = datetime.now(timezone.utc) + timedelta(minutes=interval)
+        await self.request("settings.value.set", {
+            "key": "next_scan_timestamp", "value": next_time.isoformat()},
+            timeout=10)
+        self.log.info("следующее сканирование: %s", next_time.isoformat())
+        await self._broadcast_status()
+
+    async def _setting(self, key: str, default: str | None) -> str | None:
+        reply = await self.request("settings.value.get", {"key": key},
+                                   timeout=10)
+        value = reply.get("value")
+        return value if value is not None else default
+
+    async def _broadcast_status(self) -> None:
+        """Контракт старого scanner_status_update (индикатор сканера)."""
+        self.publish_event("scan.status.changed", {
+            "scanner_enabled":
+                await self._setting("scanner_agent_enabled", "false") == "true",
+            "scan_interval":
+                int(await self._setting("scan_interval_minutes", "60")),
+            "is_scanning": self._scan_all_running or bool(self._running),
+            "is_awaiting_tasks": self._awaiting_pipeline,
+            "next_scan_time": await self._setting("next_scan_timestamp", None),
+        })

@@ -37,8 +37,9 @@ class BaseModule:
     def __init__(self, bus: Bus) -> None:
         self.bus = bus
         self.log = get_logger(self.name)
-        self._handlers: list[tuple[str, Handler]] = []
+        self._handlers: list[tuple[str, Handler, bool]] = []
         self._tasks: list[asyncio.Task] = []
+        self._bg: set[asyncio.Task] = set()
         self._subs: list[Subscription] = []
         self._pending: dict[str, asyncio.Future] = {}
         self._reply_topic = f"{REPLY_PREFIX}.{self.name}"
@@ -49,8 +50,14 @@ class BaseModule:
     def register(self) -> None:
         """Переопределяется модулем: здесь объявляются self.handle(...)."""
 
-    def handle(self, pattern: str, handler: Handler) -> None:
-        self._handlers.append((pattern, handler))
+    def handle(self, pattern: str, handler: Handler, *,
+               concurrent: bool = False) -> None:
+        """concurrent=True — каждый конверт обрабатывается отдельной
+        задачей: долгий обработчик (скан, загрузка) не блокирует
+        очередь топика для следующих запросов. По умолчанию —
+        последовательно: порядок обработки сохраняется (важно, например,
+        для свёрток статусов)."""
+        self._handlers.append((pattern, handler, concurrent))
 
     # --- жизненный цикл ----------------------------------------------------
 
@@ -65,19 +72,22 @@ class BaseModule:
         self._subs.append(reply_sub)
         self._tasks.append(asyncio.create_task(
             self._consume_replies(reply_sub), name=f"{self.name}:replies"))
-        for pattern, handler in self._handlers:
+        for pattern, handler, concurrent in self._handlers:
             sub = self.bus.subscribe(pattern)
             self._subs.append(sub)
             self._tasks.append(asyncio.create_task(
-                self._consume(sub, handler), name=f"{self.name}:{pattern}"))
+                self._consume(sub, handler, concurrent),
+                name=f"{self.name}:{pattern}"))
         await self.on_start()
         self.log.info("модуль запущен (подписок: %d)", len(self._subs))
 
     async def stop(self) -> None:
         await self.on_stop()
-        for task in self._tasks:
+        for task in (*self._tasks, *self._bg):
             task.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        await asyncio.gather(*self._tasks, *self._bg,
+                             return_exceptions=True)
+        self._bg.clear()
         for sub in self._subs:
             self.bus.unsubscribe(sub)
         self._tasks.clear()
@@ -108,25 +118,34 @@ class BaseModule:
 
     # --- потребители -------------------------------------------------------
 
-    async def _consume(self, sub: Subscription, handler: Handler) -> None:
+    async def _consume(self, sub: Subscription, handler: Handler,
+                       concurrent: bool = False) -> None:
         while True:
             env: Envelope = await sub.queue.get()
-            try:
-                result = await handler(env)
-                if env.kind == "query" and env.reply_to:
-                    self.bus.publish(Envelope(
-                        topic=env.reply_to, kind="reply", payload=result,
-                        correlation_id=env.correlation_id))
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001 — модуль не должен умирать
-                self.log.exception("ошибка обработчика '%s' на топике '%s'",
-                                   getattr(handler, "__name__", "?"), env.topic)
-                if env.kind == "query" and env.reply_to:
-                    self.bus.publish(Envelope(
-                        topic=env.reply_to, kind="reply",
-                        payload={ERROR_KEY: f"{type(exc).__name__}: {exc}"},
-                        correlation_id=env.correlation_id))
+            if concurrent:
+                task = asyncio.create_task(self._handle_one(env, handler))
+                self._bg.add(task)
+                task.add_done_callback(self._bg.discard)
+            else:
+                await self._handle_one(env, handler)
+
+    async def _handle_one(self, env: Envelope, handler: Handler) -> None:
+        try:
+            result = await handler(env)
+            if env.kind == "query" and env.reply_to:
+                self.bus.publish(Envelope(
+                    topic=env.reply_to, kind="reply", payload=result,
+                    correlation_id=env.correlation_id))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — модуль не должен умирать
+            self.log.exception("ошибка обработчика '%s' на топике '%s'",
+                               getattr(handler, "__name__", "?"), env.topic)
+            if env.kind == "query" and env.reply_to:
+                self.bus.publish(Envelope(
+                    topic=env.reply_to, kind="reply",
+                    payload={ERROR_KEY: f"{type(exc).__name__}: {exc}"},
+                    correlation_id=env.correlation_id))
 
     async def _consume_replies(self, sub: Subscription) -> None:
         while True:

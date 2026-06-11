@@ -14,7 +14,7 @@
 | 1. Каркас | ✓ core/ (шина+конверт+BaseModule+раннер+логирование), gateway-скелет (FastAPI, SSE_MAP), run.py |
 | 2. Инфраструктура | ✓ torrents (qBit-клиент: локальный infohash вкл. гибриды v2, два поколения API, релогин на 403), trackerauth (fetch-прокси, персистентные сессии, rate-limit), settings, metadata (TMDB), library (листинг), Alembic (0001 базовая схема 19 живых таблиц + 0002 tracker_sessions), core/db.py |
 | 3. Мозги | ✓ rules (движок с нуля, фиксы А/Б/В), sources (Kinozal/RuTracker/Anilibria-API/VK-API; astar+anilibria_tv — разбор готов, браузерная доставка на этапе 6), scan/planner.py (SmartCollector v4.1 + фикс Г) |
-| 4. Конвейер (идёт) | ✓ статусная модель (Р-11, согласована 2026-06-12): modules/catalog — агрегатор свёрток, series.status.changed только при изменениях, эфемерный viewing со страховкой gateway.sse.clients, запросы catalog.series.list/get + catalog.status.get; находки 23–25 |
+| 4. Конвейер (идёт) | ✓ статусная модель (Р-11): modules/catalog — агрегатор свёрток, series.status.changed только при изменениях, эфемерный viewing со страховкой gateway.sse.clients; находки 23–25. ✓ scan-оркестратор (Р-12): зеркала в sources, настоящая ресьюмабельность scan_tasks, формулы id верифицированы (190/190, 351/351), расписание автоскана, отказ параллельному скану; core: handle(concurrent=True); находки 26–29 |
 
 **Верификации против старого кода (все локально, прод не участвует):**
 infohash 170/170 реальных торрентов; движок правил 1088/1088 реальных
@@ -35,19 +35,26 @@ flags}` (а) при старте после своего reconcile, (б) при 
 (stage/status='error', задачу не удалять; для скана —
 scan_tasks.status='error').
 
+Scan готов (Р-12). Контракты, которые scan ЖДЁТ от следующих модулей
+(зафиксированы фейками tests/test_scan_module.py): renaming.reprocess
+(query); torrents.db.active, torrents.db.deactivate_all,
+torrents.register (идемпотентен: upsert по torrent_id + agent_task +
+замена старого: деактивация + удаление из qBit), torrents.queue.get,
+событие torrents.queue.changed {count}; событие scan.plan.updated →
+downloads (создание download_tasks + усыновление файлов — его зона).
+
 Дальше по этапу 4 (каждый модуль — с разбора пользователю):
-scan-оркестратор (зеркала-фоллбэк, scan_tasks-ресьюмабельность,
-fixed/rolling — Р-10; свёртка scanning/error), downloads (yt-dlp;
-VK-свёртка downloading/error/ready/waiting — семантика
-sync_vk_statuses: ready из ВСЕХ непроигнорированных, waiting=есть
-pending в плане и нет активности, сосуществует с ready), торрент-
-конвейер (стадии agent_tasks → metadata/renaming/checking/activating;
-мониторинг download_tasks → downloading/ready), slicing (ffmpeg +
-utils/chapter_*), renaming (logic/renaming_processor +
+downloads (yt-dlp; VK-свёртка downloading/error/ready/waiting —
+семантика sync_vk_statuses: ready из ВСЕХ непроигнорированных,
+waiting=есть pending в плане и нет активности, сосуществует с ready;
+обработчик scan.plan.updated), торрент-конвейер (стадии agent_tasks →
+metadata/renaming/checking/activating; мониторинг download_tasks →
+downloading/ready; torrents.db.*/register/queue.*), slicing (ffmpeg +
+utils/chapter_*), renaming (reprocess + logic/renaming_processor +
 filename_formatter — форматтер ещё НЕ перенесён), library-relocation
 (+is_busy — пока вне статусной модели, решить при разборе). Находка
 7г: при разборе агентов выяснить, что тикает с периодом ~1,5 часа
-(статусная зона кандидата не дала: такты 5 с/60 с, автоскан в
+(статусная зона и scan кандидата не дали: такты 5 с/60 с, автоскан в
 проде — 360 мин).
 
 После: этап 5 (gateway: все 73 точки с ревизией «подтверждена/

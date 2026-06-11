@@ -25,6 +25,7 @@ from modules.gateway import GatewayModule
 from modules.library import LibraryModule
 from modules.metadata import MetadataModule
 from modules.rules import RulesModule
+from modules.scan import ScanModule
 from modules.settings import SettingsModule
 from modules.sources import SourcesModule
 from modules.torrents import TorrentsModule
@@ -46,6 +47,9 @@ modules = [
     SourcesModule(bus, db),
     MetadataModule(bus),
     LibraryModule(bus),
+    # scan — после catalog/settings/sources/rules: его reconcile (resume
+    # незавершённых сканов) шлёт им запросы.
+    ScanModule(bus, db),
 ]
 
 qbit_url = os.environ.get("ST_QBIT_URL")
