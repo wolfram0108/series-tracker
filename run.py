@@ -57,7 +57,7 @@ modules = [
 qbit_url = os.environ.get("ST_QBIT_URL")
 if qbit_url:
     modules.append(TorrentsModule(
-        bus, qbt_url=qbit_url,
+        bus, db, qbt_url=qbit_url,
         qbt_username=os.environ.get("ST_QBIT_USER", "admin"),
         qbt_password=os.environ.get("ST_QBIT_PASS", "")))
 else:

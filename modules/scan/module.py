@@ -413,6 +413,10 @@ class ScanModule(BaseModule):
             for s in all_series:
                 if not s.get("auto_scan_enabled"):
                     continue
+                if await self._pipeline_busy(s["id"]):
+                    self.log.info("автоскан: сериал %d пропущен — у него "
+                                  "активные задачи конвейера", s["id"])
+                    continue
                 try:
                     await self._run_series(s["id"])
                 except Exception as exc:  # noqa: BLE001 — проход не прерываем
@@ -422,6 +426,18 @@ class ScanModule(BaseModule):
             self._awaiting_pipeline = True
             await self._broadcast_status()
             await self._check_pipeline_empty()
+
+    async def _pipeline_busy(self, series_id: int) -> bool:
+        """Поведение старого автоскана: сериал с активными задачами
+        конвейера не сканируется (ручной скан — без этой проверки)."""
+        try:
+            queue = await self.request("torrents.queue.get",
+                                       {"series_id": series_id}, timeout=10)
+            return queue.get("count", 0) > 0
+        except BusRequestError as exc:
+            if _NO_HANDLER in str(exc):
+                return False
+            raise
 
     async def _check_pipeline_empty(self) -> None:
         """После прохода: если конвейер уже пуст — назначить следующий

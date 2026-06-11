@@ -14,7 +14,7 @@
 | 1. Каркас | ✓ core/ (шина+конверт+BaseModule+раннер+логирование), gateway-скелет (FastAPI, SSE_MAP), run.py |
 | 2. Инфраструктура | ✓ torrents (qBit-клиент: локальный infohash вкл. гибриды v2, два поколения API, релогин на 403), trackerauth (fetch-прокси, персистентные сессии, rate-limit), settings, metadata (TMDB), library (листинг), Alembic (0001 базовая схема 19 живых таблиц + 0002 tracker_sessions), core/db.py |
 | 3. Мозги | ✓ rules (движок с нуля, фиксы А/Б/В), sources (Kinozal/RuTracker/Anilibria-API/VK-API; astar+anilibria_tv — разбор готов, браузерная доставка на этапе 6), scan/planner.py (SmartCollector v4.1 + фикс Г) |
-| 4. Конвейер (идёт) | ✓ статусная модель (Р-11): modules/catalog — агрегатор свёрток, series.status.changed только при изменениях, эфемерный viewing со страховкой gateway.sse.clients; находки 23–25. ✓ scan-оркестратор (Р-12): зеркала в sources, настоящая ресьюмабельность scan_tasks, формулы id верифицированы (190/190, 351/351), расписание автоскана, отказ параллельному скану; core: handle(concurrent=True); находки 26–29. ✓ downloads (Р-13): событийный диспетчер yt-dlp (async subprocess), ретрай ошибок сканом, fs.sync вместо 60-секундной ФС-проверки, агрегатор: waiting подавляется активностью; находки 30–32 |
+| 4. Конвейер (идёт) | ✓ статусная модель (Р-11): modules/catalog — агрегатор свёрток, series.status.changed только при изменениях, эфемерный viewing со страховкой gateway.sse.clients; находки 23–25. ✓ scan-оркестратор (Р-12): зеркала в sources, настоящая ресьюмабельность scan_tasks, формулы id верифицированы (190/190, 351/351), расписание автоскана, отказ параллельному скану; core: handle(concurrent=True); находки 26–29. ✓ downloads (Р-13): событийный диспетчер yt-dlp (async subprocess), ретрай ошибок сканом, fs.sync вместо 60-секундной ФС-проверки, агрегатор: waiting подавляется активностью; находки 30–32. ✓ торрент-конвейер (Р-14): ИНВАРИАНТ ЯДРА «пауза до конца переименования, magnet — запуск ровно на метаданные», чистая машина стадий (старые значения в БД), ошибки-носители stage='error', реализованы все контракты Р-12, адаптивный мониторинг прогресса, fs.verify |
 
 **Верификации против старого кода (все локально, прод не участвует):**
 infohash 170/170 реальных торрентов; движок правил 1088/1088 реальных
@@ -51,19 +51,25 @@ query downloads.fs.sync {series_id} (решение пользователя —
 фоновой 60-секундной ФС-проверки); SSE-маппинг
 downloads.queue.changed → download_queue_update.
 
-Дальше по этапу 4 (каждый модуль — с разбора пользователю):
-торрент-конвейер (стадии agent_tasks → metadata/renaming/checking/
-activating; мониторинг download_tasks (торрент-часть) →
-downloading/ready; контракты из Р-12: torrents.db.active/
-deactivate_all, register (идемпотентен), queue.get/queue.changed
-{count}), slicing (ffmpeg + utils/chapter_*; колонки slicing_status/
-chapters*; свёртка slicing/error; роуты глав/deep-adoption из
-routes/media.py), renaming (reprocess + logic/renaming_processor +
-filename_formatter — форматтер ещё НЕ перенесён; rules.format_filename),
-library-relocation (+is_busy — пока вне статусной модели, решить при
-разборе). Находка 7г: кандидаты в scan/status/downloads НЕ найдены
-(gunicorn timeout=120 → зависание держало воркер >2 мин); остаются
-slicing (ffmpeg/главы) и сверка журнала таймаутов с логами на этапе 6.
+Торрент-конвейер готов (Р-14). Контракты, которые ЖДУТ реализации:
+renaming.process_torrent {series_id, qb_hash} (фейк в
+tests/test_torrents_pipeline.py) и rules.format_filename (фейк в
+tests/test_downloads_module.py) — оба закрываются разбором
+renaming/rules (форматтер filename_formatter ещё НЕ перенесён);
+gateway этап 5: открытие модалки → downloads.fs.sync +
+torrents.fs.verify; SSE-маппинги queue.changed → agent_queue_update /
+download_queue_update.
+
+Дальше по этапу 4 (каждый модуль — с разбора пользователю): slicing
+(ffmpeg + utils/chapter_*; колонки slicing_status/chapters*; свёртка
+slicing/error; роуты глав/deep-adoption из routes/media.py), renaming
+(reprocess + process_torrent + logic/renaming_processor +
+filename_formatter + rules.format_filename — сезонные папки Season NN,
+одно/многосезонная логика из series.season), library-relocation
+(+is_busy — пока вне статусной модели, решить при разборе). Находка
+7г: кандидаты в scan/status/downloads/torrents НЕ найдены (gunicorn
+timeout=120 → зависание держало воркер >2 мин); остаются slicing
+(ffmpeg/главы) и сверка журнала таймаутов с логами на этапе 6.
 
 После: этап 5 (gateway: все 73 точки с ревизией «подтверждена/
 перепроектирована/удалена» в contracts/revision.md; правки JS-слоя

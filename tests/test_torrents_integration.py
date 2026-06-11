@@ -25,10 +25,18 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture
-async def torrents_module():
+async def torrents_module(tmp_path):
+    import subprocess
+    import sys
     bus = Bus()
+    db_file = tmp_path / "t.db"
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
+                   env={"ST_DB_URL": f"sqlite:///{db_file}",
+                        "PATH": "/usr/bin:/bin"},
+                   cwd=".", check=True, capture_output=True)
+    from core.db import Database
     module = TorrentsModule(
-        bus,
+        bus, Database(str(db_file)),
         qbt_url=QBIT_URL,
         qbt_username=os.environ.get("ST_QBIT_USER", "admin"),
         qbt_password=os.environ["ST_QBIT_PASS"],
