@@ -35,3 +35,6 @@ scripts/telegram_phase0/*.session-journal
 logs/
 tests/golden/
 tests/fixtures/
+
+# Локальные секреты — никогда не синхронизировать
+docs/key.txt
