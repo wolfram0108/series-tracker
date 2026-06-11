@@ -23,6 +23,7 @@ from core.logging import configure, get_logger
 from modules.gateway import GatewayModule
 from modules.library import LibraryModule
 from modules.metadata import MetadataModule
+from modules.rules import RulesModule
 from modules.settings import SettingsModule
 from modules.torrents import TorrentsModule
 from modules.trackerauth import TrackerauthModule
@@ -37,6 +38,7 @@ gateway = GatewayModule(bus)
 modules = [
     gateway,
     SettingsModule(bus, db),
+    RulesModule(bus, db),
     TrackerauthModule(bus, db),
     MetadataModule(bus),
     LibraryModule(bus),
