@@ -25,6 +25,7 @@ from modules.library import LibraryModule
 from modules.metadata import MetadataModule
 from modules.rules import RulesModule
 from modules.settings import SettingsModule
+from modules.sources import SourcesModule
 from modules.torrents import TorrentsModule
 from modules.trackerauth import TrackerauthModule
 
@@ -40,6 +41,7 @@ modules = [
     SettingsModule(bus, db),
     RulesModule(bus, db),
     TrackerauthModule(bus, db),
+    SourcesModule(bus, db),
     MetadataModule(bus),
     LibraryModule(bus),
 ]
