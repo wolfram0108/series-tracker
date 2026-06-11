@@ -7,3 +7,6 @@ playwright==1.52.0
 requests==2.32.3
 SQLAlchemy==2.0.35
 gunicorn==22.0.0
+
+# Telegram (фаза 0: scripts/telegram_phase0/probe.py; дальше — интеграция в приложение)
+Telethon==1.38.1

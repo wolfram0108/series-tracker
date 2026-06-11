@@ -26,3 +26,7 @@ torrent_cache/
 debug_kinozal.py
 vk_scraper_dumps/
 logs/
+
+# Telethon session (фаза 0, scripts/telegram_phase0)
+scripts/telegram_phase0/*.session
+scripts/telegram_phase0/*.session-journal
