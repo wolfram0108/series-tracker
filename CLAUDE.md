@@ -95,11 +95,13 @@ Request/reply реализован в обвязке `core/module.py` ПОВЕР
 
 ## Журналы
 
+- **[docs/STATUS.md](docs/STATUS.md) — ТЕКУЩЕЕ СОСТОЯНИЕ и точка
+  продолжения работы. Читать первым после старта сессии.**
+- [contracts/revision.md](contracts/revision.md) — решения Р-1..Р-10
+  с обоснованиями (согласованы пользователем).
+- [contracts/findings.md](contracts/findings.md) — находки 1–22.
 - [contracts/endpoints.md](contracts/endpoints.md) — инвентарь точек
   старого контракта (73 маршрута) с колонкой «Ревизия».
-- [contracts/findings.md](contracts/findings.md) — улики/находки.
-- `contracts/revision.md` — решения по каждой точке (создаётся в ходе
-  ревизии).
 
 ## Язык и стиль
 
