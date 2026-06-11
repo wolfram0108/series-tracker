@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from core import Bus, Runner
 from core.db import Database
 from core.logging import configure, get_logger
+from modules.catalog import CatalogModule
 from modules.gateway import GatewayModule
 from modules.library import LibraryModule
 from modules.metadata import MetadataModule
@@ -38,6 +39,7 @@ gateway = GatewayModule(bus)
 
 modules = [
     gateway,
+    CatalogModule(bus, db),
     SettingsModule(bus, db),
     RulesModule(bus, db),
     TrackerauthModule(bus, db),

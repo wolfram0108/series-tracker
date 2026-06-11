@@ -1,0 +1,28 @@
+"""Репозиторий catalog: таблица series (схема прод-БД).
+
+Колонка state и таблица series_statuses сознательно не читаются и не
+пишутся (Р-11: статус — вычисляемое значение агрегатора); физически они
+остаются в схеме до зачистки после переключения.
+"""
+from __future__ import annotations
+
+from core.db import Database
+
+# Все живые колонки series, КРОМЕ state (см. докстринг).
+_COLUMNS = ("id, url, name, name_en, site, save_path, season, quality, "
+            "last_scan_time, auto_scan_enabled, quality_override, "
+            "resolution_override, source_type, parser_profile_id, "
+            "ignored_seasons, vk_search_mode, vk_quality_priority")
+
+
+class CatalogRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def all_series(self) -> list[dict]:
+        return await self._db.fetch_all(
+            f"SELECT {_COLUMNS} FROM series ORDER BY id")
+
+    async def get_series(self, series_id: int) -> dict | None:
+        return await self._db.fetch_one(
+            f"SELECT {_COLUMNS} FROM series WHERE id=?", (series_id,))

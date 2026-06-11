@@ -129,3 +129,29 @@ max вместо min по ключу качества («меньше = лучш
 На данных пользователя влияла на 1 эпизод 1 сериала (приоритеты нигде
 не заполнены — иначе работала бы наоборот по всем). Согласовано чинить
 (фикс Г, Р-10).
+
+## 23. /api/agent/reset вызывает несуществующий метод
+routes/system.py:140 — `app.db.reset_stuck_series_states(stuck_states)`,
+но такого метода в классе Database нет: эндпоинт падает AttributeError
+→ 500. Фронт его не вызывает вообще (grep по static/ и templates/ пуст)
+— эндпоинт одновременно мёртвый и сломанный. Список stuck_states
+содержит `'{"%'` — след того, что series.state когда-то хранил JSON.
+Решение для новой системы — в разборе статусной модели (этап 4).
+
+## 24. SSE series_updated несёт неполный объект сериала
+_update_and_broadcast шлёт голую строку таблицы series: без statuses
+(фронт парсит строку state.split(',')), без is_busy / tmdb_info /
+downloaded_episodes_count, которые есть в GET /api/series. Поэтому
+другие события (relocation_finished, renaming_complete) компенсируют
+это полным loadInitialSeries — follow-up fetch, анти-паттерн по
+принципу 2. Во фронте при этом уже заложена мёртвая ветка
+`s.statuses || s.state.split(...)` (app.js:66) — фронт готов принять
+массив статусов, бэкенд его никогда не присылал.
+
+## 25. Каскадные дубли broadcast при одном изменении
+status_manager: каждый set_status() сам вызывает _update_and_broadcast;
+sync_torrent_statuses вызывает set_status дважды (downloading, ready) →
+2 события series_updated на сериал за такт; старт скана — тоже 2
+(error=False, scanning=True). Вместе с тактом 5 с в MonitoringAgent
+(_update_active_statuses по ВСЕМ сериалам независимо от изменений) —
+это и есть механика SSE-шторма из находки 4.

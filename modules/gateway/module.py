@@ -33,6 +33,7 @@ class GatewayModule(BaseModule):
         self._static_dir = static_dir
         self._templates_dir = templates_dir
         self._diag = diag
+        self._sse_clients = 0
         super().__init__(bus)
         self.app = self._create_app()
 
@@ -80,7 +81,11 @@ class GatewayModule(BaseModule):
         # Разрыв соединения обнаруживает Starlette: он закрывает генератор
         # (GeneratorExit), и finally снимает подписку.
         sub = self.bus.subscribe("#")
-        self.log.info("SSE-клиент подключился")
+        self._sse_clients += 1
+        # Счётчик подключений — страховка эфемерных состояний (Р-11):
+        # при count=0 catalog сбрасывает все viewing.
+        self.publish_event("gateway.sse.clients", {"count": self._sse_clients})
+        self.log.info("SSE-клиент подключился (всего: %d)", self._sse_clients)
         try:
             while True:
                 try:
@@ -99,4 +104,8 @@ class GatewayModule(BaseModule):
                 yield f"event: {sse_name}\ndata: {data}\n\n"
         finally:
             self.bus.unsubscribe(sub)
-            self.log.info("SSE-клиент отключился")
+            self._sse_clients -= 1
+            self.publish_event("gateway.sse.clients",
+                               {"count": self._sse_clients})
+            self.log.info("SSE-клиент отключился (осталось: %d)",
+                          self._sse_clients)
