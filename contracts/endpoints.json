@@ -1,0 +1,810 @@
+[
+ {
+  "file": "routes/__init__.py",
+  "line": 22,
+  "blueprint": "main_bp",
+  "route": "/",
+  "methods": [
+   "GET"
+  ],
+  "func": "index",
+  "full_path": "/"
+ },
+ {
+  "file": "routes/__init__.py",
+  "line": 26,
+  "blueprint": "main_bp",
+  "route": "/directory-picker-test",
+  "methods": [
+   "GET"
+  ],
+  "func": "directory_picker_test",
+  "full_path": "/directory-picker-test"
+ },
+ {
+  "file": "routes/__init__.py",
+  "line": 30,
+  "blueprint": "main_bp",
+  "route": "/hello-world",
+  "methods": [
+   "GET"
+  ],
+  "func": "hello_world",
+  "full_path": "/hello-world"
+ },
+ {
+  "file": "routes/__init__.py",
+  "line": 34,
+  "blueprint": "main_bp",
+  "route": "/api/hello-info",
+  "methods": [
+   "GET"
+  ],
+  "func": "hello_info",
+  "full_path": "/api/hello-info"
+ },
+ {
+  "file": "routes/filebrowser.py",
+  "line": 11,
+  "blueprint": "filebrowser_bp",
+  "route": "/api/directories",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_directories",
+  "full_path": "/api/directories"
+ },
+ {
+  "file": "routes/media.py",
+  "line": 12,
+  "blueprint": "media_bp",
+  "route": "/series/<int:series_id>/media-items",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_media_items_for_series",
+  "full_path": "/api/series/<int:series_id>/media-items"
+ },
+ {
+  "file": "routes/media.py",
+  "line": 26,
+  "blueprint": "media_bp",
+  "route": "/media-items/<string:unique_id>/chapters",
+  "methods": [
+   "POST"
+  ],
+  "func": "fetch_and_save_chapters",
+  "full_path": "/api/media-items/<string:unique_id>/chapters"
+ },
+ {
+  "file": "routes/media.py",
+  "line": 56,
+  "blueprint": "media_bp",
+  "route": "/media-items/<int:item_id>/ignore",
+  "methods": [
+   "PUT"
+  ],
+  "func": "set_item_ignored_status",
+  "full_path": "/api/media-items/<int:item_id>/ignore"
+ },
+ {
+  "file": "routes/media.py",
+  "line": 85,
+  "blueprint": "media_bp",
+  "route": "/media-items/<string:unique_id>/ignore",
+  "methods": [
+   "PUT"
+  ],
+  "func": "set_item_ignored_status_by_uid",
+  "full_path": "/api/media-items/<string:unique_id>/ignore"
+ },
+ {
+  "file": "routes/media.py",
+  "line": 112,
+  "blueprint": "media_bp",
+  "route": "/media-items/<string:unique_id>/slice",
+  "methods": [
+   "POST"
+  ],
+  "func": "create_slice_task",
+  "full_path": "/api/media-items/<string:unique_id>/slice"
+ },
+ {
+  "file": "routes/media.py",
+  "line": 144,
+  "blueprint": "media_bp",
+  "route": "/media-items/<string:unique_id>/verify-sliced-files",
+  "methods": [
+   "POST"
+  ],
+  "func": "verify_sliced_files",
+  "full_path": "/api/media-items/<string:unique_id>/verify-sliced-files"
+ },
+ {
+  "file": "routes/media.py",
+  "line": 270,
+  "blueprint": "media_bp",
+  "route": "/series/<int:series_id>/deep-adoption",
+  "methods": [
+   "POST"
+  ],
+  "func": "deep_adoption",
+  "full_path": "/api/series/<int:series_id>/deep-adoption"
+ },
+ {
+  "file": "routes/media.py",
+  "line": 284,
+  "blueprint": "media_bp",
+  "route": "/media-items/<string:unique_id>/chapters/filtered",
+  "methods": [
+   "POST"
+  ],
+  "func": "get_filtered_chapters",
+  "full_path": "/api/media-items/<string:unique_id>/chapters/filtered"
+ },
+ {
+  "file": "routes/media.py",
+  "line": 335,
+  "blueprint": "media_bp",
+  "route": "/media-items/<string:unique_id>/chapters/mark-garbage",
+  "methods": [
+   "POST"
+  ],
+  "func": "mark_garbage_chapters",
+  "full_path": "/api/media-items/<string:unique_id>/chapters/mark-garbage"
+ },
+ {
+  "file": "routes/media.py",
+  "line": 388,
+  "blueprint": "media_bp",
+  "route": "/media-items/<string:unique_id>/slice-with-filter",
+  "methods": [
+   "POST"
+  ],
+  "func": "create_slice_task_with_filter",
+  "full_path": "/api/media-items/<string:unique_id>/slice-with-filter"
+ },
+ {
+  "file": "routes/parser.py",
+  "line": 10,
+  "blueprint": "profiles_bp",
+  "route": "",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_parser_profiles",
+  "full_path": "/api/parser-profiles"
+ },
+ {
+  "file": "routes/parser.py",
+  "line": 15,
+  "blueprint": "profiles_bp",
+  "route": "",
+  "methods": [
+   "POST"
+  ],
+  "func": "create_parser_profile",
+  "full_path": "/api/parser-profiles"
+ },
+ {
+  "file": "routes/parser.py",
+  "line": 34,
+  "blueprint": "profiles_bp",
+  "route": "/<int:profile_id>",
+  "methods": [
+   "PUT"
+  ],
+  "func": "update_parser_profile",
+  "full_path": "/api/parser-profiles/<int:profile_id>"
+ },
+ {
+  "file": "routes/parser.py",
+  "line": 49,
+  "blueprint": "profiles_bp",
+  "route": "/<int:profile_id>",
+  "methods": [
+   "DELETE"
+  ],
+  "func": "delete_parser_profile",
+  "full_path": "/api/parser-profiles/<int:profile_id>"
+ },
+ {
+  "file": "routes/parser.py",
+  "line": 59,
+  "blueprint": "profiles_bp",
+  "route": "/<int:profile_id>/rules",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_rules_for_profile",
+  "full_path": "/api/parser-profiles/<int:profile_id>/rules"
+ },
+ {
+  "file": "routes/parser.py",
+  "line": 64,
+  "blueprint": "profiles_bp",
+  "route": "/<int:profile_id>/rules",
+  "methods": [
+   "POST"
+  ],
+  "func": "add_rule_to_profile",
+  "full_path": "/api/parser-profiles/<int:profile_id>/rules"
+ },
+ {
+  "file": "routes/parser.py",
+  "line": 74,
+  "blueprint": "profiles_bp",
+  "route": "/scrape-titles",
+  "methods": [
+   "POST"
+  ],
+  "func": "scrape_vk_titles",
+  "full_path": "/api/parser-profiles/scrape-titles"
+ },
+ {
+  "file": "routes/parser.py",
+  "line": 95,
+  "blueprint": "rules_bp",
+  "route": "/<int:rule_id>",
+  "methods": [
+   "PUT"
+  ],
+  "func": "update_rule",
+  "full_path": "/api/parser-rules/<int:rule_id>"
+ },
+ {
+  "file": "routes/parser.py",
+  "line": 105,
+  "blueprint": "rules_bp",
+  "route": "/<int:rule_id>",
+  "methods": [
+   "DELETE"
+  ],
+  "func": "delete_rule",
+  "full_path": "/api/parser-rules/<int:rule_id>"
+ },
+ {
+  "file": "routes/parser.py",
+  "line": 114,
+  "blueprint": "rules_bp",
+  "route": "/reorder",
+  "methods": [
+   "POST"
+  ],
+  "func": "reorder_rules",
+  "full_path": "/api/parser-rules/reorder"
+ },
+ {
+  "file": "routes/parser.py",
+  "line": 123,
+  "blueprint": "profiles_bp",
+  "route": "/test",
+  "methods": [
+   "POST"
+  ],
+  "func": "test_parser_rules",
+  "full_path": "/api/parser-profiles/test"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 21,
+  "blueprint": "series_bp",
+  "route": "",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_series",
+  "full_path": "/api/series"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 51,
+  "blueprint": "series_bp",
+  "route": "",
+  "methods": [
+   "POST"
+  ],
+  "func": "add_series",
+  "full_path": "/api/series"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 75,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_series_details",
+  "full_path": "/api/series/<int:series_id>"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 105,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/rename_preview",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_rename_preview",
+  "full_path": "/api/series/<int:series_id>/rename_preview"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 189,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/reprocess_vk_files",
+  "methods": [
+   "POST"
+  ],
+  "func": "reprocess_vk_files_route",
+  "full_path": "/api/series/<int:series_id>/reprocess_vk_files"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 210,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/composition",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_series_composition",
+  "full_path": "/api/series/<int:series_id>/composition"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 403,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/reprocess",
+  "methods": [
+   "POST"
+  ],
+  "func": "reprocess_series_torrents_route",
+  "full_path": "/api/series/<int:series_id>/reprocess"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 427,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>",
+  "methods": [
+   "POST"
+  ],
+  "func": "update_series",
+  "full_path": "/api/series/<int:series_id>"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 496,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/toggle_auto_scan",
+  "methods": [
+   "POST"
+  ],
+  "func": "toggle_auto_scan",
+  "full_path": "/api/series/<int:series_id>/toggle_auto_scan"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 507,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>",
+  "methods": [
+   "DELETE"
+  ],
+  "func": "delete_series",
+  "full_path": "/api/series/<int:series_id>"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 531,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/state",
+  "methods": [
+   "POST"
+  ],
+  "func": "set_series_state_route",
+  "full_path": "/api/series/<int:series_id>/state"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 540,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/viewing_heartbeat",
+  "methods": [
+   "POST"
+  ],
+  "func": "viewing_heartbeat",
+  "full_path": "/api/series/<int:series_id>/viewing_heartbeat"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 545,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/scan",
+  "methods": [
+   "POST"
+  ],
+  "func": "scan_series_route",
+  "full_path": "/api/series/<int:series_id>/scan"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 555,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/torrents/history",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_series_torrents_history",
+  "full_path": "/api/series/<int:series_id>/torrents/history"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 560,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/ignored-seasons",
+  "methods": [
+   "POST"
+  ],
+  "func": "update_ignored_seasons",
+  "full_path": "/api/series/<int:series_id>/ignored-seasons"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 574,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/sliced-files",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_sliced_files_for_series",
+  "full_path": "/api/series/<int:series_id>/sliced-files"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 596,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/vk-quality-priority",
+  "methods": [
+   "PUT"
+  ],
+  "func": "set_vk_quality_priority",
+  "full_path": "/api/series/<int:series_id>/vk-quality-priority"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 611,
+  "blueprint": "series_bp",
+  "route": "/active_torrents",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_active_torrents_monitoring",
+  "full_path": "/api/series/active_torrents"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 620,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/reset_torrents",
+  "methods": [
+   "POST"
+  ],
+  "func": "reset_torrents",
+  "full_path": "/api/series/<int:series_id>/reset_torrents"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 662,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/source-filenames",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_series_source_filenames",
+  "full_path": "/api/series/<int:series_id>/source-filenames"
+ },
+ {
+  "file": "routes/series.py",
+  "line": 671,
+  "blueprint": "series_bp",
+  "route": "/<int:series_id>/relocate",
+  "methods": [
+   "POST"
+  ],
+  "func": "relocate_series",
+  "full_path": "/api/series/<int:series_id>/relocate"
+ },
+ {
+  "file": "routes/settings.py",
+  "line": 58,
+  "blueprint": "settings_bp",
+  "route": "/auth",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_all_auth",
+  "full_path": "/api/auth"
+ },
+ {
+  "file": "routes/settings.py",
+  "line": 68,
+  "blueprint": "settings_bp",
+  "route": "/auth",
+  "methods": [
+   "POST"
+  ],
+  "func": "save_all_auth",
+  "full_path": "/api/auth"
+ },
+ {
+  "file": "routes/settings.py",
+  "line": 87,
+  "blueprint": "settings_bp",
+  "route": "/parse_url",
+  "methods": [
+   "POST"
+  ],
+  "func": "parse_url",
+  "full_path": "/api/parse_url"
+ },
+ {
+  "file": "routes/settings.py",
+  "line": 139,
+  "blueprint": "settings_bp",
+  "route": "/settings/debug_flags",
+  "methods": [
+   "GET",
+   "POST"
+  ],
+  "func": "handle_debug_flags",
+  "full_path": "/api/settings/debug_flags"
+ },
+ {
+  "file": "routes/settings.py",
+  "line": 171,
+  "blueprint": "settings_bp",
+  "route": "/settings/force_replace",
+  "methods": [
+   "GET",
+   "POST"
+  ],
+  "func": "handle_force_replace_setting",
+  "full_path": "/api/settings/force_replace"
+ },
+ {
+  "file": "routes/settings.py",
+  "line": 182,
+  "blueprint": "settings_bp",
+  "route": "/settings/parallel_downloads",
+  "methods": [
+   "GET",
+   "POST"
+  ],
+  "func": "handle_parallel_downloads",
+  "full_path": "/api/settings/parallel_downloads"
+ },
+ {
+  "file": "routes/settings.py",
+  "line": 193,
+  "blueprint": "settings_bp",
+  "route": "/settings/less_strict_scan",
+  "methods": [
+   "GET",
+   "POST"
+  ],
+  "func": "handle_less_strict_scan_setting",
+  "full_path": "/api/settings/less_strict_scan"
+ },
+ {
+  "file": "routes/settings.py",
+  "line": 205,
+  "blueprint": "settings_bp",
+  "route": "/settings/slicing_delete_source",
+  "methods": [
+   "GET",
+   "POST"
+  ],
+  "func": "handle_slicing_delete_source",
+  "full_path": "/api/settings/slicing_delete_source"
+ },
+ {
+  "file": "routes/system.py",
+  "line": 7,
+  "blueprint": "system_bp",
+  "route": "/stream",
+  "methods": [
+   "GET"
+  ],
+  "func": "stream",
+  "full_path": "/api/stream"
+ },
+ {
+  "file": "routes/system.py",
+  "line": 32,
+  "blueprint": "system_bp",
+  "route": "/database/clear",
+  "methods": [
+   "POST"
+  ],
+  "func": "clear_database",
+  "full_path": "/api/database/clear"
+ },
+ {
+  "file": "routes/system.py",
+  "line": 42,
+  "blueprint": "system_bp",
+  "route": "/database/tables",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_db_tables",
+  "full_path": "/api/database/tables"
+ },
+ {
+  "file": "routes/system.py",
+  "line": 53,
+  "blueprint": "system_bp",
+  "route": "/database/clear_table",
+  "methods": [
+   "POST"
+  ],
+  "func": "clear_table",
+  "full_path": "/api/database/clear_table"
+ },
+ {
+  "file": "routes/system.py",
+  "line": 71,
+  "blueprint": "system_bp",
+  "route": "/logs",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_logs",
+  "full_path": "/api/logs"
+ },
+ {
+  "file": "routes/system.py",
+  "line": 128,
+  "blueprint": "system_bp",
+  "route": "/agent/queue",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_agent_queue",
+  "full_path": "/api/agent/queue"
+ },
+ {
+  "file": "routes/system.py",
+  "line": 133,
+  "blueprint": "system_bp",
+  "route": "/agent/reset",
+  "methods": [
+   "POST"
+  ],
+  "func": "reset_agent",
+  "full_path": "/api/agent/reset"
+ },
+ {
+  "file": "routes/system.py",
+  "line": 153,
+  "blueprint": "system_bp",
+  "route": "/scanner/status",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_scanner_status",
+  "full_path": "/api/scanner/status"
+ },
+ {
+  "file": "routes/system.py",
+  "line": 157,
+  "blueprint": "system_bp",
+  "route": "/scanner/settings",
+  "methods": [
+   "POST"
+  ],
+  "func": "update_scanner_settings",
+  "full_path": "/api/scanner/settings"
+ },
+ {
+  "file": "routes/system.py",
+  "line": 170,
+  "blueprint": "system_bp",
+  "route": "/scanner/scan_all",
+  "methods": [
+   "POST"
+  ],
+  "func": "scan_all_now",
+  "full_path": "/api/scanner/scan_all"
+ },
+ {
+  "file": "routes/system.py",
+  "line": 182,
+  "blueprint": "system_bp",
+  "route": "/downloads/queue",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_download_queue",
+  "full_path": "/api/downloads/queue"
+ },
+ {
+  "file": "routes/system.py",
+  "line": 190,
+  "blueprint": "system_bp",
+  "route": "/downloads/queue/clear",
+  "methods": [
+   "POST"
+  ],
+  "func": "clear_download_queue",
+  "full_path": "/api/downloads/queue/clear"
+ },
+ {
+  "file": "routes/system.py",
+  "line": 200,
+  "blueprint": "system_bp",
+  "route": "/database/table/<string:table_name>",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_table_content",
+  "full_path": "/api/database/table/<string:table_name>"
+ },
+ {
+  "file": "routes/test.py",
+  "line": 6,
+  "blueprint": "test_bp",
+  "route": "/directory-picker-test",
+  "methods": [
+   "GET"
+  ],
+  "func": "directory_picker_test",
+  "full_path": "/directory-picker-test"
+ },
+ {
+  "file": "routes/tmdb.py",
+  "line": 9,
+  "blueprint": "tmdb_bp",
+  "route": "/search",
+  "methods": [
+   "POST"
+  ],
+  "func": "search",
+  "full_path": "/api/tmdb/search"
+ },
+ {
+  "file": "routes/tmdb.py",
+  "line": 36,
+  "blueprint": "tmdb_bp",
+  "route": "/details/<int:tmdb_id>",
+  "methods": [
+   "GET"
+  ],
+  "func": "details",
+  "full_path": "/api/tmdb/details/<int:tmdb_id>"
+ },
+ {
+  "file": "routes/trackers.py",
+  "line": 5,
+  "blueprint": "trackers_bp",
+  "route": "",
+  "methods": [
+   "GET"
+  ],
+  "func": "get_trackers",
+  "full_path": "/api/trackers"
+ },
+ {
+  "file": "routes/trackers.py",
+  "line": 15,
+  "blueprint": "trackers_bp",
+  "route": "/<int:tracker_id>",
+  "methods": [
+   "PUT"
+  ],
+  "func": "update_tracker",
+  "full_path": "/api/trackers/<int:tracker_id>"
+ }
+]

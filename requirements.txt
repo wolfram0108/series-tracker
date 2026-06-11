@@ -1,12 +1,6 @@
-beautifulsoup4==4.12.3
-cloudscraper==1.2.71
-Flask==3.0.3
-Flask-Cors==5.0.0
-lxml==6.0.0
-playwright==1.52.0
-requests==2.32.3
-SQLAlchemy==2.0.35
-gunicorn==22.0.0
-
-# Telegram (фаза 0: scripts/telegram_phase0/probe.py; дальше — интеграция в приложение)
-Telethon==1.38.1
+# Ядро новой системы (этап 1). Зависимости добавляются по этапам ТЗ
+# (docs/refactoring_bus_plan.md) — не впрок.
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+SQLAlchemy==2.0.41
+alembic==1.16.1
