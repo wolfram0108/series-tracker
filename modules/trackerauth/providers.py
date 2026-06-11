@@ -141,5 +141,30 @@ class AstarProvider:
         return {}
 
 
+class VkProvider:
+    """VK API: авторизация токеном в параметрах запроса; сессии и логина
+    нет — токен статичен (хранится в auth: auth_type='vk', поле password,
+    как в старой системе). Токен не покидает trackerauth."""
+    service = "vk"
+    needs_credential_params = True
+
+    def normalize_domain(self, url: str) -> str:
+        return "api.vk.com"
+
+    def login(self, session: requests.Session, credentials: dict,
+              url: str) -> None:
+        raise TrackerLoginError(
+            "VK: токен статичен, релогин невозможен — проверьте Access Token")
+
+    def is_logged_out(self, resp: requests.Response) -> bool:
+        return False  # ошибки API приходят JSON-ом, их разбирает sources
+
+    def request_headers(self, url: str) -> dict:
+        return {"User-Agent": UA}
+
+    def credential_params(self, credentials: dict) -> dict:
+        return {"access_token": credentials["password"], "v": "5.199"}
+
+
 PROVIDERS = {p.service: p for p in (KinozalProvider(), RutrackerProvider(),
-                                    AstarProvider())}
+                                    AstarProvider(), VkProvider())}

@@ -118,11 +118,16 @@ class TrackerauthModule(BaseModule):
                           p: dict) -> requests.Response:
         headers = provider.request_headers(p["url"])
         headers.update(p.get("headers") or {})
+        params = dict(p.get("params") or {})
+        if getattr(provider, "needs_credential_params", False):
+            # секрет (токен) подмешивается здесь и не покидает модуль
+            credentials = await self._credentials(provider.service)
+            params.update(provider.credential_params(credentials))
 
         def call() -> requests.Response:
             return session.request(
                 p.get("method", "GET"), p["url"],
-                params=p.get("params"), data=p.get("data"),
+                params=params or None, data=p.get("data"),
                 headers=headers, timeout=float(p.get("timeout", 25)))
 
         return await asyncio.to_thread(call)

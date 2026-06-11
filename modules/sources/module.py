@@ -27,7 +27,7 @@ from core import BaseModule
 from core.db import Database
 from core.envelope import Envelope
 
-from . import anilibria, parsers
+from . import anilibria, parsers, vk
 from .parsers import SourceParseError
 from .repository import SourcesRepository
 
@@ -38,9 +38,11 @@ class SourcesModule(BaseModule):
     name = "sources"
 
     def __init__(self, bus, db: Database, *,
-                 torrent_cache_dir: str = "torrent_cache") -> None:
+                 torrent_cache_dir: str = "torrent_cache",
+                 vk_page_interval: float = 1.0) -> None:
         self.repo = SourcesRepository(db)
         self._cache_dir = torrent_cache_dir
+        self.vk_page_interval = vk_page_interval
         self._locks: dict[str, asyncio.Lock] = {}
         self._last_request: dict[str, float] = {}
         super().__init__(bus)
@@ -49,6 +51,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.parse", self.on_parse)
         self.handle("sources.torrent_file.get", self.on_torrent_file)
         self.handle("sources.trackers.list", self.on_trackers_list)
+        self.handle("sources.vk.scan", self.on_vk_scan)
 
     async def on_start(self) -> None:
         self._http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
@@ -109,6 +112,68 @@ class SourcesModule(BaseModule):
                 "этапе 6 (Playwright на стенде); см. revision.md Р-9")
 
         raise SourceParseError(f"нет реализации для трекера {service}")
+
+    # --- VK (находка 15: официальный API, токен живёт в trackerauth) -------------------
+
+    async def _vk_call(self, method: str, params: dict) -> dict:
+        import json as _json
+        reply = await self.request("trackerauth.fetch", {
+            "service": "vk", "url": f"{vk.API_BASE}{method}",
+            "params": params, "timeout": 20}, timeout=60)
+        try:
+            data = _json.loads(reply.get("text") or "")
+        except _json.JSONDecodeError as exc:
+            raise vk.VkScanError(f"VK {method}: не-JSON ответ") from exc
+        if "error" in data:
+            raise vk.VkScanError(
+                f"VK {method}: {data['error'].get('error_msg')} "
+                f"(код {data['error'].get('error_code')})")
+        return data
+
+    async def _vk_paginate(self, method: str, params: dict,
+                           *, max_pages: int = 50) -> list[dict]:
+        items, offset = [], 0
+        for page in range(max_pages):
+            data = await self._vk_call(method, {
+                **params, "offset": offset, "count": vk.PAGE_SIZE})
+            page_items = (data.get("response") or {}).get("items", [])
+            if not page_items:
+                break
+            items.extend(page_items)
+            offset += vk.PAGE_SIZE
+            await asyncio.sleep(self.vk_page_interval)  # пауза — уважение к API
+        else:
+            self.log.warning("VK %s: достигнут предел %d страниц", method,
+                             max_pages)
+        return items
+
+    async def on_vk_scan(self, env: Envelope) -> dict:
+        """payload: {channel_url, query, search_mode: 'search'|'get_all'}
+        reply:   {videos: [{title, url, publication_date, resolution}]}"""
+        p = env.payload
+        screen_name = vk.screen_name_from_url(p["channel_url"])
+        resolve = await self._vk_call("utils.resolveScreenName",
+                                      {"screen_name": screen_name})
+        owner_id = vk.owner_id_from_resolve(resolve)
+        base = {"owner_id": owner_id, "fields": "files"}
+        terms = [t.strip() for t in (p.get("query") or "").split("/")
+                 if t.strip()]
+
+        if p.get("search_mode", "search") == "search":
+            raw: list[dict] = []
+            for term in terms:
+                raw.extend(await self._vk_paginate("video.search",
+                                                   {**base, "q": term}))
+            raw = vk.dedupe_by_id(raw)
+        else:  # get_all: весь канал + локальный фильтр
+            raw = vk.filter_by_terms(
+                await self._vk_paginate("video.get", base), terms)
+
+        facts = [f for f in (vk.video_to_fact(v) for v in raw) if f]
+        facts.sort(key=lambda f: f["publication_date"], reverse=True)
+        self.log.info("VK-скан %s: видео %d (сырых %d)", screen_name,
+                      len(facts), len(raw))
+        return {"videos": facts}
 
     # --- скачивание .torrent (Р-1) ----------------------------------------------------
 
