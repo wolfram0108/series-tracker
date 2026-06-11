@@ -4,3 +4,6 @@ fastapi==0.115.12
 uvicorn[standard]==0.34.2
 SQLAlchemy==2.0.41
 alembic==1.16.1
+httpx==0.28.1
+requests==2.32.3
+cloudscraper==1.2.71
