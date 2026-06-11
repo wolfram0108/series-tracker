@@ -48,6 +48,7 @@ class CatalogModule(BaseModule):
         self.handle("catalog.series.list", self.on_series_list)
         self.handle("catalog.series.get", self.on_series_get)
         self.handle("catalog.status.get", self.on_status_get)
+        self.handle("catalog.series.touch_scan_time", self.on_touch)
 
     # --- статусы: вклады и viewing ------------------------------------------
 
@@ -100,3 +101,8 @@ class CatalogModule(BaseModule):
     async def on_status_get(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
         return {"series_id": series_id, "statuses": self.agg.statuses(series_id)}
+
+    async def on_touch(self, env: Envelope) -> None:
+        """Обновление last_scan_time («время жизни» карточки) после
+        успешной загрузки/обработки — поведение старой системы."""
+        await self.repo.touch_scan_time(env.payload["series_id"])

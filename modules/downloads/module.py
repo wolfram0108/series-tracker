@@ -1,0 +1,260 @@
+"""Модуль downloads — загрузка VK-видео (yt-dlp). Решение Р-13.
+
+Владение: download_tasks (vk-часть) + колонки media_items.status и
+final_filename.
+
+События (входящие):
+  scan.plan.updated {series_id} — план пересчитан: усыновление готовых
+      файлов → создание задач (error-задача элемента заменяется новой —
+      ретрай сканом) → чистка pending вне плана → пинок диспетчеру.
+  settings.changed — подписка на max_parallel_downloads (вместо
+      перечитывания каждые 5 с).
+
+Queries / commands:
+  downloads.queue.get {} → {tasks, count} — активные задачи (загрузка UI)
+  downloads.queue.clear {} → {deleted} — всё, кроме идущих загрузок
+  downloads.fs.sync {series_id} → {adopted, lost} — синхронизация с
+      диском (вызывается сканом и при открытии модалки статуса)
+
+События (исходящие):
+  downloads.queue.changed {tasks, count} — при реальных изменениях
+      (троттлинг на прогрессе) — контракт SSE download_queue_update.
+  series.status.contribution {source: downloads, ...} — свёртка Р-11
+      (downloading/error/ready/waiting — семантика sync_vk_statuses).
+
+Диспетчер живёт по событиям (создание задачи, завершение загрузки,
+смена лимита) — никаких тиков. Параллелизм — счётчик активных задач
+против лимита из настроек.
+"""
+from __future__ import annotations
+
+import asyncio
+import os
+import time
+
+from core import BaseModule, BusRequestError
+from core.db import Database
+from core.envelope import Envelope
+
+from . import ytdlp
+from .repository import DownloadsRepository
+
+PROGRESS_DB_THROTTLE = 2.0   # секунд между записями прогресса в БД
+PROGRESS_EVENT_THROTTLE = 1.0  # секунд между событиями очереди при прогрессе
+
+
+class DownloadsModule(BaseModule):
+    name = "downloads"
+
+    def __init__(self, bus, db: Database, *, downloader=ytdlp.download) -> None:
+        self.repo = DownloadsRepository(db)
+        self._download = downloader  # подменяется в тестах
+        self._limit = 2
+        self._active: dict[int, asyncio.Task] = {}
+        self._last_db_write: dict[int, float] = {}
+        self._last_event = 0.0
+        super().__init__(bus)
+
+    def register(self) -> None:
+        self.handle("scan.plan.updated", self.on_plan_updated)
+        self.handle("settings.changed", self.on_settings_changed)
+        self.handle("downloads.queue.get", self.on_queue_get)
+        self.handle("downloads.queue.clear", self.on_queue_clear)
+        self.handle("downloads.fs.sync", self.on_fs_sync)
+
+    async def on_start(self) -> None:
+        self._limit = await self._read_limit()
+        requeued = await self.repo.requeue_interrupted()
+        if requeued:
+            self.log.info("оборванных загрузок возвращено в очередь: %d",
+                          requeued)
+        # Свёртки при старте (обязательство поставщика, Р-11).
+        try:
+            all_series = await self.request("catalog.series.list", {},
+                                            timeout=30)
+            for s in all_series:
+                if s.get("source_type") == "vk_video":
+                    await self._contribute(s["id"])
+        except BusRequestError as exc:
+            self.log.warning("каталог недоступен при старте: %s", exc)
+        await self._pump()
+
+    async def _read_limit(self) -> int:
+        try:
+            reply = await self.request("settings.value.get",
+                                       {"key": "max_parallel_downloads"},
+                                       timeout=10)
+            return max(1, int(reply.get("value") or 2))
+        except (BusRequestError, ValueError, TypeError):
+            return 2
+
+    # --- реакции на события -------------------------------------------------------
+
+    async def on_settings_changed(self, env: Envelope) -> None:
+        if env.payload.get("key") != "max_parallel_downloads":
+            return
+        try:
+            self._limit = max(1, int(env.payload.get("value")))
+        except (ValueError, TypeError):
+            return
+        self.log.info("лимит параллельных загрузок: %d", self._limit)
+        await self._pump()
+
+    async def on_plan_updated(self, env: Envelope) -> None:
+        series_id = env.payload["series_id"]
+        series = await self.request("catalog.series.get",
+                                    {"series_id": series_id})
+        adopted = await self._adopt_existing_files(series)
+        created = 0
+        for item in await self.repo.planned_pending_items(series_id):
+            filename = await self._format_filename(series, item)
+            save_path = os.path.join(series["save_path"], filename)
+            if await self.repo.replace_or_create_task(
+                    item["unique_id"], series_id, item["source_url"],
+                    save_path):
+                created += 1
+                if item["status"] == "error":  # ретрай сканом снимает ошибку
+                    await self.repo.set_item_status(item["unique_id"],
+                                                    "pending")
+        dropped = await self.repo.drop_pending_outside_plan(series_id)
+        self.log.info("план %d: усыновлено %d, задач создано %d, "
+                      "вычищено вне плана %d", series_id, adopted, created,
+                      dropped)
+        if adopted:
+            await self._contribute(series_id)
+        if created or dropped:
+            await self._broadcast_queue()
+        await self._pump()
+
+    async def _format_filename(self, series: dict, item: dict) -> str:
+        reply = await self.request("rules.format_filename", {
+            "series": series, "media_item": item}, timeout=30)
+        return reply["filename"]
+
+    # --- синхронизация с диском ------------------------------------------------------
+
+    async def _adopt_existing_files(self, series: dict) -> int:
+        """pending-элемент плана, чей файл уже лежит с ожидаемым именем,
+        регистрируется скачанным без загрузки."""
+        adopted = 0
+        for item in await self.repo.planned_pending_items(series["id"]):
+            filename = await self._format_filename(series, item)
+            path = os.path.join(series["save_path"], filename)
+            if await asyncio.to_thread(os.path.exists, path):
+                await self.repo.register_downloaded(item["unique_id"],
+                                                    filename)
+                self.log.info("усыновлён существующий файл: %s", filename)
+                adopted += 1
+        return adopted
+
+    async def on_fs_sync(self, env: Envelope) -> dict:
+        """Проверка диска по запросу (скан, открытие модалки статуса):
+        пропавшие файлы — снова pending, найденные — completed.
+        Заменяет фоновую 60-секундную проверку старой системы."""
+        series_id = env.payload["series_id"]
+        series = await self.request("catalog.series.get",
+                                    {"series_id": series_id})
+        lost = 0
+        for item in await self.repo.completed_items(series_id):
+            # нарезанные компиляции живут отдельными файлами — их
+            # верификация принадлежит slicing (читаем чужую колонку)
+            if (item.get("slicing_status") or "none") in (
+                    "completed", "completed_with_errors"):
+                continue
+            rel = item.get("final_filename")
+            if not rel:
+                continue
+            path = os.path.join(series["save_path"], rel)
+            if not await asyncio.to_thread(os.path.exists, path):
+                await self.repo.reset_download_state(item["unique_id"])
+                self.log.warning("файл пропал: %s — статус сброшен", path)
+                lost += 1
+        adopted = await self._adopt_existing_files(series)
+        if lost or adopted:
+            await self._contribute(series_id)
+            await self._pump()
+        return {"adopted": adopted, "lost": lost}
+
+    # --- очередь ------------------------------------------------------------------
+
+    async def on_queue_get(self, env: Envelope) -> dict:
+        tasks = await self.repo.active_tasks()
+        return {"tasks": tasks, "count": len(tasks)}
+
+    async def on_queue_clear(self, env: Envelope) -> dict:
+        deleted = await self.repo.clear_queue()
+        await self._broadcast_queue()
+        return {"deleted": deleted}
+
+    async def _broadcast_queue(self) -> None:
+        tasks = await self.repo.active_tasks()
+        self.publish_event("downloads.queue.changed",
+                           {"tasks": tasks, "count": len(tasks)})
+
+    # --- диспетчер и загрузка ---------------------------------------------------------
+
+    async def _pump(self) -> None:
+        free = self._limit - len(self._active)
+        if free <= 0:
+            return
+        for task in await self.repo.next_pending(free):
+            if task["id"] in self._active:
+                continue
+            await self.repo.mark_downloading(task["id"])
+            await self.repo.set_item_status(task["task_key"], "downloading")
+            runner = asyncio.create_task(self._run_download(task))
+            self._active[task["id"]] = runner
+            self._tasks.append(runner)
+            self.log.info("задача %d (%s) отправлена на загрузку",
+                          task["id"], task["task_key"])
+        await self._broadcast_queue()
+
+    async def _run_download(self, task: dict) -> None:
+        task_id, uid = task["id"], task["task_key"]
+        series_id = task["series_id"]
+        try:
+            await self._contribute(series_id)
+
+            async def on_progress(data: dict) -> None:
+                now = time.monotonic()
+                if (now - self._last_db_write.get(task_id, 0)
+                        > PROGRESS_DB_THROTTLE) or data.get("progress") == 100:
+                    await self.repo.update_progress(task_id, data)
+                    self._last_db_write[task_id] = now
+                if now - self._last_event > PROGRESS_EVENT_THROTTLE:
+                    self._last_event = now
+                    await self._broadcast_queue()
+
+            ok, error = await self._download(task["video_url"],
+                                             task["save_path"], on_progress)
+            if ok:
+                series = await self.request("catalog.series.get",
+                                            {"series_id": series_id})
+                rel = os.path.relpath(task["save_path"],
+                                      series["save_path"]).replace("\\", "/")
+                await self.repo.register_downloaded(uid, rel)
+                await self.repo.delete_task(task_id)
+                self.send_command("catalog.series.touch_scan_time",
+                                  {"series_id": series_id})
+                self.log.info("загрузка завершена: %s", rel)
+            else:
+                await self.repo.mark_error(task_id, error)
+                await self.repo.set_item_status(uid, "error")
+                self.log.error("загрузка %s не удалась: %s", uid, error)
+        except Exception as exc:  # noqa: BLE001 — ошибка не валит модуль
+            self.log.exception("сбой воркера загрузки %d", task_id)
+            await self.repo.mark_error(task_id, f"внутренняя ошибка: {exc}")
+            await self.repo.set_item_status(uid, "error")
+        finally:
+            self._active.pop(task_id, None)
+            self._last_db_write.pop(task_id, None)
+            await self._contribute(series_id)
+            await self._broadcast_queue()
+            await self._pump()
+
+    # --- свёртка статусов (Р-11) -----------------------------------------------------
+
+    async def _contribute(self, series_id: int) -> None:
+        flags = await self.repo.series_flags(series_id)
+        self.publish_event("series.status.contribution", {
+            "source": "downloads", "series_id": series_id, "flags": flags})

@@ -26,3 +26,11 @@ class CatalogRepository:
     async def get_series(self, series_id: int) -> dict | None:
         return await self._db.fetch_one(
             f"SELECT {_COLUMNS} FROM series WHERE id=?", (series_id,))
+
+    async def touch_scan_time(self, series_id: int) -> None:
+        from datetime import datetime, timezone
+        # naive-UTC с микросекундами — формат хранения прод-БД
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+        await self._db.execute(
+            "UPDATE series SET last_scan_time=? WHERE id=?",
+            (now, series_id))

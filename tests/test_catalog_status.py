@@ -39,6 +39,21 @@ def test_vk_ready_and_waiting_coexist():
     assert agg.statuses(1) == ["ready", "waiting"]
 
 
+def test_waiting_suppressed_by_activity():
+    # waiting — факт «есть что ждать», но при активности не показывается
+    agg = StatusAggregator()
+    agg.set_contribution(1, "downloads",
+                         {"downloading": True, "waiting": True})
+    assert agg.statuses(1) == ["downloading"]
+    # активность кончилась — waiting снова виден
+    agg.set_contribution(1, "downloads",
+                         {"downloading": False, "waiting": True})
+    assert agg.statuses(1) == ["waiting"]
+    # активность из ДРУГОГО вклада тоже подавляет
+    agg.set_contribution(1, "scan", {"scanning": True})
+    assert agg.statuses(1) == ["scanning"]
+
+
 def test_all_false_removes_contribution():
     agg = StatusAggregator()
     agg.set_contribution(1, "scan", {"scanning": True})

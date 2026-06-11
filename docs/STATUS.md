@@ -14,7 +14,7 @@
 | 1. Каркас | ✓ core/ (шина+конверт+BaseModule+раннер+логирование), gateway-скелет (FastAPI, SSE_MAP), run.py |
 | 2. Инфраструктура | ✓ torrents (qBit-клиент: локальный infohash вкл. гибриды v2, два поколения API, релогин на 403), trackerauth (fetch-прокси, персистентные сессии, rate-limit), settings, metadata (TMDB), library (листинг), Alembic (0001 базовая схема 19 живых таблиц + 0002 tracker_sessions), core/db.py |
 | 3. Мозги | ✓ rules (движок с нуля, фиксы А/Б/В), sources (Kinozal/RuTracker/Anilibria-API/VK-API; astar+anilibria_tv — разбор готов, браузерная доставка на этапе 6), scan/planner.py (SmartCollector v4.1 + фикс Г) |
-| 4. Конвейер (идёт) | ✓ статусная модель (Р-11): modules/catalog — агрегатор свёрток, series.status.changed только при изменениях, эфемерный viewing со страховкой gateway.sse.clients; находки 23–25. ✓ scan-оркестратор (Р-12): зеркала в sources, настоящая ресьюмабельность scan_tasks, формулы id верифицированы (190/190, 351/351), расписание автоскана, отказ параллельному скану; core: handle(concurrent=True); находки 26–29 |
+| 4. Конвейер (идёт) | ✓ статусная модель (Р-11): modules/catalog — агрегатор свёрток, series.status.changed только при изменениях, эфемерный viewing со страховкой gateway.sse.clients; находки 23–25. ✓ scan-оркестратор (Р-12): зеркала в sources, настоящая ресьюмабельность scan_tasks, формулы id верифицированы (190/190, 351/351), расписание автоскана, отказ параллельному скану; core: handle(concurrent=True); находки 26–29. ✓ downloads (Р-13): событийный диспетчер yt-dlp (async subprocess), ретрай ошибок сканом, fs.sync вместо 60-секундной ФС-проверки, агрегатор: waiting подавляется активностью; находки 30–32 |
 
 **Верификации против старого кода (все локально, прод не участвует):**
 infohash 170/170 реальных торрентов; движок правил 1088/1088 реальных
@@ -43,19 +43,27 @@ torrents.register (идемпотентен: upsert по torrent_id + agent_task
 событие torrents.queue.changed {count}; событие scan.plan.updated →
 downloads (создание download_tasks + усыновление файлов — его зона).
 
+Downloads готов (Р-13). Контракты, которые ЖДУТ реализации другими
+модулями: rules.format_filename {series, media_item} → {filename}
+(фейк в tests/test_downloads_module.py; реализация — с разбором
+renaming/rules); gateway на этапе 5: открытие модалки статуса →
+query downloads.fs.sync {series_id} (решение пользователя — вместо
+фоновой 60-секундной ФС-проверки); SSE-маппинг
+downloads.queue.changed → download_queue_update.
+
 Дальше по этапу 4 (каждый модуль — с разбора пользователю):
-downloads (yt-dlp; VK-свёртка downloading/error/ready/waiting —
-семантика sync_vk_statuses: ready из ВСЕХ непроигнорированных,
-waiting=есть pending в плане и нет активности, сосуществует с ready;
-обработчик scan.plan.updated), торрент-конвейер (стадии agent_tasks →
-metadata/renaming/checking/activating; мониторинг download_tasks →
-downloading/ready; torrents.db.*/register/queue.*), slicing (ffmpeg +
-utils/chapter_*), renaming (reprocess + logic/renaming_processor +
-filename_formatter — форматтер ещё НЕ перенесён), library-relocation
-(+is_busy — пока вне статусной модели, решить при разборе). Находка
-7г: при разборе агентов выяснить, что тикает с периодом ~1,5 часа
-(статусная зона и scan кандидата не дали: такты 5 с/60 с, автоскан в
-проде — 360 мин).
+торрент-конвейер (стадии agent_tasks → metadata/renaming/checking/
+activating; мониторинг download_tasks (торрент-часть) →
+downloading/ready; контракты из Р-12: torrents.db.active/
+deactivate_all, register (идемпотентен), queue.get/queue.changed
+{count}), slicing (ffmpeg + utils/chapter_*; колонки slicing_status/
+chapters*; свёртка slicing/error; роуты глав/deep-adoption из
+routes/media.py), renaming (reprocess + logic/renaming_processor +
+filename_formatter — форматтер ещё НЕ перенесён; rules.format_filename),
+library-relocation (+is_busy — пока вне статусной модели, решить при
+разборе). Находка 7г: кандидаты в scan/status/downloads НЕ найдены
+(gunicorn timeout=120 → зависание держало воркер >2 мин); остаются
+slicing (ffmpeg/главы) и сверка журнала таймаутов с логами на этапе 6.
 
 После: этап 5 (gateway: все 73 точки с ревизией «подтверждена/
 перепроектирована/удалена» в contracts/revision.md; правки JS-слоя

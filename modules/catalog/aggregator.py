@@ -21,6 +21,13 @@ HIERARCHY = [
 # только командами и в свёртках недопустим.
 ALLOWED_FLAGS = frozenset(HIERARCHY) - {"viewing"}
 
+# waiting — факт «есть что ждать»; при реальной активности он не
+# показывается (семантика старых sync_vk_statuses/_sync_waiting_status,
+# у которых это поведение было размазано по двум конфликтующим
+# механизмам). ready и viewing активностью не считаются: «ready,
+# waiting» (скачана часть, остальное ждёт) — валидная пара.
+_WAITING_SUPPRESSORS = frozenset(HIERARCHY) - {"ready", "viewing", "waiting"}
+
 
 class StatusAggregator:
     def __init__(self) -> None:
@@ -80,6 +87,8 @@ class StatusAggregator:
         active: set[str] = set()
         for flags in self._contrib.get(series_id, {}).values():
             active |= flags
+        if active & _WAITING_SUPPRESSORS:
+            active.discard("waiting")
         # waiting определяется ДО viewing: просмотр — не активность
         # (семантика оригинала: «viewing, waiting» при открытой модалке
         # бездействующего сериала).

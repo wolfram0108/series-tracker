@@ -21,6 +21,7 @@ from core import Bus, Runner
 from core.db import Database
 from core.logging import configure, get_logger
 from modules.catalog import CatalogModule
+from modules.downloads import DownloadsModule
 from modules.gateway import GatewayModule
 from modules.library import LibraryModule
 from modules.metadata import MetadataModule
@@ -47,9 +48,10 @@ modules = [
     SourcesModule(bus, db),
     MetadataModule(bus),
     LibraryModule(bus),
-    # scan — после catalog/settings/sources/rules: его reconcile (resume
-    # незавершённых сканов) шлёт им запросы.
+    # scan и downloads — после catalog/settings/sources/rules: их
+    # reconcile при старте шлёт запросы соседям.
     ScanModule(bus, db),
+    DownloadsModule(bus, db),
 ]
 
 qbit_url = os.environ.get("ST_QBIT_URL")
