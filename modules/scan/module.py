@@ -84,6 +84,7 @@ class ScanModule(BaseModule):
         # очередь запросов к модулю (защита от гонки — set _running).
         self.handle("scan.series.run", self.on_run, concurrent=True)
         self.handle("scan.all.start", self.on_scan_all)
+        self.handle("scan.media.list", self.on_media_list)
         self.handle("torrents.queue.changed", self.on_queue_changed)
 
     async def on_start(self) -> None:
@@ -108,6 +109,11 @@ class ScanModule(BaseModule):
         p = env.payload
         return await self._run_series(int(p["series_id"]),
                                       bool(p.get("force_replace")))
+
+    async def on_media_list(self, env: Envelope) -> list[dict]:
+        """Состав медиа-элементов серии (владелец строк — scan, Р-12);
+        читают renaming (переобработка имён) и UI (этап 5)."""
+        return await self.repo.items_for_series(env.payload["series_id"])
 
     async def on_scan_all(self, env: Envelope) -> None:
         if self._scan_all_running:

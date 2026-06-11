@@ -61,6 +61,7 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.queue.get", self.on_queue_get)
         self.handle("downloads.queue.clear", self.on_queue_clear)
         self.handle("downloads.fs.sync", self.on_fs_sync)
+        self.handle("downloads.item.set_filename", self.on_set_filename)
 
     async def on_start(self) -> None:
         self._limit = await self._read_limit()
@@ -176,6 +177,12 @@ class DownloadsModule(BaseModule):
         return {"adopted": adopted, "lost": lost}
 
     # --- очередь ------------------------------------------------------------------
+
+    async def on_set_filename(self, env: Envelope) -> None:
+        """final_filename — наша колонка; renaming сообщает новое имя
+        после переобработки (Р-15)."""
+        await self.repo.set_item_filename(env.payload["unique_id"],
+                                          env.payload["filename"])
 
     async def on_queue_get(self, env: Envelope) -> dict:
         tasks = await self.repo.active_tasks()

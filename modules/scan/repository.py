@@ -142,6 +142,10 @@ class ScanRepository:
         return {"added": added, "updated": updated, "deleted": deleted,
                 "kept_phantoms": kept_phantoms}
 
+    async def items_for_series(self, series_id: int) -> list[dict]:
+        return await self._db.fetch_all(
+            "SELECT * FROM media_items WHERE series_id=?", (series_id,))
+
     async def candidates(self, series_id: int) -> list[dict]:
         """Вход планировщика — только plan_status='candidate' (семантика
         SmartCollector: план строится из кандидатов текущего скана;

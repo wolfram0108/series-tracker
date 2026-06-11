@@ -329,3 +329,37 @@ series_statuses → строка series.state), поллинг-пересчёт 
   замена старого — деактивация + удаление из qBit без файлов +
   чистка torrent_files), queue.get {series_id?},
   событие queue.changed {count, tasks} (count=0 — сигнал scan).
+
+### Р-15. Переименование и форматтер имён (согласован 2026-06-12)
+Разбор RenamingAgent + filename_formatter + metadata_processor +
+renaming_processor; находки 33 (single_vk создаются и удаляются без
+выполнения; всё наблюдаемое поведение обеспечивала mass-переобработка)
+и 34 (get_pending_renaming_task определён в Database трижды).
+
+- **Форматтер — в rules** (чистые функции modules/rules/formatter.py,
+  поведение 1:1): иерархия метаданных (овер-райды сериала > правила >
+  факты БД), формат "Name_EN sNNeMM [озвучка] качество 1080p.ext",
+  сезонная логика торрентов (Season NN; одно/многосезонник по
+  series.season; Specials → Season 00). **Дифф-верификация: 349/349
+  реальных имён фикстуры воспроизведены точно**
+  (tests/test_rules_format_diff.py — имя файла и есть продукт).
+  Queries: rules.format_filename {series, media_item, episode_override?,
+  original_filename?} и rules.format_torrent_file {series,
+  file_basename, original_path} (filename=None — сезон не определён,
+  файл пропускается) — закрыты контракты-фейки Р-13/Р-14.
+- **Модуль renaming**: renaming.reprocess {series_id} (Р-12; то же —
+  «сохранили свойства сериала», этап 5) и renaming.process_torrent
+  {series_id, qb_hash} (Р-14). Запись renaming_tasks живёт на время
+  работы (носитель ошибки + is_busy-семантика); незавершённые при
+  старте перевыполняются (идемпотентно); повторный запрос дожидается
+  идущего (asyncio-lock по серии) вместо отказа. Событие
+  renaming.finished {series_id} — контракт SSE renaming_complete.
+- **single_vk не воспроизводится** (находка 33: диспетчер никогда его
+  не выполнял — задачи удалялись пустыми, давая ложный is_busy);
+  актуальность имён обеспечивается переобработкой при каждом скане и
+  каждом сохранении свойств — как фактически и работало (трассировано:
+  routes/series.py:478 создавал mass-задачу при каждом сохранении).
+- **Границы владения**: rename на диске/в qBit — физика renaming;
+  имена в БД пишут владельцы колонок по командам:
+  downloads.item.set_filename, slicing.file.set_path (фейк до slicing),
+  torrents.db.files.upsert; состав элементов — query scan.media.list.

@@ -111,6 +111,11 @@ class TorrentsRepository:
             "LEFT JOIN download_tasks dt ON dt.task_key = t.qb_hash "
             "AND dt.task_type='torrent' WHERE t.series_id=?", (series_id,))
 
+    async def files_for_torrent(self, torrent_db_id: int) -> list[dict]:
+        return await self._db.fetch_all(
+            "SELECT * FROM torrent_files WHERE torrent_db_id=?",
+            (torrent_db_id,))
+
     async def set_file_status(self, file_id: int, status: str) -> None:
         await self._db.execute(
             "UPDATE torrent_files SET status=? WHERE id=?", (status, file_id))

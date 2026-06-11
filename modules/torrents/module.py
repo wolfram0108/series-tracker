@@ -85,6 +85,8 @@ class TorrentsModule(BaseModule):
         self.handle("torrents.set_location", self.on_set_location)
         self.handle("torrents.db.active", self.on_db_active)
         self.handle("torrents.db.deactivate_all", self.on_db_deactivate_all)
+        self.handle("torrents.db.files.list", self.on_db_files_list)
+        self.handle("torrents.db.files.upsert", self.on_db_files_upsert)
         self.handle("torrents.register", self.on_register)
         self.handle("torrents.queue.get", self.on_queue_get)
         self.handle("torrents.fs.verify", self.on_fs_verify, concurrent=True)
@@ -207,6 +209,22 @@ class TorrentsModule(BaseModule):
         if hashes:
             await self.qbt.delete(hashes, delete_files=False)
         return {"deactivated": len(hashes)}
+
+    async def on_db_files_list(self, env: Envelope) -> list[dict]:
+        row = await self.repo.torrent_by_hash(env.payload["qb_hash"])
+        if not row:
+            return []
+        return await self.repo.files_for_torrent(row["id"])
+
+    async def on_db_files_upsert(self, env: Envelope) -> dict:
+        """Записи о файлах раздачи (пишет renaming после переименования —
+        таблицей torrent_files владеем мы)."""
+        row = await self.repo.torrent_by_hash(env.payload["qb_hash"])
+        if not row:
+            raise LookupError(
+                f"торрент {env.payload['qb_hash'][:8]} не найден в БД")
+        await self.repo.upsert_files(row["id"], env.payload["files"])
+        return {"count": len(env.payload["files"])}
 
     async def on_register(self, env: Envelope) -> dict:
         p = env.payload

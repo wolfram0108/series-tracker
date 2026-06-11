@@ -171,12 +171,18 @@ async def test_plan_updated_creates_downloads_and_completes(system):
     assert os.path.exists(os.path.join(media_dir, "Серия 01.mp4"))
     assert items["uid2"]["status"] == "pending"  # не трогали
     assert _tasks(db_path) == []  # задача удалена после успеха
-    # свёртка дошла до ready
+    # свёртка дошла до ready (финальная публикуется после завершения
+    # воркера — дожидаемся именно её)
+    expected = {"downloading": False, "error": False,
+                "ready": True, "waiting": False}
     flags = None
-    while not sub.queue.empty():
-        flags = sub.queue.get_nowait().payload["flags"]
-    assert flags == {"downloading": False, "error": False,
-                     "ready": True, "waiting": False}
+    for _ in range(100):
+        while not sub.queue.empty():
+            flags = sub.queue.get_nowait().payload["flags"]
+        if flags == expected:
+            break
+        await asyncio.sleep(0.02)
+    assert flags == expected
 
 
 @pytest.mark.asyncio

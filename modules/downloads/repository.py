@@ -108,6 +108,12 @@ class DownloadsRepository:
 
     # --- media_items: наши колонки (status, final_filename) ------------------------
 
+    async def set_item_filename(self, unique_id: str,
+                                filename: str) -> None:
+        await self._db.execute(
+            "UPDATE media_items SET final_filename=? WHERE unique_id=?",
+            (filename, unique_id))
+
     async def set_item_status(self, unique_id: str, status: str) -> None:
         await self._db.execute(
             "UPDATE media_items SET status=? WHERE unique_id=?",

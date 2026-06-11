@@ -25,6 +25,7 @@ from modules.downloads import DownloadsModule
 from modules.gateway import GatewayModule
 from modules.library import LibraryModule
 from modules.metadata import MetadataModule
+from modules.renaming import RenamingModule
 from modules.rules import RulesModule
 from modules.scan import ScanModule
 from modules.settings import SettingsModule
@@ -48,10 +49,11 @@ modules = [
     SourcesModule(bus, db),
     MetadataModule(bus),
     LibraryModule(bus),
-    # scan и downloads — после catalog/settings/sources/rules: их
-    # reconcile при старте шлёт запросы соседям.
+    # scan/downloads/renaming — после catalog/settings/sources/rules:
+    # их reconcile при старте шлёт запросы соседям.
     ScanModule(bus, db),
     DownloadsModule(bus, db),
+    RenamingModule(bus, db),
 ]
 
 qbit_url = os.environ.get("ST_QBIT_URL")

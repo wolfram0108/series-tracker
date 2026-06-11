@@ -316,11 +316,16 @@ async def test_monitor_progress_and_contribution(system):
     qbt.torrents["h5"].update(progress=1.0, state="uploading")
     assert await _wait(lambda: _progress_row() == (100, "uploading"))
 
+    # финальная свёртка публикуется следующим тактом монитора — ждём её
     flags = None
-    while not sub.queue.empty():
-        env = sub.queue.get_nowait()
-        if env.payload["source"] == "torrents":
-            flags = env.payload["flags"]
+    for _ in range(100):
+        while not sub.queue.empty():
+            env = sub.queue.get_nowait()
+            if env.payload["source"] == "torrents":
+                flags = env.payload["flags"]
+        if flags and flags["ready"]:
+            break
+        await asyncio.sleep(0.02)
     assert flags["ready"] is True and flags["downloading"] is False
 
 

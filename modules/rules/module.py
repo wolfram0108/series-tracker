@@ -14,6 +14,7 @@ from core import BaseModule
 from core.db import Database
 from core.envelope import Envelope
 
+from . import formatter
 from .engine import CompiledProfile, compile_profile, process_title
 from .repository import RulesRepository
 
@@ -30,6 +31,8 @@ class RulesModule(BaseModule):
         self.handle("rules.apply", self.on_apply)
         self.handle("rules.profiles.list", self.on_profiles_list)
         self.handle("rules.cache.invalidate", self.on_cache_invalidate)
+        self.handle("rules.format_filename", self.on_format_filename)
+        self.handle("rules.format_torrent_file", self.on_format_torrent_file)
 
     async def _profile(self, profile_id: int) -> CompiledProfile:
         if profile_id not in self._cache:
@@ -59,6 +62,44 @@ class RulesModule(BaseModule):
 
     async def on_profiles_list(self, env: Envelope) -> list[dict]:
         return await self.repo.list_profiles()
+
+    async def on_format_filename(self, env: Envelope) -> dict:
+        """payload: {series, media_item, episode_override?, original_filename?}
+        Полная цепочка имени VK-элемента: правила по source_title →
+        метаданные (иерархия приоритетов) → формат (Р-15)."""
+        p = env.payload
+        series, item = p["series"], p["media_item"]
+        extracted: dict = {}
+        title = item.get("source_title")
+        if title and series.get("parser_profile_id"):
+            profile = await self._profile(int(series["parser_profile_id"]))
+            extracted = process_title(profile, title).get("extracted") or {}
+        metadata = formatter.build_metadata(series, item, extracted)
+        if (override := p.get("episode_override")) is not None:
+            metadata["episode"] = override
+            metadata.pop("start", None)
+            metadata.pop("end", None)
+        return {"filename": formatter.format_name(
+            series, metadata, original_filename=p.get("original_filename"))}
+
+    async def on_format_torrent_file(self, env: Envelope) -> dict:
+        """payload: {series, file_basename, original_path}
+        Имя файла торрента с сезонной папкой (логика renaming_processor):
+        правила по имени файла → 'Season NN/строгое имя.ext'.
+        filename=None — сезон не определить, файл пропускается."""
+        p = env.payload
+        series = p["series"]
+        profile = await self._profile(int(series["parser_profile_id"]))
+        extracted = process_title(profile,
+                                  p["file_basename"]).get("extracted") or {}
+        season = formatter.torrent_season_folder(series, extracted,
+                                                 p["original_path"])
+        if season is None:
+            return {"filename": None, "extracted": extracted}
+        name = formatter.format_name(
+            series, extracted, original_filename=p["file_basename"],
+            target_directory=f"Season {season:02d}")
+        return {"filename": name, "extracted": extracted}
 
     async def on_cache_invalidate(self, env: Envelope) -> dict:
         """Сброс кэша (после CRUD правил — этап 5 будет звать сам)."""
