@@ -97,9 +97,11 @@ Request/reply реализован в обвязке `core/module.py` ПОВЕР
 
 - **[docs/STATUS.md](docs/STATUS.md) — ТЕКУЩЕЕ СОСТОЯНИЕ и точка
   продолжения работы. Читать первым после старта сессии.**
-- [contracts/revision.md](contracts/revision.md) — решения Р-1..Р-10
+- [contracts/revision.md](contracts/revision.md) — решения Р-1..Р-17
   с обоснованиями (согласованы пользователем).
-- [contracts/findings.md](contracts/findings.md) — находки 1–22.
+- [contracts/findings.md](contracts/findings.md) — находки 1–36.
+- [contracts/bus_topics.md](contracts/bus_topics.md) — сводная карта
+  топиков шины (queries/события/будущие SSE-маппинги).
 - [contracts/endpoints.md](contracts/endpoints.md) — инвентарь точек
   старого контракта (73 маршрута) с колонкой «Ревизия».
 
