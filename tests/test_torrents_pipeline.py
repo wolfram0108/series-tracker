@@ -330,6 +330,39 @@ async def test_monitor_progress_and_contribution(system):
 
 
 @pytest.mark.asyncio
+async def test_qbit_error_state_is_error_not_downloading(system):
+    """Находка 43: qBit-state error → флаг error (не downloading) +
+    текст ошибки в download_tasks для модалки."""
+    bus, qbt, _, probe, db_path = system
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
+                     "is_active, qb_hash) VALUES (1, 't9', 'l', 1, 'h9')")
+        conn.commit()
+    # неверный путь → qBit держит раздачу в error, прогресс 0
+    qbt.torrents["h9"] = {"state": "error", "progress": 0.0,
+                          "dlspeed": 0, "eta": 0}
+    sub = bus.subscribe("series.status.contribution")
+
+    flags = None
+    for _ in range(100):
+        while not sub.queue.empty():
+            env = sub.queue.get_nowait()
+            if env.payload["source"] == "torrents":
+                flags = env.payload["flags"]
+        if flags and flags["error"]:
+            break
+        await asyncio.sleep(0.02)
+    assert flags["error"] is True
+    assert flags["downloading"] is False
+    with sqlite3.connect(db_path) as conn:
+        status, msg = conn.execute(
+            "SELECT status, error_message FROM download_tasks "
+            "WHERE task_key='h9'").fetchone()
+    assert status == "error"
+    assert "путь сохранения" in msg
+
+
+@pytest.mark.asyncio
 async def test_fs_verify_marks_missing_and_rechecks(system, tmp_path):
     _, qbt, _, probe, db_path = system
     with sqlite3.connect(db_path) as conn:

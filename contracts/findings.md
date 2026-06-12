@@ -293,3 +293,15 @@ KinozalProvider.is_logged_out искал точную подстроку
 переживает рестарт), поэтому детектор обязан быть точным. Фикс: regex
 action=['"]?/?takelogin\.php (устойчив к слешу и кавычкам); на
 залогиненных страницах формы нет вовсе. Регрессия — в test_trackerauth.
+
+## 43. Торрент в qBit-state error/missingFiles показывался как «загрузка»
+Обнаружено пользователем на стенде (этап 6): добавил торрент с неверным
+путём, qBittorrent держит раздачу в state="error", но карточка показывала
+«Загрузка». Причина — свёртка torrents._contribute: qBit-состояния
+ошибок не входили в _NOT_DOWNLOADING, прогресс<100 → флаг downloading.
+Тот же дефект был в старой системе (status_manager.sync_torrent_statuses:
+status not in ['pausedUP','pausedDL','uploading']) — унаследован, не
+регресс. Фикс (согласован): _ERROR_STATES={"error","missingFiles"} →
+флаг error вместо downloading; текст состояния пишется в
+download_tasks.error_message (для модалки). Проверено живьём на стенде:
+статус серии стал ['error'], сообщение «проверьте путь сохранения».

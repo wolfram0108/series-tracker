@@ -49,6 +49,14 @@ from .repository import TorrentsRepository
 # stopped*-имена поколения qBit 5.x)
 _NOT_DOWNLOADING = {"pausedUP", "pausedDL", "stoppedUP", "stoppedDL",
                     "uploading"}
+# Состояния-ошибки qBittorrent: внутренняя ошибка раздачи и
+# недоступные/пропавшие файлы (находка 43). Старая система (и наш
+# перенос) считала их «загрузкой» — карточка врала; теперь это флаг
+# error. Тексты — для модалки статуса.
+_ERROR_STATES = {
+    "error": "qBittorrent: ошибка раздачи — проверьте путь сохранения",
+    "missingFiles": "qBittorrent: файлы недоступны или перемещены",
+}
 
 
 class TorrentsModule(BaseModule):
@@ -566,8 +574,10 @@ class TorrentsModule(BaseModule):
         for series_id, hashes in by_series.items():
             for qb_hash in hashes:
                 if qb_hash in info_map:
+                    info = info_map[qb_hash]
+                    err = _ERROR_STATES.get(info.get("state"))
                     await self.repo.upsert_progress(series_id, qb_hash,
-                                                    info_map[qb_hash])
+                                                    info, err)
             await self.repo.remove_stale_progress(
                 series_id, [h for h in hashes if h in info_map])
             await self._contribute(series_id)
@@ -618,7 +628,9 @@ class TorrentsModule(BaseModule):
             if flag:
                 flags[flag] = True
         for row in await self.repo.torrent_progress(series_id):
-            if row["progress"] >= 100:
+            if row["status"] in _ERROR_STATES:
+                flags["error"] = True
+            elif row["progress"] >= 100:
                 flags["ready"] = True
             elif row["status"] not in _NOT_DOWNLOADING:
                 flags["downloading"] = True

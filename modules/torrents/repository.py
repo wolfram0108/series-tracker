@@ -198,7 +198,8 @@ class TorrentsRepository:
     # --- download_tasks: прогресс торрентов для UI -------------------------------------
 
     async def upsert_progress(self, series_id: int, qb_hash: str,
-                              info: dict) -> None:
+                              info: dict, error_message: str | None = None
+                              ) -> None:
         progress = int(round(info.get("progress", 0) * 100))
         existing = await self._db.fetch_one(
             "SELECT id FROM download_tasks WHERE task_key=? AND "
@@ -206,17 +207,18 @@ class TorrentsRepository:
         if existing:
             await self._db.execute(
                 "UPDATE download_tasks SET status=?, progress=?, dlspeed=?, "
-                "eta=?, updated_at=? WHERE id=?",
+                "eta=?, error_message=?, updated_at=? WHERE id=?",
                 (info.get("state"), progress, info.get("dlspeed", 0),
-                 info.get("eta", 0), _now(), existing["id"]))
+                 info.get("eta", 0), error_message, _now(), existing["id"]))
         else:
             await self._db.execute(
                 "INSERT INTO download_tasks (task_key, series_id, "
-                "task_type, status, progress, dlspeed, eta, attempts, "
-                "created_at, updated_at) VALUES (?, ?, 'torrent', ?, ?, ?, "
-                "?, 0, ?, ?)",
+                "task_type, status, progress, dlspeed, eta, error_message, "
+                "attempts, created_at, updated_at) VALUES (?, ?, 'torrent', "
+                "?, ?, ?, ?, ?, 0, ?, ?)",
                 (qb_hash, series_id, info.get("state"), progress,
-                 info.get("dlspeed", 0), info.get("eta", 0), _now(), _now()))
+                 info.get("dlspeed", 0), info.get("eta", 0), error_message,
+                 _now(), _now()))
 
     async def remove_stale_progress(self, series_id: int,
                                     live_hashes: list[str]) -> None:
