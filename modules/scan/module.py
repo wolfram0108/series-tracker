@@ -87,8 +87,11 @@ class ScanModule(BaseModule):
         self.handle("scan.media.list", self.on_media_list)
         self.handle("scan.media.downloaded_counts", self.on_downloaded_counts)
         self.handle("scan.item.set_ignored", self.on_set_ignored)
+        self.handle("scan.status.get", self.on_status_get)
         self.handle("torrents.queue.changed", self.on_queue_changed)
         self.handle("series.deleted", self.on_series_deleted)
+        self.handle("settings.changed", self.on_settings_changed)
+        self.handle("gateway.sse.clients", self.on_sse_clients)
 
     async def on_start(self) -> None:
         # Носители прошлых ошибок — в свёртку (Р-11: поставщик публикует
@@ -110,8 +113,10 @@ class ScanModule(BaseModule):
 
     async def on_run(self, env: Envelope) -> dict:
         p = env.payload
-        return await self._run_series(int(p["series_id"]),
-                                      bool(p.get("force_replace")))
+        force = p.get("force_replace")
+        if force is None:  # как старый роут: режим из настройки отладки
+            force = await self._debug_force_replace()
+        return await self._run_series(int(p["series_id"]), bool(force))
 
     async def on_media_list(self, env: Envelope) -> list[dict]:
         """Состав медиа-элементов серии (владелец строк — scan, Р-12);
@@ -132,11 +137,39 @@ class ScanModule(BaseModule):
         """Каскад Р-19: владелец чистит media_items и scan_tasks."""
         await self.repo.delete_for_series(env.payload["series_id"])
 
-    async def on_scan_all(self, env: Envelope) -> None:
+    async def on_scan_all(self, env: Envelope) -> dict:
         if self._scan_all_running:
             self.log.warning("полный проход уже идёт — повтор отклонён")
+            return {"started": False}
+        force = bool((env.payload or {}).get("force_replace")) \
+            or await self._debug_force_replace()
+        self._spawn(self._scan_all(force))
+        return {"started": True}
+
+    async def on_status_get(self, env: Envelope) -> dict:
+        """Состояние планировщика (контракт GET /api/scanner/status)."""
+        return await self._status_payload()
+
+    async def on_settings_changed(self, env: Envelope) -> None:
+        """Р-20: смена настроек сканера пересчитывает расписание от
+        текущего момента (вместо немедленного полного скана старой
+        системы — лишняя нагрузка на трекеры)."""
+        key = env.payload.get("key")
+        if key not in ("scanner_agent_enabled", "scan_interval_minutes"):
             return
-        self._spawn(self._scan_all())
+        if await self._setting("scanner_agent_enabled", "false") == "true":
+            await self._schedule_next()
+        else:
+            await self._broadcast_status()
+
+    async def on_sse_clients(self, env: Envelope) -> None:
+        """Новый SSE-клиент: публикуем текущее состояние, чтобы вкладка
+        настроек не жила на дефолтах до первого изменения (Р-20)."""
+        if env.payload.get("count", 0) > 0:
+            await self._broadcast_status()
+
+    async def _debug_force_replace(self) -> bool:
+        return await self._setting("debug_force_replace", "false") == "true"
 
     async def _run_series(self, series_id: int, force: bool = False) -> dict:
         if series_id in self._running:
@@ -427,7 +460,7 @@ class ScanModule(BaseModule):
             self.log.info("настало время планового сканирования")
             self._spawn(self._scan_all())
 
-    async def _scan_all(self) -> None:
+    async def _scan_all(self, force: bool = False) -> None:
         self._scan_all_running = True
         await self._broadcast_status()
         try:
@@ -441,7 +474,7 @@ class ScanModule(BaseModule):
                                   "активные задачи конвейера", s["id"])
                     continue
                 try:
-                    await self._run_series(s["id"])
+                    await self._run_series(s["id"], force)
                 except Exception as exc:  # noqa: BLE001 — проход не прерываем
                     self.log.error("автоскан сериала %d: %s", s["id"], exc)
         finally:
@@ -499,9 +532,9 @@ class ScanModule(BaseModule):
         value = reply.get("value")
         return value if value is not None else default
 
-    async def _broadcast_status(self) -> None:
-        """Контракт старого scanner_status_update (индикатор сканера)."""
-        self.publish_event("scan.status.changed", {
+    async def _status_payload(self) -> dict:
+        """Форма старого scanner_status_update / GET /api/scanner/status."""
+        return {
             "scanner_enabled":
                 await self._setting("scanner_agent_enabled", "false") == "true",
             "scan_interval":
@@ -509,4 +542,9 @@ class ScanModule(BaseModule):
             "is_scanning": self._scan_all_running or bool(self._running),
             "is_awaiting_tasks": self._awaiting_pipeline,
             "next_scan_time": await self._setting("next_scan_timestamp", None),
-        })
+        }
+
+    async def _broadcast_status(self) -> None:
+        """Контракт старого scanner_status_update (индикатор сканера)."""
+        self.publish_event("scan.status.changed",
+                           await self._status_payload())

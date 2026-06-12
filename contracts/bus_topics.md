@@ -10,7 +10,7 @@
 | Модуль | Топики |
 |---|---|
 | catalog | series.list, series.get, status.get, series.create/update/delete (Р-19), series.set_save_path, series.touch_scan_time, viewing.start/stop |
-| scan | series.run {series_id, force_replace?}, all.start, media.list, media.downloaded_counts, item.set_ignored |
+| scan | series.run {series_id, force_replace?}, all.start → {started}, status.get, media.list, media.downloaded_counts, item.set_ignored |
 | sources | parse {url}, torrent_file.get, torrent_file.drop, trackers.list, tracker.resolve {url}, vk.scan |
 | rules | apply, profiles.list, cache.invalidate, format_filename, format_torrent_file |
 | torrents | add, info.get, files.get, pause/resume/recheck/delete, rename_file, set_location, db.active, db.deactivate_all, db.files.list/upsert, db.history, db.add, db.downloaded_counts, register, queue.get, fs.verify |
@@ -40,8 +40,8 @@
 | slicing.queue.changed {tasks} | slicing | — | slicing_queue_update |
 | renaming.finished {series_id} | renaming | — | renaming_complete |
 | library.relocation.started/finished | library | — | relocation_started/finished |
-| settings.changed {key, value} | settings | downloads (max_parallel_downloads) | — |
-| gateway.sse.clients {count} | gateway | catalog (count=0 → сброс viewing) | — |
+| settings.changed {key, value} | settings | downloads (max_parallel_downloads), scan (настройки сканера → пересчёт расписания, Р-20) | — |
+| gateway.sse.clients {count} | gateway | catalog (count=0 → сброс viewing), scan (count>0 → публикация статуса, Р-20) | — |
 
 ## SSE: контракт закрыт Р-18 (см. sse_contract.md)
 

@@ -228,4 +228,18 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError:
             return []
 
+    @r.post("/api/series/{series_id}/scan")
+    async def scan_series(series_id: int):
+        """Синхронный скан одной серии, как в оригинале: HTTP ждёт
+        результата; force_replace scan берёт из настройки отладки."""
+        try:
+            result = await gw.request("scan.series.run",
+                                      {"series_id": series_id}, timeout=900)
+        except BusRequestError as exc:
+            msg = str(exc).split(": ", 1)[-1]
+            code = 409 if "уже запущен" in msg else 500
+            return JSONResponse({"success": False, "error": msg},
+                                status_code=code)
+        return {"success": True, **result}
+
     return r

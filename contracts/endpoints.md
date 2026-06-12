@@ -6,8 +6,8 @@
 | Методы | Путь | Обработчик | Где | Ревизия |
 |---|---|---|---|---|
 | GET | `/` | index | routes/__init__.py:22 | — |
-| GET | `/api/agent/queue` | get_agent_queue | routes/system.py:128 | — |
-| POST | `/api/agent/reset` | reset_agent | routes/system.py:133 | — |
+| GET | `/api/agent/queue` | get_agent_queue | routes/system.py:128 | подтверждена (Р-20: torrents.queue.get, форма с hash — находка 39) |
+| POST | `/api/agent/reset` | reset_agent | routes/system.py:133 | удалена (находка 23: была сломана и мертва; зависших статусов в новой системе нет по построению — Р-11) |
 | GET | `/api/auth` | get_all_auth | routes/settings.py:58 | — |
 | POST | `/api/auth` | save_all_auth | routes/settings.py:68 | — |
 | POST | `/api/database/clear` | clear_database | routes/system.py:32 | — |
@@ -15,8 +15,8 @@
 | GET | `/api/database/table/<string:table_name>` | get_table_content | routes/system.py:200 | — |
 | GET | `/api/database/tables` | get_db_tables | routes/system.py:42 | — |
 | GET | `/api/directories` | get_directories | routes/filebrowser.py:11 | — |
-| GET | `/api/downloads/queue` | get_download_queue | routes/system.py:182 | — |
-| POST | `/api/downloads/queue/clear` | clear_download_queue | routes/system.py:190 | — |
+| GET | `/api/downloads/queue` | get_download_queue | routes/system.py:182 | подтверждена (Р-20: downloads.queue.get) |
+| POST | `/api/downloads/queue/clear` | clear_download_queue | routes/system.py:190 | подтверждена (Р-20: downloads.queue.clear; во фронте не вызывается — админ-инструмент) |
 | GET | `/api/hello-info` | hello_info | routes/__init__.py:34 | — |
 | GET | `/api/logs` | get_logs | routes/system.py:71 | — |
 | PUT | `/api/media-items/<int:item_id>/ignore` | set_item_ignored_status | routes/media.py:56 | — |
@@ -39,9 +39,9 @@
 | PUT | `/api/parser-rules/<int:rule_id>` | update_rule | routes/parser.py:95 | — |
 | DELETE | `/api/parser-rules/<int:rule_id>` | delete_rule | routes/parser.py:105 | — |
 | POST | `/api/parser-rules/reorder` | reorder_rules | routes/parser.py:114 | — |
-| POST | `/api/scanner/scan_all` | scan_all_now | routes/system.py:170 | — |
-| POST | `/api/scanner/settings` | update_scanner_settings | routes/system.py:157 | — |
-| GET | `/api/scanner/status` | get_scanner_status | routes/system.py:153 | — |
+| POST | `/api/scanner/scan_all` | scan_all_now | routes/system.py:170 | подтверждена (Р-20: scan.all.start {force_replace}; 409 при идущем) |
+| POST | `/api/scanner/settings` | update_scanner_settings | routes/system.py:157 | перепроектирована (Р-20: запись settings; вместо немедленного скана — пересчёт расписания по settings.changed) |
+| GET | `/api/scanner/status` | get_scanner_status | routes/system.py:153 | подтверждена (Р-20: scan.status.get; + публикация статуса при подключении SSE-клиента) |
 | GET | `/api/series` | get_series | routes/series.py:21 | подтверждена (Р-19: композиция gateway — catalog+metadata+счётчики батчем, N+1 устранён) |
 | POST | `/api/series` | add_series | routes/series.py:51 | подтверждена (Р-19: catalog.series.create + metadata.map.set + torrents.db.add) |
 | GET | `/api/series/<int:series_id>` | get_series_details | routes/series.py:75 | подтверждена (Р-19: catalog + sources.tracker.resolve + metadata.map.get) |
@@ -56,7 +56,7 @@
 | POST | `/api/series/<int:series_id>/reprocess` | reprocess_series_torrents_route | routes/series.py:403 | — |
 | POST | `/api/series/<int:series_id>/reprocess_vk_files` | reprocess_vk_files_route | routes/series.py:189 | — |
 | POST | `/api/series/<int:series_id>/reset_torrents` | reset_torrents | routes/series.py:620 | — |
-| POST | `/api/series/<int:series_id>/scan` | scan_series_route | routes/series.py:545 | — |
+| POST | `/api/series/<int:series_id>/scan` | scan_series_route | routes/series.py:545 | подтверждена (Р-20: query scan.series.run, синхронный ответ; force из debug_force_replace) |
 | GET | `/api/series/<int:series_id>/sliced-files` | get_sliced_files_for_series | routes/series.py:574 | — |
 | GET | `/api/series/<int:series_id>/source-filenames` | get_series_source_filenames | routes/series.py:662 | — |
 | POST | `/api/series/<int:series_id>/state` | set_series_state_route | routes/series.py:531 | перепроектирована (Р-11/Р-19: транспорт catalog.viewing.start/stop, БД не пишется) |

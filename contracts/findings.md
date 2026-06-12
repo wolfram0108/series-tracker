@@ -259,3 +259,10 @@ hash; шаблон настроек ждёт task.hash, то есть на HTTP-
 строк были undefined до первого SSE. В новой системе обе выборки идут
 из torrents.queue.get / torrents.queue.changed и поле hash добавляется
 в обеих (старая форма сохранена, расхождение устранено).
+
+## 40. Вкладка «Агенты» поллила active_torrents каждые 5 секунд
+settingsAgents.js:292 — setInterval(loadActiveTorrents, 5000) опрашивал
+GET /api/series/active_torrents, пока вкладка открыта: прямое нарушение
+принципа 1 в легаси-фронте. После выравнивания форм (находка 39) вкладку
+питает SSE agent_queue_update; setInterval уходит в пакете JS-правок
+блока 6.

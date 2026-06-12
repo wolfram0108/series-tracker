@@ -3,8 +3,8 @@
 > Обновлено: 2026-06-12. Этот файл — снимок «где мы» для продолжения
 > работы после сжатия контекста. Правила работы — в [CLAUDE.md](../CLAUDE.md)
 > (целеполагание!), решения — в [contracts/revision.md](../contracts/revision.md)
-> (Р-1..Р-19), находки — в [contracts/findings.md](../contracts/findings.md)
-> (1–39), карта топиков шины — в
+> (Р-1..Р-20), находки — в [contracts/findings.md](../contracts/findings.md)
+> (1–40), карта топиков шины — в
 > [contracts/bus_topics.md](../contracts/bus_topics.md), план — в
 > [docs/refactoring_bus_plan.md](refactoring_bus_plan.md).
 
@@ -23,7 +23,7 @@
 1088/1088 названий; планировщик 9/10 + 1 согласованное отклонение
 (сериал 87, фикс Г); формулы id 190/190 (torrents) и 351/351
 (media_items); имена файлов 349/349 (tests/test_rules_format_diff.py).
-Тесты: 147 passed (`.venv/bin/python -m pytest -q`; изредка возможен
+Тесты: 153 passed (`.venv/bin/python -m pytest -q`; изредка возможен
 флак тестовых таймаутов под полной нагрузкой — код-гонок не выявлено),
 интеграция со стендовым qBit — `ST_QBIT_URL=http://series-tracker:8080
 ST_QBIT_USER=admin ST_QBIT_PASS=REMOVED-SECRET pytest tests/test_torrents_integration.py`.
@@ -48,9 +48,13 @@ ST_QBIT_USER=admin ST_QBIT_PASS=REMOVED-SECRET pytest tests/test_torrents_integr
    /state — транспорт viewing.start/stop (без правки JS);
    viewing_heartbeat удалён; находка 39. composition и rename_preview
    перенесены в блок 4. modules/gateway/api_series.py; 10 тестов.
-3. **Скан и очереди** (следующий): scanner/*, agent/queue+reset,
-   downloads/queue*, POST /series/<id>/scan.
-4. **Media-items и операции серии**: главы/slice/verify/ignore/
+3. ✓ **Скан и очереди (Р-20)**: scanner/status сохранён (scan.status.get
+   + публикация статуса при подключении SSE-клиента); настройки —
+   пересчёт расписания вместо немедленного скана; scan_all/series-scan
+   c 409; очереди agent/downloads; /api/agent/reset удалён (находка 23);
+   находка 40 (поллинг вкладки «Агенты» — фикс в блоке 6).
+   modules/gateway/api_system.py; 6 тестов.
+4. **Media-items и операции серии** (следующий): главы/slice/verify/ignore/
    deep-adoption/reprocess*/relocate/rename_preview.
 5. **Настройки и справочники**: auth, settings/*, trackers,
    parser-profiles (конструктор), parse_url, tmdb, directories, logs,

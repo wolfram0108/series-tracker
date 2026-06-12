@@ -472,3 +472,27 @@ SSE_MAP gateway: топик шины → (имя SSE, трансформация
   «переобработка имён при каждом сохранении» сохранено.
 - **POST /state сохранён как транспорт** viewing.start/stop (правка JS
   не нужна); viewing_heartbeat — точка удалена (Р-11).
+
+### Р-20. Скан и очереди (согласован 2026-06-12, этап 5 блок 3)
+Разбор 8 точек scanner/agent/downloads из routes/system.py +
+POST /series/<id>/scan.
+
+- **GET /api/scanner/status сохранён** (query scan.status.get); плюс
+  scan подписан на gateway.sse.clients — при подключении клиента
+  публикует scan.status.changed: вкладка настроек получает актуальное
+  состояние сразу, без правок JS и периодических рассылок (старый
+  monitoring рассылал статус почти каждый тик ожидания).
+- **Настройки сканера**: побочный эффект «сменили интервал →
+  немедленный полный скан» НЕ воспроизведён (согласовано): scan по
+  settings.changed пересчитывает next_scan_timestamp от текущего
+  момента и публикует статус. Меньше лишней нагрузки на трекеры.
+- scan.all.start → {started} (повтор → 409); force_replace — из тела
+  запроса или настройки debug_force_replace (семантика оригинала).
+  scan.series.run — синхронный query (HTTP ждёт, как старый роут);
+  force из настройки, если не передан явно.
+- Очереди: /api/agent/queue → torrents.queue.get (форма с hash —
+  находка 39), /api/downloads/queue → downloads.queue.get,
+  /api/downloads/queue/clear → downloads.queue.clear (мертва в JS,
+  сохранена как админ-инструмент).
+- **/api/agent/reset удалён** (согласовано): был сломан (находка 23)
+  и мёртв; «зависшие статусы» невозможны — статус не хранится (Р-11).
