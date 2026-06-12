@@ -14,7 +14,7 @@ from core import BaseModule, Bus, BusRequestError, Runner
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.scan import ScanModule
-from modules.scan import ids
+from core import ids
 
 
 class FakeBackend(BaseModule):

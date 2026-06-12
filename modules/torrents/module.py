@@ -99,10 +99,44 @@ class TorrentsModule(BaseModule):
         self.handle("torrents.composition", self.on_composition,
                     concurrent=True)
         self.handle("series.deleted", self.on_series_deleted)
+        self.handle("trackerauth.credentials.changed",
+                    self.on_credentials_changed)
+
+    async def _resolve_qbt_config(self) -> dict:
+        """env имеет приоритет (стенд); без env — креды qbittorrent из
+        таблицы auth через шину (прод-сценарий, Р-22)."""
+        cfg = dict(self._qbt_config)
+        if cfg.get("base_url"):
+            return cfg
+        try:
+            reply = await self.request("trackerauth.credentials.get",
+                                       {"service": "qbittorrent"},
+                                       timeout=10)
+        except BusRequestError as exc:
+            self.log.warning("креды qBittorrent не получены: %s", exc)
+            return cfg
+        row = reply.get("credentials") or {}
+        return dict(base_url=row.get("url") or "",
+                    username=row.get("username") or "",
+                    password=row.get("password") or "")
+
+    async def on_credentials_changed(self, env: Envelope) -> None:
+        if env.payload.get("service") != "qbittorrent" or self._qbt_injected:
+            return
+        self.log.info("креды qBittorrent изменились — пересоздаём клиент")
+        old = self.qbt
+        self.qbt = QbtClient(**await self._resolve_qbt_config())
+        if old:
+            await old.close()
+        try:
+            await self.qbt.login()
+        except QbtError as exc:
+            self.log.error("вход в qBittorrent с новыми кредами не "
+                           "удался: %s", exc)
 
     async def on_start(self) -> None:
         if not self._qbt_injected:
-            self.qbt = QbtClient(**self._qbt_config)
+            self.qbt = QbtClient(**await self._resolve_qbt_config())
             try:
                 await self.qbt.login()
             except QbtError as exc:

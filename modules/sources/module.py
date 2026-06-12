@@ -25,7 +25,7 @@ import time
 
 import httpx
 
-from core import BaseModule
+from core import BaseModule, ids
 from core.db import Database
 from core.envelope import Envelope
 
@@ -55,6 +55,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.torrent_file.drop", self.on_torrent_file_drop)
         self.handle("sources.trackers.list", self.on_trackers_list)
         self.handle("sources.tracker.resolve", self.on_tracker_resolve)
+        self.handle("sources.tracker.set_mirrors", self.on_set_mirrors)
         self.handle("sources.vk.scan", self.on_vk_scan)
 
     async def on_start(self) -> None:
@@ -80,6 +81,12 @@ class SourcesModule(BaseModule):
         """Трекер по URL серии (контракт tracker_info деталей, Р-19)."""
         return {"tracker": await self.repo.resolve(env.payload["url"])}
 
+    async def on_set_mirrors(self, env: Envelope) -> dict:
+        """Зеркала трекера (вкладка настроек, Р-22)."""
+        await self.repo.set_mirrors(env.payload["tracker_id"],
+                                    env.payload["mirrors"])
+        return {"ok": True}
+
     async def on_torrent_file_drop(self, env: Envelope) -> None:
         """Каскад Р-19: удаление серии чистит кэш её .torrent-файлов
         (команда от torrents — torrent_id знает только он)."""
@@ -99,8 +106,16 @@ class SourcesModule(BaseModule):
             await self._polite(service)
             result = await self._parse_by_service(service, url,
                                                   tracker["mirrors"])
+        # torrent_id — констрейнт данных (core/ids, Р-10/Р-22); считаем
+        # здесь один раз, scan и форма добавления используют готовый
+        for r in result.get("releases", []):
+            link_for_id = r.get("link") or r.get("magnet")
+            if link_for_id and "torrent_id" not in r:
+                r["torrent_id"] = ids.torrent_id(link_for_id,
+                                                 r.get("date_marker"))
         result["service"] = service
         result["ui_features"] = tracker["ui_features"]
+        result["tracker"] = tracker
         return result
 
     async def _parse_by_service(self, service: str, url: str,

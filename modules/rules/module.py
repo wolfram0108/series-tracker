@@ -33,6 +33,15 @@ class RulesModule(BaseModule):
         self.handle("rules.cache.invalidate", self.on_cache_invalidate)
         self.handle("rules.format_filename", self.on_format_filename)
         self.handle("rules.format_torrent_file", self.on_format_torrent_file)
+        self.handle("rules.profiles.create", self.on_profile_create)
+        self.handle("rules.profiles.update", self.on_profile_update)
+        self.handle("rules.profiles.delete", self.on_profile_delete)
+        self.handle("rules.rules.list", self.on_rules_list)
+        self.handle("rules.rules.add", self.on_rule_add)
+        self.handle("rules.rules.update", self.on_rule_update)
+        self.handle("rules.rules.delete", self.on_rule_delete)
+        self.handle("rules.rules.reorder", self.on_rules_reorder)
+        self.handle("rules.test", self.on_test)
 
     async def _profile(self, profile_id: int) -> CompiledProfile:
         if profile_id not in self._cache:
@@ -62,6 +71,67 @@ class RulesModule(BaseModule):
 
     async def on_profiles_list(self, env: Envelope) -> list[dict]:
         return await self.repo.list_profiles()
+
+    # --- CRUD конструктора (Р-22); кэш инвалидируется сам ----------------------
+
+    async def on_profile_create(self, env: Envelope) -> dict:
+        profile_id = await self.repo.create_profile(env.payload["name"])
+        return {"id": profile_id}
+
+    async def on_profile_update(self, env: Envelope) -> dict:
+        profile_id = env.payload["profile_id"]
+        await self.repo.update_profile(profile_id, env.payload["data"])
+        self._cache.pop(profile_id, None)
+        return {"ok": True}
+
+    async def on_profile_delete(self, env: Envelope) -> dict:
+        profile_id = env.payload["profile_id"]
+        await self.repo.delete_profile(profile_id)
+        self._cache.pop(profile_id, None)
+        return {"ok": True}
+
+    async def on_rules_list(self, env: Envelope) -> list[dict]:
+        return await self.repo.get_rules(env.payload["profile_id"])
+
+    async def on_rule_add(self, env: Envelope) -> dict:
+        profile_id = env.payload["profile_id"]
+        rule_id = await self.repo.add_rule(profile_id, env.payload["data"])
+        self._cache.pop(profile_id, None)
+        return {"id": rule_id}
+
+    async def on_rule_update(self, env: Envelope) -> dict:
+        rule_id = env.payload["rule_id"]
+        profile_id = await self.repo.profile_id_of_rule(rule_id)
+        await self.repo.update_rule(rule_id, env.payload["data"])
+        self._cache.pop(profile_id, None)
+        return {"ok": True}
+
+    async def on_rule_delete(self, env: Envelope) -> dict:
+        rule_id = env.payload["rule_id"]
+        profile_id = await self.repo.profile_id_of_rule(rule_id)
+        await self.repo.delete_rule(rule_id)
+        self._cache.pop(profile_id, None)
+        return {"ok": True}
+
+    async def on_rules_reorder(self, env: Envelope) -> dict:
+        await self.repo.reorder_rules(env.payload["ordered_ids"])
+        self._cache.clear()  # порядок мог затронуть несколько профилей
+        return {"ok": True}
+
+    async def on_test(self, env: Envelope) -> list[dict]:
+        """Тест конструктора (контракт старого POST /test): полные
+        video-объекты → [{source_data, match_events, result}]."""
+        profile = await self._profile(int(env.payload["profile_id"]))
+        results = []
+        for video in env.payload["videos"]:
+            outcome = process_title(profile, video.get("title") or "")
+            results.append({
+                "source_data": video,
+                "match_events": outcome.get("events") or [],
+                "result": {"extracted": outcome.get("extracted") or {},
+                           "excluded": outcome.get("excluded", False)},
+            })
+        return results
 
     async def on_format_filename(self, env: Envelope) -> dict:
         """payload: {series, media_item, episode_override?, original_filename?}

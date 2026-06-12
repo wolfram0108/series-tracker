@@ -86,11 +86,15 @@ class GatewayModule(BaseModule):
     name = "gateway"
 
     def __init__(self, bus, *, static_dir: str = "static",
-                 templates_dir: str = "templates", diag: bool = False) -> None:
+                 templates_dir: str = "templates", diag: bool = False,
+                 db_path: str = "app.db") -> None:
         self._static_dir = static_dir
         self._templates_dir = templates_dir
         self._diag = diag
         self._sse_clients = 0
+        # путь к SQLite — только для админ-вкладки БД (Р-22: сознательный
+        # обход Р-7, отладочный инструмент пользователя)
+        self.db_path = db_path
         super().__init__(bus)
         self.app = self._create_app()
 
@@ -98,6 +102,31 @@ class GatewayModule(BaseModule):
     # на каждое клиентское соединение в _sse_stream().
     def register(self) -> None:
         pass
+
+    async def on_start(self) -> None:
+        # Начальная загрузка debug-групп логирования (Р-22): settings
+        # может стартовать позже gateway — добираем с повторами.
+        self._tasks.append(asyncio.create_task(self._load_debug_groups()))
+
+    async def _load_debug_groups(self) -> None:
+        from core import logging as core_logging
+        for _ in range(20):
+            try:
+                reply = await self.request("settings.values.by_prefix",
+                                           {"prefix": "debug_enabled_"},
+                                           timeout=5)
+            except BusRequestError:
+                await asyncio.sleep(0.5)
+                continue
+            groups = {k.removeprefix("debug_enabled_")
+                      for k, v in reply["values"].items() if v == "true"}
+            core_logging.set_debug_groups(groups)
+            if groups:
+                self.log.info("DEBUG-логирование включено для групп: %s",
+                              ", ".join(sorted(groups)))
+            return
+        self.log.warning("debug-группы логирования не загружены — "
+                         "settings так и не ответил")
 
     # --- FastAPI-приложение -------------------------------------------------
 
@@ -123,10 +152,12 @@ class GatewayModule(BaseModule):
 
         from .api_media import build_router as media_router
         from .api_series import build_router as series_router
+        from .api_settings import build_router as settings_router
         from .api_system import build_router as system_router
         app.include_router(series_router(self))
         app.include_router(system_router(self))
         app.include_router(media_router(self))
+        app.include_router(settings_router(self))
 
         index_path = os.path.join(self._templates_dir, "index.html")
 

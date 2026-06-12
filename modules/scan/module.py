@@ -49,7 +49,7 @@ from core import BaseModule, BusRequestError
 from core.db import Database
 from core.envelope import Envelope
 
-from . import ids
+from core import ids
 from .planner import build_plan
 from .repository import ScanRepository
 

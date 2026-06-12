@@ -22,6 +22,7 @@ class SettingsModule(BaseModule):
     def register(self) -> None:
         self.handle("settings.value.get", self.on_get)
         self.handle("settings.value.set", self.on_set)
+        self.handle("settings.values.by_prefix", self.on_by_prefix)
 
     async def on_get(self, env: Envelope) -> dict:
         key = env.payload["key"]
@@ -32,3 +33,7 @@ class SettingsModule(BaseModule):
         await self.repo.set(key, value)
         self.publish_event("settings.changed", {"key": key, "value": value})
         return {"key": key, "value": value}
+
+    async def on_by_prefix(self, env: Envelope) -> dict:
+        """{values: {key: value}} — например, debug_enabled_* (Р-22)."""
+        return {"values": await self.repo.by_prefix(env.payload["prefix"])}

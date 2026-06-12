@@ -21,6 +21,20 @@ _LEVELS = {
 }
 _configured = False
 
+# Группы с включённой DEBUG-детализацией (принцип 6: регулируемые
+# уровни). Пустой набор = DEBUG не пишется никому; INFO+ — всегда.
+# Управляется вкладкой отладки через gateway (Р-22).
+_debug_groups: set[str] = set()
+
+
+def set_debug_groups(groups: set[str]) -> None:
+    global _debug_groups
+    _debug_groups = set(groups)
+
+
+def debug_groups() -> set[str]:
+    return set(_debug_groups)
+
 
 class _LevelOnly(logging.Filter):
     def __init__(self, level: int) -> None:
@@ -28,7 +42,11 @@ class _LevelOnly(logging.Filter):
         self._level = level
 
     def filter(self, record: logging.LogRecord) -> bool:
-        return record.levelno == self._level
+        if record.levelno != self._level:
+            return False
+        if record.levelno == logging.DEBUG:
+            return record.name in _debug_groups
+        return True
 
 
 class _JsonFormatter(logging.Formatter):

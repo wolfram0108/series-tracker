@@ -26,6 +26,15 @@ class TrackerAuthRepository:
             "SELECT username, password, url FROM auth WHERE auth_type=?",
             (service,))
 
+    async def upsert_credentials(self, service: str, username: str | None,
+                                 password: str | None,
+                                 url: str | None = None) -> None:
+        await self._db.execute(
+            "INSERT INTO auth (auth_type, username, password, url) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(auth_type) DO UPDATE SET "
+            "username=excluded.username, password=excluded.password, "
+            "url=excluded.url", (service, username, password, url))
+
     async def load_cookies(self, service: str, domain: str) -> dict | None:
         row = await self._db.fetch_one(
             "SELECT cookies_json FROM tracker_sessions "

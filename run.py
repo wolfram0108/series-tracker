@@ -38,8 +38,9 @@ configure()
 log = get_logger("run")
 
 bus = Bus()
-db = Database(os.environ.get("ST_DB_PATH", "app.db"))
-gateway = GatewayModule(bus)
+db_path = os.environ.get("ST_DB_PATH", "app.db")
+db = Database(db_path)
+gateway = GatewayModule(bus, db_path=db_path)
 
 modules = [
     gateway,
@@ -58,14 +59,13 @@ modules = [
     SlicingModule(bus, db),
 ]
 
-qbit_url = os.environ.get("ST_QBIT_URL")
-if qbit_url:
-    modules.append(TorrentsModule(
-        bus, db, qbt_url=qbit_url,
-        qbt_username=os.environ.get("ST_QBIT_USER", "admin"),
-        qbt_password=os.environ.get("ST_QBIT_PASS", "")))
-else:
-    log.warning("ST_QBIT_URL не задан — модуль torrents не запущен")
+# env имеет приоритет (стенд/тесты); без env torrents возьмёт креды
+# qbittorrent из таблицы auth через шину (Р-22) и переподключится по
+# событию trackerauth.credentials.changed — рестарт не нужен.
+modules.append(TorrentsModule(
+    bus, db, qbt_url=os.environ.get("ST_QBIT_URL", ""),
+    qbt_username=os.environ.get("ST_QBIT_USER", "admin"),
+    qbt_password=os.environ.get("ST_QBIT_PASS", "")))
 
 runner = Runner(bus, modules)
 

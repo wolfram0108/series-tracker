@@ -28,3 +28,10 @@ class SourcesRepository:
             if domain in tracker["mirrors"]:
                 return tracker
         return None
+
+    async def set_mirrors(self, tracker_id: int,
+                          mirrors: list[str]) -> None:
+        await self._db.execute(
+            "UPDATE trackers SET mirrors=? WHERE id=?",
+            (json.dumps(mirrors), tracker_id))
+        self._cache = None  # список зеркал изменился

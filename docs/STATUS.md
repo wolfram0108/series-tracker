@@ -3,7 +3,7 @@
 > Обновлено: 2026-06-12. Этот файл — снимок «где мы» для продолжения
 > работы после сжатия контекста. Правила работы — в [CLAUDE.md](../CLAUDE.md)
 > (целеполагание!), решения — в [contracts/revision.md](../contracts/revision.md)
-> (Р-1..Р-21), находки — в [contracts/findings.md](../contracts/findings.md)
+> (Р-1..Р-22), находки — в [contracts/findings.md](../contracts/findings.md)
 > (1–40), карта топиков шины — в
 > [contracts/bus_topics.md](../contracts/bus_topics.md), план — в
 > [docs/refactoring_bus_plan.md](refactoring_bus_plan.md).
@@ -23,7 +23,7 @@
 1088/1088 названий; планировщик 9/10 + 1 согласованное отклонение
 (сериал 87, фикс Г); формулы id 190/190 (torrents) и 351/351
 (media_items); имена файлов 349/349 (tests/test_rules_format_diff.py).
-Тесты: 162 passed (`.venv/bin/python -m pytest -q`; изредка возможен
+Тесты: 171 passed (`.venv/bin/python -m pytest -q`; изредка возможен
 флак тестовых таймаутов под полной нагрузкой — код-гонок не выявлено),
 интеграция со стендовым qBit — `ST_QBIT_URL=http://series-tracker:8080
 ST_QBIT_USER=admin ST_QBIT_PASS=REMOVED-SECRET pytest tests/test_torrents_integration.py`.
@@ -60,14 +60,21 @@ ST_QBIT_USER=admin ST_QBIT_PASS=REMOVED-SECRET pytest tests/test_torrents_integr
    rename_preview → renaming.preview (dry-run); reprocess-точки — 409 по
    tasks.active + фоновая команда; удалены 3 мёртвые точки (int-ignore,
    reset_torrents, relocate). modules/gateway/api_media.py; 9 тестов.
-5. **Настройки и справочники** (следующий): auth, settings/*, trackers,
-   parser-profiles (конструктор), parse_url, tmdb, directories, logs,
-   database/*.
-6. **JS-слой** (пакет согласованных правок): убрать viewing-setInterval
+5. ✓ **Настройки и справочники (Р-22)**: auth — trackerauth (+перелогин
+   torrents по credentials.changed, env-приоритет для стенда); формулы
+   id → core/ids.py; CRUD конструктора правил в rules + rules.test;
+   debug_flags — группы новой системы + DEBUG-фильтр core/logging;
+   tmdb/trackers/directories/logs; админ-вкладка БД (исключены auth,
+   tracker_sessions). Удалены: database/clear, hello-страницы,
+   directory-picker-test. **ВСЕ 78 МЕТОД-ТОЧЕК ОТРЕВИЗОВАНЫ.**
+   modules/gateway/api_settings.py; 9 тестов.
+6. **JS-слой** (следующий; пакет согласованных правок): убрать viewing-setInterval
    (Р-11); открытие модалки → catalog.viewing.start + downloads.fs.sync
    + torrents.fs.verify; удалить слушатель agent_heartbeat (Р-18);
-   settingsDebug.js на главное SSE-соединение (находка 37);
-   компенсирующие loadInitialSeries — по месту.
+   settingsDebug.js на главное SSE-соединение (находка 37); вкладку
+   «Агенты» с поллинга active_torrents на SSE (находка 40);
+   компенсирующие loadInitialSeries — по месту. После — смоук под
+   uvicorn с фронтом.
 
 Сохранение свойств серии → catalog-обновление + library.relocate +
 renaming.reprocess (блоки 2/4). Находка 7г: финальная сверка журнала

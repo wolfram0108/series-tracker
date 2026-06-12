@@ -44,6 +44,28 @@ class TrackerauthModule(BaseModule):
 
     def register(self) -> None:
         self.handle("trackerauth.fetch", self.on_fetch)
+        self.handle("trackerauth.credentials.get", self.on_credentials_get)
+        self.handle("trackerauth.credentials.set", self.on_credentials_set)
+
+    # --- учётные данные (владелец таблицы auth, Р-22) -------------------------------
+
+    async def on_credentials_get(self, env: Envelope) -> dict:
+        """Креды сервиса для вкладки настроек (контракт GET /api/auth:
+        формы предзаполнены — пароли отдаются, как в оригинале)."""
+        row = await self.repo.get_credentials(env.payload["service"])
+        return {"credentials": row}
+
+    async def on_credentials_set(self, env: Envelope) -> dict:
+        p = env.payload
+        service = p["service"]
+        await self.repo.upsert_credentials(service, p.get("username"),
+                                           p.get("password"), p.get("url"))
+        # сессии сервиса протухли по определению — выбрасываем
+        for key in [k for k in self._sessions if k[0] == service]:
+            self._sessions.pop(key, None)
+        self.publish_event("trackerauth.credentials.changed",
+                           {"service": service})
+        return {"ok": True}
 
     # --- сессии и логин ------------------------------------------------------------
 

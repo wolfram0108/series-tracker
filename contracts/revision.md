@@ -531,3 +531,38 @@ POST /series/<id>/scan.
   свойств Р-19).
 - source-filenames: сборка gateway (торрент — basename original_path
   из torrents.db.files.for_series; VK — final_filename).
+
+### Р-22. Настройки и справочники (согласован 2026-06-12, этап 5 блок 5)
+Разбор 22 точек settings/parser/tmdb/trackers/filebrowser/system +
+тестовые страницы. Этим блоком закрыта ревизия ВСЕХ 78 метод-точек.
+
+- **Авторизации**: таблица auth — trackerauth (queries
+  credentials.get/set + событие credentials.changed; смена кредов
+  выбрасывает сессии сервиса). tmdb_token — settings. GET отдаёт
+  пароли (предзаполненные формы — поведение UI). torrents: env
+  ST_QBIT_* имеет приоритет (стенд), без env — креды qbittorrent из
+  auth через шину; по credentials.changed пересоздаёт клиент без
+  рестарта. run.py запускает torrents всегда.
+- **Формулы id → core/ids.py** (механический перенос, формулы
+  верифицированы): sources.parse теперь сам считает torrent_id —
+  единый источник для скана и формы добавления (старый роут дублировал
+  формулу локальной функцией).
+- **Конструктор правил**: rules.profiles.create/update/delete (409 на
+  дубль, 400 при использовании серией), rules.rules.list/add/update/
+  delete/reorder (умная инвалидация кэша), rules.test {profile_id,
+  videos} — форма старого ответа. scrape-titles → sources.vk.scan.
+- **debug_flags перепроектирована**: группы = модули новой системы
+  (структура приходит с бэкенда — фронт без правок); включённые группы
+  пропускают DEBUG в core/logging (фильтр; принцип 6), грузятся при
+  старте gateway и обновляются при POST. Дампы страниц (save_html_*) —
+  настройки работают, сами дампы подключаются в sources на этапе 6.
+- Остальные настройки — settings.value.get/set (ключи старые); tmdb —
+  metadata.search/details + success-обёртки; трекеры —
+  sources.trackers.list / tracker.set_mirrors (+ сброс кэша зеркал);
+  каталоги — library.directories.list; логи — чтение logs/*.log в
+  gateway (раскладка идентична старой).
+- **Админ-вкладка БД** — сознательный обход Р-7 (отладочный инструмент
+  пользователя): прямой доступ gateway к SQLite; исключены auth и
+  tracker_sessions. Удалены (согласовано): POST /api/database/clear
+  (мёртвая полная очистка), тестовые страницы hello-world / hello-info
+  / directory-picker-test (дубль регистрации — багом).

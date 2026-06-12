@@ -11,16 +11,16 @@
 |---|---|
 | catalog | series.list, series.get, status.get, series.create/update/delete (Р-19), series.set_save_path, series.touch_scan_time, viewing.start/stop |
 | scan | series.run {series_id, force_replace?}, all.start → {started}, status.get, composition {series_id, refresh?} (Р-21), media.list, media.downloaded_counts, item.set_ignored (+ scan.plan.updated) |
-| sources | parse {url}, torrent_file.get, torrent_file.drop, trackers.list, tracker.resolve {url}, vk.scan |
-| rules | apply, profiles.list, cache.invalidate, format_filename, format_torrent_file |
+| sources | parse {url} (+torrent_id из core/ids), torrent_file.get/drop, trackers.list, tracker.resolve {url}, tracker.set_mirrors (Р-22), vk.scan |
+| rules | apply, test (Р-22), profiles.list/create/update/delete, rules.list/add/update/delete/reorder (Р-22), cache.invalidate, format_filename, format_torrent_file |
 | torrents | add, info.get, files.get, pause/resume/recheck/delete, rename_file, set_location, db.active, db.deactivate_all, db.files.list/upsert, db.files.for_series, db.history, db.add, db.downloaded_counts, composition (Р-21), register, queue.get, fs.verify |
 | downloads | queue.get, queue.clear, fs.sync, item.set_filename, item.set_status |
 | slicing | chapters.get/filtered/mark, task.create, verify, deep_adoption, files.list, files.drop_for_source (Р-21), file.set_path, queue.get |
 | renaming | reprocess, process_torrent, tasks.active, preview (Р-21) |
 | library | directories.list, relocate, relocation.active |
 | metadata | search, details, map.get/list/set (владелец series_tmdb_mappings, Р-19) |
-| settings | value.get, value.set |
-| trackerauth | fetch |
+| settings | value.get, value.set, values.by_prefix (Р-22) |
+| trackerauth | fetch, credentials.get/set (Р-22, владелец auth) |
 
 ## События (издатель → подписчики)
 
@@ -42,6 +42,7 @@
 | library.relocation.started/finished | library | — | relocation_started/finished |
 | settings.changed {key, value} | settings | downloads (max_parallel_downloads), scan (настройки сканера → пересчёт расписания, Р-20) | — |
 | gateway.sse.clients {count} | gateway | catalog (count=0 → сброс viewing), scan (count>0 → публикация статуса, Р-20) | — |
+| trackerauth.credentials.changed {service} | trackerauth | torrents (qbittorrent → пересоздание клиента, Р-22) | — |
 
 ## SSE: контракт закрыт Р-18 (см. sse_contract.md)
 

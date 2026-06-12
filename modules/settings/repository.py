@@ -18,3 +18,9 @@ class SettingsRepository:
             "INSERT INTO settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, value))
+
+    async def by_prefix(self, prefix: str) -> dict:
+        rows = await self._db.fetch_all(
+            "SELECT key, value FROM settings WHERE key LIKE ?",
+            (prefix + "%",))
+        return {r["key"]: r["value"] for r in rows}

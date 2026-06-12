@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from modules.scan import ids
+from core import ids
 
 FIXTURE = "tests/fixtures/app.fixture.db"
 
