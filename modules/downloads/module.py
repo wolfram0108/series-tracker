@@ -63,6 +63,7 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.fs.sync", self.on_fs_sync)
         self.handle("downloads.item.set_filename", self.on_set_filename)
         self.handle("downloads.item.set_status", self.on_set_status)
+        self.handle("series.deleted", self.on_series_deleted)
 
     async def on_start(self) -> None:
         self._limit = await self._read_limit()
@@ -190,6 +191,11 @@ class DownloadsModule(BaseModule):
         компиляцию скачанной (deep-adoption)."""
         await self.repo.set_item_status(env.payload["unique_id"],
                                         env.payload["status"])
+
+    async def on_series_deleted(self, env: Envelope) -> None:
+        """Каскад Р-19: владелец чистит vk-задачи загрузки."""
+        await self.repo.delete_for_series(env.payload["series_id"])
+        await self._broadcast_queue()
 
     async def on_queue_get(self, env: Envelope) -> dict:
         tasks = await self.repo.active_tasks()

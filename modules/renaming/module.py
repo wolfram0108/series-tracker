@@ -49,6 +49,7 @@ class RenamingModule(BaseModule):
         self.handle("renaming.process_torrent", self.on_process_torrent,
                     concurrent=True)
         self.handle("renaming.tasks.active", self.on_tasks_active)
+        self.handle("series.deleted", self.on_series_deleted)
 
     async def on_start(self) -> None:
         for task in await self.repo.unfinished():
@@ -253,3 +254,7 @@ class RenamingModule(BaseModule):
             await self.request("torrents.db.files.upsert",
                                {"qb_hash": qb_hash, "files": records})
         return renamed
+
+    async def on_series_deleted(self, env):
+        """Каскад Р-19: владелец чистит renaming_tasks."""
+        await self.repo.delete_for_series(env.payload["series_id"])

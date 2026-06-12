@@ -251,3 +251,11 @@ settingsDebug.js:335 открывает второй EventSource('/api/stream') 
 дельта без is_busy преждевременно сбрасывала бы спиннер. Констрейнт:
 catalog включает statuses и is_busy в оба события
 (series.status.changed, series.busy.changed).
+
+## 39. Очередь торрент-агента: HTTP и SSE отдавали разные формы
+GET /api/series/active_torrents возвращал строки agent_tasks с полем
+torrent_hash, а SSE agent_queue_update — задачи из памяти агента с полем
+hash; шаблон настроек ждёт task.hash, то есть на HTTP-выборке ключи
+строк были undefined до первого SSE. В новой системе обе выборки идут
+из torrents.queue.get / torrents.queue.changed и поле hash добавляется
+в обеих (старая форма сохранена, расхождение устранено).

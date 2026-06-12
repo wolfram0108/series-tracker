@@ -438,3 +438,37 @@ SSE_MAP gateway: топик шины → (имя SSE, трансформация
   как ждёт фронт; scanner_status_update, relocation_*,
   renaming_complete — формы старого контракта без изменений;
   series_added/deleted — при ревизии CRUD (блок 2).
+
+### Р-19. Серии: карточки, CRUD, каскад удаления (согласован 2026-06-12, этап 5 блок 2)
+Разбор 13 точек routes/series.py (без composition/rename_preview —
+перенесены в блок 4 к media-items).
+
+- **Карточка серии — композиция в gateway**: catalog.series.list/get
+  (+statuses, +is_busy) + metadata.map.list/get (tmdb_info) +
+  батч-счётчики scan.media.downloaded_counts /
+  torrents.db.downloaded_counts (N+1 старого GET /api/series устранён:
+  3 запроса на серию → 4 запроса на список) + sources.tracker.resolve
+  (tracker_info деталей). Формы ответов — старый контракт; даты —
+  ISO с 'T'.
+- **CRUD — в catalog**: series.create (дефолты старой ORM; событие
+  series.added — полный объект, SSE series_added), series.update
+  (только живые колонки; ignored-seasons / vk-quality-priority /
+  toggle_auto_scan — частные случаи; событие series.updated — дельта
+  применённых полей + statuses/is_busy → SSE series_updated),
+  series.delete.
+- **Каскад удаления — событийный**: catalog удаляет строку series
+  (enforce_fk=False — мгновенные сироты допустимы, в старой системе FK
+  не принуждались вовсе), публикует series.deleted {series_id,
+  delete_from_qb}; владельцы чистят своё по подписке: scan
+  (media_items, scan_tasks), torrents (torrent_files, agent_tasks,
+  torrents, торрент-прогресс; по флагу — записи qBit; команды
+  sources.torrent_file.drop на кэш), downloads (vk-задачи), slicing
+  (slicing_tasks, sliced_files), renaming, library, metadata.
+  Reconcile сирот не делается (согласовано: сироты безвредны).
+- **Сохранение свойств — сценарий gateway**: catalog.series.update →
+  metadata.map.set → смена пути? library.relocate (валидации внутри,
+  Р-17; перемещение само переименует) : renaming.reprocess
+  (send_command — HTTP отвечает сразу, как оригинал). Поведение
+  «переобработка имён при каждом сохранении» сохранено.
+- **POST /state сохранён как транспорт** viewing.start/stop (правка JS
+  не нужна); viewing_heartbeat — точка удалена (Р-11).

@@ -42,14 +42,14 @@
 | POST | `/api/scanner/scan_all` | scan_all_now | routes/system.py:170 | — |
 | POST | `/api/scanner/settings` | update_scanner_settings | routes/system.py:157 | — |
 | GET | `/api/scanner/status` | get_scanner_status | routes/system.py:153 | — |
-| GET | `/api/series` | get_series | routes/series.py:21 | — |
-| POST | `/api/series` | add_series | routes/series.py:51 | — |
-| GET | `/api/series/<int:series_id>` | get_series_details | routes/series.py:75 | — |
-| POST | `/api/series/<int:series_id>` | update_series | routes/series.py:427 | — |
-| DELETE | `/api/series/<int:series_id>` | delete_series | routes/series.py:507 | — |
+| GET | `/api/series` | get_series | routes/series.py:21 | подтверждена (Р-19: композиция gateway — catalog+metadata+счётчики батчем, N+1 устранён) |
+| POST | `/api/series` | add_series | routes/series.py:51 | подтверждена (Р-19: catalog.series.create + metadata.map.set + torrents.db.add) |
+| GET | `/api/series/<int:series_id>` | get_series_details | routes/series.py:75 | подтверждена (Р-19: catalog + sources.tracker.resolve + metadata.map.get) |
+| POST | `/api/series/<int:series_id>` | update_series | routes/series.py:427 | подтверждена (Р-19: catalog.series.update → library.relocate | renaming.reprocess) |
+| DELETE | `/api/series/<int:series_id>` | delete_series | routes/series.py:507 | подтверждена (Р-19: catalog.series.delete, событийный каскад владельцев) |
 | GET | `/api/series/<int:series_id>/composition` | get_series_composition | routes/series.py:210 | — |
 | POST | `/api/series/<int:series_id>/deep-adoption` | deep_adoption | routes/media.py:270 | — |
-| POST | `/api/series/<int:series_id>/ignored-seasons` | update_ignored_seasons | routes/series.py:560 | — |
+| POST | `/api/series/<int:series_id>/ignored-seasons` | update_ignored_seasons | routes/series.py:560 | подтверждена (Р-19: catalog.series.update, JSON-формат колонки сохранён) |
 | GET | `/api/series/<int:series_id>/media-items` | get_media_items_for_series | routes/media.py:12 | — |
 | POST | `/api/series/<int:series_id>/relocate` | relocate_series | routes/series.py:671 | — |
 | GET | `/api/series/<int:series_id>/rename_preview` | get_rename_preview | routes/series.py:105 | — |
@@ -59,18 +59,18 @@
 | POST | `/api/series/<int:series_id>/scan` | scan_series_route | routes/series.py:545 | — |
 | GET | `/api/series/<int:series_id>/sliced-files` | get_sliced_files_for_series | routes/series.py:574 | — |
 | GET | `/api/series/<int:series_id>/source-filenames` | get_series_source_filenames | routes/series.py:662 | — |
-| POST | `/api/series/<int:series_id>/state` | set_series_state_route | routes/series.py:531 | — |
-| POST | `/api/series/<int:series_id>/toggle_auto_scan` | toggle_auto_scan | routes/series.py:496 | — |
-| GET | `/api/series/<int:series_id>/torrents/history` | get_series_torrents_history | routes/series.py:555 | — |
-| POST | `/api/series/<int:series_id>/viewing_heartbeat` | viewing_heartbeat | routes/series.py:540 | — |
-| PUT | `/api/series/<int:series_id>/vk-quality-priority` | set_vk_quality_priority | routes/series.py:596 | — |
-| GET | `/api/series/active_torrents` | get_active_torrents_monitoring | routes/series.py:611 | — |
+| POST | `/api/series/<int:series_id>/state` | set_series_state_route | routes/series.py:531 | перепроектирована (Р-11/Р-19: транспорт catalog.viewing.start/stop, БД не пишется) |
+| POST | `/api/series/<int:series_id>/toggle_auto_scan` | toggle_auto_scan | routes/series.py:496 | подтверждена (Р-19: catalog.series.update; SSE — дельта series.updated) |
+| GET | `/api/series/<int:series_id>/torrents/history` | get_series_torrents_history | routes/series.py:555 | подтверждена (Р-19: torrents.db.history) |
+| POST | `/api/series/<int:series_id>/viewing_heartbeat` | viewing_heartbeat | routes/series.py:540 | удалена (Р-11: эфемерный viewing со страховкой gateway.sse.clients; setInterval уходит в блоке 6) |
+| PUT | `/api/series/<int:series_id>/vk-quality-priority` | set_vk_quality_priority | routes/series.py:596 | подтверждена (Р-19: catalog.series.update) |
+| GET | `/api/series/active_torrents` | get_active_torrents_monitoring | routes/series.py:611 | подтверждена (Р-19: torrents.queue.get; формы HTTP и SSE выровнены — находка 39) |
 | GET/POST | `/api/settings/debug_flags` | handle_debug_flags | routes/settings.py:139 | — |
 | GET/POST | `/api/settings/force_replace` | handle_force_replace_setting | routes/settings.py:171 | — |
 | GET/POST | `/api/settings/less_strict_scan` | handle_less_strict_scan_setting | routes/settings.py:193 | — |
 | GET/POST | `/api/settings/parallel_downloads` | handle_parallel_downloads | routes/settings.py:182 | — |
 | GET/POST | `/api/settings/slicing_delete_source` | handle_slicing_delete_source | routes/settings.py:205 | — |
-| GET | `/api/stream` | stream | routes/system.py:7 | — |
+| GET | `/api/stream` | stream | routes/system.py:7 | подтверждена (Р-18: SSE_MAP, формы payload — sse_contract.md) |
 | GET | `/api/tmdb/details/<int:tmdb_id>` | details | routes/tmdb.py:36 | — |
 | POST | `/api/tmdb/search` | search | routes/tmdb.py:9 | — |
 | GET | `/api/trackers` | get_trackers | routes/trackers.py:5 | — |

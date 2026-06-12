@@ -45,3 +45,8 @@ class LibraryRepository:
     async def active_for_series(self, series_id: int) -> list[dict]:
         return await self._db.fetch_all(
             "SELECT * FROM relocation_tasks WHERE series_id=?", (series_id,))
+
+    async def delete_for_series(self, series_id: int) -> None:
+        """Каскад Р-19: серия удалена — задачи перемещения."""
+        await self._db.execute(
+            "DELETE FROM relocation_tasks WHERE series_id=?", (series_id,))

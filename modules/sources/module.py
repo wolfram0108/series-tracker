@@ -3,7 +3,9 @@
 Queries:
   sources.parse {url}            → {service, title, releases[]}
   sources.torrent_file.get {url, torrent_id} → {content_b64} (Р-1, с кэшем)
+  sources.torrent_file.drop {torrent_id} — чистка кэша (каскад Р-19)
   sources.trackers.list          → [{...}] (владелец таблицы trackers)
+  sources.tracker.resolve {url}  → {tracker|null} (tracker_info деталей)
 
 Доставка страниц:
   kinozal / rutracker — query trackerauth.fetch (сессии — не наша забота);
@@ -50,7 +52,9 @@ class SourcesModule(BaseModule):
     def register(self) -> None:
         self.handle("sources.parse", self.on_parse)
         self.handle("sources.torrent_file.get", self.on_torrent_file)
+        self.handle("sources.torrent_file.drop", self.on_torrent_file_drop)
         self.handle("sources.trackers.list", self.on_trackers_list)
+        self.handle("sources.tracker.resolve", self.on_tracker_resolve)
         self.handle("sources.vk.scan", self.on_vk_scan)
 
     async def on_start(self) -> None:
@@ -71,6 +75,18 @@ class SourcesModule(BaseModule):
 
     async def on_trackers_list(self, env: Envelope) -> list[dict]:
         return await self.repo.all_trackers()
+
+    async def on_tracker_resolve(self, env: Envelope) -> dict:
+        """Трекер по URL серии (контракт tracker_info деталей, Р-19)."""
+        return {"tracker": await self.repo.resolve(env.payload["url"])}
+
+    async def on_torrent_file_drop(self, env: Envelope) -> None:
+        """Каскад Р-19: удаление серии чистит кэш её .torrent-файлов
+        (команда от torrents — torrent_id знает только он)."""
+        import os
+        path = self._cache_path(env.payload["torrent_id"])
+        await asyncio.to_thread(
+            lambda: os.path.isfile(path) and os.remove(path))
 
     async def on_parse(self, env: Envelope) -> dict:
         url = env.payload["url"]

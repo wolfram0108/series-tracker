@@ -162,3 +162,8 @@ class DownloadsRepository:
             "waiting": "pending" in statuses,
         }
 
+    async def delete_for_series(self, series_id: int) -> None:
+        """Каскад Р-19: серия удалена — наши vk-задачи чистятся."""
+        await self._db.execute(
+            "DELETE FROM download_tasks WHERE series_id=? AND "
+            "task_type='vk_video'", (series_id,))

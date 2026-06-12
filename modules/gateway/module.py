@@ -36,14 +36,41 @@ def _bare_tasks(p: dict) -> list:
     return p["tasks"]
 
 
+def _agent_tasks(p: dict) -> list:
+    """Очередь торрент-конвейера: у задач старого контракта поле hash
+    (находка 39 — HTTP и SSE выборки выровнены)."""
+    return [{"hash": t.get("torrent_hash"), **t} for t in p["tasks"]]
+
+
+def _series_update_fields(p: dict) -> dict:
+    """series.updated (catalog, Р-19): применённые поля + обязательные
+    statuses/is_busy — дельта для Object.assign фронта."""
+    return {"id": p["series_id"],
+            **{k: v for k, v in p.items() if k != "series_id"}}
+
+
+def _deleted_id(p: dict) -> dict:
+    return {"id": p["series_id"]}
+
+
+def _series_added(p: dict) -> dict:
+    """Полный объект серии (контракт series_added); дата — в ISO."""
+    out = dict(p)
+    if isinstance(out.get("last_scan_time"), str):
+        out["last_scan_time"] = out["last_scan_time"].replace(" ", "T", 1)
+    return out
+
+
 # Топик шины -> (имя SSE-события, трансформация payload | None=как есть).
 # Контракт и решения по каждому событию — contracts/sse_contract.md (Р-18).
-# series_added / series_deleted добавляются при ревизии CRUD (блок 2).
 # agent_heartbeat удалён по согласованию (Р-18).
 SSE_MAP: dict[str, tuple[str, object]] = {
     "series.status.changed": ("series_updated", _series_delta),
     "series.busy.changed": ("series_updated", _series_delta),
-    "torrents.queue.changed": ("agent_queue_update", _bare_tasks),
+    "series.updated": ("series_updated", _series_update_fields),
+    "series.added": ("series_added", _series_added),
+    "series.deleted": ("series_deleted", _deleted_id),
+    "torrents.queue.changed": ("agent_queue_update", _agent_tasks),
     "downloads.queue.changed": ("download_queue_update", _bare_tasks),
     "slicing.queue.changed": ("slicing_queue_update", _bare_tasks),
     "scan.status.changed": ("scanner_status_update", None),
@@ -93,6 +120,9 @@ class GatewayModule(BaseModule):
                 except BusRequestError as exc:
                     return JSONResponse({"error": str(exc)}, status_code=502)
                 return JSONResponse({"reply": result})
+
+        from .api_series import build_router
+        app.include_router(build_router(self))
 
         index_path = os.path.join(self._templates_dir, "index.html")
 

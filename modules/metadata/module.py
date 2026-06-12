@@ -15,7 +15,10 @@ from __future__ import annotations
 import httpx
 
 from core import BaseModule
+from core.db import Database
 from core.envelope import Envelope
+
+from .repository import MetadataRepository
 
 BASE_URL = "https://api.themoviedb.org/3"
 
@@ -27,9 +30,17 @@ class TmdbError(RuntimeError):
 class MetadataModule(BaseModule):
     name = "metadata"
 
+    def __init__(self, bus, db: Database) -> None:
+        self.repo = MetadataRepository(db)
+        super().__init__(bus)
+
     def register(self) -> None:
         self.handle("metadata.search", self.on_search)
         self.handle("metadata.details", self.on_details)
+        self.handle("metadata.map.get", self.on_map_get)
+        self.handle("metadata.map.list", self.on_map_list)
+        self.handle("metadata.map.set", self.on_map_set)
+        self.handle("series.deleted", self.on_series_deleted)
 
     async def on_start(self) -> None:
         self._http = httpx.AsyncClient(base_url=BASE_URL, timeout=10.0)
@@ -66,6 +77,24 @@ class MetadataModule(BaseModule):
             "overview": r.get("overview") or "",
         } for r in data.get("results", [])]
         return {"results": results}
+
+    # --- series_tmdb_mappings (наша таблица, Р-19) ------------------------------
+
+    async def on_map_get(self, env: Envelope) -> dict:
+        mapping = await self.repo.get_mapping(env.payload["series_id"])
+        return {"mapping": mapping}
+
+    async def on_map_list(self, env: Envelope) -> dict:
+        return {"mappings": await self.repo.all_mappings()}
+
+    async def on_map_set(self, env: Envelope) -> dict:
+        await self.repo.upsert_mapping(env.payload["series_id"],
+                                       env.payload["tmdb_data"])
+        return {"ok": True}
+
+    async def on_series_deleted(self, env: Envelope) -> None:
+        """Каскад Р-19: владелец чистит своё по событию."""
+        await self.repo.delete_for_series(env.payload["series_id"])
 
     async def on_details(self, env: Envelope) -> dict:
         tmdb_id = int(env.payload["tmdb_id"])

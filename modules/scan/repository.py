@@ -146,6 +146,21 @@ class ScanRepository:
         return await self._db.fetch_all(
             "SELECT * FROM media_items WHERE series_id=?", (series_id,))
 
+    async def downloaded_counts(self) -> dict[int, int]:
+        """Скачанные эпизоды по сериям (final_filename есть) — батч для
+        карточек списка (устранение N+1 старого GET /api/series)."""
+        rows = await self._db.fetch_all(
+            "SELECT series_id, COUNT(*) AS n FROM media_items "
+            "WHERE final_filename IS NOT NULL GROUP BY series_id")
+        return {r["series_id"]: r["n"] for r in rows}
+
+    async def delete_for_series(self, series_id: int) -> None:
+        """Каскад Р-19: серия удалена — наши таблицы чистятся."""
+        await self._db.execute(
+            "DELETE FROM media_items WHERE series_id=?", (series_id,))
+        await self._db.execute(
+            "DELETE FROM scan_tasks WHERE series_id=?", (series_id,))
+
     async def candidates(self, series_id: int) -> list[dict]:
         """Вход планировщика — только plan_status='candidate' (семантика
         SmartCollector: план строится из кандидатов текущего скана;

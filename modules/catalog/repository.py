@@ -14,6 +14,13 @@ _COLUMNS = ("id, url, name, name_en, site, save_path, season, quality, "
             "resolution_override, source_type, parser_profile_id, "
             "ignored_seasons, vk_search_mode, vk_quality_priority")
 
+# Колонки, которые можно писать извне (без id и last_scan_time —
+# последняя обновляется только touch_scan_time).
+_WRITABLE = {"url", "name", "name_en", "site", "save_path", "season",
+             "quality", "auto_scan_enabled", "quality_override",
+             "resolution_override", "source_type", "parser_profile_id",
+             "ignored_seasons", "vk_search_mode", "vk_quality_priority"}
+
 
 class CatalogRepository:
     def __init__(self, db: Database) -> None:
@@ -31,6 +38,42 @@ class CatalogRepository:
         await self._db.execute(
             "UPDATE series SET save_path=? WHERE id=?",
             (save_path, series_id))
+
+    async def create_series(self, data: dict) -> int:
+        fields = {k: v for k, v in data.items() if k in _WRITABLE}
+        # дефолты старой ORM-модели (NOT NULL-колонки без DB-дефолтов)
+        fields.setdefault("source_type", "torrent")
+        fields.setdefault("auto_scan_enabled", False)
+        fields.setdefault("vk_search_mode", "search")
+        fields.setdefault("ignored_seasons", "[]")
+        cols = ", ".join(fields)
+        marks = ", ".join("?" for _ in fields)
+        await self._db.execute(
+            f"INSERT INTO series ({cols}) VALUES ({marks})",
+            tuple(fields.values()))
+        row = await self._db.fetch_one(
+            "SELECT id FROM series ORDER BY id DESC LIMIT 1")
+        return row["id"]
+
+    async def update_series(self, series_id: int, data: dict) -> dict:
+        """Обновляет только живые колонки; возвращает применённые поля."""
+        fields = {k: v for k, v in data.items() if k in _WRITABLE}
+        if fields:
+            sets = ", ".join(f"{k}=?" for k in fields)
+            await self._db.execute(
+                f"UPDATE series SET {sets} WHERE id=?",
+                (*fields.values(), series_id))
+        return fields
+
+    async def delete_series(self, series_id: int) -> None:
+        # series_statuses — мёртвая таблица (Р-11), но строка-сирота после
+        # удаления серии не нужна и ей: чистим вместе со строкой series.
+        await self._db.execute(
+            "DELETE FROM series_statuses WHERE series_id=?", (series_id,))
+        # enforce_fk=False: дочерние таблицы дочищают владельцы по
+        # событию series.deleted (Р-19) — мгновенные сироты допустимы.
+        await self._db.execute(
+            "DELETE FROM series WHERE id=?", (series_id,), enforce_fk=False)
 
     async def touch_scan_time(self, series_id: int) -> None:
         from datetime import datetime, timezone

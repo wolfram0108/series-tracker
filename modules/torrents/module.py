@@ -90,6 +90,11 @@ class TorrentsModule(BaseModule):
         self.handle("torrents.register", self.on_register)
         self.handle("torrents.queue.get", self.on_queue_get)
         self.handle("torrents.fs.verify", self.on_fs_verify, concurrent=True)
+        self.handle("torrents.db.history", self.on_db_history)
+        self.handle("torrents.db.add", self.on_db_add)
+        self.handle("torrents.db.downloaded_counts",
+                    self.on_downloaded_counts)
+        self.handle("series.deleted", self.on_series_deleted)
 
     async def on_start(self) -> None:
         if not self._qbt_injected:
@@ -257,6 +262,48 @@ class TorrentsModule(BaseModule):
         self._broadcast_queue()
         await self._contribute(series_id)
         return {"existed": False}
+
+    async def on_db_history(self, env: Envelope) -> list[dict]:
+        """Вся история раздач серии (контракт GET torrents/history)."""
+        return await self.repo.history(env.payload["series_id"])
+
+    async def on_db_add(self, env: Envelope) -> dict:
+        """Раздачи формы добавления серии — только реестр в БД, без qBit
+        (семантика старого add_series: конвейер запустит скан)."""
+        added = await self.repo.add_registered_rows(
+            env.payload["series_id"], env.payload["torrents"])
+        return {"added": added}
+
+    async def on_downloaded_counts(self, env: Envelope) -> dict:
+        """{counts: {series_id: n}} — переименованные файлы (Р-19)."""
+        return {"counts": await self.repo.downloaded_counts()}
+
+    async def on_series_deleted(self, env: Envelope) -> None:
+        """Каскад Р-19: чистим реестр, файлы, задачи конвейера; по флагу
+        delete_from_qb — записи в qBittorrent (файлы не трогаем);
+        кэш .torrent-файлов чистит sources по нашим командам."""
+        series_id = env.payload["series_id"]
+        rows = await self.repo.history(series_id)
+        if env.payload.get("delete_from_qb"):
+            hashes = [r["qb_hash"] for r in rows if r.get("qb_hash")]
+            if hashes:
+                try:
+                    await self.qbt.delete(hashes, delete_files=False)
+                except QbtError as exc:
+                    self.log.warning("удаление серии %d: записи в qBit не "
+                                     "удалены: %s", series_id, exc)
+        for r in rows:
+            if r.get("torrent_id"):
+                self.send_command("sources.torrent_file.drop",
+                                  {"torrent_id": r["torrent_id"]})
+        await self.repo.delete_for_series(series_id)
+        dropped = [h for h, t in self._pipe.items()
+                   if t["series_id"] == series_id]
+        for h in dropped:
+            self._pipe.pop(h, None)
+        self._flags_cache.pop(series_id, None)
+        if dropped:
+            self._broadcast_queue()
 
     async def on_queue_get(self, env: Envelope) -> dict:
         series_id = (env.payload or {}).get("series_id")

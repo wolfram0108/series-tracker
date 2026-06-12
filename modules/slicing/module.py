@@ -93,6 +93,7 @@ class SlicingModule(BaseModule):
         self.handle("slicing.files.list", self.on_files_list)
         self.handle("slicing.file.set_path", self.on_file_set_path)
         self.handle("slicing.queue.get", self.on_queue_get)
+        self.handle("series.deleted", self.on_series_deleted)
 
     async def on_start(self) -> None:
         requeued = await self.repo.requeue_interrupted()
@@ -426,3 +427,7 @@ class SlicingModule(BaseModule):
         flags = await self.repo.series_flags(series_id)
         self.publish_event("series.status.contribution", {
             "source": "slicing", "series_id": series_id, "flags": flags})
+
+    async def on_series_deleted(self, env):
+        """Каскад Р-19: владелец чистит slicing_tasks и sliced_files."""
+        await self.repo.delete_for_series(env.payload["series_id"])

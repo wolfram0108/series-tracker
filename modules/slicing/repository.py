@@ -141,3 +141,10 @@ class SlicingRepository:
             "SELECT DISTINCT series_id FROM media_items WHERE "
             "slicing_status IN ('slicing', 'error')")
         return [r["series_id"] for r in rows]
+
+    async def delete_for_series(self, series_id: int) -> None:
+        """Каскад Р-19: серия удалена — задачи и нарезанные файлы."""
+        await self._db.execute(
+            "DELETE FROM slicing_tasks WHERE series_id=?", (series_id,))
+        await self._db.execute(
+            "DELETE FROM sliced_files WHERE series_id=?", (series_id,))

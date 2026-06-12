@@ -73,6 +73,50 @@ class TorrentsRepository:
         return await self._db.fetch_one(
             "SELECT * FROM torrents WHERE qb_hash=?", (qb_hash,))
 
+    async def history(self, series_id: int) -> list[dict]:
+        """Вся история раздач серии (контракт старого get_torrents)."""
+        return await self._db.fetch_all(
+            "SELECT * FROM torrents WHERE series_id=? ORDER BY id",
+            (series_id,))
+
+    async def add_registered_rows(self, series_id: int,
+                                  torrents: list[dict]) -> int:
+        """Регистрация раздач формы добавления серии (без qBit —
+        семантика старого add_series: скан подхватит позже)."""
+        added = 0
+        for t in torrents:
+            if not t.get("link"):
+                continue
+            await self._db.execute(
+                "INSERT INTO torrents (series_id, torrent_id, link, "
+                "date_time, quality, episodes, is_active) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                (series_id, t.get("torrent_id"), t["link"],
+                 t.get("date_time"), t.get("quality"), t.get("episodes")))
+            added += 1
+        return added
+
+    async def downloaded_counts(self) -> dict[int, int]:
+        """Переименованные файлы по сериям — счётчик карточек (Р-19)."""
+        rows = await self._db.fetch_all(
+            "SELECT t.series_id AS series_id, COUNT(*) AS n "
+            "FROM torrent_files tf JOIN torrents t ON t.id=tf.torrent_db_id "
+            "WHERE tf.status='renamed' GROUP BY t.series_id")
+        return {r["series_id"]: r["n"] for r in rows}
+
+    async def delete_for_series(self, series_id: int) -> None:
+        """Каскад Р-19: серия удалена — наши таблицы чистятся."""
+        await self._db.execute(
+            "DELETE FROM torrent_files WHERE torrent_db_id IN "
+            "(SELECT id FROM torrents WHERE series_id=?)", (series_id,))
+        await self._db.execute(
+            "DELETE FROM agent_tasks WHERE series_id=?", (series_id,))
+        await self._db.execute(
+            "DELETE FROM torrents WHERE series_id=?", (series_id,))
+        await self._db.execute(
+            "DELETE FROM download_tasks WHERE series_id=? AND "
+            "task_type='torrent'", (series_id,))
+
     # --- agent_tasks (задачи конвейера) -----------------------------------------------
 
     async def all_tasks(self) -> list[dict]:

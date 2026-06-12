@@ -48,7 +48,7 @@ modules = [
     RulesModule(bus, db),
     TrackerauthModule(bus, db),
     SourcesModule(bus, db),
-    MetadataModule(bus),
+    MetadataModule(bus, db),
     LibraryModule(bus, db),
     # scan/downloads/renaming — после catalog/settings/sources/rules:
     # их reconcile при старте шлёт запросы соседям.

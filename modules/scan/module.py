@@ -85,8 +85,10 @@ class ScanModule(BaseModule):
         self.handle("scan.series.run", self.on_run, concurrent=True)
         self.handle("scan.all.start", self.on_scan_all)
         self.handle("scan.media.list", self.on_media_list)
+        self.handle("scan.media.downloaded_counts", self.on_downloaded_counts)
         self.handle("scan.item.set_ignored", self.on_set_ignored)
         self.handle("torrents.queue.changed", self.on_queue_changed)
+        self.handle("series.deleted", self.on_series_deleted)
 
     async def on_start(self) -> None:
         # Носители прошлых ошибок — в свёртку (Р-11: поставщик публикует
@@ -121,6 +123,14 @@ class ScanModule(BaseModule):
         slicing (нарезанная компиляция уходит из планов)."""
         await self.repo.set_ignored(env.payload["unique_id"],
                                     bool(env.payload["is_ignored"]))
+
+    async def on_downloaded_counts(self, env: Envelope) -> dict:
+        """{counts: {series_id: n}} — скачанные VK-эпизоды (Р-19)."""
+        return {"counts": await self.repo.downloaded_counts()}
+
+    async def on_series_deleted(self, env: Envelope) -> None:
+        """Каскад Р-19: владелец чистит media_items и scan_tasks."""
+        await self.repo.delete_for_series(env.payload["series_id"])
 
     async def on_scan_all(self, env: Envelope) -> None:
         if self._scan_all_running:

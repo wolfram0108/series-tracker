@@ -30,7 +30,7 @@ class Probe(BaseModule):
 async def system(db_path):
     bus = Bus()
     db = Database(db_path)
-    modules = [SettingsModule(bus, db), MetadataModule(bus),
+    modules = [SettingsModule(bus, db), MetadataModule(bus, db),
                LibraryModule(bus, db), Probe(bus)]
     runner = Runner(bus, modules)
     await runner.start()

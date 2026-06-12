@@ -16,6 +16,12 @@ Queries:
   catalog.series.list           → [{...series, statuses: [...]}]
   catalog.series.get {series_id} → {...series, statuses: [...]}
   catalog.status.get {series_id} → {series_id, statuses: [...]}
+  catalog.series.create {data}   → {...series} (+ событие series.added)
+  catalog.series.update {series_id, fields} → {applied: {...}}
+      (+ событие series.updated с применёнными полями — дельта SSE)
+  catalog.series.delete {series_id, delete_from_qb?} → {ok}
+      — удаляет строку series и публикует series.deleted; владельцы
+      остальных таблиц чистят своё по подписке (Р-19, событийный каскад)
 
 Events (исходящие):
   series.status.changed {series_id, statuses, is_busy} — только при
@@ -60,6 +66,9 @@ class CatalogModule(BaseModule):
         self.handle("catalog.series.get", self.on_series_get)
         self.handle("catalog.status.get", self.on_status_get)
         self.handle("catalog.series.touch_scan_time", self.on_touch)
+        self.handle("catalog.series.create", self.on_series_create)
+        self.handle("catalog.series.update", self.on_series_update)
+        self.handle("catalog.series.delete", self.on_series_delete)
 
     # --- статусы: вклады и viewing ------------------------------------------
 
@@ -134,6 +143,46 @@ class CatalogModule(BaseModule):
         row["statuses"] = self.agg.statuses(series_id)
         row["is_busy"] = bool(self._busy.get(series_id))
         return row
+
+    # --- CRUD (Р-19) ----------------------------------------------------------
+
+    async def on_series_create(self, env: Envelope) -> dict:
+        series_id = await self.repo.create_series(env.payload["data"])
+        row = await self.repo.get_series(series_id)
+        row["statuses"] = self.agg.statuses(series_id)
+        row["is_busy"] = False
+        self.log.info("добавлен сериал %d: %s", series_id, row.get("name"))
+        self.publish_event("series.added", row)
+        return row
+
+    async def on_series_update(self, env: Envelope) -> dict:
+        series_id = env.payload["series_id"]
+        if await self.repo.get_series(series_id) is None:
+            raise LookupError(f"сериал {series_id} не найден")
+        applied = await self.repo.update_series(series_id,
+                                                env.payload["fields"])
+        if applied:
+            # Дельта для SSE series_updated: применённые поля + обязательные
+            # statuses/is_busy (находка 38).
+            self.publish_event("series.updated", {
+                "series_id": series_id, **applied,
+                "statuses": self.agg.statuses(series_id),
+                "is_busy": bool(self._busy.get(series_id))})
+        return {"applied": applied}
+
+    async def on_series_delete(self, env: Envelope) -> dict:
+        series_id = env.payload["series_id"]
+        if await self.repo.get_series(series_id) is None:
+            raise LookupError(f"сериал {series_id} не найден")
+        await self.repo.delete_series(series_id)
+        self.agg.forget(series_id)
+        self._busy.pop(series_id, None)
+        self.log.info("сериал %d удалён; каскад — у владельцев таблиц",
+                      series_id)
+        self.publish_event("series.deleted", {
+            "series_id": series_id,
+            "delete_from_qb": bool(env.payload.get("delete_from_qb"))})
+        return {"ok": True}
 
     async def on_status_get(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]

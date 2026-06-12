@@ -3,8 +3,8 @@
 > Обновлено: 2026-06-12. Этот файл — снимок «где мы» для продолжения
 > работы после сжатия контекста. Правила работы — в [CLAUDE.md](../CLAUDE.md)
 > (целеполагание!), решения — в [contracts/revision.md](../contracts/revision.md)
-> (Р-1..Р-18), находки — в [contracts/findings.md](../contracts/findings.md)
-> (1–38), карта топиков шины — в
+> (Р-1..Р-19), находки — в [contracts/findings.md](../contracts/findings.md)
+> (1–39), карта топиков шины — в
 > [contracts/bus_topics.md](../contracts/bus_topics.md), план — в
 > [docs/refactoring_bus_plan.md](refactoring_bus_plan.md).
 
@@ -23,7 +23,7 @@
 1088/1088 названий; планировщик 9/10 + 1 согласованное отклонение
 (сериал 87, фикс Г); формулы id 190/190 (torrents) и 351/351
 (media_items); имена файлов 349/349 (tests/test_rules_format_diff.py).
-Тесты: 137 passed (`.venv/bin/python -m pytest -q`; изредка возможен
+Тесты: 147 passed (`.venv/bin/python -m pytest -q`; изредка возможен
 флак тестовых таймаутов под полной нагрузкой — код-гонок не выявлено),
 интеграция со стендовым qBit — `ST_QBIT_URL=http://series-tracker:8080
 ST_QBIT_USER=admin ST_QBIT_PASS=REMOVED-SECRET pytest tests/test_torrents_integration.py`.
@@ -40,9 +40,16 @@ ST_QBIT_USER=admin ST_QBIT_PASS=REMOVED-SECRET pytest tests/test_torrents_integr
    массивы; agent_heartbeat удалён по согласованию (индикаторы остаются
    на queue/status-событиях); второе SSE-соединение (находка 37) —
    чинится в блоке 6.
-2. **Серии** (следующий): список/детали/CRUD (series_added/deleted),
-   composition, история торрентов, state, toggle_auto_scan, viewing.
-3. **Скан и очереди**: scanner/*, agent/queue+reset, downloads/queue*.
+2. ✓ **Серии (Р-19)**: карточка — композиция gateway (catalog + metadata
+   + батч-счётчики, N+1 устранён); CRUD в catalog (series.added/updated/
+   deleted → SSE); каскад удаления — событие series.deleted, владельцы
+   чистят своё (enforce_fk=False для строки series); сохранение свойств —
+   сценарий gateway (catalog → library.relocate | renaming.reprocess);
+   /state — транспорт viewing.start/stop (без правки JS);
+   viewing_heartbeat удалён; находка 39. composition и rename_preview
+   перенесены в блок 4. modules/gateway/api_series.py; 10 тестов.
+3. **Скан и очереди** (следующий): scanner/*, agent/queue+reset,
+   downloads/queue*, POST /series/<id>/scan.
 4. **Media-items и операции серии**: главы/slice/verify/ignore/
    deep-adoption/reprocess*/relocate/rename_preview.
 5. **Настройки и справочники**: auth, settings/*, trackers,

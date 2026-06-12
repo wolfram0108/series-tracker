@@ -52,6 +52,7 @@ class LibraryModule(BaseModule):
         self.handle("library.directories.list", self.on_list_directories)
         self.handle("library.relocate", self.on_relocate)
         self.handle("library.relocation.active", self.on_relocation_active)
+        self.handle("series.deleted", self.on_series_deleted)
 
     async def on_start(self) -> None:
         # Reconcile: незавершённые перемещения продолжаются
@@ -209,3 +210,7 @@ class LibraryModule(BaseModule):
     def _busy(self, series_id: int, busy: bool) -> None:
         self.publish_event("series.busy.contribution", {
             "source": "library", "series_id": series_id, "busy": busy})
+
+    async def on_series_deleted(self, env):
+        """Каскад Р-19: владелец чистит relocation_tasks."""
+        await self.repo.delete_for_series(env.payload["series_id"])

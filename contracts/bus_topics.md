@@ -9,16 +9,16 @@
 
 | Модуль | Топики |
 |---|---|
-| catalog | series.list, series.get, status.get, series.set_save_path, series.touch_scan_time, viewing.start/stop |
-| scan | series.run {series_id, force_replace?}, all.start, media.list, item.set_ignored |
-| sources | parse {url}, torrent_file.get, trackers.list, vk.scan |
+| catalog | series.list, series.get, status.get, series.create/update/delete (Р-19), series.set_save_path, series.touch_scan_time, viewing.start/stop |
+| scan | series.run {series_id, force_replace?}, all.start, media.list, media.downloaded_counts, item.set_ignored |
+| sources | parse {url}, torrent_file.get, torrent_file.drop, trackers.list, tracker.resolve {url}, vk.scan |
 | rules | apply, profiles.list, cache.invalidate, format_filename, format_torrent_file |
-| torrents | add, info.get, files.get, pause/resume/recheck/delete, rename_file, set_location, db.active, db.deactivate_all, db.files.list/upsert, register, queue.get, fs.verify |
+| torrents | add, info.get, files.get, pause/resume/recheck/delete, rename_file, set_location, db.active, db.deactivate_all, db.files.list/upsert, db.history, db.add, db.downloaded_counts, register, queue.get, fs.verify |
 | downloads | queue.get, queue.clear, fs.sync, item.set_filename, item.set_status |
 | slicing | chapters.get/filtered/mark, task.create, verify, deep_adoption, files.list, file.set_path, queue.get |
 | renaming | reprocess, process_torrent, tasks.active |
 | library | directories.list, relocate, relocation.active |
-| metadata | search, details |
+| metadata | search, details, map.get/list/set (владелец series_tmdb_mappings, Р-19) |
 | settings | value.get, value.set |
 | trackerauth | fetch |
 
@@ -30,6 +30,9 @@
 | series.status.changed {series_id, statuses, is_busy} | catalog | gateway | series_updated {id, statuses, is_busy} (Р-18) |
 | series.busy.contribution | library, renaming | catalog | — |
 | series.busy.changed {series_id, is_busy, statuses} | catalog | gateway | series_updated {id, statuses, is_busy} (Р-18) |
+| series.added {…series} | catalog | gateway | series_added (полный объект, Р-19) |
+| series.updated {series_id, …поля, statuses, is_busy} | catalog | gateway | series_updated (дельта, Р-19) |
+| series.deleted {series_id, delete_from_qb} | catalog | scan, torrents, downloads, slicing, renaming, library, metadata (каскад), gateway | series_deleted {id} (Р-19) |
 | scan.plan.updated {series_id} | scan | downloads | — |
 | scan.status.changed | scan | — | scanner_status_update |
 | torrents.queue.changed {count, tasks} | torrents | scan (count=0 → следующий скан) | agent_queue_update |
@@ -46,10 +49,11 @@ SSE_MAP gateway реализован (блок 1 этапа 5): series_updated �
 очереди — голые массивы, agent_heartbeat — удалён по согласованию,
 второе SSE-соединение фронта (находка 37) чинится в блоке 6.
 
+Блок 2 (Р-19) закрыл: series_added/series_deleted (CRUD в catalog),
+сохранение свойств (сценарий gateway: catalog → library/relocate |
+renaming.reprocess), POST /state как транспорт viewing.start/stop.
+
 Остаётся на следующие блоки:
-- `series_added` / `series_deleted` — придут с CRUD сериалов (catalog,
-  блок 2).
-- Вызовы при открытии модалки статуса: catalog.viewing.start +
-  downloads.fs.sync + torrents.fs.verify (решения Р-11/Р-13/Р-14).
-- Сохранение свойств сериала: catalog-обновление + library.relocate
-  (при смене пути) + renaming.reprocess (Р-15/Р-17).
+- Вызовы при открытии модалки статуса: catalog.viewing.start (уже
+  работает через /state) + downloads.fs.sync + torrents.fs.verify
+  (Р-13/Р-14, блок 4/6).
