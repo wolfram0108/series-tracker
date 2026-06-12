@@ -14,7 +14,7 @@
 | 1. Каркас | ✓ core/ (шина+конверт+BaseModule+раннер+логирование), gateway-скелет (FastAPI, SSE_MAP), run.py |
 | 2. Инфраструктура | ✓ torrents (qBit-клиент: локальный infohash вкл. гибриды v2, два поколения API, релогин на 403), trackerauth (fetch-прокси, персистентные сессии, rate-limit), settings, metadata (TMDB), library (листинг), Alembic (0001 базовая схема 19 живых таблиц + 0002 tracker_sessions), core/db.py |
 | 3. Мозги | ✓ rules (движок с нуля, фиксы А/Б/В), sources (Kinozal/RuTracker/Anilibria-API/VK-API; astar+anilibria_tv — разбор готов, браузерная доставка на этапе 6), scan/planner.py (SmartCollector v4.1 + фикс Г) |
-| 4. Конвейер (идёт) | ✓ статусная модель (Р-11): modules/catalog — агрегатор свёрток, series.status.changed только при изменениях, эфемерный viewing со страховкой gateway.sse.clients; находки 23–25. ✓ scan-оркестратор (Р-12): зеркала в sources, настоящая ресьюмабельность scan_tasks, формулы id верифицированы (190/190, 351/351), расписание автоскана, отказ параллельному скану; core: handle(concurrent=True); находки 26–29. ✓ downloads (Р-13): событийный диспетчер yt-dlp (async subprocess), ретрай ошибок сканом, fs.sync вместо 60-секундной ФС-проверки, агрегатор: waiting подавляется активностью; находки 30–32. ✓ торрент-конвейер (Р-14): ИНВАРИАНТ ЯДРА «пауза до конца переименования, magnet — запуск ровно на метаданные», чистая машина стадий (старые значения в БД), ошибки-носители stage='error', реализованы все контракты Р-12, адаптивный мониторинг прогресса, fs.verify. ✓ renaming + форматтер (Р-15): форматтер в rules с нуля, дифф имён 349/349, reprocess/process_torrent, событие renaming.finished, single_vk похоронен (находка 33); находки 33–34 |
+| 4. Конвейер (идёт) | ✓ статусная модель (Р-11): modules/catalog — агрегатор свёрток, series.status.changed только при изменениях, эфемерный viewing со страховкой gateway.sse.clients; находки 23–25. ✓ scan-оркестратор (Р-12): зеркала в sources, настоящая ресьюмабельность scan_tasks, формулы id верифицированы (190/190, 351/351), расписание автоскана, отказ параллельному скану; core: handle(concurrent=True); находки 26–29. ✓ downloads (Р-13): событийный диспетчер yt-dlp (async subprocess), ретрай ошибок сканом, fs.sync вместо 60-секундной ФС-проверки, агрегатор: waiting подавляется активностью; находки 30–32. ✓ торрент-конвейер (Р-14): ИНВАРИАНТ ЯДРА «пауза до конца переименования, magnet — запуск ровно на метаданные», чистая машина стадий (старые значения в БД), ошибки-носители stage='error', реализованы все контракты Р-12, адаптивный мониторинг прогресса, fs.verify. ✓ renaming + форматтер (Р-15): форматтер в rules с нуля, дифф имён 349/349, reprocess/process_torrent, событие renaming.finished, single_vk похоронен (находка 33); находки 33–34. ✓ slicing (Р-16): порт 1:1 (главы/фильтр/нарезка/verify/deep-adoption), ffmpeg+yt-dlp с таймаутами, ресьюмабельность progress_chapters, закрыты фейки Р-15; находка 35 |
 
 **Верификации против старого кода (все локально, прод не участвует):**
 infohash 170/170 реальных торрентов; движок правил 1088/1088 реальных
@@ -51,25 +51,23 @@ query downloads.fs.sync {series_id} (решение пользователя —
 фоновой 60-секундной ФС-проверки); SSE-маппинг
 downloads.queue.changed → download_queue_update.
 
-Renaming готов (Р-15): закрыты контракты renaming.reprocess (Р-12),
-renaming.process_torrent (Р-14), rules.format_filename/
-format_torrent_file (Р-13). Контракты, которые ЖДУТ реализации
-slicing'ом: slicing.files.list {series_id} и slicing.file.set_path
-{id, path} (фейки в tests/test_renaming_module.py). Gateway этап 5:
-открытие модалки → downloads.fs.sync + torrents.fs.verify; сохранение
-свойств сериала → renaming.reprocess (+relocation при смене пути);
-SSE-маппинги: queue.changed → agent/download_queue_update,
-renaming.finished → renaming_complete.
+Slicing готов (Р-16) — ВСЕ межмодульные контракты-фейки этапа 4
+закрыты, конвейер замкнут. Gateway этап 5: открытие модалки →
+downloads.fs.sync + torrents.fs.verify; сохранение свойств сериала →
+renaming.reprocess (+relocation при смене пути); SSE-маппинги:
+queue.changed (torrents/downloads/slicing) → agent/download/
+slicing_queue_update, renaming.finished → renaming_complete,
+series.status.changed → series_updated, scan.status.changed →
+scanner_status_update.
 
-Дальше по этапу 4 (каждый модуль — с разбора пользователю): slicing
-(ffmpeg + utils/chapter_parser, chapter_filter; колонки
-slicing_status/chapters*; таблицы slicing_tasks/sliced_files; свёртка
-slicing/error; роуты глав/deep-adoption/verify из routes/media.py),
-library-relocation (+is_busy: renaming.tasks.active уже отдаёт свою
-половину). Находка 7г: кандидаты в scan/status/downloads/torrents/
-renaming НЕ найдены (gunicorn timeout=120 → зависание держало воркер
->2 мин); остаются slicing (ffmpeg/yt-dlp-главы) и сверка журнала
-таймаутов с логами на этапе 6.
+Остался последний модуль этапа 4: library (relocation_tasks —
+перемещение VK-файлов на диске и торрентов через set_location;
+файловый браузер уже есть с этапа 2 — расширить relocation'ом;
+is_busy = relocation + renaming.tasks.active — решить представление
+при разборе; событие library.relocation.started/finished — SSE
+relocation_started/finished). Находка 7г: все агентские кандидаты
+закрыты превентивно таймаутами; финальная сверка журнала WORKER
+TIMEOUT с логами приложения — на этапе 6 (стенд).
 
 После: этап 5 (gateway: все 73 точки с ревизией «подтверждена/
 перепроектирована/удалена» в contracts/revision.md; правки JS-слоя

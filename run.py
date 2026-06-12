@@ -29,6 +29,7 @@ from modules.renaming import RenamingModule
 from modules.rules import RulesModule
 from modules.scan import ScanModule
 from modules.settings import SettingsModule
+from modules.slicing import SlicingModule
 from modules.sources import SourcesModule
 from modules.torrents import TorrentsModule
 from modules.trackerauth import TrackerauthModule
@@ -54,6 +55,7 @@ modules = [
     ScanModule(bus, db),
     DownloadsModule(bus, db),
     RenamingModule(bus, db),
+    SlicingModule(bus, db),
 ]
 
 qbit_url = os.environ.get("ST_QBIT_URL")

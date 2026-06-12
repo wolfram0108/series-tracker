@@ -62,6 +62,7 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.queue.clear", self.on_queue_clear)
         self.handle("downloads.fs.sync", self.on_fs_sync)
         self.handle("downloads.item.set_filename", self.on_set_filename)
+        self.handle("downloads.item.set_status", self.on_set_status)
 
     async def on_start(self) -> None:
         self._limit = await self._read_limit()
@@ -183,6 +184,12 @@ class DownloadsModule(BaseModule):
         после переобработки (Р-15)."""
         await self.repo.set_item_filename(env.payload["unique_id"],
                                           env.payload["filename"])
+
+    async def on_set_status(self, env: Envelope) -> None:
+        """status — наша колонка; slicing помечает усыновлённую
+        компиляцию скачанной (deep-adoption)."""
+        await self.repo.set_item_status(env.payload["unique_id"],
+                                        env.payload["status"])
 
     async def on_queue_get(self, env: Envelope) -> dict:
         tasks = await self.repo.active_tasks()

@@ -85,6 +85,7 @@ class ScanModule(BaseModule):
         self.handle("scan.series.run", self.on_run, concurrent=True)
         self.handle("scan.all.start", self.on_scan_all)
         self.handle("scan.media.list", self.on_media_list)
+        self.handle("scan.item.set_ignored", self.on_set_ignored)
         self.handle("torrents.queue.changed", self.on_queue_changed)
 
     async def on_start(self) -> None:
@@ -114,6 +115,12 @@ class ScanModule(BaseModule):
         """Состав медиа-элементов серии (владелец строк — scan, Р-12);
         читают renaming (переобработка имён) и UI (этап 5)."""
         return await self.repo.items_for_series(env.payload["series_id"])
+
+    async def on_set_ignored(self, env: Envelope) -> None:
+        """is_ignored_by_user — наша колонка; ставят UI (этап 5) и
+        slicing (нарезанная компиляция уходит из планов)."""
+        await self.repo.set_ignored(env.payload["unique_id"],
+                                    bool(env.payload["is_ignored"]))
 
     async def on_scan_all(self, env: Envelope) -> None:
         if self._scan_all_running:

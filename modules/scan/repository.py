@@ -154,6 +154,11 @@ class ScanRepository:
             "SELECT * FROM media_items WHERE series_id=? "
             "AND plan_status='candidate'", (series_id,))
 
+    async def set_ignored(self, unique_id: str, ignored: bool) -> None:
+        await self._db.execute(
+            "UPDATE media_items SET is_ignored_by_user=? WHERE unique_id=?",
+            (1 if ignored else 0, unique_id))
+
     async def set_plan_statuses(self, plan: dict[str, str]) -> None:
         for unique_id, plan_status in plan.items():
             await self._db.execute(
