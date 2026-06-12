@@ -49,6 +49,7 @@ class RenamingModule(BaseModule):
         self.handle("renaming.process_torrent", self.on_process_torrent,
                     concurrent=True)
         self.handle("renaming.tasks.active", self.on_tasks_active)
+        self.handle("renaming.preview", self.on_preview, concurrent=True)
         self.handle("series.deleted", self.on_series_deleted)
 
     async def on_start(self) -> None:
@@ -62,6 +63,51 @@ class RenamingModule(BaseModule):
     async def on_tasks_active(self, env: Envelope) -> list[dict]:
         """Для is_busy (этап 5 / library)."""
         return await self.repo.active_for_series(env.payload["series_id"])
+
+    async def on_preview(self, env: Envelope) -> dict:
+        """Контракт GET rename_preview (Р-21): тот же обход, что
+        у переобработки VK, но без касания диска и БД."""
+        series_id = env.payload["series_id"]
+        series = await self.request("catalog.series.get",
+                                    {"series_id": series_id})
+        if not series.get("parser_profile_id"):
+            return {"preview": [], "needs_rename_count": 0}
+        items = await self.request("scan.media.list",
+                                   {"series_id": series_id})
+        items_map = {i["unique_id"]: i for i in items}
+        preview = []
+        needs = 0
+        for item in items:
+            if not item.get("source_title"):
+                continue
+            current = item.get("final_filename")
+            reply = await self.request("rules.format_filename", {
+                "series": series, "media_item": item,
+                "original_filename": current})
+            new_name = reply["filename"]
+            if current and current != new_name:
+                needs += 1
+            preview.append({"unique_id": item["unique_id"],
+                            "type": "media_item",
+                            "current_filename": current,
+                            "new_filename_preview": new_name})
+        for child in await self._sliced_files(series_id):
+            parent = items_map.get(child["source_media_item_unique_id"])
+            if not parent:
+                continue
+            current = child.get("file_path")
+            reply = await self.request("rules.format_filename", {
+                "series": series, "media_item": parent,
+                "episode_override": child["episode_number"],
+                "original_filename": current})
+            new_name = reply["filename"]
+            if current and current != new_name:
+                needs += 1
+            preview.append({"unique_id": f"sliced-{child['id']}",
+                            "type": "sliced_file",
+                            "current_filename": current,
+                            "new_filename_preview": new_name})
+        return {"preview": preview, "needs_rename_count": needs}
 
     # --- массовая переобработка ------------------------------------------------------
 

@@ -19,14 +19,14 @@
 | POST | `/api/downloads/queue/clear` | clear_download_queue | routes/system.py:190 | подтверждена (Р-20: downloads.queue.clear; во фронте не вызывается — админ-инструмент) |
 | GET | `/api/hello-info` | hello_info | routes/__init__.py:34 | — |
 | GET | `/api/logs` | get_logs | routes/system.py:71 | — |
-| PUT | `/api/media-items/<int:item_id>/ignore` | set_item_ignored_status | routes/media.py:56 | — |
-| POST | `/api/media-items/<string:unique_id>/chapters` | fetch_and_save_chapters | routes/media.py:26 | — |
-| POST | `/api/media-items/<string:unique_id>/chapters/filtered` | get_filtered_chapters | routes/media.py:284 | — |
-| POST | `/api/media-items/<string:unique_id>/chapters/mark-garbage` | mark_garbage_chapters | routes/media.py:335 | — |
-| PUT | `/api/media-items/<string:unique_id>/ignore` | set_item_ignored_status_by_uid | routes/media.py:85 | — |
-| POST | `/api/media-items/<string:unique_id>/slice` | create_slice_task | routes/media.py:112 | — |
-| POST | `/api/media-items/<string:unique_id>/slice-with-filter` | create_slice_task_with_filter | routes/media.py:388 | — |
-| POST | `/api/media-items/<string:unique_id>/verify-sliced-files` | verify_sliced_files | routes/media.py:144 | — |
+| PUT | `/api/media-items/<int:item_id>/ignore` | set_item_ignored_status | routes/media.py:56 | удалена (Р-21: мёртвый дубль uid-точки по числовому id) |
+| POST | `/api/media-items/<string:unique_id>/chapters` | fetch_and_save_chapters | routes/media.py:26 | подтверждена (Р-21: slicing.chapters.get — контракт Р-16) |
+| POST | `/api/media-items/<string:unique_id>/chapters/filtered` | get_filtered_chapters | routes/media.py:284 | подтверждена (Р-21: slicing.chapters.filtered) |
+| POST | `/api/media-items/<string:unique_id>/chapters/mark-garbage` | mark_garbage_chapters | routes/media.py:335 | подтверждена (Р-21: slicing.chapters.mark) |
+| PUT | `/api/media-items/<string:unique_id>/ignore` | set_item_ignored_status_by_uid | routes/media.py:85 | подтверждена (Р-21: scan.item.set_ignored + scan.plan.updated вместо sync_vk_statuses) |
+| POST | `/api/media-items/<string:unique_id>/slice` | create_slice_task | routes/media.py:112 | подтверждена (Р-21: slicing.task.create) |
+| POST | `/api/media-items/<string:unique_id>/slice-with-filter` | create_slice_task_with_filter | routes/media.py:388 | подтверждена (Р-21: slicing.task.create {garbage_indices}) |
+| POST | `/api/media-items/<string:unique_id>/verify-sliced-files` | verify_sliced_files | routes/media.py:144 | подтверждена (Р-21: slicing.verify) |
 | POST | `/api/parse_url` | parse_url | routes/settings.py:87 | — |
 | GET | `/api/parser-profiles` | get_parser_profiles | routes/parser.py:10 | — |
 | POST | `/api/parser-profiles` | create_parser_profile | routes/parser.py:15 | — |
@@ -47,18 +47,18 @@
 | GET | `/api/series/<int:series_id>` | get_series_details | routes/series.py:75 | подтверждена (Р-19: catalog + sources.tracker.resolve + metadata.map.get) |
 | POST | `/api/series/<int:series_id>` | update_series | routes/series.py:427 | подтверждена (Р-19: catalog.series.update → library.relocate | renaming.reprocess) |
 | DELETE | `/api/series/<int:series_id>` | delete_series | routes/series.py:507 | подтверждена (Р-19: catalog.series.delete, событийный каскад владельцев) |
-| GET | `/api/series/<int:series_id>/composition` | get_series_composition | routes/series.py:210 | — |
-| POST | `/api/series/<int:series_id>/deep-adoption` | deep_adoption | routes/media.py:270 | — |
+| GET | `/api/series/<int:series_id>/composition` | get_series_composition | routes/series.py:210 | подтверждена (Р-21: scan.composition / torrents.composition по source_type) |
+| POST | `/api/series/<int:series_id>/deep-adoption` | deep_adoption | routes/media.py:270 | подтверждена (Р-21: команда slicing.deep_adoption, фон как в оригинале) |
 | POST | `/api/series/<int:series_id>/ignored-seasons` | update_ignored_seasons | routes/series.py:560 | подтверждена (Р-19: catalog.series.update, JSON-формат колонки сохранён) |
-| GET | `/api/series/<int:series_id>/media-items` | get_media_items_for_series | routes/media.py:12 | — |
-| POST | `/api/series/<int:series_id>/relocate` | relocate_series | routes/series.py:671 | — |
-| GET | `/api/series/<int:series_id>/rename_preview` | get_rename_preview | routes/series.py:105 | — |
-| POST | `/api/series/<int:series_id>/reprocess` | reprocess_series_torrents_route | routes/series.py:403 | — |
-| POST | `/api/series/<int:series_id>/reprocess_vk_files` | reprocess_vk_files_route | routes/series.py:189 | — |
-| POST | `/api/series/<int:series_id>/reset_torrents` | reset_torrents | routes/series.py:620 | — |
+| GET | `/api/series/<int:series_id>/media-items` | get_media_items_for_series | routes/media.py:12 | подтверждена (Р-21: scan.media.list) |
+| POST | `/api/series/<int:series_id>/relocate` | relocate_series | routes/series.py:671 | удалена (Р-21: дубль сценария сохранения свойств — Р-19/Р-17) |
+| GET | `/api/series/<int:series_id>/rename_preview` | get_rename_preview | routes/series.py:105 | подтверждена (Р-21: renaming.preview — dry-run переобработки) |
+| POST | `/api/series/<int:series_id>/reprocess` | reprocess_series_torrents_route | routes/series.py:403 | подтверждена (Р-21: 409 по renaming.tasks.active, иначе команда renaming.reprocess) |
+| POST | `/api/series/<int:series_id>/reprocess_vk_files` | reprocess_vk_files_route | routes/series.py:189 | подтверждена (Р-21: то же — renaming.reprocess сам определяет тип) |
+| POST | `/api/series/<int:series_id>/reset_torrents` | reset_torrents | routes/series.py:620 | удалена (Р-21: мертва на фронте, разрушительна; согласовано) |
 | POST | `/api/series/<int:series_id>/scan` | scan_series_route | routes/series.py:545 | подтверждена (Р-20: query scan.series.run, синхронный ответ; force из debug_force_replace) |
-| GET | `/api/series/<int:series_id>/sliced-files` | get_sliced_files_for_series | routes/series.py:574 | — |
-| GET | `/api/series/<int:series_id>/source-filenames` | get_series_source_filenames | routes/series.py:662 | — |
+| GET | `/api/series/<int:series_id>/sliced-files` | get_sliced_files_for_series | routes/series.py:574 | подтверждена (Р-21: slicing.files.list + обогащение из scan.media.list) |
+| GET | `/api/series/<int:series_id>/source-filenames` | get_series_source_filenames | routes/series.py:662 | подтверждена (Р-21: сборка gateway из torrents.db.files.for_series / scan.media.list) |
 | POST | `/api/series/<int:series_id>/state` | set_series_state_route | routes/series.py:531 | перепроектирована (Р-11/Р-19: транспорт catalog.viewing.start/stop, БД не пишется) |
 | POST | `/api/series/<int:series_id>/toggle_auto_scan` | toggle_auto_scan | routes/series.py:496 | подтверждена (Р-19: catalog.series.update; SSE — дельта series.updated) |
 | GET | `/api/series/<int:series_id>/torrents/history` | get_series_torrents_history | routes/series.py:555 | подтверждена (Р-19: torrents.db.history) |

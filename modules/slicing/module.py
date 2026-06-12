@@ -91,6 +91,8 @@ class SlicingModule(BaseModule):
         self.handle("slicing.deep_adoption", self.on_deep_adoption,
                     concurrent=True)
         self.handle("slicing.files.list", self.on_files_list)
+        self.handle("slicing.files.drop_for_source",
+                    self.on_files_drop_for_source)
         self.handle("slicing.file.set_path", self.on_file_set_path)
         self.handle("slicing.queue.get", self.on_queue_get)
         self.handle("series.deleted", self.on_series_deleted)
@@ -410,6 +412,17 @@ class SlicingModule(BaseModule):
 
     async def on_files_list(self, env: Envelope) -> list[dict]:
         return await self.repo.sliced_for_series(env.payload["series_id"])
+
+    async def on_files_drop_for_source(self, env: Envelope) -> None:
+        """Каскад композиции (Р-21): компиляция вышла из плана —
+        записи о её нарезанных детях удаляются (как в старом
+        get_series_composition)."""
+        deleted = await self.repo.delete_sliced_for_source(
+            env.payload["unique_id"])
+        if deleted:
+            self.log.info("композиция: удалено %d записей о нарезке "
+                          "устаревшей компиляции %s", deleted,
+                          env.payload["unique_id"])
 
     async def on_file_set_path(self, env: Envelope) -> None:
         await self.repo.set_sliced_path(env.payload["id"],

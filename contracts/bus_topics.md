@@ -10,13 +10,13 @@
 | Модуль | Топики |
 |---|---|
 | catalog | series.list, series.get, status.get, series.create/update/delete (Р-19), series.set_save_path, series.touch_scan_time, viewing.start/stop |
-| scan | series.run {series_id, force_replace?}, all.start → {started}, status.get, media.list, media.downloaded_counts, item.set_ignored |
+| scan | series.run {series_id, force_replace?}, all.start → {started}, status.get, composition {series_id, refresh?} (Р-21), media.list, media.downloaded_counts, item.set_ignored (+ scan.plan.updated) |
 | sources | parse {url}, torrent_file.get, torrent_file.drop, trackers.list, tracker.resolve {url}, vk.scan |
 | rules | apply, profiles.list, cache.invalidate, format_filename, format_torrent_file |
-| torrents | add, info.get, files.get, pause/resume/recheck/delete, rename_file, set_location, db.active, db.deactivate_all, db.files.list/upsert, db.history, db.add, db.downloaded_counts, register, queue.get, fs.verify |
+| torrents | add, info.get, files.get, pause/resume/recheck/delete, rename_file, set_location, db.active, db.deactivate_all, db.files.list/upsert, db.files.for_series, db.history, db.add, db.downloaded_counts, composition (Р-21), register, queue.get, fs.verify |
 | downloads | queue.get, queue.clear, fs.sync, item.set_filename, item.set_status |
-| slicing | chapters.get/filtered/mark, task.create, verify, deep_adoption, files.list, file.set_path, queue.get |
-| renaming | reprocess, process_torrent, tasks.active |
+| slicing | chapters.get/filtered/mark, task.create, verify, deep_adoption, files.list, files.drop_for_source (Р-21), file.set_path, queue.get |
+| renaming | reprocess, process_torrent, tasks.active, preview (Р-21) |
 | library | directories.list, relocate, relocation.active |
 | metadata | search, details, map.get/list/set (владелец series_tmdb_mappings, Р-19) |
 | settings | value.get, value.set |

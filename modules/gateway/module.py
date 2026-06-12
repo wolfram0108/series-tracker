@@ -121,10 +121,12 @@ class GatewayModule(BaseModule):
                     return JSONResponse({"error": str(exc)}, status_code=502)
                 return JSONResponse({"reply": result})
 
+        from .api_media import build_router as media_router
         from .api_series import build_router as series_router
         from .api_system import build_router as system_router
         app.include_router(series_router(self))
         app.include_router(system_router(self))
+        app.include_router(media_router(self))
 
         index_path = os.path.join(self._templates_dir, "index.html")
 

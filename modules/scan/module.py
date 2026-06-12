@@ -87,6 +87,7 @@ class ScanModule(BaseModule):
         self.handle("scan.media.list", self.on_media_list)
         self.handle("scan.media.downloaded_counts", self.on_downloaded_counts)
         self.handle("scan.item.set_ignored", self.on_set_ignored)
+        self.handle("scan.composition", self.on_composition, concurrent=True)
         self.handle("scan.status.get", self.on_status_get)
         self.handle("torrents.queue.changed", self.on_queue_changed)
         self.handle("series.deleted", self.on_series_deleted)
@@ -125,9 +126,101 @@ class ScanModule(BaseModule):
 
     async def on_set_ignored(self, env: Envelope) -> None:
         """is_ignored_by_user — наша колонка; ставят UI (этап 5) и
-        slicing (нарезанная компиляция уходит из планов)."""
+        slicing (нарезанная компиляция уходит из планов).
+
+        Смена ignore меняет фактический план загрузки → публикуем
+        scan.plan.updated: диспетчер downloads пересчитает задачи и
+        свёртку статусов (Р-21; покрывает старый sync_vk_statuses)."""
         await self.repo.set_ignored(env.payload["unique_id"],
                                     bool(env.payload["is_ignored"]))
+        item = await self.repo.get_item(env.payload["unique_id"])
+        if item:
+            self.publish_event("scan.plan.updated",
+                               {"series_id": item["series_id"]})
+
+    async def on_composition(self, env: Envelope) -> list[dict]:
+        """Контракт GET composition для VK-серий (Р-21): при refresh —
+        полный скан канала; всегда — чистка нарезки устаревших
+        компиляций, синк с диском, проверка детей, пересборка плана и
+        реконструкция элементов через движок правил."""
+        series_id = env.payload["series_id"]
+        refresh = bool(env.payload.get("refresh"))
+        series = await self.request("catalog.series.get",
+                                    {"series_id": series_id})
+        if refresh:
+            # полный цикл Р-12: кандидаты + план + scan.plan.updated
+            await self._scan_vk(series)
+        items = await self.repo.items_for_series(series_id)
+        # компиляции, выпавшие из плана, теряют записи о нарезке
+        for item in items:
+            if item.get("episode_end") and item.get("plan_status") in (
+                    "replaced", "redundant"):
+                self.send_command("slicing.files.drop_for_source",
+                                  {"unique_id": item["unique_id"]})
+        await self._neighbour_sync(series_id, items)
+        if not refresh:
+            # пересборка плана из всего известного (семантика старого
+            # reset_plan_status + SmartCollector.collect)
+            await self.repo.reset_plan_status(series_id)
+            plan = build_plan(await self.repo.candidates(series_id),
+                              self._quality_priority(series))
+            await self.repo.set_plan_statuses(plan)
+            self.publish_event("scan.plan.updated",
+                               {"series_id": series_id})
+        return await self._reconstruct(series)
+
+    async def _neighbour_sync(self, series_id: int,
+                              items: list[dict]) -> None:
+        """Синк с диском (downloads) и проверка нарезанных детей
+        (slicing) — как в старом composition; соседи опциональны."""
+        try:
+            await self.request("downloads.fs.sync",
+                               {"series_id": series_id}, timeout=120)
+        except BusRequestError as exc:
+            self.log.warning("композиция: fs.sync недоступен: %s", exc)
+        for item in items:
+            if (item.get("slicing_status") or "none") in (
+                    "pending", "completed", "completed_with_errors"):
+                try:
+                    await self.request("slicing.verify",
+                                       {"unique_id": item["unique_id"]},
+                                       timeout=120)
+                except BusRequestError as exc:
+                    self.log.warning("композиция: verify %s: %s",
+                                     item["unique_id"], exc)
+
+    async def _reconstruct(self, series: dict) -> list[dict]:
+        """Элементы серии в форме старого composition-ответа."""
+        items = await self.repo.items_for_series(series["id"])
+        profile_id = series.get("parser_profile_id")
+        results: list[dict] = [{} for _ in items]
+        if profile_id and items:
+            reply = await self.request("rules.apply", {
+                "profile_id": profile_id,
+                "titles": [i.get("source_title") or "" for i in items]},
+                timeout=300)
+            results = reply["results"]
+        plan = []
+        for item, r in zip(items, results):
+            plan.append({
+                "source_data": {
+                    "title": item.get("source_title"),
+                    "url": item.get("source_url"),
+                    "publication_date": item.get("publication_date"),
+                    "resolution": item.get("resolution"),
+                },
+                "match_events": r.get("events") or [],
+                "result": {"extracted": r.get("extracted") or {}},
+                "season": item.get("season"),
+                "plan_status": item.get("plan_status"),
+                "status": item.get("status"),
+                "unique_id": item.get("unique_id"),
+                "final_filename": item.get("final_filename"),
+                "slicing_status": item.get("slicing_status") or "none",
+                "is_ignored_by_user": bool(item.get("is_ignored_by_user")),
+                "source_title": item.get("source_title"),
+            })
+        return plan
 
     async def on_downloaded_counts(self, env: Envelope) -> dict:
         """{counts: {series_id: n}} — скачанные VK-эпизоды (Р-19)."""

@@ -496,3 +496,38 @@ POST /series/<id>/scan.
   сохранена как админ-инструмент).
 - **/api/agent/reset удалён** (согласовано): был сломан (находка 23)
   и мёртв; «зависшие статусы» невозможны — статус не хранится (Р-11).
+
+### Р-21. Media-items и операции серии (согласован 2026-06-12, этап 5 блок 4)
+Разбор 18 точек routes/media.py + остатка routes/series.py.
+
+- **Главы и нарезка** (7 точек) — на готовые контракты Р-16
+  (slicing.chapters.get/filtered/mark, task.create, verify,
+  deep_adoption); gateway — формы старых ответов (status_message
+  собирает gateway — это презентация). deep-adoption — фоновая
+  команда, ответ сразу (как старый поток). Согласованное упрощение:
+  тело 400 у slice-with-filter — только текст ошибки (без дублирования
+  filtered_chapters; фронт показывает только сообщение).
+- **ignore → пересборка плана**: scan.item.set_ignored публикует
+  scan.plan.updated — диспетчер downloads пересчитывает задачи и
+  свёртку (покрывает старый sync_vk_statuses и честно качает элемент,
+  с которого сняли ignore).
+- **Композиция по владельцам**: scan.composition (VK: refresh → полный
+  цикл скана Р-12; всегда — чистка нарезки выпавших компиляций
+  командой slicing.files.drop_for_source, downloads.fs.sync,
+  slicing.verify по детям, пересборка плана, реконструкция батчем
+  rules.apply вместо пошагового RuleEngine) и torrents.composition
+  (свои файлы + rules.format_torrent_file + наличие на диске).
+  Сознательные отличия: после refresh план строится по модели Р-12
+  (кандидаты текущего скана с фантомной защитой); превью имени
+  торрент-файла — с сезонной папкой (точнее старого, который
+  форматировал без неё и мог давать ложный is_mismatch).
+- **rename_preview** → query renaming.preview: тот же обход, что у
+  переобработки VK, без касания диска и БД.
+- **reprocess / reprocess_vk_files**: 409 по renaming.tasks.active,
+  иначе фоновая команда renaming.reprocess (тип определяет сам модуль).
+- **Удалены три мёртвые точки** (согласовано): PUT ignore по числовому
+  id (дубль), POST reset_torrents (разрушительна, использовалась
+  только при отладке), POST relocate (дубль сценария сохранения
+  свойств Р-19).
+- source-filenames: сборка gateway (торрент — basename original_path
+  из torrents.db.files.for_series; VK — final_filename).

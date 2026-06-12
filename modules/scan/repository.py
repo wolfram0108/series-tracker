@@ -174,6 +174,17 @@ class ScanRepository:
             "UPDATE media_items SET is_ignored_by_user=? WHERE unique_id=?",
             (1 if ignored else 0, unique_id))
 
+    async def get_item(self, unique_id: str) -> dict | None:
+        return await self._db.fetch_one(
+            "SELECT * FROM media_items WHERE unique_id=?", (unique_id,))
+
+    async def reset_plan_status(self, series_id: int) -> None:
+        """Пересборка плана композиции (Р-21): все элементы — снова
+        кандидаты (семантика старого reset_plan_status_for_series)."""
+        await self._db.execute(
+            "UPDATE media_items SET plan_status='candidate' "
+            "WHERE series_id=?", (series_id,))
+
     async def set_plan_statuses(self, plan: dict[str, str]) -> None:
         for unique_id, plan_status in plan.items():
             await self._db.execute(

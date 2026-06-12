@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 
 from core import BaseModule, BusRequestError
@@ -94,6 +95,9 @@ class TorrentsModule(BaseModule):
         self.handle("torrents.db.add", self.on_db_add)
         self.handle("torrents.db.downloaded_counts",
                     self.on_downloaded_counts)
+        self.handle("torrents.db.files.for_series", self.on_files_for_series)
+        self.handle("torrents.composition", self.on_composition,
+                    concurrent=True)
         self.handle("series.deleted", self.on_series_deleted)
 
     async def on_start(self) -> None:
@@ -266,6 +270,51 @@ class TorrentsModule(BaseModule):
     async def on_db_history(self, env: Envelope) -> list[dict]:
         """Вся история раздач серии (контракт GET torrents/history)."""
         return await self.repo.history(env.payload["series_id"])
+
+    async def on_files_for_series(self, env: Envelope) -> list[dict]:
+        """Файлы всех раздач серии (sourcefile-список, композиция)."""
+        return await self.repo.files_for_series(env.payload["series_id"])
+
+    async def on_composition(self, env: Envelope) -> list[dict]:
+        """Контракт GET composition для торрент-серий (Р-21): свежие
+        правила + предпросмотр имени + наличие файла на диске."""
+        series_id = env.payload["series_id"]
+        series = await self.request("catalog.series.get",
+                                    {"series_id": series_id})
+        files = await self.repo.files_for_series(series_id)
+        plan: list[dict] = []
+        has_profile = bool(series.get("parser_profile_id"))
+        for f in files:
+            current = f.get("renamed_path") or f["original_path"]
+            present = await asyncio.to_thread(
+                os.path.exists,
+                os.path.join(series["save_path"], current))
+            if not has_profile:
+                # как в оригинале: без профиля — сохранённые метаданные
+                meta = f.get("extracted_metadata")
+                plan.append({
+                    "id": f["id"], "original_path": f["original_path"],
+                    "renamed_path_preview": current,
+                    "status": f["status"],
+                    "extracted_metadata":
+                        json.loads(meta) if meta else {},
+                    "is_file_present": present,
+                    "qb_hash": f.get("qb_hash")})
+                continue
+            reply = await self.request("rules.format_torrent_file", {
+                "series": series,
+                "file_basename": os.path.basename(f["original_path"]),
+                "original_path": f["original_path"]}, timeout=60)
+            preview = reply["filename"] or current
+            plan.append({
+                "id": f["id"], "original_path": f["original_path"],
+                "renamed_path_preview": preview,
+                "status": f["status"],
+                "extracted_metadata": reply.get("extracted") or {},
+                "is_file_present": present,
+                "qb_hash": f.get("qb_hash"),
+                "is_mismatch": current != preview})
+        return plan
 
     async def on_db_add(self, env: Envelope) -> dict:
         """Раздачи формы добавления серии — только реестр в БД, без qBit
