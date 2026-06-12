@@ -18,9 +18,14 @@ Queries:
   catalog.status.get {series_id} → {series_id, statuses: [...]}
 
 Events (исходящие):
-  series.status.changed {series_id, statuses} — только при изменении
-      набора; на этапе 5 транслируется в SSE series_updated (оживляет
-      ветку фронта s.statuses, находка 24).
+  series.status.changed {series_id, statuses, is_busy} — только при
+      изменении набора; транслируется в SSE series_updated (Р-18;
+      оживляет ветку фронта s.statuses, находка 24).
+  series.busy.changed {series_id, is_busy, statuses} — смена занятости
+      карточки; тоже series_updated. Оба события несут ПОЛНУЮ дельту
+      {statuses, is_busy}: обработчик series_updated на фронте снимает
+      спиннер сохранения по falsy is_busy, поэтому каждое series_updated
+      обязано нести актуальный is_busy (находка 38).
 """
 from __future__ import annotations
 
@@ -85,8 +90,9 @@ class CatalogModule(BaseModule):
         if not sources:
             self._busy.pop(series_id, None)
         if before != now:
-            self.publish_event("series.busy.changed",
-                               {"series_id": series_id, "is_busy": now})
+            self.publish_event("series.busy.changed", {
+                "series_id": series_id, "is_busy": now,
+                "statuses": self.agg.statuses(series_id)})
 
     async def on_set_save_path(self, env: Envelope) -> dict:
         """save_path — наша колонка; library пишет её после перемещения."""
@@ -107,8 +113,9 @@ class CatalogModule(BaseModule):
                             statuses: list[str] | None) -> None:
         if statuses is None:
             return
-        self.publish_event("series.status.changed",
-                           {"series_id": series_id, "statuses": statuses})
+        self.publish_event("series.status.changed", {
+            "series_id": series_id, "statuses": statuses,
+            "is_busy": bool(self._busy.get(series_id))})
 
     # --- queries --------------------------------------------------------------
 

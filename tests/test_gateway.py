@@ -58,7 +58,7 @@ async def test_bus_event_reaches_sse_with_mapped_name(system, monkeypatch):
     # транспортный уровень проверяется смоук-тестом под живым uvicorn.
     bus, _, gateway = system
     monkeypatch.setitem(gateway_module.SSE_MAP,
-                        "demo.things.changed", "things_changed")
+                        "demo.things.changed", ("things_changed", None))
 
     stream = gateway._sse_stream()
     received: list[str] = []
@@ -83,3 +83,63 @@ async def test_bus_event_reaches_sse_with_mapped_name(system, monkeypatch):
     assert text.startswith("event: things_changed\n")
     assert json.loads(text.split("data:", 1)[1].strip()) == {"id": 7}
     assert "секрет" not in text
+
+
+async def _collect_sse_events(gateway, bus, envelopes, expected):
+    """Прогоняет конверты через живой SSE-генератор, возвращает
+    [(имя события, payload)] первых `expected` событий."""
+    stream = gateway._sse_stream()
+    received: list[str] = []
+
+    async def consume():
+        events = 0
+        async for chunk in stream:
+            received.append(chunk)
+            if chunk.startswith("event:"):
+                events += 1
+                if events >= expected:
+                    break
+
+    consumer = asyncio.create_task(consume())
+    await asyncio.sleep(0.05)
+    for env in envelopes:
+        bus.publish(env)
+    await asyncio.wait_for(consumer, timeout=5)
+    await stream.aclose()
+
+    result = []
+    for block in "".join(received).split("\n\n"):
+        if not block.startswith("event:"):
+            continue
+        name_line, data_line = block.split("\n", 1)
+        result.append((name_line.split(": ", 1)[1],
+                       json.loads(data_line.split("data: ", 1)[1])))
+    return result
+
+
+@pytest.mark.asyncio
+async def test_sse_contract_mappings_and_transforms(system):
+    """Р-18: формы payload старого SSE-контракта (sse_contract.md)."""
+    bus, _, gateway = system
+    events = await _collect_sse_events(gateway, bus, [
+        Envelope(topic="series.status.changed", kind="event",
+                 payload={"series_id": 5, "statuses": ["downloading"],
+                          "is_busy": False}),
+        Envelope(topic="series.busy.changed", kind="event",
+                 payload={"series_id": 5, "is_busy": True,
+                          "statuses": ["waiting"]}),
+        Envelope(topic="torrents.queue.changed", kind="event",
+                 payload={"count": 1, "tasks": [{"hash": "abc"}]}),
+        Envelope(topic="renaming.finished", kind="event",
+                 payload={"series_id": 5}),
+    ], expected=4)
+
+    # series_updated — дельта {id, statuses, is_busy}, не полный объект
+    assert events[0] == ("series_updated", {
+        "id": 5, "statuses": ["downloading"], "is_busy": False})
+    assert events[1] == ("series_updated", {
+        "id": 5, "statuses": ["waiting"], "is_busy": True})
+    # очереди — голый массив задач (контракт фронта this.agentQueue = data)
+    assert events[2] == ("agent_queue_update", [{"hash": "abc"}])
+    # события без трансформации проходят как есть
+    assert events[3] == ("renaming_complete", {"series_id": 5})

@@ -4,8 +4,9 @@
 в SSE. Сам не содержит бизнес-логики (она в модулях); его логика —
 только адаптация протоколов и таблица соответствия топиков SSE-именам.
 
-SSE_MAP заполняется по мере ревизии контракта (этап 5): ключ — топик
-шины, значение — имя SSE-события для фронта.
+SSE_MAP: ключ — топик шины, значение — (имя SSE-события, трансформация
+payload). Контракт — contracts/sse_contract.md (Р-18); series_added и
+series_deleted добавятся при ревизии CRUD сериалов.
 """
 from __future__ import annotations
 
@@ -19,8 +20,37 @@ from fastapi.staticfiles import StaticFiles
 
 from core import BaseModule, BusRequestError
 
-# Топик шины -> имя SSE-события. Источник имён — contracts/sse_contract.md.
-SSE_MAP: dict[str, str] = {}
+
+def _series_delta(p: dict) -> dict:
+    """series_updated — дельта вместо полного объекта серии (Р-18).
+
+    Object.assign на фронте сливает только присланные поля; is_busy
+    обязан присутствовать в каждом событии (находка 38 — по falsy
+    is_busy фронт снимает спиннер сохранения)."""
+    return {"id": p["series_id"], "statuses": p["statuses"],
+            "is_busy": p["is_busy"]}
+
+
+def _bare_tasks(p: dict) -> list:
+    """Старый контракт очередей — голый массив задач."""
+    return p["tasks"]
+
+
+# Топик шины -> (имя SSE-события, трансформация payload | None=как есть).
+# Контракт и решения по каждому событию — contracts/sse_contract.md (Р-18).
+# series_added / series_deleted добавляются при ревизии CRUD (блок 2).
+# agent_heartbeat удалён по согласованию (Р-18).
+SSE_MAP: dict[str, tuple[str, object]] = {
+    "series.status.changed": ("series_updated", _series_delta),
+    "series.busy.changed": ("series_updated", _series_delta),
+    "torrents.queue.changed": ("agent_queue_update", _bare_tasks),
+    "downloads.queue.changed": ("download_queue_update", _bare_tasks),
+    "slicing.queue.changed": ("slicing_queue_update", _bare_tasks),
+    "scan.status.changed": ("scanner_status_update", None),
+    "renaming.finished": ("renaming_complete", None),
+    "library.relocation.started": ("relocation_started", None),
+    "library.relocation.finished": ("relocation_finished", None),
+}
 
 _KEEPALIVE_SECONDS = 15.0
 
@@ -97,10 +127,12 @@ class GatewayModule(BaseModule):
                     continue
                 if env.kind != "event":
                     continue
-                sse_name = SSE_MAP.get(env.topic)
-                if sse_name is None:
+                mapping = SSE_MAP.get(env.topic)
+                if mapping is None:
                     continue
-                data = json.dumps(env.payload, ensure_ascii=False)
+                sse_name, transform = mapping
+                payload = transform(env.payload) if transform else env.payload
+                data = json.dumps(payload, ensure_ascii=False)
                 yield f"event: {sse_name}\ndata: {data}\n\n"
         finally:
             self.bus.unsubscribe(sub)

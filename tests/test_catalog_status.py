@@ -143,7 +143,8 @@ async def test_contribution_publishes_only_changes(system):
         "source": "downloads", "series_id": 1,
         "flags": {"downloading": True}})
     assert await _next_change(sub) == {"series_id": 1,
-                                       "statuses": ["downloading"]}
+                                       "statuses": ["downloading"],
+                                       "is_busy": False}
 
     # идентичная свёртка — события нет; следующее изменение приходит первым
     probe.publish_event("series.status.contribution", {
@@ -152,7 +153,8 @@ async def test_contribution_publishes_only_changes(system):
     probe.publish_event("series.status.contribution", {
         "source": "downloads", "series_id": 1,
         "flags": {"downloading": False, "ready": True}})
-    assert await _next_change(sub) == {"series_id": 1, "statuses": ["ready"]}
+    assert await _next_change(sub) == {"series_id": 1, "statuses": ["ready"],
+                                       "is_busy": False}
     assert sub.queue.empty()
 
 
@@ -163,12 +165,14 @@ async def test_viewing_commands_and_sse_guard(system):
 
     probe.send_command("catalog.viewing.start", {"series_id": 1})
     assert await _next_change(sub) == {"series_id": 1,
-                                       "statuses": ["viewing", "waiting"]}
+                                       "statuses": ["viewing", "waiting"],
+                                       "is_busy": False}
 
     # последний SSE-клиент отключился — viewing сброшен без heartbeat'ов
     probe.publish_event("gateway.sse.clients", {"count": 0})
     assert await _next_change(sub) == {"series_id": 1,
-                                       "statuses": ["waiting"]}
+                                       "statuses": ["waiting"],
+                                       "is_busy": False}
 
 
 @pytest.mark.asyncio

@@ -27,9 +27,9 @@
 | Событие | Издатель | Подписчики сейчас | SSE (этап 5) |
 |---|---|---|---|
 | series.status.contribution | scan, downloads, torrents, slicing | catalog | — |
-| series.status.changed {series_id, statuses} | catalog | — | series_updated (оживляет ветку s.statuses) |
+| series.status.changed {series_id, statuses, is_busy} | catalog | gateway | series_updated {id, statuses, is_busy} (Р-18) |
 | series.busy.contribution | library, renaming | catalog | — |
-| series.busy.changed {series_id, is_busy} | catalog | — | в series_updated (решить формат) |
+| series.busy.changed {series_id, is_busy, statuses} | catalog | gateway | series_updated {id, statuses, is_busy} (Р-18) |
 | scan.plan.updated {series_id} | scan | downloads | — |
 | scan.status.changed | scan | — | scanner_status_update |
 | torrents.queue.changed {count, tasks} | torrents | scan (count=0 → следующий скан) | agent_queue_update |
@@ -40,14 +40,15 @@
 | settings.changed {key, value} | settings | downloads (max_parallel_downloads) | — |
 | gateway.sse.clients {count} | gateway | catalog (count=0 → сброс viewing) | — |
 
-## SSE старого контракта, требующие решения на этапе 5
+## SSE: контракт закрыт Р-18 (см. sse_contract.md)
 
+SSE_MAP gateway реализован (блок 1 этапа 5): series_updated — дельта,
+очереди — голые массивы, agent_heartbeat — удалён по согласованию,
+второе SSE-соединение фронта (находка 37) чинится в блоке 6.
+
+Остаётся на следующие блоки:
 - `series_added` / `series_deleted` — придут с CRUD сериалов (catalog,
-  ревизия эндпоинтов).
-- `agent_heartbeat` — пульсация индикаторов агентов; по принципу 2
-  «heartbeat ради оживления UI — анти-паттерн», но индикаторы — часть
-  дизайна. Решить с пользователем: выводить пульс из реальных событий
-  (queue.changed и пр.) или воспроизвести.
+  блок 2).
 - Вызовы при открытии модалки статуса: catalog.viewing.start +
   downloads.fs.sync + torrents.fs.verify (решения Р-11/Р-13/Р-14).
 - Сохранение свойств сериала: catalog-обновление + library.relocate

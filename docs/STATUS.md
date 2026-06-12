@@ -3,8 +3,8 @@
 > Обновлено: 2026-06-12. Этот файл — снимок «где мы» для продолжения
 > работы после сжатия контекста. Правила работы — в [CLAUDE.md](../CLAUDE.md)
 > (целеполагание!), решения — в [contracts/revision.md](../contracts/revision.md)
-> (Р-1..Р-17), находки — в [contracts/findings.md](../contracts/findings.md)
-> (1–36), карта топиков шины — в
+> (Р-1..Р-18), находки — в [contracts/findings.md](../contracts/findings.md)
+> (1–38), карта топиков шины — в
 > [contracts/bus_topics.md](../contracts/bus_topics.md), план — в
 > [docs/refactoring_bus_plan.md](refactoring_bus_plan.md).
 
@@ -31,25 +31,32 @@ ST_QBIT_USER=admin ST_QBIT_PASS=REMOVED-SECRET pytest tests/test_torrents_integr
 
 ## СЛЕДУЮЩИЙ ШАГ (точка продолжения)
 
-**ЭТАП 4 ЗАВЕРШЁН** (Р-11..Р-17): весь конвейер на шине, все
-межмодульные контракты закрыты реальными модулями, статусная и
-busy-модели работают на свёртках. 137 тестов (изредка возможен флак
-тестовых таймаутов под полной нагрузкой — код-гонок после фикса
-_pump не выявлено).
+**Идёт этап 5 (gateway)** — ревизия 78 метод-точек старого контракта
+(contracts/endpoints.md) согласованными блоками:
 
-**Следующий — этап 5 (gateway)**: все 73 точки старого контракта
-(contracts/endpoints.md) с ревизией «подтверждена/перепроектирована/
-удалена»; SSE-маппинги (series.status.changed → series_updated {id,
-statuses}, series.busy.changed, queue.changed ×3, renaming.finished,
-library.relocation.*, scan.status.changed → scanner_status_update,
-agent_heartbeat — решить, нужен ли); правки JS-слоя фронта — каждая
-по согласованию (визуал неприкосновенен; мёртвая ветка s.statuses
-оживает без правок JS; убрать viewing-setInterval — согласовано в
-Р-11); открытие модалки → catalog.viewing.start + downloads.fs.sync +
-torrents.fs.verify; сохранение свойств → renaming.reprocess /
-library.relocate. CRUD сериалов (добавление/удаление) — в catalog при
-ревизии соответствующих эндпоинтов. Находка 7г: финальная сверка
-журнала WORKER TIMEOUT с логами приложения — на этапе 6 (стенд).
+1. ✓ **SSE-контракт (Р-18, sse_contract.md)**: SSE_MAP с трансформациями
+   реализован; series_updated — дельта {id, statuses, is_busy} (catalog
+   шлёт оба поля в обоих событиях — находка 38); очереди — голые
+   массивы; agent_heartbeat удалён по согласованию (индикаторы остаются
+   на queue/status-событиях); второе SSE-соединение (находка 37) —
+   чинится в блоке 6.
+2. **Серии** (следующий): список/детали/CRUD (series_added/deleted),
+   composition, история торрентов, state, toggle_auto_scan, viewing.
+3. **Скан и очереди**: scanner/*, agent/queue+reset, downloads/queue*.
+4. **Media-items и операции серии**: главы/slice/verify/ignore/
+   deep-adoption/reprocess*/relocate/rename_preview.
+5. **Настройки и справочники**: auth, settings/*, trackers,
+   parser-profiles (конструктор), parse_url, tmdb, directories, logs,
+   database/*.
+6. **JS-слой** (пакет согласованных правок): убрать viewing-setInterval
+   (Р-11); открытие модалки → catalog.viewing.start + downloads.fs.sync
+   + torrents.fs.verify; удалить слушатель agent_heartbeat (Р-18);
+   settingsDebug.js на главное SSE-соединение (находка 37);
+   компенсирующие loadInitialSeries — по месту.
+
+Сохранение свойств серии → catalog-обновление + library.relocate +
+renaming.reprocess (блоки 2/4). Находка 7г: финальная сверка журнала
+WORKER TIMEOUT с логами приложения — на этапе 6 (стенд).
 
 После этапа 5 — этап 6 (стенд): учётки из
 /home/user/series-tracker/docs/key.txt (ещё НЕ читал); Playwright для
