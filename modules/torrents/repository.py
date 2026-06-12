@@ -75,9 +75,10 @@ class TorrentsRepository:
 
     async def history(self, series_id: int) -> list[dict]:
         """Вся история раздач серии (контракт старого get_torrents)."""
-        return await self._db.fetch_all(
+        rows = await self._db.fetch_all(
             "SELECT * FROM torrents WHERE series_id=? ORDER BY id",
             (series_id,))
+        return self._db.coerce_bools(rows, ("is_active",))
 
     async def add_registered_rows(self, series_id: int,
                                   torrents: list[dict]) -> int:

@@ -142,9 +142,12 @@ class ScanRepository:
         return {"added": added, "updated": updated, "deleted": deleted,
                 "kept_phantoms": kept_phantoms}
 
+    _BOOLS = ("is_ignored_by_user", "is_available")
+
     async def items_for_series(self, series_id: int) -> list[dict]:
-        return await self._db.fetch_all(
+        rows = await self._db.fetch_all(
             "SELECT * FROM media_items WHERE series_id=?", (series_id,))
+        return self._db.coerce_bools(rows, self._BOOLS)
 
     async def downloaded_counts(self) -> dict[int, int]:
         """Скачанные эпизоды по сериям (final_filename есть) — батч для

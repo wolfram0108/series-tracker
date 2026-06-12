@@ -26,13 +26,17 @@ class CatalogRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
+    _BOOLS = ("auto_scan_enabled",)
+
     async def all_series(self) -> list[dict]:
-        return await self._db.fetch_all(
+        rows = await self._db.fetch_all(
             f"SELECT {_COLUMNS} FROM series ORDER BY id")
+        return self._db.coerce_bools(rows, self._BOOLS)
 
     async def get_series(self, series_id: int) -> dict | None:
-        return await self._db.fetch_one(
+        row = await self._db.fetch_one(
             f"SELECT {_COLUMNS} FROM series WHERE id=?", (series_id,))
+        return self._db.coerce_bools(row, self._BOOLS)
 
     async def set_save_path(self, series_id: int, save_path: str) -> None:
         await self._db.execute(

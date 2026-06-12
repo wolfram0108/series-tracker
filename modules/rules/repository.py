@@ -18,6 +18,7 @@ class RulesRepository:
             "SELECT id, profile_id, name, priority, action_pattern, "
             "continue_after_match FROM parser_rules "
             "WHERE profile_id=? ORDER BY priority", (profile_id,))
+        self._db.coerce_bools(rules, ("continue_after_match",))
         for rule in rules:
             rule["conditions"] = await self._db.fetch_all(
                 "SELECT id, condition_type, pattern, logical_operator "

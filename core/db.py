@@ -43,6 +43,22 @@ class Database:
         rows = await self.fetch_all(query, params)
         return rows[0] if rows else None
 
+    @staticmethod
+    def coerce_bools(rows: list[dict] | dict | None,
+                     columns: tuple[str, ...]) -> list[dict] | dict | None:
+        """SQLite хранит BOOLEAN как 0/1; старый контракт (SQLAlchemy)
+        отдавал true/false, и фронт (Vue v-model) различает это строго —
+        находка 41. Владельцы таблиц приводят свои булевы колонки на
+        выдаче наружу."""
+        if rows is None:
+            return None
+        single = isinstance(rows, dict)
+        for row in [rows] if single else rows:
+            for col in columns:
+                if col in row and row[col] is not None:
+                    row[col] = bool(row[col])
+        return rows
+
     async def execute(self, query: str, params: Iterable[Any] = (), *,
                       enforce_fk: bool = True) -> int:
         """enforce_fk=False — для событийного каскада удаления (Р-19):
