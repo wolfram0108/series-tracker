@@ -31,7 +31,7 @@ async def system(db_path):
     bus = Bus()
     db = Database(db_path)
     modules = [SettingsModule(bus, db), MetadataModule(bus),
-               LibraryModule(bus), Probe(bus)]
+               LibraryModule(bus, db), Probe(bus)]
     runner = Runner(bus, modules)
     await runner.start()
     yield bus, db, modules
@@ -122,7 +122,8 @@ async def test_library_lists_only_directories_sorted(system, tmp_path):
 @pytest.mark.asyncio
 async def test_library_allowed_roots_enforced(db_path, tmp_path):
     bus = Bus()
-    modules = [LibraryModule(bus, allowed_roots=[str(tmp_path)]), Probe(bus)]
+    modules = [LibraryModule(bus, Database(db_path),
+                              allowed_roots=[str(tmp_path)]), Probe(bus)]
     runner = Runner(bus, modules)
     await runner.start()
     try:

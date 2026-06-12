@@ -38,11 +38,17 @@ class CatalogModule(BaseModule):
     def __init__(self, bus, db: Database) -> None:
         self.repo = CatalogRepository(db)
         self.agg = StatusAggregator()
+        # is_busy (блокировка карточки): эфемерный набор вкладов
+        # series_id -> {источники активной работы} (Р-17). Ошибка
+        # больше не держит busy (находка 36) — только активная работа.
+        self._busy: dict[int, set[str]] = {}
         super().__init__(bus)
 
     def register(self) -> None:
         self.handle("series.status.contribution", self.on_contribution)
+        self.handle("series.busy.contribution", self.on_busy_contribution)
         self.handle("gateway.sse.clients", self.on_sse_clients)
+        self.handle("catalog.series.set_save_path", self.on_set_save_path)
         self.handle("catalog.viewing.start", self.on_viewing_start)
         self.handle("catalog.viewing.stop", self.on_viewing_stop)
         self.handle("catalog.series.list", self.on_series_list)
@@ -66,6 +72,28 @@ class CatalogModule(BaseModule):
         series_id = env.payload["series_id"]
         self._publish_if_changed(series_id, self.agg.set_viewing(series_id, False))
 
+    async def on_busy_contribution(self, env: Envelope) -> None:
+        p = env.payload
+        series_id, source = p["series_id"], p["source"]
+        sources = self._busy.setdefault(series_id, set())
+        before = bool(sources)
+        if p["busy"]:
+            sources.add(source)
+        else:
+            sources.discard(source)
+        now = bool(sources)
+        if not sources:
+            self._busy.pop(series_id, None)
+        if before != now:
+            self.publish_event("series.busy.changed",
+                               {"series_id": series_id, "is_busy": now})
+
+    async def on_set_save_path(self, env: Envelope) -> dict:
+        """save_path — наша колонка; library пишет её после перемещения."""
+        await self.repo.set_save_path(env.payload["series_id"],
+                                      env.payload["save_path"])
+        return {"ok": True}
+
     async def on_sse_clients(self, env: Envelope) -> None:
         if env.payload["count"] > 0:
             return
@@ -88,6 +116,7 @@ class CatalogModule(BaseModule):
         rows = await self.repo.all_series()
         for row in rows:
             row["statuses"] = self.agg.statuses(row["id"])
+            row["is_busy"] = bool(self._busy.get(row["id"]))
         return rows
 
     async def on_series_get(self, env: Envelope) -> dict:
@@ -96,6 +125,7 @@ class CatalogModule(BaseModule):
         if row is None:
             raise LookupError(f"сериал {series_id} не найден")
         row["statuses"] = self.agg.statuses(series_id)
+        row["is_busy"] = bool(self._busy.get(series_id))
         return row
 
     async def on_status_get(self, env: Envelope) -> dict:

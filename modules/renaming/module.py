@@ -92,6 +92,7 @@ class RenamingModule(BaseModule):
                          if series["source_type"] == "vk_video"
                          else "mass_torrent_reprocess")
             task_id = await self.repo.create(series_id, task_type)
+            self._busy(series_id, True)
             try:
                 if series["source_type"] == "vk_video":
                     renamed = await self._reprocess_vk(series)
@@ -101,8 +102,16 @@ class RenamingModule(BaseModule):
             except Exception as exc:
                 await self.repo.set_error(task_id, str(exc))
                 raise
+            finally:
+                # busy — только активная работа: ошибка не блокирует
+                # карточку навечно (Р-17, находка 36)
+                self._busy(series_id, False)
             self.publish_event("renaming.finished", {"series_id": series_id})
             return {"renamed": renamed}
+
+    def _busy(self, series_id: int, busy: bool) -> None:
+        self.publish_event("series.busy.contribution", {
+            "source": "renaming", "series_id": series_id, "busy": busy})
 
     # --- VK: файлы на диске --------------------------------------------------------------
 

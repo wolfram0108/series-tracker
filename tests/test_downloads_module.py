@@ -211,10 +211,11 @@ async def test_error_carrier_and_retry_by_next_scan(system):
     assert "недоступно" in tasks[0]["error_message"]
 
     # следующий скан: error-задача заменяется новой, без дублей
+    # (completed пишется на шаг раньше удаления задачи — ждём оба факта)
     dl.fail_urls.clear()
     probe.publish_event("scan.plan.updated", {"series_id": 2})
     assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "completed")
-    assert _tasks(db_path) == []
+    assert await _wait(lambda: _tasks(db_path) == [])
 
 
 @pytest.mark.asyncio

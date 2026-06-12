@@ -214,10 +214,16 @@ class DownloadsModule(BaseModule):
         for task in await self.repo.next_pending(free):
             if task["id"] in self._active:
                 continue
+            # слот резервируется ДО первого await — конкурентный _pump
+            # (завершение другой загрузки) не возьмёт ту же задачу
+            placeholder: asyncio.Future = asyncio.get_running_loop(
+                ).create_future()
+            self._active[task["id"]] = placeholder
             await self.repo.mark_downloading(task["id"])
             await self.repo.set_item_status(task["task_key"], "downloading")
             runner = asyncio.create_task(self._run_download(task))
             self._active[task["id"]] = runner
+            placeholder.cancel()
             self._tasks.append(runner)
             self.log.info("задача %d (%s) отправлена на загрузку",
                           task["id"], task["task_key"])
