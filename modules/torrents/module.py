@@ -68,6 +68,8 @@ class TorrentsModule(BaseModule):
         self._pipe: dict[str, dict] = {}  # hash -> задача конвейера
         self._wake = asyncio.Event()
         self._flags_cache: dict[int, dict] = {}
+        self._names_cache: dict[int, str] = {}  # имена серий для прогресса
+        self._progress_snapshot: str | None = None
         self._has_incomplete = False
         self._pipeline_poll = pipeline_poll
         self._monitor_active = monitor_active
@@ -96,6 +98,7 @@ class TorrentsModule(BaseModule):
         self.handle("torrents.db.downloaded_counts",
                     self.on_downloaded_counts)
         self.handle("torrents.db.files.for_series", self.on_files_for_series)
+        self.handle("torrents.db.progress.list", self.on_progress_list)
         self.handle("torrents.composition", self.on_composition,
                     concurrent=True)
         self.handle("series.deleted", self.on_series_deleted)
@@ -120,28 +123,33 @@ class TorrentsModule(BaseModule):
                     username=row.get("username") or "",
                     password=row.get("password") or "")
 
+    async def _connect_qbt(self) -> None:
+        """Создание клиента и вход; любая ошибка (включая пустой URL —
+        креды ещё не настроены) не валит процесс: конвейер ждёт
+        (находка 7 — модуль не замораживает и не роняет систему)."""
+        cfg = await self._resolve_qbt_config()
+        old, self.qbt = self.qbt, QbtClient(**cfg)
+        if old:
+            await old.close()
+        if not cfg.get("base_url"):
+            self.log.warning("креды qBittorrent не настроены (ни env, ни "
+                             "таблица auth) — конвейер ждёт настроек")
+            return
+        try:
+            await self.qbt.login()
+        except Exception as exc:  # noqa: BLE001 — недоступность не фатальна
+            self.log.error("qBittorrent недоступен: %s — конвейер будет "
+                           "ждать", exc)
+
     async def on_credentials_changed(self, env: Envelope) -> None:
         if env.payload.get("service") != "qbittorrent" or self._qbt_injected:
             return
         self.log.info("креды qBittorrent изменились — пересоздаём клиент")
-        old = self.qbt
-        self.qbt = QbtClient(**await self._resolve_qbt_config())
-        if old:
-            await old.close()
-        try:
-            await self.qbt.login()
-        except QbtError as exc:
-            self.log.error("вход в qBittorrent с новыми кредами не "
-                           "удался: %s", exc)
+        await self._connect_qbt()
 
     async def on_start(self) -> None:
         if not self._qbt_injected:
-            self.qbt = QbtClient(**await self._resolve_qbt_config())
-            try:
-                await self.qbt.login()
-            except QbtError as exc:
-                self.log.error("qBittorrent недоступен при старте: %s — "
-                               "конвейер будет ждать", exc)
+            await self._connect_qbt()
         await self._recover_tasks()
         self._tasks.append(asyncio.create_task(self._pipeline_loop()))
         self._tasks.append(asyncio.create_task(self._monitor_loop()))
@@ -385,6 +393,7 @@ class TorrentsModule(BaseModule):
         for h in dropped:
             self._pipe.pop(h, None)
         self._flags_cache.pop(series_id, None)
+        self._names_cache.pop(series_id, None)
         if dropped:
             self._broadcast_queue()
 
@@ -544,6 +553,7 @@ class TorrentsModule(BaseModule):
         rows = await self.repo.all_active()
         if not rows:
             self._has_incomplete = False
+            await self._broadcast_progress()
             return
         by_series: dict[int, list[str]] = {}
         for r in rows:
@@ -561,6 +571,41 @@ class TorrentsModule(BaseModule):
             await self.repo.remove_stale_progress(
                 series_id, [h for h in hashes if h in info_map])
             await self._contribute(series_id)
+        await self._broadcast_progress()
+
+    # --- прогресс торрентов для UI (Р-23: вместо поллинга вкладки) ---------------------
+
+    async def _progress_tasks(self) -> list[dict]:
+        tasks = await self.repo.all_torrent_progress()
+        for t in tasks:
+            t["series_name"] = await self._series_name(t["series_id"])
+        return tasks
+
+    async def _series_name(self, series_id: int) -> str:
+        if series_id not in self._names_cache:
+            try:
+                series = await self.request("catalog.series.get",
+                                            {"series_id": series_id},
+                                            timeout=10)
+                self._names_cache[series_id] = series.get("name") or ""
+            except BusRequestError:
+                return ""
+        return self._names_cache[series_id]
+
+    async def on_progress_list(self, env: Envelope) -> dict:
+        """Контракт старого GET /api/series/active_torrents."""
+        return {"tasks": await self._progress_tasks()}
+
+    async def _broadcast_progress(self) -> None:
+        """torrents.progress.changed — только при реальных изменениях
+        (SSE torrent_progress_update; заменяет 5-секундный поллинг
+        вкладки «Агенты», находка 40)."""
+        tasks = await self._progress_tasks()
+        snapshot = json.dumps(tasks, sort_keys=True, default=str)
+        if snapshot == self._progress_snapshot:
+            return
+        self._progress_snapshot = snapshot
+        self.publish_event("torrents.progress.changed", {"tasks": tasks})
 
     # --- свёртка статусов (Р-11) --------------------------------------------------------
 

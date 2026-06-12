@@ -90,12 +90,15 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     # ВАЖНО: статический путь регистрируется до /{series_id}.
     @r.get("/api/series/active_torrents")
     async def active_torrents():
+        """Прогресс торрент-загрузок с именами серий (таблица
+        «Мониторинг» вкладки агентов; Р-23 — исправление маппинга
+        блока 2: источник download_tasks, не очередь конвейера)."""
         try:
-            reply = await gw.request("torrents.queue.get", {}, timeout=10)
+            reply = await gw.request("torrents.db.progress.list", {},
+                                     timeout=10)
         except BusRequestError:
             return []
-        # старый контракт: у задач поле hash (находка 39)
-        return [{"hash": t.get("torrent_hash"), **t} for t in reply["tasks"]]
+        return reply["tasks"]
 
     @r.get("/api/series/{series_id}")
     async def series_details(series_id: int):
@@ -162,12 +165,24 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/series/{series_id}/state")
     async def set_state(series_id: int, request: Request):
         """Старый контракт фронта: ['viewing'] при открытии модалки,
-        [] при закрытии → эфемерный viewing (Р-11)."""
+        [] при закрытии → эфемерный viewing (Р-11). Открытие модалки
+        дополнительно запускает сверку файлов с диском (Р-13/Р-14:
+        замена фоновых периодических проверок старой системы)."""
         data = await request.json()
-        topic = ("catalog.viewing.start"
-                 if "viewing" in data.get("state", [])
-                 else "catalog.viewing.stop")
+        viewing = "viewing" in data.get("state", [])
+        topic = "catalog.viewing.start" if viewing else "catalog.viewing.stop"
         gw.send_command(topic, {"series_id": series_id})
+        if viewing:
+            try:
+                series = await gw.request("catalog.series.get",
+                                          {"series_id": series_id},
+                                          timeout=10)
+            except BusRequestError:
+                return {"success": True}
+            sync_topic = ("downloads.fs.sync"
+                          if series.get("source_type") == "vk_video"
+                          else "torrents.fs.verify")
+            gw.send_command(sync_topic, {"series_id": series_id})
         return {"success": True}
 
     @r.post("/api/series/{series_id}/toggle_auto_scan")

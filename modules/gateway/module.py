@@ -71,6 +71,7 @@ SSE_MAP: dict[str, tuple[str, object]] = {
     "series.added": ("series_added", _series_added),
     "series.deleted": ("series_deleted", _deleted_id),
     "torrents.queue.changed": ("agent_queue_update", _agent_tasks),
+    "torrents.progress.changed": ("torrent_progress_update", _bare_tasks),
     "downloads.queue.changed": ("download_queue_update", _bare_tasks),
     "slicing.queue.changed": ("slicing_queue_update", _bare_tasks),
     "scan.status.changed": ("scanner_status_update", None),

@@ -32,6 +32,7 @@
 | `relocation_started` | `{series_id}` | подтверждено | `library.relocation.started` | как есть |
 | `relocation_finished` | `{series_id, success, message}` | подтверждено | `library.relocation.finished` | как есть |
 | `renaming_complete` | `{series_id}` | подтверждено | `renaming.finished` | как есть |
+| `torrent_progress_update` | — (новое, Р-23) | замена поллинга вкладки «Агенты» (находка 40) | `torrents.progress.changed {tasks}` | голый массив `tasks` |
 
 ## Решения и обоснования
 
@@ -57,7 +58,15 @@ catalog включает оба поля (`statuses`, `is_busy`) и в
 вспышка-пульс. JS-слушатель `agent_heartbeat` (app.js:236) удаляется в
 пакете правок блока 6.
 
-### Второе SSE-соединение — устраняется (блок 6)
+### Реализация блока 6 (Р-23)
+
+Все решения внесены: слушатель agent_heartbeat и viewing-setInterval
+удалены из app.js; settingsDebug.js получает scannerStatus пропсом с
+главного соединения; вкладка «Агенты» питается torrent_progress_update.
+Осознанное наследие: loadInitialSeries() в relocation_finished /
+renaming_complete (одиночная реакция, не поллинг).
+
+### Второе SSE-соединение — устранено (блок 6)
 
 Находка 37: `settingsDebug.js:335` открывает второй `EventSource` ради
 одного `scanner_status_update`. Согласовано: починить правильно —

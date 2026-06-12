@@ -159,7 +159,7 @@
         <logs-modal ref="logsModal" @reload-series="loadInitialSeries" @show-toast="showToast"></logs-modal>
 
         <settings-modal ref="settingsModal" :series="series" :agent-queue="agentQueue" :download-queue="downloadQueue"
-            :slicing-queue="slicingQueue" @show-toast="showToast" @reload-series="loadInitialSeries">
+            :slicing-queue="slicingQueue" :scanner-status="scannerStatus" :active-torrents="activeTorrents" @show-toast="showToast" @reload-series="loadInitialSeries">
         </settings-modal>
     </div>
 

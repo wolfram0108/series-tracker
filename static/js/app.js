@@ -12,6 +12,7 @@ const app = createApp({
         return {
             series: [],
             agentQueue: [],
+            activeTorrents: [],
             downloadQueue: [],
             slicingQueue: [],
             toastMessage: '',
@@ -25,7 +26,13 @@ const app = createApp({
                 downloader: { color: 'bg-secondary', pulse: false, timeoutId: null },
                 slicing: { color: 'bg-secondary', pulse: false, timeoutId: null },
             },
-            scannerStatus: {},
+            scannerStatus: {
+                scanner_enabled: false,
+                scan_interval: 60,
+                is_scanning: false,
+                is_awaiting_tasks: false,
+                next_scan_time: null,
+            },
 
             stateConfig: {
                 'waiting': { title: 'Ожидание', icon: 'bi-clock' },
@@ -46,6 +53,7 @@ const app = createApp({
     mounted() {
         this.loadInitialSeries();
         this.loadAgentQueue();
+        this.loadActiveTorrents();
         this.connectEventSource();
 
         // Предотвращаем ошибку "connection interrupted" при перезагрузке страницы
@@ -149,6 +157,13 @@ const app = createApp({
                 this.agentQueue = await response.json();
             } catch (error) { this.showToast(error.message, 'danger'); }
         },
+        async loadActiveTorrents() {
+            try {
+                const response = await fetch('/api/series/active_torrents');
+                if (!response.ok) throw new Error('Ошибка загрузки активных торрентов');
+                this.activeTorrents = await response.json();
+            } catch (error) { this.showToast(error.message, 'danger'); }
+        },
         async loadDownloadQueue() {
             try {
                 const response = await fetch('/api/downloads/queue');
@@ -170,6 +185,12 @@ const app = createApp({
 
             this.eventSource.addEventListener('agent_queue_update', (event) => {
                 this.agentQueue = JSON.parse(event.data);
+            });
+
+            // Прогресс торрентов приходит push'ем (находка 40: вместо
+            // 5-секундного поллинга вкладки «Агенты»).
+            this.eventSource.addEventListener('torrent_progress_update', (event) => {
+                this.activeTorrents = JSON.parse(event.data);
             });
 
             this.eventSource.addEventListener('relocation_started', (event) => {
@@ -233,35 +254,8 @@ const app = createApp({
                 }
             });
 
-            this.eventSource.addEventListener('agent_heartbeat', (event) => {
-                const data = JSON.parse(event.data);
-                const indicatorName = data.name === 'torrents' ? 'monitoring' : data.name;
-                const indicator = this.agentIndicators[indicatorName];
-                if (!indicator) return;
-
-                if (indicator.color === 'bg-primary') return;
-
-                clearTimeout(indicator.timeoutId);
-
-                let pulseColor = 'bg-success';
-                if (indicatorName === 'monitoring') {
-                    if (data.activity === 'qbit_check') pulseColor = 'bg-success';
-                    else if (data.activity === 'file_verify') pulseColor = 'bg-info';
-                }
-
-                indicator.color = pulseColor;
-                indicator.pulse = true;
-
-                indicator.timeoutId = setTimeout(() => {
-                    if (indicatorName === 'monitoring' && (this.scannerStatus.is_scanning || this.scannerStatus.is_awaiting_tasks)) {
-                        indicator.color = 'bg-primary';
-                        indicator.pulse = true;
-                    } else {
-                        indicator.color = 'bg-secondary';
-                        indicator.pulse = false;
-                    }
-                }, 1000);
-            });
+            // agent_heartbeat удалён (Р-18): вспышки «я жив» были легаси
+            // нестабильного прода; индикаторы живут на queue/status-событиях.
 
             this.eventSource.addEventListener('series_added', (event) => {
                 const newSeries = JSON.parse(event.data);
@@ -324,11 +318,9 @@ const app = createApp({
         async openStatusModal(id) {
             this.activeSeriesId = id;
             try {
+                // viewing теперь эфемерный на бэкенде (Р-11): heartbeat
+                // не нужен, сброс при обрыве SSE делает catalog.
                 await this.setSeriesState(id, ['viewing']);
-
-                this.viewingHeartbeatInterval = setInterval(() => {
-                    fetch(`/api/series/${id}/viewing_heartbeat`, { method: 'POST' });
-                }, 30000);
 
                 const modalComponent = this.$refs.statusModal;
                 if (modalComponent) {
@@ -336,9 +328,6 @@ const app = createApp({
                     const modalEl = modalComponent.$refs.statusModal;
 
                     modalEl.addEventListener('hidden.bs.modal', async () => {
-                        clearInterval(this.viewingHeartbeatInterval);
-                        this.viewingHeartbeatInterval = null;
-
                         await this.setSeriesState(id, []);
 
                         this.activeSeriesId = null;
@@ -347,9 +336,6 @@ const app = createApp({
             } catch (error) {
                 this.showToast('Ошибка при открытии окна статуса: ' + error.message, 'danger');
                 this.activeSeriesId = null;
-                if (this.viewingHeartbeatInterval) {
-                    clearInterval(this.viewingHeartbeatInterval);
-                }
             }
         },
 

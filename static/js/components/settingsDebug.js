@@ -3,6 +3,11 @@ const SettingsDebugTab = {
     'database-viewer-modal': DatabaseViewerModal,
     'constructor-item-select': ConstructorItemSelect
   },
+  props: {
+    // Статус сканера приходит с главного SSE-соединения app.js
+    // (находка 37: второе соединение убрано).
+    scannerStatus: { type: Object, required: true },
+  },
   template: `
     <div class="settings-tab-content">
         <div class="modern-fieldset mb-4">
@@ -133,16 +138,8 @@ const SettingsDebugTab = {
   `,
   data() {
     return {
-      eventSource: null,
       tables: [],
       selectedTableToClear: '',
-      scannerStatus: {
-          scanner_enabled: false,
-          scan_interval: 60,
-          is_scanning: false,
-          is_awaiting_tasks: false,
-          next_scan_time: null,
-      },
       parallelDownloads: 2,
       debugForceReplace: false,
       debugSaveHtml: false,
@@ -205,15 +202,10 @@ const SettingsDebugTab = {
         this.loadLessStrictScanSetting();
         this.loadSlicingDeleteSourceSetting();
         this.loadTables();
-        this.connectEventSourceForScanner();
         this.startCountdownTimer();
         this.loadParallelDownloads();
     },
     unload() {
-        if (this.eventSource) {
-            this.eventSource.close();
-            this.eventSource = null;
-        }
         if (this.countdownTimer) {
             clearInterval(this.countdownTimer);
             this.countdownTimer = null;
@@ -328,17 +320,6 @@ const SettingsDebugTab = {
         } catch (error) {
             this.$emit('show-toast', error.message, 'danger');
         }
-    },
-    connectEventSourceForScanner() {
-        if (this.eventSource) return;
-        
-        this.eventSource = new EventSource('/api/stream');
-        this.eventSource.onopen = () => console.log("SSE для отладки (сканер) подключен.");
-        this.eventSource.onerror = () => console.error("Ошибка SSE для отладки (сканер).");
-
-        this.eventSource.addEventListener('scanner_status_update', (event) => {
-            this.scannerStatus = JSON.parse(event.data);
-        });
     },
     async loadTables() {
         try {

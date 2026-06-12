@@ -87,6 +87,19 @@ class Neighbours(BaseModule):
             return {"count": 1, "tasks": [
                 {"torrent_hash": "h1", "series_id": 1, "stage": "renaming"}]}
 
+        async def progress(env):
+            return {"tasks": [{"task_key": "h1", "series_id": 1,
+                               "series_name": "Тайтл", "status": "downloading",
+                               "progress": 55, "dlspeed": 1024, "eta": 60}]}
+
+        async def fs_sync(env):
+            self.calls.append(("fs.sync", env.payload))
+            return {"adopted": 0, "lost": 0}
+
+        async def fs_verify(env):
+            self.calls.append(("fs.verify", env.payload))
+            return {"missing": 0}
+
         async def reprocess(env):
             self.calls.append(("reprocess", env.payload))
             return {"ok": True}
@@ -104,6 +117,9 @@ class Neighbours(BaseModule):
         self.handle("sources.tracker.resolve", resolve)
         self.handle("torrents.db.history", history)
         self.handle("torrents.queue.get", queue)
+        self.handle("torrents.db.progress.list", progress)
+        self.handle("downloads.fs.sync", fs_sync)
+        self.handle("torrents.fs.verify", fs_verify)
         self.handle("renaming.reprocess", reprocess)
         self.handle("library.relocate", relocate)
         self.handle("torrents.db.add", db_add)
@@ -298,7 +314,7 @@ async def test_toggle_auto_scan_and_update_event(system):
 
 @pytest.mark.asyncio
 async def test_state_route_drives_viewing(system):
-    bus, _, client, _ = system
+    bus, _, client, neighbours = system
     sub = bus.subscribe("series.status.changed")
     resp = await client.post("/api/series/1/state",
                              json={"state": ["viewing"]})
@@ -306,6 +322,12 @@ async def test_state_route_drives_viewing(system):
     env = await asyncio.wait_for(sub.queue.get(), 3)
     assert env.payload["series_id"] == 1
     assert "viewing" in env.payload["statuses"]
+    # открытие модалки торрент-серии запускает сверку файлов (Р-23)
+    for _ in range(100):
+        if ("fs.verify", {"series_id": 1}) in neighbours.calls:
+            break
+        await asyncio.sleep(0.02)
+    assert ("fs.verify", {"series_id": 1}) in neighbours.calls
     resp = await client.post("/api/series/1/state", json={"state": []})
     assert resp.status_code == 200
     env = await asyncio.wait_for(sub.queue.get(), 3)
@@ -332,7 +354,9 @@ async def test_small_endpoints(system):
     resp = await client.get("/api/series/1/torrents/history")
     assert resp.json()[0]["torrent_id"] == "abc"
 
+    # прогресс торрентов (Р-23: источник — download_tasks, не конвейер)
     resp = await client.get("/api/series/active_torrents")
     body = resp.json()
-    assert body[0]["hash"] == "h1"  # старая форма (находка 39)
-    assert body[0]["stage"] == "renaming"
+    assert body[0]["task_key"] == "h1"
+    assert body[0]["series_name"] == "Тайтл"
+    assert body[0]["progress"] == 55

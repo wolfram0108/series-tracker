@@ -23,6 +23,12 @@ const SettingsAgentsTab = {
         required: true,
         default: () => []
     },
+    activeTorrents: {
+      // прогресс торрентов: push с главного SSE (находка 40)
+      type: Array,
+      required: true,
+      default: () => []
+    },
   },
   template: `
     <div class="settings-tab-content">
@@ -182,21 +188,9 @@ const SettingsAgentsTab = {
     </div>
   `,
   data() {
-    return {
-      activeTorrents: [],
-      updateInterval: null,
-    }
+    return {}
   },
   methods: {
-    async loadActiveTorrents() {
-        try {
-            const response = await fetch('/api/series/active_torrents');
-            if (!response.ok) throw new Error('Ошибка загрузки активных торрентов');
-            this.activeTorrents = await response.json();
-        } catch (error) {
-            console.error(error);
-        }
-    },
     formatSlicingProgress(task) {
         try {
             const progress = JSON.parse(task.progress_chapters || '{}');
@@ -287,11 +281,4 @@ const SettingsAgentsTab = {
         return statuses[state] || state || 'Неизвестно';
     }
   },
-  mounted() {
-    this.loadActiveTorrents();
-    this.updateInterval = setInterval(this.loadActiveTorrents, 5000);
-  },
-  beforeUnmount() {
-    clearInterval(this.updateInterval);
-  }
 };

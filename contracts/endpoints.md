@@ -64,7 +64,7 @@
 | GET | `/api/series/<int:series_id>/torrents/history` | get_series_torrents_history | routes/series.py:555 | подтверждена (Р-19: torrents.db.history) |
 | POST | `/api/series/<int:series_id>/viewing_heartbeat` | viewing_heartbeat | routes/series.py:540 | удалена (Р-11: эфемерный viewing со страховкой gateway.sse.clients; setInterval уходит в блоке 6) |
 | PUT | `/api/series/<int:series_id>/vk-quality-priority` | set_vk_quality_priority | routes/series.py:596 | подтверждена (Р-19: catalog.series.update) |
-| GET | `/api/series/active_torrents` | get_active_torrents_monitoring | routes/series.py:611 | подтверждена (Р-19: torrents.queue.get; формы HTTP и SSE выровнены — находка 39) |
+| GET | `/api/series/active_torrents` | get_active_torrents_monitoring | routes/series.py:611 | подтверждена (Р-23: torrents.db.progress.list — прогресс загрузок; push torrent_progress_update вместо поллинга) |
 | GET/POST | `/api/settings/debug_flags` | handle_debug_flags | routes/settings.py:139 | перепроектирована (Р-22: группы = модули новой системы; DEBUG-фильтр в core/logging) |
 | GET/POST | `/api/settings/force_replace` | handle_force_replace_setting | routes/settings.py:171 | подтверждена (Р-22: settings) |
 | GET/POST | `/api/settings/less_strict_scan` | handle_less_strict_scan_setting | routes/settings.py:193 | подтверждена (Р-22: settings) |

@@ -229,3 +229,10 @@ class TorrentsRepository:
         return await self._db.fetch_all(
             "SELECT * FROM download_tasks WHERE series_id=? AND "
             "task_type='torrent'", (series_id,))
+
+    async def all_torrent_progress(self) -> list[dict]:
+        """Прогресс всех торрент-загрузок (контракт старого
+        get_all_active_torrent_tasks — таблица мониторинга в UI)."""
+        return await self._db.fetch_all(
+            "SELECT * FROM download_tasks WHERE task_type='torrent' "
+            "ORDER BY id")
