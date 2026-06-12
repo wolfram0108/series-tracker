@@ -63,8 +63,11 @@ def _ok_page(url="https://kinozal.me/details.php?id=1"):
 
 
 def _login_page(url="https://kinozal.me/details.php?id=1"):
+    # реальный Kinozal отдаёт форму со слешем — action="/takelogin.php"
+    # (находка 42: детектор должен распознавать её, а не точную строку)
     return FakeResponse(url=url,
-                        text='<form action="takelogin.php">вход</form>')
+                        text='<form method="post" action="/takelogin.php">'
+                             'вход</form>')
 
 
 @pytest.mark.asyncio

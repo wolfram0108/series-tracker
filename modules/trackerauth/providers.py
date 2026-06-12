@@ -7,19 +7,24 @@ query `trackerauth.fetch`. Каждый провайдер отвечает на
 
 Маркеры выбраны детерминированными (вместо гадания по подстрокам
 «login/error/пароль» из старой системы — см. разбор auth.py):
-- Kinozal: разлогиненного отправляют на форму с action="takelogin.php";
-  успех входа = редирект НЕ на takelogin.php (как в старом коде — этот
-  маркер разбором подтверждён как корректный).
+- Kinozal: разлогиненному показывают форму входа action=".../takelogin.php"
+  (на залогиненных страницах её нет вовсе); успех входа = редирект НЕ на
+  takelogin.php. Маркер устойчив к ведущему слешу и кавычкам формы
+  (находка 42).
 - RuTracker: признак живой сессии — кука `bb_session`; она появляется
   только после успешного логина и пропадает с его смертью.
 - Astar: логина нет, есть Cloudflare — сессию делает cloudscraper.
 """
 from __future__ import annotations
 
+import re
 from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
+
+# Форма входа Kinozal: action может быть со слешем и в любых кавычках.
+_LOGIN_FORM_RE = re.compile(r"""action=['"]?/?takelogin\.php""", re.I)
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -58,8 +63,11 @@ class KinozalProvider:
                                     "проверьте учётные данные")
 
     def is_logged_out(self, resp: requests.Response) -> bool:
-        return ("takelogin.php" in resp.url
-                or 'action="takelogin.php"' in resp.text[:20000])
+        # форма входа: action="/takelogin.php" | "takelogin.php" | '...'
+        # (на залогиненных страницах формы нет — находка 42)
+        if "takelogin.php" in resp.url:
+            return True
+        return bool(_LOGIN_FORM_RE.search(resp.text[:20000]))
 
     def request_headers(self, url: str) -> dict:
         # Скачивание с dl.* требует Referer основного домена (из разбора
