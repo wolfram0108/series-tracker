@@ -214,10 +214,13 @@ async def _phase_remux(raw: str, full_output_path: str,
     # оставляет частичного финального файла, который потом приняли бы за
     # готовый ('файл существует' в download()).
     tmp_out = full_output_path + ".remux.mp4"
+    # БЕЗ +faststart: на больших файлах он делает второй полный проход
+    # (переписать весь файл ради moov в начале) — минуты после
+    # progress=100 без метрик, «вечное зависание на 100%» (находка 51).
+    # Для медиатеки faststart не нужен (легаси его не использовал).
     proc = await asyncio.create_subprocess_exec(
         executable, "-y", "-i", raw, "-c", "copy",
-        "-movflags", "+faststart", "-progress", "pipe:1", "-nostats",
-        tmp_out,
+        "-progress", "pipe:1", "-nostats", tmp_out,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     # stderr дренируем параллельно: битый VK-hls сыпет тысячи
     # 'Packet corrupt' в stderr, без вычитки буфер переполняется и
