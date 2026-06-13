@@ -227,9 +227,9 @@ async def test_full_slice_flow(system):
     assert [f["episode_number"] for f in files] == [11, 12, 13]
     for ep in (11, 12, 13):
         assert os.path.exists(os.path.join(media, f"Show s01e{ep:02d}.mp4"))
-    # длительности: разница глав; последняя — до конца (None)
+    # длительности: разница глав в секундах; последняя — до конца (None)
     durations = [c[2] for c in ffmpeg.calls]
-    assert durations == ["0:22:30", "0:22:00", None]
+    assert durations == ["1350", "1320", None]
     # компиляция ушла из планов (семантика оригинала); команда
     # асинхронная — дожидаемся
     assert await _wait(lambda: fake.ignored_calls == [
@@ -391,3 +391,13 @@ async def test_chapters_check_does_not_block_slicing(tmp_path):
                                 {"unique_id": "comp1"}, timeout=10)
     finally:
         await runner.stop()
+
+
+def test_duration_handles_over_24h():
+    """Находка 55: компиляции длиннее суток дают время 24:02:29 —
+    длительность считается через time_to_seconds, не strptime."""
+    from modules.slicing.module import SlicingModule
+    chs = [{"time": "23:50:00"}, {"time": "24:05:00"}, {"time": "25:00:00"}]
+    assert SlicingModule._duration(chs[0], chs, 0) == "900"   # 15 мин
+    assert SlicingModule._duration(chs[1], chs, 1) == "3300"  # 55 мин
+    assert SlicingModule._duration(chs[2], chs, 2) is None    # последняя

@@ -309,10 +309,14 @@ class SlicingModule(BaseModule):
     def _duration(chapter: dict, chapters: list[dict], i: int) -> str | None:
         if i + 1 >= len(chapters):
             return None  # последняя глава — до конца файла
-        fmt = "%H:%M:%S"
-        delta = (datetime.strptime(chapters[i + 1]["time"], fmt)
-                 - datetime.strptime(chapter["time"], fmt))
-        return str(delta)
+        # time_to_seconds (а не strptime '%H:%M:%S'): компиляции длиннее
+        # суток дают время вида 24:02:29 — strptime часы>23 не парсит
+        # (находка 55). ffmpeg -t принимает секунды.
+        nxt = ch.time_to_seconds(chapters[i + 1]["time"])
+        cur = ch.time_to_seconds(chapter["time"])
+        if nxt is None or cur is None:
+            return None
+        return str(nxt - cur)
 
     async def _maybe_delete_source(self, uid: str, source: str) -> None:
         reply = await self.request("settings.value.get",
