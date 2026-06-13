@@ -54,6 +54,7 @@ const app = createApp({
         this.loadInitialSeries();
         this.loadAgentQueue();
         this.loadActiveTorrents();
+        this.loadDownloadQueue();   // иначе очередь пуста до первого SSE
         this.connectEventSource();
 
         // Предотвращаем ошибку "connection interrupted" при перезагрузке страницы

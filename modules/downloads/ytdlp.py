@@ -96,6 +96,22 @@ def ffmpeg_progress(fields: dict, duration: float) -> dict:
             "speed": round(speed, 1)}
 
 
+async def _drain_stderr(stream) -> list[bytes]:
+    """Фоновое вычитывание stderr, чтобы процесс не блокировался на
+    переполнении буфера (deadlock — находка 48: битый VK-hls сыпет
+    тысячи 'Packet corrupt' в stderr ffmpeg). Копим только хвост для
+    текста ошибки."""
+    tail: list[bytes] = []
+    while True:
+        line = await stream.readline()
+        if not line:
+            break
+        tail.append(line)
+        if len(tail) > 50:
+            del tail[0]
+    return tail
+
+
 async def _probe_duration(path: str) -> float:
     """Длительность файла через ffprobe (метрика инструмента, не размер)."""
     ffprobe = shutil.which("ffprobe")
@@ -149,6 +165,7 @@ async def _phase_download(video_url: str, full_output_path: str,
         "-f", HLS_FORMAT, "-N", str(threads),
         "-o", out_template, video_url,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr))
     try:
         assert proc.stdout is not None
         while True:
@@ -163,12 +180,12 @@ async def _phase_download(video_url: str, full_output_path: str,
         if proc.returncode is None:  # отмена/сбой — убить процесс (находка 45)
             proc.kill()
             await proc.wait()
+    tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
 
     if proc.returncode != 0:
-        stderr = (await proc.stderr.read()).decode("utf-8", errors="replace")
-        error = stderr.strip().splitlines()[-1] if stderr.strip() else \
+        error = tail.strip().splitlines()[-1] if tail.strip() else \
             f"yt-dlp завершился с кодом {proc.returncode}"
-        if "Video unavailable" in stderr or "Private video" in stderr:
+        if "Video unavailable" in tail or "Private video" in tail:
             error = "видео недоступно или приватно"
         return False, error
 
@@ -194,6 +211,10 @@ async def _phase_remux(raw: str, full_output_path: str,
         "-movflags", "+faststart", "-progress", "pipe:1", "-nostats",
         full_output_path,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    # stderr дренируем параллельно: битый VK-hls сыпет тысячи
+    # 'Packet corrupt' в stderr, без вычитки буфер переполняется и
+    # ffmpeg намертво виснет на записи в него (deadlock — находка 48).
+    stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr))
     fields: dict[str, str] = {}
     try:
         assert proc.stdout is not None
@@ -213,11 +234,11 @@ async def _phase_remux(raw: str, full_output_path: str,
         if proc.returncode is None:
             proc.kill()
             await proc.wait()
+    tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
 
     if proc.returncode == 0:
         await on_progress({"phase": "remux", "progress": 100, "eta": 0,
                            "speed": 0.0})
         return True, ""
-    stderr = (await proc.stderr.read()).decode("utf-8", errors="replace")
-    tail = stderr.strip().splitlines()[-1] if stderr.strip() else ""
-    return False, f"ffmpeg remux: {tail or proc.returncode}"
+    last = tail.strip().splitlines()[-1] if tail.strip() else ""
+    return False, f"ffmpeg remux: {last or proc.returncode}"
