@@ -168,7 +168,11 @@ class VkProvider:
         return False  # ошибки API приходят JSON-ом, их разбирает sources
 
     def request_headers(self, url: str) -> dict:
-        return {"User-Agent": UA}
+        # БЕЗ браузерного UA: на Chrome-UA VK API отдаёт video без поля
+        # files (прямые mp4-ссылки и разрешения вырезаются), и resolution
+        # вычислить нельзя. Легаси слал дефолтный requests-UA и получал
+        # files — воспроизводим (находка 44).
+        return {}
 
     def credential_params(self, credentials: dict) -> dict:
         return {"access_token": credentials["password"], "v": "5.199"}

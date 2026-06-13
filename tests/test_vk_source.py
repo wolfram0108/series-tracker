@@ -133,3 +133,13 @@ async def test_vk_scan_api_error_is_loud(vk_system):
         await probe.request("sources.vk.scan", {
             "channel_url": "https://vkvideo.ru/@chan",
             "query": "x", "search_mode": "get_all"}, timeout=10)
+
+
+def test_vk_provider_no_browser_ua():
+    """Находка 44: на браузерный UA VK API вырезает поле files (mp4-
+    ссылки/разрешения), и resolution не вычислить. Провайдер VK обязан
+    НЕ слать браузерный UA — как легаси (дефолтный requests-UA)."""
+    from modules.trackerauth.providers import VkProvider, UA
+    headers = VkProvider().request_headers("https://api.vk.com/method/video.get")
+    assert headers.get("User-Agent") != UA
+    assert "User-Agent" not in headers  # отдаём на откуп requests-дефолту
