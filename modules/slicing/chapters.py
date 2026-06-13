@@ -53,8 +53,9 @@ def time_to_seconds(time_str: str) -> int | None:
     return None
 
 
-def is_garbage_chapter(chapter: dict, index: int,
-                       total: int) -> tuple[bool, str | None]:
+def is_garbage_chapter(chapter: dict, index: int, total: int,
+                       next_time: int | None = None
+                       ) -> tuple[bool, str | None]:
     title = (chapter.get("title") or "").lower().strip()
     for pattern in GARBAGE_PATTERNS:
         if re.search(pattern, title, re.IGNORECASE):
@@ -63,20 +64,32 @@ def is_garbage_chapter(chapter: dict, index: int,
         return True, "Первая глава, похожая на опенинг"
     if index == total - 1 and any(k in title for k in _ENDING_KEYWORDS):
         return True, "Последняя глава, похожая на эндинг/превью"
-    duration = time_to_seconds(chapter.get("time", ""))
-    if duration is not None and duration < MIN_DURATION_SECONDS:
-        return True, f"Слишком короткая глава: {duration}сек"
+    # Длительность главы = интервал до СЛЕДУЮЩЕЙ главы, а не её время
+    # начала (находка 35/54): иначе глава в 00:00:00 всегда «0 сек».
+    # Последнюю главу (next_time неизвестно) по длительности не судим.
+    start = time_to_seconds(chapter.get("time", ""))
+    if next_time is not None and start is not None:
+        duration = next_time - start
+        if 0 <= duration < MIN_DURATION_SECONDS:
+            return True, f"Слишком короткая глава: {duration}сек"
     if (index in (0, total - 1) and len(title) < 10
             and not any(c.isdigit() for c in title)):
         return True, "Короткое название в начале/конце"
     return False, None
 
 
+def _next_time(chapters: list[dict], index: int) -> int | None:
+    if index + 1 < len(chapters):
+        return time_to_seconds(chapters[index + 1].get("time", ""))
+    return None
+
+
 def filter_chapters(chapters: list[dict]) -> list[dict]:
     """Только хорошие главы (с метками is_garbage=False)."""
     result = []
     for index, chapter in enumerate(chapters):
-        garbage, reason = is_garbage_chapter(chapter, index, len(chapters))
+        garbage, reason = is_garbage_chapter(
+            chapter, index, len(chapters), _next_time(chapters, index))
         if not garbage:
             result.append({**chapter, "is_garbage": False,
                            "garbage_reason": reason})
@@ -86,7 +99,8 @@ def filter_chapters(chapters: list[dict]) -> list[dict]:
 def garbage_chapters(chapters: list[dict]) -> list[dict]:
     result = []
     for index, chapter in enumerate(chapters):
-        garbage, reason = is_garbage_chapter(chapter, index, len(chapters))
+        garbage, reason = is_garbage_chapter(
+            chapter, index, len(chapters), _next_time(chapters, index))
         if garbage:
             result.append({**chapter, "is_garbage": True,
                            "garbage_reason": reason,

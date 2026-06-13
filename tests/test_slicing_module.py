@@ -31,6 +31,23 @@ def test_filter_marks_openings_endings_and_short():
     assert {g["title"] for g in garbage} == {"Опенинг", "Ending"}
 
 
+def test_chapter_duration_by_interval_not_start_time():
+    """Находка 54: длительность главы — интервал до следующей, а не её
+    время начала. Глава в 00:00:00 с длинным интервалом не «короткая»."""
+    chapters = [
+        {"time": "00:00:00", "title": "1 Серия"},   # → 15:00 интервал
+        {"time": "00:15:00", "title": "2 Серия"},   # → 15:10 интервал
+        {"time": "00:30:10", "title": "Врезка"},     # → 10 сек, короткая
+        {"time": "00:30:20", "title": "3 Серия"},    # последняя
+    ]
+    filtered = [c["title"] for c in ch.filter_chapters(chapters)]
+    assert "1 Серия" in filtered           # 00:00:00 больше не бракуется
+    assert filtered == ["1 Серия", "2 Серия", "3 Серия"]
+    garbage = {g["title"]: g["garbage_reason"]
+               for g in ch.garbage_chapters(chapters)}
+    assert "Врезка" in garbage and "сек" in garbage["Врезка"]
+
+
 def test_mark_manually():
     chapters = [{"time": "00:00:00", "title": "A"},
                 {"time": "00:10:00", "title": "B"}]
