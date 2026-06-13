@@ -62,6 +62,12 @@ const SettingsDebugTab = {
                                 <input type="text" inputmode="numeric" class="constructor-item item-input" :value="parallelDownloads" @input="handleNumericInput($event, 'parallelDownloads')" @change="saveParallelDownloads">
                             </constructor-group>
                         </div>
+                        <div class="field-group">
+                            <constructor-group>
+                                <div class="constructor-item item-label">Потоков на одну загрузку (yt-dlp -N)</div>
+                                <input type="text" inputmode="numeric" class="constructor-item item-input" :value="concurrentFragments" @input="handleNumericInput($event, 'concurrentFragments')" @change="saveConcurrentFragments">
+                            </constructor-group>
+                        </div>
                     </div>
                 </div>
                 <hr>
@@ -141,6 +147,7 @@ const SettingsDebugTab = {
       tables: [],
       selectedTableToClear: '',
       parallelDownloads: 2,
+      concurrentFragments: 6,
       debugForceReplace: false,
       debugSaveHtml: false,
       lessStrictScan: false,
@@ -204,6 +211,7 @@ const SettingsDebugTab = {
         this.loadTables();
         this.startCountdownTimer();
         this.loadParallelDownloads();
+        this.loadConcurrentFragments();
     },
     unload() {
         if (this.countdownTimer) {
@@ -229,6 +237,28 @@ const SettingsDebugTab = {
                 body: JSON.stringify({ value: this.parallelDownloads })
             });
             this.$emit('show-toast', `Лимит параллельных загрузок установлен: ${this.parallelDownloads}`, 'info');
+        } catch (error) {
+            this.$emit('show-toast', error.message, 'danger');
+        }
+    },
+    async loadConcurrentFragments() {
+        try {
+            const response = await fetch('/api/settings/concurrent_fragments');
+            if (!response.ok) throw new Error('Could not fetch concurrent fragments setting');
+            const setting = await response.json();
+            this.concurrentFragments = setting.value || 6;
+        } catch (error) {
+            this.$emit('show-toast', error.message, 'danger');
+        }
+    },
+    async saveConcurrentFragments() {
+        try {
+            await fetch('/api/settings/concurrent_fragments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: this.concurrentFragments })
+            });
+            this.$emit('show-toast', `Потоков на загрузку установлено: ${this.concurrentFragments}`, 'info');
         } catch (error) {
             this.$emit('show-toast', error.message, 'danger');
         }

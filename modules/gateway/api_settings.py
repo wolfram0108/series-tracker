@@ -153,6 +153,23 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                  timeout=10)
         return {"value": int(reply.get("value") or 2)}
 
+    @r.api_route("/api/settings/concurrent_fragments",
+                 methods=["GET", "POST"])
+    async def concurrent_fragments(request: Request):
+        """Число параллельных фрагментов yt-dlp (-N) — ускорение одной
+        загрузки на hls-потоках."""
+        if request.method == "POST":
+            data = await request.json()
+            if "value" in data:
+                await gw.request("settings.value.set", {
+                    "key": "yt_dlp_concurrent_fragments",
+                    "value": str(data["value"])}, timeout=10)
+            return {"success": True}
+        reply = await gw.request("settings.value.get",
+                                 {"key": "yt_dlp_concurrent_fragments"},
+                                 timeout=10)
+        return {"value": int(reply.get("value") or 6)}
+
     async def _refresh_debug_groups():
         reply = await gw.request("settings.values.by_prefix",
                                  {"prefix": "debug_enabled_"}, timeout=10)

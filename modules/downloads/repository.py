@@ -22,10 +22,11 @@ class DownloadsRepository:
     # --- задачи -------------------------------------------------------------------
 
     async def active_tasks(self) -> list[dict]:
-        """pending+downloading — контракт старого download_queue_update."""
+        """pending+downloading+processing (remux) — активная очередь UI."""
         return await self._db.fetch_all(
             "SELECT * FROM download_tasks WHERE task_type='vk_video' AND "
-            "status IN ('pending', 'downloading') ORDER BY created_at")
+            "status IN ('pending', 'downloading', 'processing') "
+            "ORDER BY created_at")
 
     async def next_pending(self, limit: int) -> list[dict]:
         """Добор: только задачи, чей элемент в плане (семантика
@@ -81,11 +82,16 @@ class DownloadsRepository:
             "updated_at=? WHERE id=?", (message, _now(), task_id))
 
     async def update_progress(self, task_id: int, data: dict) -> None:
+        # фаза remux отражается статусом 'processing' (постобработка) —
+        # прогресс и ETA там из метрик ffmpeg (ТЗ: постобработка обязана
+        # показывать прогресс и оставшееся время)
+        status = "processing" if data.get("phase") == "remux" \
+            else "downloading"
         await self._db.execute(
-            "UPDATE download_tasks SET progress=?, dlspeed=?, eta=?, "
-            "total_size_mb=COALESCE(?, total_size_mb), updated_at=? "
+            "UPDATE download_tasks SET status=?, progress=?, dlspeed=?, "
+            "eta=?, total_size_mb=COALESCE(?, total_size_mb), updated_at=? "
             "WHERE id=?",
-            (data.get("progress", 0), data.get("dlspeed", 0),
+            (status, data.get("progress", 0), data.get("dlspeed", 0),
              data.get("eta", 0), data.get("total_size_mb"), _now(), task_id))
 
     async def delete_task(self, task_id: int) -> None:
@@ -109,7 +115,7 @@ class DownloadsRepository:
         error НЕ трогаем (Р-13: ошибка не лечится рестартом)."""
         return await self._db.execute(
             "UPDATE download_tasks SET status='pending' WHERE "
-            "task_type='vk_video' AND status='downloading'")
+            "task_type='vk_video' AND status IN ('downloading', 'processing')")
 
     # --- media_items: наши колонки (status, final_filename) ------------------------
 

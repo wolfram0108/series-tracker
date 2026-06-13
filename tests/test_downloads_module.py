@@ -21,9 +21,21 @@ from modules.downloads import ytdlp
 def test_parse_progress_line():
     line = "[download]  42.5% of ~1.20GiB at 5.00MiB/s ETA 01:33"
     data = ytdlp.parse_progress_line(line)
-    assert data == {"progress": 42, "total_size_mb": 1228.8,
+    assert data == {"phase": "download", "progress": 42,
+                    "total_size_mb": 1228.8,
                     "dlspeed": 5 * 1024 * 1024, "eta": 93}
     assert ytdlp.parse_progress_line("[merge] something") is None
+
+
+def test_ffmpeg_progress_percent_and_eta():
+    # remux обработал 30с из 120с со скоростью 60x: 25%, ETA = 90/60 = 1с
+    out = ytdlp.ffmpeg_progress(
+        {"out_time": "00:00:30.000000", "speed": "60x",
+         "progress": "continue"}, duration=120.0)
+    assert out == {"phase": "remux", "progress": 25, "eta": 1, "speed": 60.0}
+    # нулевая длительность не делит на ноль
+    assert ytdlp.ffmpeg_progress({"out_time": "00:00:10", "speed": "1x"},
+                                 0.0)["progress"] == 0
 
 
 # --- сквозные сценарии ---------------------------------------------------------------
@@ -59,7 +71,8 @@ class FakeDownloader:
         self.concurrent = 0
         self.max_concurrent = 0
 
-    async def __call__(self, url, path, on_progress):
+    async def __call__(self, url, path, on_progress, *, threads=6):
+        self.threads = threads
         self.started.append(url)
         self.concurrent += 1
         self.max_concurrent = max(self.max_concurrent, self.concurrent)

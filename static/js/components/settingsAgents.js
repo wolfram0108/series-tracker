@@ -84,20 +84,21 @@ const SettingsAgentsTab = {
                                     <small class="text-muted" :title="task.save_path">{{ getBaseName(task.save_path) }}</small>
                                 </div>
                                 <div class="div-table-cell" style="flex-direction: column; align-items: flex-start; gap: 4px;">
-                                    <span class="badge" :class="getDownloadStatusClass(task.status)">{{ task.status }}</span>
+                                    <span class="badge" :class="getDownloadStatusClass(task.status)">{{ downloadStatusLabel(task.status) }}</span>
                                     <small v-if="task.status === 'error'" class="d-block error-cell" :title="task.error_message">
                                         {{ task.error_message }}
                                     </small>
-                                    <button v-if="['pending','downloading','error'].includes(task.status)"
+                                    <button v-if="['pending','downloading','processing','error'].includes(task.status)"
                                             @click="cancelDownload(task)" class="btn-icon btn-delete"
                                             title="Отменить загрузку и удалить файл">
                                         <i class="bi bi-x-lg"></i>
                                     </button>
                                 </div>
                                 <div class="div-table-cell" style="flex-direction: column; align-items: stretch; gap: 8px;">
-                                    <div class="progress" style="height: 20px; font-size: 12px;" v-if="task.status === 'downloading' || task.status === 'completed'">
-                                        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" 
-                                             :style="{width: task.progress + '%'}" 
+                                    <div class="progress" style="height: 20px; font-size: 12px;" v-if="['downloading','processing','completed'].includes(task.status)">
+                                        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar"
+                                             :class="{ 'bg-info': task.status === 'processing' }"
+                                             :style="{width: task.progress + '%'}"
                                              :aria-valuenow="task.progress" aria-valuemin="0" aria-valuemax="100">
                                             {{ task.progress }}%
                                         </div>
@@ -105,6 +106,10 @@ const SettingsAgentsTab = {
                                     <div v-if="task.status === 'downloading' && task.progress > 0" class="d-flex justify-content-between" style="font-size: 12px; font-family: monospace;">
                                         <span class="text-success">{{ formatSize(task.dlspeed) }}/s</span>
                                         <span class="text-muted">{{ (task.progress / 100 * task.total_size_mb).toFixed(1) }} / {{ task.total_size_mb }} MB</span>
+                                        <span class="text-primary">ETA: {{ formatEta(task.eta) }}</span>
+                                    </div>
+                                    <div v-if="task.status === 'processing'" class="d-flex justify-content-between" style="font-size: 12px; font-family: monospace;">
+                                        <span class="text-info">Постобработка (remux)</span>
                                         <span class="text-primary">ETA: {{ formatEta(task.eta) }}</span>
                                     </div>
                                 </div>
@@ -233,11 +238,22 @@ const SettingsAgentsTab = {
         const map = {
             'pending': 'bg-secondary',
             'downloading': 'bg-primary',
+            'processing': 'bg-info',
             'slicing': 'bg-info',
             'completed': 'bg-success',
             'error': 'bg-danger',
         };
         return map[status] || 'bg-dark';
+    },
+    downloadStatusLabel(status) {
+        const map = {
+            'pending': 'ожидание',
+            'downloading': 'загрузка',
+            'processing': 'обработка',
+            'completed': 'готово',
+            'error': 'ошибка',
+        };
+        return map[status] || status;
     },
     getAgentRowClass(stage) {
         const stageToClassMap = {

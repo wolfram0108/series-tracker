@@ -49,7 +49,8 @@ class DownloadsModule(BaseModule):
     def __init__(self, bus, db: Database, *, downloader=ytdlp.download) -> None:
         self.repo = DownloadsRepository(db)
         self._download = downloader  # подменяется в тестах
-        self._limit = 2
+        self._limit = 2               # параллельных файлов (max_parallel_downloads)
+        self._threads = 6             # фрагментов на файл (yt-dlp -N)
         self._active: dict[int, asyncio.Task] = {}
         self._last_db_write: dict[int, float] = {}
         self._last_event = 0.0
@@ -68,6 +69,7 @@ class DownloadsModule(BaseModule):
 
     async def on_start(self) -> None:
         self._limit = await self._read_limit()
+        self._threads = await self._read_threads()
         requeued = await self.repo.requeue_interrupted()
         if requeued:
             self.log.info("оборванных загрузок возвращено в очередь: %d",
@@ -92,10 +94,30 @@ class DownloadsModule(BaseModule):
         except (BusRequestError, ValueError, TypeError):
             return 2
 
+    async def _read_threads(self) -> int:
+        """Число параллельных фрагментов yt-dlp (-N). Прирост скорости
+        идёт только в связке hls+-N (замер на стенде)."""
+        try:
+            reply = await self.request("settings.value.get",
+                                       {"key": "yt_dlp_concurrent_fragments"},
+                                       timeout=10)
+            return max(1, int(reply.get("value") or 6))
+        except (BusRequestError, ValueError, TypeError):
+            return 6
+
     # --- реакции на события -------------------------------------------------------
 
     async def on_settings_changed(self, env: Envelope) -> None:
-        if env.payload.get("key") != "max_parallel_downloads":
+        key = env.payload.get("key")
+        if key == "yt_dlp_concurrent_fragments":
+            try:
+                self._threads = max(1, int(env.payload.get("value")))
+                self.log.info("параллельных фрагментов (-N): %d",
+                              self._threads)
+            except (ValueError, TypeError):
+                pass
+            return
+        if key != "max_parallel_downloads":
             return
         try:
             self._limit = max(1, int(env.payload.get("value")))
@@ -306,7 +328,8 @@ class DownloadsModule(BaseModule):
                     await self._broadcast_queue()
 
             ok, error = await self._download(task["video_url"],
-                                             task["save_path"], on_progress)
+                                             task["save_path"], on_progress,
+                                             threads=self._threads)
             if ok:
                 series = await self.request("catalog.series.get",
                                             {"series_id": series_id})
