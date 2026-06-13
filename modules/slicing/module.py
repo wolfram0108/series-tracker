@@ -121,11 +121,12 @@ class SlicingModule(BaseModule):
             (item.get("episode_start") or 0) + 1
 
     async def on_chapters_get(self, env: Envelope) -> list[dict]:
+        # проверка глав НЕ меняет slicing_status (находка 53): 'pending'
+        # означает запущенную задачу нарезки, а не «главы готовы» —
+        # иначе проверка оглавления блокировала бы саму нарезку.
         item = await self._item_or_fail(env.payload["unique_id"])
         chapters = await self._fetch(item["source_url"])
         await self.repo.set_chapters(item["unique_id"], chapters=chapters)
-        if chapters and len(chapters) == self._expected_count(item):
-            await self.repo.set_slicing_status(item["unique_id"], "pending")
         return chapters
 
     async def on_chapters_filtered(self, env: Envelope) -> dict:
@@ -139,8 +140,7 @@ class SlicingModule(BaseModule):
         await self.repo.set_chapters(item["unique_id"], chapters=chapters,
                                      filtered=filtered)
         expected = self._expected_count(item)
-        if len(filtered) == expected:
-            await self.repo.set_slicing_status(item["unique_id"], "pending")
+        # slicing_status НЕ трогаем (находка 53) — см. on_chapters_get
         return {"chapters": chapters, "filtered_chapters": filtered,
                 "garbage_chapters": garbage, "expected_count": expected}
 
@@ -153,8 +153,7 @@ class SlicingModule(BaseModule):
         filtered = [c for c in marked if not c["is_garbage"]]
         await self.repo.set_chapters(item["unique_id"], filtered=filtered)
         expected = self._expected_count(item)
-        if len(filtered) == expected:
-            await self.repo.set_slicing_status(item["unique_id"], "pending")
+        # slicing_status НЕ трогаем (находка 53) — см. on_chapters_get
         return {"chapters": marked, "filtered_chapters": filtered,
                 "garbage_chapters": [c for c in marked if c["is_garbage"]],
                 "expected_count": expected}

@@ -321,3 +321,56 @@ async def test_files_list_and_set_path_for_renaming(system):
                        {"id": files[0]["id"], "path": "новое.mp4"})
     assert await _wait(
         lambda: _sliced(db_path, "comp1")[0]["file_path"] == "новое.mp4")
+
+
+@pytest.mark.asyncio
+async def test_chapters_check_does_not_block_slicing(tmp_path):
+    """Находка 53: проверка глав НЕ ставит slicing_status='pending',
+    поэтому нарезка после проверки оглавления запускается; повторный
+    запуск при уже созданной задаче — отвергается."""
+    db_path = tmp_path / "test.db"
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
+                   env={"ST_DB_URL": "sqlite:///%s" % db_path,
+                        "PATH": "/usr/bin:/bin"},
+                   cwd=".", check=True, capture_output=True)
+    media = tmp_path / "media"; media.mkdir()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO parser_profiles (id, name) VALUES (1, 'p')")
+        conn.execute(
+            "INSERT INTO series (id, url, name, name_en, site, save_path, "
+            "state, source_type, auto_scan_enabled, vk_search_mode, "
+            "parser_profile_id) VALUES (2, 'u|q', 'Т', 'Show', 'vk', ?, "
+            "'waiting', 'vk_video', 0, 'get_all', 1)", (str(media),))
+        conn.commit()
+    _add_compilation(db_path, slicing_status="none")
+    open(os.path.join(media, "компиляция.mp4"), "wb").close()
+
+    series = {"id": 2, "name_en": "Show", "source_type": "vk_video",
+              "save_path": str(media), "parser_profile_id": 1, "season": None}
+    bus = Bus()
+    fake = FakeNeighbours(bus, series)
+
+    async def fetch(url):
+        return CHAPTERS[1:]  # 3 главы = диапазон 11-13 (совпадает)
+
+    slicing = SlicingModule(bus, Database(str(db_path)), ffmpeg=FakeFfmpeg(),
+                            fetch_chapters=fetch)
+    probe = Probe(bus)
+    runner = Runner(bus, [fake, slicing, probe])
+    await runner.start()
+    try:
+        await probe.request("slicing.chapters.get", {"unique_id": "comp1"},
+                            timeout=10)
+        # проверка глав не перевела в pending — нарезка не заблокирована
+        assert _item(db_path, "comp1")["slicing_status"] == "none"
+
+        reply = await probe.request("slicing.task.create",
+                                    {"unique_id": "comp1"}, timeout=10)
+        assert reply["created"] is True
+
+        # активная задача → повторный запуск отвергается
+        with pytest.raises(BusRequestError, match="уже"):
+            await probe.request("slicing.task.create",
+                                {"unique_id": "comp1"}, timeout=10)
+    finally:
+        await runner.stop()
