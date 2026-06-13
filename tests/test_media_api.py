@@ -173,12 +173,16 @@ async def test_chapters_and_slice_flow(system):
     assert resp.status_code == 200
     assert [c["title"] for c in resp.json()] == ["Серия 1", "Серия 2",
                                                  "Серия 3"]
-    # 3 главы == диапазону 1..3 → нарезка стала pending
+    # находка 53: проверка глав НЕ переводит в pending — статус остаётся
     row = await db.fetch_one(
         "SELECT slicing_status FROM media_items WHERE unique_id='uid2'")
-    assert row["slicing_status"] == "pending"
+    assert row["slicing_status"] == "none"
 
-    # из pending повторная задача запрещена (контракт старого /slice)
+    # нарезка запускается после проверки глав (не заблокирована)
+    resp = await client.post("/api/media-items/uid2/slice")
+    assert resp.status_code == 200
+
+    # теперь задача запущена (pending) — повторный запуск отвергается
     resp = await client.post("/api/media-items/uid2/slice")
     assert resp.status_code == 409
 
