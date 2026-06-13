@@ -112,14 +112,16 @@ async def _drain_stderr(stream) -> list[bytes]:
     return tail
 
 
-async def _probe_duration(path: str) -> float:
-    """Длительность файла через ffprobe (метрика инструмента, не размер)."""
-    ffprobe = shutil.which("ffprobe")
-    if not ffprobe:
+async def _probe_duration(video_url: str) -> float:
+    """Длительность видео из yt-dlp (метаданные источника — НАДЁЖНО).
+    ffprobe промежуточного MPEG-TS даёт заниженную длительность (находка
+    52: 7343с вместо реальных 102787с), из-за чего процент remux был бы
+    100% сразу. yt-dlp --print даёт точное значение из метаданных VK."""
+    executable = shutil.which("yt-dlp")
+    if not executable:
         return 0.0
     proc = await asyncio.create_subprocess_exec(
-        ffprobe, "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", path,
+        executable, "--no-download", "--print", "%(duration)s", video_url,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     out, _ = await proc.communicate()
     try:
@@ -137,12 +139,16 @@ async def download(video_url: str, full_output_path: str,
     if os.path.exists(full_output_path):
         return True, "файл уже существует"
 
+    # длительность для процента remux — из yt-dlp (метаданные источника),
+    # НЕ из промежуточного TS (находка 52)
+    duration = await _probe_duration(video_url)
     raw = await _phase_download(video_url, full_output_path, on_progress,
                                 threads)
     if not isinstance(raw, str):
         return raw  # (False, error)
     try:
-        return await _phase_remux(raw, full_output_path, on_progress)
+        return await _phase_remux(raw, full_output_path, on_progress,
+                                  duration)
     finally:
         # подчищаем промежуточные и недоделанный remux-файл (находка 50:
         # частичный финал нельзя принимать за готовый)
@@ -199,13 +205,14 @@ async def _phase_download(video_url: str, full_output_path: str,
 
 
 async def _phase_remux(raw: str, full_output_path: str,
-                       on_progress: ProgressCb) -> tuple[bool, str]:
+                       on_progress: ProgressCb,
+                       duration: float) -> tuple[bool, str]:
     """Наш ffmpeg -c copy с -progress pipe:1: remux в mp4, прогресс и ETA
-    из метрик ffmpeg (out_time/длительность, speed)."""
+    из метрик ffmpeg (out_time/длительность, speed). duration — из
+    yt-dlp (надёжно), не из промежуточного TS (находка 52)."""
     executable = shutil.which("ffmpeg")
     if not executable:
         return False, "ffmpeg не найден в PATH"
-    duration = await _probe_duration(raw)
     await on_progress({"phase": "remux", "progress": 0, "eta": 0,
                        "speed": 0.0})
 
