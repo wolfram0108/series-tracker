@@ -60,6 +60,7 @@ class DownloadsModule(BaseModule):
         self.handle("settings.changed", self.on_settings_changed)
         self.handle("downloads.queue.get", self.on_queue_get)
         self.handle("downloads.queue.clear", self.on_queue_clear)
+        self.handle("downloads.cancel", self.on_cancel)
         self.handle("downloads.fs.sync", self.on_fs_sync)
         self.handle("downloads.item.set_filename", self.on_set_filename)
         self.handle("downloads.item.set_status", self.on_set_status)
@@ -196,6 +197,59 @@ class DownloadsModule(BaseModule):
         """Каскад Р-19: владелец чистит vk-задачи загрузки."""
         await self.repo.delete_for_series(env.payload["series_id"])
         await self._broadcast_queue()
+
+    async def on_cancel(self, env: Envelope) -> dict:
+        """Точечная отмена загрузки (приказ пользователя): убить активный
+        yt-dlp, удалить недокачанный файл, снять задачу из очереди. НЕ
+        трогает план/игноры — штатная автоматизация (скан) может позже
+        снова поставить серию в загрузку (находка 45)."""
+        task_id = env.payload["task_id"]
+        task = await self.repo.get_task(task_id)
+        if task is None:
+            raise LookupError(f"задача загрузки {task_id} не найдена")
+        uid, series_id = task["task_key"], task["series_id"]
+
+        # 1) остановить активную загрузку — cancel прерывает _run_download,
+        # ytdlp.download в finally убивает процесс
+        runner = self._active.get(task_id)
+        if runner is not None and not runner.done():
+            runner.cancel()
+            try:
+                await runner
+            except BaseException:  # noqa: BLE001 — ждём завершения отмены
+                pass
+
+        # 2) удалить недокачанный файл и временные артефакты yt-dlp
+        if task.get("save_path"):
+            await asyncio.to_thread(self._remove_partial, task["save_path"])
+
+        # 3) снять задачу, вернуть элемент в pending (был downloading)
+        await self.repo.delete_task(task_id)
+        await self.repo.set_item_status(uid, "pending")
+        self.log.info("загрузка %s отменена пользователем (задача %d)",
+                      uid, task_id)
+        await self._contribute(series_id)
+        await self._broadcast_queue()
+        return {"cancelled": True}
+
+    @staticmethod
+    def _remove_partial(save_path: str) -> None:
+        """Целевой файл + недокачанные артефакты yt-dlp (.part, .ytdl,
+        .fNNN.*) того же видео — точечно по имени, чужого не трогаем."""
+        import glob
+        directory = os.path.dirname(save_path)
+        base = os.path.basename(save_path)
+        stem = os.path.splitext(base)[0]
+        targets = {save_path}
+        for pat in (f"{base}.part", f"{stem}.*.part", f"{stem}*.ytdl",
+                    f"{stem}.f*.*"):
+            targets.update(glob.glob(os.path.join(directory, pat)))
+        for path in targets:
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+            except OSError:
+                pass
 
     async def on_queue_get(self, env: Envelope) -> dict:
         tasks = await self.repo.active_tasks()

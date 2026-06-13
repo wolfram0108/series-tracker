@@ -83,11 +83,16 @@ const SettingsAgentsTab = {
                                     <strong :title="getSeriesName(task.series_id)">{{ getSeriesName(task.series_id) }}</strong>
                                     <small class="text-muted" :title="task.save_path">{{ getBaseName(task.save_path) }}</small>
                                 </div>
-                                <div class="div-table-cell">
+                                <div class="div-table-cell" style="flex-direction: column; align-items: flex-start; gap: 4px;">
                                     <span class="badge" :class="getDownloadStatusClass(task.status)">{{ task.status }}</span>
-                                    <small v-if="task.status === 'error'" class="d-block error-cell mt-1" :title="task.error_message">
+                                    <small v-if="task.status === 'error'" class="d-block error-cell" :title="task.error_message">
                                         {{ task.error_message }}
                                     </small>
+                                    <button v-if="['pending','downloading','error'].includes(task.status)"
+                                            @click="cancelDownload(task)" class="btn-icon btn-delete"
+                                            title="Отменить загрузку и удалить файл">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
                                 </div>
                                 <div class="div-table-cell" style="flex-direction: column; align-items: stretch; gap: 8px;">
                                     <div class="progress" style="height: 20px; font-size: 12px;" v-if="task.status === 'downloading' || task.status === 'completed'">
@@ -211,6 +216,18 @@ const SettingsAgentsTab = {
     getBaseName(path) {
         if (!path) return '';
         return path.split(/[\\/]/).pop();
+    },
+    async cancelDownload(task) {
+        if (!confirm(`Отменить загрузку «${this.getBaseName(task.save_path) || this.getSeriesName(task.series_id)}» и удалить файл?`)) return;
+        try {
+            const r = await fetch(`/api/downloads/${task.id}/cancel`, { method: 'POST' });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || 'Ошибка отмены загрузки');
+            this.$emit('show-toast', d.message || 'Загрузка отменена', 'success');
+            // очередь обновится push-событием download_queue_update (принцип 2)
+        } catch (e) {
+            this.$emit('show-toast', e.message, 'danger');
+        }
     },
     getDownloadStatusClass(status) {
         const map = {

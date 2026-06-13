@@ -92,6 +92,11 @@ class DownloadsRepository:
         await self._db.execute(
             "DELETE FROM download_tasks WHERE id=?", (task_id,))
 
+    async def get_task(self, task_id: int) -> dict | None:
+        return await self._db.fetch_one(
+            "SELECT * FROM download_tasks WHERE id=? AND task_type='vk_video'",
+            (task_id,))
+
     async def clear_queue(self) -> int:
         """Удаляет все задачи, кроме идущих загрузок (контракт
         /downloads/queue/clear)."""

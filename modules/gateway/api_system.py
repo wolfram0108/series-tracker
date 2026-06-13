@@ -73,4 +73,19 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         return {"success": True,
                 "message": f"Удалено {reply['deleted']} задач из очереди."}
 
+    @r.post("/api/downloads/{task_id}/cancel")
+    async def downloads_cancel(task_id: int):
+        """Точечная отмена загрузки: убить процесс + удалить файл +
+        снять задачу (находка 45)."""
+        try:
+            await gw.request("downloads.cancel", {"task_id": task_id},
+                             timeout=30)
+        except BusRequestError as exc:
+            msg = str(exc)
+            code = 404 if "LookupError" in msg else 500
+            return JSONResponse(
+                {"success": False, "error": msg.split(": ", 1)[-1]},
+                status_code=code)
+        return {"success": True, "message": "Загрузка отменена."}
+
     return r

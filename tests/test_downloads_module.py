@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from core import BaseModule, Bus, Runner
+from core import BaseModule, Bus, BusRequestError, Runner
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.downloads import DownloadsModule
@@ -314,3 +314,44 @@ async def test_interrupted_requeued_on_start_but_error_kept(env_paths):
         dl.gate.set()
     finally:
         await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_cancel_active_download(system):
+    """Находка 45: точечная отмена — убить активную загрузку, удалить
+    файл, снять задачу; план/игноры не трогаются."""
+    bus, _, dl, probe, db_path, media_dir = system
+    dl.gate = asyncio.Event()  # держим загрузку активной на 50%
+    _add_item(db_path, "uid1", 1)
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+
+    # дождаться, пока задача реально пошла в загрузку
+    assert await _wait(lambda: _items(db_path)["uid1"]["status"]
+                       == "downloading")
+    task = _tasks(db_path)[0]
+    save_path = task["save_path"]
+    # имитируем недокачанные артефакты yt-dlp на диске
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    open(save_path, "wb").close()
+    open(save_path + ".part", "wb").close()
+
+    reply = await probe.request("downloads.cancel",
+                                {"task_id": task["id"]}, timeout=10)
+    assert reply["cancelled"] is True
+
+    # задача снята, элемент вернулся в pending (план/игнор не тронуты)
+    assert _tasks(db_path) == []
+    item = _items(db_path)["uid1"]
+    assert item["status"] == "pending"
+    assert item["plan_status"] == "in_plan_single"
+    assert item["is_ignored_by_user"] == 0
+    # файл и .part удалены
+    assert not os.path.exists(save_path)
+    assert not os.path.exists(save_path + ".part")
+
+
+@pytest.mark.asyncio
+async def test_cancel_unknown_task_errors(system):
+    bus, _, dl, probe, db_path, media_dir = system
+    with pytest.raises(BusRequestError, match="не найдена"):
+        await probe.request("downloads.cancel", {"task_id": 999}, timeout=5)

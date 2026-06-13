@@ -68,16 +68,25 @@ async def download(video_url: str, full_output_path: str,
         "-o", full_output_path, video_url,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
-    assert proc.stdout is not None
-    while True:
-        line = await proc.stdout.readline()
-        if not line:
-            break
-        data = parse_progress_line(line.decode("utf-8", errors="replace"))
-        if data:
-            await on_progress(data)
+    # При отмене задачи (downloads.cancel) корутину прерывает
+    # CancelledError на await ниже — процесс yt-dlp надо убить, иначе он
+    # продолжит качать осиротевшим (находка 45). finally гарантирует это
+    # при любом выходе.
+    try:
+        assert proc.stdout is not None
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            data = parse_progress_line(line.decode("utf-8", errors="replace"))
+            if data:
+                await on_progress(data)
+        await proc.wait()
+    finally:
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
 
-    await proc.wait()
     if proc.returncode == 0:
         await on_progress({"progress": 100, "dlspeed": 0, "eta": 0})
         return True, ""
