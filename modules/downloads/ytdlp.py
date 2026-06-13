@@ -30,9 +30,11 @@ ProgressCb = Callable[[dict], Awaitable[None]]
 # (тогда без ускорения, но загрузка работает).
 HLS_FORMAT = "b[protocol*=m3u8]/b"
 
+# Формат hlsnative+-N отличается от обычного: после '~' идут пробелы,
+# ETA бывает 'Unknown', в хвосте '(frag X/Y)' (находка 47).
 PROGRESS_RE = re.compile(
-    r"\[download\]\s+(?P<percent>[\d.]+)%\s+of\s+~?(?P<size>[\d.]+\w+)"
-    r"\s+at\s+(?P<speed>[\d.]+\w+/s)\s+ETA\s+(?P<eta>[\d:]+)")
+    r"\[download\]\s+(?P<percent>[\d.]+)%\s+of\s+~?\s*(?P<size>[\d.]+\w+)"
+    r"\s+at\s+(?P<speed>[\d.]+\w+/s)\s+ETA\s+(?P<eta>[\d:]+|Unknown)")
 
 _UNITS = {"kib": 1024, "mib": 1024 ** 2, "gib": 1024 ** 3}
 

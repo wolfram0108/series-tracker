@@ -25,6 +25,18 @@ def test_parse_progress_line():
                     "total_size_mb": 1228.8,
                     "dlspeed": 5 * 1024 * 1024, "eta": 93}
     assert ytdlp.parse_progress_line("[merge] something") is None
+    # формат hlsnative+-N: пробелы после '~', ETA Unknown, хвост (frag)
+    hls = ytdlp.parse_progress_line(
+        "[download]   3.0% of ~  24.82GiB at    5.00MiB/s ETA Unknown "
+        "(frag 138/4602)")
+    assert hls["progress"] == 3
+    assert hls["dlspeed"] == 5 * 1024 * 1024
+    assert hls["eta"] == 0          # Unknown -> 0
+    # и обычная hls-строка с временем ETA
+    hls2 = ytdlp.parse_progress_line(
+        "[download]  55.0% of ~  24.82GiB at  60.00MiB/s ETA 03:30 "
+        "(frag 2500/4602)")
+    assert hls2["progress"] == 55 and hls2["eta"] == 210
 
 
 def test_ffmpeg_progress_percent_and_eta():
