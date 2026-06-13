@@ -144,11 +144,14 @@ async def download(video_url: str, full_output_path: str,
     try:
         return await _phase_remux(raw, full_output_path, on_progress)
     finally:
-        for leftover in glob.glob(full_output_path + ".download.*"):
-            try:
-                os.remove(leftover)
-            except OSError:
-                pass
+        # подчищаем промежуточные и недоделанный remux-файл (находка 50:
+        # частичный финал нельзя принимать за готовый)
+        for pat in (".download.*", ".remux.mp4"):
+            for leftover in glob.glob(full_output_path + pat):
+                try:
+                    os.remove(leftover)
+                except OSError:
+                    pass
 
 
 async def _phase_download(video_url: str, full_output_path: str,
@@ -206,10 +209,15 @@ async def _phase_remux(raw: str, full_output_path: str,
     await on_progress({"phase": "remux", "progress": 0, "eta": 0,
                        "speed": 0.0})
 
+    # Атомарность (находка 50): ffmpeg пишет во временный файл, в финал
+    # переименовываем ТОЛЬКО при успехе. Прерванный/зависший remux не
+    # оставляет частичного финального файла, который потом приняли бы за
+    # готовый ('файл существует' в download()).
+    tmp_out = full_output_path + ".remux.mp4"
     proc = await asyncio.create_subprocess_exec(
         executable, "-y", "-i", raw, "-c", "copy",
         "-movflags", "+faststart", "-progress", "pipe:1", "-nostats",
-        full_output_path,
+        tmp_out,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     # stderr дренируем параллельно: битый VK-hls сыпет тысячи
     # 'Packet corrupt' в stderr, без вычитки буфер переполняется и
@@ -237,6 +245,7 @@ async def _phase_remux(raw: str, full_output_path: str,
     tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
 
     if proc.returncode == 0:
+        os.replace(tmp_out, full_output_path)  # атомарная публикация
         await on_progress({"phase": "remux", "progress": 100, "eta": 0,
                            "speed": 0.0})
         return True, ""
