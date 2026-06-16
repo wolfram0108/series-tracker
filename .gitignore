@@ -38,3 +38,6 @@ tests/fixtures/
 
 # Локальные секреты — никогда не синхронизировать
 docs/key.txt
+
+# Лог запуска стенда (создаётся restart.sh)
+uvicorn.log

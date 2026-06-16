@@ -25,8 +25,9 @@
 (media_items); имена файлов 349/349 (tests/test_rules_format_diff.py).
 Тесты: 171 passed (после этапа 5) (`.venv/bin/python -m pytest -q`; изредка возможен
 флак тестовых таймаутов под полной нагрузкой — код-гонок не выявлено),
-интеграция со стендовым qBit — `ST_QBIT_URL=http://series-tracker:8080
-ST_QBIT_USER=admin ST_QBIT_PASS=REMOVED-SECRET pytest tests/test_torrents_integration.py`.
+интеграция со стендовым qBit — переменные `ST_QBIT_URL/USER/PASS` из
+локального `.env` (см. `.env.example`), затем
+`pytest tests/test_torrents_integration.py`.
 Дифф-харнесы: `tests/verify_rules_diff.py`, `tests/verify_planner_diff.py`.
 
 ## СЛЕДУЮЩИЙ ШАГ (точка продолжения)
@@ -107,7 +108,7 @@ WORKER TIMEOUT с логами).
 
 - Worktree: `~/series-tracker-bus` (ветка refactoring/bus), venv `.venv/`.
 - Стенд: `ssh series-tracker` (user) / root; qBit в Docker :8080
-  admin/REMOVED-SECRET; голая Ubuntu 24.04 + git/ffmpeg/yt-dlp/Docker.
+  (логин/пароль — в локальном `.env`); Ubuntu 24.04 + git/ffmpeg/yt-dlp/Docker.
 - Констрейнты данных: формулы unique_id/torrent_id (Р-10), форматы
   дат-маркеров по трекерам (находка 13, modules/sources/dates.py),
   схема app.db = Alembic 0001.

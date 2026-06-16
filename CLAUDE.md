@@ -85,7 +85,7 @@ Request/reply реализован в обвязке `core/module.py` ПОВЕР
 | Тесты | `.venv/bin/python -m pytest -q` |
 | Запуск | `.venv/bin/uvicorn run:app --port 5000` |
 | Стенд | `ssh series-tracker` (user), `ssh root@series-tracker` (root — только пакеты/система) |
-| qBittorrent стенда | Docker на стенде, WebUI `:8080`, `admin / REMOVED-SECRET` |
+| qBittorrent стенда | Docker на стенде, WebUI `:8080`; логин/пароль — в локальном `.env` (см. `.env.example`) |
 | Фикстура прод-БД | `tests/fixtures/app.fixture.db` (без таблицы auth; в git не попадает) |
 | Учётки | локальный файл `/home/user/series-tracker/docs/key.txt` (в git не попадает) |
 
