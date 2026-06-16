@@ -135,6 +135,40 @@ async def test_login_rate_limit_protects_tracker(system):
 
 
 @pytest.mark.asyncio
+async def test_failed_login_does_not_consume_rate_limit(system):
+    """Неудачный логин (сетевая ошибка/таймаут одного зеркала) НЕ должен
+    выставлять rate-limit и блокировать логин на другом доступном
+    зеркале того же трекера — иначе перебор зеркал теряет смысл."""
+    _, _, module, probe, monkeypatch = system
+    posts = {"n": 0}
+    monkeypatch.setattr(requests.Session, "request",
+                        lambda self, *a, **kw: _login_page())
+
+    def fake_post(self, url, **kwargs):
+        posts["n"] += 1
+        if posts["n"] == 1:  # первое зеркало: таймаут на логине
+            raise requests.exceptions.ConnectionError("Read timed out")
+        return FakeResponse(url="https://kinozal.tv/userdetails.php")
+
+    monkeypatch.setattr(requests.Session, "post", fake_post)
+
+    # первое зеркало (kinozal.me): логин падает по сети
+    with pytest.raises(BusRequestError):
+        await probe.request("trackerauth.fetch", {
+            "service": "kinozal",
+            "url": "https://kinozal.me/details.php?id=1"}, timeout=5)
+
+    # второе зеркало сразу же: rate-limit НЕ блокирует — логин реально
+    # вызывается (дальше «разлогинены», т.к. request-мок всё ещё отдаёт
+    # форму входа; до бага здесь была бы ошибка rate-limit)
+    with pytest.raises(BusRequestError, match="разлогинены"):
+        await probe.request("trackerauth.fetch", {
+            "service": "kinozal",
+            "url": "https://kinozal.tv/details.php?id=1"}, timeout=5)
+    assert posts["n"] == 2, "второй логин должен состояться, не отсечён лимитом"
+
+
+@pytest.mark.asyncio
 async def test_cookies_survive_restart(system):
     bus, db, module, probe, monkeypatch = system
     monkeypatch.setattr(requests.Session, "request",

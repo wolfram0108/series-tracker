@@ -103,10 +103,14 @@ class TrackerauthModule(BaseModule):
                 f"логин на {service} был {since_last:.0f} с назад — повторный "
                 f"раньше {LOGIN_MIN_INTERVAL:.0f} с запрещён (rate-limit)")
         credentials = await self._credentials(service)
-        self._last_login[service] = time.monotonic()
         session.cookies.clear()
         self.log.info("логин на %s/%s", service, domain)
         await asyncio.to_thread(provider.login, session, credentials, url)
+        # Отметку rate-limit ставим ТОЛЬКО после успешного логина: иначе
+        # неудачная попытка на одном зеркале (таймаут/сетевая ошибка)
+        # «съедала» общий по сервису лимит и блокировала логин на другом
+        # доступном зеркале того же трекера — перебор зеркал терял смысл.
+        self._last_login[service] = time.monotonic()
         await self.repo.save_cookies(service, domain, session, logged_in=True)
 
     # --- fetch ----------------------------------------------------------------------
