@@ -114,6 +114,7 @@ const AddSeriesModal = {
                                                 <label for="savePath">Путь сохранения</label>
                                             </div>
                                         </constructor-group>
+                                        <saved-path-dropdown class="mt-2" :catalog-name="tmdbCatalogName" @select="newSeries.save_path = $event"></saved-path-dropdown>
                                     </div>
                                     <div class="col-md-6">
                                         <constructor-group :class="[seasonClasses, { 'is-disabled': isSeasonless }]">

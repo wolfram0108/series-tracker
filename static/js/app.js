@@ -518,6 +518,7 @@ const app = createApp({
 
 app.component('ConstructorGroup', ConstructorGroup);
 app.component('ConstructorItemSelect', ConstructorItemSelect);
+app.component('SavedPathDropdown', SavedPathDropdown);
 
 app.component('draggable', vuedraggable);
 
