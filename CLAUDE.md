@@ -70,6 +70,39 @@ Request/reply реализован в обвязке `core/module.py` ПОВЕР
   одного модуля не должно замораживать процесс — находка №7);
 - группа логирования = имя модуля (`core/logging.py`).
 
+### Анатомия модуля
+
+Каждый модуль (`modules/<имя>/`) устроен одинаково:
+- `module.py` — класс `…Module(BaseModule)`; в `register()` объявлены
+  `self.handle(topic, fn[, concurrent=True])`. **Докстринг `module.py` —
+  это контракт модуля**: входящие queries/commands, исходящие события,
+  ресьюмабельность. Читать его ПЕРВЫМ при работе с модулем — он точнее
+  любой сводки.
+- `repository.py` — весь SQL модуля (приватные таблицы; чужие данные —
+  только через `request()` к соседу).
+- `on_start()` — reconcile: при старте модуль добирает незавершённые
+  задачи из своих таблиц (правило «шина — сигнал, БД — истина»).
+- профильные файлы (например `torrents/qbt_client.py`,
+  `sources/parsers.py`, `scan/planner.py`) — внешние протоколы и чистая
+  логика, отделённые от обвязки шины.
+
+Сводная карта всех топиков и событий (кто владелец, кто подписчик) —
+[contracts/bus_topics.md](contracts/bus_topics.md). Сборка процесса
+(порядок старта модулей, env) — `run.py`.
+
+### Конвейер (поток данных)
+
+`scan` (оркестратор + расписание) находит раздачи через `sources`
+(kinozal/rutracker/anilibria/VK), применяет `rules` и регистрирует их в
+`torrents` (qBit) или ставит VK-загрузки в `downloads` (yt-dlp). Готовый
+файл проходит `slicing` (нарезка по главам, ffmpeg), `renaming`
+(форматтер из `rules`) и попадает в медиатеку через `library`
+(перемещение/`set_location`). `catalog` — агрегатор: собирает
+`series.status.contribution` / `series.busy.contribution` от всех
+участников в свёрнутый статус серии и публикует `series.status.changed`.
+`gateway` транслирует события шины в SSE по таблице `SSE_MAP` и HTTP —
+в queries/commands; **бизнес-логики в gateway нет**.
+
 ## Фронт
 
 `static/` и `templates/` принесены из `main` как есть. Визуал, DOM,
@@ -82,16 +115,26 @@ Request/reply реализован в обвязке `core/module.py` ПОВЕР
 | Задача | Команда |
 |---|---|
 | venv | `.venv/` в корне worktree (создан) |
-| Тесты | `.venv/bin/python -m pytest -q` |
-| Запуск | `.venv/bin/uvicorn run:app --port 5000` |
+| Весь набор тестов | `.venv/bin/python -m pytest -q` |
+| Один файл / один тест | `.venv/bin/python -m pytest tests/test_bus.py -q` · `… -k "имя_теста"` |
+| Миграции БД (перед первым запуском) | `.venv/bin/alembic upgrade head` |
+| Запуск (dev, без qBit) | `.venv/bin/uvicorn run:app --port 5000` — без `ST_QBIT_URL` модуль torrents не стартует |
+| Браузерная доставка (astar/anilibria_tv) | после `pip install` — `.venv/bin/playwright install firefox` |
 | Стенд | `ssh series-tracker` (user), `ssh root@series-tracker` (root — только пакеты/система) |
 | qBittorrent стенда | Docker на стенде, WebUI `:8080`; логин/пароль — в локальном `.env` (см. `.env.example`) |
+| Интеграция с qBit | задать `ST_QBIT_URL/USER/PASS` (из `.env`), затем `pytest tests/test_torrents_integration.py` |
 | Фикстура прод-БД | `tests/fixtures/app.fixture.db` (без таблицы auth; в git не попадает) |
 | Учётки | локальный файл `/home/user/series-tracker/docs/key.txt` (в git не попадает) |
 
 Приложение на стенде работает от `user`; root — только для системных
 задач. Репозиторий имеет публичный origin: golden/fixtures и любые
 реальные данные пользователя в git не коммитятся.
+
+**Намеренно «красные» здесь тесты — это НЕ регрессии:** `*_match_production`
+/ `*_diff` (`verify_rules_diff.py`, `verify_planner_diff.py`,
+`test_rules_format_diff.py`) и `test_sources` с реальными дампами требуют
+golden-фикстур и прод-данных, которых в репозитории нет (живут на
+monitorka). Интеграционные тесты с живым qBit зависят от его состояния.
 
 ## Журналы
 
