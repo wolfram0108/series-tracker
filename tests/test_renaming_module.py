@@ -28,6 +28,7 @@ class FakeNeighbours(BaseModule):
         self.upserts: list[dict] = []
         self.active_torrents: list[dict] = []
         self.fail_format = False
+        self.collide_name: str | None = None  # одно имя на все файлы
         super().__init__(bus)
 
     def register(self):
@@ -59,6 +60,9 @@ class FakeNeighbours(BaseModule):
         base = env.payload["file_basename"]
         if "skip" in base:
             return {"filename": None, "extracted": {}}
+        if self.collide_name:
+            return {"filename": self.collide_name,
+                    "extracted": {"episode": 1}}
         return {"filename": f"Season 01/Show {base}",
                 "extracted": {"episode": 1}}
 
@@ -216,3 +220,23 @@ async def test_process_torrent_uses_original_path_from_db(system):
     assert reply == {"renamed": 0}
     assert fake.renames == []
     assert fake.upserts[0]["files"][0]["original_path"] == "old/ep1.mkv"
+
+
+@pytest.mark.asyncio
+async def test_process_torrent_collision_not_merged(system):
+    """Находка 63 (консистентность БД↔qBit): если правила дают двум
+    файлам ОДНО имя — это коллизия. Второй файл помечается rename_error
+    и НЕ отправляется в qBit (qBit мог бы принять переименование в
+    занятый путь и слить файлы, а БД соврала бы «renamed»)."""
+    _, fake, probe, _, _ = system
+    fake.series = {**fake.series, "source_type": "torrent"}
+    fake.collide_name = "Season 01/Show one.mkv"
+    fake.qbt_files["hc"] = [{"name": "old/a.mkv"}, {"name": "old/b.mkv"}]
+    reply = await probe.request("renaming.process_torrent", {
+        "series_id": 2, "qb_hash": "hc"}, timeout=10)
+    # переименован только первый; второй — коллизия, в qBit не ушёл
+    assert reply == {"renamed": 1}
+    assert [r["new_path"] for r in fake.renames] == ["Season 01/Show one.mkv"]
+    saved = {f["original_path"]: f["status"] for f in fake.upserts[0]["files"]}
+    assert saved["old/a.mkv"] == "renamed"
+    assert saved["old/b.mkv"] == "rename_error"

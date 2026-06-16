@@ -266,6 +266,7 @@ class RenamingModule(BaseModule):
                       for f in db_files}
 
         records, renamed = [], 0
+        assigned: dict[str, str] = {}  # new_path -> original (детект коллизий)
         for f in files:
             current_path = f["name"] if isinstance(f, dict) else f
             if not current_path.lower().endswith(_VIDEO_EXT):
@@ -282,6 +283,22 @@ class RenamingModule(BaseModule):
                 self.log.warning("сезон не определён для '%s' — файл "
                                  "пропущен", current_path)
                 continue
+            # Консистентность (находка 63): два файла, получивших ОДНО имя
+            # (правила дали неуникальный результат) — это коллизия. qBit
+            # может принять переименование в уже занятый путь и слить
+            # файлы, вернув успех; БД тогда соврала бы «renamed». Не
+            # сливаем — помечаем ошибкой явно, чтобы БД отражала реальность.
+            prev = assigned.get(new_path)
+            if prev is not None and prev != original:
+                self.log.error("коллизия имён: '%s' и '%s' дают одно имя "
+                               "'%s' — переименование пропущено (правила "
+                               "неуникальны)", prev, original, new_path)
+                records.append({"original_path": original,
+                                "renamed_path": None,
+                                "status": "rename_error",
+                                "extracted_metadata": reply["extracted"]})
+                continue
+            assigned[new_path] = original
             status = "renamed"
             if new_path != current_path:
                 try:
