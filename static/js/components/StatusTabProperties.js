@@ -78,8 +78,8 @@ const StatusTabProperties = {
                                     <input v-model.trim="editableSeries.save_path" type="text" @input="autoCorrectSlash($event, 'editableSeries', 'save_path')" class="item-input" id="savePath-edit" placeholder=" ">
                                     <label for="savePath-edit">Путь сохранения</label>
                                 </div>
+                                <saved-path-dropdown :catalog-name="tmdbCatalogName" @select="editableSeries.save_path = $event"></saved-path-dropdown>
                             </constructor-group>
-                            <saved-path-dropdown class="mt-2" :catalog-name="tmdbCatalogName" @select="editableSeries.save_path = $event"></saved-path-dropdown>
                         </div>
                         <div class="col-md-6">
                             <constructor-group :class="[seasonClasses, {'is-disabled': isSeasonless}]">

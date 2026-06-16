@@ -7,7 +7,8 @@ const ConstructorGroup = {
 const ConstructorItemSelect = {
     props: {
         options: { type: Array, required: true },
-        modelValue: { type: [String, Number], default: '' }
+        modelValue: { type: [String, Number], default: '' },
+        placeholder: { type: String, default: 'Выберите опцию' }
     },
     emits: ['update:modelValue'],
     setup(props, { emit }) {
@@ -25,7 +26,7 @@ const ConstructorItemSelect = {
 
         const selectedOptionText = computed(() => {
             const selected = props.options.find(opt => opt.value === props.modelValue);
-            return selected ? selected.text : 'Выберите опцию';
+            return selected ? selected.text : props.placeholder;
         });
 
         const toggleDropdown = () => {

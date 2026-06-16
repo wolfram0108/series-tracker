@@ -177,19 +177,11 @@
 .option:hover { background-color: var(--color-gray-100); }
 .option.selected { font-weight: 600; background-color: #e9f2ff; }
 
-/* Выпадающий список сохранённых путей (SavedPathDropdown).
-   Позиционирование — absolute в относительном контейнере, без ручного
-   расчёта координат; визуал переиспользует .option выше. */
-.saved-path-dropdown { position: relative; }
-.saved-path-dropdown .chevron { transition: transform 0.2s ease; }
-.saved-path-dropdown .open .chevron { transform: rotate(180deg); }
-.path-combo-list {
-    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 1050;
-    background-color: #fff; border: 1px solid var(--color-gray-200);
-    border-radius: var(--border-radius); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    max-height: 240px; overflow-y: auto;
-}
-.path-combo-empty { padding: 0.75rem 1rem; color: var(--color-text-muted, #888); }
+/* Выбор сохранённого пути (SavedPathDropdown) — ConstructorItemSelect,
+   встроенный в строку поля пути. flex-grow:0, чтобы не съедать ширину
+   у input'а пути; список наследует .options-list (position:fixed,
+   не обрезается). */
+.item-select.saved-path-select { flex-grow: 0; min-width: 160px; }
 
 .btn-icon:disabled {
     opacity: 0.5;
