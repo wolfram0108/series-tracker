@@ -1,14 +1,16 @@
 // static/js/components/SavedPathDropdown.js
 //
 // Выбор сохранённого пути (Настройки → Отладка → «Сохранённые пути»).
-// Тонкая обёртка над ConstructorItemSelect — тем же контролом, что у
-// «Профиль правил»: одна строка, интегрируется в constructor-group поля
-// пути, список через position:fixed не обрезается overflow'ом модалки.
+// Встраивается в constructor-group поля пути как компактная кнопка-
+// шеврон без подписи. Выпадающий список разворачивается во всю ширину
+// поля и позиционируется position:fixed — поэтому не обрезается
+// overflow'ом модалки (та же идея, что в ConstructorItemSelect, но без
+// его глобального querySelector и ручной логики «вверх/вниз»).
 //
-// Сам не хранит выбор (всегда показывает placeholder): при выборе
-// эмитит готовый путь событием select, а поле пути остаётся обычным
-// редактируемым input'ом родителя. Если задан catalogName
-// («Имя (год) [tmdbid-XXXX]»), он дописывается в конец через слэш.
+// Сам не хранит выбор: при клике по пути эмитит готовое значение
+// событием select; поле ввода остаётся обычным редактируемым input'ом
+// родителя. Если задан catalogName («Имя (год) [tmdbid-XXXX]»), он
+// дописывается в конец через слэш.
 
 const SavedPathDropdown = {
     props: {
@@ -16,17 +18,31 @@ const SavedPathDropdown = {
     },
     emits: ['select'],
     data() {
-        return { paths: [] };
+        return { isOpen: false, paths: [], listStyle: {} };
     },
-    async mounted() {
-        await this.loadPaths();
+    mounted() {
+        document.addEventListener('click', this.onOutside, true);
     },
-    computed: {
-        options() {
-            return this.paths.map(p => ({ text: p.path, value: p.path }));
-        },
+    beforeUnmount() {
+        document.removeEventListener('click', this.onOutside, true);
     },
     methods: {
+        async toggle() {
+            if (this.isOpen) { this.isOpen = false; return; }
+            await this.loadPaths();
+            this.positionList();
+            this.isOpen = true;
+        },
+        positionList() {
+            // Якорь — вся группа поля пути: список во всю её ширину.
+            const group = this.$el.closest('.input-constructor-group') || this.$el;
+            const rect = group.getBoundingClientRect();
+            this.listStyle = {
+                top: `${rect.bottom + 4}px`,
+                left: `${rect.left}px`,
+                width: `${rect.width}px`,
+            };
+        },
         async loadPaths() {
             try {
                 const response = await fetch('/api/settings/saved_paths');
@@ -35,18 +51,26 @@ const SavedPathDropdown = {
                 // Тихо: список просто пуст, ручной ввод пути не блокируется.
             }
         },
-        onPick(base) {
+        choose(base) {
             const name = (this.catalogName || '').trim();
             const full = name ? base.replace(/\/+$/, '') + '/' + name : base;
             this.$emit('select', full);
+            this.isOpen = false;
+        },
+        onOutside(event) {
+            if (this.isOpen && this.$el && !this.$el.contains(event.target)) {
+                this.isOpen = false;
+            }
         },
     },
     template: `
-        <constructor-item-select
-            class="saved-path-select"
-            :options="options"
-            placeholder="Сохранённые пути"
-            @update:modelValue="onPick">
-        </constructor-item-select>
+        <div class="constructor-item saved-path-trigger" :class="{ open: isOpen }"
+             @click.stop="toggle" title="Сохранённые пути">
+            <i class="bi bi-chevron-down chevron"></i>
+            <div class="options-list" :style="listStyle">
+                <div v-if="!paths.length" class="path-combo-empty">Нет сохранённых путей</div>
+                <div v-for="p in paths" :key="p.id" class="option" @click.stop="choose(p.path)">{{ p.path }}</div>
+            </div>
+        </div>
     `,
 };

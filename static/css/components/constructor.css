@@ -177,11 +177,18 @@
 .option:hover { background-color: var(--color-gray-100); }
 .option.selected { font-weight: 600; background-color: #e9f2ff; }
 
-/* Выбор сохранённого пути (SavedPathDropdown) — ConstructorItemSelect,
-   встроенный в строку поля пути. flex-grow:0, чтобы не съедать ширину
-   у input'а пути; список наследует .options-list (position:fixed,
-   не обрезается). */
-.item-select.saved-path-select { flex-grow: 0; min-width: 160px; }
+/* Выбор сохранённого пути (SavedPathDropdown) — компактная кнопка-
+   шеврон в строке поля пути; список наследует .options-list
+   (position:fixed, не обрезается) и разворачивается во всю ширину поля
+   (ширина задаётся инлайном из ширины группы). */
+.saved-path-trigger {
+    width: 44px; justify-content: center; cursor: pointer;
+    color: var(--color-gray-600); transition: color 0.2s ease;
+}
+.saved-path-trigger:hover, .saved-path-trigger.open { color: var(--color-blue); }
+.saved-path-trigger .chevron { margin-left: 0; }
+.saved-path-trigger .options-list { max-height: 280px; }
+.path-combo-empty { padding: 0.75rem 1rem; color: var(--color-text-muted, #888); }
 
 .btn-icon:disabled {
     opacity: 0.5;
