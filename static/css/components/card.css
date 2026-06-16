@@ -235,19 +235,20 @@ input:checked + .slider:before {
         transparent 100%
     );
     background-size: var(--stripe-size) var(--stripe-size);
-    z-index: 11; 
+    z-index: 12;
 }
 
 .layer-waiting    { background: linear-gradient(135deg, #f0f2f5, #e9ecef); z-index: 1; }
-.layer-ready      { background: linear-gradient(135deg, #4CAF50, #409444); z-index: 2; } 
-.layer-downloading{ background: linear-gradient(135deg, #009688, #00796D); z-index: 3; } 
-.layer-activating { background: linear-gradient(135deg, #7EC9D1, #6ab8bf); z-index: 4; }
-.layer-checking   { background: linear-gradient(135deg, #849DD5, #6f88c3); z-index: 5; }
-.layer-renaming   { background: linear-gradient(135deg, #A28ADA, #8b73c2); z-index: 6; }
-.layer-metadata   { background: linear-gradient(135deg, #D2B575, #c0a463); z-index: 7; }
-.layer-scanning   { background: linear-gradient(135deg, #CF9772, #bd8561); z-index: 8; }
-.layer-viewing    { background: linear-gradient(135deg, #6c757d, #5a6268); z-index: 9; }
-.layer-error      { background: linear-gradient(135deg, #dc3545, #c82333); z-index: 10; }
+.layer-ready      { background: linear-gradient(135deg, #4CAF50, #409444); z-index: 2; }
+.layer-downloading{ background: linear-gradient(135deg, #009688, #00796D); z-index: 3; }
+.layer-queued     { background: linear-gradient(135deg, #C9A66B, #b4905a); z-index: 4; }
+.layer-activating { background: linear-gradient(135deg, #7EC9D1, #6ab8bf); z-index: 5; }
+.layer-checking   { background: linear-gradient(135deg, #849DD5, #6f88c3); z-index: 6; }
+.layer-renaming   { background: linear-gradient(135deg, #A28ADA, #8b73c2); z-index: 7; }
+.layer-metadata   { background: linear-gradient(135deg, #D2B575, #c0a463); z-index: 8; }
+.layer-scanning   { background: linear-gradient(135deg, #CF9772, #bd8561); z-index: 9; }
+.layer-viewing    { background: linear-gradient(135deg, #6c757d, #5a6268); z-index: 10; }
+.layer-error      { background: linear-gradient(135deg, #dc3545, #c82333); z-index: 11; }
 
 .status-spinner {
     width: 14px;

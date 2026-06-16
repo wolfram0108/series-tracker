@@ -13,12 +13,14 @@ from __future__ import annotations
 HIERARCHY = [
     "error", "scanning", "checking", "slicing",
     "renaming", "metadata", "activating",
-    "downloading", "idle", "ready", "viewing", "waiting",
+    "downloading", "idle", "queued", "ready", "viewing", "waiting",
 ]
 # idle — простой торрент-загрузки (qBit stalledDL): отдельный статус
 # рядом с downloading (Р-11, ревизия). Цвет на фронте тот же, что у
 # downloading; меняется только пилюля. Активность как у downloading —
 # поэтому подавляет waiting (входит в _WAITING_SUPPRESSORS ниже).
+# queued — торрент в очереди qBit (queuedDL): тоже отдельный статус,
+# но со своим (светло-коричневым) цветом слоя. Так же подавляет waiting.
 
 # viewing и waiting в свёртках не запрещены умышленно: waiting — часть
 # VK-свёртки (семантика «есть pending в плане»), viewing же приходит

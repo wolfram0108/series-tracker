@@ -48,6 +48,18 @@ def test_downloading_precedes_idle_in_order():
     assert agg.statuses(1) == ["downloading", "idle"]
 
 
+def test_queued_is_its_own_status():
+    # очередь qBit (queuedDL) — отдельный статус queued (Р-11): своя
+    # пилюля «В очереди», как активность подавляет waiting.
+    agg = StatusAggregator()
+    assert agg.set_contribution(1, "torrents", {"queued": True}) == ["queued"]
+    assert agg.statuses(1) == ["queued"]
+    # порядок: downloading, idle, queued — затем ready
+    agg.set_contribution(1, "torrents", {"idle": True, "queued": True,
+                                         "ready": True})
+    assert agg.statuses(1) == ["idle", "queued", "ready"]
+
+
 def test_vk_ready_and_waiting_coexist():
     # семантика VK: скачана часть, остальное ждёт (фронт: stripes-stopped)
     agg = StatusAggregator()

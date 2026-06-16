@@ -44,11 +44,12 @@ const app = createApp({
                 'activating': { title: 'Активация', icon: 'bi-lightning-charge' },
                 'downloading': { title: 'Загрузка', icon: 'bi-download' },
                 'idle': { title: 'Простой', icon: 'bi-pause-circle' },
+                'queued': { title: 'В очереди', icon: 'bi-hourglass-split' },
                 'ready': { title: 'Готов', icon: 'bi-hdd-stack-fill' },
                 'error': { title: 'Ошибка', icon: 'bi-exclamation-triangle' },
                 'overflow': { title: '', icon: 'bi-three-dots' }
             },
-            layerHierarchy: ['waiting', 'ready', 'downloading', 'activating', 'checking', 'renaming', 'metadata', 'scanning', 'viewing', 'error']
+            layerHierarchy: ['waiting', 'ready', 'downloading', 'queued', 'activating', 'checking', 'renaming', 'metadata', 'scanning', 'viewing', 'error']
         };
     },
     mounted() {
@@ -317,13 +318,15 @@ const app = createApp({
                 if (['waiting', 'viewing'].includes(states[0])) return 'stripes-slow';
             }
 
-            // Простой торрент-загрузки (idle): цвет тот же зелёный, но линии
-            // замирают. Не замораживаем, если параллельно идёт другая
-            // реальная работа конвейера (включая активную загрузку) — её
-            // движение должно остаться.
+            // Простой (idle) и очередь (queued) торрент-загрузки: линии
+            // замирают (у idle цвет тот же зелёный, у queued — свой).
+            // Не замораживаем, если параллельно идёт другая реальная
+            // работа конвейера (включая активную загрузку) — её движение
+            // должно остаться.
             const stillActive = ['scanning', 'checking', 'activating',
                                   'renaming', 'metadata', 'downloading'];
-            if (states.includes('idle') && !states.some(s => stillActive.includes(s))) {
+            if ((states.includes('idle') || states.includes('queued'))
+                    && !states.some(s => stillActive.includes(s))) {
                 return 'stripes-stopped';
             }
 
