@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from core.db import Database
 
 _FIELDS = ("tmdb_id", "tmdb_season_number", "total_episodes",
-           "poster_path", "series_name")
+           "poster_path", "series_name", "year")
 
 
 def _now() -> str:

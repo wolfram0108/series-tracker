@@ -104,6 +104,26 @@ async def test_metadata_without_token_fails_loudly(system):
                                       {"query": "x"}, timeout=5)
 
 
+@pytest.mark.asyncio
+async def test_metadata_mapping_persists_year(system):
+    # год (миграция 0003) доезжает через map.set → map.get: нужен для
+    # имени каталога «Имя (год) [tmdbid-XXXX]» в инфо-режиме.
+    bus, db, modules = system
+    await db.execute(
+        "INSERT INTO series (id, url, name, name_en, site, save_path, "
+        "auto_scan_enabled, source_type, vk_search_mode) "
+        "VALUES (1, 'u', 'Очень странные дела', 'Stranger Things', "
+        "'kinozal', '/nas', 1, 'torrent', 'search')")
+    probe = _probe(modules)
+    await probe.request("metadata.map.set", {
+        "series_id": 1,
+        "tmdb_data": {"tmdb_id": 66732, "tmdb_season_number": 1,
+                      "total_episodes": 8, "series_name": "Очень странные дела",
+                      "year": "2016"}}, timeout=5)
+    reply = await probe.request("metadata.map.get", {"series_id": 1}, timeout=5)
+    assert reply["mapping"]["year"] == "2016"
+
+
 # --- library --------------------------------------------------------------------
 
 @pytest.mark.asyncio

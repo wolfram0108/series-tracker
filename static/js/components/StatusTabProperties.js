@@ -359,6 +359,17 @@ const StatusTabProperties = {
             const match = this.editableSeries.season ? this.editableSeries.season.match(/^s(\d+)$/i) : null;
             return match ? parseInt(match[1], 10) : 1;
         },
+
+        // Готовое имя каталога «Имя (год) [tmdbid-XXXX]» (как в add-модалке).
+        // Имя — RU-из-TMDB; год опускается со скобками, если его нет.
+        tmdbCatalogName() {
+            if (!this.tmdbSelected) return '';
+            const name = (this.tmdbSelected.name || '').trim();
+            if (!name) return '';
+            const year = String(this.tmdbSelected.year || '').trim();
+            const idPart = `[tmdbid-${this.tmdbSelected.id}]`;
+            return year ? `${name} (${year}) ${idPart}` : `${name} ${idPart}`;
+        },
     },
     methods: {
         async load() {
@@ -411,7 +422,8 @@ const StatusTabProperties = {
                     this.tmdbSelected = {
                         id: seriesData.tmdb_info.tmdb_id,
                         name: seriesData.tmdb_info.series_name || seriesData.name,
-                        poster_path: seriesData.tmdb_info.poster_path
+                        poster_path: seriesData.tmdb_info.poster_path,
+                        year: seriesData.tmdb_info.year || ''
                     };
                     this.tmdbEpisodeCount = seriesData.tmdb_info.total_episodes;
                     // Не загружаем детали автоматически, чтобы не спамить API,
@@ -510,7 +522,8 @@ const StatusTabProperties = {
                         tmdb_season_number: this.tmdbSeasonNumber,
                         total_episodes: this.tmdbEpisodeCount,
                         poster_path: this.tmdbSelected.poster_path,
-                        series_name: this.tmdbSelected.name
+                        series_name: this.tmdbSelected.name,
+                        year: this.tmdbSelected.year || ''
                     };
                 } else {
                     // Если пользователь нажал крестик (отвязал), нужно передать null или специальный флаг?

@@ -559,7 +559,8 @@ const AddSeriesModal = {
                         tmdb_season_number: this.tmdbSeasonNumber,
                         total_episodes: this.tmdbEpisodeCount,
                         poster_path: this.tmdbSelected.poster_path,
-                        series_name: this.tmdbSelected.name
+                        series_name: this.tmdbSelected.name,
+                        year: this.tmdbSelected.year
                     };
                 }
 
