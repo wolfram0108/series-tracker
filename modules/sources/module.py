@@ -39,6 +39,12 @@ REQUEST_MIN_INTERVAL = 3.0  # секунд между запросами к од
 class SourcesModule(BaseModule):
     name = "sources"
 
+    # Браузерная доставка astar/anilibria_tv (Р-9). UA/viewport — как в
+    # старом firefox-парсере (защита трекеров фингерпринтит браузер).
+    _BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) "
+                   "Gecko/20100101 Firefox/125.0")
+    BROWSER_TIMEOUT = 30000  # мс на загрузку/JS-челлендж в браузере
+
     def __init__(self, bus, db: Database, *,
                  torrent_cache_dir: str = "torrent_cache",
                  vk_page_interval: float = 1.0) -> None:
@@ -60,9 +66,18 @@ class SourcesModule(BaseModule):
 
     async def on_start(self) -> None:
         self._http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
+        # Браузерный пул (astar/anilibria_tv) поднимается ЛЕНИВО при
+        # первом обращении — на стенде без этих трекеров firefox не
+        # запускается (находка 14: один браузер на модуль, а не на скан).
+        self._pw = None
+        self._browser = None
 
     async def on_stop(self) -> None:
         await self._http.aclose()
+        if self._browser is not None:
+            await self._browser.close()
+        if self._pw is not None:
+            await self._pw.stop()
 
     # --- бережный доступ к трекеру ------------------------------------------------
 
@@ -134,20 +149,70 @@ class SourcesModule(BaseModule):
                                                   parse)
 
         if service in ("astar", "anilibria_tv"):
-            # Функции разбора готовы (parsers.astar_parse /
-            # anilibria_tv_parse); браузерная доставка — этап 6.
-            raise SourceParseError(
-                f"{service}: браузерная доставка страниц подключается на "
-                "этапе 6 (Playwright на стенде); см. revision.md Р-9")
+            # Разбор готов (parsers.astar_parse / anilibria_tv_parse);
+            # доставка — общий браузерный пул (Р-9, этап 6).
+            parse = (parsers.astar_parse if service == "astar"
+                     else parsers.anilibria_tv_parse)
+            return await self._parse_with_mirrors(
+                service, url, mirrors, parse,
+                fetcher=lambda u: self._browser_html(service, u))
 
         raise SourceParseError(f"нет реализации для трекера {service}")
 
+    # --- браузерный пул (astar/anilibria_tv, Р-9) ------------------------------------
+
+    async def _ensure_browser(self):
+        """Ленивый запуск общего браузера: поднимается при первом
+        обращении к astar/anilibria_tv, переиспользуется (контекст — на
+        запрос). Снимает находку 14 (старый код плодил браузер на скан)."""
+        if self._browser is None:
+            from playwright.async_api import async_playwright
+            self._pw = await async_playwright().start()
+            self._browser = await self._pw.firefox.launch(headless=True)
+            self.log.info("браузерный пул запущен (firefox, headless)")
+        return self._browser
+
+    async def _browser_html(self, service: str, url: str) -> str:
+        """HTML страницы трекера через браузер. Подготовка страницы
+        зависит от трекера (порт старых парсеров): astar — открыть список
+        кликом «Все торренты»; anilibria_tv — дождаться таблицы после
+        JS-челленджа."""
+        browser = await self._ensure_browser()
+        context = await browser.new_context(
+            user_agent=self._BROWSER_UA,
+            viewport={"width": 1920, "height": 1080},
+            ignore_https_errors=True)
+        page = await context.new_page()
+        try:
+            await page.goto(url, timeout=self.BROWSER_TIMEOUT,
+                            wait_until="domcontentloaded")
+            if service == "astar":
+                await page.wait_for_selector("span#torrent_all",
+                                             state="visible",
+                                             timeout=self.BROWSER_TIMEOUT)
+                await page.click("span#torrent_all")
+                await page.wait_for_selector("div.list_torrent",
+                                             state="visible",
+                                             timeout=self.BROWSER_TIMEOUT)
+            elif service == "anilibria_tv":
+                await page.wait_for_selector("table#publicTorrentTable",
+                                             state="visible",
+                                             timeout=self.BROWSER_TIMEOUT)
+            return await page.content()
+        finally:
+            await context.close()
+
     async def _parse_with_mirrors(self, service: str, url: str,
-                                  mirrors: list[str], parse) -> dict:
+                                  mirrors: list[str], parse,
+                                  fetcher=None) -> dict:
         """Фоллбэк зеркал живёт здесь, а не в scan: владелец таблицы
         trackers и доставки страниц — sources (Р-7). Пробуем исходный
         URL, затем остальные зеркала; неудача всех — громкая ошибка со
-        списком попыток. Результат несёт фактический URL ('url')."""
+        списком попыток. Результат несёт фактический URL ('url').
+
+        Доставка HTML параметризуется: по умолчанию через trackerauth.fetch
+        (kinozal/rutracker), либо переданным fetcher (браузер — astar/
+        anilibria_tv). Перебор зеркал общий для обоих способов."""
         from urllib.parse import urlparse
         original = urlparse(url)
         candidates = [url] + [original._replace(netloc=m).geturl()
@@ -155,12 +220,16 @@ class SourcesModule(BaseModule):
         errors = []
         for attempt_url in candidates:
             try:
-                reply = await self.request("trackerauth.fetch", {
-                    "service": service, "url": attempt_url, "timeout": 20},
-                    timeout=60)
-                if reply["status"] != 200:
-                    raise SourceParseError(f"HTTP {reply['status']}")
-                result = parse(reply["text"], attempt_url)
+                if fetcher is not None:
+                    html = await fetcher(attempt_url)
+                else:
+                    reply = await self.request("trackerauth.fetch", {
+                        "service": service, "url": attempt_url,
+                        "timeout": 20}, timeout=60)
+                    if reply["status"] != 200:
+                        raise SourceParseError(f"HTTP {reply['status']}")
+                    html = reply["text"]
+                result = parse(html, attempt_url)
                 result["url"] = attempt_url
                 if attempt_url != url:
                     self.log.info("%s: основной URL не сработал, страница "

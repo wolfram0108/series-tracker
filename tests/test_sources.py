@@ -8,7 +8,8 @@ from datetime import datetime
 
 import pytest
 
-from modules.sources import anilibria, dates, parsers
+from core import Bus
+from modules.sources import SourcesModule, anilibria, dates, parsers
 
 FIX = os.path.join(os.path.dirname(__file__), "fixtures", "sources")
 
@@ -99,3 +100,50 @@ def test_anilibria_alias_from_url():
         "https://anilibria.top/release/kusuriya-2") == "kusuriya-2"
     with pytest.raises(parsers.SourceParseError):
         anilibria.alias_from_url("https://example.com/нет/релиза")
+
+
+# --- браузерная доставка astar/anilibria_tv (Р-9, этап 6) ------------------------
+
+@pytest.mark.asyncio
+async def test_astar_goes_through_browser_delivery(monkeypatch):
+    """astar доставляется браузерным пулом (fetcher), не trackerauth;
+    parse получает доставленный HTML, результат несёт фактический URL."""
+    mod = SourcesModule(Bus(), None)
+    captured = {}
+
+    async def fake_html(service, url):
+        captured["service"] = service
+        captured["url"] = url
+        return "<html>astar</html>"
+
+    monkeypatch.setattr(mod, "_browser_html", fake_html)
+    monkeypatch.setattr(parsers, "astar_parse",
+                        lambda html, url: {"title": "T", "releases": [{"link": "L"}]})
+
+    res = await mod._parse_by_service("astar", "https://astar.bz/v/1", [])
+    assert captured == {"service": "astar", "url": "https://astar.bz/v/1"}
+    assert res["releases"] == [{"link": "L"}]
+    assert res["url"] == "https://astar.bz/v/1"
+
+
+@pytest.mark.asyncio
+async def test_anilibria_tv_browser_mirror_fallback(monkeypatch):
+    """Перебор зеркал работает и для браузерной доставки: упавшее зеркало
+    пропускается, страница берётся со следующего."""
+    mod = SourcesModule(Bus(), None)
+    calls = []
+
+    async def fake_html(service, url):
+        calls.append(url)
+        if len(calls) == 1:
+            raise RuntimeError("первое зеркало недоступно")
+        return "<html>ok</html>"
+
+    monkeypatch.setattr(mod, "_browser_html", fake_html)
+    monkeypatch.setattr(parsers, "anilibria_tv_parse",
+                        lambda html, url: {"title": "x", "releases": []})
+
+    res = await mod._parse_by_service(
+        "anilibria_tv", "https://anilibria.tv/r/1", ["mirror.anilibria.tv"])
+    assert len(calls) == 2  # перешли на зеркало
+    assert "mirror.anilibria.tv" in res["url"]

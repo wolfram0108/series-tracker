@@ -9,3 +9,6 @@ requests==2.32.3
 cloudscraper==1.2.71
 beautifulsoup4==4.12.3
 lxml==6.0.0
+# Браузерная доставка astar/anilibria_tv (этап 6, Р-9): требует
+# `playwright install firefox` после установки пакета.
+playwright==1.52.0
