@@ -196,8 +196,12 @@ class DownloadsModule(BaseModule):
                 self.log.warning("файл пропал: %s — статус сброшен", path)
                 lost += 1
         adopted = await self._adopt_existing_files(series)
+        # Обход диска — авторитетная точка: публикуем готовность всегда,
+        # даже если ничего не изменилось (иначе после рестарта вклад не
+        # переотправится до первого реального изменения). _pump имеет
+        # смысл только когда что-то вернулось в очередь.
+        await self._contribute(series_id)
         if lost or adopted:
-            await self._contribute(series_id)
             await self._pump()
         return {"adopted": adopted, "lost": lost}
 

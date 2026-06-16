@@ -314,10 +314,209 @@ async def test_verify_marks_missing(system):
 
     reply = await probe.request("slicing.verify", {"unique_id": "comp1"},
                                 timeout=10)
+    # 12 — потерянный файл, 13 — вообще не нарезан (нет записи)
     assert reply == {"status": "completed_with_errors",
-                     "has_missing_files": True}
+                     "has_missing_files": True,
+                     "missing_episodes": [12, 13]}
     files = _sliced(db_path, "comp1")
     assert [f["status"] for f in files] == ["completed", "missing"]
+
+
+@pytest.mark.asyncio
+async def test_verify_incomplete_range_not_completed(system):
+    """Находка 56: посерийная сверка. Все имеющиеся куски на диске, но
+    нарезаны не все серии из диапазона (нарезка оборвалась) — статус
+    completed_with_errors, а не completed; кнопка разблокируется."""
+    _, _, _, probe, db_path, media = system
+    _add_compilation(db_path, slicing_status="completed")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO sliced_files (series_id, "
+                     "source_media_item_unique_id, episode_number, "
+                     "file_path, status) VALUES (2, 'comp1', 11, "
+                     "'Show s01e11.mp4', 'completed'), (2, 'comp1', 12, "
+                     "'Show s01e12.mp4', 'completed')")
+        conn.commit()
+    open(os.path.join(media, "Show s01e11.mp4"), "wb").close()
+    open(os.path.join(media, "Show s01e12.mp4"), "wb").close()  # 13 не нарезан
+
+    reply = await probe.request("slicing.verify", {"unique_id": "comp1"},
+                                timeout=10)
+    assert reply == {"status": "completed_with_errors",
+                     "has_missing_files": False,
+                     "missing_episodes": [13]}
+
+
+@pytest.mark.asyncio
+async def test_verify_full_range_completed(system):
+    """Полный набор серий на диске → completed (кнопка блокируется)."""
+    _, _, _, probe, db_path, media = system
+    _add_compilation(db_path, slicing_status="slicing")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO sliced_files (series_id, "
+                     "source_media_item_unique_id, episode_number, "
+                     "file_path, status) VALUES (2, 'comp1', 11, "
+                     "'Show s01e11.mp4', 'completed'), (2, 'comp1', 12, "
+                     "'Show s01e12.mp4', 'completed'), (2, 'comp1', 13, "
+                     "'Show s01e13.mp4', 'completed')")
+        conn.commit()
+    for ep in (11, 12, 13):
+        open(os.path.join(media, f"Show s01e{ep}.mp4"), "wb").close()
+
+    reply = await probe.request("slicing.verify", {"unique_id": "comp1"},
+                                timeout=10)
+    assert reply == {"status": "completed",
+                     "has_missing_files": False,
+                     "missing_episodes": []}
+
+
+@pytest.mark.asyncio
+async def test_sliced_files_contribute_ready(system):
+    """Готовность нарезанных: даже когда компиляция-исходник помечена
+    ignored (как после нарезки) и из плановой свёртки выпала, наличие
+    готового нарезанного файла даёт флаг ready."""
+    bus, _, _, probe, db_path, media = system
+    _add_compilation(db_path, slicing_status="completed")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE media_items SET is_ignored_by_user=1 "
+                     "WHERE unique_id='comp1'")
+        conn.execute("INSERT INTO sliced_files (series_id, "
+                     "source_media_item_unique_id, episode_number, "
+                     "file_path, status) VALUES (2, 'comp1', 11, "
+                     "'Show s01e11.mp4', 'completed')")
+        conn.commit()
+    open(os.path.join(media, "Show s01e11.mp4"), "wb").close()
+
+    sub = bus.subscribe("series.status.contribution")
+    await probe.request("slicing.verify", {"unique_id": "comp1"}, timeout=10)
+    seen = [e.payload["flags"] for e in iter(
+        lambda: sub.queue.get_nowait() if not sub.queue.empty() else None,
+        None)]
+    assert any(f.get("ready") for f in seen)
+    # компиляция ignored → в slicing-свёртке её активность не светится
+    assert all(not f.get("slicing") for f in seen)
+
+
+@pytest.mark.asyncio
+async def test_verify_missing_returns_source_to_download(system):
+    """Задача 2: пропал ранее нарезанный файл → исходник возвращается
+    в дозагрузку (снять игнор + status pending), чтобы downloads его
+    усыновил/закачал, а пользователь смог перенарезать."""
+    _, fake, _, probe, db_path, media = system
+    _add_compilation(db_path, slicing_status="completed")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO sliced_files (series_id, "
+                     "source_media_item_unique_id, episode_number, "
+                     "file_path, status) VALUES (2, 'comp1', 11, "
+                     "'Show s01e11.mp4', 'completed'), (2, 'comp1', 12, "
+                     "'Show s01e12.mp4', 'completed'), (2, 'comp1', 13, "
+                     "'Show s01e13.mp4', 'completed')")
+        conn.commit()
+    open(os.path.join(media, "Show s01e11.mp4"), "wb").close()
+    open(os.path.join(media, "Show s01e12.mp4"), "wb").close()  # 13 пропал
+
+    reply = await probe.request("slicing.verify", {"unique_id": "comp1"},
+                                timeout=10)
+    assert reply["status"] == "completed_with_errors"
+    assert reply["has_missing_files"] is True
+    assert reply["missing_episodes"] == [13]
+    assert {"unique_id": "comp1", "is_ignored": False} in fake.ignored_calls
+    assert ("status", {"unique_id": "comp1", "status": "pending"}) \
+        in fake.status_calls
+
+
+@pytest.mark.asyncio
+async def test_verify_incomplete_does_not_return_to_download(system):
+    """incomplete без пропаж (нарезка просто не доходила до всех серий)
+    исходника не теряла — в дозагрузку не возвращаем."""
+    _, fake, _, probe, db_path, media = system
+    _add_compilation(db_path, slicing_status="slicing")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO sliced_files (series_id, "
+                     "source_media_item_unique_id, episode_number, "
+                     "file_path, status) VALUES (2, 'comp1', 11, "
+                     "'Show s01e11.mp4', 'completed'), (2, 'comp1', 12, "
+                     "'Show s01e12.mp4', 'completed')")
+        conn.commit()
+    open(os.path.join(media, "Show s01e11.mp4"), "wb").close()
+    open(os.path.join(media, "Show s01e12.mp4"), "wb").close()  # 13 не нарезан
+
+    reply = await probe.request("slicing.verify", {"unique_id": "comp1"},
+                                timeout=10)
+    assert reply["status"] == "completed_with_errors"
+    assert reply["has_missing_files"] is False
+    assert reply["missing_episodes"] == [13]
+    assert fake.ignored_calls == []  # в дозагрузку не возвращали
+
+
+@pytest.mark.asyncio
+async def test_task_create_source_missing(system):
+    """Задача 3: нажали нарезку, а исходника нет на диске → задача не
+    создаётся, компиляция уходит в дозагрузку, ответ source_missing."""
+    _, fake, _, probe, db_path, _ = system
+    _add_compilation(db_path)  # filename компиляция.mp4 — файла на диске нет
+
+    reply = await probe.request("slicing.task.create",
+                                {"unique_id": "comp1"}, timeout=10)
+    assert reply == {"created": False, "source_missing": True}
+    q = await probe.request("slicing.queue.get", {}, timeout=5)
+    assert q["count"] == 0  # задача нарезки не создана
+    assert {"unique_id": "comp1", "is_ignored": False} in fake.ignored_calls
+    assert ("status", {"unique_id": "comp1", "status": "pending"}) \
+        in fake.status_calls
+
+
+@pytest.mark.asyncio
+async def test_source_delete_removes_file_and_clears_filename(system):
+    """Задача 1: ручное удаление исходника нарезанной компиляции."""
+    _, fake, _, probe, db_path, media = system
+    _add_compilation(db_path, slicing_status="completed", filename="comp.mp4")
+    src = os.path.join(media, "comp.mp4")
+    open(src, "wb").close()
+
+    reply = await probe.request("slicing.source.delete",
+                                {"unique_id": "comp1"}, timeout=10)
+    assert reply == {"deleted": True}
+    assert not os.path.exists(src)
+    assert ("filename", {"unique_id": "comp1", "filename": None}) \
+        in fake.status_calls
+
+
+@pytest.mark.asyncio
+async def test_source_delete_already_absent(system):
+    _, fake, _, probe, db_path, _ = system
+    _add_compilation(db_path, slicing_status="completed", filename="нет.mp4")
+    reply = await probe.request("slicing.source.delete",
+                                {"unique_id": "comp1"}, timeout=10)
+    assert reply == {"deleted": False, "reason": "already_absent"}
+    assert ("filename", {"unique_id": "comp1", "filename": None}) \
+        in fake.status_calls
+
+
+@pytest.mark.asyncio
+async def test_source_delete_rejects_unsliced(system):
+    _, _, _, probe, db_path, _ = system
+    _add_compilation(db_path, slicing_status="none", filename="comp.mp4")
+    with pytest.raises(BusRequestError, match="нарезанной"):
+        await probe.request("slicing.source.delete",
+                            {"unique_id": "comp1"}, timeout=10)
+
+
+@pytest.mark.asyncio
+async def test_files_list_triggers_verify(system):
+    """on_files_list сверяет компиляции с диском: пропавший ребёнок
+    помечается и исходник уходит в дозагрузку."""
+    _, fake, _, probe, db_path, _ = system
+    _add_compilation(db_path, slicing_status="completed")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO sliced_files (series_id, "
+                     "source_media_item_unique_id, episode_number, "
+                     "file_path, status) VALUES (2, 'comp1', 11, "
+                     "'Show s01e11.mp4', 'completed')")
+        conn.commit()  # файла на диске нет
+
+    await probe.request("slicing.files.list", {"series_id": 2}, timeout=10)
+    assert _item(db_path, "comp1")["slicing_status"] == "completed_with_errors"
+    assert {"unique_id": "comp1", "is_ignored": False} in fake.ignored_calls
 
 
 @pytest.mark.asyncio

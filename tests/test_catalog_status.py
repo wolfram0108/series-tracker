@@ -39,6 +39,25 @@ def test_vk_ready_and_waiting_coexist():
     assert agg.statuses(1) == ["ready", "waiting"]
 
 
+def test_sliced_ready_is_full_when_nothing_waits():
+    # сценарий «Мой старший брат»: серия из нарезанных компиляций.
+    # slicing вкладывает ready, плановой активности/ожидания нет —
+    # полный «готов» без «белого» waiting.
+    agg = StatusAggregator()
+    agg.set_contribution(1, "slicing",
+                         {"slicing": False, "error": False, "ready": True})
+    assert agg.statuses(1) == ["ready"]
+
+
+def test_ready_from_slicing_pairs_with_waiting_from_downloads():
+    # часть нарезана (slicing.ready), исходник/остальное ещё ждёт
+    # (downloads.waiting): готовность сосуществует с «белым».
+    agg = StatusAggregator()
+    agg.set_contribution(1, "slicing", {"ready": True})
+    agg.set_contribution(1, "downloads", {"waiting": True})
+    assert agg.statuses(1) == ["ready", "waiting"]
+
+
 def test_waiting_suppressed_by_activity():
     # waiting — факт «есть что ждать», но при активности не показывается
     agg = StatusAggregator()

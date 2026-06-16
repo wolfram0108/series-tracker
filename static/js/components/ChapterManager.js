@@ -43,6 +43,13 @@ const ChapterManager = {
                             :title="getSliceButtonTitle(item)">
                                 <i class="bi bi-scissors"></i>
                         </button>
+                        <button
+                            v-if="canDeleteSource(item)"
+                            class="control-btn text-danger"
+                            @click="deleteSource(item)"
+                            title="Удалить исходный файл компиляции">
+                                <i class="bi bi-trash"></i>
+                        </button>
                     </div>
                 </div>
 
@@ -287,12 +294,13 @@ const ChapterManager = {
              return;
         }
         
+        const prevStatus = item.slicing_status;
         item.slicing_status = 'pending';
-        
+
         try {
             const garbageIndices = item.garbageChapters ?
                 item.garbageChapters.map(ch => ch.original_index) : [];
-            
+
             const response = await fetch(`/api/media-items/${item.unique_id}/slice-with-filter`, {
                 method: 'POST',
                 headers: {
@@ -306,10 +314,17 @@ const ChapterManager = {
             if (!response.ok) {
                 // Если ошибка связана с несоответствием количества глав, показываем детальную информацию
                 if (data.error && data.error.includes('не совпадает')) {
+                    item.slicing_status = prevStatus;
                     this.$emit('show-toast', data.error, 'warning');
                     return;
                 }
                 throw new Error(data.error || 'Ошибка создания задачи');
+            }
+            if (data.source_missing) {
+                // исходника нет на диске — компиляция отправлена в дозагрузку
+                item.slicing_status = prevStatus;
+                this.$emit('show-toast', data.message, 'warning');
+                return;
             }
             this.$emit('show-toast', 'Задача на нарезку с фильтрацией успешно создана.', 'success');
         } catch(error) {
@@ -320,6 +335,41 @@ const ChapterManager = {
     isSliceButtonDisabled(item) {
         const allowed_statuses = ['none', 'completed_with_errors', 'error'];
         return !allowed_statuses.includes(item.slicing_status);
+    },
+    canDeleteSource(item) {
+        // Исходник можно удалить вручную только у нарезанной компиляции,
+        // и только пока он ещё числится на месте (есть final_filename).
+        return ['completed', 'completed_with_errors'].includes(item.slicing_status)
+            && !!item.final_filename;
+    },
+    async deleteSource(item) {
+        try {
+            const result = await this.$root.$refs.confirmationModal.open(
+                'Удаление исходного файла',
+                `Удалить исходный файл компиляции: <br><strong>${this.getBaseName(item.final_filename)}</strong>?<br>
+                 Нарезанные эпизоды останутся на месте.`
+            );
+            if (!result.confirmed) {
+                this.$emit('show-toast', 'Удаление отменено.', 'info');
+                return;
+            }
+        } catch (isCancelled) {
+            if (isCancelled === false) {
+                this.$emit('show-toast', 'Удаление отменено.', 'info');
+            }
+            return;
+        }
+        try {
+            const response = await fetch(`/api/media-items/${item.unique_id}/delete-source`, {
+                method: 'POST'
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Ошибка удаления исходника');
+            item.final_filename = null;
+            this.$emit('show-toast', data.message || 'Исходный файл удалён.', 'success');
+        } catch(error) {
+            this.$emit('show-toast', error.message, 'danger');
+        }
     },
     getSliceButtonTitle(item) {
         const statusMap = {
@@ -350,14 +400,21 @@ const ChapterManager = {
              return;
         }
         
+        const prevStatus = item.slicing_status;
         item.slicing_status = 'pending';
-        
+
         try {
             const response = await fetch(`/api/media-items/${item.unique_id}/slice`, {
                 method: 'POST'
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Ошибка создания задачи');
+            if (data.source_missing) {
+                // исходника нет на диске — компиляция отправлена в дозагрузку
+                item.slicing_status = prevStatus;
+                this.$emit('show-toast', data.message, 'warning');
+                return;
+            }
             this.$emit('show-toast', 'Задача на нарезку успешно создана.', 'success');
         } catch(error) {
             this.$emit('show-toast', error.message, 'danger');

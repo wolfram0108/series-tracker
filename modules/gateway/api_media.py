@@ -118,13 +118,20 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 f"с ожидаемым ({expected}).")
         return reply
 
+    _SOURCE_MISSING_MSG = ("Исходник отсутствует, отправлен в загрузку. "
+                           "Запустите нарезку повторно после завершения "
+                           "загрузки.")
+
     @r.post("/api/media-items/{unique_id}/slice")
     async def slice_task(unique_id: str):
         try:
-            await gw.request("slicing.task.create",
-                             {"unique_id": unique_id}, timeout=60)
+            reply = await gw.request("slicing.task.create",
+                                     {"unique_id": unique_id}, timeout=60)
         except BusRequestError as exc:
             return _media_error(exc)
+        if reply.get("source_missing"):
+            return {"success": False, "source_missing": True,
+                    "message": _SOURCE_MISSING_MSG}
         return {"success": True,
                 "message": "Задача на нарезку успешно создана."}
 
@@ -138,10 +145,26 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 timeout=60)
         except BusRequestError as exc:
             return _media_error(exc)
+        if reply.get("source_missing"):
+            return {"success": False, "source_missing": True,
+                    "message": _SOURCE_MISSING_MSG}
         return {"success": True,
                 "message": "Задача на нарезку с фильтрацией успешно "
                            "создана.",
                 "filtered_chapters_count": reply["chapters"]}
+
+    @r.post("/api/media-items/{unique_id}/delete-source")
+    async def delete_source(unique_id: str):
+        try:
+            reply = await gw.request("slicing.source.delete",
+                                     {"unique_id": unique_id}, timeout=60)
+        except BusRequestError as exc:
+            return _media_error(exc)
+        if reply.get("deleted"):
+            return {"success": True,
+                    "message": "Исходный файл компиляции удалён."}
+        return {"success": True, "deleted": False,
+                "message": "Исходный файл уже отсутствует."}
 
     @r.post("/api/media-items/{unique_id}/verify-sliced-files")
     async def verify_sliced(unique_id: str):

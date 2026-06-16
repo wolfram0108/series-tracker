@@ -2,6 +2,7 @@
 главы/нарезка через готовые контракты slicing, ignore → пересборка
 плана, композиция по владельцам, rename_preview, переобработки."""
 import asyncio
+import os
 import sqlite3
 import subprocess
 import sys
@@ -39,6 +40,10 @@ def db_path(tmp_path):
                    env={"ST_DB_URL": f"sqlite:///{path}",
                         "PATH": "/usr/bin:/bin"},
                    cwd=".", check=True, capture_output=True)
+    # save_path VK-серии — реальный каталог в tmp: нарезка проверяет
+    # наличие исходника на диске (исходник кладёт тест перед slice).
+    media_s = tmp_path / "media_s"
+    media_s.mkdir()
     with sqlite3.connect(path) as conn:
         conn.execute(
             "INSERT INTO series (id, url, name, name_en, site, save_path, "
@@ -48,8 +53,8 @@ def db_path(tmp_path):
         conn.execute(
             "INSERT INTO series (id, url, name, name_en, site, save_path, "
             "state, source_type, auto_scan_enabled, vk_search_mode, "
-            "parser_profile_id) VALUES (2, 'u|q', 'ВК', 'Show', 'vk', "
-            "'/media/s', 'waiting', 'vk_video', 0, 'get_all', 1)")
+            "parser_profile_id) VALUES (2, 'u|q', 'ВК', 'Show', 'vk', ?, "
+            "'waiting', 'vk_video', 0, 'get_all', 1)", (str(media_s),))
         # одиночный скачанный эпизод
         conn.execute(
             "INSERT INTO media_items (series_id, unique_id, episode_start, "
@@ -178,9 +183,16 @@ async def test_chapters_and_slice_flow(system):
         "SELECT slicing_status FROM media_items WHERE unique_id='uid2'")
     assert row["slicing_status"] == "none"
 
+    # исходник компиляции кладём на диск (нарезка проверяет наличие)
+    srow = await db.fetch_one("SELECT save_path FROM series WHERE id=2")
+    open(os.path.join(srow["save_path"], "comp.mp4"), "wb").close()
+    await db.execute("UPDATE media_items SET final_filename='comp.mp4' "
+                     "WHERE unique_id='uid2'")
+
     # нарезка запускается после проверки глав (не заблокирована)
     resp = await client.post("/api/media-items/uid2/slice")
     assert resp.status_code == 200
+    assert resp.json()["success"] is True
 
     # теперь задача запущена (pending) — повторный запуск отвергается
     resp = await client.post("/api/media-items/uid2/slice")

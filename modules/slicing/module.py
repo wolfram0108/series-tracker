@@ -87,6 +87,7 @@ class SlicingModule(BaseModule):
                     concurrent=True)
         self.handle("slicing.chapters.mark", self.on_chapters_mark)
         self.handle("slicing.task.create", self.on_task_create)
+        self.handle("slicing.source.delete", self.on_source_delete)
         self.handle("slicing.verify", self.on_verify)
         self.handle("slicing.deep_adoption", self.on_deep_adoption,
                     concurrent=True)
@@ -119,6 +120,15 @@ class SlicingModule(BaseModule):
     def _expected_count(item: dict) -> int:
         return (item.get("episode_end") or 0) - \
             (item.get("episode_start") or 0) + 1
+
+    @staticmethod
+    def _expected_episodes(item: dict) -> set[int]:
+        # Эпизоды нумеруются episode_start + индекс хорошей главы, а число
+        # хороших глав строго == диапазону (проверка в on_task_create),
+        # поэтому ожидаемый набор серий — это весь диапазон.
+        start = item.get("episode_start") or 0
+        end = item.get("episode_end") or start
+        return set(range(start, end + 1))
 
     async def on_chapters_get(self, env: Envelope) -> list[dict]:
         # проверка глав НЕ меняет slicing_status (находка 53): 'pending'
@@ -183,6 +193,18 @@ class SlicingModule(BaseModule):
             raise ValueError(
                 f"число отфильтрованных глав ({len(filtered)}) не "
                 f"совпадает с ожидаемым ({expected})")
+        # Исходника может не быть (удалён после прошлой нарезки, а дети
+        # позже пропали): нарезать нечего — возвращаем компиляцию в
+        # дозагрузку и просим пользователя повторить нарезку после
+        # завершения загрузки (без автопродолжения — инициатор он же).
+        # Проверяем после валидации глав, до мутаций (chapters/задача).
+        series = await self.request("catalog.series.get",
+                                    {"series_id": item["series_id"]})
+        if not await self._source_present(series, item):
+            await self._return_source_to_download(item)
+            self.log.info("нарезка %s: исходник отсутствует — возвращён "
+                          "в дозагрузку", uid)
+            return {"created": False, "source_missing": True}
         # как slice-with-filter: оба поля получают отфильтрованный список
         await self.repo.set_chapters(uid, chapters=filtered,
                                      filtered=filtered)
@@ -324,38 +346,113 @@ class SlicingModule(BaseModule):
         if (reply.get("value") or "false") != "true":
             return
         try:
-            await asyncio.to_thread(os.remove, source)
-            self.log.info("исходник удалён по настройке: %s", source)
-            self.send_command("downloads.item.set_filename",
-                              {"unique_id": uid, "filename": None})
+            await self._delete_source_file(uid, source)
         except OSError as exc:
             self.log.error("не удалось удалить исходник %s: %s", source, exc)
+
+    async def _delete_source_file(self, uid: str, source: str) -> None:
+        """Удаление файла-исходника + очистка ссылки на него. Общий код
+        для авто-удаления по настройке и ручного удаления кнопкой."""
+        await asyncio.to_thread(os.remove, source)
+        self.log.info("исходник удалён: %s", source)
+        # final_filename — колонка downloads; чистим через её владельца
+        self.send_command("downloads.item.set_filename",
+                          {"unique_id": uid, "filename": None})
+
+    @staticmethod
+    async def _source_present(series: dict, item: dict) -> bool:
+        rel = item.get("final_filename")
+        if not rel:
+            return False
+        return await asyncio.to_thread(
+            os.path.exists, os.path.join(series["save_path"], rel))
+
+    async def _return_source_to_download(self, item: dict) -> None:
+        """Вернуть компиляцию в план дозагрузки: пропал нарезанный
+        ребёнок или нет исходника. downloads сам усыновит исходник
+        (если лежит на диске) или закачает (если удалён) — штатными
+        _adopt_existing_files / _pump. Колонками владеют scan/downloads,
+        поэтому идём командами их владельцам."""
+        self.send_command("scan.item.set_ignored",
+                          {"unique_id": item["unique_id"],
+                           "is_ignored": False})
+        self.send_command("downloads.item.set_status",
+                          {"unique_id": item["unique_id"],
+                           "status": "pending"})
+
+    async def on_source_delete(self, env: Envelope) -> dict:
+        """Ручное удаление исходника нарезанной компиляции (кнопка возле
+        ножниц). В отличие от _maybe_delete_source — без оглядки на
+        настройку: это явное действие пользователя."""
+        item = await self._item_or_fail(env.payload["unique_id"])
+        if (item.get("slicing_status") or "none") not in (
+                "completed", "completed_with_errors"):
+            raise RuntimeError("исходник можно удалить только у нарезанной "
+                               "компиляции")
+        if not item.get("final_filename"):
+            return {"deleted": False, "reason": "no_source"}
+        series = await self.request("catalog.series.get",
+                                    {"series_id": item["series_id"]})
+        source = os.path.join(series["save_path"], item["final_filename"])
+        if not await asyncio.to_thread(os.path.exists, source):
+            # файла уже нет — просто снимаем ссылку
+            self.send_command("downloads.item.set_filename",
+                              {"unique_id": item["unique_id"],
+                               "filename": None})
+            return {"deleted": False, "reason": "already_absent"}
+        await self._delete_source_file(item["unique_id"], source)
+        return {"deleted": True}
 
     # --- verify / deep adoption --------------------------------------------------------
 
     async def on_verify(self, env: Envelope) -> dict:
         """Контракт /verify-sliced-files: сверка детей с диском."""
-        item = await self._item_or_fail(env.payload["unique_id"])
+        return await self._verify_item(env.payload["unique_id"])
+
+    async def _verify_item(self, unique_id: str) -> dict:
+        item = await self._item_or_fail(unique_id)
         series = await self.request("catalog.series.get",
                                     {"series_id": item["series_id"]})
-        children = await self.repo.sliced_for_source(item["unique_id"])
+        children = await self.repo.sliced_for_source(unique_id)
         if not children:
-            await self.repo.set_slicing_status(item["unique_id"], "none")
+            await self.repo.set_slicing_status(unique_id, "none")
             return {"status": "none"}
         has_missing = False
+        present_episodes: set[int] = set()
         for child in children:
             path = os.path.join(series["save_path"], child["file_path"])
             exists = await asyncio.to_thread(os.path.exists, path)
-            if exists and child["status"] == "missing":
-                await self.repo.set_sliced_status(child["id"], "completed")
-            elif not exists:
+            if exists:
+                present_episodes.add(child["episode_number"])
+                if child["status"] == "missing":
+                    await self.repo.set_sliced_status(child["id"],
+                                                      "completed")
+            else:
                 if child["status"] == "completed":
                     await self.repo.set_sliced_status(child["id"], "missing")
                 has_missing = True
-        status = "completed_with_errors" if has_missing else "completed"
-        await self.repo.set_slicing_status(item["unique_id"], status)
+        # Посерийная сверка с ожидаемым диапазоном (находка 56): если
+        # нарезаны не все серии из списка (нарезка оборвалась, дети
+        # отсутствуют как записи) — это completed_with_errors, а не
+        # completed. Так статус честно отражает неполноту и разблокирует
+        # кнопку, разрешая дорезать недостающие (готовые усыновятся).
+        missing_episodes = sorted(self._expected_episodes(item)
+                                  - present_episodes)
+        incomplete = bool(missing_episodes)
+        # Если ранее завершённый нарезанный файл пропал с диска —
+        # возвращаем исходник в дозагрузку: чтобы перенарезать, нужен
+        # исходник, а его могло уже не быть (удалён после нарезки).
+        # downloads усыновит/закачает, после чего пользователь повторит
+        # нарезку. incomplete без пропаж (нарезка просто не доходила до
+        # всех серий) исходника не теряла — там достаточно дорезать.
+        if has_missing:
+            await self._return_source_to_download(item)
+        status = ("completed_with_errors"
+                  if (has_missing or incomplete) else "completed")
+        await self.repo.set_slicing_status(unique_id, status)
         await self._contribute(item["series_id"])
-        return {"status": status, "has_missing_files": has_missing}
+        return {"status": status, "has_missing_files": has_missing,
+                "missing_episodes": missing_episodes}
 
     async def on_deep_adoption(self, env: Envelope) -> dict:
         """Контракт /deep-adoption: компиляции плана без глав, чьи дети
@@ -414,7 +511,20 @@ class SlicingModule(BaseModule):
     # --- сервисные -----------------------------------------------------------------------
 
     async def on_files_list(self, env: Envelope) -> list[dict]:
-        return await self.repo.sliced_for_series(env.payload["series_id"])
+        # Получение списка нарезанных — точка, через которую идут
+        # renaming (preview/reprocess) и library. Сверяем компиляции с
+        # диском перед выдачей: пропавший нарезанный ребёнок возвращает
+        # исходник в дозагрузку (задача автовосстановления).
+        series_id = env.payload["series_id"]
+        await self._verify_series_compilations(series_id)
+        return await self.repo.sliced_for_series(series_id)
+
+    async def _verify_series_compilations(self, series_id: int) -> None:
+        for uid in await self.repo.compilation_uids(series_id):
+            try:
+                await self._verify_item(uid)
+            except Exception as exc:  # noqa: BLE001 — best effort
+                self.log.warning("verify компиляции %s: %s", uid, exc)
 
     async def on_files_drop_for_source(self, env: Envelope) -> None:
         """Каскад композиции (Р-21): компиляция вышла из плана —

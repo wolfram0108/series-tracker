@@ -311,6 +311,30 @@ async def test_fs_sync_detects_lost_and_adopted(system):
 
 
 @pytest.mark.asyncio
+async def test_fs_sync_always_contributes(system):
+    """Обход диска публикует готовность даже без изменений (после
+    рестарта вклад иначе не переотправится до первого изменения)."""
+    bus, _, _, probe, db_path, media_dir = system
+    _add_item(db_path, "uid1", 1, status="completed",
+              filename="Серия 01.mp4")
+    with open(os.path.join(media_dir, "Серия 01.mp4"), "wb") as f:
+        f.write(b"x")
+
+    sub = bus.subscribe("series.status.contribution")
+    reply = await probe.request("downloads.fs.sync", {"series_id": 2},
+                                timeout=10)
+    assert reply == {"adopted": 0, "lost": 0}  # ничего не изменилось
+    flags = None
+    for _ in range(50):
+        while not sub.queue.empty():
+            flags = sub.queue.get_nowait().payload["flags"]
+        if flags is not None:
+            break
+        await asyncio.sleep(0.02)
+    assert flags is not None and flags["ready"] is True
+
+
+@pytest.mark.asyncio
 async def test_interrupted_requeued_on_start_but_error_kept(env_paths):
     db_path, _ = env_paths
     _add_item(db_path, "uid1", 1, status="downloading")

@@ -87,6 +87,14 @@ class SlicingRepository:
         return await self._db.fetch_all(
             "SELECT * FROM sliced_files WHERE series_id=?", (series_id,))
 
+    async def compilation_uids(self, series_id: int) -> list[str]:
+        """Уникальные id компиляций-исходников, у которых есть записи о
+        нарезанных детях (для посерийной сверки при выдаче списка)."""
+        rows = await self._db.fetch_all(
+            "SELECT DISTINCT source_media_item_unique_id AS uid FROM "
+            "sliced_files WHERE series_id=?", (series_id,))
+        return [r["uid"] for r in rows]
+
     async def delete_sliced_for_source(self, source_uid: str) -> int:
         return await self._db.execute(
             "DELETE FROM sliced_files WHERE source_media_item_unique_id=?",
@@ -133,13 +141,26 @@ class SlicingRepository:
             "plan_status IN ('in_plan_single', 'in_plan_compilation') AND "
             "is_ignored_by_user=0", (series_id,))
         statuses = [r["slicing_status"] for r in rows]
+        # ready по нарезанным: хотя бы один готовый нарезанный файл делает
+        # серию «готовой», даже если компиляция-исходник помечена ignored
+        # и из плановой свёртки выпала. Готовность вкладывает каждый
+        # модуль-владелец по своим файлам (downloads — по загруженным).
+        has_sliced = await self._db.fetch_one(
+            "SELECT 1 AS x FROM sliced_files WHERE series_id=? AND "
+            "status='completed' LIMIT 1", (series_id,))
         return {"slicing": "slicing" in statuses,
-                "error": "error" in statuses}
+                "error": "error" in statuses,
+                "ready": has_sliced is not None}
 
     async def series_with_activity(self) -> list[int]:
+        # slicing/error — активные задачи; completed sliced_files — чтобы
+        # on_start опубликовал готовность нарезанных серий после рестарта
+        # (иначе ready висел бы до первого обхода/композиции).
         rows = await self._db.fetch_all(
             "SELECT DISTINCT series_id FROM media_items WHERE "
-            "slicing_status IN ('slicing', 'error')")
+            "slicing_status IN ('slicing', 'error') "
+            "UNION SELECT DISTINCT series_id FROM sliced_files WHERE "
+            "status='completed'")
         return [r["series_id"] for r in rows]
 
     async def delete_for_series(self, series_id: int) -> None:
