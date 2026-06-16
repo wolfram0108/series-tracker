@@ -212,6 +212,16 @@ const AddSeriesModal = {
                                     </div>
                                     <button type="button" class="btn-close" @click="clearTMDBSelection"></button>
                                 </div>
+
+                                <div v-if="tmdbSelected && tmdbCatalogName">
+                                    <label class="form-label small text-muted mb-1">Имя каталога</label>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" :value="tmdbCatalogName" readonly @focus="$event.target.select()">
+                                        <button class="btn btn-outline-secondary" type="button" @click="copyCatalogName" title="Скопировать">
+                                            <i class="bi bi-clipboard"></i>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -316,6 +326,18 @@ const AddSeriesModal = {
             if (this.isSeasonless) return 1;
             const match = this.newSeries.season.match(/^s(\d+)$/i);
             return match ? parseInt(match[1], 10) : 1;
+        },
+
+        // Готовое имя каталога по шаблону Jellyfin/Plex:
+        // «Имя (год) [tmdbid-XXXX]». Имя — RU-из-TMDB (поиск идёт с
+        // language=ru-RU); год опускается вместе со скобками, если его нет.
+        tmdbCatalogName() {
+            if (!this.tmdbSelected) return '';
+            const name = (this.tmdbSelected.name || '').trim();
+            if (!name) return '';
+            const year = String(this.tmdbSelected.year || '').trim();
+            const idPart = `[tmdbid-${this.tmdbSelected.id}]`;
+            return year ? `${name} (${year}) ${idPart}` : `${name} ${idPart}`;
         },
 
         // Вычисляемые свойства для классов валидации
@@ -632,6 +654,15 @@ const AddSeriesModal = {
             this.tmdbSelected = null;
             this.tmdbSeasonDetails = [];
             this.tmdbEpisodeCount = 0;
+        },
+        async copyCatalogName() {
+            if (!this.tmdbCatalogName) return;
+            try {
+                await navigator.clipboard.writeText(this.tmdbCatalogName);
+                this.$emit('show-toast', 'Имя каталога скопировано', 'success');
+            } catch (e) {
+                this.$emit('show-toast', 'Не удалось скопировать имя', 'danger');
+            }
         },
         updateTMDBEpisodeCount() {
             if (!this.tmdbSelected || !this.tmdbSeasonDetails.length) return;
