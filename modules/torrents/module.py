@@ -49,6 +49,9 @@ from .repository import TorrentsRepository
 # stopped*-имена поколения qBit 5.x)
 _NOT_DOWNLOADING = {"pausedUP", "pausedDL", "stoppedUP", "stoppedDL",
                     "uploading"}
+# Простой: торрент в загрузке, но данные не идут (нет пиров/источников).
+# Отдельный статус idle (Р-11): цвет как у downloading, пилюля «Простой».
+_IDLE_STATES = {"stalledDL"}
 # Состояния-ошибки qBittorrent: внутренняя ошибка раздачи и
 # недоступные/пропавшие файлы (находка 43). Старая система (и наш
 # перенос) считала их «загрузкой» — карточка врала; теперь это флаг
@@ -644,7 +647,7 @@ class TorrentsModule(BaseModule):
     async def _contribute(self, series_id: int) -> None:
         flags = dict.fromkeys(
             ("metadata", "renaming", "checking", "activating", "error",
-             "downloading", "ready"), False)
+             "downloading", "idle", "ready"), False)
         for task in await self.repo.tasks_for_series(series_id):
             flag = pipeline.STAGE_FLAGS.get(task["stage"])
             if flag:
@@ -654,6 +657,8 @@ class TorrentsModule(BaseModule):
                 flags["error"] = True
             elif row["progress"] >= 100:
                 flags["ready"] = True
+            elif row["status"] in _IDLE_STATES:
+                flags["idle"] = True
             elif row["status"] not in _NOT_DOWNLOADING:
                 flags["downloading"] = True
         if self._flags_cache.get(series_id) == flags:

@@ -32,6 +32,22 @@ def test_union_and_hierarchy_order():
     assert agg.statuses(1) == ["error", "scanning", "downloading"]
 
 
+def test_idle_is_its_own_status():
+    # простой торрент-загрузки (qBit stalledDL) — отдельный статус idle
+    # (Р-11): отдельная пилюля, и как реальная активность подавляет
+    # waiting (не «Ожидание», а именно «Простой»).
+    agg = StatusAggregator()
+    assert agg.set_contribution(1, "torrents", {"idle": True}) == ["idle"]
+    assert agg.statuses(1) == ["idle"]
+
+
+def test_downloading_precedes_idle_in_order():
+    # downloading раньше idle в иерархии (источник порядка пилюль)
+    agg = StatusAggregator()
+    agg.set_contribution(1, "torrents", {"downloading": True, "idle": True})
+    assert agg.statuses(1) == ["downloading", "idle"]
+
+
 def test_vk_ready_and_waiting_coexist():
     # семантика VK: скачана часть, остальное ждёт (фронт: stripes-stopped)
     agg = StatusAggregator()

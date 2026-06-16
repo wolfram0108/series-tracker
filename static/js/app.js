@@ -43,6 +43,7 @@ const app = createApp({
                 'checking': { title: 'Проверка', icon: 'bi-arrow-repeat' },
                 'activating': { title: 'Активация', icon: 'bi-lightning-charge' },
                 'downloading': { title: 'Загрузка', icon: 'bi-download' },
+                'idle': { title: 'Простой', icon: 'bi-pause-circle' },
                 'ready': { title: 'Готов', icon: 'bi-hdd-stack-fill' },
                 'error': { title: 'Ошибка', icon: 'bi-exclamation-triangle' },
                 'overflow': { title: '', icon: 'bi-three-dots' }
@@ -286,7 +287,10 @@ const app = createApp({
         },
 
         getLayerStyle(series, layerName) {
-            const activeLayers = this.layerHierarchy.filter(l => series.displayStates.includes(l));
+            // idle (простой) рисуется тем же зелёным слоем, что и downloading:
+            // отдельного цвета у простоя нет — меняется только пилюля.
+            const states = series.displayStates.map(s => s === 'idle' ? 'downloading' : s);
+            const activeLayers = this.layerHierarchy.filter(l => states.includes(l));
             const visibleCount = activeLayers.length;
             if (visibleCount === 0) return { width: '0%' };
             const visibleIndex = activeLayers.indexOf(layerName);
@@ -311,6 +315,16 @@ const app = createApp({
             if (states.length === 1) {
                 if (['error', 'ready'].includes(states[0])) return 'stripes-stopped';
                 if (['waiting', 'viewing'].includes(states[0])) return 'stripes-slow';
+            }
+
+            // Простой торрент-загрузки (idle): цвет тот же зелёный, но линии
+            // замирают. Не замораживаем, если параллельно идёт другая
+            // реальная работа конвейера (включая активную загрузку) — её
+            // движение должно остаться.
+            const stillActive = ['scanning', 'checking', 'activating',
+                                  'renaming', 'metadata', 'downloading'];
+            if (states.includes('idle') && !states.some(s => stillActive.includes(s))) {
+                return 'stripes-stopped';
             }
 
             return 'stripes-normal';
