@@ -13,9 +13,11 @@ __pycache__/
 .idea/
 .vscode/
 
-# База данных SQLite
+# База данных SQLite (включая WAL/SHM рядом с app.db)
 *.db
 app.db
+app.db-shm
+app.db-wal
 
 # Папка тестов
 test/
