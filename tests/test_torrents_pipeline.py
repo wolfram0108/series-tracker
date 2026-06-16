@@ -387,3 +387,45 @@ async def test_fs_verify_marks_missing_and_rechecks(system, tmp_path):
     assert reply == {"missing": 1, "recheck_started": 1}
     # recheck-задача дойдёт до конца, файл будет «восстановлен» qBit'ом
     assert await _wait(lambda: ("recheck", ("h6",)) in qbt.calls)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_drops_orphan_torrent_on_start(db_path):
+    """Crash-tolerance (reconcile при старте): торрент есть в БД и
+    активен, но отсутствует в реальном qBit (удалён вручную) → запись
+    сбрасывается (is_active=0, файлы удалены). Торрент, который в qBit
+    есть, не трогается."""
+    with sqlite3.connect(db_path) as conn:
+        # orphan — в qBit его не будет
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
+                     "is_active, qb_hash) VALUES (1, 'torph', 'l', 1, 'horphan')")
+        tid = conn.execute("SELECT id FROM torrents WHERE "
+                           "torrent_id='torph'").fetchone()[0]
+        conn.execute("INSERT INTO torrent_files (torrent_db_id, original_path, "
+                     "status) VALUES (?, 'a.mkv', 'renamed')", (tid,))
+        # live — будет присутствовать в qBit
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
+                     "is_active, qb_hash) VALUES (1, 'tlive', 'l', 1, 'hlive')")
+        conn.commit()
+
+    bus = Bus()
+    db = Database(db_path)
+    qbt = FakeQbt()
+    qbt.torrents = {"hlive": {"state": "pausedUP", "progress": 1.0}}
+    torrents = TorrentsModule(bus, db, qbt=qbt, pipeline_poll=0.02,
+                              monitor_active=0.05, monitor_idle=0.2)
+    runner = Runner(bus, [CatalogModule(bus, db), torrents, Probe(bus)])
+    await runner.start()
+    try:
+        with sqlite3.connect(db_path) as conn:
+            orphan = conn.execute("SELECT is_active FROM torrents WHERE "
+                                  "torrent_id='torph'").fetchone()[0]
+            files = conn.execute("SELECT count(*) FROM torrent_files WHERE "
+                                 "torrent_db_id=?", (tid,)).fetchone()[0]
+            live = conn.execute("SELECT is_active FROM torrents WHERE "
+                                "torrent_id='tlive'").fetchone()[0]
+        assert orphan == 0, "осиротевший торрент должен быть деактивирован"
+        assert files == 0, "записи о файлах осиротевшего торрента удалены"
+        assert live == 1, "присутствующий в qBit торрент не трогается"
+    finally:
+        await runner.stop()

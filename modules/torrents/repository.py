@@ -69,6 +69,25 @@ class TorrentsRepository:
             await self.deactivate_and_clear_files(r["torrent_id"])
         return [r["qb_hash"] for r in rows if r.get("qb_hash")]
 
+    async def deactivate_orphans(self, live_hashes: set[str]) -> list[int]:
+        """Reconcile с qBit (crash-tolerance): активные torrents-записи,
+        чьего qb_hash НЕТ в реальном qBit (торрент удалён вручную/пропал),
+        сбрасываются — файлы удаляются, is_active=0. Серия возвращается в
+        состояние «торрента нет», следующий скан добавит раздачу заново.
+        Возвращает series_id затронутых серий."""
+        affected: list[int] = []
+        for row in await self.all_active():
+            qh = (row.get("qb_hash") or "").lower()
+            if qh and qh not in live_hashes:
+                await self._db.execute(
+                    "DELETE FROM torrent_files WHERE torrent_db_id=?",
+                    (row["id"],))
+                await self._db.execute(
+                    "UPDATE torrents SET is_active=0 WHERE id=?",
+                    (row["id"],))
+                affected.append(row["series_id"])
+        return affected
+
     async def torrent_by_hash(self, qb_hash: str) -> dict | None:
         return await self._db.fetch_one(
             "SELECT * FROM torrents WHERE qb_hash=?", (qb_hash,))

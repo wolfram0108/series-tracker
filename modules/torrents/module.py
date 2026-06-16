@@ -158,9 +158,31 @@ class TorrentsModule(BaseModule):
     async def on_start(self) -> None:
         if not self._qbt_injected:
             await self._connect_qbt()
+        await self._reconcile_with_qbt()
         await self._recover_tasks()
         self._tasks.append(asyncio.create_task(self._pipeline_loop()))
         self._tasks.append(asyncio.create_task(self._monitor_loop()))
+
+    async def _reconcile_with_qbt(self) -> None:
+        """Сверка БД с реальным qBit при старте (crash-tolerance): если
+        торрент есть в БД, но отсутствует в qBit (удалён вручную/пропал),
+        запись сбрасывается и серия возвращается в состояние «торрента
+        нет» — следующий скан добавит раздачу заново. qBit недоступен —
+        пропускаем (не теряем данные на ложном выводе)."""
+        try:
+            live = await self.qbt.torrents_info()
+        except Exception as exc:  # noqa: BLE001 — qBit мог не подняться
+            self.log.warning("reconcile с qBit пропущен — qBit недоступен: "
+                             "%s", exc)
+            return
+        live_hashes = {(t.get("hash") or "").lower() for t in live}
+        affected = await self.repo.deactivate_orphans(live_hashes)
+        for series_id in set(affected):
+            self.log.warning("серия %d: торрент отсутствует в qBit — запись "
+                             "сброшена (reconcile при старте)", series_id)
+            await self._contribute(series_id)
+        if affected:
+            self._broadcast_queue()
 
     async def on_stop(self) -> None:
         if self.qbt and not self._qbt_injected:
