@@ -24,3 +24,17 @@ class SettingsRepository:
             "SELECT key, value FROM settings WHERE key LIKE ?",
             (prefix + "%",))
         return {r["key"]: r["value"] for r in rows}
+
+    # --- saved_paths (отдельная таблица, тот же владелец) ------------------
+
+    async def list_paths(self) -> list[dict]:
+        return await self._db.fetch_all(
+            "SELECT id, path FROM saved_paths ORDER BY id")
+
+    async def add_path(self, path: str) -> None:
+        await self._db.execute(
+            "INSERT OR IGNORE INTO saved_paths (path) VALUES (?)", (path,))
+
+    async def remove_path(self, path_id: int) -> None:
+        await self._db.execute(
+            "DELETE FROM saved_paths WHERE id=?", (path_id,))

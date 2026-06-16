@@ -170,6 +170,23 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                  timeout=10)
         return {"value": int(reply.get("value") or 6)}
 
+    @r.api_route("/api/settings/saved_paths", methods=["GET", "POST", "DELETE"])
+    async def saved_paths(request: Request):
+        """Сохранённые пути загрузки: список, добавление, удаление.
+        Источник истины — модуль settings (таблица saved_paths)."""
+        if request.method == "POST":
+            data = await request.json()
+            reply = await gw.request("settings.paths.add",
+                                     {"path": data.get("path", "")}, timeout=10)
+            return {"paths": reply["paths"]}
+        if request.method == "DELETE":
+            data = await request.json()
+            reply = await gw.request("settings.paths.remove",
+                                     {"id": data.get("id")}, timeout=10)
+            return {"paths": reply["paths"]}
+        reply = await gw.request("settings.paths.list", {}, timeout=10)
+        return {"paths": reply["paths"]}
+
     async def _refresh_debug_groups():
         reply = await gw.request("settings.values.by_prefix",
                                  {"prefix": "debug_enabled_"}, timeout=10)

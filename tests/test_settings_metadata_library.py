@@ -69,6 +69,20 @@ async def test_settings_get_missing_returns_none(system):
     assert reply["value"] is None
 
 
+@pytest.mark.asyncio
+async def test_settings_saved_paths_crud(system):
+    # сохранённые пути: add (с игнором дублей) / list / remove
+    probe = _probe(system[2])
+    await probe.request("settings.paths.add", {"path": "/nas/a"}, timeout=5)
+    await probe.request("settings.paths.add", {"path": "/nas/b"}, timeout=5)
+    await probe.request("settings.paths.add", {"path": "/nas/a"}, timeout=5)
+    lst = await probe.request("settings.paths.list", {}, timeout=5)
+    assert [p["path"] for p in lst["paths"]] == ["/nas/a", "/nas/b"]
+    pid = lst["paths"][0]["id"]
+    reply = await probe.request("settings.paths.remove", {"id": pid}, timeout=5)
+    assert [p["path"] for p in reply["paths"]] == ["/nas/b"]
+
+
 # --- metadata -------------------------------------------------------------------
 
 @pytest.mark.asyncio

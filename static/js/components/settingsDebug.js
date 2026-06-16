@@ -104,6 +104,31 @@ const SettingsDebugTab = {
         
         <div class="modern-fieldset mb-4">
             <div class="fieldset-header">
+                <i class="bi bi-folder2-open me-2"></i>
+                <h6 class="fieldset-title mb-0">Сохранённые пути</h6>
+            </div>
+            <div class="fieldset-content">
+                <p class="text-muted small mb-3">Пути для быстрого выбора при добавлении и правке сериала.</p>
+                <div v-if="savedPaths.length" class="mb-3">
+                    <div v-for="p in savedPaths" :key="p.id" class="d-flex align-items-center justify-content-between mb-2">
+                        <code class="text-truncate me-2">{{ p.path }}</code>
+                        <button class="btn btn-sm btn-outline-danger flex-shrink-0" @click="removeSavedPath(p.id)" title="Удалить">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div v-else class="text-muted small mb-3">Пока нет сохранённых путей.</div>
+                <div class="input-group">
+                    <input type="text" class="form-control" v-model="newSavedPath" placeholder="/nas/media/..." @keyup.enter="addSavedPath">
+                    <button class="btn btn-outline-primary" type="button" @click="addSavedPath">
+                        <i class="bi bi-plus-lg"></i> Добавить
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="modern-fieldset mb-4">
+            <div class="fieldset-header">
                 <i class="bi bi-bug me-2"></i>
                 <h6 class="fieldset-title mb-0">Действия отладки</h6>
             </div>
@@ -154,6 +179,8 @@ const SettingsDebugTab = {
       slicingDeleteSource: false,
       countdownTimer: null,
       nextScanCountdown: '...',
+      savedPaths: [],
+      newSavedPath: '',
       tableDescriptions: {
         'series': 'Удалить все отслеживаемые сериалы.',
         'torrents': 'Удалить все связанные торренты из базы данных (не из qBittorrent).',
@@ -212,6 +239,7 @@ const SettingsDebugTab = {
         this.startCountdownTimer();
         this.loadParallelDownloads();
         this.loadConcurrentFragments();
+        this.loadSavedPaths();
     },
     unload() {
         if (this.countdownTimer) {
@@ -259,6 +287,44 @@ const SettingsDebugTab = {
                 body: JSON.stringify({ value: this.concurrentFragments })
             });
             this.$emit('show-toast', `Потоков на загрузку установлено: ${this.concurrentFragments}`, 'info');
+        } catch (error) {
+            this.$emit('show-toast', error.message, 'danger');
+        }
+    },
+    async loadSavedPaths() {
+        try {
+            const response = await fetch('/api/settings/saved_paths');
+            if (!response.ok) throw new Error('Не удалось загрузить сохранённые пути');
+            this.savedPaths = (await response.json()).paths;
+        } catch (error) {
+            this.$emit('show-toast', error.message, 'danger');
+        }
+    },
+    async addSavedPath() {
+        const path = this.newSavedPath.trim();
+        if (!path) return;
+        try {
+            const response = await fetch('/api/settings/saved_paths', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path })
+            });
+            if (!response.ok) throw new Error('Не удалось добавить путь');
+            this.savedPaths = (await response.json()).paths;
+            this.newSavedPath = '';
+        } catch (error) {
+            this.$emit('show-toast', error.message, 'danger');
+        }
+    },
+    async removeSavedPath(id) {
+        try {
+            const response = await fetch('/api/settings/saved_paths', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id })
+            });
+            if (!response.ok) throw new Error('Не удалось удалить путь');
+            this.savedPaths = (await response.json()).paths;
         } catch (error) {
             this.$emit('show-toast', error.message, 'danger');
         }
