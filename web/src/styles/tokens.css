@@ -1,0 +1,41 @@
+/* Токены series-tracker (порт static/css/base/variables.css).
+   Единый источник правды: на эти переменные опираются и пресет PrimeVue
+   (web/src/theme/preset.ts), и будущие кастом-островки (карточка,
+   конфигуратор) — frontend-rewrite §7. */
+:root {
+  /* --- палитра --- */
+  --color-text: #212529;
+  --color-gray-100: #f8f9fa;
+  --color-gray-200: #e9ecef;
+  --color-gray-600: #495057;
+  --color-blue: #0d6efd;
+  --color-green-1: #198754;
+  --color-green-2: #20c997;
+  --color-yellow-1: #ffc107;
+  --color-yellow-2: #ffda6a;
+  --color-red-1: #dc3545;
+  --color-red-2: #fd7e14;
+  --color-blue-1: #0d6efd;
+  --color-blue-2: #0dcaf0;
+  --color-purple-1: #6f42c1;
+  --color-purple-2: #845ef7;
+
+  /* --- размеры и радиусы --- */
+  --control-height: 56px;
+  --border-radius: 9px;
+  --inner-border-radius: 7px;
+  --border-width: 2px;
+  --card-border-radius: 12px;
+
+  /* --- тени --- */
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --card-hover-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+
+  /* --- совместимость --- */
+  --border-color: var(--color-gray-200);
+  --border-color-focus: var(--color-blue);
+  --bg-light: var(--color-gray-100);
+  --bg-white: #fff;
+  --text-muted: #6c757d;
+  --stripe-intensity: 0.3;
+}
