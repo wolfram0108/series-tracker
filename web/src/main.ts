@@ -7,6 +7,7 @@ import "./style.css"
 import "./styles/fields.css"
 import "./styles/overrides.css"
 import "./styles/tables.css"
+import "./styles/pills.css"
 import { STPreset } from "./theme/preset"
 import App from "./App.vue"
 

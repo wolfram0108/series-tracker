@@ -7,7 +7,6 @@ import ToggleSwitch from "primevue/toggleswitch"
 import Checkbox from "primevue/checkbox"
 import SelectButton from "primevue/selectbutton"
 import Button from "primevue/button"
-import Tag from "primevue/tag"
 import DataTable from "primevue/datatable"
 import Column from "primevue/column"
 import StField from "./components/StField.vue"
@@ -119,12 +118,34 @@ const rtPass = ref("password123")
     </section>
 
     <section>
-      <h2>Теги</h2>
-      <div class="row">
-        <Tag value="успех" severity="success" />
-        <Tag value="ошибка" severity="danger" />
-        <Tag value="ожидание" severity="warn" />
-        <Tag value="инфо" severity="info" />
+      <h2>Пилюли и бейджи — по местам в проде</h2>
+      <div class="grid">
+        <div class="cell">
+          <label>Статус-бейдж очереди (Агенты)</label>
+          <div class="row" style="gap: 6px">
+            <span class="badge bg-primary">загрузка</span>
+            <span class="badge bg-info">обработка</span>
+            <span class="badge bg-success">готово</span>
+            <span class="badge bg-danger">ошибка</span>
+            <span class="badge bg-secondary">ожидание</span>
+          </div>
+        </div>
+        <div class="cell">
+          <label>Зеркало трекера (Трекеры)</label>
+          <div class="row" style="gap: 8px">
+            <span class="mirror-pill">anilibria.top <button class="mirror-pill-remove">&times;</button></span>
+            <span class="mirror-pill">aniliberty.top <button class="mirror-pill-remove">&times;</button></span>
+          </div>
+        </div>
+      </div>
+      <div class="cell" style="margin-top: 16px">
+        <label>Предпросмотр VK-фильтра (тест правил) — пилюли на цветном фоне</label>
+        <div class="vk-preview">
+          <span class="quality-badge">1080p</span>
+          <span class="pill"><i class="pi pi-th-large" />Сезон: <strong>1</strong></span>
+          <span class="pill"><i class="pi pi-video" />Серия: <strong>5</strong></span>
+          <span class="pill"><i class="pi pi-tags" />Тег: <strong>AniLibria</strong></span>
+        </div>
       </div>
     </section>
 
@@ -194,6 +215,13 @@ h2 { font-size: 1.05rem; margin-bottom: 12px; }
 .cell { display: flex; flex-direction: column; gap: 6px; }
 .cell > label { font-size: 0.8rem; color: var(--color-gray-600); }
 .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 10px; }
+
+/* подложка под полупрозрачные пилюли VK-предпросмотра */
+.vk-preview {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 12px; border-radius: var(--card-border-radius);
+  background: linear-gradient(135deg, #009688, #00796D); color: #fff;
+}
 
 /* нагруженные примеры */
 .loaded .block { margin-bottom: 20px; }
