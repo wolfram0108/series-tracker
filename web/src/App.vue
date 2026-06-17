@@ -15,6 +15,20 @@ import StIcon from "./components/StIcon.vue"
 import StInput from "./components/StInput.vue"
 import StSelect from "./components/StSelect.vue"
 import StBtn from "./components/StBtn.vue"
+import SeriesCard from "./components/SeriesCard.vue"
+
+// Карточки сериала — по состояниям, по порядку.
+const cards = [
+  { id: 1, name: "Ожидание (пусто)", site: "kinozal.me", auto_scan_enabled: true, statuses: ["waiting"] },
+  { id: 2, name: "Готов", site: "kinozal.me", auto_scan_enabled: true, statuses: ["ready"], last_scan_time: "18.06, 00:34", tmdb: { downloaded: 10, total: 10 } },
+  { id: 3, name: "Фронт кровавой блокады", site: "kinozal.me", auto_scan_enabled: true, statuses: ["downloading"], last_scan_time: "18.06, 00:31", tmdb: { downloaded: 5, total: 12 } },
+  { id: 4, name: "Простой (нет пиров)", site: "rutracker", auto_scan_enabled: false, statuses: ["idle"], last_scan_time: "18.06, 00:30" },
+  { id: 5, name: "В очереди", site: "rutracker", auto_scan_enabled: true, statuses: ["queued"] },
+  { id: 6, name: "Сканирование", site: "anilibria", auto_scan_enabled: true, statuses: ["scanning"] },
+  { id: 7, name: "Ошибка", site: "kinozal.me", auto_scan_enabled: true, statuses: ["error"] },
+  { id: 8, name: "Несколько статусов", site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "downloading", "metadata"] },
+  { id: 9, name: "Готов + ожидание (VK)", site: "vk_video", auto_scan_enabled: true, statuses: ["ready", "waiting"], tmdb: { downloaded: 7, total: 24 } },
+]
 
 // Парити-галерея (Ф2). Эталон — старый фронт на «/».
 const text = ref("Очень странные дела")
@@ -65,6 +79,11 @@ const rtPass = ref("password123")
       <h1>Парити-галерея <small>/v2 · Ф2</small></h1>
       <p class="muted">PrimeVue + StField (порт constructor-group) под токены series-tracker. Эталон — старый фронт на «/».</p>
     </header>
+
+    <section>
+      <h2>Карточки сериала (кастом-островок) — по состояниям</h2>
+      <SeriesCard v-for="c in cards" :key="c.id" :series="c" />
+    </section>
 
     <section>
       <h2>Поля — обычная высота (46px, PrimeVue)</h2>
