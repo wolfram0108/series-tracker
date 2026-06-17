@@ -11,6 +11,11 @@ import Tag from "primevue/tag"
 import DataTable from "primevue/datatable"
 import Column from "primevue/column"
 import StField from "./components/StField.vue"
+import StGroup from "./components/StGroup.vue"
+import StIcon from "./components/StIcon.vue"
+import StInput from "./components/StInput.vue"
+import StSelect from "./components/StSelect.vue"
+import StBtn from "./components/StBtn.vue"
 
 // Парити-галерея (Ф2). Эталон — старый фронт на «/».
 const text = ref("Очень странные дела")
@@ -38,10 +43,10 @@ const fPath = ref("/nas/media/Сериалы")
 const fPwd = ref("секрет123")
 
 // Нагруженные примеры из прода
-const profileSel = ref(null)
+const profileSel = ref<number | null>(null)
 const profileOptions = [
-  { label: "-- Выберите профиль --", value: null },
   { label: "Аниме", value: 1 },
+  { label: "Кино", value: 2 },
 ]
 const newProfile = ref("")
 const rtLogin = ref("bitter194")
@@ -122,22 +127,32 @@ const rtPass = ref("password123")
     </section>
 
     <section class="loaded">
-      <h2>Нагруженные примеры из прода</h2>
+      <h2>Нагруженные примеры из прода (монолитные группы)</h2>
+      <p class="muted small">Несколько айтемов соединены в один блок (одна рамка, внутренние разделители) — как в проде.</p>
 
       <div class="block">
         <p class="muted small">Выберите профиль для редактирования или создайте новый. Правила и тестирование появятся ниже после выбора профиля.</p>
-        <div class="row">
-          <Select v-model="profileSel" :options="profileOptions" option-label="label" placeholder="-- Выберите профиль --" style="min-width: 220px" />
-          <StField v-model="newProfile" label="Имя нового профиля..." icon="pi pi-plus" />
-          <Button label="Создать" icon="pi pi-plus" />
-        </div>
+        <StGroup>
+          <StIcon icon="pi pi-user-edit" />
+          <StSelect v-model="profileSel" :options="profileOptions" placeholder="-- Выберите профиль --" />
+          <StInput v-model="newProfile" label="Имя нового профиля..." />
+          <div class="constructor-item item-button-group">
+            <StBtn icon="pi pi-plus" variant="add" title="Создать" :disabled="!newProfile" />
+            <StBtn icon="pi pi-pencil" variant="edit" title="Переименовать" :disabled="!profileSel" />
+            <StBtn icon="pi pi-trash" variant="delete" title="Удалить" :disabled="!profileSel" />
+          </div>
+        </StGroup>
       </div>
 
       <div class="fieldset">
         <div class="fieldset-head"><span>RuTracker.org</span></div>
-        <div class="fieldset-body two">
-          <StField v-model="rtLogin" label="Логин" icon="pi pi-user" />
-          <StField v-model="rtPass" label="Пароль" type="password" icon="pi pi-lock" />
+        <div class="fieldset-body">
+          <StGroup>
+            <StIcon icon="pi pi-user" />
+            <StInput v-model="rtLogin" label="Логин" />
+            <StIcon icon="pi pi-lock" />
+            <StInput v-model="rtPass" label="Пароль" type="password" />
+          </StGroup>
         </div>
       </div>
     </section>
