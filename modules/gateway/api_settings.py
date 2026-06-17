@@ -17,6 +17,12 @@ from fastapi.responses import JSONResponse
 from core import BusRequestError
 from core import logging as core_logging
 
+from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse
+
+# Документация веток ошибок (JSONResponse, response_model не трогает).
+_ERR = {c: {"model": ErrorResponse} for c in (400, 403, 404, 409, 500)}
+_ERR1 = {c: {"model": ErrorOnly} for c in (400, 403, 404, 500)}
+
 # Группы логирования новой системы (UI рендерит список из ответа —
 # структура с бэкенда, как в оригинале).
 LOGGING_MODULES = {
@@ -60,7 +66,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- авторизации ------------------------------------------------------------
 
-    @r.get("/api/auth")
+    @r.get("/api/auth", response_model=DynamicObject)
     async def get_auth():
         out = {}
         for service in AUTH_SERVICES:
@@ -72,7 +78,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         out["tmdb"] = {"token": tmdb.get("value") or ""}
         return out
 
-    @r.post("/api/auth")
+    @r.post("/api/auth", response_model=OkResponse,
+            response_model_exclude_none=True)
     async def save_auth(request: Request):
         data = await request.json()
         for service in ("qbittorrent", "kinozal", "rutracker"):
@@ -95,7 +102,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- разбор URL (форма добавления) ---------------------------------------------
 
-    @r.post("/api/parse_url")
+    @r.post("/api/parse_url", response_model=DynamicObject, responses=_ERR1)
     async def parse_url(request: Request):
         data = await request.json()
         try:
@@ -126,20 +133,23 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                  timeout=10)
         return {response_key: (reply.get("value") or "false") == "true"}
 
-    @r.api_route("/api/settings/force_replace", methods=["GET", "POST"])
+    @r.api_route("/api/settings/force_replace", methods=["GET", "POST"],
+                 response_model=DynamicObject)
     async def force_replace(request: Request):
         return await _setting_flag("debug_force_replace", request)
 
-    @r.api_route("/api/settings/less_strict_scan", methods=["GET", "POST"])
+    @r.api_route("/api/settings/less_strict_scan", methods=["GET", "POST"],
+                 response_model=DynamicObject)
     async def less_strict_scan(request: Request):
         return await _setting_flag("debug_less_strict_scan", request)
 
     @r.api_route("/api/settings/slicing_delete_source",
-                 methods=["GET", "POST"])
+                 methods=["GET", "POST"], response_model=DynamicObject)
     async def slicing_delete_source(request: Request):
         return await _setting_flag("slicing_delete_source_file", request)
 
-    @r.api_route("/api/settings/parallel_downloads", methods=["GET", "POST"])
+    @r.api_route("/api/settings/parallel_downloads", methods=["GET", "POST"],
+                 response_model=DynamicObject)
     async def parallel_downloads(request: Request):
         if request.method == "POST":
             data = await request.json()
@@ -154,7 +164,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         return {"value": int(reply.get("value") or 2)}
 
     @r.api_route("/api/settings/concurrent_fragments",
-                 methods=["GET", "POST"])
+                 methods=["GET", "POST"], response_model=DynamicObject)
     async def concurrent_fragments(request: Request):
         """Число параллельных фрагментов yt-dlp (-N) — ускорение одной
         загрузки на hls-потоках."""
@@ -170,7 +180,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                  timeout=10)
         return {"value": int(reply.get("value") or 6)}
 
-    @r.api_route("/api/settings/saved_paths", methods=["GET", "POST", "DELETE"])
+    @r.api_route("/api/settings/saved_paths", methods=["GET", "POST", "DELETE"],
+                 response_model=DynamicObject)
     async def saved_paths(request: Request):
         """Сохранённые пути загрузки: список, добавление, удаление.
         Источник истины — модуль settings (таблица saved_paths)."""
@@ -196,7 +207,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         core_logging.set_debug_groups(groups)
         return flags
 
-    @r.api_route("/api/settings/debug_flags", methods=["GET", "POST"])
+    @r.api_route("/api/settings/debug_flags", methods=["GET", "POST"],
+                 response_model=DynamicObject, responses=_ERR)
     async def debug_flags(request: Request):
         if request.method == "POST":
             data = await request.json()
@@ -225,7 +237,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- TMDB ----------------------------------------------------------------------
 
-    @r.post("/api/tmdb/search")
+    @r.post("/api/tmdb/search", response_model=OkResponse,
+            response_model_exclude_none=True, responses=_ERR)
     async def tmdb_search(request: Request):
         data = await request.json()
         query = data.get("query")
@@ -242,7 +255,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 status_code=400)
         return {"success": True, "results": reply["results"]}
 
-    @r.get("/api/tmdb/details/{tmdb_id}")
+    @r.get("/api/tmdb/details/{tmdb_id}", response_model=DynamicObject,
+           responses=_ERR)
     async def tmdb_details(tmdb_id: int):
         try:
             reply = await gw.request("metadata.details",
@@ -255,11 +269,12 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- трекеры (владелец — sources) -----------------------------------------------
 
-    @r.get("/api/trackers")
+    @r.get("/api/trackers", response_model=list[DynamicObject])
     async def trackers_list():
         return await gw.request("sources.trackers.list", {}, timeout=10)
 
-    @r.put("/api/trackers/{tracker_id}")
+    @r.put("/api/trackers/{tracker_id}", response_model=OkResponse,
+           response_model_exclude_none=True, responses=_ERR1)
     async def tracker_update(tracker_id: int, request: Request):
         data = await request.json()
         mirrors = data.get("mirrors")
@@ -272,7 +287,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- каталоги -------------------------------------------------------------------
 
-    @r.get("/api/directories")
+    @r.get("/api/directories", response_model=DynamicObject, responses=_ERR1)
     async def directories(path: str = "/"):
         try:
             return await gw.request("library.directories.list",
@@ -289,11 +304,13 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             {"success": False, "error": str(exc).split(": ", 1)[-1]},
             status_code=code)
 
-    @r.get("/api/parser-profiles")
+    @r.get("/api/parser-profiles", response_model=list[DynamicObject])
     async def profiles_list():
         return await gw.request("rules.profiles.list", {}, timeout=10)
 
-    @r.post("/api/parser-profiles")
+    @r.post("/api/parser-profiles", response_model=OkResponse,
+            response_model_exclude_none=True,
+            responses={201: {"model": OkResponse}, **_ERR})
     async def profile_create(request: Request):
         data = await request.json()
         name = data.get("name")
@@ -309,7 +326,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         return JSONResponse({"success": True, "id": reply["id"]},
                             status_code=201)
 
-    @r.put("/api/parser-profiles/{profile_id}")
+    @r.put("/api/parser-profiles/{profile_id}", response_model=OkResponse,
+           response_model_exclude_none=True, responses=_ERR)
     async def profile_update(profile_id: int, request: Request):
         data = await request.json()
         if not data.get("name"):
@@ -324,7 +342,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return _value_error(exc, 409)
         return {"success": True}
 
-    @r.delete("/api/parser-profiles/{profile_id}")
+    @r.delete("/api/parser-profiles/{profile_id}", response_model=OkResponse,
+              response_model_exclude_none=True, responses=_ERR)
     async def profile_delete(profile_id: int):
         try:
             await gw.request("rules.profiles.delete",
@@ -333,19 +352,22 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return _value_error(exc, 400)
         return {"success": True}
 
-    @r.get("/api/parser-profiles/{profile_id}/rules")
+    @r.get("/api/parser-profiles/{profile_id}/rules",
+           response_model=list[DynamicObject])
     async def rules_list(profile_id: int):
         return await gw.request("rules.rules.list",
                                 {"profile_id": profile_id}, timeout=10)
 
-    @r.post("/api/parser-profiles/{profile_id}/rules")
+    @r.post("/api/parser-profiles/{profile_id}/rules",
+            response_model=OkResponse, response_model_exclude_none=True)
     async def rule_add(profile_id: int, request: Request):
         data = await request.json()
         reply = await gw.request("rules.rules.add", {
             "profile_id": profile_id, "data": data}, timeout=10)
         return {"success": True, "id": reply["id"]}
 
-    @r.post("/api/parser-profiles/scrape-titles")
+    @r.post("/api/parser-profiles/scrape-titles",
+            response_model=list[DynamicObject], responses=_ERR1)
     async def scrape_titles(request: Request):
         data = await request.json()
         if not data.get("channel_url"):
@@ -364,7 +386,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 status_code=500)
         return reply["videos"]
 
-    @r.post("/api/parser-profiles/test")
+    @r.post("/api/parser-profiles/test", response_model=DynamicObject,
+            responses=_ERR1)
     async def rules_test(request: Request):
         data = await request.json()
         if not data.get("profile_id"):
@@ -379,20 +402,23 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             "profile_id": data["profile_id"], "videos": videos},
             timeout=60)
 
-    @r.put("/api/parser-rules/{rule_id}")
+    @r.put("/api/parser-rules/{rule_id}", response_model=OkResponse,
+           response_model_exclude_none=True)
     async def rule_update(rule_id: int, request: Request):
         data = await request.json()
         await gw.request("rules.rules.update",
                          {"rule_id": rule_id, "data": data}, timeout=10)
         return {"success": True}
 
-    @r.delete("/api/parser-rules/{rule_id}")
+    @r.delete("/api/parser-rules/{rule_id}", response_model=OkResponse,
+              response_model_exclude_none=True)
     async def rule_delete(rule_id: int):
         await gw.request("rules.rules.delete", {"rule_id": rule_id},
                          timeout=10)
         return {"success": True}
 
-    @r.post("/api/parser-rules/reorder")
+    @r.post("/api/parser-rules/reorder", response_model=OkResponse,
+            response_model_exclude_none=True)
     async def rules_reorder(request: Request):
         ordered_ids = await request.json()
         await gw.request("rules.rules.reorder",
@@ -401,7 +427,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- логи -----------------------------------------------------------------------
 
-    @r.get("/api/logs")
+    @r.get("/api/logs", response_model=list[DynamicObject])
     async def logs(group: str | None = None, level: str | None = None,
                    limit: int = 200):
         files = ([f"{level.lower()}.log"] if level else
@@ -438,12 +464,13 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 "'alembic_%'").fetchall()
         return [r[0] for r in rows]
 
-    @r.get("/api/database/tables")
+    @r.get("/api/database/tables", response_model=list[str])
     async def database_tables():
         tables = await asyncio.to_thread(_db_tables)
         return [t for t in tables if t not in DB_EXCLUDED_TABLES]
 
-    @r.get("/api/database/table/{table_name}")
+    @r.get("/api/database/table/{table_name}",
+           response_model=list[DynamicObject], responses=_ERR1)
     async def database_table(table_name: str):
         tables = await asyncio.to_thread(_db_tables)
         if table_name in DB_EXCLUDED_TABLES or table_name not in tables:
@@ -460,7 +487,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
         return await asyncio.to_thread(read_table)
 
-    @r.post("/api/database/clear_table")
+    @r.post("/api/database/clear_table", response_model=OkResponse,
+            response_model_exclude_none=True, responses=_ERR)
     async def database_clear_table(request: Request):
         data = await request.json()
         table_name = data.get("table_name")
