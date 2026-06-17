@@ -13,8 +13,8 @@ from fastapi.responses import JSONResponse
 
 from core import BusRequestError
 
-from .schemas import (CreatedSeries, ErrorResponse, OkResponse, QueueTask,
-                      SeriesObject, TorrentHistoryItem)
+from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, OkResponse,
+                      QueueTask, SeriesObject)
 
 # Общая документация веток ошибок (отдаются через JSONResponse, на них
 # response_model не распространяется).
@@ -253,7 +253,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         return {"success": True, "message": "Приоритет качества сохранен."}
 
     @r.get("/api/series/{series_id}/torrents/history",
-           response_model=list[TorrentHistoryItem])
+           response_model=list[DynamicObject])
     async def torrents_history(series_id: int):
         try:
             return await gw.request("torrents.db.history",

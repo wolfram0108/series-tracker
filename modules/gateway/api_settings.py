@@ -386,7 +386,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 status_code=500)
         return reply["videos"]
 
-    @r.post("/api/parser-profiles/test", response_model=DynamicObject,
+    @r.post("/api/parser-profiles/test", response_model=list[DynamicObject],
             responses=_ERR1)
     async def rules_test(request: Request):
         data = await request.json()

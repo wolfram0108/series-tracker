@@ -97,16 +97,3 @@ class SeriesObject(ApiModel):
 class CreatedSeries(ApiModel):
     success: bool
     series_id: int
-
-
-class TorrentHistoryItem(ApiModel):
-    # Только torrent_id/link в БД NOT NULL; остальное nullable.
-    id: int
-    series_id: int
-    torrent_id: str
-    link: str
-    qb_hash: str | None = None
-    is_active: bool | None = None
-    date_time: str | None = None
-    episodes: str | None = None
-    quality: str | None = None
