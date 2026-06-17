@@ -6,6 +6,7 @@ import "./styles/tokens.css"
 import "./style.css"
 import "./styles/fields.css"
 import "./styles/overrides.css"
+import "./styles/tables.css"
 import { STPreset } from "./theme/preset"
 import App from "./App.vue"
 

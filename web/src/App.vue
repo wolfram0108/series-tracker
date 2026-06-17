@@ -35,6 +35,13 @@ const modeOptions = [
 const rows = [
   { name: "Фронт кровавой блокады", status: "Загрузка", progress: 45 },
   { name: "Извне", status: "Готов", progress: 100 },
+  { name: "Рик и Морти", status: "В очереди", progress: 0 },
+]
+const logs = [
+  { time: "18.06.2026, 00:34:41", group: "gateway", level: "INFO", msg: "SSE клиент подключился (count=1)" },
+  { time: "18.06.2026, 00:33:01", group: "https", level: "INFO", msg: "HTTP Request: GET /api/scanner/status \"HTTP/1.1 200 OK\"" },
+  { time: "18.06.2026, 00:32:39", group: "torrents", level: "WARNING", msg: "серия 1: торрент отсутствует в qBit — запись сброшена" },
+  { time: "18.06.2026, 00:31:10", group: "scan", level: "INFO", msg: "запущено модулей: 13" },
 ]
 
 // StField (floating-label, порт constructor-group)
@@ -112,17 +119,33 @@ const rtPass = ref("password123")
     </section>
 
     <section>
-      <h2>Теги · Таблица</h2>
+      <h2>Теги</h2>
       <div class="row">
         <Tag value="успех" severity="success" />
         <Tag value="ошибка" severity="danger" />
         <Tag value="ожидание" severity="warn" />
         <Tag value="инфо" severity="info" />
       </div>
-      <DataTable :value="rows" size="small">
-        <Column field="name" header="Сериал" />
-        <Column field="status" header="Статус" />
-        <Column field="progress" header="Прогресс, %" />
+    </section>
+
+    <section>
+      <h2>Таблицы (под div-table)</h2>
+      <p class="muted small">Очередь — в fieldset с заголовком-баром (как у агентов); ниже — таблица логов.</p>
+      <div class="fieldset" style="margin-bottom: 20px">
+        <div class="fieldset-head"><span>Очередь Агента Загрузки (yt-dlp)</span></div>
+        <div class="fieldset-body">
+          <DataTable :value="rows" size="small">
+            <Column field="name" header="Сериал / Файл" />
+            <Column field="status" header="Статус" />
+            <Column field="progress" header="Прогресс, %" />
+          </DataTable>
+        </div>
+      </div>
+      <DataTable :value="logs" size="small">
+        <Column field="time" header="Время" />
+        <Column field="group" header="Группа" />
+        <Column field="level" header="Уровень" />
+        <Column field="msg" header="Сообщение" />
       </DataTable>
     </section>
 

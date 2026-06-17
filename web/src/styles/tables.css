@@ -1,0 +1,33 @@
+/* PrimeVue DataTable под div-table (static/css/components/table.css):
+   рамка, светлый ЖИРНЫЙ header (левое выравнивание), зебра (нечётные
+   строки rgba(0,0,0,.02)), ячейки padding .75rem, нижние разделители.
+   Тема инжектится рантаймом — !important. */
+
+.p-datatable {
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  overflow: hidden;
+}
+
+.p-datatable-thead > tr > th {
+  background: var(--bg-light) !important;
+  color: var(--color-text) !important;
+  font-weight: 700 !important;
+  text-align: left !important;
+  padding: 0.75rem !important;
+  border: none !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  white-space: nowrap;
+}
+
+.p-datatable-tbody > tr { background: #fff !important; }
+.p-datatable-tbody > tr:nth-child(odd) { background: rgba(0, 0, 0, 0.02) !important; }
+.p-datatable-tbody > tr:hover { background: var(--color-gray-100) !important; }
+
+.p-datatable-tbody > tr > td {
+  padding: 0.75rem !important;
+  border: none !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  color: var(--color-text);
+}
+.p-datatable-tbody > tr:last-child > td { border-bottom: none !important; }
