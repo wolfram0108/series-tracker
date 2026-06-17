@@ -13,6 +13,13 @@ from fastapi.responses import JSONResponse
 
 from core import BusRequestError
 
+from .schemas import (CreatedSeries, ErrorResponse, OkResponse, QueueTask,
+                      SeriesObject, TorrentHistoryItem)
+
+# Общая документация веток ошибок (отдаются через JSONResponse, на них
+# response_model не распространяется).
+_ERRORS = {code: {"model": ErrorResponse} for code in (400, 404, 409, 500)}
+
 
 def _iso(value):
     """Наивная UTC-строка БД ('%Y-%m-%d %H:%M:%S.%f') → ISO с 'T'
@@ -53,7 +60,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- список и карточки ----------------------------------------------------
 
-    @r.get("/api/series")
+    @r.get("/api/series", response_model=list[SeriesObject])
     async def list_series():
         series = await gw.request("catalog.series.list", {}, timeout=15)
         reply = await gw.request("metadata.map.list", {}, timeout=10)
@@ -67,7 +74,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             s["downloaded_episodes_count"] = counts.get(s["id"], 0)
         return series
 
-    @r.post("/api/series")
+    @r.post("/api/series", response_model=CreatedSeries)
     async def add_series(request: Request):
         data = await request.json()
         series = await gw.request("catalog.series.create", {"data": data},
@@ -88,7 +95,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         return {"success": True, "series_id": series_id}
 
     # ВАЖНО: статический путь регистрируется до /{series_id}.
-    @r.get("/api/series/active_torrents")
+    @r.get("/api/series/active_torrents", response_model=list[QueueTask])
     async def active_torrents():
         """Прогресс торрент-загрузок с именами серий (таблица
         «Мониторинг» вкладки агентов; Р-23 — исправление маппинга
@@ -100,7 +107,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return []
         return reply["tasks"]
 
-    @r.get("/api/series/{series_id}")
+    @r.get("/api/series/{series_id}", response_model=SeriesObject,
+           responses=_ERRORS)
     async def series_details(series_id: int):
         try:
             s = await gw.request("catalog.series.get",
@@ -117,7 +125,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         _attach_tmdb(s, reply["mapping"])
         return s
 
-    @r.post("/api/series/{series_id}")
+    @r.post("/api/series/{series_id}", response_model=OkResponse,
+            response_model_exclude_none=True, responses=_ERRORS)
     async def update_series(series_id: int, request: Request):
         """Сохранение свойств: catalog → metadata → library/renaming
         (сценарий Р-19; цепочка «переместили → переименовали» — Р-17)."""
@@ -150,7 +159,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         return {"success": True,
                 "message": "Задача на обновление принята в обработку."}
 
-    @r.delete("/api/series/{series_id}")
+    @r.delete("/api/series/{series_id}", response_model=OkResponse,
+              response_model_exclude_none=True, responses=_ERRORS)
     async def delete_series(series_id: int, delete_from_qb: bool = False):
         try:
             await gw.request("catalog.series.delete", {
@@ -162,7 +172,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- просмотр и мелкие свойства ---------------------------------------------
 
-    @r.post("/api/series/{series_id}/state")
+    @r.post("/api/series/{series_id}/state", response_model=OkResponse,
+            response_model_exclude_none=True)
     async def set_state(series_id: int, request: Request):
         """Старый контракт фронта: ['viewing'] при открытии модалки,
         [] при закрытии → эфемерный viewing (Р-11). Открытие модалки
@@ -185,7 +196,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             gw.send_command(sync_topic, {"series_id": series_id})
         return {"success": True}
 
-    @r.post("/api/series/{series_id}/toggle_auto_scan")
+    @r.post("/api/series/{series_id}/toggle_auto_scan",
+            response_model=OkResponse, response_model_exclude_none=True,
+            responses=_ERRORS)
     async def toggle_auto_scan(series_id: int, request: Request):
         data = await request.json()
         enabled = data.get("enabled")
@@ -201,7 +214,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return _error_response(exc)
         return {"success": True}
 
-    @r.post("/api/series/{series_id}/ignored-seasons")
+    @r.post("/api/series/{series_id}/ignored-seasons",
+            response_model=OkResponse, response_model_exclude_none=True,
+            responses=_ERRORS)
     async def ignored_seasons(series_id: int, request: Request):
         data = await request.json()
         seasons = data.get("seasons")
@@ -218,7 +233,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return _error_response(exc)
         return {"success": True}
 
-    @r.put("/api/series/{series_id}/vk-quality-priority")
+    @r.put("/api/series/{series_id}/vk-quality-priority",
+           response_model=OkResponse, response_model_exclude_none=True,
+           responses=_ERRORS)
     async def vk_quality_priority(series_id: int, request: Request):
         data = await request.json()
         priority = data.get("priority")
@@ -235,7 +252,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return _error_response(exc)
         return {"success": True, "message": "Приоритет качества сохранен."}
 
-    @r.get("/api/series/{series_id}/torrents/history")
+    @r.get("/api/series/{series_id}/torrents/history",
+           response_model=list[TorrentHistoryItem])
     async def torrents_history(series_id: int):
         try:
             return await gw.request("torrents.db.history",
@@ -243,7 +261,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError:
             return []
 
-    @r.post("/api/series/{series_id}/scan")
+    @r.post("/api/series/{series_id}/scan", response_model=OkResponse,
+            response_model_exclude_none=True,
+            responses={409: {"model": ErrorResponse},
+                       500: {"model": ErrorResponse}})
     async def scan_series(series_id: int):
         """Синхронный скан одной серии, как в оригинале: HTTP ждёт
         результата; force_replace scan берёт из настройки отладки."""
