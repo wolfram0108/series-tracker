@@ -11,15 +11,18 @@ from fastapi.responses import JSONResponse
 
 from core import BusRequestError
 
+from .schemas import ErrorResponse, OkResponse, QueueTask, ScannerStatus
+
 
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
     r = APIRouter()
 
-    @r.get("/api/scanner/status")
+    @r.get("/api/scanner/status", response_model=ScannerStatus)
     async def scanner_status():
         return await gw.request("scan.status.get", {}, timeout=10)
 
-    @r.post("/api/scanner/settings")
+    @r.post("/api/scanner/settings", response_model=OkResponse,
+            response_model_exclude_none=True)
     async def scanner_settings(request: Request):
         data = await request.json()
         if "enabled" in data:
@@ -34,7 +37,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         # немедленный полный скан старой системы не воспроизводится.
         return {"success": True}
 
-    @r.post("/api/scanner/scan_all")
+    @r.post("/api/scanner/scan_all", response_model=OkResponse,
+            response_model_exclude_none=True,
+            responses={409: {"model": ErrorResponse}})
     async def scan_all(request: Request):
         data = await request.json() if await request.body() else {}
         reply = await gw.request("scan.all.start", {
@@ -47,7 +52,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         return {"success": True,
                 "message": "Сканирование всех сериалов запущено."}
 
-    @r.get("/api/agent/queue")
+    @r.get("/api/agent/queue", response_model=list[QueueTask])
     async def agent_queue():
         try:
             reply = await gw.request("torrents.queue.get", {}, timeout=10)
@@ -55,7 +60,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return []  # модуль не поднят — как старый «нет агента»
         return [{"hash": t.get("torrent_hash"), **t} for t in reply["tasks"]]
 
-    @r.get("/api/downloads/queue")
+    @r.get("/api/downloads/queue", response_model=list[QueueTask])
     async def downloads_queue():
         try:
             reply = await gw.request("downloads.queue.get", {}, timeout=10)
@@ -63,7 +68,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return []
         return reply["tasks"]
 
-    @r.post("/api/downloads/queue/clear")
+    @r.post("/api/downloads/queue/clear", response_model=OkResponse,
+            response_model_exclude_none=True,
+            responses={500: {"model": ErrorResponse}})
     async def downloads_queue_clear():
         try:
             reply = await gw.request("downloads.queue.clear", {}, timeout=15)
@@ -73,7 +80,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         return {"success": True,
                 "message": f"Удалено {reply['deleted']} задач из очереди."}
 
-    @r.post("/api/downloads/{task_id}/cancel")
+    @r.post("/api/downloads/{task_id}/cancel", response_model=OkResponse,
+            response_model_exclude_none=True,
+            responses={404: {"model": ErrorResponse},
+                       500: {"model": ErrorResponse}})
     async def downloads_cancel(task_id: int):
         """Точечная отмена загрузки: убить процесс + удалить файл +
         снять задачу (находка 45)."""
