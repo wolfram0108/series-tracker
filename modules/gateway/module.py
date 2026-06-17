@@ -88,9 +88,11 @@ class GatewayModule(BaseModule):
 
     def __init__(self, bus, *, static_dir: str = "static",
                  templates_dir: str = "templates", diag: bool = False,
-                 db_path: str = "app.db") -> None:
+                 db_path: str = "app.db",
+                 web_dist_dir: str = "web/dist") -> None:
         self._static_dir = static_dir
         self._templates_dir = templates_dir
+        self._web_dist_dir = web_dist_dir
         self._diag = diag
         self._sse_clients = 0
         # путь к SQLite — только для админ-вкладки БД (Р-22: сознательный
@@ -172,6 +174,13 @@ class GatewayModule(BaseModule):
         if os.path.isdir(self._static_dir):
             app.mount("/static", StaticFiles(directory=self._static_dir),
                       name="static")
+
+        # Новый фронт (Vite-сборка) под /v2, рядом со старым на «/»
+        # (frontend-rewrite Ф1, Р-Ф7). html=True отдаёт index.html на /v2/
+        # и ассеты на /v2/assets/*. Старый фронт и /api не затронуты.
+        if os.path.isdir(self._web_dist_dir):
+            app.mount("/v2", StaticFiles(directory=self._web_dist_dir,
+                                         html=True), name="v2")
         return app
 
     # --- SSE: шина -> браузер -------------------------------------------------

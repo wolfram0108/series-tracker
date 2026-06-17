@@ -1,0 +1,30 @@
+{
+  "name": "series-tracker-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
+    "gen:api": "openapi-typescript http://127.0.0.1:5000/openapi.json -o src/api/schema.d.ts"
+  },
+  "dependencies": {
+    "@primevue/themes": "^4.2.5",
+    "openapi-fetch": "^0.13.1",
+    "pinia": "^2.3.0",
+    "primeicons": "^7.0.0",
+    "primevue": "^4.2.5",
+    "vue": "^3.5.13",
+    "vuedraggable": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "openapi-typescript": "^7.4.4",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vue-tsc": "^2.1.10"
+  }
+}

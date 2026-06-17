@@ -1,0 +1,9 @@
+/* Базовый сброс. Слой токенов (перенос variables.css → пресет PrimeVue)
+   появится в Ф2 (frontend-rewrite §7). */
+* { box-sizing: border-box; }
+html, body, #app { margin: 0; height: 100%; }
+body {
+  background: #f8f9fa;
+  color: #212529;
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+}
