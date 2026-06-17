@@ -69,7 +69,10 @@
   padding: 0.5rem 0.85rem !important;
   transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
 }
-.p-select { display: inline-flex; align-items: center; }
+/* Select: высота как у прочих полей (паддинг — на внутренней метке,
+   иначе двойной паддинг root+label делает его выше остальных). */
+.p-select { display: inline-flex; align-items: center; padding: 0 !important; }
+.p-select .p-select-label { padding: 0.5rem 0.85rem !important; min-height: 0 !important; }
 .p-inputtext:enabled:focus,
 .p-select.p-focus,
 .p-inputnumber-input:enabled:focus {
@@ -85,24 +88,5 @@
   box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.25) !important;
 }
 
-/* --- Составное поле: иконка-сегмент + input (аналог constructor-group) --- */
-.p-inputgroup {
-  border: var(--border-width) solid var(--color-gray-200);
-  border-radius: var(--border-radius);
-  overflow: hidden;
-  background: #fff;
-}
-.p-inputgroup:focus-within {
-  border-color: var(--border-color-focus);
-  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.25);
-}
-.p-inputgroup > .p-inputgroupaddon {
-  background: var(--color-gray-100);
-  color: var(--color-gray-600);
-  border: none;
-  min-width: 46px;
-}
-.p-inputgroup > .p-inputtext {
-  border: none !important;
-  box-shadow: none !important;
-}
+/* Составное поле (иконка + input) и floating-label — реализованы точным
+   портом constructor-group в компоненте StField (styles/fields.css). */
