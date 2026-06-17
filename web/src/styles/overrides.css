@@ -1,0 +1,76 @@
+/* Перекрытия PrimeVue под точный вид series-tracker (Ф2).
+   Тема PrimeVue инжектится рантаймом после бандла, поэтому !important.
+   Источник значений — static/css/components/buttons.css. */
+
+/* --- Кнопки: градиентная заливка как в оригинале (.btn) --- */
+.p-button {
+  border: none !important;
+  border-radius: 8px !important;
+  font-weight: 500 !important;
+  padding: 10px 20px !important;
+  gap: 8px !important;
+  min-height: 44px !important;
+  font-size: 14px !important;
+  transition: all 0.2s ease !important;
+  /* primary по умолчанию (severity не задан) */
+  background: linear-gradient(135deg, #007bff 0%, #0056b3 100%) !important;
+  color: #fff !important;
+  box-shadow: 0 2px 8px rgba(0, 123, 255, 0.3) !important;
+}
+.p-button:not(:disabled):hover { filter: brightness(90%); }
+.p-button:disabled { opacity: 0.6 !important; filter: none !important; }
+
+.p-button-secondary {
+  background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%) !important;
+  box-shadow: 0 2px 8px rgba(108, 117, 125, 0.3) !important;
+  color: #fff !important;
+}
+.p-button-success {
+  background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%) !important;
+  box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3) !important;
+}
+.p-button-danger {
+  background: linear-gradient(135deg, #dc3545 0%, #c82333 100%) !important;
+  box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3) !important;
+}
+.p-button-warn {
+  background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%) !important;
+  color: #212529 !important;
+  box-shadow: 0 2px 8px rgba(255, 193, 7, 0.3) !important;
+}
+.p-button-info {
+  background: linear-gradient(135deg, #17a2b8 0%, #117a8b 100%) !important;
+  box-shadow: 0 2px 8px rgba(23, 162, 184, 0.3) !important;
+}
+
+/* outlined/text — без заливки (в оригинале заливные только основные) */
+.p-button-outlined {
+  background: transparent !important;
+  color: var(--color-blue) !important;
+  border: 1px solid var(--color-blue) !important;
+  box-shadow: none !important;
+}
+.p-button-text {
+  background: transparent !important;
+  color: var(--color-blue) !important;
+  box-shadow: none !important;
+}
+
+/* --- Составное поле: иконка-сегмент + input (аналог constructor-group) --- */
+.p-inputgroup {
+  border: var(--border-width) solid var(--color-gray-200);
+  border-radius: var(--border-radius);
+  overflow: hidden;
+  background: #fff;
+}
+.p-inputgroup:focus-within { border-color: var(--border-color-focus); }
+.p-inputgroup > .p-inputgroupaddon {
+  background: var(--color-gray-100);
+  color: var(--color-gray-600);
+  border: none;
+  min-width: 46px;
+}
+.p-inputgroup > .p-inputtext {
+  border: none !important;
+  box-shadow: none !important;
+}

@@ -4,6 +4,7 @@ import PrimeVue from "primevue/config"
 import "primeicons/primeicons.css"
 import "./styles/tokens.css"
 import "./style.css"
+import "./styles/overrides.css"
 import { STPreset } from "./theme/preset"
 import App from "./App.vue"
 

@@ -10,6 +10,8 @@ import SelectButton from "primevue/selectbutton"
 import Button from "primevue/button"
 import Tag from "primevue/tag"
 import FloatLabel from "primevue/floatlabel"
+import InputGroup from "primevue/inputgroup"
+import InputGroupAddon from "primevue/inputgroupaddon"
 import DataTable from "primevue/datatable"
 import Column from "primevue/column"
 
@@ -63,6 +65,13 @@ const rows = [
         <div class="cell"><label>Число</label><InputNumber v-model="num" show-buttons :min="0" :max="8" /></div>
         <div class="cell"><label>Пароль</label><Password v-model="pwd" toggle-mask :feedback="false" /></div>
         <div class="cell"><label>Select</label><Select v-model="sel" :options="selOptions" option-label="label" placeholder="Профиль правил" /></div>
+        <div class="cell">
+          <label>Составное (как constructor-group)</label>
+          <InputGroup>
+            <InputGroupAddon><i class="pi pi-link" /></InputGroupAddon>
+            <InputText model-value="" placeholder="URL для парсинга" />
+          </InputGroup>
+        </div>
       </div>
     </section>
 
