@@ -132,7 +132,10 @@ class GatewayModule(BaseModule):
     # --- FastAPI-приложение -------------------------------------------------
 
     def _create_app(self) -> FastAPI:
-        app = FastAPI(title="Series Tracker", docs_url=None, redoc_url=None)
+        # /docs включён для разработки типизированного фронта (Ф0): схема
+        # обогащена response_model'ами, удобно смотреть контракт. /openapi.json
+        # доступен по умолчанию — из него генерируются TS-типы (openapi-typescript).
+        app = FastAPI(title="Series Tracker", docs_url="/docs", redoc_url=None)
 
         @app.get("/api/stream")
         async def stream() -> StreamingResponse:
