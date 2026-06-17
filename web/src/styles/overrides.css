@@ -56,6 +56,35 @@
   box-shadow: none !important;
 }
 
+/* --- Поля ввода: высота/обводка/фокус как в constructor.css --- */
+/* Оригинал: высота 46px, бордер 2px gray-200, радиус 9px, фокус —
+   синяя рамка + свечение 0 0 0 3px rgba(13,110,253,.25); invalid — красный. */
+.p-inputtext,
+.p-select,
+.p-inputnumber-input,
+.p-password .p-inputtext {
+  min-height: 46px !important;
+  border: var(--border-width) solid var(--color-gray-200) !important;
+  border-radius: var(--border-radius) !important;
+  padding: 0.5rem 0.85rem !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+.p-select { display: inline-flex; align-items: center; }
+.p-inputtext:enabled:focus,
+.p-select.p-focus,
+.p-inputnumber-input:enabled:focus {
+  border-color: var(--color-blue) !important;
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.25) !important;
+  outline: none !important;
+}
+.p-inputtext.p-invalid,
+.p-invalid > .p-inputtext {
+  border-color: var(--color-red-1) !important;
+}
+.p-inputtext.p-invalid:enabled:focus {
+  box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.25) !important;
+}
+
 /* --- Составное поле: иконка-сегмент + input (аналог constructor-group) --- */
 .p-inputgroup {
   border: var(--border-width) solid var(--color-gray-200);
@@ -63,7 +92,10 @@
   overflow: hidden;
   background: #fff;
 }
-.p-inputgroup:focus-within { border-color: var(--border-color-focus); }
+.p-inputgroup:focus-within {
+  border-color: var(--border-color-focus);
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.25);
+}
 .p-inputgroup > .p-inputgroupaddon {
   background: var(--color-gray-100);
   color: var(--color-gray-600);
