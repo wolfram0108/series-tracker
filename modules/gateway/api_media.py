@@ -14,6 +14,13 @@ from fastapi.responses import JSONResponse
 
 from core import BusRequestError
 
+from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, OkResponse)
+
+# Документация веток ошибок (отдаются JSONResponse, response_model на них
+# не распространяется). _ERR — тело {success, error}; _ERR1 — {error}.
+_ERR = {c: {"model": ErrorResponse} for c in (400, 404, 409, 500)}
+_ERR1 = {c: {"model": ErrorOnly} for c in (404, 500)}
+
 
 def _iso(value):
     return value.replace(" ", "T", 1) if isinstance(value, str) else value
@@ -39,7 +46,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- media-items ------------------------------------------------------------
 
-    @r.get("/api/series/{series_id}/media-items")
+    @r.get("/api/series/{series_id}/media-items",
+           response_model=list[DynamicObject])
     async def media_items(series_id: int):
         items = await gw.request("scan.media.list",
                                  {"series_id": series_id}, timeout=15)
@@ -47,7 +55,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             item["publication_date"] = _iso(item.get("publication_date"))
         return items
 
-    @r.put("/api/media-items/{unique_id}/ignore")
+    @r.put("/api/media-items/{unique_id}/ignore", response_model=OkResponse,
+           response_model_exclude_none=True, responses=_ERR)
     async def set_ignored(unique_id: str, request: Request):
         data = await request.json()
         is_ignored = data.get("is_ignored")
@@ -61,7 +70,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- главы и нарезка ----------------------------------------------------------
 
-    @r.post("/api/media-items/{unique_id}/chapters")
+    @r.post("/api/media-items/{unique_id}/chapters",
+            response_model=list[DynamicObject], responses=_ERR1)
     async def chapters(unique_id: str):
         try:
             return await gw.request("slicing.chapters.get",
@@ -73,7 +83,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return JSONResponse(
                 {"error": "Не удалось получить оглавление"}, status_code=500)
 
-    @r.post("/api/media-items/{unique_id}/chapters/filtered")
+    @r.post("/api/media-items/{unique_id}/chapters/filtered",
+            response_model=DynamicObject, responses=_ERR1)
     async def chapters_filtered(unique_id: str):
         try:
             reply = await gw.request("slicing.chapters.filtered",
@@ -87,7 +98,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 status_code=500)
         return _with_status_message(reply)
 
-    @r.post("/api/media-items/{unique_id}/chapters/mark-garbage")
+    @r.post("/api/media-items/{unique_id}/chapters/mark-garbage",
+            response_model=DynamicObject, responses=_ERR)
     async def chapters_mark(unique_id: str, request: Request):
         data = await request.json()
         indices = data.get("garbage_indices", [])
@@ -122,7 +134,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                            "Запустите нарезку повторно после завершения "
                            "загрузки.")
 
-    @r.post("/api/media-items/{unique_id}/slice")
+    @r.post("/api/media-items/{unique_id}/slice", response_model=OkResponse,
+            response_model_exclude_none=True, responses=_ERR)
     async def slice_task(unique_id: str):
         try:
             reply = await gw.request("slicing.task.create",
@@ -135,7 +148,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         return {"success": True,
                 "message": "Задача на нарезку успешно создана."}
 
-    @r.post("/api/media-items/{unique_id}/slice-with-filter")
+    @r.post("/api/media-items/{unique_id}/slice-with-filter",
+            response_model=OkResponse, response_model_exclude_none=True,
+            responses=_ERR)
     async def slice_with_filter(unique_id: str, request: Request):
         data = await request.json() if await request.body() else {}
         try:
@@ -153,7 +168,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                            "создана.",
                 "filtered_chapters_count": reply["chapters"]}
 
-    @r.post("/api/media-items/{unique_id}/delete-source")
+    @r.post("/api/media-items/{unique_id}/delete-source",
+            response_model=OkResponse, response_model_exclude_none=True,
+            responses=_ERR)
     async def delete_source(unique_id: str):
         try:
             reply = await gw.request("slicing.source.delete",
@@ -166,7 +183,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         return {"success": True, "deleted": False,
                 "message": "Исходный файл уже отсутствует."}
 
-    @r.post("/api/media-items/{unique_id}/verify-sliced-files")
+    @r.post("/api/media-items/{unique_id}/verify-sliced-files",
+            response_model=DynamicObject, responses=_ERR1)
     async def verify_sliced(unique_id: str):
         try:
             reply = await gw.request("slicing.verify",
@@ -182,14 +200,16 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                 "статус сброшен.")
         return reply
 
-    @r.post("/api/series/{series_id}/deep-adoption")
+    @r.post("/api/series/{series_id}/deep-adoption", response_model=OkResponse,
+            response_model_exclude_none=True)
     async def deep_adoption(series_id: int):
         gw.send_command("slicing.deep_adoption", {"series_id": series_id})
         return {"success": True,
                 "message": "Процесс глубокого усыновления запущен "
                            "в фоновом режиме."}
 
-    @r.get("/api/series/{series_id}/sliced-files")
+    @r.get("/api/series/{series_id}/sliced-files",
+           response_model=list[DynamicObject])
     async def sliced_files(series_id: int):
         files = await gw.request("slicing.files.list",
                                  {"series_id": series_id}, timeout=15)
@@ -209,7 +229,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- композиция и превью --------------------------------------------------------
 
-    @r.get("/api/series/{series_id}/composition")
+    @r.get("/api/series/{series_id}/composition",
+           response_model=list[DynamicObject], responses=_ERR1)
     async def composition(series_id: int, refresh: bool = False):
         try:
             series = await gw.request("catalog.series.get",
@@ -231,7 +252,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 sd["publication_date"] = _iso(sd.get("publication_date"))
         return plan
 
-    @r.get("/api/series/{series_id}/rename_preview")
+    @r.get("/api/series/{series_id}/rename_preview",
+           response_model=DynamicObject, responses=_ERR1)
     async def rename_preview(series_id: int):
         try:
             return await gw.request("renaming.preview",
@@ -252,13 +274,16 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         gw.send_command("renaming.reprocess", {"series_id": series_id})
         return {"success": True, "message": message}
 
-    @r.post("/api/series/{series_id}/reprocess")
+    @r.post("/api/series/{series_id}/reprocess", response_model=OkResponse,
+            response_model_exclude_none=True, responses=_ERR)
     async def reprocess(series_id: int):
         return await _reprocess(
             series_id, "Задача на переобработку файлов создана и "
                        "запущена в фоновом режиме.")
 
-    @r.post("/api/series/{series_id}/reprocess_vk_files")
+    @r.post("/api/series/{series_id}/reprocess_vk_files",
+            response_model=OkResponse, response_model_exclude_none=True,
+            responses=_ERR)
     async def reprocess_vk(series_id: int):
         return await _reprocess(
             series_id, "Задача на переобработку файлов VK-сериала "
@@ -266,7 +291,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- имена для теста парсера ----------------------------------------------------
 
-    @r.get("/api/series/{series_id}/source-filenames")
+    @r.get("/api/series/{series_id}/source-filenames",
+           response_model=list[str])
     async def source_filenames(series_id: int):
         try:
             series = await gw.request("catalog.series.get",

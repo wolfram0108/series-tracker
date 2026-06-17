@@ -50,6 +50,17 @@ class QueueTask(ApiModel):
 
 # --- блок «серии» (api_series) ----------------------------------------------
 
+class DynamicObject(ApiModel):
+    """Динамический ответ (форма зависит от данных/типа серии): главы,
+    композиция, медиа-элементы, превью. extra='allow' пропускает всё —
+    ничего не отрезается; жёстко фиксировать форму не требуется."""
+
+
+class ErrorOnly(ApiModel):
+    """Тело ошибки вида {error: ...} (без success) — для документации."""
+    error: str
+
+
 class TmdbInfo(ApiModel):
     """TMDB-маппинг серии; поля динамические (tmdb_id, series_name, year,
     poster_path, last_updated, ...)."""
