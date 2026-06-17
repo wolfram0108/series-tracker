@@ -85,6 +85,7 @@
   border-color: var(--color-red-1) !important;
 }
 .p-inputtext.p-invalid:enabled:focus {
+  border-color: var(--color-red-1) !important;
   box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.25) !important;
 }
 
