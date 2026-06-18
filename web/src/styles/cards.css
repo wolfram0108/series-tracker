@@ -127,6 +127,38 @@
 }
 .composition-cards-container { display: flex; flex-direction: column; gap: 8px; }
 
+/* ── Карточка очереди (Агенты) — компактная, 1–2 строки ──────────────── *
+ * Замена табличных строк очередей единым карточным видом. Вертикальный
+ * flex: строка заголовка (имя + детали-пилюли + бейдж + действие) и, где
+ * нужно, строка прогресса (полоса + метрики). Без раздувания на 3+ строки. */
+.card-final.card-queue {
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 14px;
+  /* align-items: stretch обязателен — у базового .card-final он center,
+     что в flex-column схлопывало бы строки по ширине и центрировало */
+}
+.card-queue .queue-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.card-queue .queue-title {
+  font-weight: 600; flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.card-queue .queue-row .badge { flex-shrink: 0; }
+.card-queue .queue-row .pill { flex-shrink: 0; }
+.card-queue .progress { flex: 1; height: 20px; font-size: 12px; }
+.card-queue .queue-metrics {
+  display: flex; gap: 14px; flex-shrink: 0;
+  font-family: var(--font-mono); font-size: 12px;
+}
+.card-queue .queue-metrics .m-speed { color: var(--color-green-1); }
+.card-queue .queue-metrics .m-eta { color: var(--color-blue); }
+.card-queue .queue-metrics .m-size { color: var(--text-muted); }
+/* кнопка отмены ✕ в карточке очереди */
+.card-queue .btn-cancel {
+  flex-shrink: 0; width: 28px; height: 28px; border: none; cursor: pointer;
+  border-radius: 6px; display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+}
+.card-queue .btn-cancel:hover { filter: brightness(90%); }
+
 /* ── Нарезка (slicing-card) — раскрывающийся контейнер глав ───────────── *
  * Структурно иная карточка (header/body/footer + список глав-пилюль), форму
  * сохраняем (раскрытие глав ≠ плоская grid-карточка), но радиус/бордеры/

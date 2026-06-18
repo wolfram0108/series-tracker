@@ -142,6 +142,21 @@ const slicing = {
   status: "Готово к нарезке: 3 главы",
 }
 
+// Карточки очередей (Агенты) — вместо таблиц
+const queueProcessing = [
+  { title: "Фронт кровавой блокады", torrent: 12, hash: "974f83ee", stage: "renaming" },
+]
+const queueDownload = [
+  { file: "Рик и Морти s07e01.mp4", status: "загрузка", cls: "bg-primary", progress: 62, speed: "2.1 MB/s", eta: "1:20", remux: false },
+  { file: "Извне s01e04.mp4", status: "обработка", cls: "bg-info", progress: 90, speed: "", eta: "0:10", remux: true },
+]
+const queueSlicing = [
+  { title: "Рик и Морти", status: "slicing", chapters: "2 / 5" },
+]
+const queueMonitor = [
+  { title: "Извне", hash: "a1b2c3d4", status: "Загрузка", progress: 48, speed: "2.1 MB/s", eta: "1:20" },
+]
+
 // StField (floating-label, порт constructor-group)
 const fText = ref("")
 const fPath = ref("/nas/media/Сериалы")
@@ -314,6 +329,75 @@ const rtPass = ref("password123")
         </div>
         <div class="slicing-card-footer card-footer-status">
           <span>{{ slicing.status }}</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Карточки очередей (Агенты) — вместо таблиц</h2>
+      <p class="muted">4 очереди переведены с таблиц на единый карточный вид. Компактно, 1–2 строки, без раздувания.</p>
+
+      <h3 class="sub">Агент Обработки</h3>
+      <div class="composition-cards-container">
+        <div v-for="t in queueProcessing" :key="t.hash" class="card-final card-queue status-pending">
+          <div class="queue-row">
+            <span class="queue-title">{{ t.title }}</span>
+            <div class="pill"><i class="pi pi-link"></i> Торрент: {{ t.torrent }}</div>
+            <div class="pill"><i class="pi pi-key"></i> {{ t.hash }}…</div>
+            <span class="badge bg-info">{{ t.stage }}</span>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="sub">Агент Загрузки (yt-dlp)</h3>
+      <div class="composition-cards-container">
+        <div v-for="t in queueDownload" :key="t.file" class="card-final card-queue status-pending">
+          <div class="queue-row">
+            <span class="queue-title">{{ t.file }}</span>
+            <span class="badge" :class="t.cls">{{ t.status }}</span>
+            <button class="btn-cancel" title="Отменить загрузку"><i class="pi pi-times"></i></button>
+          </div>
+          <div class="queue-row">
+            <div class="progress">
+              <div class="progress-bar progress-bar-striped progress-bar-animated" :class="{ 'bg-info': t.remux }" :style="{ width: t.progress + '%' }">{{ t.progress }}%</div>
+            </div>
+            <div class="queue-metrics">
+              <span v-if="t.speed" class="m-speed">↓{{ t.speed }}</span>
+              <span v-if="t.remux" class="m-size">remux</span>
+              <span class="m-eta">ETA {{ t.eta }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="sub">Агент Нарезки (ffmpeg)</h3>
+      <div class="composition-cards-container">
+        <div v-for="t in queueSlicing" :key="t.title" class="card-final card-queue status-sliced">
+          <div class="queue-row">
+            <span class="queue-title">{{ t.title }}</span>
+            <span class="badge bg-info">{{ t.status }}</span>
+            <div class="pill"><i class="pi pi-clone"></i> {{ t.chapters }} глав</div>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="sub">Мониторинг торрентов</h3>
+      <div class="composition-cards-container">
+        <div v-for="t in queueMonitor" :key="t.hash" class="card-final card-queue status-pending">
+          <div class="queue-row">
+            <span class="queue-title">{{ t.title }}</span>
+            <div class="pill"><i class="pi pi-key"></i> {{ t.hash }}…</div>
+            <span class="badge bg-primary">{{ t.status }}</span>
+          </div>
+          <div class="queue-row">
+            <div class="progress">
+              <div class="progress-bar" :style="{ width: t.progress + '%' }">{{ t.progress }}%</div>
+            </div>
+            <div class="queue-metrics">
+              <span class="m-speed">↓{{ t.speed }}</span>
+              <span class="m-eta">ETA {{ t.eta }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </section>
