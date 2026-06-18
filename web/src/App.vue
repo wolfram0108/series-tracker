@@ -6,6 +6,7 @@ import AppHeader from "./components/AppHeader.vue"
 import SeriesCard from "./components/SeriesCard.vue"
 import ConfirmDialog from "./components/ConfirmDialog.vue"
 import SettingsModal from "./components/SettingsModal.vue"
+import LogsModal from "./components/LogsModal.vue"
 import { useSeriesStore } from "./stores/series"
 import { useUiStore } from "./stores/ui"
 import { useApi } from "./composables/useApi"
@@ -22,7 +23,7 @@ const confirm = useConfirm()
 const toast = useToast()
 
 // какая модалка открыта (одна за раз). add/logs/status — следующие под-вехи.
-const openModal = ref<null | "settings">(null)
+const openModal = ref<null | "settings" | "logs">(null)
 
 function onScan(id: number) {
   void request(
@@ -66,7 +67,7 @@ function stub(name: string) {
     <Toast />
     <AppHeader
       @add="stub('Добавить сериал')"
-      @logs="stub('Просмотр логов')"
+      @logs="openModal = 'logs'"
       @settings="openModal = 'settings'"
     />
     <div class="series-list">
@@ -84,6 +85,7 @@ function stub(name: string) {
     </div>
 
     <SettingsModal v-if="openModal === 'settings'" @close="openModal = null" />
+    <LogsModal v-if="openModal === 'logs'" @close="openModal = null" />
     <ConfirmDialog />
   </main>
 </template>
