@@ -126,3 +126,68 @@
   font-weight: 600;
 }
 .composition-cards-container { display: flex; flex-direction: column; gap: 8px; }
+
+/* ── Нарезка (slicing-card) — раскрывающийся контейнер глав ───────────── *
+ * Структурно иная карточка (header/body/footer + список глав-пилюль), форму
+ * сохраняем (раскрытие глав ≠ плоская grid-карточка), но радиус/бордеры/
+ * фон/статусные акценты приводим к единому языку (radius 9px, токены).      */
+.slicing-card {
+  border-radius: var(--border-radius); /* 9px — был 8px */
+  margin-bottom: 1rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border-color);
+  background: var(--bg-white);
+  overflow: hidden;
+}
+.slicing-card-accent { border-left-width: 5px; transition: all 0.2s ease; }
+/* статусный акцент слева (border-left) — единые токены вместо bootstrap-rgb */
+.slicing-card-accent.status-success { border-left-color: rgba(25, 135, 84, 0.7); }
+.slicing-card-accent.status-warning { border-left-color: rgba(255, 193, 7, 0.7); }
+.slicing-card-accent.status-danger  { border-left-color: rgba(220, 53, 69, 0.7); }
+
+.slicing-card-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; gap: 1rem;
+}
+.slicing-card-header .compilation-title {
+  font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.slicing-card-body { padding: 16px; border-top: 1px solid var(--border-color); }
+.slicing-card-footer {
+  padding: 10px 16px; border-top: 1px solid var(--border-color);
+  background-color: var(--bg-light);
+}
+.card-footer-status { font-size: 13px; font-weight: 500; color: var(--text-muted); }
+
+/* кнопки управления в шапке (оглавление / фильтр / нарезать / удалить) */
+.slicing-card .control-btn {
+  background: none; border: 1px solid var(--border-color); border-radius: 6px;
+  padding: 6px 8px; cursor: pointer; transition: all 0.2s ease;
+  color: var(--text-color, #212529);
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; flex-shrink: 0;
+}
+.slicing-card .control-btn:hover { background: var(--bg-light); }
+.slicing-card .control-btn.text-info { color: var(--color-blue-2); }
+.slicing-card .control-btn.text-primary { color: var(--color-blue); }
+.slicing-card .control-btn.text-danger { color: var(--color-red-1); }
+
+/* секции и список глав */
+.chapter-section { margin-bottom: 15px; }
+.chapter-section h6 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-muted); }
+.chapter-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+
+/* пилюля главы (таблетка): обычная / активная (голубая) / мусорная (зачёркнутая) */
+.chapter-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 8px; font-size: 0.75rem; font-weight: 500;
+  border-radius: 12px; max-width: 100%;
+  background-color: #e9ecef; color: #495057; border: 1px solid #dee2e6;
+  font-family: var(--font-mono);
+}
+.chapter-pill.chapter-active { background-color: #d1ecf1; color: #0c5460; border-color: #bee5eb; }
+.chapter-pill.chapter-garbage {
+  background-color: #f8d7da; color: #721c24; border-color: #f5c6cb;
+  text-decoration: line-through; opacity: 0.8;
+}
+.chapter-controls { display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-color); }

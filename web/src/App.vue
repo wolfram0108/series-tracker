@@ -98,6 +98,14 @@ const testResults = [
     pills: [{ icon: "pi-times-circle", label: "ИСКЛЮЧЕНО", value: "правило «трейлер»" }] },
 ]
 
+// Нарезка (slicing-card) — раскрытый список глав
+const slicing = {
+  title: "Рик и Морти 7 сезон [компиляция].mkv",
+  active: ["00:00 (s07e01)", "22:14 (s07e02)", "44:30 (s07e03)"],
+  garbage: ["00:00 (Интро)", "21:50 (Реклама блогера)"],
+  status: "Готово к нарезке: 3 главы",
+}
+
 // StField (floating-label, порт constructor-group)
 const fText = ref("")
 const fPath = ref("/nas/media/Сериалы")
@@ -223,6 +231,36 @@ const rtPass = ref("password123")
           <div class="pills-column">
             <div v-for="p in t.pills" :key="p.label" class="pill"><i class="pi" :class="p.icon"></i><span>{{ p.label }}: <strong>{{ p.value }}</strong></span></div>
           </div>
+        </div>
+      </div>
+
+      <h3 class="sub">Нарезка (slicing-card) — раскрытый список глав</h3>
+      <div class="slicing-card slicing-card-accent status-success">
+        <div class="slicing-card-header">
+          <strong class="compilation-title">{{ slicing.title }}</strong>
+          <div style="display: flex; gap: 8px">
+            <button class="control-btn" title="Проверить оглавление"><i class="pi pi-search"></i></button>
+            <button class="control-btn text-info" title="Проверить и отфильтровать"><i class="pi pi-filter"></i></button>
+            <button class="control-btn text-primary" title="Нарезать"><i class="pi pi-clone"></i></button>
+            <button class="control-btn text-danger" title="Удалить исходник"><i class="pi pi-trash"></i></button>
+          </div>
+        </div>
+        <div class="slicing-card-body">
+          <div class="chapter-section">
+            <h6>Активные главы ({{ slicing.active.length }}):</h6>
+            <div class="chapter-list">
+              <span v-for="c in slicing.active" :key="c" class="chapter-pill chapter-active">{{ c }}</span>
+            </div>
+          </div>
+          <div class="chapter-section">
+            <h6>Мусорные главы ({{ slicing.garbage.length }}):</h6>
+            <div class="chapter-list">
+              <span v-for="c in slicing.garbage" :key="c" class="chapter-pill chapter-garbage">{{ c }} <i class="pi pi-times-circle"></i></span>
+            </div>
+          </div>
+        </div>
+        <div class="slicing-card-footer card-footer-status">
+          <span>{{ slicing.status }}</span>
         </div>
       </div>
     </section>
