@@ -4,6 +4,7 @@ import Button from "primevue/button"
 import ModalShell from "./ModalShell.vue"
 import StatusProperties from "./status/StatusProperties.vue"
 import StatusComposition from "./status/StatusComposition.vue"
+import StatusHistory from "./status/StatusHistory.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
 import type { Series } from "../stores/series"
@@ -87,7 +88,7 @@ onMounted(load)
       />
       <div v-else v-show="tab === 'composition'" class="status-stub">Композиция VK — следующий шаг переноса.</div>
       <div v-if="isVk" v-show="tab === 'slicing'" class="status-stub">Вкладка «Нарезка» — следующий шаг переноса.</div>
-      <div v-show="tab === 'history'" class="status-stub">Вкладка «История» — следующий шаг переноса.</div>
+      <StatusHistory v-show="tab === 'history'" :series-id="seriesId" :source-type="String(series.source_type ?? 'torrent')" />
     </template>
 
     <template #footer>

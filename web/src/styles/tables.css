@@ -70,3 +70,14 @@
 .div-table.table-site-torrents .div-table-row {
   grid-template-columns: 2fr 4fr 2fr 2fr 3fr;
 }
+/* история торрентов (вкладка «История», торрент) */
+.div-table.table-torrents-history .div-table-header,
+.div-table.table-torrents-history .div-table-row {
+  grid-template-columns: 2fr 4fr 2fr 1.5fr 2fr 1fr 2.5fr;
+}
+/* история медиа-элементов (вкладка «История», VK) */
+.div-table.table-media-item-history { min-width: 1200px; }
+.div-table.table-media-item-history .div-table-header,
+.div-table.table-media-item-history .div-table-row {
+  grid-template-columns: 1.5fr 3fr 1.5fr 1fr 3fr 1fr 1.5fr;
+}
