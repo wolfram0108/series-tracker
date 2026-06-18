@@ -24,7 +24,7 @@ const toast = useToast()
 interface Torrent { torrent_id?: string | number; link?: string; date_time?: string; episodes?: string; quality?: string }
 interface ParseResult { success?: boolean; title?: { ru?: string; en?: string }; torrents?: Torrent[]; tracker_info?: TrackerInfo; error?: string }
 interface TrackerInfo { ui_features?: { quality_selector?: string } }
-interface TmdbResult { id: number; name?: string; original_name?: string; year?: string; poster_path?: string }
+interface TmdbResult { id: number; name?: string; name_en?: string; original_name?: string; year?: string; poster_path?: string }
 interface TmdbSeason { season_number: number; episode_count: number }
 
 // --- состояние формы ---
@@ -104,10 +104,23 @@ const tmdbSeasonNumber = computed(() => {
   const m = newSeries.season.match(/^s(\d+)$/i)
   return m ? parseInt(m[1], 10) : 1
 })
+// Отображаемое имя: русское, если перевод реально есть (name ≠ original);
+// иначе английское (для азиатских релизов без ru TMDB кладёт в name
+// оригинал-иероглифы); иначе — что есть. Применяется и в списке, и в
+// имени каталога.
+function tmdbName(r: TmdbResult): string {
+  const ru = (r.name || "").trim()
+  const orig = (r.original_name || "").trim()
+  if (ru && ru !== orig) return ru
+  const en = (r.name_en || "").trim()
+  if (en && en !== orig) return en
+  return ru || en || orig
+}
+
 // «Имя (год) [tmdbid-XXXX]» (шаблон Jellyfin/Plex); год опускается, если его нет
 const tmdbCatalogName = computed(() => {
   if (!tmdbSelected.value) return ""
-  const name = (tmdbSelected.value.name || "").trim()
+  const name = tmdbName(tmdbSelected.value)
   if (!name) return ""
   const year = String(tmdbSelected.value.year || "").trim()
   const idPart = `[tmdbid-${tmdbSelected.value.id}]`
@@ -319,7 +332,7 @@ async function addSeries() {
         tmdb_season_number: tmdbSeasonNumber.value,
         total_episodes: tmdbEpisodeCount.value,
         poster_path: tmdbSelected.value.poster_path,
-        series_name: tmdbSelected.value.name,
+        series_name: tmdbName(tmdbSelected.value),
         year: tmdbSelected.value.year,
       }
     }
@@ -533,7 +546,7 @@ onBeforeUnmount(() => {
               @click="selectTMDBSeries(res)"
             >
               <div class="info-column">
-                <span class="card-title">{{ res.name }} <small style="opacity: 0.6">({{ res.year }})</small></span>
+                <span class="card-title">{{ tmdbName(res) }} <small style="opacity: 0.6">({{ res.year }})</small></span>
                 <div class="path-line tmdb-pills">
                   <span v-if="res.original_name" class="path-pill">
                     <span class="path-pill-label">Оригинал:</span>
