@@ -1,0 +1,153 @@
+/* Стили модалки «Добавить сериал» (порт addSeriesModal).
+   Структурные классы групп-конструкторов, которых ещё не было в
+   fields.css, и виджет-специфика (режим VK, TMDB, таблица торрентов). */
+
+/* отступ между группами полей внутри fieldset */
+.field-group + .field-group,
+.modern-fieldset .field-group { margin-top: 0; }
+
+/* текстовый лейбл-сегмент группы (constructor-item item-label) */
+.constructor-item.item-label {
+  padding: 0 1rem;
+  background-color: var(--color-gray-100);
+  color: var(--color-gray-700, #495057);
+  font-weight: 500;
+  white-space: nowrap;
+  z-index: 1;
+}
+/* лейбл-сегмент «иконка + текст» (item-label-text-icon) */
+.constructor-item.item-label-text-icon {
+  width: auto;
+  gap: 0.5rem;
+  padding: 0 1rem;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+/* отключённая группа (seasonless гасит поле сезона) */
+.input-constructor-group.is-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.modern-label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+/* --- режим поиска VK (двухкнопочный переключатель) --- */
+.vk-mode-group {
+  display: flex;
+  width: 100%;
+  border: 1px solid var(--color-gray-300, #dee2e6);
+  border-radius: var(--border-radius);
+  overflow: hidden;
+}
+.vk-mode-btn {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--color-white, #fff);
+  border: none;
+  color: var(--color-blue);
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.vk-mode-btn + .vk-mode-btn { border-left: 1px solid var(--color-gray-300, #dee2e6); }
+.vk-mode-btn:hover { background: var(--color-gray-100); }
+.vk-mode-btn.active { background: var(--color-blue); color: #fff; }
+
+/* --- TMDB-виджет --- */
+.tmdb-search { display: flex; gap: 10px; margin-bottom: 14px; }
+.tmdb-search-input {
+  flex: 1;
+  padding: 0 14px;
+  height: 42px;
+  border: 1px solid var(--color-gray-300, #dee2e6);
+  border-radius: var(--border-radius);
+  font: inherit;
+  color: var(--color-text);
+}
+.tmdb-search-input:focus { outline: none; border-color: var(--color-blue); }
+
+.tmdb-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 14px;
+}
+.tmdb-result {
+  text-align: left;
+  padding: 10px 14px;
+  border: 1px solid var(--color-gray-200, #e9ecef);
+  border-radius: var(--border-radius);
+  background: var(--color-white, #fff);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.tmdb-result:hover { background: var(--color-gray-100); }
+.tmdb-result.active { background: var(--color-blue); border-color: var(--color-blue); color: #fff; }
+.tmdb-result-top { display: flex; justify-content: space-between; gap: 12px; }
+.tmdb-result-name { font-weight: 600; }
+.tmdb-result-orig { opacity: 0.75; }
+
+.tmdb-selected {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--border-radius);
+  background: var(--color-green-bg, #d1e7dd);
+  color: var(--color-green-text, #0f5132);
+  margin-bottom: 14px;
+}
+.tmdb-selected .pi-check-circle { font-size: 1.3rem; }
+.tmdb-selected-text { flex: 1; }
+.tmdb-clear {
+  background: transparent; border: none; cursor: pointer;
+  color: inherit; opacity: 0.7; font-size: 1rem;
+}
+.tmdb-clear:hover { opacity: 1; }
+
+.tmdb-catalog-label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 4px; }
+.tmdb-catalog-row { display: flex; gap: 10px; }
+.tmdb-catalog-input {
+  flex: 1;
+  padding: 0 14px;
+  height: 42px;
+  border: 1px solid var(--color-gray-300, #dee2e6);
+  border-radius: var(--border-radius);
+  font-family: var(--font-mono);
+  color: var(--color-text);
+  background: var(--bg-light, #f8f9fa);
+}
+
+/* --- таблица доступных торрентов --- */
+.add-torrents { margin-top: 16px; }
+.add-torrents-title { margin: 0 0 8px; font-size: 1rem; }
+.add-torrents-table .div-table-header,
+.add-torrents-table .div-table-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 130px 80px 90px;
+  gap: 8px;
+}
+/* torrent_id в новой системе — 16-символьный хеш (ids.torrent_id), не int */
+.add-torrents-table .div-table-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.add-torrents-table .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* переключатель «несколько сезонов» */
+.seasonless-switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: pointer;
+}
