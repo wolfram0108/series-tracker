@@ -15,6 +15,9 @@ import "./styles/progress.css"
 import "./styles/modal.css"
 import { STPreset } from "./theme/preset"
 import App from "./App.vue"
+import { setupRealtime } from "./composables/useRealtime"
+import { useSeriesStore } from "./stores/series"
+import { useScannerStore } from "./stores/scanner"
 
 // Тема — производный пресет под токены series-tracker (Ф2).
 // darkModeSelector привязан к классу .st-dark (которого нет) — иначе
@@ -27,3 +30,9 @@ createApp(App)
   })
   .use(ToastService)
   .mount("#app")
+
+// Ф3: real-time слой — стартовая загрузка + SSE-подписки сторов (Pinia уже
+// установлена). В Ф4 переедет в bootstrap реального приложения.
+setupRealtime()
+void useSeriesStore().load()
+void useScannerStore().load()
