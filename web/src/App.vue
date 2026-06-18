@@ -135,7 +135,7 @@ const rtPass = ref("password123")
         <div
           v-for="r in tmdbResults"
           :key="r.id"
-          class="card-final"
+          class="card-final card-tmdb"
           :class="r.selected ? 'status-success' : 'status-archived'"
         >
           <div class="info-column">
