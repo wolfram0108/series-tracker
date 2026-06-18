@@ -374,7 +374,7 @@ onBeforeUnmount(() => {
 <template>
   <ModalShell size="xl" title="Добавить новый сериал" @close="emit('close')">
     <!-- URL -->
-    <div class="field-group">
+    <div class="field-group add-url-row">
       <StGroup :state="urlState">
         <StIcon icon="pi pi-link" />
         <StInput v-model="newSeries.url" label="URL для парсинга" />

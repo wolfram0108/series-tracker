@@ -4,6 +4,8 @@
    Здесь они воссозданы точно под вид оригинала; структурные классы групп
    и таблиц — в fields.css/tables.css/layout.css. */
 
+/* строка URL отделяется от первой секции (в легаси — mt-4 на секциях) */
+.add-url-row { margin-bottom: 24px; }
 /* отступ ошибки/подсказки под полем URL */
 .add-hint { color: var(--text-muted); margin: 8px 0 0; }
 .add-error { color: var(--color-red-1); margin: 8px 0 0; }
