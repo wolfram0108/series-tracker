@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from "vue"
 import { api } from "../api/client"
+import { computeDropStyle, type DropStyle } from "../composables/useDropAnchor"
 
 // Выбор сохранённого пути (Настройки → Отладка → «Сохранённые пути»).
 // Встраивается в input-constructor-group поля пути компактной кнопкой-
@@ -15,6 +16,7 @@ interface SavedPath { id: number; path: string }
 const open = ref(false)
 const paths = ref<SavedPath[]>([])
 const root = ref<HTMLElement | null>(null)
+const dropStyle = ref<DropStyle | null>(null)
 
 async function loadPaths() {
   try {
@@ -32,6 +34,7 @@ async function toggle() {
     return
   }
   await loadPaths()
+  if (root.value) dropStyle.value = computeDropStyle(root.value)
   open.value = true
 }
 
@@ -58,7 +61,7 @@ onBeforeUnmount(() => document.removeEventListener("click", onOutside, true))
     @click.stop="toggle"
   >
     <i class="pi pi-chevron-down chevron" />
-    <div v-if="open" class="options-list">
+    <div v-if="open" class="options-list" :style="dropStyle ?? undefined">
       <div v-if="!paths.length" class="path-combo-empty">Нет сохранённых путей</div>
       <div v-for="p in paths" :key="p.id" class="option" @click.stop="choose(p.path)">{{ p.path }}</div>
     </div>
