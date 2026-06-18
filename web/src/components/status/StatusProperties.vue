@@ -334,9 +334,13 @@ onMounted(loadProfiles)
             </div>
           </StGroup>
         </div>
+      </div>
+    </div>
 
-        <!-- несколько сезонов -->
-        <label class="modern-form-check mt-3">
+    <!-- несколько сезонов — отдельной секцией (как в окне добавления) -->
+    <div class="modern-fieldset">
+      <div class="fieldset-content">
+        <label class="modern-form-check">
           <input v-model="isSeasonless" type="checkbox" class="form-switch-input" />
           <span class="modern-form-check-label">Раздача содержит несколько сезонов (или сезон не важен)</span>
         </label>
