@@ -157,6 +157,16 @@ const queueMonitor = [
   { title: "Извне", hash: "a1b2c3d4", status: "Загрузка", progress: 48, speed: "2.1 MB/s", eta: "1:20" },
 ]
 
+// Шапка вкладок настроек — SelectButton (сегмент, адаптивнее папочек)
+const settingsTab = ref("auth")
+const settingsTabs = [
+  { label: "Авторизация", value: "auth", icon: "pi-key" },
+  { label: "Трекеры", value: "trackers", icon: "pi-wifi" },
+  { label: "Фильтры VK", value: "parser", icon: "pi-filter" },
+  { label: "Агенты", value: "agents", icon: "pi-server" },
+  { label: "Отладка", value: "debug", icon: "pi-wrench" },
+]
+
 // StField (floating-label, порт constructor-group)
 const fText = ref("")
 const fPath = ref("/nas/media/Сериалы")
@@ -458,6 +468,20 @@ const rtPass = ref("password123")
     </section>
 
     <section>
+      <h2>Шапка вкладок настроек (SelectButton вместо папочек)</h2>
+      <p class="muted small">Папочки плохо переживали resize (ломались на 2 строки). Сегмент SelectButton на всю ширину тянется/сжимается ровно.</p>
+      <SelectButton v-model="settingsTab" :options="settingsTabs" optionValue="value" :allowEmpty="false" class="settings-tabs">
+        <template #option="{ option }">
+          <i class="pi tab-icon" :class="option.icon"></i>
+          <span class="tab-label">{{ option.label }}</span>
+        </template>
+      </SelectButton>
+      <div class="settings-tab-body">
+        Содержимое вкладки «<strong>{{ settingsTabs.find((t) => t.value === settingsTab)?.label }}</strong>»
+      </div>
+    </section>
+
+    <section>
       <h2>Пилюли и бейджи — по местам в проде</h2>
       <div class="grid">
         <div class="cell">
@@ -584,4 +608,21 @@ h3.sub { font-size: 0.85rem; color: var(--color-gray-600); margin: 18px 0 8px; f
 }
 .fieldset-body { padding: 16px; }
 .fieldset-body.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+/* Шапка вкладок настроек: SelectButton на всю ширину, кнопки делят её
+   поровну (как полноширинный btn-group) — ровно переживает resize. */
+.settings-tabs { display: flex; width: 100%; }
+.settings-tabs :deep(.p-togglebutton) { flex: 1; min-width: 0; }
+.settings-tabs :deep(.tab-icon) { margin-right: 6px; }
+.settings-tabs :deep(.tab-label) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* узкий контейнер: прячем подписи, оставляем иконки — 5 иконок влезают всегда */
+@media (max-width: 620px) {
+  .settings-tabs :deep(.tab-label) { display: none; }
+  .settings-tabs :deep(.tab-icon) { margin-right: 0; }
+}
+.settings-tab-body {
+  border: 1px solid var(--color-gray-200); border-top: none;
+  border-radius: 0 0 var(--border-radius) var(--border-radius);
+  padding: 20px; background: var(--bg-white); color: var(--text-muted);
+}
 </style>
