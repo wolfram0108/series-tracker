@@ -483,7 +483,7 @@ const rtPass = ref("password123")
               @click="settingsTab = t.value"
             >
               <i class="pi tab-icon" :class="t.icon"></i>
-              <span class="tab-label">{{ t.label }}</span>
+              <span class="tab-label" :data-text="t.label"><span class="tl-text">{{ t.label }}</span></span>
             </button>
           </div>
           <button class="modern-close" title="Закрыть"><i class="pi pi-times"></i></button>

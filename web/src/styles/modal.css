@@ -73,9 +73,19 @@
   font-weight: 600; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
 .st-tab .tab-icon { flex-shrink: 0; font-size: 15px; }
+/* подпись: «призрак жирного текста» резервирует ширину по bold-копии,
+   поэтому жирный шрифт активной вкладки НЕ меняет ширину кнопки (не пляшет) */
 .st-tab .tab-label {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px;
+  display: inline-grid; align-items: center; overflow: hidden; max-width: 160px;
   transition: max-width 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
+}
+.st-tab .tab-label .tl-text {
+  grid-area: 1 / 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.st-tab .tab-label::after {
+  content: attr(data-text); grid-area: 1 / 1;
+  font-weight: 600; height: 0; visibility: hidden; white-space: nowrap;
 }
 /* узко (подписи суммарно не влезают): невыбранные → иконка (подпись
    схлопывается), выбранная остаётся развёрнутой. По viewport, т.к.
