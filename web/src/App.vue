@@ -16,6 +16,7 @@ import StInput from "./components/StInput.vue"
 import StSelect from "./components/StSelect.vue"
 import StBtn from "./components/StBtn.vue"
 import SeriesCard from "./components/SeriesCard.vue"
+import Toast from "primevue/toast"
 
 // Карточки сериала — по состояниям, по порядку.
 const cards = [
@@ -185,6 +186,7 @@ const rtPass = ref("password123")
 
 <template>
   <main class="gallery">
+    <Toast />
     <header>
       <h1>Парити-галерея <small>/v2 · Ф2</small></h1>
       <p class="muted">PrimeVue + StField (порт constructor-group) под токены series-tracker. Эталон — старый фронт на «/».</p>

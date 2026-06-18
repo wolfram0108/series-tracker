@@ -1,6 +1,7 @@
 import { createApp } from "vue"
 import { createPinia } from "pinia"
 import PrimeVue from "primevue/config"
+import ToastService from "primevue/toastservice"
 import "primeicons/primeicons.css"
 import "./styles/tokens.css"
 import "./style.css"
@@ -24,4 +25,5 @@ createApp(App)
   .use(PrimeVue, {
     theme: { preset: STPreset, options: { darkModeSelector: ".st-dark" } },
   })
+  .use(ToastService)
   .mount("#app")
