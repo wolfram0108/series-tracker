@@ -5,6 +5,7 @@ import ModalShell from "./ModalShell.vue"
 import SettingsAgents from "./settings/SettingsAgents.vue"
 import SettingsAuth from "./settings/SettingsAuth.vue"
 import SettingsTrackers from "./settings/SettingsTrackers.vue"
+import SettingsDebug from "./settings/SettingsDebug.vue"
 
 // Окно настроек (порт settingsModal): шапка с вкладками-сегментом + тело
 // активной вкладки + футер. Вкладки trackers/debug и конфигуратор (parser) —
@@ -34,9 +35,6 @@ const tabs = [
   { label: "Отладка", value: "debug", icon: "pi-wrench" },
 ] as const
 
-function tabTitle(v: string): string {
-  return tabs.find((t) => t.value === v)?.label ?? ""
-}
 </script>
 
 <template>
@@ -61,13 +59,10 @@ function tabTitle(v: string): string {
     <SettingsAuth v-if="tab === 'auth'" ref="tabRef" />
     <SettingsTrackers v-else-if="tab === 'trackers'" />
     <SettingsAgents v-else-if="tab === 'agents'" />
+    <SettingsDebug v-else-if="tab === 'debug'" />
     <div v-else-if="tab === 'parser'" class="tab-stub">
       <i class="pi pi-filter"></i>
       <p>Конфигуратор правил VK (drag-and-drop) — крупная отдельная веха Ф4, в работе.</p>
-    </div>
-    <div v-else class="tab-stub">
-      <i class="pi pi-wrench"></i>
-      <p>Вкладка «{{ tabTitle(tab) }}» — в следующих под-вехах Ф4.</p>
     </div>
 
     <template #footer>
