@@ -380,6 +380,7 @@ const rtPass = ref("password123")
             <span class="badge bg-success">готово</span>
             <span class="badge bg-danger">ошибка</span>
             <span class="badge bg-secondary">ожидание</span>
+            <span class="badge bg-dark">неизвестно</span>
           </div>
         </div>
         <div class="cell">

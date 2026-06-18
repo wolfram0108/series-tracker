@@ -12,6 +12,7 @@
 .badge.bg-info { background-color: #0dcaf0; color: #000; }
 .badge.bg-success { background-color: #198754; }
 .badge.bg-danger { background-color: #dc3545; }
+.badge.bg-dark { background-color: #212529; } /* fallback неизвестных статусов (map || 'bg-dark') */
 
 /* 2) Зеркало трекера (Трекеры): mirror-pill + remove (lists.css) */
 .mirror-pill {
