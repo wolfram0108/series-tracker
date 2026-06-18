@@ -38,7 +38,7 @@ const tabs = [
 </script>
 
 <template>
-  <ModalShell size="xl" @close="emit('close')">
+  <ModalShell size="xl" fixed-height @close="emit('close')">
     <template #title><i class="pi pi-cog"></i> Настройки</template>
     <template #header-extra>
       <div class="header-tabs st-tabs">

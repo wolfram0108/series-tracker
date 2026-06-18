@@ -53,7 +53,7 @@ onMounted(loadLogs)
 </script>
 
 <template>
-  <ModalShell size="xl" title="Просмотр логов" @close="$emit('close')">
+  <ModalShell size="xl" fixed-height title="Просмотр логов" @close="$emit('close')">
     <div class="logs-filters">
       <Select v-model="group" :options="groupOptions" option-label="label" option-value="value" @change="loadLogs" />
       <Select v-model="level" :options="levelOptions" option-label="label" option-value="value" @change="loadLogs" />
