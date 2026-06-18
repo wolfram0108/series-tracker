@@ -121,47 +121,25 @@
 .input-group-btn:hover:not(:disabled) { background: var(--color-blue); color: #fff; }
 .input-group-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
+.mb-3 { margin-bottom: 16px; }
+
+/* результаты поиска TMDB — карточки проекта (.card-final.card-tmdb),
+   серебряный фон (status-no-match), выбранная — зелёная (status-success).
+   Отделены от строки поиска, между собой — отступ. */
 .tmdb-results {
-  display: flex; flex-direction: column;
-  max-height: 200px; overflow-y: auto;
-  margin-bottom: 1rem;
-  border-radius: 8px;
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 320px; overflow-y: auto;
+  margin: 12px 0 16px;
+  padding: 2px; /* чтобы тень/бордер карточек не обрезались при скролле */
 }
-/* list-group-item-action */
-.tmdb-result {
-  text-align: left;
-  padding: 0.75rem 1rem;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.125);
-  cursor: pointer;
-  color: var(--color-text);
-  transition: background 0.15s ease;
-}
-.tmdb-result + .tmdb-result { border-top: none; }
-.tmdb-result:first-child { border-radius: 8px 8px 0 0; }
-.tmdb-result:last-child { border-radius: 0 0 8px 8px; }
-.tmdb-result:hover { background: var(--color-gray-100); }
-.tmdb-result.active { background: var(--color-blue); border-color: var(--color-blue); color: #fff; }
-.tmdb-result-top { display: flex; justify-content: space-between; gap: 12px; }
-.tmdb-result-name { font-weight: 600; }
-.tmdb-result-name small { font-weight: 400; opacity: 0.85; }
-.tmdb-result-orig { opacity: 0.8; }
+/* flex-shrink:0 — иначе flex-колонка сжимает карточки по высоте и режет контент */
+.tmdb-result-card { cursor: pointer; flex: 0 0 auto; }
+.tmdb-result-card:hover { border-color: var(--color-blue); box-shadow: 0 2px 8px rgba(13, 110, 253, 0.15); }
+/* у выбранной карточки в info-column может быть две инфо-пилюли (Оригинал +
+   Сезон/эпизоды) — выстраиваем в ряд с переносом */
+.tmdb-result-card .tmdb-pills { display: flex; flex-wrap: wrap; gap: 6px; }
 
-/* alert-success */
-.tmdb-selected {
-  display: flex; align-items: center; gap: 12px;
-  padding: 0.75rem 1rem;
-  border: 1px solid #badbcc;
-  border-radius: 8px;
-  background: #d1e7dd;
-  color: #0f5132;
-  margin-bottom: 1rem;
-}
-.tmdb-selected .pi-check-circle { font-size: 1.2rem; }
-.tmdb-selected-text { flex: 1; }
-.tmdb-clear { background: transparent; border: none; cursor: pointer; color: inherit; opacity: 0.7; font-size: 0.95rem; }
-.tmdb-clear:hover { opacity: 1; }
-
+.tmdb-catalog { margin-top: 4px; }
 .tmdb-catalog-label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 4px; }
 .tmdb-catalog .input-group .form-control { font-family: var(--font-mono); background: var(--bg-light); }
 

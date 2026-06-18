@@ -525,31 +525,41 @@ onBeforeUnmount(() => {
           </div>
 
           <div v-if="tmdbResults.length" class="tmdb-results">
-            <button
+            <div
               v-for="res in tmdbResults"
               :key="res.id"
-              type="button"
-              class="tmdb-result"
-              :class="{ active: tmdbSelected && tmdbSelected.id === res.id }"
+              class="card-final card-tmdb tmdb-result-card"
+              :class="tmdbSelected && tmdbSelected.id === res.id ? 'status-success' : 'status-no-match'"
               @click="selectTMDBSeries(res)"
             >
-              <div class="tmdb-result-top">
-                <span class="tmdb-result-name">{{ res.name }} <small>({{ res.year }})</small></span>
-                <small class="tmdb-result-id">ID: {{ res.id }}</small>
+              <div class="info-column">
+                <span class="card-title">{{ res.name }} <small style="opacity: 0.6">({{ res.year }})</small></span>
+                <div class="path-line tmdb-pills">
+                  <span v-if="res.original_name" class="path-pill">
+                    <span class="path-pill-label">Оригинал:</span>
+                    <span class="path-pill-value">{{ res.original_name }}</span>
+                  </span>
+                  <span v-if="tmdbSelected && tmdbSelected.id === res.id" class="path-pill">
+                    <span class="path-pill-label">Сезон {{ tmdbSeasonNumber }}:</span>
+                    <span class="path-pill-value">{{ tmdbEpisodeCount }} эпизодов</span>
+                  </span>
+                </div>
               </div>
-              <small class="tmdb-result-orig">{{ res.original_name }}</small>
-            </button>
-          </div>
-
-          <div v-if="tmdbSelected" class="tmdb-selected">
-            <i class="pi pi-check-circle" />
-            <div class="tmdb-selected-text">
-              Выбран: <strong>{{ tmdbSelected.name }}</strong><br />
-              <small>Сезон {{ tmdbSeasonNumber }}: {{ tmdbEpisodeCount }} эпизодов</small>
+              <div class="pills-column">
+                <div class="quality-badge">ID: {{ res.id }}</div>
+                <div v-if="tmdbSelected && tmdbSelected.id === res.id" class="pill">
+                  <i class="pi pi-check-circle" /><span>Выбран</span>
+                </div>
+                <div
+                  v-if="tmdbSelected && tmdbSelected.id === res.id"
+                  class="pill pill-link"
+                  title="Сбросить выбор"
+                  @click.stop="clearTMDBSelection"
+                >
+                  <i class="pi pi-times" /><span>Сброс</span>
+                </div>
+              </div>
             </div>
-            <button type="button" class="tmdb-clear" title="Сбросить" @click="clearTMDBSelection">
-              <i class="pi pi-times" />
-            </button>
           </div>
 
           <div v-if="tmdbSelected && tmdbCatalogName" class="tmdb-catalog">
