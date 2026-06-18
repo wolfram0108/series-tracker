@@ -44,6 +44,39 @@
 }
 .modern-close:hover { background: rgba(0, 0, 0, 0.05); color: #2c3e50; }
 
+/* ── Вкладки шапки (сегмент) ──────────────────────────────────────────
+ * Вариант Б (адаптивность): широко — все равной ширины (выбор НЕ меняет
+ * ширину, не пляшут); узко — невыбранные схлопываются в иконку, выбранная
+ * разворачивается с подписью. Переключение по container-query ширины. */
+.st-tabs {
+  display: flex; gap: 4px; width: 100%; min-width: 0;
+  container-type: inline-size;
+}
+.st-tab {
+  flex: 0 0 auto; min-width: 0; /* по содержимому: ширина стабильна, выбор её НЕ меняет (не пляшут) */
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 9px 14px; border: 1px solid var(--border-color);
+  border-radius: 8px; background: rgba(0, 0, 0, 0.03);
+  color: var(--text-muted); font-weight: 500; cursor: pointer;
+  white-space: nowrap; overflow: hidden;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.st-tab:hover { color: #2c3e50; background: rgba(255, 255, 255, 0.6); }
+.st-tab.active {
+  background: var(--bg-white); color: var(--color-blue);
+  font-weight: 600; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+.st-tab .tab-icon { flex-shrink: 0; font-size: 15px; }
+.st-tab .tab-label {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px;
+  transition: max-width 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
+}
+/* узкий контейнер (все подписи суммарно не влезают): невыбранные → иконка
+   (подпись схлопывается), выбранная остаётся развёрнутой с подписью */
+@container (max-width: 700px) {
+  .st-tab:not(.active) .tab-label { max-width: 0; opacity: 0; margin-left: -8px; }
+}
+
 /* Тело */
 .modern-body {
   padding: 24px;

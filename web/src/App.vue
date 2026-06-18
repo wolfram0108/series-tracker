@@ -467,24 +467,25 @@ const rtPass = ref("password123")
       </div>
     </section>
 
-    <section>
-      <h2>Окно настроек — шапка с вкладками (SelectButton)</h2>
+    <section class="wide-section">
+      <h2>Окно настроек — шапка с вкладками (адаптивные)</h2>
       <p class="muted small">Целая модалка: шапка (заголовок + вкладки + крестик), тело, футер — единое скруглённое окно. Вкладки интегрированы в шапку и адаптивны (узко → иконки), вместо ломавшихся папочек.</p>
       <div class="modern-modal">
         <div class="modern-header">
           <h5 class="modal-title"><i class="pi pi-cog"></i> Настройки</h5>
-          <SelectButton
-            v-model="settingsTab"
-            :options="settingsTabs"
-            optionValue="value"
-            :allowEmpty="false"
-            class="header-tabs settings-tabs"
-          >
-            <template #option="{ option }">
-              <i class="pi tab-icon" :class="option.icon"></i>
-              <span class="tab-label">{{ option.label }}</span>
-            </template>
-          </SelectButton>
+          <div class="header-tabs st-tabs">
+            <button
+              v-for="t in settingsTabs"
+              :key="t.value"
+              class="st-tab"
+              :class="{ active: settingsTab === t.value }"
+              :title="t.label"
+              @click="settingsTab = t.value"
+            >
+              <i class="pi tab-icon" :class="t.icon"></i>
+              <span class="tab-label">{{ t.label }}</span>
+            </button>
+          </div>
           <button class="modern-close" title="Закрыть"><i class="pi pi-times"></i></button>
         </div>
         <div class="modern-body">
@@ -591,6 +592,12 @@ small { color: #888; font-weight: 400; font-size: 0.6em; }
 .muted { color: var(--text-muted); }
 .small { font-size: 0.85rem; }
 section { margin-top: 28px; border-top: 1px solid var(--color-gray-200); padding-top: 16px; }
+/* секция во всю ширину viewport (демо-окно как modal-xl, вне max-width галереи) */
+.wide-section {
+  width: 100vw; position: relative; left: 50%; transform: translateX(-50%);
+  padding: 16px 24px 0; box-sizing: border-box;
+}
+.wide-section .modern-modal { max-width: 1140px; margin: 0 auto; }
 h2 { font-size: 1.05rem; margin-bottom: 12px; }
 h3.sub { font-size: 0.85rem; color: var(--color-gray-600); margin: 18px 0 8px; font-weight: 600; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; align-items: start; }
@@ -625,17 +632,4 @@ h3.sub { font-size: 0.85rem; color: var(--color-gray-600); margin: 18px 0 8px; f
 .fieldset-body { padding: 16px; }
 .fieldset-body.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
-/* Шапка вкладок настроек: SelectButton на всю ширину, кнопки делят её
-   поровну (как полноширинный btn-group) — ровно переживает resize. */
-.settings-tabs { display: flex; width: 100%; }
-.settings-tabs :deep(.p-togglebutton) { flex: 1; min-width: 0; }
-/* активная вкладка не сжимается — её подпись читаема всегда, остальные жмутся */
-.settings-tabs :deep(.p-togglebutton-checked) { flex: 0 0 auto; }
-.settings-tabs :deep(.tab-icon) { margin-right: 6px; }
-.settings-tabs :deep(.tab-label) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* узкий контейнер: прячем подписи, оставляем иконки — 5 иконок влезают всегда */
-@media (max-width: 620px) {
-  .settings-tabs :deep(.tab-label) { display: none; }
-  .settings-tabs :deep(.tab-icon) { margin-right: 0; }
-}
 </style>
