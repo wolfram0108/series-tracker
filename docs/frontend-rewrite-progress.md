@@ -1,9 +1,8 @@
 # Прогресс переписывания фронта — точка продолжения (handoff)
 
-> Живой снимок состояния для бесшовного продолжения после сжатия
-> контекста. План/ТЗ — [docs/frontend-rewrite.md](frontend-rewrite.md)
-> (решения Р-Ф1..Р-Ф12, фазы, §13 под-вехи Ф4). Этот файл — что уже
-> сделано и что дальше. Обновлено: 2026-06-18 (после блока карточек).
+> Живой снимок для бесшовного продолжения после сжатия контекста.
+> План/ТЗ — [docs/frontend-rewrite.md](frontend-rewrite.md) (Р-Ф1..Р-Ф12,
+> фазы, §13 под-вехи Ф4). Обновлено: 2026-06-18 (Ф3 закрыта, Ф4 в работе).
 
 ---
 
@@ -11,201 +10,153 @@
 
 | Фаза | Статус |
 |---|---|
-| **Ф0** — типизация бэка (response_model на 62 + OpenAPI + golden) | ✅ **завершена** |
-| **Ф1** — каркас `web/` (Vite+Vue3+TS+PrimeVue+Pinia) под `/v2` | ✅ **завершена** |
-| **Ф2** — токен-пресет + парити-галерея | ✅ **закрыта** (примитивы + составные экраны + окно настроек) |
-| Ф3 — API-слой (типы+useSSE+сторы) | 🔄 **в работе** |
-| Ф4 — перенос экранов (под-вехи §13 ТЗ) | ⏳ (дизайн части экранов уже сделан в галерее — см. ниже) |
+| **Ф0** — типизация бэка (response_model 62 + OpenAPI + golden) | ✅ |
+| **Ф1** — каркас `web/` (Vite+Vue3+TS+PrimeVue+Pinia) под `/v2` | ✅ |
+| **Ф2** — токен-пресет + парити-галерея + окно настроек | ✅ |
+| **Ф3** — API-слой (client+useSSE+сторы+диспетчер) | ✅ |
+| **Ф4** — перенос экранов на живые данные | 🔄 **в работе** (см. §4) |
 | Ф5 — приёмка паритета | ⏳ |
 | Ф6 — cutover `/v2`→`/` | ⏳ |
 
-**Важно про границу Ф2/Ф4:** галерея переросла «парити примитивов» — в ней
-уже спроектированы реальные **составные экраны** (карточки-сущности всех
-мест, очереди Агентов вместо таблиц). Это де-факто визуальная часть Ф4,
-сделанная заранее на моках. Когда дойдём до Ф4 «по-настоящему» — переносим
-эти готовые карточные раскладки в реальные компоненты на живых данных.
+**`/v2` теперь — реальное приложение** (не галерея): `App.vue` = главный
+экран на живых данных стенда. Галерея сохранена в `Gallery.vue` (полигон,
+не монтируется).
 
-**Аванс покрывает НЕ всё.** Конфигуратор правил (сборщик правил, §13 под-веха
-6) — крупная отдельная веха Ф4 с **drag-and-drop**, в галерее ещё НЕ
-проектировался и требует детальной пересборки. Не считать его покрытым
-авансом карточек.
-
-**Вектор (согласовано):** добить Ф2 (табы → модалка) → **Ф3 (API-слой)** →
-Ф4. Начинаем с **табов**.
-
-Стратегия (Р-Ф7): **полная переделка целиком в `/v2`**, старый фронт на
-`/`, переключение по полному паритету. Без срезания углов (память:
-`feedback-full-rewrites-no-corner-cutting`).
+**РЕЖИМ РАБОТЫ (важно):** Ф4 ведётся **автономно по ТЗ** — пользователя
+звать **только на визуальную приёмку** готовых экранов; техническое/
+архитектурное/порядок под-вех решать самому (память
+`feedback-autonomous-frontend-rewrite`). На приёмку зову скриншотом.
 
 ---
 
-## 2. Операционка (как собирать, смотреть, проверять)
+## 2. Операционка
 
-**Стенд:** я работаю как **root**; приложение под systemd от `user`.
-**Node 20** на стенде. Адрес снаружи: `http://192.168.1.148:5000`
-(старый фронт `/`, новый `/v2`).
+**Стенд:** root-сессия; приложение под systemd от `user`. Node 20. Адрес:
+`http://192.168.1.148:5000` (старый фронт `/`, новый `/v2`).
 
 ```bash
-# Сборка нового фронта (после правок web/):
-cd /home/user/series-tracker/web && npm run build      # → web/dist (vue-tsc strict!)
-chown -R user:user /home/user/series-tracker/web        # root создаёт файлы — вернуть владельца
-# /v2 отдаётся сразу (gateway монтирует web/dist, рестарт НЕ нужен для статики)
-
-# Дев-режим: cd web && npm run dev   (Vite proxy /api → :5000)
-# Регенерация TS-типов из OpenAPI:  cd web && npm run gen:api  → src/api/schema.d.ts
-# Перезапуск бэка (после Python):   sudo systemctl restart series-tracker
-
-# Скриншоты (Playwright+firefox, в т.ч. /root/.cache):
-.venv/bin/python - <<'PY'
-from playwright.sync_api import sync_playwright
-with sync_playwright() as p:
-    b = p.firefox.launch()
-    pg = b.new_page(viewport={"width":900,"height":900}, device_scale_factor=2)
-    pg.goto("http://127.0.0.1:5000/v2/", wait_until="networkidle")   # новый — networkidle ок
-    # старый фронт /: wait_until="domcontentloaded" (+wait_for_timeout) — вечный SSE!
-    pg.screenshot(path="/tmp/v2.png", full_page=True)
-    b.close()
-PY
-# затем смотреть PNG инструментом Read. Для секции: найти h2/h3 по тексту,
-# el.scroll_into_view_if_needed(); снимать el или el.nextElementSibling.
-
-# Golden-харнесс контракта (страховка additive-правок бэка, Ф0):
-.venv/bin/python tests/api_golden.py capture   # эталон ДО
-.venv/bin/python tests/api_golden.py check     # сверка ПОСЛЕ
+cd /home/user/series-tracker/web && npm run build   # → dist (vue-tsc strict!)
+chown -R user:user /home/user/series-tracker/web     # root создаёт файлы — вернуть владельца
+npm run test                                         # Vitest (юнит сторов)
+# /v2 отдаётся сразу (gateway монтирует dist; рестарт не нужен для статики)
+# Скриншот: Playwright firefox, /v2 — wait_until="domcontentloaded" (+timeout),
+#   т.к. SSE /api/stream вечный → networkidle НЕ наступает (это норма, SSE жив).
+sudo systemctl restart series-tracker                # после правок Python
 ```
 
-**Дисциплина:** русский; без AI-атрибуции; коммит на каждый согласованный
-шаг; vue-tsc strict при build (следить за неиспользуемыми импортами).
-**Архитектурные/UI-правки — только после явного «да» пользователя.**
+**Дисциплина:** русский; без AI-атрибуции; **не вписывать реальные данные
+стенда (логины/пароли) в коммиты** (классификатор блокирует); коммит на шаг.
 
 ---
 
-## 3. Что построено в `web/` (стек и файлы)
+## 3. Архитектура `web/src` (Ф3 + Ф4)
 
-Стек (выверенные версии): Vite 6, Vue 3.5 SFC+TS 5.7, vue-tsc 2,
-PrimeVue 4.2 (Aura), Pinia 2, openapi-fetch/typescript, vuedraggable 4.
-
-| Файл | Назначение |
-|---|---|
-| `src/main.ts` | bootstrap: Pinia + PrimeVue(STPreset, `darkModeSelector: ".st-dark"`) + импорт стилей (tokens/style/fields/overrides/tables/pills/card/cards/progress) |
-| `src/theme/preset.ts` | `STPreset` = definePreset(Aura): primary = Bootstrap-синий #0d6efd, радиусы 9px |
-| `src/styles/tokens.css` | порт `variables.css`; **+ `--font-mono`, `--card-animation-duration: 0.3s`** (были потеряны) |
-| `src/styles/overrides.css` | кнопки-градиенты, поля PrimeVue (46px/бордер 2px/фокус/invalid) |
-| `src/styles/fields.css` | порт constructor-group (floating-label 64px, item-select, btn-icon) |
-| `src/styles/tables.css` | DataTable под `div-table` |
-| `src/styles/pills.css` | бейдж очереди (`.badge bg-*` вкл. **bg-dark fallback**), зеркало, VK-пилюли |
-| `src/styles/card.css` | **карточка сериала** (слои, полосы, свитч) + **`badge-fade`** (анимация смены пилюль) |
-| `src/styles/cards.css` | **карточки-сущности** (`.card-final`): единый стиль, палитра, пилюли, тонированные пилюли статуса, **`.card-queue`** (очереди), Нарезка (`slicing-card`) |
-| `src/styles/progress.css` | **прогресс-бар** — порт Bootstrap 5.3 (.progress/.progress-bar striped/animated) |
-| `src/components/StGroup/StIcon/StInput/StSelect/StBtn/StField.vue` | композиция поля = constructor-group |
-| `src/components/SeriesCard.vue` | карточка сериала + `<TransitionGroup name="badge-fade">` для пилюль |
-| `src/App.vue` | **парити-галерея** (разделы — см. §4); моки + симуляция анимаций |
-| `src/api/schema.d.ts` | сгенерированные TS-типы из `/openapi.json` |
-
-`node_modules`, `dist` — вне git. `schema.d.ts` — в git.
-
----
-
-## 4. Ф2: статус по элементам (галерея `/v2`)
-
-| Элемент | Статус |
-|---|---|
-| Поля (обычные/floating/составные) | ✅ утверждено («годно для прода») |
-| Кнопки, монолитные группы | ✅ утверждено |
-| Таблицы (div-table) | ✅ «безупречно» |
-| Пилюли/бейджи (зеркало/очередь/VK + bg-dark) | ✅ утверждено |
-| **Карточка сериала** (9 состояний) | ✅ утверждено |
-| **Динамика карточки** (слои 0.8s, полосы, hover, **badge-fade** пилюль) | ✅ + **симуляция** (кнопки сценариев + авто-прогон) |
-| **Карточки-сущности** (TMDB/Композиция торрент+VK/Нарезанный/Отсутствует/тест VK/Нарезка) | ✅ единый стиль, утверждено |
-| **Карточки очередей Агентов** (Обработка/Загрузка/Нарезка/Мониторинг) | ✅ утверждено |
-| **Прогресс-бар** (порт Bootstrap) | ✅ |
-| **ToggleSwitch / SelectButton / Checkbox** | ✅ в галерее (PrimeVue) |
-| **Окно настроек** (modern-modal: шапка/тело/футер) | ✅ собрано (modal.css) |
-| **Вкладки шапки** (.st-tabs — кастомный сегмент) | ✅ остров облегает кнопки, адаптивное схлопывание в иконки (@media), стабильная ширина (призрак жирного текста), высота ~39px |
-| Под-вкладки (sub-nav-pills, 2-я полоса в Нейминге) | ⏳ отложено в Ф4 (на реальном экране Парсера) |
+```
+api/client.ts ─ openapi-fetch на schema.d.ts (62 маршрута)
+composables/
+  useApi.ts ─ request(): loading + ошибки→Toast (для компонентов)
+  useSSE.ts ─ singleton, 1 EventSource /api/stream, 11 событий, on()/connect()
+  useRealtime.ts ─ диспетчер SSE→сторы (вызывается в main.ts)
+  useConfirm.ts ─ Promise-подтверждение (singleton state)
+stores/ (Pinia, setup-стиль)
+  series.ts ─ список + merge series_updated + savingIds; series.test.ts (6 Vitest)
+  queues.ts ─ 4 очереди (agent/torrents/downloads/slicing)
+  scanner.ts ─ ScannerStatus + load
+  indicators.ts ─ computed (monitoring/downloader/slicing) — см. находку §6
+  ui.ts ─ activeSeriesId + viewing-цикл (open→['viewing'], close→[])
+components/
+  AppHeader.vue ─ заголовок + индикаторы + кнопки
+  SeriesCard.vue ─ карточка на реальной Series (emit scan/delete/toggle/open-status)
+  ModalShell.vue ─ оболочка модалок (оверлей, header/body/footer слоты, Esc/клик-вне)
+  ConfirmDialog.vue ─ окно подтверждения (useConfirm)
+  SettingsModal.vue ─ окно настроек (xl, фикс-высота 86vh) + вкладки-сегмент
+  settings/SettingsAuth|Trackers|Agents|Debug.vue ─ вкладки
+  LogsModal.vue ─ просмотр логов (фильтры + таблица)
+  AddSeriesModal.vue ─ КАРКАС (этап 1) добавления
+  St*.vue ─ поля constructor-group (из Ф2)
+main.ts ─ bootstrap + setupRealtime() + load series/scanner
+Gallery.vue ─ сохранённая парити-галерея Ф2 (полигон, не монтируется)
+styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layout.css
+```
 
 ---
 
-## 5. Дизайн-решения по карточкам (зафиксировано с пользователем)
+## 4. Ф4: статус под-вех
 
-Единый язык карточек — ядро визуальной системы. Принципы:
+| Под-веха (§13) | Статус | Эндпоинты |
+|---|---|---|
+| **Главный экран** (список+карточки, live) | ✅ принят | GET /api/series, scan/toggle/delete |
+| **Подтверждение** + ModalShell | ✅ | DELETE /api/series/{id}?delete_from_qb |
+| **Настройки: Авторизация** | ✅ принят | GET/POST /api/auth |
+| **Настройки: Трекеры** | ✅ принят | GET /api/trackers, PUT /api/trackers/{id} |
+| **Настройки: Агенты** (очереди-карточки) | ✅ принят | queuesStore (SSE) |
+| **Настройки: Отладка** (сканер+saved_paths) | ✅ принят | /api/scanner/settings, scan_all, /api/settings/saved_paths |
+| **Просмотр логов** | ✅ | GET /api/logs?group&level&limit |
+| **Add-модалка** | 🔄 каркас (этап 1) | POST /api/parse_url, POST /api/series |
+| Add: TMDB + saved-path + VK + качество | ⏳ | /api/tmdb/search, /api/tmdb/details/{id}, /api/parser-profiles |
+| **Статус-модалка** (Props/Composition/Slicing/History) | ⏳ крупная | |
+| **Конфигуратор Фильтров VK** (DnD) | ⏳ крупная | см. §5 |
+| Отладка-доп (БД-просмотр/очистка/флаги) | ⏳ | /api/settings/{force_replace,less_strict_scan,...} |
 
-1. **Единая база `.card-final`** (cards.css): grid `info │ pills │ controls`,
-   **радиус 9px** (токен `--border-radius`, был разнобой 8/10), padding 12 16.
-   Имя класса оставлено `card-final` (не `st-card`) — чтобы реальные
-   компоненты (composition/parser/chapter) при переносе не переписывать.
-2. **Единая статусная палитра** (5 пастельных градиентов 135° + бордер):
-   `status-success`(зелёный) / `status-pending`(жёлтый) / `card-sliced`+
-   `status-sliced`(синий) / `status-excluded`(красный) / `status-archived`(серый).
-3. **Раскладки пилюль — как в оригинале:** `card-torrent/compilation` →
-   grid 2 колонки; `card-sliced` → 1 колонка; `card-test-result`+`card-tmdb`
-   → flex column (пилюли 2-й строкой / правый столбец у края).
-4. **Тонированные пилюли статуса** (`.pill.pill-primary/info/success/danger/
-   secondary`): форма как `.pill`, фон слегка подкрашен в цвет — мягко, НЕ
-   яркий bootstrap-бейдж. Это основной приём показа статуса в карточках.
-5. **Карточки очередей Агентов** (`.card-queue`): таблицы → карточки.
-   Компактно (1–2 строки, без раздувания). **Фон нейтральный серебряный**
-   (как невыбранная TMDB), статус несёт тонированная пилюля (жёлтый фон
-   читался как warning). `align-items: stretch` обязателен (база даёт center).
-   Прогресс-бар где нужен: Загрузка/Мониторинг — полосатый + метрики
-   (скорость/ETA), Нарезка — по числу глав (done/total).
-6. **TMDB-результат** снят с Bootstrap `list-group`/`alert` → на `.card-final`.
-7. **Анимация пилюль** (`badge-fade`, Vue TransitionGroup): появление
-   scale(0.8)→1, исчезновение scale→0.6 + схлопывание ширины; соседи плавно
-   сдвигаются. Раньше пилюли шли простым v-for без анимации.
-8. **Нет Bootstrap reboot** — браузерные margin заголовков (h6) надо гасить
-   точечно (всплыло в Нарезке: лишний отступ над «Активные главы»).
-
-**Инвентарь карточек проекта** (где живут реальные карточки в исходнике):
-Композиция (StatusTabTorrentComposition, seriesCompositionManager),
-Нарезка (ChapterManager), тест VK (settingsParser), TMDB (addSeriesModal).
-Пилюли-НЕ-карточки → раздел «Пилюли/бейджи»: зеркала (settingsTrackers),
-бейджи очереди (settingsAgents).
+Окно настроек: вкладки-сегмент (остров облегает, адаптивное схлопывание
+в иконки @media, стабильная ширина призраком жирного текста, высота 39px),
+фикс-высота окна 86vh (легаси-паттерн — не прыгает при переключении вкладок).
 
 ---
 
-## 6. Ф0 — что сделано (бэкенд типизирован)
+## 5. Конфигуратор правил VK (разобран, веха ⏳)
 
-- `modules/gateway/schemas.py` — модели (ApiModel extra="allow", OkResponse,
-  DynamicObject, SeriesObject, …); `response_model` на **62 маршрутах**.
-- **Паттерн:** nullable строго по схеме БД; объекты с null НЕ `exclude_none`;
-  условные поля через extra="allow"; табличные → `DynamicObject`; success →
-  `OkResponse`+exclude_none; ошибки → `responses={}`.
-- Golden-харнесс `tests/api_golden.py` поймал 2 бага (500 на NULL; list-vs-
-  dict). Тесты: 195 passed (красное — намеренные golden/prod-фикстуры).
+«Фильтры VK» = Парсер (`settingsParser.js`, 763 стр). Три шага: Профили
+(✅ StGroup), Тестирование (✅ card-test-result), **Редактор правил
+(Шаг 2) — НЕ сделан**. Модель:
+- правило = `conditions[]` (ЕСЛИ: `_blocks[]` + AND/OR) + `actions[]`
+  (ТО: `action_type` + `_action_blocks[]`).
+- блок = `{id, type, value?}`; 8 типов: text(ред.)/number/whitespace/
+  any_text/start_of_line/end_of_line + add/subtract(ред., только ТО).
+- DnD: **vuedraggable@4** (уже в deps) + палитра clone; **contenteditable**
+  для значений; CSS — порт `rule-editor.css`. API: GET /api/parser-profiles,
+  POST /api/parser-profiles/test. Логика блоков (перенести 1:1): cloneBlock,
+  isBlockEditable, getBlockDisplayText (number в ТО → «Число #N»),
+  updateBlockValue, getBlockClasses. Риски §6.2 (contenteditable, drag).
 
 ---
 
-## 7. Следующий шаг / вектор
+## 6. Находки и Ф0
 
-**Закрыть Ф2** (последние два примитива):
-1. **Табы** — две полосы вкладок настроек (PrimeVue Tabs под токены).
-2. **Модалка** — PrimeVue Dialog (шапка/тело/футер, оверлей) под исходный вид.
+- **НАХОДКА (Ф3):** `_updateIndicatorState` (hold-таймер 1000ms, на него
+  ссылался §11 ТЗ) в исходном app.js **мёртвый** (не вызывается). Индикаторы
+  мгновенные → `indicatorsStore` = computed-производные от очередей/сканера.
+- **Ф0:** `schemas.py` (62 response_model, extra="allow"), golden-харнесс
+  `tests/api_golden.py`. Тесты: 195 passed + 6 Vitest (seriesStore merge).
 
-**Затем развилка (согласовать):**
-- **Ф3 (API-слой)** — `useApi` на openapi-fetch + `useSSE` (11 SSE-событий) +
-  Pinia-сторы (§11 ТЗ). Инфраструктура данных; без неё экраны статичны.
-- Дальше **Ф4** — переносить экраны на живые данные, переиспользуя готовые
-  карточные раскладки из галереи (очереди, композиция, …) и под-вехи §13.
+---
 
-**Незакрытые риски (ТЗ §16):** SSE-инварианты (одно соединение, частичный
-merge `series_updated`, `viewing`-stop при закрытии модалки); 15-мин
-синхронный scan (AbortController); тесты (Vitest+Playwright); статус-модалка
-и конфигуратор правил — крупные отдельные вехи Ф4.
+## 7. Следующий шаг
+
+1. **Доделать Add-модалку:** TMDB-распознаватель (поиск+catalog-name
+   «Имя (год) [tmdbid-XXXX]»), saved-path-dropdown (порт SavedPathDropdown),
+   VK-настройки (search/get_all, channel/query), выбор качества по сайту.
+2. **Статус-модалка** — крупная веха (Properties/Composition/Slicing/History
+   + ChapterManager). uiStore.openStatus уже ставит viewing.
+3. **Конфигуратор Фильтров VK** — крупная веха DnD (§5).
+4. **Отладка-доп** + модалка DatabaseViewer.
+5. Затем Ф5 (приёмка паритета + e2e Playwright) → Ф6 (cutover).
+
+**Незакрытые инварианты для проверки в Ф5:** частичный merge series_updated
+(есть), viewing-stop при закрытии статус-модалки (uiStore.closeStatus —
+подключить в статус-модалке), одно SSE-соединение (есть), 15-мин scan
+(AbortController — добавить при необходимости).
 
 ---
 
 ## 8. Карта коммитов (ветка refactoring/bus)
 
 ```
-Ф0: c31bf3c golden → c4cf52f/7b6bf5b/783c85a/2e1e4e7 fix → 82555c0 docs
-Ф1: ffef404 каркас web/ под /v2
-Ф2 (примитивы): 92158e8 пресет+галерея → e043a28 поля → a7afaa1 кнопки →
-    3eaddc2 высота/обводка → 9a4c25c монолит → e40788c invalid → ea082ea
-    таблицы → 8e84062 пилюли → c08c7a6 карточка сериала → 7422a35 docs
-Ф2 (карточки): ef7eb70 высота кнопок карточки → b98da7b единый стиль
-    карточек → 0190993 раскладка пилюль+hover → b2ba627 TMDB → e3047b2
-    Нарезка → b6ebb6e отступы → 0d47779 badge-fade+симуляция → d654aec
-    bg-dark → e4b07bc очереди→карточки → 5b420f8 тонир.пилюли+бар Нарезки
-    → 379fdea нейтральный фон очередей
+Ф3: 254b43e client+useApi → 1176f1f useSSE → d015812 seriesStore+Vitest
+    → ea811d6 сторы+диспетчер
+Ф4: 6ec2e47 главный экран → 3d96aa2 ModalShell+подтверждение → d3b64a7
+    окно настроек+Агенты → 694ec77 фикс-высота → 305c794 Авторизация →
+    804cd7a Трекеры → 4fb844c Отладка → 8ee89c5 Логи → 8f93836 Add-каркас
+(ранее: Ф0 c31bf3c.., Ф1 ffef404, Ф2 92158e8..9043c45 + окно настроек
+ 2f9fa90..9185a3d)
 ```
