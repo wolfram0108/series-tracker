@@ -32,10 +32,13 @@
   gap: 8px;
   flex-shrink: 0;
 }
-.modern-header .header-tabs { flex: 1; min-width: 0; } /* SelectButton-вкладки занимают серединку */
+/* контейнер вкладок — по содержимому (облегает остров), сжимается при
+   нехватке места. БЕЗ container-type: он ломает «размер по содержимому»
+   у потомков (остров растягивался). Адаптивность — через @media ниже. */
+.modern-header .header-tabs { flex: 0 1 auto; min-width: 0; }
 
 .modern-close {
-  flex-shrink: 0;
+  flex-shrink: 0; margin-left: auto; /* прижать к правому краю шапки */
   width: 36px; height: 36px;
   padding: 8px; border: none; background: transparent; cursor: pointer;
   border-radius: 8px; color: var(--text-muted);
@@ -51,8 +54,7 @@
 /* остров-подложка: вкладки живут на одном общем фоне (segmented control),
    а не каждая в своей рамке. Фон острова чуть темнее серой шапки — виден. */
 .st-tabs {
-  display: flex; gap: 3px; width: 100%; min-width: 0;
-  container-type: inline-size;
+  display: inline-flex; gap: 3px; max-width: 100%; min-width: 0; /* по содержимому — остров облегает вкладки */
   background: var(--color-gray-200);
   border-radius: 10px; padding: 3px;
 }
@@ -75,9 +77,10 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px;
   transition: max-width 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
 }
-/* узкий контейнер (все подписи суммарно не влезают): невыбранные → иконка
-   (подпись схлопывается), выбранная остаётся развёрнутой с подписью */
-@container (max-width: 700px) {
+/* узко (подписи суммарно не влезают): невыбранные → иконка (подпись
+   схлопывается), выбранная остаётся развёрнутой. По viewport, т.к.
+   container-query несовместим с обтеканием острова. */
+@media (max-width: 1000px) {
   .st-tab:not(.active) .tab-label { max-width: 0; opacity: 0; margin-left: -8px; }
 }
 
