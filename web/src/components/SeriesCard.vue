@@ -1,18 +1,16 @@
 <script setup lang="ts">
 import { computed } from "vue"
+import type { Series } from "../stores/series"
 
 // Карточка сериала — кастом-островок. Порт логики из app.js
-// (getLayerStyle/getAnimationClass/seriesWithPills).
-interface Series {
-  id: number
-  name: string
-  site: string
-  auto_scan_enabled: boolean
-  statuses: string[]
-  last_scan_time?: string
-  tmdb?: { downloaded: number; total: number }
-}
-const props = defineProps<{ series: Series }>()
+// (getLayerStyle/getAnimationClass/seriesWithPills) на реальную модель серии.
+const props = defineProps<{ series: Series; saving?: boolean }>()
+const emit = defineEmits<{
+  (e: "open-status", id: number): void
+  (e: "scan", id: number): void
+  (e: "delete", id: number): void
+  (e: "toggle-auto-scan", id: number, enabled: boolean): void
+}>()
 
 const layerHierarchy = [
   "waiting", "ready", "downloading", "queued", "activating",
@@ -33,7 +31,8 @@ const stateConfig: Record<string, { title: string; icon: string }> = {
   error: { title: "Ошибка", icon: "pi-exclamation-triangle" },
 }
 
-const states = computed(() => props.series.statuses)
+const states = computed(() => props.series.statuses ?? [])
+const busy = computed(() => Boolean(props.series.is_busy) || Boolean(props.saving))
 
 function layerStyle(layer: string) {
   // idle рисуется зелёным слоем downloading (Р-24); остальное — по имени.
@@ -75,6 +74,24 @@ const pills = computed(() => {
     out.push({ key: k, title: stateConfig[k]?.title || k, icon: stateConfig[k]?.icon || "" }))
   return out.reverse()
 })
+
+// tmdb-прогресс: пилюля скачано/всего, если есть TMDB-инфо с числом эпизодов
+const tmdb = computed(() => {
+  const info = props.series.tmdb_info as { total_episodes?: number } | null
+  const total = info?.total_episodes
+  if (total && total > 0) {
+    return { downloaded: (props.series.downloaded_episodes_count as number) ?? 0, total }
+  }
+  return null
+})
+
+const scanTime = computed(() => {
+  const iso = props.series.last_scan_time
+  if (!iso) return "Никогда"
+  return new Date(iso).toLocaleString("ru-RU", {
+    day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+  })
+})
 </script>
 
 <template>
@@ -98,8 +115,12 @@ const pills = computed(() => {
         <span class="series-site unified-text-bg">{{ series.site }}</span>
         <div class="auto-scan-switch unified-text-bg">
           <span>Готовность</span>
-          <label class="switch">
-            <input type="checkbox" :checked="series.auto_scan_enabled" />
+          <label class="switch" :title="series.auto_scan_enabled ? 'Авто-сканирование включено' : 'Авто-сканирование выключено'">
+            <input
+              type="checkbox"
+              :checked="series.auto_scan_enabled"
+              @change="emit('toggle-auto-scan', series.id, ($event.target as HTMLInputElement).checked)"
+            />
             <span class="slider"></span>
           </label>
         </div>
@@ -114,16 +135,22 @@ const pills = computed(() => {
             <span v-if="p.title">{{ p.title }}</span>
           </div>
         </TransitionGroup>
-        <div v-if="series.tmdb" class="status-pill ms-auto" title="Прогресс эпизодов">
+        <div v-if="tmdb" class="status-pill ms-auto" title="Прогресс эпизодов">
           <i class="pi pi-images"></i>
-          <span>{{ series.tmdb.downloaded }} / {{ series.tmdb.total }}</span>
+          <span>{{ tmdb.downloaded }} / {{ tmdb.total }}</span>
         </div>
       </div>
-      <div class="scan-time unified-text-bg">{{ series.last_scan_time || "—" }}</div>
+      <div class="scan-time unified-text-bg">{{ scanTime }}</div>
       <div class="card-actions">
-        <button class="action-btn btn-status" title="Статус"><i class="pi pi-info-circle" /></button>
-        <button class="action-btn btn-scan" title="Сканировать"><i class="pi pi-refresh" /></button>
-        <button class="action-btn btn-delete" title="Удалить"><i class="pi pi-trash" /></button>
+        <button class="action-btn btn-status" title="Статус" @click="emit('open-status', series.id)">
+          <i class="pi pi-info-circle" />
+        </button>
+        <button class="action-btn btn-scan" title="Сканировать" :disabled="busy" @click="emit('scan', series.id)">
+          <i class="pi pi-refresh" />
+        </button>
+        <button class="action-btn btn-delete" title="Удалить" :disabled="busy" @click="emit('delete', series.id)">
+          <i class="pi pi-trash" />
+        </button>
       </div>
     </div>
   </div>

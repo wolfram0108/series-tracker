@@ -1,0 +1,36 @@
+/* Каркас приложения: шапка (заголовок + индикаторы агентов + действия) и
+ * список серий. Порт layout.css/индикаторов исходника. */
+.app { max-width: 1200px; margin: 0 auto; padding: 24px 20px 60px; }
+
+.page-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 24px; flex-wrap: wrap; gap: 16px;
+}
+.page-title { font-size: 28px; font-weight: 700; color: #2c3e50; margin: 0; }
+.page-title-container { display: flex; align-items: center; gap: 16px; }
+.header-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+/* Индикаторы агентов — круглые точки; неактив серый, активный синий + пульс.
+   Размеры: мониторинг 24px, загрузка/нарезка 18px (≈ на 30% меньше). */
+.agent-indicators { display: flex; align-items: center; gap: 10px; padding-left: 4px; }
+.indicator {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--color-gray-500, #6c757d);
+  transition: all 300ms ease-in-out;
+  box-shadow: 0 0 8px 2px rgba(0, 0, 0, 0.1);
+}
+.indicator.ind-small { width: 18px; height: 18px; }
+.indicator.ind-active {
+  background: var(--color-blue);
+  animation: indicatorPulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes indicatorPulse {
+  0%, 100% { box-shadow: 0 0 8px 2px rgba(13, 110, 253, 0.5); }
+  50% { box-shadow: 0 0 4px 1px rgba(13, 110, 253, 0.2); }
+}
+
+.series-list { display: flex; flex-direction: column; }
+.empty-state {
+  text-align: center; padding: 48px 16px; color: var(--text-muted);
+  font-size: 1.05rem;
+}
