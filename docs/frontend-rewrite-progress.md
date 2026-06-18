@@ -92,9 +92,10 @@ styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layou
 | **Настройки: Агенты** (очереди-карточки) | ✅ принят | queuesStore (SSE) |
 | **Настройки: Отладка** (сканер+saved_paths) | ✅ принят | /api/scanner/settings, scan_all, /api/settings/saved_paths |
 | **Просмотр логов** | ✅ | GET /api/logs?group&level&limit |
-| **Add-модалка** (полный порт) | ✅ на приёмке | parse_url, tmdb/search+details, parser-profiles, saved_paths, POST /api/series |
-| ↳ SavedPathDropdown + качество (anilibria/astar) + VK + TMDB | ✅ | catalogName, sortEpisodeKeys, vk_search_mode |
-| **Статус-модалка** (Props/Composition/Slicing/History) | ⏳ крупная | |
+| **Add-модалка** (полный порт) | ✅ принят | parse_url, tmdb/search+details, parser-profiles, saved_paths, POST /api/series |
+| ↳ SavedPathDropdown + качество (anilibria/astar) + VK + TMDB | ✅ принят | catalogName, sortEpisodeKeys, vk_search_mode |
+| ↳ TMDB-имя ru→en→original (азиатские без ru) | ✅ | metadata.search +en-US → name_en |
+| **Статус-модалка** (Props/Composition/Slicing/History) | ⏳ **следующая** крупная | см. §5а |
 | **Конфигуратор Фильтров VK** (DnD) | ⏳ крупная | см. §5 |
 | Отладка-доп (БД-просмотр/очистка/флаги) | ⏳ | /api/settings/{force_replace,less_strict_scan,...} |
 
@@ -123,6 +124,20 @@ styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layou
 
 ## 6. Находки и Ф0
 
+- **УРОК (Add-модалка):** сперва собрал окно «по смыслу» (свои стили) —
+  пользователь забраковал. Дизайн неприкосновенен: снимать скриншот
+  исходного экрана, портировать РЕАЛЬНЫЙ CSS (`static/css/components/*`),
+  сверять. См. память `feedback-port-real-css-not-reinvent`.
+- **Находки по ходу Add:** (а) `GET /api/settings/saved_paths` отдаёт
+  `{paths:[]}`, а не массив — в Отладке список был пуст (исправлено);
+  (б) `modal-xl` с `height:86vh` распирал окно добавления — фикс-высоту
+  вынес в `modal-fixed` (только настройки/логи), Add — по контенту;
+  (в) `div-table`/`table-site-torrents` вообще не были портированы —
+  перенёс в `tables.css`; (г) азиатские тайтлы без ru: TMDB кладёт в
+  `name` иероглифы — добрал `name_en` (en-US) и правило ru→en→original.
+- **Виджеты:** галерея согласованных форм (Ф2) доступна по `/v2#gallery`
+  (Gallery.vue, не удалена). Выпадающие списки (StSelect/SavedPathDropdown)
+  — высота по содержимому, потолок до края экрана (useDropAnchor).
 - **НАХОДКА (Ф3):** `_updateIndicatorState` (hold-таймер 1000ms, на него
   ссылался §11 ТЗ) в исходном app.js **мёртвый** (не вызывается). Индикаторы
   мгновенные → `indicatorsStore` = computed-производные от очередей/сканера.
@@ -133,11 +148,11 @@ styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layou
 
 ## 7. Следующий шаг
 
-1. ~~Доделать Add-модалку~~ ✅ (порт целиком: TMDB, SavedPathDropdown,
-   VK search/get_all, качество anilibria/astar). Попутно исправлен баг
-   saved_paths в Отладке (обёртка {paths:[]}). Ждёт визуальной приёмки.
+1. ~~Доделать Add-модалку~~ ✅ принята (порт целиком + TMDB ru→en).
 2. **Статус-модалка** — крупная веха (Properties/Composition/Slicing/History
-   + ChapterManager). uiStore.openStatus уже ставит viewing.
+   + ChapterManager). uiStore.openStatus уже ставит viewing. ПЕРВЫМ —
+   разбор исходника (StatusModal/StatusTab*.js + статус-CSS), скриншот
+   эталона, потом порт (урок Add: не сочинять, портировать реальный CSS).
 3. **Конфигуратор Фильтров VK** — крупная веха DnD (§5).
 4. **Отладка-доп** + модалка DatabaseViewer.
 5. Затем Ф5 (приёмка паритета + e2e Playwright) → Ф6 (cutover).
