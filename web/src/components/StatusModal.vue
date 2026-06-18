@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from "vue"
 import Button from "primevue/button"
 import ModalShell from "./ModalShell.vue"
 import StatusProperties from "./status/StatusProperties.vue"
+import StatusComposition from "./status/StatusComposition.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
 import type { Series } from "../stores/series"
@@ -78,7 +79,13 @@ onMounted(load)
     <div v-if="!series" class="status-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem"></i></div>
     <template v-else>
       <StatusProperties v-show="tab === 'properties'" ref="propsRef" :series="series" @saving="saving = $event" />
-      <div v-show="tab === 'composition'" class="status-stub">Вкладка «Композиция» — следующий шаг переноса.</div>
+      <StatusComposition
+        v-if="!isVk"
+        v-show="tab === 'composition'"
+        :series-id="seriesId"
+        :series-name="String(series.name ?? '')"
+      />
+      <div v-else v-show="tab === 'composition'" class="status-stub">Композиция VK — следующий шаг переноса.</div>
       <div v-if="isVk" v-show="tab === 'slicing'" class="status-stub">Вкладка «Нарезка» — следующий шаг переноса.</div>
       <div v-show="tab === 'history'" class="status-stub">Вкладка «История» — следующий шаг переноса.</div>
     </template>
