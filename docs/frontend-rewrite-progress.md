@@ -92,8 +92,8 @@ styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layou
 | **Настройки: Агенты** (очереди-карточки) | ✅ принят | queuesStore (SSE) |
 | **Настройки: Отладка** (сканер+saved_paths) | ✅ принят | /api/scanner/settings, scan_all, /api/settings/saved_paths |
 | **Просмотр логов** | ✅ | GET /api/logs?group&level&limit |
-| **Add-модалка** | 🔄 каркас (этап 1) | POST /api/parse_url, POST /api/series |
-| Add: TMDB + saved-path + VK + качество | ⏳ | /api/tmdb/search, /api/tmdb/details/{id}, /api/parser-profiles |
+| **Add-модалка** (полный порт) | ✅ на приёмке | parse_url, tmdb/search+details, parser-profiles, saved_paths, POST /api/series |
+| ↳ SavedPathDropdown + качество (anilibria/astar) + VK + TMDB | ✅ | catalogName, sortEpisodeKeys, vk_search_mode |
 | **Статус-модалка** (Props/Composition/Slicing/History) | ⏳ крупная | |
 | **Конфигуратор Фильтров VK** (DnD) | ⏳ крупная | см. §5 |
 | Отладка-доп (БД-просмотр/очистка/флаги) | ⏳ | /api/settings/{force_replace,less_strict_scan,...} |
@@ -133,9 +133,9 @@ styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layou
 
 ## 7. Следующий шаг
 
-1. **Доделать Add-модалку:** TMDB-распознаватель (поиск+catalog-name
-   «Имя (год) [tmdbid-XXXX]»), saved-path-dropdown (порт SavedPathDropdown),
-   VK-настройки (search/get_all, channel/query), выбор качества по сайту.
+1. ~~Доделать Add-модалку~~ ✅ (порт целиком: TMDB, SavedPathDropdown,
+   VK search/get_all, качество anilibria/astar). Попутно исправлен баг
+   saved_paths в Отладке (обёртка {paths:[]}). Ждёт визуальной приёмки.
 2. **Статус-модалка** — крупная веха (Properties/Composition/Slicing/History
    + ChapterManager). uiStore.openStatus уже ставит viewing.
 3. **Конфигуратор Фильтров VK** — крупная веха DnD (§5).
