@@ -4,6 +4,7 @@ import Button from "primevue/button"
 import ModalShell from "./ModalShell.vue"
 import SettingsAgents from "./settings/SettingsAgents.vue"
 import SettingsAuth from "./settings/SettingsAuth.vue"
+import SettingsTrackers from "./settings/SettingsTrackers.vue"
 
 // Окно настроек (порт settingsModal): шапка с вкладками-сегментом + тело
 // активной вкладки + футер. Вкладки trackers/debug и конфигуратор (parser) —
@@ -58,6 +59,7 @@ function tabTitle(v: string): string {
     </template>
 
     <SettingsAuth v-if="tab === 'auth'" ref="tabRef" />
+    <SettingsTrackers v-else-if="tab === 'trackers'" />
     <SettingsAgents v-else-if="tab === 'agents'" />
     <div v-else-if="tab === 'parser'" class="tab-stub">
       <i class="pi pi-filter"></i>
