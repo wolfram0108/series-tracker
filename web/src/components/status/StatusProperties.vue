@@ -22,6 +22,7 @@ const toast = useToast()
 
 interface TmdbResult { id: number; name?: string; name_en?: string; original_name?: string; year?: string; poster_path?: string }
 interface TmdbSeason { season_number: number; episode_count: number }
+interface Torrent { torrent_id?: string | number; link?: string; date_time?: string; episodes?: string; quality?: string; is_active?: boolean }
 type VState = "valid" | "invalid" | null
 
 const s = props.series
@@ -33,11 +34,104 @@ const form = reactive({
   name_en: String((s as Record<string, unknown>).name_en ?? ""),
   save_path: String((s as Record<string, unknown>).save_path ?? ""),
   season: String(s.season ?? ""),
+  quality: String((s as Record<string, unknown>).quality ?? ""),
   quality_override: String((s as Record<string, unknown>).quality_override ?? ""),
   resolution_override: String((s as Record<string, unknown>).resolution_override ?? ""),
   parser_profile_id: ((s as Record<string, unknown>).parser_profile_id ?? null) as number | null,
   vk_search_mode: String((s as Record<string, unknown>).vk_search_mode ?? "search"),
 })
+const site = String((s as Record<string, unknown>).site ?? "")
+const trackerInfo = (s as Record<string, unknown>).tracker_info as { ui_features?: { quality_selector?: string } } | null
+const qualitySelector = computed(() => trackerInfo?.ui_features?.quality_selector || "")
+
+// --- доступные раздачи с сайта + выбор качества (порт StatusTabProperties) ---
+const allSiteTorrents = ref<Torrent[]>([])
+const siteTorrentsLoading = ref(false)
+const siteDataIsStale = ref(false)
+const anilibriaQ = ref<string[]>([]) // варианты качества (anilibria/rutracker)
+const astarQ = reactive<Record<string, string[]>>({}) // по группам эпизодов (astar)
+const qualityByEpisodes = reactive<Record<string, string>>({})
+
+function sortEpisodeKeys(keys: string[]): string[] {
+  const firstNum = (k: string) => {
+    const m = k.match(/\d+/)
+    return m ? parseInt(m[0], 10) : Infinity
+  }
+  return [...keys].sort((a, b) => {
+    const na = firstNum(a)
+    const nb = firstNum(b)
+    return na === nb ? a.localeCompare(b) : na - nb
+  })
+}
+const sortedQualityOptionsKeys = computed(() => (site.includes("astar") ? sortEpisodeKeys(Object.keys(astarQ)) : []))
+const qualityOptionsAnilibria = computed(() => anilibriaQ.value.map((q) => ({ label: q, value: q })))
+const astarHasAlternatives = computed(() => Object.values(astarQ).some((o) => o.length > 1))
+const filteredSiteTorrents = computed(() => {
+  if (!allSiteTorrents.value.length) return []
+  if (site.includes("anilibria") || site.includes("aniliberty")) {
+    return allSiteTorrents.value.filter((t) => t.quality === form.quality)
+  }
+  if (site.includes("astar")) {
+    const choices = Object.values(qualityByEpisodes)
+    return allSiteTorrents.value.filter((t) =>
+      (astarQ[t.episodes ?? ""] || []).length <= 1 ? choices.includes(t.quality ?? "") : t.quality === qualityByEpisodes[t.episodes ?? ""],
+    )
+  }
+  return allSiteTorrents.value
+})
+
+// предвыбор качества из сохранённого (как _buildQualityOptions)
+function buildQualityOptions(torrents: Torrent[]) {
+  if (site.includes("anilibria") || site.includes("aniliberty") || site.includes("rutracker")) {
+    anilibriaQ.value = [...new Set(torrents.filter((t) => t.quality).map((t) => t.quality as string))]
+    if (!form.quality || !anilibriaQ.value.includes(form.quality)) form.quality = anilibriaQ.value[0] || ""
+  } else if (site.includes("astar")) {
+    Object.keys(astarQ).forEach((k) => delete astarQ[k])
+    torrents.forEach((t) => {
+      if (t.episodes) {
+        if (!astarQ[t.episodes]) astarQ[t.episodes] = []
+        if (t.quality) astarQ[t.episodes].push(t.quality)
+      }
+    })
+    const saved = form.quality ? form.quality.split(";") : []
+    let i = 0
+    sortedQualityOptionsKeys.value.forEach((ep) => {
+      const opts = astarQ[ep]
+      if (opts.length > 1) {
+        qualityByEpisodes[ep] = saved[i] || opts.find((q) => q !== "old") || opts[0]
+        i++
+      } else {
+        qualityByEpisodes[ep] = opts[0]
+      }
+    })
+  }
+}
+
+async function refreshSiteTorrents() {
+  siteTorrentsLoading.value = true
+  siteDataIsStale.value = false
+  try {
+    const hist = (await request(
+      api.GET("/api/series/{series_id}/torrents/history", { params: { path: { series_id: Number(s.id) } } } as never),
+    )) as Torrent[] | null
+    if (Array.isArray(hist)) {
+      allSiteTorrents.value = hist
+      buildQualityOptions(hist)
+    }
+    const { data } = await api.POST("/api/parse_url", { body: { url } } as never)
+    const res = (data ?? null) as { success?: boolean; torrents?: Torrent[]; error?: string } | null
+    if (res?.success && Array.isArray(res.torrents)) {
+      allSiteTorrents.value = res.torrents
+      buildQualityOptions(res.torrents)
+    } else {
+      siteDataIsStale.value = true
+    }
+  } catch {
+    siteDataIsStale.value = true
+  } finally {
+    siteTorrentsLoading.value = false
+  }
+}
 const url = String((s as Record<string, unknown>).url ?? "")
 const isSeasonless = ref(!form.season)
 const showValidation = ref(false)
@@ -206,7 +300,25 @@ async function save(): Promise<boolean> {
       parser_profile_id: form.parser_profile_id,
       vk_search_mode: form.vk_search_mode,
     }
-    if (isVk) payload.url = `${vkChannelUrl.value}|${vkQuery.value}`
+    if (isVk) {
+      payload.url = `${vkChannelUrl.value}|${vkQuery.value}`
+    } else {
+      // строка качества (как в оригинале): anilibria/rutracker → одно
+      // значение; astar → версии мульти-групп + по одной из одиночных, ';'
+      let quality = ""
+      if (site.includes("anilibria") || site.includes("aniliberty") || site.includes("rutracker")) {
+        quality = form.quality
+      } else if (site.includes("astar")) {
+        const multi = sortedQualityOptionsKeys.value
+          .filter((ep) => astarQ[ep] && astarQ[ep].length > 1)
+          .map((ep) => qualityByEpisodes[ep])
+        const single = new Set(
+          sortedQualityOptionsKeys.value.filter((ep) => astarQ[ep] && astarQ[ep].length === 1).map((ep) => astarQ[ep][0]),
+        )
+        quality = [...multi, ...Array.from(single)].join(";")
+      }
+      payload.quality = quality
+    }
     if (tmdbSelected.value) {
       payload.tmdb_data = {
         tmdb_id: tmdbSelected.value.id,
@@ -232,7 +344,10 @@ async function save(): Promise<boolean> {
 }
 
 defineExpose({ save })
-onMounted(loadProfiles)
+onMounted(() => {
+  void loadProfiles()
+  if (!isVk) void refreshSiteTorrents() // автопарсинг доступных раздач + качество
+})
 </script>
 
 <template>
@@ -345,6 +460,76 @@ onMounted(loadProfiles)
           <span class="modern-form-check-label">Раздача содержит несколько сезонов (или сезон не важен)</span>
         </label>
       </div>
+    </div>
+
+    <!-- Выбор качества (торрент, по tracker_info.ui_features) -->
+    <div v-if="!isVk && qualitySelector === 'anilibria'" class="modern-fieldset">
+      <div class="fieldset-header"><span class="fieldset-title">Выбор качества</span></div>
+      <div class="fieldset-content">
+        <div v-if="qualityOptionsAnilibria.length" class="field-group">
+          <StGroup>
+            <div class="constructor-item item-label">Качество</div>
+            <StSelect
+              :model-value="form.quality"
+              :options="qualityOptionsAnilibria"
+              @update:model-value="form.quality = $event as string"
+            />
+          </StGroup>
+        </div>
+        <div v-else-if="!siteTorrentsLoading" class="add-error">Качества не найдены</div>
+      </div>
+    </div>
+    <div v-if="!isVk && qualitySelector === 'astar'" class="modern-fieldset">
+      <div class="fieldset-header"><span class="fieldset-title">Выбор качества</span></div>
+      <div class="fieldset-content">
+        <template v-for="ep in sortedQualityOptionsKeys" :key="ep">
+          <div v-if="astarQ[ep] && astarQ[ep].length > 1" class="field-group mt-2">
+            <StGroup>
+              <div class="constructor-item item-label">Эпизоды {{ ep }}</div>
+              <StSelect
+                :model-value="qualityByEpisodes[ep]"
+                :options="astarQ[ep].map((q) => ({ label: q, value: q }))"
+                @update:model-value="qualityByEpisodes[ep] = $event as string"
+              />
+            </StGroup>
+          </div>
+        </template>
+        <div v-if="!siteTorrentsLoading && !astarHasAlternatives" class="fieldset-hint">
+          Для данного релиза нет альтернативных версий.
+        </div>
+      </div>
+    </div>
+
+    <!-- Доступные раздачи с сайта (торрент) -->
+    <div v-if="!isVk" class="add-torrents">
+      <h6 class="add-torrents-title">Раздачи с сайта (по выбранному качеству)</h6>
+      <div v-if="siteTorrentsLoading" class="status-loading">
+        <i class="pi pi-spin pi-spinner" /> Обновляем список с сайта…
+      </div>
+      <template v-else>
+        <div class="div-table table-site-torrents">
+          <div class="div-table-header">
+            <div class="div-table-cell">ID</div>
+            <div class="div-table-cell">Ссылка</div>
+            <div class="div-table-cell">Дата</div>
+            <div class="div-table-cell">Эпизоды</div>
+            <div class="div-table-cell">Качество</div>
+          </div>
+          <div class="div-table-body">
+            <div v-for="(t, i) in filteredSiteTorrents" :key="t.torrent_id ?? i" class="div-table-row" :class="{ 'row-stale': siteDataIsStale }">
+              <div class="div-table-cell">{{ t.torrent_id }}</div>
+              <div class="div-table-cell">{{ t.link }}</div>
+              <div class="div-table-cell">{{ t.date_time }}</div>
+              <div class="div-table-cell">{{ t.episodes }}</div>
+              <div class="div-table-cell">{{ t.quality }}</div>
+            </div>
+            <div v-if="!filteredSiteTorrents.length" class="div-table-row"><div class="div-table-cell" style="grid-column: 1 / -1">Раздач не найдено</div></div>
+          </div>
+        </div>
+        <small v-if="siteDataIsStale" class="add-error" style="display: block; margin-top: 8px">
+          Не удалось обновить данные с сайта — показана последняя сохранённая версия.
+        </small>
+      </template>
     </div>
 
     <!-- TMDB -->

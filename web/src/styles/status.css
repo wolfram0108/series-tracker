@@ -3,7 +3,9 @@
    специфика содержимого вкладок. */
 
 /* загрузка серии */
-.status-loading { display: flex; justify-content: center; padding: 48px 0; color: var(--text-muted); }
+.status-loading { display: flex; justify-content: center; align-items: center; gap: 10px; padding: 48px 0; color: var(--text-muted); }
+/* строки таблицы раздач, когда показана устаревшая (несвежая) версия */
+.table-site-torrents .div-table-row.row-stale { background: rgba(220, 53, 69, 0.06); }
 
 /* строка url (readonly + копировать/открыть) */
 .url-actions { display: flex; align-items: stretch; }
