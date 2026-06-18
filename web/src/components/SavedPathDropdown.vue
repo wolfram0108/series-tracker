@@ -65,29 +65,3 @@ onBeforeUnmount(() => document.removeEventListener("click", onOutside, true))
   </div>
 </template>
 
-<style scoped>
-.saved-path-trigger {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 0.85rem;
-  cursor: pointer;
-  position: relative;
-  color: var(--color-gray-600);
-  transition: color 0.2s ease, background 0.2s ease;
-}
-.saved-path-trigger:hover { background: var(--color-gray-100); color: var(--color-blue); }
-.saved-path-trigger .chevron { margin-left: 0; }
-.saved-path-trigger.open .chevron { transform: rotate(180deg); color: var(--color-blue); }
-/* список во всю ширину группы, выпадает вниз */
-.saved-path-trigger .options-list {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  min-width: 260px;
-  max-height: 240px;
-  overflow-y: auto;
-  z-index: 30;
-}
-.path-combo-empty { padding: 0.75rem 1rem; color: var(--text-muted); white-space: nowrap; }
-</style>

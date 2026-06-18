@@ -29,21 +29,26 @@
   50% { box-shadow: 0 0 4px 1px rgba(13, 110, 253, 0.2); }
 }
 
-/* Блок-рамка раздела настроек (порт modern-fieldset). */
+/* Блок-рамка раздела (точный порт lists.css .modern-fieldset). */
 .modern-fieldset {
+  background: var(--bg-white);
   border: 1px solid var(--border-color);
   border-radius: var(--card-border-radius);
+  margin-bottom: 24px;
   overflow: hidden;
-  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 .modern-fieldset:last-child { margin-bottom: 0; }
 .fieldset-header {
   display: flex; align-items: center; gap: 8px;
-  background: var(--bg-light); padding: 10px 16px;
-  font-weight: 600; color: var(--color-gray-700, #495057);
+  justify-content: space-between;
+  background: linear-gradient(135deg, var(--bg-light) 0%, var(--border-color) 100%);
+  padding: 16px 20px;
   border-bottom: 1px solid var(--border-color);
 }
-.fieldset-content { padding: 16px; }
+.fieldset-title { font-size: 16px; font-weight: 600; color: #2c3e50; }
+.fieldset-header { font-size: 16px; font-weight: 600; color: #2c3e50; }
+.fieldset-content { padding: 20px; }
 .fieldset-hint { display: block; margin-top: 8px; font-size: 0.85rem; color: var(--text-muted); }
 
 .series-list { display: flex; flex-direction: column; }

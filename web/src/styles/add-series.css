@@ -1,34 +1,17 @@
-/* Стили модалки «Добавить сериал» (порт addSeriesModal).
-   Структурные классы групп-конструкторов, которых ещё не было в
-   fields.css, и виджет-специфика (режим VK, TMDB, таблица торрентов). */
+/* Окно «Добавить сериал» — порт addSeriesModal.
+   Исходная модалка опирается на Bootstrap-компоненты (btn-group/btn-check,
+   form-switch, input-group/list-group/alert), которых нет в новом стеке.
+   Здесь они воссозданы точно под вид оригинала; структурные классы групп
+   и таблиц — в fields.css/tables.css/layout.css. */
 
-/* отступ между группами полей внутри fieldset */
-.field-group + .field-group,
-.modern-fieldset .field-group { margin-top: 0; }
-
-/* текстовый лейбл-сегмент группы (constructor-item item-label) */
-.constructor-item.item-label {
-  padding: 0 1rem;
-  background-color: var(--color-gray-100);
-  color: var(--color-gray-700, #495057);
-  font-weight: 500;
-  white-space: nowrap;
-  z-index: 1;
-}
-/* лейбл-сегмент «иконка + текст» (item-label-text-icon) */
-.constructor-item.item-label-text-icon {
-  width: auto;
-  gap: 0.5rem;
-  padding: 0 1rem;
-  white-space: nowrap;
-  font-weight: 500;
-}
-
-/* отключённая группа (seasonless гасит поле сезона) */
-.input-constructor-group.is-disabled {
-  opacity: 0.55;
-  pointer-events: none;
-}
+/* отступ ошибки/подсказки под полем URL */
+.add-hint { color: var(--text-muted); margin: 8px 0 0; }
+.add-error { color: var(--color-red-1); margin: 8px 0 0; }
+.add-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.mt-2 { margin-top: 8px; }
+.mt-3 { margin-top: 16px; }
+.mb-2 { margin-bottom: 8px; }
+@media (max-width: 720px) { .add-grid-2 { grid-template-columns: 1fr; } }
 
 .modern-label {
   display: block;
@@ -37,117 +20,149 @@
   color: var(--color-text);
 }
 
-/* --- режим поиска VK (двухкнопочный переключатель) --- */
+/* --- режим поиска VK: btn-group + btn-check + btn-outline-primary --- */
 .vk-mode-group {
-  display: flex;
+  display: inline-flex;
   width: 100%;
-  border: 1px solid var(--color-gray-300, #dee2e6);
-  border-radius: var(--border-radius);
+  border-radius: 8px;
   overflow: hidden;
 }
 .vk-mode-btn {
   flex: 1 1 0;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 10px 14px;
-  background: var(--color-white, #fff);
-  border: none;
-  color: var(--color-blue);
+  padding: 0.5rem 0.75rem;
   font: inherit;
+  font-weight: 500;
   cursor: pointer;
+  color: var(--color-blue);
+  background: #fff;
+  border: 1px solid var(--color-blue);
   transition: background 0.15s ease, color 0.15s ease;
 }
-.vk-mode-btn + .vk-mode-btn { border-left: 1px solid var(--color-gray-300, #dee2e6); }
-.vk-mode-btn:hover { background: var(--color-gray-100); }
-.vk-mode-btn.active { background: var(--color-blue); color: #fff; }
+.vk-mode-btn:first-child { border-radius: 8px 0 0 8px; }
+.vk-mode-btn:last-child { border-radius: 0 8px 8px 0; }
+.vk-mode-btn + .vk-mode-btn { border-left: none; }
+.vk-mode-btn:hover { background: rgba(13, 110, 253, 0.06); }
+.vk-mode-btn.active {
+  background: var(--color-blue);
+  border-color: var(--color-blue);
+  color: #fff;
+}
 
-/* --- TMDB-виджет --- */
-.tmdb-search { display: flex; gap: 10px; margin-bottom: 14px; }
-.tmdb-search-input {
+/* --- переключатель «несколько сезонов»: modern-form-check + form-switch --- */
+.modern-form-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0;
+}
+.modern-form-check-label { font-size: 14px; color: var(--color-text); cursor: pointer; line-height: 1.4; }
+/* пилюля-переключатель (порт bootstrap form-switch) */
+.form-switch-input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 2.5em;
+  height: 1.35em;
+  margin: 0;
+  flex-shrink: 0;
+  background-color: var(--color-gray-300, #dee2e6);
+  border-radius: 2em;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.form-switch-input::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0.15em;
+  transform: translateY(-50%);
+  width: 1.05em;
+  height: 1.05em;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 0.2s ease;
+}
+.form-switch-input:checked { background-color: var(--color-blue); }
+.form-switch-input:checked::before { left: calc(100% - 1.2em); }
+
+/* --- TMDB-виджет: input-group / list-group / alert-success --- */
+.input-group { display: flex; align-items: stretch; }
+.input-group .form-control { border-radius: 8px 0 0 8px; border-right: none; }
+.input-group .input-group-btn { border-radius: 0 8px 8px 0; white-space: nowrap; }
+.form-control {
   flex: 1;
-  padding: 0 14px;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
   height: 42px;
-  border: 1px solid var(--color-gray-300, #dee2e6);
-  border-radius: var(--border-radius);
+  border: 1px solid var(--color-gray-300, #ced4da);
+  border-radius: 8px;
   font: inherit;
   color: var(--color-text);
+  background: #fff;
 }
-.tmdb-search-input:focus { outline: none; border-color: var(--color-blue); }
+.form-control:focus { outline: none; border-color: var(--color-blue); box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.15); }
+/* кнопка-«Найти» в группе — btn-outline-primary */
+.input-group-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 0.9rem;
+  background: #fff;
+  color: var(--color-blue);
+  border: 1px solid var(--color-blue);
+  font: inherit; font-weight: 500; cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.input-group-btn:hover:not(:disabled) { background: var(--color-blue); color: #fff; }
+.input-group-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .tmdb-results {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 220px;
-  overflow-y: auto;
-  margin-bottom: 14px;
+  display: flex; flex-direction: column;
+  max-height: 200px; overflow-y: auto;
+  margin-bottom: 1rem;
+  border-radius: 8px;
 }
+/* list-group-item-action */
 .tmdb-result {
   text-align: left;
-  padding: 10px 14px;
-  border: 1px solid var(--color-gray-200, #e9ecef);
-  border-radius: var(--border-radius);
-  background: var(--color-white, #fff);
+  padding: 0.75rem 1rem;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.125);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  color: var(--color-text);
+  transition: background 0.15s ease;
 }
+.tmdb-result + .tmdb-result { border-top: none; }
+.tmdb-result:first-child { border-radius: 8px 8px 0 0; }
+.tmdb-result:last-child { border-radius: 0 0 8px 8px; }
 .tmdb-result:hover { background: var(--color-gray-100); }
 .tmdb-result.active { background: var(--color-blue); border-color: var(--color-blue); color: #fff; }
 .tmdb-result-top { display: flex; justify-content: space-between; gap: 12px; }
 .tmdb-result-name { font-weight: 600; }
-.tmdb-result-orig { opacity: 0.75; }
+.tmdb-result-name small { font-weight: 400; opacity: 0.85; }
+.tmdb-result-orig { opacity: 0.8; }
 
+/* alert-success */
 .tmdb-selected {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: var(--border-radius);
-  background: var(--color-green-bg, #d1e7dd);
-  color: var(--color-green-text, #0f5132);
-  margin-bottom: 14px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0.75rem 1rem;
+  border: 1px solid #badbcc;
+  border-radius: 8px;
+  background: #d1e7dd;
+  color: #0f5132;
+  margin-bottom: 1rem;
 }
-.tmdb-selected .pi-check-circle { font-size: 1.3rem; }
+.tmdb-selected .pi-check-circle { font-size: 1.2rem; }
 .tmdb-selected-text { flex: 1; }
-.tmdb-clear {
-  background: transparent; border: none; cursor: pointer;
-  color: inherit; opacity: 0.7; font-size: 1rem;
-}
+.tmdb-clear { background: transparent; border: none; cursor: pointer; color: inherit; opacity: 0.7; font-size: 0.95rem; }
 .tmdb-clear:hover { opacity: 1; }
 
 .tmdb-catalog-label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 4px; }
-.tmdb-catalog-row { display: flex; gap: 10px; }
-.tmdb-catalog-input {
-  flex: 1;
-  padding: 0 14px;
-  height: 42px;
-  border: 1px solid var(--color-gray-300, #dee2e6);
-  border-radius: var(--border-radius);
-  font-family: var(--font-mono);
-  color: var(--color-text);
-  background: var(--bg-light, #f8f9fa);
-}
+.tmdb-catalog .input-group .form-control { font-family: var(--font-mono); background: var(--bg-light); }
 
-/* --- таблица доступных торрентов --- */
-.add-torrents { margin-top: 16px; }
-.add-torrents-title { margin: 0 0 8px; font-size: 1rem; }
-.add-torrents-table .div-table-header,
-.add-torrents-table .div-table-row {
-  display: grid;
-  grid-template-columns: 160px 1fr 130px 80px 90px;
-  gap: 8px;
-}
-/* torrent_id в новой системе — 16-символьный хеш (ids.torrent_id), не int */
-.add-torrents-table .div-table-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.add-torrents-table .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* переключатель «несколько сезонов» */
-.seasonless-switch {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  cursor: pointer;
-}
+/* заголовок и обёртка таблицы найденных раздач */
+.add-torrents { margin-top: 1.5rem; }
+.add-torrents-title { margin: 0 0 0.5rem; font-size: 1rem; font-weight: 600; }

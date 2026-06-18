@@ -33,6 +33,14 @@
   position: relative;
   border-radius: var(--inner-border-radius);
 }
+/* текстовый лейбл-сегмент группы (порт constructor.css .item-label) */
+.item-label {
+  padding: 0 1rem;
+  background-color: var(--color-gray-100);
+  color: var(--color-gray-600);
+  font-weight: 500;
+  z-index: 1;
+}
 .item-label-icon {
   width: 50px;
   justify-content: center;
@@ -42,6 +50,36 @@
   color: var(--color-gray-600);
   z-index: 1;
 }
+/* лейбл «иконка + текст» (порт .item-label-text-icon) */
+.item-label-text-icon {
+  width: auto;
+  padding: 0 1rem;
+  gap: 0.5rem;
+  justify-content: flex-start;
+  background-color: var(--color-gray-100);
+  color: var(--color-gray-600);
+  z-index: 1;
+}
+/* отключённая группа — гасит поле сезона при seasonless (порт .is-disabled) */
+.input-constructor-group.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+  background-color: var(--color-gray-100);
+}
+/* кнопка-шеврон выбора сохранённого пути (порт .saved-path-trigger) */
+.saved-path-trigger {
+  width: 44px;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--color-gray-600);
+  transition: color 0.2s ease;
+}
+.saved-path-trigger:hover,
+.saved-path-trigger.open { color: var(--color-blue); }
+.saved-path-trigger .chevron { margin-left: 0; }
+/* список прижат к правому краю триггера (он в конце группы), ширина — фикс. */
+.saved-path-trigger .options-list { left: auto; right: 0; min-width: 320px; max-height: 280px; overflow-y: auto; }
+.path-combo-empty { padding: 0.75rem 1rem; color: var(--text-muted); }
 .item-input {
   flex-grow: 1;
   background: none;

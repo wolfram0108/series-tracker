@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from "vue"
 import Button from "primevue/button"
-import ToggleSwitch from "primevue/toggleswitch"
 import { useToast } from "primevue/usetoast"
 import ModalShell from "./ModalShell.vue"
 import StGroup from "./StGroup.vue"
@@ -387,7 +386,7 @@ onBeforeUnmount(() => {
     <div v-if="parsed || sourceType === 'vk_video'">
       <!-- VK -->
       <div v-if="sourceType === 'vk_video'" class="modern-fieldset">
-        <div class="fieldset-header">Настройки для VK Video</div>
+        <div class="fieldset-header"><span class="fieldset-title">Настройки для VK Video</span></div>
         <div class="fieldset-content">
           <label class="modern-label">Режим поиска</label>
           <div class="vk-mode-group">
@@ -427,7 +426,7 @@ onBeforeUnmount(() => {
 
       <!-- Информация о сериале -->
       <div class="modern-fieldset">
-        <div class="fieldset-header">Информация о сериале</div>
+        <div class="fieldset-header"><span class="fieldset-title">Информация о сериале</span></div>
         <div class="fieldset-content">
           <div class="add-grid-2">
             <StGroup :state="nameState">
@@ -464,16 +463,16 @@ onBeforeUnmount(() => {
       <!-- Несколько сезонов -->
       <div v-if="showSeasonlessSwitch" class="modern-fieldset">
         <div class="fieldset-content">
-          <label class="seasonless-switch">
-            <ToggleSwitch v-model="isSeasonless" />
-            <span>Раздача содержит несколько сезонов (или сезон не важен)</span>
+          <label class="modern-form-check">
+            <input v-model="isSeasonless" type="checkbox" class="form-switch-input" />
+            <span class="modern-form-check-label">Раздача содержит несколько сезонов (или сезон не важен)</span>
           </label>
         </div>
       </div>
 
       <!-- Качество -->
       <div v-if="showQualityBlock" class="modern-fieldset">
-        <div class="fieldset-header">Выбор качества</div>
+        <div class="fieldset-header"><span class="fieldset-title">Выбор качества</span></div>
         <div class="fieldset-content">
           <template v-if="qualitySelector === 'anilibria'">
             <div v-if="isQualityOptionsReady && qualityOptionsAnilibria.length" class="field-group">
@@ -510,17 +509,19 @@ onBeforeUnmount(() => {
 
       <!-- TMDB -->
       <div class="modern-fieldset">
-        <div class="fieldset-header">Синхронизация с TMDB</div>
+        <div class="fieldset-header"><span class="fieldset-title">Синхронизация с TMDB</span></div>
         <div class="fieldset-content">
-          <div class="tmdb-search">
+          <div class="input-group mb-3">
             <input
               v-model="tmdbSearchQuery"
               type="text"
-              class="tmdb-search-input"
+              class="form-control"
               placeholder="Название сериала"
               @keyup.enter="searchTMDB"
             />
-            <Button :loading="tmdbLoading" icon="pi pi-search" label="Найти" severity="secondary" @click="searchTMDB" />
+            <button type="button" class="input-group-btn" :disabled="tmdbLoading" @click="searchTMDB">
+              <i class="pi" :class="tmdbLoading ? 'pi-spin pi-spinner' : 'pi-search'" /> Найти
+            </button>
           </div>
 
           <div v-if="tmdbResults.length" class="tmdb-results">
@@ -553,9 +554,11 @@ onBeforeUnmount(() => {
 
           <div v-if="tmdbSelected && tmdbCatalogName" class="tmdb-catalog">
             <label class="tmdb-catalog-label">Имя каталога</label>
-            <div class="tmdb-catalog-row">
-              <input class="tmdb-catalog-input" :value="tmdbCatalogName" readonly @focus="($event.target as HTMLInputElement).select()" />
-              <Button icon="pi pi-clipboard" severity="secondary" title="Скопировать" @click="copyCatalogName" />
+            <div class="input-group">
+              <input class="form-control" :value="tmdbCatalogName" readonly @focus="($event.target as HTMLInputElement).select()" />
+              <button type="button" class="input-group-btn" title="Скопировать" @click="copyCatalogName">
+                <i class="pi pi-clipboard" />
+              </button>
             </div>
           </div>
         </div>
@@ -564,7 +567,7 @@ onBeforeUnmount(() => {
       <!-- Доступные торренты -->
       <div v-if="sourceType === 'torrent' && parserData && parserData.torrents.length" class="add-torrents">
         <h6 class="add-torrents-title">Доступные торренты ({{ parserData.torrents.length }})</h6>
-        <div class="div-table add-torrents-table">
+        <div class="div-table table-site-torrents">
           <div class="div-table-header">
             <div class="div-table-cell">ID</div>
             <div class="div-table-cell">Ссылка</div>
@@ -575,7 +578,7 @@ onBeforeUnmount(() => {
           <div class="div-table-body">
             <div v-for="(t, i) in parserData.torrents" :key="t.torrent_id ?? i" class="div-table-row">
               <div class="div-table-cell">{{ t.torrent_id }}</div>
-              <div class="div-table-cell ellip">{{ t.link }}</div>
+              <div class="div-table-cell">{{ t.link }}</div>
               <div class="div-table-cell">{{ t.date_time }}</div>
               <div class="div-table-cell">{{ t.episodes }}</div>
               <div class="div-table-cell">{{ t.quality }}</div>
@@ -591,13 +594,3 @@ onBeforeUnmount(() => {
     </template>
   </ModalShell>
 </template>
-
-<style scoped>
-.add-hint { color: var(--text-muted); margin: 8px 0 0; }
-.add-error { color: var(--color-red-1, #dc3545); margin: 8px 0 0; }
-.add-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.mt-2 { margin-top: 8px; }
-.mt-3 { margin-top: 16px; }
-.mb-2 { margin-bottom: 8px; }
-@media (max-width: 720px) { .add-grid-2 { grid-template-columns: 1fr; } }
-</style>
