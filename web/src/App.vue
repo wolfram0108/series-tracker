@@ -147,11 +147,11 @@ const queueProcessing = [
   { title: "Фронт кровавой блокады", torrent: 12, hash: "974f83ee", stage: "renaming" },
 ]
 const queueDownload = [
-  { file: "Рик и Морти s07e01.mp4", status: "загрузка", cls: "bg-primary", progress: 62, speed: "2.1 MB/s", eta: "1:20", remux: false },
-  { file: "Извне s01e04.mp4", status: "обработка", cls: "bg-info", progress: 90, speed: "", eta: "0:10", remux: true },
+  { file: "Рик и Морти s07e01.mp4", status: "загрузка", cls: "pill-primary", progress: 62, speed: "2.1 MB/s", eta: "1:20", remux: false },
+  { file: "Извне s01e04.mp4", status: "обработка", cls: "pill-info", progress: 90, speed: "", eta: "0:10", remux: true },
 ]
 const queueSlicing = [
-  { title: "Рик и Морти", status: "slicing", chapters: "2 / 5" },
+  { title: "Рик и Морти", status: "slicing", done: 2, total: 5 },
 ]
 const queueMonitor = [
   { title: "Извне", hash: "a1b2c3d4", status: "Загрузка", progress: 48, speed: "2.1 MB/s", eta: "1:20" },
@@ -344,7 +344,7 @@ const rtPass = ref("password123")
             <span class="queue-title">{{ t.title }}</span>
             <div class="pill"><i class="pi pi-link"></i> Торрент: {{ t.torrent }}</div>
             <div class="pill"><i class="pi pi-key"></i> {{ t.hash }}…</div>
-            <span class="badge bg-info">{{ t.stage }}</span>
+            <div class="pill pill-info">{{ t.stage }}</div>
           </div>
         </div>
       </div>
@@ -354,7 +354,7 @@ const rtPass = ref("password123")
         <div v-for="t in queueDownload" :key="t.file" class="card-final card-queue status-pending">
           <div class="queue-row">
             <span class="queue-title">{{ t.file }}</span>
-            <span class="badge" :class="t.cls">{{ t.status }}</span>
+            <div class="pill" :class="t.cls">{{ t.status }}</div>
             <button class="btn-cancel" title="Отменить загрузку"><i class="pi pi-times"></i></button>
           </div>
           <div class="queue-row">
@@ -375,8 +375,12 @@ const rtPass = ref("password123")
         <div v-for="t in queueSlicing" :key="t.title" class="card-final card-queue status-sliced">
           <div class="queue-row">
             <span class="queue-title">{{ t.title }}</span>
-            <span class="badge bg-info">{{ t.status }}</span>
-            <div class="pill"><i class="pi pi-clone"></i> {{ t.chapters }} глав</div>
+            <div class="pill pill-info">{{ t.status }}</div>
+          </div>
+          <div class="queue-row">
+            <div class="progress">
+              <div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: (t.done / t.total * 100) + '%' }">{{ t.done }} / {{ t.total }} глав</div>
+            </div>
           </div>
         </div>
       </div>
@@ -387,11 +391,11 @@ const rtPass = ref("password123")
           <div class="queue-row">
             <span class="queue-title">{{ t.title }}</span>
             <div class="pill"><i class="pi pi-key"></i> {{ t.hash }}…</div>
-            <span class="badge bg-primary">{{ t.status }}</span>
+            <div class="pill pill-primary">{{ t.status }}</div>
           </div>
           <div class="queue-row">
             <div class="progress">
-              <div class="progress-bar" :style="{ width: t.progress + '%' }">{{ t.progress }}%</div>
+              <div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: t.progress + '%' }">{{ t.progress }}%</div>
             </div>
             <div class="queue-metrics">
               <span class="m-speed">↓{{ t.speed }}</span>
