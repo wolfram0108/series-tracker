@@ -92,10 +92,14 @@ async def test_metadata_search_formats_results(system, monkeypatch):
     await probe.request("settings.value.set",
                         {"key": "tmdb_token", "value": "x"}, timeout=5)
 
+    # поиск идёт двумя запросами: ru-RU (основной) и en-US — английское имя
+    # доезжает в name_en (для тайтлов без русского перевода).
     async def fake_get(self, path, **kwargs):
         assert path == "/search/tv"
+        name = ("Во все тяжкие" if kwargs["params"]["language"] == "ru-RU"
+                else "Breaking Bad")
         return httpx.Response(200, json={"results": [{
-            "id": 4638, "name": "Во все тяжкие",
+            "id": 4638, "name": name,
             "original_name": "Breaking Bad",
             "first_air_date": "2008-01-20",
             "poster_path": "/p.jpg", "overview": "химия"}]},
@@ -105,7 +109,7 @@ async def test_metadata_search_formats_results(system, monkeypatch):
     reply = await probe.request("metadata.search",
                                 {"query": "breaking"}, timeout=5)
     assert reply["results"] == [{
-        "id": 4638, "name": "Во все тяжкие",
+        "id": 4638, "name": "Во все тяжкие", "name_en": "Breaking Bad",
         "original_name": "Breaking Bad", "year": "2008",
         "poster_path": "/p.jpg", "overview": "химия"}]
 

@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 
 from core import BaseModule
@@ -65,12 +67,25 @@ class MetadataModule(BaseModule):
 
     async def on_search(self, env: Envelope) -> dict:
         query = env.payload["query"]
-        data = await self._get("/search/tv", {
-            "query": query, "include_adult": "false",
-            "language": "ru-RU", "page": "1"})
+        params = {"query": query, "include_adult": "false", "page": "1"}
+        # Два запроса параллельно: ru-RU (как раньше) и en-US — чтобы у
+        # тайтлов без русского перевода (азиатские релизы: TMDB отдаёт в
+        # name оригинал-иероглифы) было читаемое английское имя. Английский
+        # — опциональное обогащение: его сбой не валит поиск.
+        data, en_data = await asyncio.gather(
+            self._get("/search/tv", {**params, "language": "ru-RU"}),
+            self._get("/search/tv", {**params, "language": "en-US"}),
+            return_exceptions=True,
+        )
+        if isinstance(data, BaseException):
+            raise data
+        en_names = ({} if isinstance(en_data, BaseException)
+                    else {r.get("id"): r.get("name")
+                          for r in en_data.get("results", [])})
         results = [{
             "id": r.get("id"),
             "name": r.get("name"),
+            "name_en": en_names.get(r.get("id")),
             "original_name": r.get("original_name"),
             "year": (r.get("first_air_date") or "")[:4],
             "poster_path": r.get("poster_path"),
