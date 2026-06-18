@@ -8,6 +8,7 @@ import ConfirmDialog from "./components/ConfirmDialog.vue"
 import SettingsModal from "./components/SettingsModal.vue"
 import LogsModal from "./components/LogsModal.vue"
 import AddSeriesModal from "./components/AddSeriesModal.vue"
+import StatusModal from "./components/StatusModal.vue"
 import { useSeriesStore } from "./stores/series"
 import { useUiStore } from "./stores/ui"
 import { useApi } from "./composables/useApi"
@@ -21,9 +22,10 @@ const seriesStore = useSeriesStore()
 const ui = useUiStore()
 const { request } = useApi()
 const confirm = useConfirm()
-const toast = useToast()
+useToast()
 
-// какая модалка открыта (одна за раз). add/logs/status — следующие под-вехи.
+// какая модалка открыта (одна за раз). Статус-окно управляется отдельно
+// через ui.activeSeriesId (его ставит ui.openStatus + viewing).
 const openModal = ref<null | "settings" | "logs" | "add">(null)
 
 function onScan(id: number) {
@@ -40,8 +42,10 @@ function onToggle(id: number, enabled: boolean) {
   )
 }
 function onOpenStatus(id: number) {
-  void ui.openStatus(id)
-  toast.add({ severity: "info", summary: "Статус", detail: "Окно статуса — в следующей под-вехе Ф4", life: 3000 })
+  void ui.openStatus(id) // ставит activeSeriesId + POST state ['viewing']
+}
+function onCloseStatus() {
+  void ui.closeStatus() // POST state [] (снятие viewing)
 }
 async function onDelete(id: number) {
   const s = seriesStore.byId(id)
@@ -85,6 +89,12 @@ async function onDelete(id: number) {
     <SettingsModal v-if="openModal === 'settings'" @close="openModal = null" />
     <LogsModal v-if="openModal === 'logs'" @close="openModal = null" />
     <AddSeriesModal v-if="openModal === 'add'" @close="openModal = null" @created="seriesStore.load()" />
+    <StatusModal
+      v-if="ui.activeSeriesId"
+      :series-id="ui.activeSeriesId"
+      @close="onCloseStatus"
+      @updated="seriesStore.load()"
+    />
     <ConfirmDialog />
   </main>
 </template>
