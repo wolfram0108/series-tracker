@@ -11,6 +11,7 @@ import "./styles/pills.css"
 import "./styles/card.css"
 import "./styles/cards.css"
 import "./styles/progress.css"
+import "./styles/modal.css"
 import { STPreset } from "./theme/preset"
 import App from "./App.vue"
 

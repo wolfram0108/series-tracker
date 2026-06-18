@@ -1,0 +1,61 @@
+/* Модалка (окно) — порт modern-modal/header/body/footer.
+ * Единое скруглённое окно (overflow:hidden обрезает углы), внутри —
+ * шапка / тело / футер, стыкующиеся через границы. Шапка несёт заголовок,
+ * вкладки (SelectButton) и крестик. База для всех модалок проекта. */
+.modern-modal {
+  border: none;
+  border-radius: var(--card-border-radius); /* 12px */
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  background: var(--bg-white);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Шапка: заголовок | вкладки (растягиваются) | крестик */
+.modern-header {
+  background: var(--bg-light);
+  border-bottom: 1px solid var(--border-color);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.modern-header .modal-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #2c3e50;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.modern-header .header-tabs { flex: 1; min-width: 0; } /* SelectButton-вкладки занимают серединку */
+
+.modern-close {
+  flex-shrink: 0;
+  width: 36px; height: 36px;
+  padding: 8px; border: none; background: transparent; cursor: pointer;
+  border-radius: 8px; color: var(--text-muted);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all 0.2s ease;
+}
+.modern-close:hover { background: rgba(0, 0, 0, 0.05); color: #2c3e50; }
+
+/* Тело */
+.modern-body {
+  padding: 24px;
+  background: var(--bg-white);
+}
+
+/* Футер */
+.modern-footer {
+  background: var(--bg-light);
+  border-top: 1px solid var(--border-color);
+  padding: 16px 24px;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}

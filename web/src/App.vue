@@ -468,16 +468,32 @@ const rtPass = ref("password123")
     </section>
 
     <section>
-      <h2>Шапка вкладок настроек (SelectButton вместо папочек)</h2>
-      <p class="muted small">Папочки плохо переживали resize (ломались на 2 строки). Сегмент SelectButton на всю ширину тянется/сжимается ровно.</p>
-      <SelectButton v-model="settingsTab" :options="settingsTabs" optionValue="value" :allowEmpty="false" class="settings-tabs">
-        <template #option="{ option }">
-          <i class="pi tab-icon" :class="option.icon"></i>
-          <span class="tab-label">{{ option.label }}</span>
-        </template>
-      </SelectButton>
-      <div class="settings-tab-body">
-        Содержимое вкладки «<strong>{{ settingsTabs.find((t) => t.value === settingsTab)?.label }}</strong>»
+      <h2>Окно настроек — шапка с вкладками (SelectButton)</h2>
+      <p class="muted small">Целая модалка: шапка (заголовок + вкладки + крестик), тело, футер — единое скруглённое окно. Вкладки интегрированы в шапку и адаптивны (узко → иконки), вместо ломавшихся папочек.</p>
+      <div class="modern-modal">
+        <div class="modern-header">
+          <h5 class="modal-title"><i class="pi pi-cog"></i> Настройки</h5>
+          <SelectButton
+            v-model="settingsTab"
+            :options="settingsTabs"
+            optionValue="value"
+            :allowEmpty="false"
+            class="header-tabs settings-tabs"
+          >
+            <template #option="{ option }">
+              <i class="pi tab-icon" :class="option.icon"></i>
+              <span class="tab-label">{{ option.label }}</span>
+            </template>
+          </SelectButton>
+          <button class="modern-close" title="Закрыть"><i class="pi pi-times"></i></button>
+        </div>
+        <div class="modern-body">
+          Содержимое вкладки «<strong>{{ settingsTabs.find((t) => t.value === settingsTab)?.label }}</strong>» — здесь формы/таблицы соответствующего раздела.
+        </div>
+        <div class="modern-footer">
+          <Button label="Сохранить" icon="pi pi-check" />
+          <Button label="Закрыть" icon="pi pi-times" severity="secondary" />
+        </div>
       </div>
     </section>
 
@@ -613,16 +629,13 @@ h3.sub { font-size: 0.85rem; color: var(--color-gray-600); margin: 18px 0 8px; f
    поровну (как полноширинный btn-group) — ровно переживает resize. */
 .settings-tabs { display: flex; width: 100%; }
 .settings-tabs :deep(.p-togglebutton) { flex: 1; min-width: 0; }
+/* активная вкладка не сжимается — её подпись читаема всегда, остальные жмутся */
+.settings-tabs :deep(.p-togglebutton-checked) { flex: 0 0 auto; }
 .settings-tabs :deep(.tab-icon) { margin-right: 6px; }
 .settings-tabs :deep(.tab-label) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* узкий контейнер: прячем подписи, оставляем иконки — 5 иконок влезают всегда */
 @media (max-width: 620px) {
   .settings-tabs :deep(.tab-label) { display: none; }
   .settings-tabs :deep(.tab-icon) { margin-right: 0; }
-}
-.settings-tab-body {
-  border: 1px solid var(--color-gray-200); border-top: none;
-  border-radius: 0 0 var(--border-radius) var(--border-radius);
-  padding: 20px; background: var(--bg-white); color: var(--text-muted);
 }
 </style>
