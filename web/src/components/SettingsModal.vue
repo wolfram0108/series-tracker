@@ -1,15 +1,30 @@
 <script setup lang="ts">
-import { ref } from "vue"
+import { ref, computed } from "vue"
 import Button from "primevue/button"
 import ModalShell from "./ModalShell.vue"
 import SettingsAgents from "./settings/SettingsAgents.vue"
+import SettingsAuth from "./settings/SettingsAuth.vue"
 
 // Окно настроек (порт settingsModal): шапка с вкладками-сегментом + тело
-// активной вкладки + футер. Вкладки auth/trackers/debug и конфигуратор
-// (parser) — следующие под-вехи Ф4, пока заглушки.
+// активной вкладки + футер. Вкладки trackers/debug и конфигуратор (parser) —
+// следующие под-вехи Ф4, пока заглушки.
 const emit = defineEmits<{ (e: "close"): void }>()
 
-const tab = ref<"auth" | "trackers" | "parser" | "agents" | "debug">("agents")
+const tab = ref<"auth" | "trackers" | "parser" | "agents" | "debug">("auth")
+
+// ссылка на активную вкладку с методом save() (для кнопки в футере)
+const tabRef = ref<{ save?: () => Promise<boolean> } | null>(null)
+const savable = computed(() => tab.value === "auth")
+const saving = ref(false)
+async function onSave() {
+  if (!tabRef.value?.save) return
+  saving.value = true
+  try {
+    await tabRef.value.save()
+  } finally {
+    saving.value = false
+  }
+}
 const tabs = [
   { label: "Авторизация", value: "auth", icon: "pi-key" },
   { label: "Трекеры", value: "trackers", icon: "pi-wifi" },
@@ -42,7 +57,8 @@ function tabTitle(v: string): string {
       </div>
     </template>
 
-    <SettingsAgents v-if="tab === 'agents'" />
+    <SettingsAuth v-if="tab === 'auth'" ref="tabRef" />
+    <SettingsAgents v-else-if="tab === 'agents'" />
     <div v-else-if="tab === 'parser'" class="tab-stub">
       <i class="pi pi-filter"></i>
       <p>Конфигуратор правил VK (drag-and-drop) — крупная отдельная веха Ф4, в работе.</p>
@@ -53,6 +69,13 @@ function tabTitle(v: string): string {
     </div>
 
     <template #footer>
+      <Button
+        v-if="savable"
+        label="Сохранить"
+        icon="pi pi-check"
+        :loading="saving"
+        @click="onSave"
+      />
       <Button label="Закрыть" icon="pi pi-times" severity="secondary" @click="emit('close')" />
     </template>
   </ModalShell>
