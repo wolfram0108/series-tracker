@@ -121,3 +121,15 @@
 .layer-stripes.stripes-normal::before { animation: move-stripes 2s linear infinite; }
 .layer-stripes.stripes-slow::before { animation: move-stripes 10s linear infinite; }
 .layer-stripes.stripes-stopped::before { animation: none; }
+
+/* Анимация смены пилюль статуса (Vue TransitionGroup name="badge-fade").
+ * Появление: scale(0.8)→1; исчезновение: scale→0.6 + «схлопывание» ширины
+ * и отступов в ноль; badge-fade-move — плавный сдвиг соседних пилюль. */
+.badge-fade-enter-active { transition: all 0.3s ease-out; }
+.badge-fade-leave-active { transition: all 0.4s ease-in; }
+.badge-fade-move { transition: transform 0.4s ease; }
+.badge-fade-enter-from { opacity: 0; transform: scale(0.8); }
+.badge-fade-leave-to {
+  opacity: 0; transform: scale(0.6);
+  padding-left: 0; padding-right: 0; margin-left: 0; margin-right: 0; max-width: 0px;
+}

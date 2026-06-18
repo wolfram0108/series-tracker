@@ -108,10 +108,12 @@ const pills = computed(() => {
 
     <div class="card-body">
       <div class="status-pills-container">
-        <div v-for="p in pills" :key="p.key" class="status-pill">
-          <i v-if="p.icon" class="pi" :class="p.icon"></i>
-          <span v-if="p.title">{{ p.title }}</span>
-        </div>
+        <TransitionGroup name="badge-fade">
+          <div v-for="p in pills" :key="p.key" class="status-pill">
+            <i v-if="p.icon" class="pi" :class="p.icon"></i>
+            <span v-if="p.title">{{ p.title }}</span>
+          </div>
+        </TransitionGroup>
         <div v-if="series.tmdb" class="status-pill ms-auto" title="Прогресс эпизодов">
           <i class="pi pi-images"></i>
           <span>{{ series.tmdb.downloaded }} / {{ series.tmdb.total }}</span>

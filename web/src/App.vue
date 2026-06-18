@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue"
+import { ref, reactive, onUnmounted } from "vue"
 import InputText from "primevue/inputtext"
 import InputNumber from "primevue/inputnumber"
 import Select from "primevue/select"
@@ -29,6 +29,42 @@ const cards = [
   { id: 8, name: "Несколько статусов", site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "downloading", "metadata"] },
   { id: 9, name: "Готов + ожидание (VK)", site: "vk_video", auto_scan_enabled: true, statuses: ["ready", "waiting"], tmdb: { downloaded: 7, total: 24 } },
 ]
+
+// Симуляция анимаций карточки: смена статусов → перетекание слоёв (0.8s),
+// fade пилюль (badge-fade), смена скорости полос. Эталон — старый фронт.
+const simStates: Record<string, string[]> = {
+  "Ожидание": ["waiting"],
+  "Сканирование": ["scanning"],
+  "Загрузка": ["downloading"],
+  "Простой": ["idle"],
+  "В очереди": ["queued"],
+  "Метадата": ["metadata"],
+  "Готов": ["ready"],
+  "Мульти": ["scanning", "downloading", "metadata"],
+  "Ошибка": ["error"],
+}
+const simSeries = reactive({
+  id: 42, name: "Симуляция анимаций", site: "kinozal.me",
+  auto_scan_enabled: true, statuses: ["waiting"] as string[],
+  last_scan_time: "18.06, 00:34", tmdb: { downloaded: 6, total: 12 },
+})
+function setSim(states: string[]) { simSeries.statuses = states }
+const seq = Object.values(simStates)
+let simIdx = 0
+let simTimer: number | undefined
+const playing = ref(false)
+function togglePlay() {
+  playing.value = !playing.value
+  if (playing.value) {
+    simTimer = window.setInterval(() => {
+      simIdx = (simIdx + 1) % seq.length
+      simSeries.statuses = seq[simIdx]
+    }, 1500)
+  } else {
+    clearInterval(simTimer)
+  }
+}
+onUnmounted(() => clearInterval(simTimer))
 
 // Парити-галерея (Ф2). Эталон — старый фронт на «/».
 const text = ref("Очень странные дела")
@@ -132,6 +168,23 @@ const rtPass = ref("password123")
     <section>
       <h2>Карточки сериала (кастом-островок) — по состояниям</h2>
       <SeriesCard v-for="c in cards" :key="c.id" :series="c" />
+    </section>
+
+    <section>
+      <h2>Симуляция анимаций карточки (слои + пилюли + полосы)</h2>
+      <p class="muted">Жми сценарии или «Прогон» — слои перетекают (0.8s), пилюли появляются/схлопываются (badge-fade), полосы меняют скорость (2s / 10s / стоп).</p>
+      <SeriesCard :series="simSeries" />
+      <div class="row" style="margin-top: 12px">
+        <Button
+          v-for="(states, name) in simStates"
+          :key="name"
+          :label="name"
+          size="small"
+          severity="secondary"
+          @click="setSim(states)"
+        />
+        <Button :label="playing ? '⏸ Стоп' : '▶ Прогон'" size="small" @click="togglePlay" />
+      </div>
     </section>
 
     <section>
