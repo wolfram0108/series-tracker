@@ -143,6 +143,10 @@
   display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 14px;
   /* align-items: stretch обязателен — у базового .card-final он center,
      что в flex-column схлопывало бы строки по ширине и центрировало */
+  /* нейтральный серебряный фон: очередь агентов — штатный процесс, статус
+     несёт тонированная пилюля, а не цвет всей карточки (жёлтый читался как warning) */
+  background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+  border-color: #dee2e6;
 }
 .card-queue .queue-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .card-queue .queue-title {

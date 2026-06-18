@@ -339,7 +339,7 @@ const rtPass = ref("password123")
 
       <h3 class="sub">Агент Обработки</h3>
       <div class="composition-cards-container">
-        <div v-for="t in queueProcessing" :key="t.hash" class="card-final card-queue status-pending">
+        <div v-for="t in queueProcessing" :key="t.hash" class="card-final card-queue">
           <div class="queue-row">
             <span class="queue-title">{{ t.title }}</span>
             <div class="pill"><i class="pi pi-link"></i> Торрент: {{ t.torrent }}</div>
@@ -351,7 +351,7 @@ const rtPass = ref("password123")
 
       <h3 class="sub">Агент Загрузки (yt-dlp)</h3>
       <div class="composition-cards-container">
-        <div v-for="t in queueDownload" :key="t.file" class="card-final card-queue status-pending">
+        <div v-for="t in queueDownload" :key="t.file" class="card-final card-queue">
           <div class="queue-row">
             <span class="queue-title">{{ t.file }}</span>
             <div class="pill" :class="t.cls">{{ t.status }}</div>
@@ -372,7 +372,7 @@ const rtPass = ref("password123")
 
       <h3 class="sub">Агент Нарезки (ffmpeg)</h3>
       <div class="composition-cards-container">
-        <div v-for="t in queueSlicing" :key="t.title" class="card-final card-queue status-sliced">
+        <div v-for="t in queueSlicing" :key="t.title" class="card-final card-queue">
           <div class="queue-row">
             <span class="queue-title">{{ t.title }}</span>
             <div class="pill pill-info">{{ t.status }}</div>
@@ -387,7 +387,7 @@ const rtPass = ref("password123")
 
       <h3 class="sub">Мониторинг торрентов</h3>
       <div class="composition-cards-container">
-        <div v-for="t in queueMonitor" :key="t.hash" class="card-final card-queue status-pending">
+        <div v-for="t in queueMonitor" :key="t.hash" class="card-final card-queue">
           <div class="queue-row">
             <span class="queue-title">{{ t.title }}</span>
             <div class="pill"><i class="pi pi-key"></i> {{ t.hash }}…</div>
