@@ -10,8 +10,10 @@
   padding: 24px;
 }
 .modal-overlay .modern-modal { width: 100%; max-width: 600px; max-height: 90vh; }
-.modal-overlay .modern-modal.modal-xl { max-width: 1140px; }
-.modal-overlay .modern-body { overflow-y: auto; }
+/* большие окна (настройки, статус) — фиксированная высота, чтобы габарит не
+   прыгал при переключении вкладок; тело скроллится (как в легаси) */
+.modal-overlay .modern-modal.modal-xl { max-width: 1140px; height: 86vh; }
+.modal-overlay .modern-body { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
 
 .modern-modal {
   border: none;
