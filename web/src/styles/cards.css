@@ -1,0 +1,99 @@
+/* Карточки-сущности (Композиция / Нарезка / тест VK / TMDB-результат).
+ *
+ * Единый язык карточки. В исходнике стили писались в разное время и
+ * разошлись на семейства (card-final 10px, slicing-card 8px, list-card 8px,
+ * TMDB на Bootstrap). Здесь всё сведено к ОДНОЙ базе .card-final с:
+ *   - единым радиусом var(--border-radius) = 9px (ритм полей/кнопок);
+ *   - единой статусной палитрой (5 пастельных градиентов 135° + бордер в тон);
+ *   - grid-структурой info │ pills │ controls.
+ * Карточка сериала (главный экран) — отдельный островок (card.css), здесь нет.
+ */
+
+/* ── База ───────────────────────────────────────────────────────────── */
+.card-final {
+  border: 1px solid transparent;
+  border-radius: var(--border-radius); /* 9px — единый ритм с полями/кнопками */
+  overflow: hidden;
+  font-size: 14px;
+  position: relative;
+  padding: 12px 16px;
+  display: grid;
+  grid-template-columns: 1fr auto auto; /* info │ pills │ controls */
+  gap: 16px;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+
+/* ── Колонки ─────────────────────────────────────────────────────────── */
+.card-final .info-column { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card-final .pills-column { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.card-final .controls-column { align-self: center; }
+
+.card-final .card-title-block {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0;
+}
+.card-final .card-title {
+  font-weight: 600; font-size: 16px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── Строка пути (Полученное / Фактическое / Будет / Родитель) ────────── */
+.card-final .path-line { min-width: 0; }
+.path-pill {
+  display: inline-flex; align-items: center; max-width: 100%;
+  border-radius: 6px; padding: 4px 8px; font-size: 13px;
+  background-color: rgba(0, 0, 0, 0.05); border: 1px solid rgba(0, 0, 0, 0.08);
+}
+.path-pill-label { font-weight: 600; opacity: 0.7; margin-right: 8px; white-space: nowrap; flex-shrink: 0; }
+.path-pill-value {
+  font-family: var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.path-pill.is-missing { color: var(--color-red-1, #dc3545); }
+.path-pill.is-mismatch { color: var(--color-blue, #0d6efd); }
+
+/* ── Бейдж качества (разрешение) ─────────────────────────────────────── */
+.quality-badge {
+  display: inline-flex; align-items: center; flex-shrink: 0;
+  font-size: 13px; font-weight: 600; padding: 4px 8px;
+  border-radius: 6px; border: 1px solid rgba(0, 0, 0, 0.1);
+  background-color: rgba(255, 255, 255, 0.3); color: inherit;
+}
+
+/* ── Пилюли карточки (Статус / Тег / Качество / ID …) ────────────────── */
+.card-final .pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; font-size: 12px; font-weight: 500;
+  border-radius: 20px; border: 1px solid rgba(0, 0, 0, 0.1);
+  background-color: rgba(255, 255, 255, 0.2); white-space: nowrap;
+}
+.card-final .pill i { font-size: 14px; }
+.card-final .pill.pill-danger { color: var(--color-red-1, #dc3545); }
+.card-final .pill.pill-link { cursor: pointer; }
+
+/* ── Единая статусная палитра (пастель 135° + бордер в тон) ───────────── */
+.card-final.status-success  { background: linear-gradient(135deg, #e7f4e8, #d1e7dd); border-color: #a3cfbb; }
+.card-final.status-pending  { background: linear-gradient(135deg, #fff9e6, #ffecb3); border-color: #ffe69c; }
+.card-final.status-excluded { background: linear-gradient(135deg, #fbe9ea, #f8d7da); border-color: #f5c6cb; }
+.card-final.status-archived,
+.card-final.status-no-match { background: linear-gradient(135deg, #f8f9fa, #e9ecef); border-color: #dee2e6; }
+.card-final.card-sliced     { background: linear-gradient(135deg, #cfe2ff, #b8daff); border-color: #a9c7fe; }
+
+/* ── «Отсутствует» — особый минималистичный вид (заголовок + иконка) ──── */
+.card-final.card-missing {
+  display: flex; align-items: center; justify-content: space-between;
+  background: #f8f9fa; border: 1px dashed var(--border-color);
+  color: var(--text-muted, #6c757d);
+}
+.card-final.card-missing .card-title { font-weight: 500; }
+.card-final.card-missing .missing-icon { font-size: 20px; opacity: 0.5; }
+
+/* ── Заголовок сезона + контейнер группы ─────────────────────────────── */
+.season-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 0.75rem; padding: 12px 16px;
+  background-color: var(--bg-light, #f8f9fa);
+  border-radius: var(--border-radius); border: 1px solid var(--border-color);
+  font-weight: 600;
+}
+.composition-cards-container { display: flex; flex-direction: column; gap: 8px; }

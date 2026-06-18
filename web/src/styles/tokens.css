@@ -20,6 +20,9 @@
   --color-purple-1: #6f42c1;
   --color-purple-2: #845ef7;
 
+  /* --- шрифты --- */
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
   /* --- размеры и радиусы --- */
   --control-height: 56px;
   --border-radius: 9px;

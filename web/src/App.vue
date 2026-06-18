@@ -57,6 +57,47 @@ const logs = [
   { time: "18.06.2026, 00:31:10", group: "scan", level: "INFO", msg: "запущено модулей: 13" },
 ]
 
+// Карточки-сущности (Композиция / тест VK / TMDB) — единый стиль .card-final.
+// TMDB-результаты (список + выбранный)
+const tmdbResults = [
+  { name: "Очень странные дела", original: "Stranger Things", year: 2016, id: 66732, selected: false },
+  { name: "Извне", original: "From", year: 2022, id: 122226, selected: true },
+]
+// Композиция торрента
+const torrentFiles = [
+  {
+    title: "Фронт кровавой блокады s01e01", res: "1080p",
+    got: "Kekkai.Sensen.S01E01.Secret.Society.avi", actual: "Kekkai Sensen s01e01.avi",
+    pills: [
+      { icon: "pi-check-square", label: "Статус", value: "renamed" },
+      { icon: "pi-tags", label: "Тег", value: "AniLibria" },
+      { icon: "pi-video", label: "Качество", value: "WEB-DL" },
+      { icon: "pi-id-card", label: "ID", value: "1 / 974f83ee" },
+    ],
+  },
+]
+// Композиция VK (compilation) — со свитчом
+const compFiles = [
+  {
+    title: "Рик и Морти s07e01", res: "720p",
+    got: "Рик и Морти 7 сезон 1 серия [AniLibria].mp4", actual: "Рик и Морти s07e01.mkv",
+    will: "Рик и Морти s07e01.mkv", enabled: true,
+    pills: [
+      { icon: "pi-calendar", label: "План", value: "scheduled" },
+      { icon: "pi-tags", label: "Тег", value: "AniLibria" },
+      { icon: "pi-check-circle", label: "Статус", value: "renamed" },
+      { icon: "pi-id-card", label: "ID", value: "a1b2c3d4" },
+    ],
+  },
+]
+// Тест правил VK — результат (применилось / исключено)
+const testResults = [
+  { title: "Рик и Морти 7 сезон 1 серия [AniLibria] 1080p", res: "1080p", status: "success",
+    pills: [{ icon: "pi-tags", label: "Озвучка", value: "AniLibria" }, { icon: "pi-hashtag", label: "Серия", value: "1" }] },
+  { title: "Рик и Морти 7 сезон [трейлер]", res: "1080p", status: "excluded",
+    pills: [{ icon: "pi-times-circle", label: "ИСКЛЮЧЕНО", value: "правило «трейлер»" }] },
+]
+
 // StField (floating-label, порт constructor-group)
 const fText = ref("")
 const fPath = ref("/nas/media/Сериалы")
@@ -83,6 +124,109 @@ const rtPass = ref("password123")
     <section>
       <h2>Карточки сериала (кастом-островок) — по состояниям</h2>
       <SeriesCard v-for="c in cards" :key="c.id" :series="c" />
+    </section>
+
+    <section>
+      <h2>Карточки — единый стиль (.card-final, radius 9px, общая палитра)</h2>
+      <p class="muted">Сведены к одному языку: Композиция (торрент/VK/нарезка), тест VK, TMDB. Раньше — разные радиусы (8/10) и фоны.</p>
+
+      <h3 class="sub">TMDB-результат (добавление сериала / инфо)</h3>
+      <div class="composition-cards-container">
+        <div
+          v-for="r in tmdbResults"
+          :key="r.id"
+          class="card-final"
+          :class="r.selected ? 'status-success' : 'status-archived'"
+        >
+          <div class="info-column">
+            <div class="card-title-block">
+              <span class="card-title">{{ r.name }} <small style="opacity:.6">({{ r.year }})</small></span>
+              <div class="quality-badge">ID: {{ r.id }}</div>
+            </div>
+            <div class="path-line">
+              <span class="path-pill"><span class="path-pill-label">Оригинал:</span><span class="path-pill-value">{{ r.original }}</span></span>
+            </div>
+          </div>
+          <div class="pills-column">
+            <div v-if="r.selected" class="pill"><i class="pi pi-check-circle"></i><span>Выбран</span></div>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="sub">Композиция торрента (Статус → Композиция)</h3>
+      <div class="composition-cards-container">
+        <div v-for="f in torrentFiles" :key="f.title" class="card-final card-torrent status-success">
+          <div class="info-column">
+            <div class="card-title-block">
+              <span class="card-title">{{ f.title }}</span>
+              <div class="quality-badge">{{ f.res }}</div>
+            </div>
+            <div class="path-line"><span class="path-pill"><span class="path-pill-label">Полученное:</span><span class="path-pill-value">{{ f.got }}</span></span></div>
+            <div class="path-line"><span class="path-pill"><span class="path-pill-label">Фактическое:</span><span class="path-pill-value">{{ f.actual }}</span></span></div>
+          </div>
+          <div class="pills-column">
+            <div v-for="p in f.pills" :key="p.label" class="pill"><i class="pi" :class="p.icon"></i><span>{{ p.label }}: <strong>{{ p.value }}</strong></span></div>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="sub">Композиция медиатеки VK (compilation) — со свитчом</h3>
+      <div class="composition-cards-container">
+        <div v-for="f in compFiles" :key="f.title" class="card-final card-compilation status-pending">
+          <div class="info-column">
+            <div class="card-title-block">
+              <span class="card-title">{{ f.title }}</span>
+              <div class="quality-badge">{{ f.res }}</div>
+            </div>
+            <div class="path-line"><span class="path-pill"><span class="path-pill-label">Полученное:</span><span class="path-pill-value">{{ f.got }}</span></span></div>
+            <div class="path-line"><span class="path-pill"><span class="path-pill-label">Фактическое:</span><span class="path-pill-value">{{ f.actual }}</span></span></div>
+            <div class="path-line"><span class="path-pill is-mismatch"><span class="path-pill-label">Будет:</span><span class="path-pill-value">{{ f.will }}</span></span></div>
+          </div>
+          <div class="pills-column">
+            <div v-for="p in f.pills" :key="p.label" class="pill"><i class="pi" :class="p.icon"></i><span>{{ p.label }}: <strong>{{ p.value }}</strong></span></div>
+          </div>
+          <div class="controls-column">
+            <label class="switch"><input type="checkbox" :checked="f.enabled" /><span class="slider"></span></label>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="sub">Нарезанный файл (sliced, синий) и Отсутствует (missing)</h3>
+      <div class="composition-cards-container">
+        <div class="card-final card-sliced">
+          <div class="info-column">
+            <div class="card-title-block">
+              <span class="card-title">Рик и Морти s07e03</span>
+              <div class="quality-badge">720p</div>
+            </div>
+            <div class="path-line"><span class="path-pill"><span class="path-pill-label">Родитель:</span><span class="path-pill-value">Рик и Морти 7 сезон [компиляция].mkv</span></span></div>
+            <div class="path-line"><span class="path-pill"><span class="path-pill-label">Фактическое:</span><span class="path-pill-value">Рик и Морти s07e03.mkv</span></span></div>
+          </div>
+          <div class="pills-column">
+            <div class="pill"><i class="pi pi-images"></i><strong>Нарезанный файл</strong></div>
+            <div class="pill"><i class="pi pi-check-circle"></i><span>Файл на месте</span></div>
+          </div>
+        </div>
+        <div class="card-final card-missing">
+          <span class="card-title">Эпизод s07e05 — не найден в источнике</span>
+          <i class="pi pi-eye-slash missing-icon"></i>
+        </div>
+      </div>
+
+      <h3 class="sub">Тест правил VK — результат (применилось / исключено)</h3>
+      <div class="composition-cards-container">
+        <div v-for="t in testResults" :key="t.title" class="card-final card-test-result" :class="`status-${t.status}`">
+          <div class="info-column">
+            <div class="card-title-block">
+              <span class="card-title">{{ t.title }}</span>
+              <div class="quality-badge">{{ t.res }}</div>
+            </div>
+          </div>
+          <div class="pills-column">
+            <div v-for="p in t.pills" :key="p.label" class="pill"><i class="pi" :class="p.icon"></i><span>{{ p.label }}: <strong>{{ p.value }}</strong></span></div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section>
@@ -230,6 +374,7 @@ small { color: #888; font-weight: 400; font-size: 0.6em; }
 .small { font-size: 0.85rem; }
 section { margin-top: 28px; border-top: 1px solid var(--color-gray-200); padding-top: 16px; }
 h2 { font-size: 1.05rem; margin-bottom: 12px; }
+h3.sub { font-size: 0.85rem; color: var(--color-gray-600); margin: 18px 0 8px; font-weight: 600; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; align-items: start; }
 .cell { display: flex; flex-direction: column; gap: 6px; }
 .cell > label { font-size: 0.8rem; color: var(--color-gray-600); }
