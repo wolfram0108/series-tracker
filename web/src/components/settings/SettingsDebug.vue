@@ -40,8 +40,9 @@ const paths = ref<SavedPath[]>([])
 const newPath = ref("")
 
 async function loadPaths() {
-  const data = (await request(api.GET("/api/settings/saved_paths"))) as unknown
-  if (Array.isArray(data)) paths.value = data as SavedPath[]
+  // Бэк отдаёт обёртку { paths: [...] }, а не голый массив.
+  const data = (await request(api.GET("/api/settings/saved_paths"))) as { paths?: SavedPath[] } | null
+  if (data && Array.isArray(data.paths)) paths.value = data.paths
 }
 async function addPath() {
   const v = newPath.value.trim()
