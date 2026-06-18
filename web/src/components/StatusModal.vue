@@ -1,38 +1,35 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue"
+import { ref, computed, onMounted } from "vue"
 import Button from "primevue/button"
+import ModalShell from "./ModalShell.vue"
 import StatusProperties from "./status/StatusProperties.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
 import type { Series } from "../stores/series"
 
-// Окно «Статус сериала» — каркас (Шаг 1): шапка с вкладками-папками
-// (зависят от source_type), тело активной вкладки, футер (Сохранить —
-// только на «Свойствах»). Грузит GET /api/series/{id}. Вкладки
-// Композиция/История — следующие шаги, пока заглушки.
+// Окно «Статус сериала» — та же оболочка, что у Настроек (ModalShell xl,
+// фикс-высота) + вкладки-сегмент (st-tabs). Вкладки зависят от source_type.
+// Футер: «Сохранить» только на «Свойствах». Composition/History/Slicing —
+// следующие шаги (заглушки).
 const props = defineProps<{ seriesId: number }>()
 const emit = defineEmits<{ (e: "close"): void; (e: "updated"): void }>()
 const { request } = useApi()
 
 const series = ref<Series | null>(null)
-const activeTab = ref<"properties" | "composition" | "history">("properties")
 const propsRef = ref<InstanceType<typeof StatusProperties> | null>(null)
 const saving = ref(false)
-
 const isBusy = computed(() => saving.value || !!series.value?.is_busy)
+const isVk = computed(() => series.value?.source_type === "vk_video")
 
-interface Tab { key: "properties" | "composition" | "history"; label: string; icon: string }
-const tabs = computed<Tab[]>(() => {
-  const t: Tab[] = [{ key: "properties", label: "Свойства", icon: "pi pi-info-circle" }]
-  t.push({ key: "composition", label: "Композиция", icon: "pi pi-sitemap" })
-  t.push({ key: "history", label: "История", icon: "pi pi-history" })
+type TabKey = "properties" | "composition" | "slicing" | "history"
+const tab = ref<TabKey>("properties")
+const tabs = computed(() => {
+  const t = [{ value: "properties" as TabKey, label: "Свойства", icon: "pi-info-circle" }]
+  t.push({ value: "composition", label: "Композиция", icon: "pi-sitemap" })
+  if (isVk.value) t.push({ value: "slicing", label: "Нарезка", icon: "pi-images" })
+  t.push({ value: "history", label: "История", icon: "pi-history" })
   return t
 })
-
-function setTab(key: Tab["key"]) {
-  if (isBusy.value && key !== "properties") return
-  activeTab.value = key
-}
 
 async function load() {
   const data = (await request(
@@ -49,73 +46,55 @@ async function save() {
     const ok = await propsRef.value.save()
     if (ok) {
       emit("updated")
-      await load() // перечитать актуальные значения
+      await load()
     }
   } finally {
     saving.value = false
   }
 }
 
-function onKey(e: KeyboardEvent) {
-  if (e.key === "Escape") emit("close")
-}
-onMounted(() => {
-  document.addEventListener("keydown", onKey)
-  void load()
-})
-onUnmounted(() => document.removeEventListener("keydown", onKey))
+onMounted(load)
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="emit('close')">
-    <div class="modern-modal modal-xl modal-fixed status-modal">
-      <div class="status-header">
-        <h5 class="modal-title"><i class="pi pi-info-circle" /> Статус</h5>
-        <div class="status-tabs">
-          <button
-            v-for="t in tabs"
-            :key="t.key"
-            class="status-tab"
-            :class="{ active: activeTab === t.key, disabled: isBusy && t.key !== 'properties' }"
-            @click="setTab(t.key)"
-          >
-            <i :class="t.icon" /> {{ t.label }}
-          </button>
-        </div>
-        <button class="modern-close" title="Закрыть" @click="emit('close')"><i class="pi pi-times" /></button>
+  <ModalShell size="xl" fixed-height @close="emit('close')">
+    <template #title><i class="pi pi-info-circle"></i> Статус</template>
+    <template #header-extra>
+      <div class="header-tabs st-tabs">
+        <button
+          v-for="t in tabs"
+          :key="t.value"
+          class="st-tab"
+          :class="{ active: tab === t.value }"
+          :title="t.label"
+          @click="tab = t.value"
+        >
+          <i class="pi tab-icon" :class="t.icon"></i>
+          <span class="tab-label" :data-text="t.label"><span class="tl-text">{{ t.label }}</span></span>
+        </button>
       </div>
+    </template>
 
-      <div class="modern-body">
-        <div v-if="!series" class="status-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
-        <template v-else>
-          <StatusProperties
-            v-show="activeTab === 'properties'"
-            ref="propsRef"
-            :series="series"
-            @saving="saving = $event"
-          />
-          <div v-show="activeTab === 'composition'" class="status-stub">
-            Вкладка «Композиция» — следующий шаг переноса статус-окна.
-          </div>
-          <div v-show="activeTab === 'history'" class="status-stub">
-            Вкладка «История» — следующий шаг переноса статус-окна.
-          </div>
-        </template>
-      </div>
+    <div v-if="!series" class="status-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem"></i></div>
+    <template v-else>
+      <StatusProperties v-show="tab === 'properties'" ref="propsRef" :series="series" @saving="saving = $event" />
+      <div v-show="tab === 'composition'" class="status-stub">Вкладка «Композиция» — следующий шаг переноса.</div>
+      <div v-if="isVk" v-show="tab === 'slicing'" class="status-stub">Вкладка «Нарезка» — следующий шаг переноса.</div>
+      <div v-show="tab === 'history'" class="status-stub">Вкладка «История» — следующий шаг переноса.</div>
+    </template>
 
-      <div class="modern-footer">
-        <Button
-          v-if="activeTab === 'properties'"
-          :label="isBusy ? 'Обработка…' : 'Сохранить'"
-          icon="pi pi-check"
-          :loading="saving"
-          :disabled="isBusy"
-          @click="save"
-        />
-        <Button label="Закрыть" icon="pi pi-times" severity="secondary" @click="emit('close')" />
-      </div>
-    </div>
-  </div>
+    <template #footer>
+      <Button
+        v-if="tab === 'properties'"
+        :label="isBusy ? 'Обработка…' : 'Сохранить'"
+        icon="pi pi-check"
+        :loading="saving"
+        :disabled="isBusy"
+        @click="save"
+      />
+      <Button label="Закрыть" icon="pi pi-times" severity="secondary" @click="emit('close')" />
+    </template>
+  </ModalShell>
 </template>
 
 <style scoped>

@@ -1,59 +1,6 @@
-/* Статус-окно сериала. Вкладки — порт modal.css .modern-nav-tabs /
-   .modern-tab-link (классические «папки»: прижаты к низу шапки, активная
-   белая и перекрывает границу тела). Отдельная шапка status-header с
-   выравниванием по низу — здесь это не сегмент-остров (как в Настройках),
-   а оригинальный folder-tabs. */
-
-.status-header {
-  background: var(--bg-light);
-  border-bottom: 1px solid var(--border-color);
-  padding: 0 24px;
-  display: flex;
-  align-items: flex-end;
-  gap: 16px;
-}
-.status-header .modal-title {
-  margin: 0;
-  padding: 14px 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #2c3e50;
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-.status-header .modern-close { margin-left: auto; align-self: center; }
-
-/* вкладки-папки */
-.status-tabs { display: flex; gap: 2px; align-items: flex-end; flex-wrap: wrap; }
-.status-tab {
-  background: rgba(0, 0, 0, 0.03);
-  border: 1px solid var(--border-color);
-  border-bottom: none;
-  border-radius: 8px 8px 0 0;
-  padding: 12px 20px;
-  margin-bottom: -1px; /* перекрыть границу тела */
-  font: inherit;
-  font-weight: 500;
-  color: var(--text-muted);
-  cursor: pointer;
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  transition: color 0.2s ease, background 0.2s ease;
-}
-.status-tab:hover:not(.active):not(.disabled) { color: #2c3e50; background: rgba(255, 255, 255, 0.5); }
-.status-tab.active {
-  color: var(--color-blue);
-  background: var(--bg-white);
-  border-color: var(--border-color) var(--border-color) var(--bg-white);
-  font-weight: 600;
-  z-index: 2;
-}
-.status-tab.disabled { opacity: 0.5; pointer-events: none; }
+/* Статус-окно сериала. Оболочка и вкладки — общие с Настройками
+   (ModalShell xl фикс-высота + сегмент-остров st-tabs). Здесь — только
+   специфика содержимого вкладок. */
 
 /* загрузка серии */
 .status-loading { display: flex; justify-content: center; padding: 48px 0; color: var(--text-muted); }
