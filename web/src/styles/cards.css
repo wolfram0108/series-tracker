@@ -93,15 +93,19 @@
 .card-final.card-sliced .pills-column { grid-template-columns: auto; }
 /* Отсутствует: простая 2-колоночная карточка */
 .card-final.card-missing { grid-template-columns: 1fr auto; }
-/* Тест VK и TMDB: вертикальные — пилюли идут ВТОРОЙ строкой на всю ширину
+/* Тест VK: вертикальный — пилюли идут ВТОРОЙ строкой на всю ширину
    (в оригинале card-test-result переопределяет grid на flex column) */
-.card-final.card-test-result,
-.card-final.card-tmdb {
+.card-final.card-test-result {
   display: flex; flex-direction: column; align-items: stretch; gap: 8px;
 }
-.card-final.card-test-result .pills-column,
-.card-final.card-tmdb .pills-column {
+.card-final.card-test-result .pills-column {
   width: 100%; display: flex; flex-wrap: wrap; justify-content: flex-start;
+}
+/* TMDB: info слева (название + оригинал), правый столбец у края —
+   ID сверху и «Выбран» снизу, оба прижаты вправо с симметричным отступом */
+.card-final.card-tmdb { grid-template-columns: 1fr auto; }
+.card-final.card-tmdb .pills-column {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
 }
 
 /* ── «Отсутствует» — особый минималистичный вид (заголовок + иконка) ──── */

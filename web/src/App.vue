@@ -139,15 +139,13 @@ const rtPass = ref("password123")
           :class="r.selected ? 'status-success' : 'status-archived'"
         >
           <div class="info-column">
-            <div class="card-title-block">
-              <span class="card-title">{{ r.name }} <small style="opacity:.6">({{ r.year }})</small></span>
-              <div class="quality-badge">ID: {{ r.id }}</div>
-            </div>
+            <span class="card-title">{{ r.name }} <small style="opacity:.6">({{ r.year }})</small></span>
             <div class="path-line">
               <span class="path-pill"><span class="path-pill-label">Оригинал:</span><span class="path-pill-value">{{ r.original }}</span></span>
             </div>
           </div>
           <div class="pills-column">
+            <div class="quality-badge">ID: {{ r.id }}</div>
             <div v-if="r.selected" class="pill"><i class="pi pi-check-circle"></i><span>Выбран</span></div>
           </div>
         </div>
