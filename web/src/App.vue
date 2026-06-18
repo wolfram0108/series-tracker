@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import Toast from "primevue/toast"
 import { useToast } from "primevue/usetoast"
+import { ref } from "vue"
 import AppHeader from "./components/AppHeader.vue"
 import SeriesCard from "./components/SeriesCard.vue"
 import ConfirmDialog from "./components/ConfirmDialog.vue"
+import SettingsModal from "./components/SettingsModal.vue"
 import { useSeriesStore } from "./stores/series"
 import { useUiStore } from "./stores/ui"
 import { useApi } from "./composables/useApi"
@@ -18,6 +20,9 @@ const ui = useUiStore()
 const { request } = useApi()
 const confirm = useConfirm()
 const toast = useToast()
+
+// какая модалка открыта (одна за раз). add/logs/status — следующие под-вехи.
+const openModal = ref<null | "settings">(null)
 
 function onScan(id: number) {
   void request(
@@ -62,7 +67,7 @@ function stub(name: string) {
     <AppHeader
       @add="stub('Добавить сериал')"
       @logs="stub('Просмотр логов')"
-      @settings="stub('Настройки')"
+      @settings="openModal = 'settings'"
     />
     <div class="series-list">
       <SeriesCard
@@ -78,6 +83,7 @@ function stub(name: string) {
       <div v-if="!seriesStore.list.length" class="empty-state">Нет сериалов. Добавьте первый.</div>
     </div>
 
+    <SettingsModal v-if="openModal === 'settings'" @close="openModal = null" />
     <ConfirmDialog />
   </main>
 </template>
