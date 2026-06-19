@@ -95,7 +95,12 @@ styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layou
 | **Add-модалка** (полный порт) | ✅ принят | parse_url, tmdb/search+details, parser-profiles, saved_paths, POST /api/series |
 | ↳ SavedPathDropdown + качество (anilibria/astar) + VK + TMDB | ✅ принят | catalogName, sortEpisodeKeys, vk_search_mode |
 | ↳ TMDB-имя ru→en→original (азиатские без ru) | ✅ | metadata.search +en-US → name_en |
-| **Статус-модалка** (Props/Composition/Slicing/History) | ⏳ **следующая** крупная | см. §5а |
+| **Статус-модалка** (Props/Composition/Slicing/History) | ✅ собрана | оболочка как Настройки (xl, фикс, st-tabs) |
+| ↳ Свойства (торрент+VK, автопарсинг качества, TMDB) | ✅ принят | POST /api/series/{id}, parse_url, tmdb |
+| ↳ Композиция торрент (карточки файлов) | ✅ принят | composition, reprocess |
+| ↳ История (торрент+VK таблицы) | ✅ принят | torrents/history, media-items |
+| ↳ Композиция VK (карточки+DnD приоритет) | 🔁 построена, ждёт VK-данных | composition?refresh, sliced-files, rename_preview, ignore, ignored-seasons, vk-quality-priority, deep-adoption, reprocess_vk_files |
+| ↳ Нарезка (главы ffprobe, фильтр, нарезка) | 🔁 построена, ждёт VK-данных | media-items, chapters(/filtered/mark-garbage), slice(/-with-filter), delete-source |
 | **Конфигуратор Фильтров VK** (DnD) | ⏳ крупная | см. §5 |
 | Отладка-доп (БД-просмотр/очистка/флаги) | ⏳ | /api/settings/{force_replace,less_strict_scan,...} |
 
@@ -149,12 +154,12 @@ styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layou
 ## 7. Следующий шаг
 
 1. ~~Доделать Add-модалку~~ ✅ принята (порт целиком + TMDB ru→en).
-2. **Статус-модалка** — крупная веха (Properties/Composition/Slicing/History
-   + ChapterManager). uiStore.openStatus уже ставит viewing. ПЕРВЫМ —
-   разбор исходника (StatusModal/StatusTab*.js + статус-CSS), скриншот
-   эталона, потом порт (урок Add: не сочинять, портировать реальный CSS).
-3. **Конфигуратор Фильтров VK** — крупная веха DnD (§5).
-4. **Отладка-доп** + модалка DatabaseViewer.
+2. ~~Статус-модалка~~ ✅ собрана целиком (Свойства/Композиция торрент+VK/
+   Нарезка/История). Торрент-путь принят; VK-композиция и Нарезка ждут
+   визуальной приёмки на реальных VK-данных (у серии #6 «Сказание о
+   пастухе богов» пока нет медиа-элементов — нужен скан/загрузка).
+3. **Конфигуратор Фильтров VK** — крупная веха DnD (§5). СЛЕДУЮЩАЯ.
+4. **Отладка-доп** + модалка DatabaseViewer (БД-просмотр/очистка/флаги).
 5. Затем Ф5 (приёмка паритета + e2e Playwright) → Ф6 (cutover).
 
 **Незакрытые инварианты для проверки в Ф5:** частичный merge series_updated
