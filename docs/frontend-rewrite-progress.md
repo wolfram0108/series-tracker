@@ -2,7 +2,8 @@
 
 > Живой снимок для бесшовного продолжения после сжатия контекста.
 > План/ТЗ — [docs/frontend-rewrite.md](frontend-rewrite.md) (Р-Ф1..Р-Ф12,
-> фазы, §13 под-вехи Ф4). Обновлено: 2026-06-18 (Ф3 закрыта, Ф4 в работе).
+> фазы, §13 под-вехи Ф4). Обновлено: 2026-06-19 (Ф4: Add ✅ + статус-окно
+> собрано; СЛЕДУЮЩЕЕ — конфигуратор «Фильтры VK», см. §5).
 
 ---
 
@@ -58,6 +59,7 @@ composables/
   useSSE.ts ─ singleton, 1 EventSource /api/stream, 11 событий, on()/connect()
   useRealtime.ts ─ диспетчер SSE→сторы (вызывается в main.ts)
   useConfirm.ts ─ Promise-подтверждение (singleton state)
+  useDropAnchor.ts ─ computeDropStyle(): высота выпадашек по содержимому, потолок до края экрана
 stores/ (Pinia, setup-стиль)
   series.ts ─ список + merge series_updated + savingIds; series.test.ts (6 Vitest)
   queues.ts ─ 4 очереди (agent/torrents/downloads/slicing)
@@ -69,14 +71,23 @@ components/
   SeriesCard.vue ─ карточка на реальной Series (emit scan/delete/toggle/open-status)
   ModalShell.vue ─ оболочка модалок (оверлей, header/body/footer слоты, Esc/клик-вне)
   ConfirmDialog.vue ─ окно подтверждения (useConfirm)
-  SettingsModal.vue ─ окно настроек (xl, фикс-высота 86vh) + вкладки-сегмент
+  SettingsModal.vue ─ окно настроек (xl, фикс-высота) + вкладки-сегмент st-tabs;
+                      вкладка 'parser' (Фильтры VK) — ЗАГЛУШКА (tab-stub), её и строим
   settings/SettingsAuth|Trackers|Agents|Debug.vue ─ вкладки
   LogsModal.vue ─ просмотр логов (фильтры + таблица)
-  AddSeriesModal.vue ─ КАРКАС (этап 1) добавления
-  St*.vue ─ поля constructor-group (из Ф2)
-main.ts ─ bootstrap + setupRealtime() + load series/scanner
-Gallery.vue ─ сохранённая парити-галерея Ф2 (полигон, не монтируется)
-styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layout.css
+  AddSeriesModal.vue ─ окно добавления (полное: parse_url, TMDB ru→en, качество, VK)
+  SavedPathDropdown.vue ─ выбор сохранённого пути ({paths:[]}, +catalogName, useDropAnchor)
+  StatusModal.vue ─ окно «Статус» (ModalShell xl фикс + st-tabs; вкладки по source_type)
+  status/StatusProperties.vue ─ Свойства (торрент+VK, автопарсинг качества, TMDB)
+  status/StatusComposition.vue ─ Композиция торрент (карточки card-torrent по сезонам)
+  status/StatusVkComposition.vue ─ Композиция VK (3 типа карточек + DnD приоритет качества)
+  status/StatusSlicing.vue ─ Нарезка (главы ffprobe, фильтр, нарезка) — VK
+  status/StatusHistory.vue ─ История (таблицы торрент/VK)
+  St*.vue ─ поля constructor-group (из Ф2); StSelect — высота через useDropAnchor
+main.ts ─ bootstrap + setupRealtime() + load series/scanner; #gallery → Gallery.vue
+Gallery.vue ─ парити-галерея Ф2 (доступна по /v2#gallery)
+styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layout/
+          add-series/status/slicing.css
 ```
 
 ---
@@ -110,20 +121,43 @@ styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layou
 
 ---
 
-## 5. Конфигуратор правил VK (разобран, веха ⏳)
+## 5. СЛЕДУЮЩАЯ ВЕХА — Конфигуратор «Фильтры VK» (точка старта на свежий контекст)
 
-«Фильтры VK» = Парсер (`settingsParser.js`, 763 стр). Три шага: Профили
-(✅ StGroup), Тестирование (✅ card-test-result), **Редактор правил
-(Шаг 2) — НЕ сделан**. Модель:
-- правило = `conditions[]` (ЕСЛИ: `_blocks[]` + AND/OR) + `actions[]`
-  (ТО: `action_type` + `_action_blocks[]`).
-- блок = `{id, type, value?}`; 8 типов: text(ред.)/number/whitespace/
-  any_text/start_of_line/end_of_line + add/subtract(ред., только ТО).
-- DnD: **vuedraggable@4** (уже в deps) + палитра clone; **contenteditable**
-  для значений; CSS — порт `rule-editor.css`. API: GET /api/parser-profiles,
-  POST /api/parser-profiles/test. Логика блоков (перенести 1:1): cloneBlock,
-  isBlockEditable, getBlockDisplayText (number в ТО → «Число #N»),
-  updateBlockValue, getBlockClasses. Риски §6.2 (contenteditable, drag).
+«Фильтры VK» = вкладка `parser` окна Настроек. Сейчас это **заглушка**
+(`SettingsModal.vue` строка ~63, `tab-stub`). Строим всю вкладку.
+
+**ПЕРВЫМ делом (на свежую голову, по уроку «портируй реальный CSS»):**
+1. Снять скриншот эталона: старый фронт `/`, Настройки → «Фильтры VK»,
+   все три шага (Профили / Тестирование / Редактор правил Шаг 2).
+2. Прочитать ИСХОДНИК целиком: `static/js/components/settingsParser.js`
+   (763 стр) и `static/css/components/rule-editor.css` (321 стр).
+3. Запустить Explore-агента за порт-картой (как делали для
+   addSeriesModal/seriesCompositionManager) — компонент крупный.
+
+**Три шага вкладки:**
+- **Профили** — выбор/создание/удаление профиля парсера; компоненты
+  StGroup/StSelect уже есть. API: GET/POST/PUT/DELETE /api/parser-profiles[/{id}].
+- **Тестирование** — ввод строк, прогон правил, карточки результата
+  (стиль `card-final.card-test-result` уже в cards.css; пример — в
+  Gallery.vue). API: POST /api/parser-profiles/test, scrape-titles.
+- **Редактор правил (Шаг 2) — САМОЕ СЛОЖНОЕ, DnD:**
+  - правило = `conditions[]` (ЕСЛИ: `_blocks[]` + AND/OR) + `actions[]`
+    (ТО: `action_type` + `_action_blocks[]`).
+  - блок = `{id, type, value?}`; 8 типов: text(ред.)/number/whitespace/
+    any_text/start_of_line/end_of_line + add/subtract(ред., только ТО).
+  - DnD: **vuedraggable@4** (в deps, уже юзаем в StatusVkComposition) +
+    палитра clone; **contenteditable** для значений; CSS — порт
+    `rule-editor.css`. Логика блоков (перенести 1:1): cloneBlock,
+    isBlockEditable, getBlockDisplayText (number в ТО → «Число #N»),
+    updateBlockValue, getBlockClasses.
+  - Риски: contenteditable+v-model (двусторонняя синхронизация курсора),
+    клонирование из палитры (vuedraggable :clone), коллизии id.
+
+**Как подключить:** в `SettingsModal.vue` заменить `tab-stub` ветки
+`tab==='parser'` на новый компонент `settings/SettingsParser.vue`
+(под-вкладки шага реализовать внутри). Эндпоинты parser-profiles уже в
+schema.d.ts. Образец DnD на vuedraggable@4 — `StatusVkComposition.vue`
+(приоритет качества).
 
 ---
 
@@ -146,6 +180,12 @@ styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layou
 - **НАХОДКА (Ф3):** `_updateIndicatorState` (hold-таймер 1000ms, на него
   ссылался §11 ТЗ) в исходном app.js **мёртвый** (не вызывается). Индикаторы
   мгновенные → `indicatorsStore` = computed-производные от очередей/сканера.
+- **ТЕХ-ДОЛГ (бэкенд, не фронт):** `torrent_files.original_path` пишется
+  лениво из листинга qBit в `renaming` (не write-once при download-complete),
+  пристинное имя релиза может теряться в краях. НЕ регрессия переноса
+  (старый код идентичен). Память `techdebt-original-path-not-immutable`.
+  Видно во вкладке Композиция у серий «Извне»/«Рик и Морти» (заведены из
+  уже-переименованных файлов на стенде).
 - **Ф0:** `schemas.py` (62 response_model, extra="allow"), golden-харнесс
   `tests/api_golden.py`. Тесты: 195 passed + 6 Vitest (seriesStore merge).
 
@@ -163,9 +203,10 @@ styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layou
 5. Затем Ф5 (приёмка паритета + e2e Playwright) → Ф6 (cutover).
 
 **Незакрытые инварианты для проверки в Ф5:** частичный merge series_updated
-(есть), viewing-stop при закрытии статус-модалки (uiStore.closeStatus —
-подключить в статус-модалке), одно SSE-соединение (есть), 15-мин scan
-(AbortController — добавить при необходимости).
+(есть), viewing-stop при закрытии статус-модалки (есть: App.onCloseStatus →
+uiStore.closeStatus), одно SSE-соединение (есть), 15-мин scan
+(AbortController — добавить при необходимости). Плюс: визуальная приёмка
+VK-композиции и Нарезки на реальных данных (сейчас пусто).
 
 ---
 
@@ -177,6 +218,29 @@ styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layou
 Ф4: 6ec2e47 главный экран → 3d96aa2 ModalShell+подтверждение → d3b64a7
     окно настроек+Агенты → 694ec77 фикс-высота → 305c794 Авторизация →
     804cd7a Трекеры → 4fb844c Отладка → 8ee89c5 Логи → 8f93836 Add-каркас
+Add: cefe0a4 фикс saved_paths → 02c486d полный порт Add → 0d112ca точный
+    CSS-порт → 161082b выпадашки+отступ → fc015cb #gallery → c7c1ea0 TMDB-
+    карточки → 2285721 высота выпадашек → 57d0f36 metadata name_en →
+    cbe074d имя ru→en
+Статус: d4c9427 вкладки как Настройки → 0db8ecc seasonless-секция →
+    b376867 Свойства+качество → 67761bf Композиция торрент → 7d344ec
+    История → 399c9f4 Композиция VK → 5ddf44c Нарезка
 (ранее: Ф0 c31bf3c.., Ф1 ffef404, Ф2 92158e8..9043c45 + окно настроек
  2f9fa90..9185a3d)
 ```
+
+---
+
+## 9. Операционка для продолжения (быстрый старт после сжатия)
+
+```bash
+cd /home/user/series-tracker/web && npm run build   # vue-tsc strict + vite
+chown -R user:user /home/user/series-tracker/web     # root создаёт файлы → вернуть владельца
+# /v2/ отдаётся сразу (рестарт не нужен для статики). Python-правки: sudo systemctl restart series-tracker
+```
+- Скриншот на приёмку: Playwright firefox, `wait_until="domcontentloaded"`
+  (вечный SSE мешает networkidle). Статус-окно: клик `[title='Статус']`
+  на карточке; вкладки — `.st-tab`; VK-серия (#6) — `.last`.
+- Дисциплина: русский; без AI-атрибуции; коммит на каждый согласованный
+  шаг; **не сочинять CSS — портировать реальный** (память
+  `feedback-port-real-css-not-reinvent`); VK-вкладки ждут реальных данных.
