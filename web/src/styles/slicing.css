@@ -1,0 +1,70 @@
+/* Вкладка «Нарезка» статус-окна (порт ChapterManager + chapter-filter.css +
+   lists.css slicing-card* + buttons.css control-btn). Bootstrap-rgb заменены
+   конкретными значениями (success 25,135,84 / warning 255,193,7 /
+   danger 220,53,69). */
+
+.compilation-cards-container { display: flex; flex-direction: column; gap: 1rem; }
+.compilation-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* карточка компиляции */
+.slicing-card {
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border-color);
+  background: var(--bg-white);
+}
+.slicing-card-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; gap: 1rem; }
+.slicing-card-body { padding: 16px; border-top: 1px solid var(--border-color); }
+.slicing-card-footer { padding: 10px 16px; border-top: 1px solid var(--border-color); background-color: var(--bg-light); }
+.slicing-card-accent { border-left-width: 5px; transition: all 0.2s ease; }
+.slicing-card-accent.status-success { border-left-color: rgba(25, 135, 84, 0.7); background: linear-gradient(90deg, rgba(25, 135, 84, 0.05) 0%, #fff 15%); }
+.slicing-card-accent.status-warning { border-left-color: rgba(255, 193, 7, 0.7); background: linear-gradient(90deg, rgba(255, 193, 7, 0.05) 0%, #fff 15%); }
+.slicing-card-accent.status-danger { border-left-color: rgba(220, 53, 69, 0.7); background: linear-gradient(90deg, rgba(220, 53, 69, 0.05) 0%, #fff 15%); }
+
+.card-footer-status { font-size: 13px; font-weight: 500; color: var(--text-muted); }
+.card-footer-status .status-message { font-style: italic; color: #6c757d; }
+
+/* иконочные кнопки операций */
+.control-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--color-text);
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+}
+.control-btn:hover:not(:disabled) { background: var(--bg-light); border-color: var(--border-color-focus); }
+.control-btn:disabled { opacity: 0.5; cursor: not-allowed; color: var(--text-muted); }
+.control-btn.text-info { color: #0a7c8f; border-color: #0dcaf0; }
+.control-btn.text-info:hover:not(:disabled) { background: #0dcaf0; color: #fff; }
+.control-btn.text-primary { color: #0d6efd; border-color: #0d6efd; }
+.control-btn.text-primary:hover:not(:disabled) { background: #0d6efd; color: #fff; }
+.control-btn.text-danger { color: #dc3545; border-color: #dc3545; }
+.control-btn.text-danger:hover:not(:disabled) { background: #dc3545; color: #fff; }
+
+/* секции и пилюли глав */
+.chapter-section { margin-bottom: 15px; }
+.chapter-section h6 { font-size: 0.9rem; font-weight: 600; margin: 0 0 8px; color: #495057; }
+.chapter-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.chapter-pill {
+  display: inline-flex; align-items: center;
+  padding: 4px 8px; font-size: 0.75rem; font-weight: 500;
+  border-radius: 12px; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background-color: #e9ecef; color: #495057; border: 1px solid #dee2e6;
+}
+.chapter-pill.chapter-active { background-color: #d1ecf1; color: #0c5460; border-color: #bee5eb; }
+.chapter-pill.chapter-garbage { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; text-decoration: line-through; opacity: 0.8; }
+.chapter-pill .pi-times-circle { margin-left: 4px; font-size: 0.8rem; }
+
+.chapter-controls { display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #dee2e6; flex-wrap: wrap; }
+.chapter-selection { background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px; margin-top: 12px; }
+.chapter-selection h6 { font-size: 0.9rem; font-weight: 600; margin: 0 0 10px; color: #495057; }
+.chapter-checkbox-list { max-height: 200px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 4px; padding: 8px; background: #fff; }
+.chapter-checkbox-list .chk-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.chapter-checkbox-list label { font-size: 0.8rem; color: #495057; cursor: pointer; }
+.chapter-selection-actions { display: flex; gap: 8px; margin-top: 10px; }

@@ -5,6 +5,7 @@ import ModalShell from "./ModalShell.vue"
 import StatusProperties from "./status/StatusProperties.vue"
 import StatusComposition from "./status/StatusComposition.vue"
 import StatusVkComposition from "./status/StatusVkComposition.vue"
+import StatusSlicing from "./status/StatusSlicing.vue"
 import StatusHistory from "./status/StatusHistory.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
@@ -93,7 +94,12 @@ onMounted(load)
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
       />
-      <div v-if="isVk" v-show="tab === 'slicing'" class="status-stub">Вкладка «Нарезка» — следующий шаг переноса.</div>
+      <StatusSlicing
+        v-if="isVk"
+        v-show="tab === 'slicing'"
+        :series-id="seriesId"
+        :series-name="String(series.name ?? '')"
+      />
       <StatusHistory v-show="tab === 'history'" :series-id="seriesId" :source-type="String(series.source_type ?? 'torrent')" />
     </template>
 
