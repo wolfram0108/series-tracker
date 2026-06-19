@@ -10,6 +10,33 @@
 .season-group { margin-bottom: 20px; }
 .season-group:last-child { margin-bottom: 0; }
 
+/* --- VK-композиция --- */
+.vk-comp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.vk-comp-controls { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
+.vk-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.season-ignore { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.season-ignore-label { font-size: 0.85rem; color: var(--text-muted); }
+
+/* приоритет качества (DnD) */
+.quality-settings-block {
+  background: var(--bg-light);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 14px 16px;
+}
+.quality-settings-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.quality-priority-list { display: flex; gap: 12px; flex-wrap: wrap; min-height: 40px; }
+.quality-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 20px;
+  background: #fff; border: 1px solid var(--color-gray-300, #dee2e6);
+  cursor: grab; user-select: none; font-weight: 500;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.quality-pill:active { cursor: grabbing; transform: scale(1.05); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); }
+.quality-pill .pi-bars { color: var(--color-gray-600); }
+.ghost-pill { opacity: 0.5; background: #cfe2ff; }
+
 /* строка url (readonly + копировать/открыть) */
 .url-actions { display: flex; align-items: stretch; }
 .url-action-btn {
