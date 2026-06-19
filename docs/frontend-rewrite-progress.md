@@ -186,6 +186,16 @@ schema.d.ts. Образец DnD на vuedraggable@4 — `StatusVkComposition.vue
   (старый код идентичен). Память `techdebt-original-path-not-immutable`.
   Видно во вкладке Композиция у серий «Извне»/«Рик и Морти» (заведены из
   уже-переименованных файлов на стенде).
+- **ПАРИТИ-РАЗРЫВ (VK-композиция, починить с приёмкой VK):** усыновление
+  файлов мой интерфейс ЗАПУСКАЕТ (ui.openStatus → viewing → бэк для VK шлёт
+  `downloads.fs.sync` → `_adopt_existing_files`), как и старый. НО команда
+  fire-and-forget (фон), а `StatusVkComposition` грузит композицию ОДИН раз
+  на mount → до завершения усыновления показывает пусто и не перечитывает.
+  Точечного SSE «композиция/media изменилась» нет (бэк шлёт `series_updated`
+  + `download_queue_update`). **Фикс:** подписать StatusVkComposition (и,
+  по-хорошему, StatusComposition/Slicing) на SSE `series_updated` этой серии
+  → debounce-reload composition. Проверено: данные серии #6 теперь есть (84
+  media-items), вкладка рендерит 86 карточек корректно.
 - **Ф0:** `schemas.py` (62 response_model, extra="allow"), golden-харнесс
   `tests/api_golden.py`. Тесты: 195 passed + 6 Vitest (seriesStore merge).
 
