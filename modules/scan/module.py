@@ -404,6 +404,19 @@ class ScanModule(BaseModule):
 
     async def _scan_torrents(self, series: dict, force: bool) -> dict:
         series_id = series["id"]
+        # Сверка файлов на диске (R1, ситуации F1/F2): пропавший renamed-файл
+        # → recheck-задача (восстановление средствами qB). Легаси делал это
+        # на КАЖДОМ скане; в новом fs.verify висела только на открытии
+        # модалки — пропажа файла сканом не лечилась.
+        try:
+            await self.request("torrents.fs.verify",
+                               {"series_id": series_id}, timeout=120)
+            # реконсиляция застрявших раздач (P10): активная, но не докачана
+            # и без задачи → загнать в конвейер заново.
+            await self.request("torrents.drive_incomplete",
+                               {"series_id": series_id}, timeout=120)
+        except BusRequestError as exc:
+            self.log.warning("сверка файлов перед сканом пропущена: %s", exc)
         if force:
             self.log.warning("force_replace: все активные торренты "
                              "сериала %d будут заменены", series_id)

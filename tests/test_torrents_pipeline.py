@@ -376,6 +376,57 @@ async def test_sim_C1_readd_after_qb_delete_repipelines(system):
 
 
 @pytest.mark.asyncio
+async def test_sim_P7_vanish_midpipeline_deactivates(system):
+    """Симуляция P7: торрент исчез из qB посреди конвейера (пользователь
+    удалил его во время работы). Задача снимается — и строка должна стать
+    неактивной (симметрия с reconcile при старте), иначе остаётся фантомная
+    is_active=1 без живой раздачи (дыра R3) → ложные счётчики и зацепка для
+    повторной регистрации."""
+    _, qbt, _, probe, db_path = system
+    # magnet без метаданных — конвейер паркуется на ожидании размера
+    qbt.torrents["hp7"] = {"state": "stoppedDL", "total_size": 0,
+                           "progress": 0.0}
+    await probe.request("torrents.register", {
+        "series_id": 1, "torrent": _torrent("tidp7"), "qb_hash": "hp7",
+        "link_type": "magnet", "replaces": None}, timeout=5)
+    assert await _wait(lambda: ("resume", ("hp7",)) in qbt.calls)  # в конвейере
+
+    qbt.torrents.pop("hp7", None)  # пользователь удалил торрент из qB
+    assert await _wait(lambda: not _agent_tasks(db_path))  # задача снята
+
+    with sqlite3.connect(db_path) as conn:
+        active = conn.execute("SELECT is_active FROM torrents WHERE "
+                              "torrent_id='tidp7'").fetchone()[0]
+    assert active == 0, "исчезнувшая из qB раздача должна деактивироваться"
+
+
+@pytest.mark.asyncio
+async def test_sim_P10_stuck_active_driven(system):
+    """Симуляция P10 («Путешествие»): раздача активна и ЕСТЬ в qB, но
+    застряла — на паузе 0%, без задачи конвейера. drive_incomplete (её
+    зовёт скан) загоняет её в конвейер; повторно на уже возобновлённой —
+    не плодит."""
+    _, qbt, renaming, probe, db_path = system
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
+                     "is_active, qb_hash) VALUES (1,'tidp10','l',1,'hp10')")
+        conn.commit()
+    qbt.torrents["hp10"] = {"state": "pausedDL", "total_size": 100,
+                            "progress": 0.0}  # в qB, не докачан, без задачи
+
+    reply = await probe.request("torrents.drive_incomplete",
+                                {"series_id": 1}, timeout=5)
+    assert reply["driven"] == 1
+    assert await _wait(lambda: not _agent_tasks(db_path))  # конвейер прошёл
+    assert renaming.calls  # переименование запустилось
+
+    # после конвейера раздача возобновлена (downloading) → повторно не гоним
+    reply2 = await probe.request("torrents.drive_incomplete",
+                                 {"series_id": 1}, timeout=5)
+    assert reply2["driven"] == 0
+
+
+@pytest.mark.asyncio
 async def test_rename_error_becomes_carrier(system):
     bus, qbt, renaming, probe, db_path = system
     renaming.fail = True

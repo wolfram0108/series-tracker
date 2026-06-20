@@ -30,6 +30,8 @@ class FakeBackend(BaseModule):
         self.settings = {"scan_interval_minutes": "60"}
         self.registered: list[dict] = []
         self.register_existed = False  # ПУНКТ 3: тот же infohash → existed
+        self.fs_verify_calls = 0       # R1: скан должен сверять файлы
+        self.drive_calls = 0           # P10: скан гонит застрявших
         self.added: list[dict] = []
         self.deactivate_calls = 0
         self.reprocess_calls = 0
@@ -47,6 +49,8 @@ class FakeBackend(BaseModule):
         h("torrents.db.active", self.on_active)
         h("torrents.db.deactivate_all", self.on_deactivate)
         h("torrents.add", self.on_add)
+        h("torrents.fs.verify", self.on_fs_verify)
+        h("torrents.drive_incomplete", self.on_drive_incomplete)
         h("torrents.register", self.on_register)
         h("torrents.queue.get", self.on_queue)
         h("settings.value.get", self.on_get)
@@ -92,6 +96,14 @@ class FakeBackend(BaseModule):
                     "existed": False}
         return {"hash": "hash-magnet", "link_type": "magnet",
                 "existed": False}
+
+    async def on_fs_verify(self, env):
+        self.fs_verify_calls += 1
+        return {"missing": 0, "recheck_started": 0}
+
+    async def on_drive_incomplete(self, env):
+        self.drive_calls += 1
+        return {"driven": 0}
 
     async def on_register(self, env):
         self.registered.append(env.payload)
@@ -176,6 +188,8 @@ async def test_rolling_replace_single_active(system):
                                 timeout=10)
     assert reply["tasks_created"] == 1
     assert fake.reprocess_calls == 1
+    assert fake.fs_verify_calls == 1  # R1: скан сверил файлы (F1/F2)
+    assert fake.drive_calls == 1      # P10: скан реконсилил застрявших
     reg = fake.registered[0]
     assert reg["replaces"]["qb_hash"] == "oldhash"
     assert reg["link_type"] == "file"

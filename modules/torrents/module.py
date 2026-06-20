@@ -112,6 +112,7 @@ class TorrentsModule(BaseModule):
         self.handle("torrents.register", self.on_register)
         self.handle("torrents.queue.get", self.on_queue_get)
         self.handle("torrents.fs.verify", self.on_fs_verify, concurrent=True)
+        self.handle("torrents.drive_incomplete", self.on_drive_incomplete)
         self.handle("torrents.db.history", self.on_db_history)
         self.handle("torrents.db.add", self.on_db_add)
         self.handle("torrents.db.downloaded_counts",
@@ -390,6 +391,20 @@ class TorrentsModule(BaseModule):
         return (info.get("progress", 0) >= 1.0
                 and info.get("state") not in _ERROR_STATES)
 
+    async def _is_stuck_in_qb(self, qb_hash: str) -> bool:
+        """Раздача в qB НА ПАУЗЕ и не докачана — застряла (конвейер поставил
+        паузу и не возобновил). Качающиеся (running) и ждущие пиров
+        (stalledDL) не застряли — их не трогаем."""
+        try:
+            infos = await self.qbt.torrents_info([qb_hash])
+        except QbtError:
+            return False
+        info = next((i for i in infos if i.get("hash") == qb_hash), None)
+        if info is None:
+            return False
+        return (info.get("progress", 0) < 1.0
+                and info.get("state") in pipeline.PAUSED)
+
     async def _enter_pipeline(self, qb_hash: str, series_id: int,
                               torrent: dict, link_type: str,
                               old_torrent_id: str) -> None:
@@ -545,6 +560,36 @@ class TorrentsModule(BaseModule):
             await self._contribute(series_id)
         return {"missing": missing, "recheck_started": started}
 
+    async def on_drive_incomplete(self, env: Envelope) -> dict:
+        """Реконсиляция застрявших раздач (ситуация P10): активная раздача,
+        которая ЕСТЬ в qB, но не докачана и БЕЗ задачи конвейера (задача
+        потеряна / не доведена), — загоняется в конвейер заново. Здоровые
+        (докачанные) и уже ведомые/ошибочные (есть задача) не трогаем.
+        Зовётся сканом на каждом проходе — восстанавливает самолечение
+        легаси, но точечно."""
+        series_id = env.payload["series_id"]
+        driven = 0
+        for row in await self.repo.active_torrents(series_id):
+            qb_hash = row.get("qb_hash")
+            if not qb_hash or qb_hash in self._pipe:
+                continue
+            if await self.repo.task_by_hash(qb_hash):
+                continue  # уже есть задача (в т.ч. носитель error) — не трогаем
+            if not await self._is_stuck_in_qb(qb_hash):
+                continue  # качается / ждёт пиров / докачана — не застряла
+            torrent = {"torrent_id": row["torrent_id"], "link": row.get("link"),
+                       "magnet": None, "date_time": row.get("date_time"),
+                       "quality": row.get("quality"),
+                       "episodes": row.get("episodes")}
+            # раздача уже в qB с метаданными → входная стадия как у file
+            await self._enter_pipeline(qb_hash, series_id, torrent, "file",
+                                       "None")
+            driven += 1
+        if driven:
+            self.log.info("серия %d: загнано в конвейер застрявших раздач: "
+                          "%d", series_id, driven)
+        return {"driven": driven}
+
     # --- конвейер ---------------------------------------------------------------------
 
     async def _pipeline_loop(self) -> None:
@@ -621,6 +666,13 @@ class TorrentsModule(BaseModule):
     async def _drop_task(self, qb_hash: str, series_id: int) -> None:
         await self.repo.delete_task(qb_hash)
         self._pipe.pop(qb_hash, None)
+        # раздача исчезла из qB — деактивируем строку и снимаем файло-записи
+        # (симметрия с reconcile при старте, R3): серия возвращается к
+        # «торрента нет», следующий скан добавит заново. Иначе осталась бы
+        # фантомная is_active=1 без живой раздачи (ложные счётчики).
+        row = await self.repo.torrent_by_hash(qb_hash)
+        if row and row["is_active"]:
+            await self.repo.deactivate_and_clear_files(row["id"])
         self._broadcast_queue()
         await self._contribute(series_id)
 
