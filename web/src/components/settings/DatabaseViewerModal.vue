@@ -122,12 +122,18 @@ onMounted(fetchTables)
 .db-empty .pi { font-size: 2rem; opacity: 0.5; }
 .db-empty p { margin: 0; }
 .db-table-wrap { min-width: 100%; }
-.db-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+/* таблица растёт под содержимое (min 100% контейнера); горизонтальный
+   скролл — у .db-content. Ячейкам задан min-width, чтобы колонки не
+   схлопывались в ноль (иначе вместо текста виден только скролл). */
+.db-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.82rem; }
 .db-table th, .db-table td { border: 1px solid var(--border-color); padding: 5px 8px; text-align: left; vertical-align: top; }
 .db-table thead th {
   position: sticky; top: 0; z-index: 1; background: var(--bg-light);
   font-weight: 600; white-space: nowrap;
 }
 .db-table tbody tr:nth-child(even) { background: #fafbfc; }
-.db-cell { max-width: 360px; max-height: 90px; overflow: auto; font-family: var(--font-mono); white-space: pre-wrap; word-break: break-word; }
+.db-cell {
+  min-width: 120px; max-width: 360px; max-height: 90px; overflow: auto;
+  font-family: var(--font-mono); white-space: pre-wrap; word-break: break-word;
+}
 </style>
