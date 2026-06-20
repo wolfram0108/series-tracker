@@ -186,16 +186,18 @@ schema.d.ts. Образец DnD на vuedraggable@4 — `StatusVkComposition.vue
   (старый код идентичен). Память `techdebt-original-path-not-immutable`.
   Видно во вкладке Композиция у серий «Извне»/«Рик и Морти» (заведены из
   уже-переименованных файлов на стенде).
-- **ПАРИТИ-РАЗРЫВ (VK-композиция, починить с приёмкой VK):** усыновление
-  файлов мой интерфейс ЗАПУСКАЕТ (ui.openStatus → viewing → бэк для VK шлёт
-  `downloads.fs.sync` → `_adopt_existing_files`), как и старый. НО команда
-  fire-and-forget (фон), а `StatusVkComposition` грузит композицию ОДИН раз
-  на mount → до завершения усыновления показывает пусто и не перечитывает.
-  Точечного SSE «композиция/media изменилась» нет (бэк шлёт `series_updated`
-  + `download_queue_update`). **Фикс:** подписать StatusVkComposition (и,
-  по-хорошему, StatusComposition/Slicing) на SSE `series_updated` этой серии
-  → debounce-reload composition. Проверено: данные серии #6 теперь есть (84
-  media-items), вкладка рендерит 86 карточек корректно.
+- **БАГ ПЕРЕНОСА (VK-композиция) — НАЙДЕН И ИСПРАВЛЕН (доказано):** записи
+  media_items создаёт СКРЕЙП VK-канала (GET `composition?refresh=true`),
+  а НЕ `viewing`/`fs.sync` (тот лишь усыновляет уже существующие pending→
+  completed по диску). Доказано на стенде: удалил записи серии #6 →
+  POST viewing оставил 0; GET composition?refresh=true → 85 (создал+
+  усыновил, сразу completed). В оригинале `seriesCompositionManager`
+  `autoUpdateEnabled` **дефолт=true** (строки 241/543; false только
+  get_all) → loadComposition(true) → авто-скрейп на открытии. Я в порте
+  по ошибке поставил дефолт=false → мой интерфейс не скрейпил на открытии.
+  **Исправлено** (StatusVkComposition.initialize: дефолт true, false для
+  get_all, иначе localStorage). Доказано end-to-end: 0 записей → открыл
+  вкладку в /v2 → авто-скрейп → 85 записей + 85 карточек.
 - **Ф0:** `schemas.py` (62 response_model, extra="allow"), golden-харнесс
   `tests/api_golden.py`. Тесты: 195 passed + 6 Vitest (seriesStore merge).
 

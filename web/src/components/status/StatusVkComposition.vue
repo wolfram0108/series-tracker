@@ -281,7 +281,15 @@ async function initialize() {
   searchMode.value = String(series?.vk_search_mode ?? "search")
   const ign = series?.ignored_seasons
   ignoredSeasons.value = Array.isArray(ign) ? (ign as number[]) : []
-  autoUpdate.value = localStorage.getItem(`composition_autoupdate_${props.seriesId}`) === "1" && searchMode.value !== "get_all"
+  // дефолт авто-обновления = true (как в оригинале: при открытии VK-серии
+  // автоматически скрейпим/усыновляем). false только для get_all или если
+  // пользователь явно выключил (сохранено в localStorage).
+  if (searchMode.value === "get_all") {
+    autoUpdate.value = false
+  } else {
+    const saved = localStorage.getItem(`composition_autoupdate_${props.seriesId}`)
+    autoUpdate.value = saved !== null ? saved === "1" : true
+  }
   await loadComposition(autoUpdate.value)
 }
 
