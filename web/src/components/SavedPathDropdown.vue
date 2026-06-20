@@ -9,6 +9,8 @@ import { computeDropStyle, type DropStyle } from "../composables/useDropAnchor"
 // готовое значение (select). Если задан catalogName («Имя (год)
 // [tmdbid-XXXX]»), он дописывается в конец через слэш — порт логики
 // legacy SavedPathDropdown.js (choose()).
+// Список — через <Teleport to="body"> (position:fixed, useDropAnchor):
+// не обрезается overflow'ом предков; прижат к правому краю триггера.
 const props = withDefaults(defineProps<{ catalogName?: string }>(), { catalogName: "" })
 const emit = defineEmits<{ (e: "select", value: string): void }>()
 
@@ -16,7 +18,15 @@ interface SavedPath { id: number; path: string }
 const open = ref(false)
 const paths = ref<SavedPath[]>([])
 const root = ref<HTMLElement | null>(null)
+const list = ref<HTMLElement | null>(null)
 const dropStyle = ref<DropStyle | null>(null)
+
+function reposition() {
+  if (root.value) dropStyle.value = computeDropStyle(root.value, { align: "right", minWidth: 320 })
+}
+function onMove() {
+  if (open.value) reposition()
+}
 
 async function loadPaths() {
   try {
@@ -34,7 +44,7 @@ async function toggle() {
     return
   }
   await loadPaths()
-  if (root.value) dropStyle.value = computeDropStyle(root.value)
+  reposition()
   open.value = true
 }
 
@@ -46,10 +56,19 @@ function choose(base: string) {
 }
 
 function onOutside(e: MouseEvent) {
-  if (open.value && root.value && !root.value.contains(e.target as Node)) open.value = false
+  const t = e.target as Node
+  if (open.value && !root.value?.contains(t) && !list.value?.contains(t)) open.value = false
 }
-onMounted(() => document.addEventListener("click", onOutside, true))
-onBeforeUnmount(() => document.removeEventListener("click", onOutside, true))
+onMounted(() => {
+  document.addEventListener("click", onOutside, true)
+  window.addEventListener("scroll", onMove, true)
+  window.addEventListener("resize", onMove)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener("click", onOutside, true)
+  window.removeEventListener("scroll", onMove, true)
+  window.removeEventListener("resize", onMove)
+})
 </script>
 
 <template>
@@ -61,10 +80,11 @@ onBeforeUnmount(() => document.removeEventListener("click", onOutside, true))
     @click.stop="toggle"
   >
     <i class="pi pi-chevron-down chevron" />
-    <div v-if="open" class="options-list" :style="dropStyle ?? undefined">
-      <div v-if="!paths.length" class="path-combo-empty">Нет сохранённых путей</div>
-      <div v-for="p in paths" :key="p.id" class="option" @click.stop="choose(p.path)">{{ p.path }}</div>
-    </div>
+    <Teleport to="body">
+      <div v-if="open" ref="list" class="options-list" :style="dropStyle ?? undefined">
+        <div v-if="!paths.length" class="path-combo-empty">Нет сохранённых путей</div>
+        <div v-for="p in paths" :key="p.id" class="option" @click.stop="choose(p.path)">{{ p.path }}</div>
+      </div>
+    </Teleport>
   </div>
 </template>
-

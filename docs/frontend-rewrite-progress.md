@@ -59,7 +59,7 @@ composables/
   useSSE.ts ─ singleton, 1 EventSource /api/stream, 11 событий, on()/connect()
   useRealtime.ts ─ диспетчер SSE→сторы (вызывается в main.ts)
   useConfirm.ts ─ Promise-подтверждение (singleton state)
-  useDropAnchor.ts ─ computeDropStyle(): высота выпадашек по содержимому, потолок до края экрана
+  useDropAnchor.ts ─ computeDropStyle(): fixed-координаты выпадашки от триггера (Teleport в body — overflow предков НЕ режет); высота по содержимому, потолок до края экрана
 stores/ (Pinia, setup-стиль)
   series.ts ─ список + merge series_updated + savingIds; series.test.ts (6 Vitest)
   queues.ts ─ 4 очереди (agent/torrents/downloads/slicing)
@@ -178,6 +178,13 @@ schema.d.ts. Образец DnD на vuedraggable@4 — `StatusVkComposition.vue
 - **Виджеты:** галерея согласованных форм (Ф2) доступна по `/v2#gallery`
   (Gallery.vue, не удалена). Выпадающие списки (StSelect/SavedPathDropdown)
   — высота по содержимому, потолок до края экрана (useDropAnchor).
+- **ФУНДАМЕНТ выпадашек (исправлено, повторялось 4 раза):** список рендерится
+  через `<Teleport to="body">` + `position:fixed` по координатам триггера —
+  `overflow:hidden` предков (fieldset/аккордеон/модалка) его НЕ обрезает.
+  Раньше был `position:absolute` внутри триггера → каждый новый overflow-
+  контейнер заново клипал список, и «чинилось» точечно (заплатка). Теперь
+  класс ошибки устранён. Правило в памяти `feedback-dropdowns-teleport-not-clip`.
+  Любой новый dropdown/popover — только так, не охотиться за overflow.
 - **НАХОДКА (Ф3):** `_updateIndicatorState` (hold-таймер 1000ms, на него
   ссылался §11 ТЗ) в исходном app.js **мёртвый** (не вызывается). Индикаторы
   мгновенные → `indicatorsStore` = computed-производные от очередей/сканера.
