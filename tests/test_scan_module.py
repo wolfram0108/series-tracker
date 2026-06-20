@@ -29,6 +29,7 @@ class FakeBackend(BaseModule):
         self.active: list[dict] = []
         self.settings = {"scan_interval_minutes": "60"}
         self.registered: list[dict] = []
+        self.register_existed = False  # ПУНКТ 3: тот же infohash → existed
         self.added: list[dict] = []
         self.deactivate_calls = 0
         self.reprocess_calls = 0
@@ -94,7 +95,7 @@ class FakeBackend(BaseModule):
 
     async def on_register(self, env):
         self.registered.append(env.payload)
-        return {"ok": True}
+        return {"ok": True, "existed": self.register_existed}
 
     async def on_queue(self, env):
         return {"count": 0}
@@ -193,7 +194,27 @@ async def test_unchanged_release_is_skipped(system):
     reply = await probe.request("scan.series.run", {"series_id": 1},
                                 timeout=10)
     assert reply["tasks_created"] == 0
+    assert reply["changed"] is False  # «Обновлений нет»
     assert fake.added == []
+
+
+@pytest.mark.asyncio
+async def test_relist_same_hash_reports_unchanged(system):
+    """Дата сменилась, но контент тот же (перевыкладка): торрент добавлен в
+    qBit, но register вернул existed=True (ПУНКТ 3) → ничего не создано →
+    changed=False, тост «Обновлений нет», а не ложное «завершено»."""
+    _, fake, probe, _ = system
+    link = "https://dl.kinozal.me/download.php?id=1"
+    fake.active = [{"id": 10, "torrent_id": ids.torrent_id(link, "01.01.2026"),
+                    "qb_hash": "samehash", "episodes": None}]
+    fake.releases = [_release(link, "09.01.2026 12:00:00")]  # новая дата
+    fake.register_existed = True  # qBit вернул тот же infohash
+
+    reply = await probe.request("scan.series.run", {"series_id": 1},
+                                timeout=10)
+    assert fake.added != []          # в qBit добавляли (узнать infohash)
+    assert reply["tasks_created"] == 0   # но задач не создано
+    assert reply["changed"] is False     # «Обновлений нет»
 
 
 @pytest.mark.asyncio
@@ -330,8 +351,17 @@ async def test_vk_scan_upserts_plans_and_publishes(system):
                                 timeout=10)
     assert reply["candidates"] == {"added": 2, "updated": 0, "deleted": 0,
                                    "kept_phantoms": 0}
+    assert reply["changed"] is True  # появились кандидаты → «завершено»
     env = await asyncio.wait_for(sub.queue.get(), 2)
     assert env.payload == {"series_id": 2}
+
+    # повторный скан тем же составом: added/deleted=0 (updated растёт сам по
+    # себе — он не «обновление») → changed=False → «Обновлений нет»
+    reply2 = await probe.request("scan.series.run", {"series_id": 2},
+                                 timeout=10)
+    assert reply2["candidates"]["added"] == 0
+    assert reply2["candidates"]["deleted"] == 0
+    assert reply2["changed"] is False
 
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row

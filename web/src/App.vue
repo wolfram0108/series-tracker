@@ -22,15 +22,23 @@ const seriesStore = useSeriesStore()
 const ui = useUiStore()
 const { request } = useApi()
 const confirm = useConfirm()
-useToast()
+const toast = useToast()
 
 // какая модалка открыта (одна за раз). Статус-окно управляется отдельно
 // через ui.activeSeriesId (его ставит ui.openStatus + viewing).
 const openModal = ref<null | "settings" | "logs" | "add">(null)
 
-function onScan(id: number) {
-  void request(
+async function onScan(id: number) {
+  // Ручной скан (по кнопке) уведомляет о результате; ошибку покажет useApi.
+  // Автоскан — в фоне и молча (решение пользователя).
+  const r = (await request(
     api.POST("/api/series/{series_id}/scan", { params: { path: { series_id: id } } } as never),
+  )) as { changed?: boolean } | null
+  if (r === null) return
+  toast.add(
+    r.changed
+      ? { severity: "success", summary: "Сканирование завершено", life: 3000 }
+      : { severity: "info", summary: "Обновлений нет", life: 3000 },
   )
 }
 function onToggle(id: number, enabled: boolean) {

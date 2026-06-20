@@ -2,7 +2,10 @@
 расписание из MonitoringAgent).
 
 Queries:
-  scan.series.run {series_id, force_replace?} → {tasks_created | vk-сводка}
+  scan.series.run {series_id, force_replace?} → {changed, tasks_created |
+      vk-сводка}. changed — были ли реальные изменения (торрент: созданы
+      задачи; VK: изменился состав кандидатов); по нему фронт ручного скана
+      шлёт тост «Сканирование завершено» / «Обновлений нет»
       Повторный запуск при идущем скане сериала — ошибка («уже запущен»,
       находка 27).
 
@@ -345,8 +348,13 @@ class ScanModule(BaseModule):
         await self.repo.set_plan_statuses(plan)
         in_plan = sum(1 for s in plan.values() if s.startswith("in_plan"))
         self.publish_event("scan.plan.updated", {"series_id": series_id})
+        # «изменения есть» = СОСТАВ кандидатов изменился: появился новый
+        # эпизод (added) или пропал (deleted). updated НЕ берём — он растёт
+        # на каждом перескане (безусловная перезапись существующих), это не
+        # «обновление». Иначе «обновлений нет».
+        changed = bool(stats["added"] or stats["deleted"])
         return {"source_type": "vk_video", "candidates": stats,
-                "in_plan": in_plan}
+                "in_plan": in_plan, "changed": changed}
 
     @staticmethod
     def _quality_priority(series: dict) -> list[int]:
@@ -409,7 +417,8 @@ class ScanModule(BaseModule):
         plan_items = self._replace_plan(series, parsed, active)
         if not plan_items:
             self.log.info("сериал %d: новых раздач нет", series_id)
-            return {"source_type": "torrent", "tasks_created": 0}
+            return {"source_type": "torrent", "tasks_created": 0,
+                    "changed": False}
 
         task_id = await self.repo.create_task(series_id, plan_items)
         return await self._execute_torrent_task(
@@ -489,18 +498,23 @@ class ScanModule(BaseModule):
             if not results:
                 raise ScanError("не удалось добавить ни одной раздачи")
 
+            created = 0
             for idx_str, res in results.items():
                 item = plan_items[int(idx_str)]
-                await self.request("torrents.register", {
+                reg = await self.request("torrents.register", {
                     "series_id": series_id,
                     "torrent": item["site_torrent"],
                     "qb_hash": res["hash"],
                     "link_type": res["link_type"],
                     "replaces": item["old"]}, timeout=120)
+                # existed=True — тот же infohash (перевыкладка, ПУНКТ 3):
+                # ничего не создано, в «изменения» не идёт.
+                if not (reg or {}).get("existed"):
+                    created += 1
 
             await self.repo.delete_task(task_id)
-            return {"source_type": "torrent",
-                    "tasks_created": len(results)}
+            return {"source_type": "torrent", "tasks_created": created,
+                    "changed": created > 0}
         except Exception as exc:
             await self.repo.set_error(task_id, str(exc))
             raise
