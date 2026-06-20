@@ -30,9 +30,11 @@ function syncFromStore() {
 }
 
 async function saveScanner() {
+  // Контракт gateway (api_system): поля enabled/interval (НЕ scanner_enabled/
+  // scan_interval) — иначе тумблер автоскана молча не срабатывает.
   await request(
     api.POST("/api/scanner/settings", {
-      body: { scanner_enabled: enabled.value, scan_interval: Number(interval.value) },
+      body: { enabled: enabled.value, interval: Number(interval.value) },
     } as never),
     { errorMessage: "Ошибка сохранения настроек сканера" },
   )
