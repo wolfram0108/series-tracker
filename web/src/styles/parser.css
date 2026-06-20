@@ -206,9 +206,6 @@
   border-radius: 4px;
 }
 .pattern-block-remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   background: #6c757d;
   color: white;
   border: none;
@@ -221,8 +218,9 @@
   opacity: 0.5;
   transition: opacity 0.2s;
   flex-shrink: 0;
+  --x-size: 7px;
+  --x-thick: 1.5px;
 }
-.pattern-block-remove .pi { font-size: 9px; line-height: 1; }
 .pattern-block:hover .pattern-block-remove { opacity: 1; }
 
 .palette-footer {
