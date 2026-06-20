@@ -103,6 +103,13 @@ class DownloadsRepository:
             "SELECT * FROM download_tasks WHERE id=? AND task_type='vk_video'",
             (task_id,))
 
+    async def tasks_for_series(self, series_id: int) -> list[dict]:
+        """Задачи загрузки серии (id, save_path, status) — для отмены
+        in-flight при удалении серии (Д2)."""
+        return await self._db.fetch_all(
+            "SELECT id, save_path, status FROM download_tasks WHERE "
+            "series_id=? AND task_type='vk_video'", (series_id,))
+
     async def clear_queue(self) -> int:
         """Удаляет все задачи, кроме идущих загрузок (контракт
         /downloads/queue/clear)."""

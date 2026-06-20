@@ -245,8 +245,24 @@ class DownloadsModule(BaseModule):
                                         env.payload["status"])
 
     async def on_series_deleted(self, env: Envelope) -> None:
-        """Каскад Р-19: владелец чистит vk-задачи загрузки."""
-        await self.repo.delete_for_series(env.payload["series_id"])
+        """Каскад Р-19 + Д2: прервать активные загрузки серии и снести
+        НЕДОДЕЛАННЫЕ полуфайлы (законченные не трогаем — файлы остаются по
+        принципу «удаление не удаляет файлы»), затем вычистить vk-задачи."""
+        series_id = env.payload["series_id"]
+        for task in await self.repo.tasks_for_series(series_id):
+            runner = self._active.get(task["id"])
+            if runner is not None and not runner.done():
+                runner.cancel()  # ytdlp в finally убьёт процесс и .download/.remux
+                try:
+                    await runner
+                except BaseException:  # noqa: BLE001 — ждём отмены
+                    pass
+            sp = task.get("save_path")
+            # final отсутствует → загрузка не закончена → снести полуфайлы;
+            # если final на месте — это законченный файл, не трогаем.
+            if sp and not await asyncio.to_thread(os.path.exists, sp):
+                await asyncio.to_thread(self._remove_partial, sp)
+        await self.repo.delete_for_series(series_id)
         await self._broadcast_queue()
 
     async def on_cancel(self, env: Envelope) -> dict:

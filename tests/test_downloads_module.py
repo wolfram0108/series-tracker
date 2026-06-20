@@ -168,6 +168,34 @@ async def _wait(predicate, timeout=3.0):
     return False
 
 
+@pytest.mark.asyncio
+async def test_sim_C5_delete_keeps_completed_removes_partial(system):
+    """C5/Д2: удаление серии сносит НЕДОДЕЛАННЫЙ полуфайл (final нет), но
+    НЕ трогает законченный (final на месте — файлы остаются). Задачи
+    вычищаются."""
+    bus, _, dl, probe, db_path, media_dir = system
+    done = os.path.join(media_dir, "done.mp4")   # законченный: final есть
+    open(done, "w").close()
+    wip = os.path.join(media_dir, "wip.mp4")     # недоделанный: final НЕТ
+    part = wip + ".part"
+    open(part, "w").close()
+    with sqlite3.connect(db_path) as conn:
+        for uid, sp in (("u_done", done), ("u_wip", wip)):
+            conn.execute(
+                "INSERT INTO download_tasks (task_key, series_id, video_url, "
+                "save_path, task_type, status, attempts, created_at, "
+                "updated_at) VALUES (?,2,'url',?, 'vk_video','pending',0,"
+                "'t','t')", (uid, sp))
+        conn.commit()
+
+    probe.publish_event("series.deleted",
+                        {"series_id": 2, "delete_from_qb": False})
+
+    assert await _wait(lambda: not os.path.exists(part))  # полуфайл снесён
+    assert os.path.exists(done)                  # законченный файл не тронут
+    assert await _wait(lambda: not _tasks(db_path))  # задачи вычищены
+
+
 def _items(db_path):
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
