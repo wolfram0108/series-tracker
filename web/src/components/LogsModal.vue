@@ -12,8 +12,12 @@ defineEmits<{ (e: "close"): void }>()
 
 interface LogEntry { timestamp: string; group: string; level: string; message: string }
 const logs = ref<LogEntry[]>([])
-const group = ref("")
-const level = ref("")
+// сентинел "all": PrimeVue Select трактует пустую строку как «не выбрано» и
+// не показывает опцию-«все» → дефолт делаем реальным значением, в запрос —
+// undefined (без фильтра).
+const ALL = "all"
+const group = ref(ALL)
+const level = ref(ALL)
 const limit = ref("200")
 const { request } = useApi()
 
@@ -22,9 +26,9 @@ const GROUPS = [
   "parser_api", "qbittorrent", "renaming_agent", "renaming_processor", "run", "scanner",
   "series_api", "slicing_agent", "smart_collector", "system_api", "vk_scraper",
 ]
-const groupOptions = [{ label: "Все группы", value: "" }, ...[...GROUPS].sort().map((g) => ({ label: g, value: g }))]
+const groupOptions = [{ label: "Все группы", value: ALL }, ...[...GROUPS].sort().map((g) => ({ label: g, value: g }))]
 const levelOptions = [
-  { label: "Все уровни", value: "" },
+  { label: "Все уровни", value: ALL },
   { label: "DEBUG", value: "DEBUG" },
   { label: "INFO", value: "INFO" },
   { label: "WARNING", value: "WARNING" },
@@ -34,7 +38,13 @@ const levelOptions = [
 async function loadLogs() {
   const data = (await request(
     api.GET("/api/logs", {
-      params: { query: { group: group.value || undefined, level: level.value || undefined, limit: Number(limit.value) || 200 } },
+      params: {
+        query: {
+          group: group.value === ALL ? undefined : group.value,
+          level: level.value === ALL ? undefined : level.value,
+          limit: Number(limit.value) || 200,
+        },
+      },
     } as never),
   )) as unknown
   if (Array.isArray(data)) logs.value = data as LogEntry[]
