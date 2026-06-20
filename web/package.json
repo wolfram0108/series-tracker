@@ -10,6 +10,7 @@
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "gen:api": "openapi-typescript http://127.0.0.1:5000/openapi.json -o src/api/schema.d.ts"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "vuedraggable": "^4.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@types/node": "^22.10.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vue/test-utils": "^2.4.11",
