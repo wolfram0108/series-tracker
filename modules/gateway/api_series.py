@@ -156,6 +156,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             # как в оригинале: каждое сохранение свойств переобрабатывает
             # имена; при перемещении это сделает сам library (Р-17)
             gw.send_command("renaming.reprocess", {"series_id": series_id})
+        # VK: сохранение свойств УСЫНОВЛЯЕТ уже лежащие на диске файлы
+        # (контракт: Сохранить → усыновление, НЕ загрузка). fs.sync —
+        # усыновление без создания задач загрузки.
+        if series.get("source_type") == "vk_video":
+            gw.send_command("downloads.fs.sync", {"series_id": series_id})
         return {"success": True,
                 "message": "Задача на обновление принята в обработку."}
 

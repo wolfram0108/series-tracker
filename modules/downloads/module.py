@@ -4,13 +4,18 @@
 final_filename.
 
 События (входящие):
-  scan.plan.updated {series_id} — план пересчитан: усыновление готовых
-      файлов → создание задач (error-задача элемента заменяется новой —
-      ретрай сканом) → чистка pending вне плана → пинок диспетчеру.
+  scan.plan.updated {series_id} — план пересчитан: ТОЛЬКО усыновление
+      готовых на диске файлов + чистка pending вне плана. Загрузку НЕ
+      запускает (инвариант: усыновление ≠ загрузка; открытие композиции
+      и сохранение свойств не должны качать).
   settings.changed — подписка на max_parallel_downloads (вместо
       перечитывания каждые 5 с).
 
 Queries / commands:
+  downloads.dispatch {series_id} — ПРИКАЗ скана докачать недостающее:
+      усыновление + создание задач на планово-ожидаемое, чего НЕТ на
+      диске, + пинок диспетчеру. ЕДИНСТВЕННАЯ точка старта загрузки
+      (шлёт только scan._run_series по явному скану/автоскану).
   downloads.queue.get {} → {tasks, count} — активные задачи (загрузка UI)
   downloads.queue.clear {} → {deleted} — всё, кроме идущих загрузок
   downloads.fs.sync {series_id} → {adopted, lost} — синхронизация с
@@ -58,6 +63,7 @@ class DownloadsModule(BaseModule):
 
     def register(self) -> None:
         self.handle("scan.plan.updated", self.on_plan_updated)
+        self.handle("downloads.dispatch", self.on_dispatch)
         self.handle("settings.changed", self.on_settings_changed)
         self.handle("downloads.queue.get", self.on_queue_get)
         self.handle("downloads.queue.clear", self.on_queue_clear)
@@ -127,6 +133,27 @@ class DownloadsModule(BaseModule):
         await self._pump()
 
     async def on_plan_updated(self, env: Envelope) -> None:
+        """План изменился (скан-скрейп / открытие композиции / смена
+        игнора): УСЫНОВЛЕНИЕ существующих на диске файлов + чистка pending
+        вне плана. Загрузку НЕ запускает — её стартует ТОЛЬКО downloads.
+        dispatch по явному скану (инвариант: усыновление ≠ загрузка)."""
+        series_id = env.payload["series_id"]
+        series = await self.request("catalog.series.get",
+                                    {"series_id": series_id})
+        adopted = await self._adopt_existing_files(series)
+        dropped = await self.repo.drop_pending_outside_plan(series_id)
+        self.log.info("план %d: усыновлено %d, вычищено вне плана %d",
+                      series_id, adopted, dropped)
+        if adopted:
+            await self._contribute(series_id)
+        if dropped:
+            await self._broadcast_queue()
+
+    async def on_dispatch(self, env: Envelope) -> None:
+        """Явная диспетчеризация загрузок (приказ скана, downloads.dispatch):
+        сперва усыновить уже лежащее на диске, затем создать задачи только
+        на планово-ожидаемое, чего на диске НЕТ, и пнуть пул. ЕДИНСТВЕННАЯ
+        точка, где стартует загрузка VK-видео."""
         series_id = env.payload["series_id"]
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
@@ -142,13 +169,11 @@ class DownloadsModule(BaseModule):
                 if item["status"] == "error":  # ретрай сканом снимает ошибку
                     await self.repo.set_item_status(item["unique_id"],
                                                     "pending")
-        dropped = await self.repo.drop_pending_outside_plan(series_id)
-        self.log.info("план %d: усыновлено %d, задач создано %d, "
-                      "вычищено вне плана %d", series_id, adopted, created,
-                      dropped)
-        if adopted:
+        self.log.info("диспетч %d: усыновлено %d, задач создано %d",
+                      series_id, adopted, created)
+        if adopted or created:
             await self._contribute(series_id)
-        if created or dropped:
+        if created:
             await self._broadcast_queue()
         await self._pump()
 

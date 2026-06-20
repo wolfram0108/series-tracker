@@ -11,9 +11,10 @@ Commands:
       (то же делает внутренний планировщик по расписанию из settings).
 
 События (исходящие):
-  scan.plan.updated {series_id} — план VK-загрузок пересчитан; владелец
-      download_tasks (downloads) подписан: усыновление файлов и создание
-      задач — его зона.
+  scan.plan.updated {series_id} — план VK-загрузок пересчитан; downloads
+      на него делает ТОЛЬКО усыновление готовых файлов (НЕ загрузку).
+      Загрузку запускает лишь явный скан: _run_series после _scan_vk
+      шлёт команду downloads.dispatch (открытие композиции — не шлёт).
   scan.status.changed {scanner_enabled, scan_interval, is_scanning,
       is_awaiting_tasks, next_scan_time} — состояние планировщика
       (контракт старого scanner_status_update).
@@ -281,6 +282,11 @@ class ScanModule(BaseModule):
             await self._reprocess_names(series_id)
             if series["source_type"] == "vk_video":
                 result = await self._scan_vk(series)
+                # Явный скан — ЕДИНСТВЕННЫЙ путь к загрузке: после скрейпа
+                # и усыновления (scan.plan.updated) приказываем downloads
+                # докачать недостающее. Открытие композиции этого НЕ делает.
+                self.send_command("downloads.dispatch",
+                                  {"series_id": series_id})
             else:
                 result = await self._scan_torrents(series, force)
             self._contribute(series_id, scanning=False, error=False)

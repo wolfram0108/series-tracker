@@ -182,13 +182,13 @@ def _tasks(db_path):
 
 
 @pytest.mark.asyncio
-async def test_plan_updated_creates_downloads_and_completes(system):
+async def test_dispatch_creates_downloads_and_completes(system):
     bus, _, dl, probe, db_path, media_dir = system
     _add_item(db_path, "uid1", 1)
     _add_item(db_path, "uid2", 2, plan="redundant")  # вне плана — без задачи
     sub = bus.subscribe("series.status.contribution")
 
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
     assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "completed")
 
     items = _items(db_path)
@@ -224,21 +224,35 @@ async def test_adoption_skips_download(system):
 
 
 @pytest.mark.asyncio
+async def test_plan_updated_adopts_only_no_downloads(system):
+    """Инвариант контракта: scan.plan.updated делает ТОЛЬКО усыновление.
+    Если файла на диске нет — НЕ создаёт задач и НЕ запускает загрузку
+    (загрузку стартует лишь явный скан через downloads.dispatch)."""
+    _, _, dl, probe, db_path, _ = system
+    _add_item(db_path, "uid1", 1)  # файла на диске НЕТ
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await asyncio.sleep(0.2)
+    assert dl.started == []                                  # не качали
+    assert _tasks(db_path) == []                             # задач не создано
+    assert _items(db_path)["uid1"]["status"] == "pending"    # остался pending
+
+
+@pytest.mark.asyncio
 async def test_error_carrier_and_retry_by_next_scan(system):
     _, _, dl, probe, db_path, _ = system
     _add_item(db_path, "uid1", 1)
     dl.fail_urls.add("https://vk.com/video-1_1")
 
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
     assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "error")
     tasks = _tasks(db_path)
     assert len(tasks) == 1 and tasks[0]["status"] == "error"
     assert "недоступно" in tasks[0]["error_message"]
 
-    # следующий скан: error-задача заменяется новой, без дублей
+    # следующий скан (dispatch): error-задача заменяется новой, без дублей
     # (completed пишется на шаг раньше удаления задачи — ждём оба факта)
     dl.fail_urls.clear()
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
     assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "completed")
     assert await _wait(lambda: _tasks(db_path) == [])
 
@@ -248,7 +262,7 @@ async def test_pending_outside_plan_dropped(system):
     _, _, dl, probe, db_path, _ = system
     dl.gate = asyncio.Event()  # держим загрузки, чтобы успеть проверить
     _add_item(db_path, "uid1", 1)
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
     assert await _wait(lambda: len(_tasks(db_path)) == 1)
 
     # план изменился: элемент выпал, задача ещё pending? — нет, уже
@@ -279,7 +293,7 @@ async def test_parallel_limit_respected(system):
     dl.gate = asyncio.Event()
     for ep in (1, 2, 3):
         _add_item(db_path, f"uid{ep}", ep)
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
     assert await _wait(lambda: len(dl.started) >= 1)
     await asyncio.sleep(0.1)
     assert dl.max_concurrent == 1
@@ -372,7 +386,7 @@ async def test_cancel_active_download(system):
     bus, _, dl, probe, db_path, media_dir = system
     dl.gate = asyncio.Event()  # держим загрузку активной на 50%
     _add_item(db_path, "uid1", 1)
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
 
     # дождаться, пока задача реально пошла в загрузку
     assert await _wait(lambda: _items(db_path)["uid1"]["status"]
