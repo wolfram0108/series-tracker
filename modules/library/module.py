@@ -46,6 +46,7 @@ class LibraryModule(BaseModule):
         # None = вся ФС (поведение старой системы); список — явные корни.
         self._allowed_roots = allowed_roots
         self.repo = LibraryRepository(db)
+        self._relocations: dict[int, asyncio.Task] = {}  # Д2: отмена при удалении
         super().__init__(bus)
 
     def register(self) -> None:
@@ -60,7 +61,9 @@ class LibraryModule(BaseModule):
         for task in await self.repo.unfinished():
             self.log.info("возобновление перемещения: задача %d, сериал %d",
                           task["id"], task["series_id"])
-            self._tasks.append(asyncio.create_task(self._execute(task)))
+            t = asyncio.create_task(self._execute(task))
+            self._relocations[task["series_id"]] = t
+            self._tasks.append(t)
 
     def _check_allowed(self, path: str) -> None:
         if self._allowed_roots is None:
@@ -112,7 +115,9 @@ class LibraryModule(BaseModule):
             raise LibraryError("активная задача на перемещение уже "
                                "выполняется")
         task = {"id": task_id, "series_id": series_id, "new_path": new_path}
-        self._tasks.append(asyncio.create_task(self._execute(task)))
+        t = asyncio.create_task(self._execute(task))
+        self._relocations[series_id] = t
+        self._tasks.append(t)
         return {"task_id": task_id}
 
     @staticmethod
@@ -157,6 +162,7 @@ class LibraryModule(BaseModule):
                 "message": str(exc)})
         finally:
             # busy — только активная работа (находка 36)
+            self._relocations.pop(series_id, None)
             self._busy(series_id, False)
 
     async def _move_vk_files(self, series_id: int, old_base: str,
@@ -212,5 +218,11 @@ class LibraryModule(BaseModule):
             "source": "library", "series_id": series_id, "busy": busy})
 
     async def on_series_deleted(self, env):
-        """Каскад Р-19: владелец чистит relocation_tasks."""
-        await self.repo.delete_for_series(env.payload["series_id"])
+        """Каскад Р-19 + Д2: прервать идущее перемещение этой серии
+        (os.rename атомарен — полуфайлов нет, останавливаем перенос
+        оставшихся файлов) и вычистить relocation_tasks."""
+        series_id = env.payload["series_id"]
+        t = self._relocations.pop(series_id, None)
+        if t and not t.done():
+            t.cancel()
+        await self.repo.delete_for_series(series_id)

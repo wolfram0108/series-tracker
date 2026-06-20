@@ -64,6 +64,9 @@ async def run_ffmpeg(source: str, start: str, duration: str | None,
     except asyncio.TimeoutError:
         proc.kill()
         return False, f"ffmpeg не уложился в {FFMPEG_TIMEOUT:.0f} с"
+    except asyncio.CancelledError:
+        proc.kill()  # отмена (удаление серии, Д2) — убить процесс ffmpeg
+        raise
     if proc.returncode != 0:
         return False, stderr.decode("utf-8", "replace").strip()[-500:]
     return True, ""
@@ -78,6 +81,10 @@ class SlicingModule(BaseModule):
         self._ffmpeg = ffmpeg
         self._fetch = fetch_chapters
         self._wake = asyncio.Event()
+        # Д2: прерывание текущей нарезки при удалении её серии
+        self._current_series: int | None = None
+        self._current_ffmpeg: asyncio.Task | None = None
+        self._aborted: set[int] = set()
         super().__init__(bus)
 
     def register(self) -> None:
@@ -237,6 +244,7 @@ class SlicingModule(BaseModule):
     async def _process_task(self, task: dict) -> None:
         uid, task_id = task["media_item_unique_id"], task["id"]
         series_id = task["series_id"]
+        self._current_series = series_id  # Д2: какую серию режем сейчас
         try:
             await self.repo.set_task_status(task_id, "slicing")
             await self.repo.set_slicing_status(uid, "slicing")
@@ -264,6 +272,9 @@ class SlicingModule(BaseModule):
                                                      task_id)
 
             for i, chapter in enumerate(chapters):
+                if series_id in self._aborted:  # Д2: серию удалили — прекращаем
+                    self.log.info("нарезка %s прервана удалением серии", uid)
+                    return
                 if chapter.get("is_garbage"):
                     self.log.info("мусорная глава %d пропущена: %s", i + 1,
                                   chapter.get("title"))
@@ -276,8 +287,19 @@ class SlicingModule(BaseModule):
                 duration = self._duration(chapter, chapters, i)
                 self.log.info("ffmpeg: эпизод %d (%s, %s)", episode,
                               chapter["time"], duration or "до конца")
-                ok, error = await self._ffmpeg(source, chapter["time"],
-                                               duration, out_abs)
+                self._current_ffmpeg = asyncio.ensure_future(
+                    self._ffmpeg(source, chapter["time"], duration, out_abs))
+                try:
+                    ok, error = await self._current_ffmpeg
+                except asyncio.CancelledError:
+                    # серию удалили во время ffmpeg → снести недоделанный
+                    # полуфайл (законченные ранее главы остаются)
+                    await asyncio.to_thread(self._remove_file, out_abs)
+                    self.log.info("нарезка %s прервана — недоделанный %s "
+                                  "снесён", uid, out_rel)
+                    return
+                finally:
+                    self._current_ffmpeg = None
                 if not ok:
                     raise RuntimeError(
                         f"ffmpeg, эпизод {episode}: {error}")
@@ -300,8 +322,18 @@ class SlicingModule(BaseModule):
             await self.repo.set_task_status(task_id, "error", str(exc))
             await self.repo.set_slicing_status(uid, "error")
         finally:
+            self._current_series = None
+            self._aborted.discard(series_id)
             await self._contribute(series_id)
             await self._broadcast_queue()
+
+    @staticmethod
+    def _remove_file(path: str) -> None:
+        try:
+            if os.path.isfile(path):
+                os.remove(path)
+        except OSError:
+            pass
 
     async def _init_progress(self, series: dict, item: dict,
                              chapters: list[dict], task_id: int) -> dict:
@@ -555,5 +587,11 @@ class SlicingModule(BaseModule):
             "source": "slicing", "series_id": series_id, "flags": flags})
 
     async def on_series_deleted(self, env):
-        """Каскад Р-19: владелец чистит slicing_tasks и sliced_files."""
-        await self.repo.delete_for_series(env.payload["series_id"])
+        """Каскад Р-19 + Д2: прервать идущую нарезку этой серии (kill ffmpeg,
+        снос недоделанного выхода — в _process_task) и вычистить таблицы."""
+        series_id = env.payload["series_id"]
+        self._aborted.add(series_id)
+        if (self._current_series == series_id and self._current_ffmpeg
+                and not self._current_ffmpeg.done()):
+            self._current_ffmpeg.cancel()
+        await self.repo.delete_for_series(series_id)

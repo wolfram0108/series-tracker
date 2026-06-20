@@ -113,6 +113,8 @@ class FakeFfmpeg:
     def __init__(self):
         self.calls: list[tuple] = []
         self.fail_episodes: set[str] = set()
+        self.block: "asyncio.Event | None" = None  # задан → виснем после записи
+        self.started = asyncio.Event()
 
     async def __call__(self, source, start, duration, output):
         self.calls.append((source, start, duration, output))
@@ -121,6 +123,9 @@ class FakeFfmpeg:
         os.makedirs(os.path.dirname(output), exist_ok=True)
         with open(output, "wb") as f:
             f.write(b"cut")
+        if self.block is not None:  # имитация долгого ffmpeg до отмены (Д2)
+            self.started.set()
+            await self.block.wait()
         return True, ""
 
 
@@ -209,6 +214,30 @@ async def _wait(predicate, timeout=3.0):
             return True
         await asyncio.sleep(0.02)
     return False
+
+
+@pytest.mark.asyncio
+async def test_sim_C5_slicing_aborts_removes_partial(system):
+    """C5/Д2: удаление серии во время нарезки прерывает ffmpeg и сносит
+    недоделанный выходной файл."""
+    _, _, ffmpeg, probe, db_path, media = system
+    _add_compilation(db_path)
+    open(os.path.join(media, "компиляция.mp4"), "wb").close()
+    ffmpeg.block = asyncio.Event()  # ffmpeg зависнет после записи частичного
+
+    await probe.request("slicing.task.create", {"unique_id": "comp1"},
+                        timeout=10)
+    assert await _wait(lambda: ffmpeg.started.is_set())  # режет первую главу
+    partial = os.path.join(media, "Show s01e11.mp4")
+    assert os.path.exists(partial)  # частичный выход на диске
+
+    probe.publish_event("series.deleted",
+                        {"series_id": 2, "delete_from_qb": False})
+
+    assert await _wait(lambda: not os.path.exists(partial))  # снесён
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM slicing_tasks").fetchone()[0] == 0
 
 
 @pytest.mark.asyncio
