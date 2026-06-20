@@ -578,6 +578,35 @@ async def test_fs_verify_marks_missing_and_rechecks(system, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_sim_L3_pipeline_task_recovered_on_start(db_path):
+    """L2/L3: рестарт посреди конвейера — незавершённая задача из
+    agent_tasks восстанавливается в работу и доводится (торрент жив в qB)."""
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
+                     "is_active, qb_hash) VALUES (1,'tl3','l',1,'hl3')")
+        conn.execute("INSERT INTO agent_tasks (torrent_hash, series_id, "
+                     "torrent_id, old_torrent_id, stage) VALUES "
+                     "('hl3',1,'tl3','None','awaiting_pause_before_rename')")
+        conn.commit()
+    bus = Bus()
+    db = Database(db_path)
+    qbt = FakeQbt()
+    qbt.torrents = {"hl3": {"state": "pausedDL", "total_size": 9,
+                            "progress": 0.0}}
+    renaming = FakeRenaming(bus)
+    torrents = TorrentsModule(bus, db, qbt=qbt, pipeline_poll=0.02,
+                              monitor_active=0.05, monitor_idle=0.2)
+    runner = Runner(bus, [renaming, CatalogModule(bus, db), torrents,
+                          Probe(bus)])
+    await runner.start()
+    try:
+        assert await _wait(lambda: not _agent_tasks(db_path))  # доведена
+        assert renaming.calls  # переименование отработало после рестарта
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
 async def test_reconcile_drops_orphan_torrent_on_start(db_path):
     """Crash-tolerance (reconcile при старте): торрент есть в БД и
     активен, но отсутствует в реальном qBit (удалён вручную) → запись
