@@ -6,10 +6,10 @@ import SettingsAgents from "./settings/SettingsAgents.vue"
 import SettingsAuth from "./settings/SettingsAuth.vue"
 import SettingsTrackers from "./settings/SettingsTrackers.vue"
 import SettingsDebug from "./settings/SettingsDebug.vue"
+import SettingsParser from "./settings/SettingsParser.vue"
 
 // Окно настроек (порт settingsModal): шапка с вкладками-сегментом + тело
-// активной вкладки + футер. Вкладки trackers/debug и конфигуратор (parser) —
-// следующие под-вехи Ф4, пока заглушки.
+// активной вкладки + футер. Вкладка parser — конфигуратор «Фильтры VK».
 const emit = defineEmits<{ (e: "close"): void }>()
 
 const tab = ref<"auth" | "trackers" | "parser" | "agents" | "debug">("auth")
@@ -60,10 +60,7 @@ const tabs = [
     <SettingsTrackers v-else-if="tab === 'trackers'" />
     <SettingsAgents v-else-if="tab === 'agents'" />
     <SettingsDebug v-else-if="tab === 'debug'" />
-    <div v-else-if="tab === 'parser'" class="tab-stub">
-      <i class="pi pi-filter"></i>
-      <p>Конфигуратор правил VK (drag-and-drop) — крупная отдельная веха Ф4, в работе.</p>
-    </div>
+    <SettingsParser v-else-if="tab === 'parser'" />
 
     <template #footer>
       <Button

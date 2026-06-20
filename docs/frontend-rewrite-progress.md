@@ -112,7 +112,8 @@ styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layou
 | ↳ История (торрент+VK таблицы) | ✅ принят | torrents/history, media-items |
 | ↳ Композиция VK (карточки+DnD приоритет) | 🔁 построена, ждёт VK-данных | composition?refresh, sliced-files, rename_preview, ignore, ignored-seasons, vk-quality-priority, deep-adoption, reprocess_vk_files |
 | ↳ Нарезка (главы ffprobe, фильтр, нарезка) | 🔁 построена, ждёт VK-данных | media-items, chapters(/filtered/mark-garbage), slice(/-with-filter), delete-source |
-| **Конфигуратор Фильтров VK** (DnD) | ⏳ крупная | см. §5 |
+| **Конфигуратор Фильтров VK** (DnD) | ✅ собран | parser-profiles[/{id}][/rules], parser-rules/{id}[reorder], test, scrape-titles, source-filenames |
+| ↳ Профили / Правила (DnD-блоки + И/ИЛИ) / Тест | ✅ собран | аккордеон 3 шагов; конструктор паттернов (vuedraggable@4 clone + contenteditable) |
 | Отладка-доп (БД-просмотр/очистка/флаги) | ⏳ | /api/settings/{force_replace,less_strict_scan,...} |
 
 Окно настроек: вкладки-сегмент (остров облегает, адаптивное схлопывание
@@ -198,6 +199,24 @@ schema.d.ts. Образец DnD на vuedraggable@4 — `StatusVkComposition.vue
   **Исправлено** (StatusVkComposition.initialize: дефолт true, false для
   get_all, иначе localStorage). Доказано end-to-end: 0 записей → открыл
   вкладку в /v2 → авто-скрейп → 85 записей + 85 карточек.
+- **КОНФИГУРАТОР «Фильтры VK» — собран (порт по эталону, доказан end-to-end):**
+  снят скриншот старого экрана (Шаг 1/2/3), портированы реальный шаблон
+  settingsParser.js + rule-editor.css (→ `web/src/styles/parser.css`).
+  Компоненты: `settings/SettingsParser.vue` (аккордеон + профили + вся API),
+  `ParserRuleCard.vue` (правило ЕСЛИ/ТО), `ParserPatternEditor.vue` (DnD-блоки
+  vuedraggable@4 clone + contenteditable, общий для IF/THEN), `ParserTest.vue`
+  (Шаг 3). Аккордеон в оригинале — Bootstrap (кастома нет); портирован
+  минимально под токены. Кнопки/переключатели — на языке нового проекта
+  (PrimeVue Button/ToggleSwitch), как соседние экраны. Доказано в /v2:
+  выбор профиля → правила → прогон теста; «Трейлер» → ИСКЛЮЧЕНО (имя правила),
+  обычное → «правила не применились».
+- **НАХОДКА КОНТРАКТА (test): `rule`, не `rule_name`.** Старый фронт читал
+  `match_events[].rule_name`; новый движок (`modules/rules/engine.py`) кладёт
+  ключ `rule` (`{"rule": <имя>, "action": "exclude"|"extract"}`). Проверено
+  на живом API (curl) и в /v2 UI. Новый фронт пишется под РЕАЛЬНЫЙ контракт
+  API (`rule`) — это фундамент, не подгонка под старое поле. Для Ф5: если
+  нужна дословная верность старому контракту — переименовать в движке, иначе
+  принять `rule` как ревизию (пометить в contracts/revision.md).
 - **Ф0:** `schemas.py` (62 response_model, extra="allow"), golden-харнесс
   `tests/api_golden.py`. Тесты: 195 passed + 6 Vitest (seriesStore merge).
 
@@ -210,8 +229,9 @@ schema.d.ts. Образец DnD на vuedraggable@4 — `StatusVkComposition.vue
    Нарезка/История). Торрент-путь принят; VK-композиция и Нарезка ждут
    визуальной приёмки на реальных VK-данных (у серии #6 «Сказание о
    пастухе богов» пока нет медиа-элементов — нужен скан/загрузка).
-3. **Конфигуратор Фильтров VK** — крупная веха DnD (§5). СЛЕДУЮЩАЯ.
-4. **Отладка-доп** + модалка DatabaseViewer (БД-просмотр/очистка/флаги).
+3. ~~Конфигуратор Фильтров VK~~ ✅ собран (порт по эталону, доказан в /v2).
+   Ждёт визуальной приёмки пользователем.
+4. **Отладка-доп** + модалка DatabaseViewer (БД-просмотр/очистка/флаги). СЛЕДУЮЩАЯ.
 5. Затем Ф5 (приёмка паритета + e2e Playwright) → Ф6 (cutover).
 
 **Незакрытые инварианты для проверки в Ф5:** частичный merge series_updated
