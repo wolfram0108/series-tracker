@@ -22,13 +22,17 @@
   font-size: 14px; font-weight: 500; color: var(--color-gray-600);
 }
 .mirror-pill-remove {
-  width: 20px; height: 20px; padding: 0; background-color: var(--border-color);
-  color: var(--text-muted); border: none; border-radius: 50%; cursor: pointer;
-  transition: all 0.2s ease;
-  --x-size: 9px;
-  --x-thick: 2px;
+  width: 20px; height: 20px; padding: 0; border: none; cursor: pointer;
+  transition: transform 0.2s ease;
+  /* круг + крест — ОДНА картинка (центровка нерушима) */
+  background: center / 20px 20px no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Ccircle cx='10' cy='10' r='10' fill='%23dee2e6'/%3E%3Cpath d='M6 6l8 8M14 6l-8 8' stroke='%236c757d' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
 }
-.mirror-pill-remove:hover { background-color: var(--color-red-1); color: #fff; transform: scale(1.1); }
+.mirror-pill-remove:hover {
+  transform: scale(1.1);
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Ccircle cx='10' cy='10' r='10' fill='%23dc3545'/%3E%3Cpath d='M6 6l8 8M14 6l-8 8' stroke='%23fff' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+}
 
 /* 3) Предпросмотр VK-фильтра: info-пилюли на цветном фоне (compact-card.css) */
 .pill {

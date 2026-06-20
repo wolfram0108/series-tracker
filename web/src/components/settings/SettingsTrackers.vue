@@ -81,7 +81,7 @@ onMounted(load)
         <div v-if="t.mirrors.length" class="mirrors-row">
           <span v-for="(m, i) in t.mirrors" :key="m" class="mirror-pill">
             {{ m }}
-            <button class="mirror-pill-remove x-mark" title="Удалить" @click="removeMirror(t, i)" />
+            <button class="mirror-pill-remove" title="Удалить" @click="removeMirror(t, i)" />
           </span>
         </div>
         <StGroup>

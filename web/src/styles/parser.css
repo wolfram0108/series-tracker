@@ -206,20 +206,18 @@
   border-radius: 4px;
 }
 .pattern-block-remove {
-  background: #6c757d;
-  color: white;
-  border: none;
-  border-radius: 50%;
   width: 16px;
   height: 16px;
   padding: 0;
+  border: none;
   cursor: pointer;
   margin-left: 0.5rem;
   opacity: 0.5;
   transition: opacity 0.2s;
   flex-shrink: 0;
-  --x-size: 7px;
-  --x-thick: 1.5px;
+  /* круг + крест — ОДНА картинка (один слой краски → центровка нерушима) */
+  background: center / 16px 16px no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%236c757d'/%3E%3Cpath d='M5 5l6 6M11 5l-6 6' stroke='%23fff' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
 }
 .pattern-block:hover .pattern-block-remove { opacity: 1; }
 
