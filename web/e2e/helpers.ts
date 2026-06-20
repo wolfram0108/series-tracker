@@ -1,8 +1,9 @@
 import { type Page } from "@playwright/test"
 
-// Открыть /v2 и дождаться отрисовки списка серий (SSE вечный → domcontentloaded).
+// Открыть корень (Ф6: новый фронт на /) и дождаться списка серий
+// (SSE вечный → domcontentloaded).
 export async function openApp(page: Page): Promise<void> {
-  await page.goto("/v2/", { waitUntil: "domcontentloaded" })
+  await page.goto("/", { waitUntil: "domcontentloaded" })
   await page.waitForSelector(".series-card", { timeout: 20_000 })
 }
 

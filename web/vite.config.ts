@@ -1,11 +1,11 @@
 import { defineConfig } from "vite"
 import vue from "@vitejs/plugin-vue"
 
-// Новый фронт раздаётся под /v2 (рядом со старым на /). Бэкенд — FastAPI :5000.
-// В dev /api проксируется на бэкенд. SSE (/api/stream) при необходимости можно
-// слушать напрямую на :5000, минуя proxy (ТЗ §8, frontend-rewrite).
+// Новый фронт раздаётся с КОРНЯ / (Ф6 cutover; старый — на /legacy). Ассеты
+// абсолютные (/assets/*) → грузятся одинаково с / и со старого алиаса /v2.
+// Бэкенд — FastAPI :5000; в dev /api проксируется на бэкенд.
 export default defineConfig({
-  base: "/v2/",
+  base: "/",
   plugins: [vue()],
   build: {
     outDir: "dist",

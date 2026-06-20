@@ -15,7 +15,8 @@ import json
 import os
 
 from fastapi import FastAPI, Request  # Request нужен diag-роуту
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse,
+                               StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 
 from core import BaseModule, BusRequestError
@@ -165,22 +166,43 @@ class GatewayModule(BaseModule):
         app.include_router(media_router(self))
         app.include_router(settings_router(self))
 
-        index_path = os.path.join(self._templates_dir, "index.html")
+        legacy_index = os.path.join(self._templates_dir, "index.html")
+        dist_index = os.path.join(self._web_dist_dir, "index.html")
+        dist_favicon = os.path.join(self._web_dist_dir, "favicon.svg")
+        has_dist = os.path.isdir(self._web_dist_dir)
 
+        # Ф6 cutover (Р-Ф7): корень «/» — НОВЫЙ фронт (Vite-сборка), старый
+        # уведён на «/legacy» для отката. Если сборки нет (dist отсутствует) —
+        # падаем обратно на старый фронт с корня, чтобы стенд не остался без UI.
         @app.get("/")
         async def index() -> FileResponse:
-            return FileResponse(index_path)
+            return FileResponse(dist_index if has_dist else legacy_index)
+
+        # Старый фронт (rollback): отдаём по /legacy; его ассеты — /static.
+        @app.get("/legacy")
+        async def legacy() -> FileResponse:
+            return FileResponse(legacy_index)
 
         if os.path.isdir(self._static_dir):
             app.mount("/static", StaticFiles(directory=self._static_dir),
                       name="static")
 
-        # Новый фронт (Vite-сборка) под /v2, рядом со старым на «/»
-        # (frontend-rewrite Ф1, Р-Ф7). html=True отдаёт index.html на /v2/
-        # и ассеты на /v2/assets/*. Старый фронт и /api не затронуты.
-        if os.path.isdir(self._web_dist_dir):
-            app.mount("/v2", StaticFiles(directory=self._web_dist_dir,
-                                         html=True), name="v2")
+        # Старый адрес нового фронта «/v2» → редирект на корень.
+        @app.get("/v2")
+        @app.get("/v2/")
+        async def v2_redirect() -> RedirectResponse:
+            return RedirectResponse("/", status_code=307)
+
+        # Ассеты нового фронта (абсолютные пути base="/"): /assets/* + favicon.
+        if has_dist:
+            app.mount("/assets",
+                      StaticFiles(directory=os.path.join(self._web_dist_dir,
+                                                         "assets")),
+                      name="assets")
+
+            @app.get("/favicon.svg")
+            async def favicon() -> FileResponse:
+                return FileResponse(dist_favicon)
         return app
 
     # --- SSE: шина -> браузер -------------------------------------------------
