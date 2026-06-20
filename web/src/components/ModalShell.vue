@@ -14,6 +14,19 @@ withDefaults(defineProps<{ title?: string; size?: "" | "xl" | "full"; fixedHeigh
 })
 const emit = defineEmits<{ (e: "close"): void }>()
 
+// Закрытие по клику вне окна — только если ЖЕСТ начался на самом оверлее.
+// Иначе выделение текста в поле с отпусканием за пределами окна порождает
+// click по общему предку (оверлею в Chromium) и теряет введённые данные.
+// Поэтому закрываем лишь когда и mousedown, и click пришлись на оверлей.
+let pressedOnOverlay = false
+function onOverlayMousedown(e: MouseEvent) {
+  pressedOnOverlay = e.target === e.currentTarget
+}
+function onOverlayClick(e: MouseEvent) {
+  if (e.target === e.currentTarget && pressedOnOverlay) emit("close")
+  pressedOnOverlay = false
+}
+
 function onKey(e: KeyboardEvent) {
   if (e.key === "Escape") emit("close")
 }
@@ -22,7 +35,7 @@ onUnmounted(() => document.removeEventListener("keydown", onKey))
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="emit('close')">
+  <div class="modal-overlay" @mousedown="onOverlayMousedown" @click="onOverlayClick">
     <div
       class="modern-modal"
       :class="[size === 'xl' ? 'modal-xl' : size === 'full' ? 'modal-full' : '', { 'modal-fixed': fixedHeight }]"
