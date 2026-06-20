@@ -114,7 +114,8 @@ styles/ ─ tokens/overrides/fields/tables/pills/card/cards/progress/modal/layou
 | ↳ Нарезка (главы ffprobe, фильтр, нарезка) | 🔁 построена, ждёт VK-данных | media-items, chapters(/filtered/mark-garbage), slice(/-with-filter), delete-source |
 | **Конфигуратор Фильтров VK** (DnD) | ✅ собран | parser-profiles[/{id}][/rules], parser-rules/{id}[reorder], test, scrape-titles, source-filenames |
 | ↳ Профили / Правила (DnD-блоки + И/ИЛИ) / Тест | ✅ собран | аккордеон 3 шагов; конструктор паттернов (vuedraggable@4 clone + contenteditable) |
-| Отладка-доп (БД-просмотр/очистка/флаги) | ⏳ | /api/settings/{force_replace,less_strict_scan,...} |
+| **Отладка-доп** (флаги/числа конвейера + просмотр/очистка БД) | ✅ собран | settings/{force_replace,less_strict_scan,slicing_delete_source,parallel_downloads,concurrent_fragments}; database/{tables,table/{n},clear_table} |
+| ↳ DatabaseViewerModal (полноэкранно, вкладки-таблицы) | ✅ собран | ModalShell size="full" (новый размер) |
 
 Окно настроек: вкладки-сегмент (остров облегает, адаптивное схлопывание
 в иконки @media, стабильная ширина призраком жирного текста, высота 39px),
@@ -238,8 +239,11 @@ schema.d.ts. Образец DnD на vuedraggable@4 — `StatusVkComposition.vue
    пастухе богов» пока нет медиа-элементов — нужен скан/загрузка).
 3. ~~Конфигуратор Фильтров VK~~ ✅ собран (порт по эталону, доказан в /v2).
    Ждёт визуальной приёмки пользователем.
-4. **Отладка-доп** + модалка DatabaseViewer (БД-просмотр/очистка/флаги). СЛЕДУЮЩАЯ.
-5. Затем Ф5 (приёмка паритета + e2e Playwright) → Ф6 (cutover).
+4. ~~Отладка-доп + DatabaseViewer~~ ✅ собран (флаги/числа конвейера, просмотр/
+   очистка БД; запись флага доказана round-trip UI↔API). Ждёт визуальной приёмки.
+   NB: новый бэк умеет `debug_flags` (per-module debug-логирование) — старый UI
+   это НЕ показывал, в порт не включал; можно добавить отдельно, если нужно.
+5. **Ф4 закрыт.** Дальше Ф5 (приёмка паритета + e2e Playwright) → Ф6 (cutover).
 
 **Незакрытые инварианты для проверки в Ф5:** частичный merge series_updated
 (есть), viewing-stop при закрытии статус-модалки (есть: App.onCloseStatus →

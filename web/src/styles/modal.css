@@ -11,6 +11,8 @@
 }
 .modal-overlay .modern-modal { width: 100%; max-width: 600px; max-height: 90vh; }
 .modal-overlay .modern-modal.modal-xl { max-width: 1140px; }
+/* почти полноэкранное окно (просмотр БД: широкие таблицы) */
+.modal-overlay .modern-modal.modal-full { max-width: 96vw; width: 96vw; height: 92vh; }
 /* фикс-высота — только окнам с вкладками/длинными таблицами (настройки,
    логи), чтобы габарит не прыгал. Окно добавления её НЕ имеет: растёт под
    контент до max-height 90vh, дальше тело скроллится (как в легаси). */

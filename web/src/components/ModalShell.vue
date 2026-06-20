@@ -7,7 +7,7 @@ import { onMounted, onUnmounted } from "vue"
 // fixedHeight: окно занимает фикс. высоту (настройки/логи — чтобы габарит
 // не прыгал). Без него окно растёт под контент (как окно добавления в
 // легаси: max-height 90vh, тело скроллится).
-withDefaults(defineProps<{ title?: string; size?: "" | "xl"; fixedHeight?: boolean }>(), {
+withDefaults(defineProps<{ title?: string; size?: "" | "xl" | "full"; fixedHeight?: boolean }>(), {
   title: "",
   size: "",
   fixedHeight: false,
@@ -23,7 +23,10 @@ onUnmounted(() => document.removeEventListener("keydown", onKey))
 
 <template>
   <div class="modal-overlay" @click.self="emit('close')">
-    <div class="modern-modal" :class="[size === 'xl' ? 'modal-xl' : '', { 'modal-fixed': fixedHeight }]">
+    <div
+      class="modern-modal"
+      :class="[size === 'xl' ? 'modal-xl' : size === 'full' ? 'modal-full' : '', { 'modal-fixed': fixedHeight }]"
+    >
       <div class="modern-header">
         <h5 class="modal-title"><slot name="title">{{ title }}</slot></h5>
         <slot name="header-extra" />
