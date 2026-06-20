@@ -3,12 +3,20 @@ import { ref, onMounted } from "vue"
 import Select from "primevue/select"
 import InputText from "primevue/inputtext"
 import ModalShell from "./ModalShell.vue"
+import LogsLoggingTab from "./LogsLoggingTab.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
 
-// Модалка «Просмотр логов»: фильтры (группа/уровень/лимит) + таблица логов
-// с подсветкой строк по уровню. GET /api/logs?group&level&limit.
+// Модалка логов: две вкладки — «Просмотр» (фильтры группа/уровень/лимит +
+// таблица с подсветкой по уровню, GET /api/logs) и «Настройка» (детализация
+// логирования по модулям + флаги дампа, LogsLoggingTab).
 defineEmits<{ (e: "close"): void }>()
+
+const tab = ref<"viewer" | "settings">("viewer")
+const TABS = [
+  { label: "Просмотр", value: "viewer", icon: "pi-list" },
+  { label: "Настройка", value: "settings", icon: "pi-sliders-h" },
+] as const
 
 interface LogEntry { timestamp: string; group: string; level: string; message: string }
 const logs = ref<LogEntry[]>([])
@@ -63,30 +71,51 @@ onMounted(loadLogs)
 </script>
 
 <template>
-  <ModalShell size="xl" fixed-height title="Просмотр логов" @close="$emit('close')">
-    <div class="logs-filters">
-      <Select v-model="group" :options="groupOptions" option-label="label" option-value="value" @change="loadLogs" />
-      <Select v-model="level" :options="levelOptions" option-label="label" option-value="value" @change="loadLogs" />
-      <InputText v-model="limit" inputmode="numeric" class="limit-input" title="Лимит строк" @change="loadLogs" />
-    </div>
+  <ModalShell size="xl" fixed-height @close="$emit('close')">
+    <template #title><i class="pi pi-book"></i> Логи</template>
+    <template #header-extra>
+      <div class="header-tabs st-tabs">
+        <button
+          v-for="t in TABS"
+          :key="t.value"
+          class="st-tab"
+          :class="{ active: tab === t.value }"
+          :title="t.label"
+          @click="tab = t.value"
+        >
+          <i class="pi tab-icon" :class="t.icon"></i>
+          <span class="tab-label" :data-text="t.label"><span class="tl-text">{{ t.label }}</span></span>
+        </button>
+      </div>
+    </template>
 
-    <div class="div-table logs-table">
-      <div class="div-table-header">
-        <div class="div-table-cell">Время</div>
-        <div class="div-table-cell">Группа</div>
-        <div class="div-table-cell">Уровень</div>
-        <div class="div-table-cell">Сообщение</div>
+    <template v-if="tab === 'viewer'">
+      <div class="logs-filters">
+        <Select v-model="group" :options="groupOptions" option-label="label" option-value="value" @change="loadLogs" />
+        <Select v-model="level" :options="levelOptions" option-label="label" option-value="value" @change="loadLogs" />
+        <InputText v-model="limit" inputmode="numeric" class="limit-input" title="Лимит строк" @change="loadLogs" />
       </div>
-      <div class="div-table-body">
-        <div v-for="(l, i) in logs" :key="i" class="div-table-row" :class="rowClass(l.level)">
-          <div class="div-table-cell">{{ fmt(l.timestamp) }}</div>
-          <div class="div-table-cell">{{ l.group }}</div>
-          <div class="div-table-cell">{{ l.level }}</div>
-          <div class="div-table-cell msg">{{ l.message }}</div>
+
+      <div class="div-table logs-table">
+        <div class="div-table-header">
+          <div class="div-table-cell">Время</div>
+          <div class="div-table-cell">Группа</div>
+          <div class="div-table-cell">Уровень</div>
+          <div class="div-table-cell">Сообщение</div>
         </div>
-        <div v-if="!logs.length" class="div-table-row"><div class="div-table-cell empty">Логов нет</div></div>
+        <div class="div-table-body">
+          <div v-for="(l, i) in logs" :key="i" class="div-table-row" :class="rowClass(l.level)">
+            <div class="div-table-cell">{{ fmt(l.timestamp) }}</div>
+            <div class="div-table-cell">{{ l.group }}</div>
+            <div class="div-table-cell">{{ l.level }}</div>
+            <div class="div-table-cell msg">{{ l.message }}</div>
+          </div>
+          <div v-if="!logs.length" class="div-table-row"><div class="div-table-cell empty">Логов нет</div></div>
+        </div>
       </div>
-    </div>
+    </template>
+
+    <LogsLoggingTab v-else />
   </ModalShell>
 </template>
 
