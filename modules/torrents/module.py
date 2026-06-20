@@ -521,6 +521,12 @@ class TorrentsModule(BaseModule):
         series_id = env.payload["series_id"]
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
+        # F7: путь/NAS недоступен → НЕ помечать всё ложно missing и не
+        # запускать массовый recheck. Пропускаем сверку до восстановления.
+        if not await asyncio.to_thread(os.path.exists, series["save_path"]):
+            self.log.warning("серия %d: путь %s недоступен — сверка файлов "
+                             "пропущена", series_id, series["save_path"])
+            return {"missing": 0, "recheck_started": 0}
         missing_hashes: set[str] = set()
         missing = 0
         for f in await self.repo.files_for_series(series_id):

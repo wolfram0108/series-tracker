@@ -205,6 +205,12 @@ class DownloadsModule(BaseModule):
         series_id = env.payload["series_id"]
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
+        # F7/VF7: путь/NAS недоступен → НЕ сбрасывать всё ложно в pending.
+        if not await asyncio.to_thread(os.path.exists, series["save_path"]):
+            self.log.warning("серия %d: путь %s недоступен — сверка диска "
+                             "пропущена", series_id, series["save_path"])
+            await self._contribute(series_id)
+            return {"adopted": 0, "lost": 0}
         lost = 0
         for item in await self.repo.completed_items(series_id):
             # нарезанные компиляции живут отдельными файлами — их

@@ -425,6 +425,37 @@ async def test_sim_D1_downloaded_count_pushed_on_rename(system):
 
 
 @pytest.mark.asyncio
+async def test_sim_F7_path_unavailable_no_false_missing(system, tmp_path):
+    """F7: путь/NAS недоступен → fs.verify не помечает файлы ложно missing
+    и не запускает recheck."""
+    _, qbt, _, probe, db_path = system
+    gone = str(tmp_path / "nas_down")  # не существует
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE series SET save_path=? WHERE id=1", (gone,))
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
+                     "is_active, qb_hash) VALUES (1,'tf7','l',1,'hf7')")
+        tid = conn.execute("SELECT id FROM torrents WHERE "
+                           "torrent_id='tf7'").fetchone()[0]
+        conn.execute("INSERT INTO torrent_files (torrent_db_id, original_path,"
+                     " renamed_path, status) VALUES (?, 'o.mkv', "
+                     "'Season 01/s01e01.mkv','renamed')", (tid,))
+        conn.execute("INSERT INTO download_tasks (task_key, series_id, "
+                     "task_type, status, progress) VALUES "
+                     "('hf7',1,'torrent','uploading',100)")
+        conn.commit()
+    qbt.torrents["hf7"] = {"state": "uploading", "total_size": 9,
+                           "progress": 1.0}
+
+    reply = await probe.request("torrents.fs.verify", {"series_id": 1},
+                                timeout=5)
+    assert reply == {"missing": 0, "recheck_started": 0}
+    with sqlite3.connect(db_path) as conn:
+        st = conn.execute("SELECT status FROM torrent_files WHERE "
+                          "torrent_db_id=?", (tid,)).fetchone()[0]
+    assert st == "renamed"  # файл НЕ помечен ложно missing
+
+
+@pytest.mark.asyncio
 async def test_sim_P10_stuck_active_driven(system):
     """Симуляция P10 («Путешествие»): раздача активна и ЕСТЬ в qB, но
     застряла — на паузе 0%, без задачи конвейера. drive_incomplete (её
@@ -599,6 +630,41 @@ async def test_fs_verify_marks_missing_and_rechecks(system, tmp_path):
     assert reply == {"missing": 1, "recheck_started": 1}
     # recheck-задача дойдёт до конца, файл будет «восстановлен» qBit'ом
     assert await _wait(lambda: ("recheck", ("h6",)) in qbt.calls)
+
+
+@pytest.mark.asyncio
+async def test_sim_C7_new_release_while_old_in_pipeline(system):
+    """C7: новый релиз пришёл, пока старый ещё в конвейере. Старый
+    заменяется (удалён из qB), его задача снимается без зависания, новый
+    доходит до конца."""
+    _, qbt, renaming, probe, db_path = system
+    # старый — magnet без метаданных: припаркован в конвейере (в _pipe)
+    qbt.torrents["hOld"] = {"state": "stoppedDL", "total_size": 0,
+                            "progress": 0.0}
+    await probe.request("torrents.register", {
+        "series_id": 1, "torrent": _torrent("old"), "qb_hash": "hOld",
+        "link_type": "magnet", "replaces": None}, timeout=5)
+    assert await _wait(lambda: ("resume", ("hOld",)) in qbt.calls)  # в конвейере
+    with sqlite3.connect(db_path) as conn:
+        old_id = conn.execute("SELECT id FROM torrents WHERE "
+                              "torrent_id='old'").fetchone()[0]
+
+    # приходит НОВЫЙ релиз (другой infohash), заменяет старый
+    qbt.torrents["hNew"] = {"state": "pausedDL", "total_size": 99,
+                            "progress": 0.0}
+    await probe.request("torrents.register", {
+        "series_id": 1, "torrent": _torrent("new"), "qb_hash": "hNew",
+        "link_type": "file",
+        "replaces": {"torrent_id": "old", "qb_hash": "hOld",
+                     "db_id": old_id}}, timeout=5)
+
+    assert ("delete", ("hOld",), False) in qbt.calls  # старый убран из qB
+    # новый доходит до конца, старая задача не зависла
+    assert await _wait(lambda: not _agent_tasks(db_path))
+    with sqlite3.connect(db_path) as conn:
+        rows = dict(conn.execute(
+            "SELECT torrent_id, is_active FROM torrents").fetchall())
+    assert rows["old"] == 0 and rows["new"] == 1  # старый заменён, новый активен
 
 
 @pytest.mark.asyncio
