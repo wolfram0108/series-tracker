@@ -118,7 +118,7 @@ function removeBlock(index: number): void {
               @keydown.enter.prevent
             >{{ getBlockDisplayText(element) }}</div>
           </template>
-          <button class="pattern-block-remove" title="Удалить блок" @click="removeBlock(index)">&times;</button>
+          <button class="pattern-block-remove" title="Удалить блок" @click="removeBlock(index)"><i class="pi pi-times" /></button>
         </div>
       </template>
     </draggable>
