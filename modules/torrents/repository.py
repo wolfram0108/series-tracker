@@ -51,22 +51,34 @@ class TorrentsRepository:
                  torrent.get("date_time"), torrent.get("quality"),
                  torrent.get("episodes"), qb_hash))
 
-    async def deactivate_and_clear_files(self, torrent_id: str) -> None:
-        """Замена раздачи: пометить неактивной, записи о файлах удалить
-        (семантика старого deactivate_torrent_and_clear_files)."""
-        row = await self._db.fetch_one(
-            "SELECT id FROM torrents WHERE torrent_id=?", (torrent_id,))
-        if not row:
-            return
+    async def refresh_listing(self, db_id: int, torrent: dict,
+                              qb_hash: str) -> None:
+        """ПУНКТ 3: тот же infohash перевыложен под новым ярлыком — обновляем
+        метку/дату/качество и держим строку активной. Без закачки и дублей;
+        нужно лишь чтобы детектор по дате (ПУНКТ 1) сошёлся и трекер не
+        дёргался каждый скан."""
+        link = torrent.get("link") or torrent.get("magnet")
         await self._db.execute(
-            "DELETE FROM torrent_files WHERE torrent_db_id=?", (row["id"],))
+            "UPDATE torrents SET is_active=1, qb_hash=?, torrent_id=?, "
+            "link=?, date_time=?, quality=?, episodes=? WHERE id=?",
+            (qb_hash, torrent["torrent_id"], link, torrent.get("date_time"),
+             torrent.get("quality"), torrent.get("episodes"), db_id))
+
+    async def deactivate_and_clear_files(self, db_id: int) -> None:
+        """Замена раздачи (ПУНКТ 4): строку пометить неактивной — она
+        ОСТАЁТСЯ как запись истории релиза, — а записи о её файлах снять
+        (файлы на диске замещены новой раздачей). Ключ — id строки (точная
+        строка), как в старой системе (deactivate_torrent_and_clear_files),
+        а НЕ ярлык с трекера: иначе можно деактивировать не ту строку."""
         await self._db.execute(
-            "UPDATE torrents SET is_active=0 WHERE id=?", (row["id"],))
+            "DELETE FROM torrent_files WHERE torrent_db_id=?", (db_id,))
+        await self._db.execute(
+            "UPDATE torrents SET is_active=0 WHERE id=?", (db_id,))
 
     async def deactivate_all(self, series_id: int) -> list[str]:
         rows = await self.active_torrents(series_id)
         for r in rows:
-            await self.deactivate_and_clear_files(r["torrent_id"])
+            await self.deactivate_and_clear_files(r["id"])
         return [r["qb_hash"] for r in rows if r.get("qb_hash")]
 
     async def deactivate_orphans(self, live_hashes: set[str]) -> list[int]:
@@ -89,8 +101,19 @@ class TorrentsRepository:
         return affected
 
     async def torrent_by_hash(self, qb_hash: str) -> dict | None:
+        """Строка-владелец infohash. При исторических двойниках (та же
+        раздача под старым ярлыком) возвращается АКТИВНАЯ — привязка файлов
+        и прогресс идут только на живую строку (инвариант И2)."""
         return await self._db.fetch_one(
-            "SELECT * FROM torrents WHERE qb_hash=?", (qb_hash,))
+            "SELECT * FROM torrents WHERE qb_hash=? "
+            "ORDER BY is_active DESC, id LIMIT 1", (qb_hash,))
+
+    async def row_by_hash(self, series_id: int, qb_hash: str) -> dict | None:
+        """Знает ли серия этот infohash (активный или исторический). Ключ
+        идентичности раздачи (И1): по нему решается «это та же раздача»."""
+        return await self._db.fetch_one(
+            "SELECT * FROM torrents WHERE series_id=? AND qb_hash=? "
+            "ORDER BY is_active DESC, id LIMIT 1", (series_id, qb_hash))
 
     async def history(self, series_id: int) -> list[dict]:
         """Вся история раздач серии (контракт старого get_torrents)."""
@@ -117,11 +140,13 @@ class TorrentsRepository:
         return added
 
     async def downloaded_counts(self) -> dict[int, int]:
-        """Переименованные файлы по сериям — счётчик карточек (Р-19)."""
+        """Переименованные файлы по сериям — счётчик карточек (Р-19).
+        Только АКТИВНЫЕ раздачи (И4): заменённые строки — история, в счёт
+        не идут; иначе налипший дубль даёт «16 вместо 8»."""
         rows = await self._db.fetch_all(
             "SELECT t.series_id AS series_id, COUNT(*) AS n "
             "FROM torrent_files tf JOIN torrents t ON t.id=tf.torrent_db_id "
-            "WHERE tf.status='renamed' GROUP BY t.series_id")
+            "WHERE tf.status='renamed' AND t.is_active=1 GROUP BY t.series_id")
         return {r["series_id"]: r["n"] for r in rows}
 
     async def delete_for_series(self, series_id: int) -> None:
@@ -141,6 +166,12 @@ class TorrentsRepository:
 
     async def all_tasks(self) -> list[dict]:
         return await self._db.fetch_all("SELECT * FROM agent_tasks")
+
+    async def task_by_hash(self, torrent_hash: str) -> dict | None:
+        """Задача конвейера по infohash — для различения «уже здоров»
+        (задачи нет) и «ошибка, нужен перезапуск» (стадия error)."""
+        return await self._db.fetch_one(
+            "SELECT * FROM agent_tasks WHERE torrent_hash=?", (torrent_hash,))
 
     async def tasks_for_series(self, series_id: int) -> list[dict]:
         return await self._db.fetch_all(
@@ -167,13 +198,15 @@ class TorrentsRepository:
 
     async def files_for_series(self, series_id: int) -> list[dict]:
         """Файлы с qb_hash и прогрессом (контракт старого
-        get_torrent_files_for_series)."""
+        get_torrent_files_for_series). Только АКТИВНЫЕ раздачи (И4):
+        заменённые — история без файлов."""
         return await self._db.fetch_all(
             "SELECT tf.*, t.qb_hash, COALESCE(dt.progress, 0) AS progress "
             "FROM torrent_files tf "
             "JOIN torrents t ON t.id = tf.torrent_db_id "
             "LEFT JOIN download_tasks dt ON dt.task_key = t.qb_hash "
-            "AND dt.task_type='torrent' WHERE t.series_id=?", (series_id,))
+            "AND dt.task_type='torrent' WHERE t.series_id=? "
+            "AND t.is_active=1", (series_id,))
 
     async def files_for_torrent(self, torrent_db_id: int) -> list[dict]:
         return await self._db.fetch_all(

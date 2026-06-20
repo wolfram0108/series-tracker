@@ -253,7 +253,8 @@ async def test_replace_deactivates_old(system):
     await probe.request("torrents.register", {
         "series_id": 1, "torrent": _torrent("tid3"), "qb_hash": "h3",
         "link_type": "file",
-        "replaces": {"torrent_id": "old", "qb_hash": "hOld"}}, timeout=5)
+        "replaces": {"torrent_id": "old", "qb_hash": "hOld",
+                     "db_id": old_id}}, timeout=5)
     assert await _wait(lambda: not _agent_tasks(db_path))
 
     with sqlite3.connect(db_path) as conn:
@@ -261,9 +262,79 @@ async def test_replace_deactivates_old(system):
                               "ORDER BY torrent_id").fetchall()
         files = conn.execute("SELECT COUNT(*) FROM torrent_files "
                              "WHERE torrent_db_id=?", (old_id,)).fetchone()
+    # старая строка ОСТАЁТСЯ как история (is_active=0), новая активна
     assert ("old", 0) in active and ("tid3", 1) in active
-    assert files[0] == 0  # записи о файлах старой раздачи удалены
-    assert ("delete", ("hOld",), False) in qbt.calls
+    assert files[0] == 0  # записи о файлах старой раздачи сняты (И4)
+    assert ("delete", ("hOld",), False) in qbt.calls  # старый hash убран из qBit
+
+
+@pytest.mark.asyncio
+async def test_same_hash_relist_no_duplicate_no_download(system):
+    """ПУНКТ 3 / И1: трекер перевыложил ту же раздачу под новым ярлыком
+    (новый torrent_id, тот же infohash). Регистрация по infohash:
+    ничего не качаем, второй строки не плодим, старую раздачу из qBit НЕ
+    удаляем — лишь переклеиваем ярлык/дату."""
+    _, qbt, _, probe, db_path = system
+    qbt.torrents["hSame"] = {"state": "pausedDL", "total_size": 100,
+                             "progress": 0.5}
+    # первая раздача проходит конвейер до конца
+    await probe.request("torrents.register", {
+        "series_id": 1, "torrent": _torrent("tidA"), "qb_hash": "hSame",
+        "link_type": "file", "replaces": None}, timeout=5)
+    assert await _wait(lambda: not _agent_tasks(db_path))
+    qbt.calls.clear()
+
+    # перевыкладка: новый ярлык tidB, тот же infohash hSame; rolling →
+    # scan укажет replaces на единственную активную строку (её же)
+    with sqlite3.connect(db_path) as conn:
+        old = conn.execute("SELECT id, torrent_id, qb_hash FROM torrents "
+                           "WHERE qb_hash='hSame' AND is_active=1").fetchone()
+    reply = await probe.request("torrents.register", {
+        "series_id": 1, "torrent": _torrent("tidB"), "qb_hash": "hSame",
+        "link_type": "file",
+        "replaces": {"torrent_id": old[1], "qb_hash": old[2],
+                     "db_id": old[0]}}, timeout=5)
+
+    assert reply == {"existed": True}            # ничего не делаем (ПУНКТ 3)
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT torrent_id, is_active FROM torrents "
+                            "WHERE qb_hash='hSame'").fetchall()
+    assert rows == [("tidB", 1)]                 # одна строка, ярлык обновлён (И1)
+    assert not _agent_tasks(db_path)             # новой задачи нет — не качаем
+    assert all(c[0] != "delete" for c in qbt.calls)  # из qBit не удаляли
+
+
+@pytest.mark.asyncio
+async def test_by_hash_prefers_active_and_count_ignores_history(system):
+    """И2: при активной + исторической строке с ОДНИМ infohash поиск по
+    hash возвращает активную. И4: счётчик скачанного считает только
+    активные (исторические дубли не раздувают «16 вместо 8»)."""
+    _, qbt, _, probe, db_path = system
+    from modules.torrents.repository import TorrentsRepository
+    from core.db import Database
+    repo = TorrentsRepository(Database(db_path))
+    with sqlite3.connect(db_path) as conn:
+        # историческая (заменённая) строка того же hash — с «налипшим» файлом
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
+                     "is_active, qb_hash) VALUES (1,'hist','l',0,'hX')")
+        hist = conn.execute("SELECT id FROM torrents WHERE "
+                            "torrent_id='hist'").fetchone()[0]
+        conn.execute("INSERT INTO torrent_files (torrent_db_id, original_path,"
+                     " status) VALUES (?, 'a.mkv', 'renamed')", (hist,))
+        # активная строка того же hash — настоящая
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
+                     "is_active, qb_hash) VALUES (1,'liveX','l',1,'hX')")
+        live = conn.execute("SELECT id FROM torrents WHERE "
+                            "torrent_id='liveX'").fetchone()[0]
+        conn.execute("INSERT INTO torrent_files (torrent_db_id, original_path,"
+                     " status) VALUES (?, 'b.mkv', 'renamed')", (live,))
+        conn.commit()
+
+    row = await repo.torrent_by_hash("hX")
+    assert row["id"] == live and row["is_active"] == 1   # И2: активная
+
+    counts = await repo.downloaded_counts()
+    assert counts.get(1) == 1   # И4: только файл активной строки, не 2
 
 
 @pytest.mark.asyncio

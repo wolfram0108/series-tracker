@@ -12,7 +12,12 @@ Queries/commands конвейера (контракты Р-12, их ждёт sca
   torrents.db.active {series_id}        → активные раздачи, сверенные с qBit
   torrents.db.deactivate_all {series_id} → для force_replace
   torrents.register {series_id, torrent, qb_hash, link_type, replaces}
-      — идемпотентная фиксация раздачи + замена старой + задача конвейера
+      — фиксация раздачи по ИДЕНТИЧНОСТИ infohash (qb_hash), не по ярлыку
+        с трекера. Тот же infohash уже у серии → ничего не качаем, лишь
+        переклеиваем ярлык (ПУНКТ 3). Новый infohash → старую раздачу
+        убрать из qBit, прежнюю строку пометить «заменена» (история),
+        новую — в конвейер (ПУНКТ 4). replaces.db_id — точная строка для
+        деактивации (по id, не по ярлыку: иначе деактивируется не та)
   torrents.queue.get {series_id?}       → {count, tasks}
   torrents.fs.verify {series_id}        → {missing, recheck_started}
       — проверка файлов на диске + recheck-задачи для пропавших
@@ -314,20 +319,43 @@ class TorrentsModule(BaseModule):
         return {"count": len(env.payload["files"])}
 
     async def on_register(self, env: Envelope) -> dict:
+        """Идентичность раздачи — infohash (qb_hash), не ярлык с трекера.
+
+        ПУНКТ 3: если этот infohash серия уже знает и он здоров — ничего не
+        качаем и не дублируем; лишь переклеиваем ярлык/дату (детектор по
+        дате, ПУНКТ 1, должен сойтись). ПУНКТ 4: новый infohash → старую
+        раздачу обязательно убрать из qBit, прежнюю строку пометить
+        «заменена» (история), новую прогнать пайплайном."""
         p = env.payload
         qb_hash, series_id = p["qb_hash"], p["series_id"]
         torrent, replaces = p["torrent"], p.get("replaces")
 
+        # задача этого infohash уже в полёте — ничего не делаем (идемпотентно)
         if qb_hash in self._pipe:
             return {"existed": True}
+
+        task_row = await self.repo.task_by_hash(qb_hash)
+        is_error_retry = bool(task_row and task_row["stage"] == pipeline.ERROR)
+        known = await self.repo.row_by_hash(series_id, qb_hash)
+
+        # ПУНКТ 3: infohash уже у серии и здоров → не качаем, не дублируем.
+        if known and not is_error_retry:
+            await self.repo.refresh_listing(known["id"], torrent, qb_hash)
+            return {"existed": True}
+
+        # ПУНКТ 4 (или перезапуск после ошибки): регистрируем активной.
         await self.repo.upsert_registered(series_id, torrent, qb_hash)
 
         old_torrent_id = "None"
-        if replaces and replaces["torrent_id"] != torrent["torrent_id"]:
-            old_torrent_id = replaces["torrent_id"]
-            await self.repo.deactivate_and_clear_files(old_torrent_id)
+        if replaces and replaces.get("torrent_id") != torrent["torrent_id"]:
+            old_torrent_id = replaces.get("torrent_id") or "None"
+            old_db_id = replaces.get("db_id")
+            if old_db_id is not None:
+                # точная строка по db_id (история сохраняется, файлы снимаются)
+                await self.repo.deactivate_and_clear_files(old_db_id)
             old_hash = replaces.get("qb_hash")
             if old_hash and old_hash != qb_hash:
+                # новый infohash → старую раздачу убрать из qBit (обязательно)
                 try:
                     await self.qbt.delete([old_hash], delete_files=False)
                 except QbtError as exc:
