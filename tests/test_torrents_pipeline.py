@@ -490,6 +490,34 @@ async def test_monitor_progress_and_contribution(system):
 
 
 @pytest.mark.asyncio
+async def test_sim_P3_P4_P6_states_map_to_flags(system):
+    """P3/P4/P6: stalledDL→idle, queuedDL→queued, missingFiles→error
+    (а не «загрузка»). Свёртка _contribute по картам _IDLE/_QUEUED/_ERROR."""
+    bus, qbt, _, probe, db_path = system
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
+                     "is_active, qb_hash) VALUES (1,'tst','l',1,'hst')")
+        conn.commit()
+    sub = bus.subscribe("series.status.contribution")
+
+    async def _has_flag(state, flag):
+        qbt.torrents["hst"] = {"state": state, "progress": 0.5,
+                               "dlspeed": 0, "eta": 0}
+        for _ in range(150):
+            while not sub.queue.empty():
+                env = sub.queue.get_nowait()
+                if env.payload["source"] == "torrents" and \
+                        env.payload["flags"].get(flag):
+                    return True
+            await asyncio.sleep(0.02)
+        return False
+
+    assert await _has_flag("stalledDL", "idle")
+    assert await _has_flag("queuedDL", "queued")
+    assert await _has_flag("missingFiles", "error")
+
+
+@pytest.mark.asyncio
 async def test_qbit_error_state_is_error_not_downloading(system):
     """Находка 43: qBit-state error → флаг error (не downloading) +
     текст ошибки в download_tasks для модалки."""

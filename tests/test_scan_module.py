@@ -232,6 +232,25 @@ async def test_relist_same_hash_reports_unchanged(system):
 
 
 @pytest.mark.asyncio
+async def test_sim_T4_release_vanished_keeps_active(system):
+    """T4: релиз пропал с трекера (parse его не вернул и ничего нового нет).
+    Активную раздачу НЕ трогаем — она в qB, файлы на диске; ничего не
+    заменяем и не добавляем."""
+    _, fake, probe, _ = system
+    link = "https://dl.kinozal.me/download.php?id=1"
+    fake.active = [{"id": 10, "torrent_id": ids.torrent_id(link, "01.01.2026"),
+                    "qb_hash": "hkeep", "episodes": None}]
+    fake.releases = []  # на трекере больше нет этой раздачи
+
+    reply = await probe.request("scan.series.run", {"series_id": 1}, timeout=10)
+    assert reply["tasks_created"] == 0
+    assert reply["changed"] is False
+    assert fake.registered == []  # ничего не заменяли
+    assert fake.added == []       # ничего не добавляли
+    assert fake.deactivate_calls == 0  # активную не деактивировали
+
+
+@pytest.mark.asyncio
 async def test_fixed_mode_replaces_by_episodes(system):
     _, fake, probe, _ = system
     fake.service = "astar"
