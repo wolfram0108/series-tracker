@@ -248,9 +248,16 @@ class RenamingModule(BaseModule):
         return renamed
 
     async def on_process_torrent(self, env: Envelope) -> dict:
+        series_id = env.payload["series_id"]
         series = await self.request("catalog.series.get",
-                                    {"series_id": env.payload["series_id"]})
-        renamed = await self._process_torrent(series, env.payload["qb_hash"])
+                                    {"series_id": series_id})
+        # C9: тот же per-series лок, что и у reprocess — иначе save во время
+        # стадии RENAMING запускает ВТОРОЕ переименование тех же файлов
+        # параллельно (гонка, кривые имена). Сериализуем.
+        lock = self._locks.setdefault(series_id, asyncio.Lock())
+        async with lock:
+            renamed = await self._process_torrent(series,
+                                                  env.payload["qb_hash"])
         return {"renamed": renamed}
 
     async def _process_torrent(self, series: dict, qb_hash: str) -> int:

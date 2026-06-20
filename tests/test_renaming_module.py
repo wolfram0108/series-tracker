@@ -29,6 +29,8 @@ class FakeNeighbours(BaseModule):
         self.active_torrents: list[dict] = []
         self.fail_format = False
         self.collide_name: str | None = None  # одно имя на все файлы
+        self.files_block: "asyncio.Event | None" = None  # C9: блок files.get
+        self.files_calls = 0
         super().__init__(bus)
 
     def register(self):
@@ -82,6 +84,9 @@ class FakeNeighbours(BaseModule):
         return self.active_torrents
 
     async def on_qbt_files(self, env):
+        self.files_calls += 1
+        if self.files_block is not None and self.files_calls == 1:
+            await self.files_block.wait()  # C9: держим конвейерный rename
         return self.qbt_files.get(env.payload["hash"], [])
 
     async def on_db_files(self, env):
@@ -220,6 +225,40 @@ async def test_process_torrent_uses_original_path_from_db(system):
     assert reply == {"renamed": 0}
     assert fake.renames == []
     assert fake.upserts[0]["files"][0]["original_path"] == "old/ep1.mkv"
+
+
+@pytest.mark.asyncio
+async def test_sim_C9_pipeline_rename_serializes_with_reprocess(system):
+    """C9: переименование конвейера (process_torrent) и reprocess (от save)
+    делят per-series лок — НЕ переименовывают одни файлы параллельно
+    (иначе кривые имена, как у «Путешествия»)."""
+    _, fake, probe, _, media = system
+    fake.series = {**fake.series, "source_type": "torrent"}
+    fake.active_torrents = [{"qb_hash": "h", "torrent_id": "t"}]
+    fake.qbt_files["h"] = [{"name": "a.mkv"}]
+    fake.db_files["h"] = [{"original_path": "a.mkv", "renamed_path": None,
+                           "status": "downloaded"}]
+    fake.files_block = asyncio.Event()  # конвейерный rename виснет в files.get
+
+    async def _poll(pred, t=2.0):
+        for _ in range(int(t / 0.02)):
+            if pred():
+                return True
+            await asyncio.sleep(0.02)
+        return False
+
+    t1 = asyncio.create_task(probe.request(
+        "renaming.process_torrent", {"series_id": 2, "qb_hash": "h"},
+        timeout=10))
+    assert await _poll(lambda: fake.files_calls == 1)  # вошёл, держит лок
+    t2 = asyncio.create_task(probe.request(
+        "renaming.reprocess", {"series_id": 2}, timeout=10))
+    await asyncio.sleep(0.2)
+    assert fake.files_calls == 1  # reprocess ЖДЁТ лок, в files.get не вошёл
+
+    fake.files_block.set()  # отпускаем конвейерный rename
+    await asyncio.gather(t1, t2)
+    assert fake.files_calls >= 2  # reprocess отработал ПОСЛЕ, не параллельно
 
 
 @pytest.mark.asyncio
