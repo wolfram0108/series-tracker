@@ -32,6 +32,13 @@ def _series_delta(p: dict) -> dict:
             "is_busy": p["is_busy"]}
 
 
+def _series_downloaded(p: dict) -> dict:
+    """series_updated — дельта только со счётчиком скачанного (Д1): фронт
+    сливает в карточку, число обновляется без перезагрузки."""
+    return {"id": p["series_id"],
+            "downloaded_episodes_count": p["count"]}
+
+
 def _bare_tasks(p: dict) -> list:
     """Старый контракт очередей — голый массив задач."""
     return p["tasks"]
@@ -68,6 +75,7 @@ def _series_added(p: dict) -> dict:
 SSE_MAP: dict[str, tuple[str, object]] = {
     "series.status.changed": ("series_updated", _series_delta),
     "series.busy.changed": ("series_updated", _series_delta),
+    "series.downloaded.changed": ("series_updated", _series_downloaded),
     "series.updated": ("series_updated", _series_update_fields),
     "series.added": ("series_added", _series_added),
     "series.deleted": ("series_deleted", _deleted_id),

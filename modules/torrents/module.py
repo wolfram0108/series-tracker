@@ -317,6 +317,7 @@ class TorrentsModule(BaseModule):
             raise LookupError(
                 f"торрент {env.payload['qb_hash'][:8]} не найден в БД")
         await self.repo.upsert_files(row["id"], env.payload["files"])
+        await self._broadcast_downloaded(row["series_id"])  # Д1
         return {"count": len(env.payload["files"])}
 
     async def on_register(self, env: Envelope) -> dict:
@@ -558,6 +559,7 @@ class TorrentsModule(BaseModule):
             self._wake.set()
             self._broadcast_queue()
             await self._contribute(series_id)
+        await self._broadcast_downloaded(series_id)  # Д1: missing меняет счёт
         return {"missing": missing, "recheck_started": started}
 
     async def on_drive_incomplete(self, env: Envelope) -> dict:
@@ -673,6 +675,7 @@ class TorrentsModule(BaseModule):
         row = await self.repo.torrent_by_hash(qb_hash)
         if row and row["is_active"]:
             await self.repo.deactivate_and_clear_files(row["id"])
+            await self._broadcast_downloaded(series_id)  # Д1: счёт упал
         self._broadcast_queue()
         await self._contribute(series_id)
 
@@ -680,6 +683,13 @@ class TorrentsModule(BaseModule):
         tasks = list(self._pipe.values())
         self.publish_event("torrents.queue.changed",
                            {"count": len(tasks), "tasks": tasks})
+
+    async def _broadcast_downloaded(self, series_id: int) -> None:
+        """Состав скачанных файлов серии изменился → толкнуть счётчик в SSE
+        (Д1): карточка обновляет «скачано» сразу, без перезагрузки."""
+        count = await self.repo.downloaded_count_for_series(series_id)
+        self.publish_event("series.downloaded.changed",
+                           {"series_id": series_id, "count": count})
 
     # --- мониторинг прогресса -----------------------------------------------------------
 

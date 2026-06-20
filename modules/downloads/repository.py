@@ -154,6 +154,14 @@ class DownloadsRepository:
             "SELECT * FROM media_items WHERE series_id=? AND "
             "status='completed'", (series_id,))
 
+    async def downloaded_count(self, series_id: int) -> int:
+        """Счётчик «скачано» VK-серии — как scan.media.downloaded_counts
+        (есть final_filename), для реактивного SSE (Д1)."""
+        row = await self._db.fetch_one(
+            "SELECT COUNT(*) AS n FROM media_items WHERE series_id=? AND "
+            "final_filename IS NOT NULL", (series_id,))
+        return row["n"] if row else 0
+
     # --- свёртка статусов (семантика старого sync_vk_statuses) ---------------------
 
     async def series_flags(self, series_id: int) -> dict:

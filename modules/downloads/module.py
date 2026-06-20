@@ -390,3 +390,8 @@ class DownloadsModule(BaseModule):
         flags = await self.repo.series_flags(series_id)
         self.publish_event("series.status.contribution", {
             "source": "downloads", "series_id": series_id, "flags": flags})
+        # Д1: состав скачанного мог измениться (усыновление/докачка/сброс) —
+        # толкаем счётчик в SSE, карточка обновляет «скачано» без перезагрузки.
+        count = await self.repo.downloaded_count(series_id)
+        self.publish_event("series.downloaded.changed",
+                           {"series_id": series_id, "count": count})

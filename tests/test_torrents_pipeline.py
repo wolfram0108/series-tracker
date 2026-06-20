@@ -401,6 +401,30 @@ async def test_sim_P7_vanish_midpipeline_deactivates(system):
 
 
 @pytest.mark.asyncio
+async def test_sim_D1_downloaded_count_pushed_on_rename(system):
+    """Д1: запись о файле (renaming → files.upsert) публикует
+    series.downloaded.changed со счётчиком — карточка обновляет «скачано»
+    по SSE без перезагрузки."""
+    bus, qbt, _, probe, db_path = system
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
+                     "is_active, qb_hash) VALUES (1,'td1','l',1,'hd1')")
+        conn.commit()
+    sub = bus.subscribe("series.downloaded.changed")
+
+    await probe.request("torrents.db.files.upsert", {
+        "qb_hash": "hd1", "files": [
+            {"original_path": "a.mkv",
+             "renamed_path": "Season 01/s01e01.mkv", "status": "renamed"},
+            {"original_path": "b.mkv",
+             "renamed_path": "Season 01/s01e02.mkv", "status": "renamed"}]},
+        timeout=5)
+
+    env = await asyncio.wait_for(sub.queue.get(), 2)
+    assert env.payload == {"series_id": 1, "count": 2}
+
+
+@pytest.mark.asyncio
 async def test_sim_P10_stuck_active_driven(system):
     """Симуляция P10 («Путешествие»): раздача активна и ЕСТЬ в qB, но
     застряла — на паузе 0%, без задачи конвейера. drive_incomplete (её

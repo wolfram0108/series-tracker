@@ -149,6 +149,16 @@ class TorrentsRepository:
             "WHERE tf.status='renamed' AND t.is_active=1 GROUP BY t.series_id")
         return {r["series_id"]: r["n"] for r in rows}
 
+    async def downloaded_count_for_series(self, series_id: int) -> int:
+        """Счётчик «скачано» одной серии (переименованные файлы активных
+        раздач) — для реактивного обновления карточки (Д1)."""
+        row = await self._db.fetch_one(
+            "SELECT COUNT(*) AS n FROM torrent_files tf "
+            "JOIN torrents t ON t.id=tf.torrent_db_id "
+            "WHERE tf.status='renamed' AND t.is_active=1 AND t.series_id=?",
+            (series_id,))
+        return row["n"] if row else 0
+
     async def delete_for_series(self, series_id: int) -> None:
         """Каскад Р-19: серия удалена — наши таблицы чистятся."""
         await self._db.execute(
