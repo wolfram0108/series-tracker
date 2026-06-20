@@ -334,16 +334,25 @@ class TorrentsModule(BaseModule):
         if qb_hash in self._pipe:
             return {"existed": True}
 
+        link_type = p.get("link_type", "file")
         task_row = await self.repo.task_by_hash(qb_hash)
         is_error_retry = bool(task_row and task_row["stage"] == pipeline.ERROR)
         known = await self.repo.row_by_hash(series_id, qb_hash)
 
-        # ПУНКТ 3: infohash уже у серии и здоров → не качаем, не дублируем.
         if known and not is_error_retry:
+            # ПУНКТ 3 — но «ничего не делать» ТОЛЬКО если раздача реально
+            # докачана и здорова в qB, а не просто известна БД. Удалил из qB
+            # и добавил заново / раздача неполна / в ошибке → реконсиляция:
+            # обновляем ту же строку (без дубля) и (пере)гоняем конвейер,
+            # чтобы раздача докачалась и переименовалась.
             await self.repo.refresh_listing(known["id"], torrent, qb_hash)
-            return {"existed": True}
+            if await self._is_complete_in_qb(qb_hash):
+                return {"existed": True}
+            await self._enter_pipeline(qb_hash, series_id, torrent,
+                                       link_type, "None")
+            return {"existed": False}
 
-        # ПУНКТ 4 (или перезапуск после ошибки): регистрируем активной.
+        # ПУНКТ 4 (или перезапуск после ошибки): новый infohash → активной.
         await self.repo.upsert_registered(series_id, torrent, qb_hash)
 
         old_torrent_id = "None"
@@ -362,16 +371,38 @@ class TorrentsModule(BaseModule):
                     self.log.warning("замена: старый торрент %s не удалён "
                                      "из qBit: %s", old_hash[:8], exc)
 
+        await self._enter_pipeline(qb_hash, series_id, torrent, link_type,
+                                   old_torrent_id)
+        return {"existed": False}
+
+    async def _is_complete_in_qb(self, qb_hash: str) -> bool:
+        """Раздача реально докачана и здорова в qBit (а не просто известна
+        БД): только тогда повторная регистрация — no-op (ПУНКТ 3). qBit
+        недоступен / раздачи нет / прогресс <100 / ошибка → не докачана,
+        нужна реконсиляция конвейером."""
+        try:
+            infos = await self.qbt.torrents_info([qb_hash])
+        except QbtError:
+            return False
+        info = next((i for i in infos if i.get("hash") == qb_hash), None)
+        if info is None:
+            return False
+        return (info.get("progress", 0) >= 1.0
+                and info.get("state") not in _ERROR_STATES)
+
+    async def _enter_pipeline(self, qb_hash: str, series_id: int,
+                              torrent: dict, link_type: str,
+                              old_torrent_id: str) -> None:
+        """Поставить задачу конвейера для infohash и разбудить его."""
         task = {"torrent_hash": qb_hash, "series_id": series_id,
                 "torrent_id": torrent["torrent_id"],
                 "old_torrent_id": old_torrent_id,
-                "stage": pipeline.INITIAL_STAGE[p.get("link_type", "file")]}
+                "stage": pipeline.INITIAL_STAGE[link_type]}
         await self.repo.upsert_task(task)
         self._pipe[qb_hash] = {**task, "recheck_initiated": False}
         self._wake.set()
         self._broadcast_queue()
         await self._contribute(series_id)
-        return {"existed": False}
 
     async def on_db_history(self, env: Envelope) -> list[dict]:
         """Вся история раздач серии (контракт GET torrents/history)."""

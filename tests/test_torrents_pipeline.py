@@ -283,6 +283,7 @@ async def test_same_hash_relist_no_duplicate_no_download(system):
         "link_type": "file", "replaces": None}, timeout=5)
     assert await _wait(lambda: not _agent_tasks(db_path))
     qbt.calls.clear()
+    qbt.torrents["hSame"].update(progress=1.0, state="uploading")  # докачана
 
     # перевыкладка: новый ярлык tidB, тот же infohash hSame; rolling →
     # scan укажет replaces на единственную активную строку (её же)
@@ -335,6 +336,43 @@ async def test_by_hash_prefers_active_and_count_ignores_history(system):
 
     counts = await repo.downloaded_counts()
     assert counts.get(1) == 1   # И4: только файл активной строки, не 2
+
+
+@pytest.mark.asyncio
+async def test_sim_C1_readd_after_qb_delete_repipelines(system):
+    """Симуляция C1/Q1/Q2 (матрица ситуаций): торрент удалён из qB, строка
+    БД осталась is_active=1 с 'renamed'-файлами. Пользователь жмёт скан →
+    раздача добавляется заново (тот же контент → тот же infohash) → scan
+    зовёт register на свежей (0%, на паузе) раздаче.
+
+    ОЖИДАНИЕ: конвейер перезапускается и доводит раздачу (rename→recheck→
+    activate). Если задача не создаётся — раздача висит на паузе 0% и не
+    качается (дыра R2: ПУНКТ 3 'existed, ничего не делаю' для известного
+    hash без проверки, докачан ли он реально)."""
+    bus, qbt, renaming, probe, db_path = system
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
+                     "is_active, qb_hash) VALUES (1,'tid','l',1,'hgone')")
+        tid = conn.execute("SELECT id FROM torrents WHERE "
+                           "torrent_id='tid'").fetchone()[0]
+        conn.execute("INSERT INTO torrent_files (torrent_db_id, original_path,"
+                     " renamed_path, status) VALUES (?, 'orig.mkv', "
+                     "'Season 01/s01e01.mkv','renamed')", (tid,))
+        conn.commit()
+    # скан добавил заново → qB снова содержит infohash, СВЕЖИЙ (0%, пауза)
+    qbt.torrents["hgone"] = {"state": "pausedDL", "total_size": 100,
+                             "progress": 0.0}
+
+    reply = await probe.request("torrents.register", {
+        "series_id": 1,
+        "torrent": {"torrent_id": "tid", "link": "l", "magnet": None,
+                    "date_time": "02.02.2026", "quality": None,
+                    "episodes": None},
+        "qb_hash": "hgone", "link_type": "file", "replaces": None}, timeout=5)
+
+    assert reply == {"existed": False}, "re-add не докачанной раздачи обязан запустить конвейер"
+    assert await _wait(lambda: not _agent_tasks(db_path)), "конвейер должен пройти до конца"
+    assert renaming.calls, "переименование должно запуститься заново"
 
 
 @pytest.mark.asyncio
