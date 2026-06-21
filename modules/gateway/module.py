@@ -95,9 +95,9 @@ _KEEPALIVE_SECONDS = 15.0
 class GatewayModule(BaseModule):
     name = "gateway"
 
-    def __init__(self, bus, *, static_dir: str = "static",
-                 templates_dir: str = "templates", diag: bool = False,
-                 db_path: str = "app.db",
+    def __init__(self, bus, *, static_dir: str = "legacy_frontend/static",
+                 templates_dir: str = "legacy_frontend/templates",
+                 diag: bool = False, db_path: str = "app.db",
                  web_dist_dir: str = "web/dist") -> None:
         self._static_dir = static_dir
         self._templates_dir = templates_dir
