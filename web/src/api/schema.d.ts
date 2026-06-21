@@ -736,20 +736,20 @@ export interface paths {
          * @description Сохранённые пути загрузки: список, добавление, удаление.
          *     Источник истины — модуль settings (таблица saved_paths).
          */
-        get: operations["saved_paths_api_settings_saved_paths_delete"];
+        get: operations["saved_paths_api_settings_saved_paths_get"];
         put?: never;
         /**
          * Saved Paths
          * @description Сохранённые пути загрузки: список, добавление, удаление.
          *     Источник истины — модуль settings (таблица saved_paths).
          */
-        post: operations["saved_paths_api_settings_saved_paths_delete"];
+        post: operations["saved_paths_api_settings_saved_paths_get"];
         /**
          * Saved Paths
          * @description Сохранённые пути загрузки: список, добавление, удаление.
          *     Источник истины — модуль settings (таблица saved_paths).
          */
-        delete: operations["saved_paths_api_settings_saved_paths_delete"];
+        delete: operations["saved_paths_api_settings_saved_paths_get"];
         options?: never;
         head?: never;
         patch?: never;
@@ -998,6 +998,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/logs/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Log Groups
+         * @description Динамический список групп логов: distinct поля 'group' из всех
+         *     лог-файлов. Фильтр просмотрщика берёт его, а не статичный набор,
+         *     чтобы не отставать от реальных групп (имя группы = имя модуля).
+         */
+        get: operations["log_groups_api_logs_groups_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/database/tables": {
         parameters: {
             query?: never;
@@ -1058,6 +1080,74 @@ export interface paths {
         };
         /** Index */
         get: operations["index__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/legacy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Legacy */
+        get: operations["legacy_legacy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v2/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** V2 Redirect */
+        get: operations["v2_redirect_v2__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v2": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** V2 Redirect */
+        get: operations["v2_redirect_v2_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/favicon.svg": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Favicon */
+        get: operations["favicon_favicon_svg_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3149,7 +3239,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_delete: {
+    saved_paths_api_settings_saved_paths_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3169,7 +3259,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_delete: {
+    saved_paths_api_settings_saved_paths_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3189,7 +3279,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_delete: {
+    saved_paths_api_settings_saved_paths_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -4169,6 +4259,26 @@ export interface operations {
             };
         };
     };
+    log_groups_api_logs_groups_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+        };
+    };
     database_tables_api_database_tables_get: {
         parameters: {
             query?: never;
@@ -4322,6 +4432,86 @@ export interface operations {
         };
     };
     index__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    legacy_legacy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    v2_redirect_v2__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    v2_redirect_v2_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    favicon_favicon_svg_get: {
         parameters: {
             query?: never;
             header?: never;
