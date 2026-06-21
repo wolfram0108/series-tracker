@@ -426,8 +426,8 @@ onMounted(() => {
           </StGroup>
         </div>
 
-        <!-- профиль правил (торрент) -->
-        <div v-if="!isVk" class="field-group mt-3">
+        <!-- профиль правил (торрент и VK: оба используют parser_profile_id) -->
+        <div class="field-group mt-3">
           <StGroup>
             <div class="constructor-item item-label-text-icon" title="Профиль правил">
               <i class="pi pi-filter" /><span>Профиль правил</span>
