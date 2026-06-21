@@ -20,6 +20,23 @@ def test_best_single_by_resolution():
     assert plan == {"hi": "in_plan_single", "lo": "replaced"}
 
 
+def test_ignored_candidate_excluded_from_plan():
+    """Игнорированный кандидат не участвует в плане: он не выигрывает слот
+    и не вытесняет валидную альтернативу (живой кейс «Сильнейший городской
+    мастер» — 2160p-«ep1», мис-распознанный из компиляции и помеченный
+    игнором, не должен держать настоящий 1080p в replaced)."""
+    hi = {**_item("hi", 1, resolution=2160), "is_ignored_by_user": 1}
+    lo = {**_item("lo", 1, resolution=1080), "is_ignored_by_user": 0}
+    plan = build_plan([hi, lo])
+    # игнорированный 2160p не в плане; настоящий 1080p — победитель → усыновится
+    assert plan == {"lo": "in_plan_single"}
+
+
+def test_all_candidates_ignored_yields_empty_plan():
+    ig = {**_item("x", 1, resolution=1080), "is_ignored_by_user": 1}
+    assert build_plan([ig]) == {}
+
+
 def test_user_priority_beats_resolution():
     # пользователь предпочитает 480 (например, меньше места)
     plan = build_plan([_item("lo", 1, resolution=480),

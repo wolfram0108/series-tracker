@@ -87,6 +87,12 @@ def build_plan(candidates: list[dict[str, Any]],
                quality_priority: list[int] | None = None) -> dict[str, str]:
     """Кандидаты -> {unique_id: plan_status}."""
     priority = quality_priority or []
+    # Игнорированные пользователем кандидаты в плане не участвуют: они не
+    # должны выигрывать слот эпизода и вытеснять валидную альтернативу.
+    # Иначе игнор «битого»/ненужного варианта (напр. 2160p-компиляции,
+    # мис-распознанной как одиночка) не освобождает место настоящему файлу,
+    # уже лежащему на диске (тот остаётся `replaced` → не усыновляется).
+    candidates = [c for c in candidates if not c.get("is_ignored_by_user")]
     full_range: set[Episode] = set()
     for item in candidates:
         full_range |= _episodes(item)
