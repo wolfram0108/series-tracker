@@ -375,6 +375,11 @@ async function deepAdoption() {
 }
 
 onMounted(initialize)
+
+// Перечитывание по запросу модалки (переход на вкладку «Композиция»): после
+// «Сохранить» фоновое усыновление меняет БД. Читаем из БД (refresh=false) —
+// без повторного скрейпа VK (он только по кнопке «Обновить с VK»).
+defineExpose({ reload: () => loadComposition(false) })
 </script>
 
 <template>

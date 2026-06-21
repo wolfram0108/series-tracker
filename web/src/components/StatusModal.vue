@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue"
+import { ref, computed, onMounted, watch } from "vue"
 import Button from "primevue/button"
 import ModalShell from "./ModalShell.vue"
 import StatusProperties from "./status/StatusProperties.vue"
@@ -21,6 +21,8 @@ const { request } = useApi()
 
 const series = ref<Series | null>(null)
 const propsRef = ref<InstanceType<typeof StatusProperties> | null>(null)
+const compRef = ref<InstanceType<typeof StatusComposition> | null>(null)
+const vkCompRef = ref<InstanceType<typeof StatusVkComposition> | null>(null)
 const saving = ref(false)
 const isBusy = computed(() => saving.value || !!series.value?.is_busy)
 const isVk = computed(() => series.value?.source_type === "vk_video")
@@ -57,6 +59,14 @@ async function save() {
   }
 }
 
+// Композиция смонтирована один раз (v-show, без ре-монтажа при смене вкладки),
+// поэтому сама не освежается. При переходе на вкладку «Композиция»
+// перечитываем её — иначе после «Сохранить» (фоновое усыновление меняет БД)
+// видны старые данные до закрытия/открытия модалки.
+watch(tab, (t) => {
+  if (t === "composition") (isVk.value ? vkCompRef.value : compRef.value)?.reload?.()
+})
+
 onMounted(load)
 </script>
 
@@ -84,12 +94,14 @@ onMounted(load)
       <StatusProperties v-show="tab === 'properties'" ref="propsRef" :series="series" @saving="saving = $event" />
       <StatusComposition
         v-if="!isVk"
+        ref="compRef"
         v-show="tab === 'composition'"
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
       />
       <StatusVkComposition
         v-else
+        ref="vkCompRef"
         v-show="tab === 'composition'"
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
