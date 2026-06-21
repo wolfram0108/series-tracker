@@ -400,6 +400,29 @@ async def test_verify_marks_missing(system):
 
 
 @pytest.mark.asyncio
+async def test_verify_skips_when_path_unavailable(system):
+    """F7/VF7: путь/NAS недоступен → сверка нарезки пропускается; дети НЕ
+    помечаются missing, исходник НЕ возвращается в дозагрузку (иначе скан
+    при отвале NAS массово портит статусы)."""
+    _, fake, _, probe, db_path, media = system
+    _add_compilation(db_path, slicing_status="completed")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO sliced_files (series_id, "
+                     "source_media_item_unique_id, episode_number, "
+                     "file_path, status) VALUES (2, 'comp1', 11, "
+                     "'Show s01e11.mp4', 'completed')")
+        conn.commit()
+    fake.series = {**fake.series, "save_path": "/nonexistent/nas"}
+
+    reply = await probe.request("slicing.verify", {"unique_id": "comp1"},
+                                timeout=10)
+    assert reply == {"status": "completed", "skipped": True}
+    assert [f["status"] for f in _sliced(db_path, "comp1")] == ["completed"]
+    assert ("status", {"unique_id": "comp1", "status": "pending"}) \
+        not in fake.status_calls
+
+
+@pytest.mark.asyncio
 async def test_verify_incomplete_range_not_completed(system):
     """Находка 56: посерийная сверка. Все имеющиеся куски на диске, но
     нарезаны не все серии из диапазона (нарезка оборвалась) — статус

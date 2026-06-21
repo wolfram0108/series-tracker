@@ -33,6 +33,7 @@ class FakeBackend(BaseModule):
         self.fs_verify_calls = 0       # R1: скан должен сверять файлы
         self.drive_calls = 0           # P10: скан гонит застрявших
         self.fs_sync_calls = 0         # R4: VK-скан должен сверять диск
+        self.verify_calls: list[str] = []  # VF2: скан сверяет нарезку
         self.added: list[dict] = []
         self.deactivate_calls = 0
         self.reprocess_calls = 0
@@ -47,6 +48,7 @@ class FakeBackend(BaseModule):
         h("sources.torrent_file.get", self.on_file)
         h("sources.vk.scan", self.on_vk)
         h("downloads.fs.sync", self.on_fs_sync_vk)
+        h("slicing.verify", self.on_slicing_verify)
         h("rules.apply", self.on_rules)
         h("torrents.db.active", self.on_active)
         h("torrents.db.deactivate_all", self.on_deactivate)
@@ -79,6 +81,10 @@ class FakeBackend(BaseModule):
     async def on_fs_sync_vk(self, env):
         self.fs_sync_calls += 1
         return {"adopted": 0, "lost": 0}
+
+    async def on_slicing_verify(self, env):
+        self.verify_calls.append(env.payload["unique_id"])
+        return {"status": "completed"}
 
     async def on_rules(self, env):
         return {"results": self.rules_results, "invalid_rules": []}
@@ -430,6 +436,27 @@ async def test_sim_R4_vk_scan_syncs_disk(system):
     assert fake.fs_sync_calls == 1
     # торрент-сверки на VK-сериале не зовутся
     assert fake.fs_verify_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_sim_VF2_vk_scan_verifies_sliced_children(system):
+    """VF2: обычный VK-скан сверяет нарезанных детей (slicing.verify), не
+    только открытие композиции — иначе удалённый sliced-файл незаметен до
+    композиции. downloads.fs.sync компиляции пропускает (владелец slicing)."""
+    _, fake, probe, db_path = system
+    # уже нарезанная компиляция (slicing_status=completed)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO media_items (series_id, unique_id, source_url, "
+            "source_title, publication_date, plan_status, status, "
+            "slicing_status, episode_start, episode_end, is_ignored_by_user, "
+            "is_available) VALUES "
+            "(2,'comp1','u','Компиляция 1-3','2026-03-17 20:13:16',"
+            "'in_plan_compilation','completed','completed',1,3,0,1)")
+        conn.commit()
+    fake.vk_videos, fake.rules_results = [], []  # скрейп пуст: фантом не-виргин → остаётся
+    await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
+    assert "comp1" in fake.verify_calls
 
 
 @pytest.mark.asyncio

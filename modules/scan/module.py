@@ -182,6 +182,15 @@ class ScanModule(BaseModule):
                                {"series_id": series_id}, timeout=120)
         except BusRequestError as exc:
             self.log.warning("композиция: fs.sync недоступен: %s", exc)
+        await self._verify_compilations(series_id, items)
+
+    async def _verify_compilations(self, series_id: int,
+                                   items: list[dict]) -> None:
+        """Сверка нарезанных детей с диском (slicing): пропавший ребёнок →
+        missing/completed_with_errors, исходник возвращается в дозагрузку.
+        downloads.fs.sync компиляции намеренно пропускает (владелец —
+        slicing), поэтому верификацию инициируем явно. F7-гард — в
+        slicing._verify_item."""
         for item in items:
             if (item.get("slicing_status") or "none") in (
                     "pending", "completed", "completed_with_errors"):
@@ -190,7 +199,7 @@ class ScanModule(BaseModule):
                                        {"unique_id": item["unique_id"]},
                                        timeout=120)
                 except BusRequestError as exc:
-                    self.log.warning("композиция: verify %s: %s",
+                    self.log.warning("verify нарезки %s: %s",
                                      item["unique_id"], exc)
 
     async def _reconstruct(self, series: dict) -> list[dict]:
@@ -297,6 +306,13 @@ class ScanModule(BaseModule):
                     self.log.warning("сверка диска перед VK-сканом "
                                      "пропущена: %s", exc)
                 result = await self._scan_vk(series)
+                # VF2: проверка нарезанных детей на КАЖДОМ скане (а не только
+                # при открытии композиции). Пропавший sliced-файл → missing/
+                # completed_with_errors + исходник назад в дозагрузку, который
+                # тут же подхватит dispatch. До скана — после _scan_vk, чтобы
+                # верификация шла по актуальному плану.
+                await self._verify_compilations(
+                    series_id, await self.repo.items_for_series(series_id))
                 # Явный скан — ЕДИНСТВЕННЫЙ путь к загрузке: после скрейпа
                 # и усыновления (scan.plan.updated) приказываем downloads
                 # докачать недостающее. Открытие композиции этого НЕ делает.

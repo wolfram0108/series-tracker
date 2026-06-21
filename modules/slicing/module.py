@@ -467,6 +467,16 @@ class SlicingModule(BaseModule):
         item = await self._item_or_fail(unique_id)
         series = await self.request("catalog.series.get",
                                     {"series_id": item["series_id"]})
+        # F7/VF7: путь/NAS недоступен → НЕ помечать всех детей missing и НЕ
+        # возвращать исходник в дозагрузку (иначе скан при отвале NAS массово
+        # портит статусы нарезки). Сверка откладывается до восстановления —
+        # симметрично downloads.on_fs_sync.
+        if not await asyncio.to_thread(os.path.exists, series["save_path"]):
+            self.log.warning("серия %d: путь %s недоступен — сверка нарезки "
+                             "пропущена", item["series_id"],
+                             series["save_path"])
+            return {"status": item.get("slicing_status") or "none",
+                    "skipped": True}
         children = await self.repo.sliced_for_source(unique_id)
         if not children:
             await self.repo.set_slicing_status(unique_id, "none")
