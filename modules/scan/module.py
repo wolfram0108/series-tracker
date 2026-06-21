@@ -284,6 +284,18 @@ class ScanModule(BaseModule):
             await self.repo.delete_error_tasks(series_id)
             await self._reprocess_names(series_id)
             if series["source_type"] == "vk_video":
+                # Сверка диска перед сканом (R4, ситуации VF1/VF3/VC1):
+                # пропавший скачанный .mp4 → сброс completed→pending, чтобы
+                # dispatch перекачал. Симметрично торрент-ветке, которая
+                # стартует с torrents.fs.verify. Без этого «удалил VK-файл →
+                # обычный скан не замечает». Гард недоступного пути (F7/VF7) —
+                # внутри downloads.on_fs_sync; композиция зовёт fs.sync сама.
+                try:
+                    await self.request("downloads.fs.sync",
+                                       {"series_id": series_id}, timeout=120)
+                except BusRequestError as exc:
+                    self.log.warning("сверка диска перед VK-сканом "
+                                     "пропущена: %s", exc)
                 result = await self._scan_vk(series)
                 # Явный скан — ЕДИНСТВЕННЫЙ путь к загрузке: после скрейпа
                 # и усыновления (scan.plan.updated) приказываем downloads

@@ -32,6 +32,7 @@ class FakeBackend(BaseModule):
         self.register_existed = False  # ПУНКТ 3: тот же infohash → existed
         self.fs_verify_calls = 0       # R1: скан должен сверять файлы
         self.drive_calls = 0           # P10: скан гонит застрявших
+        self.fs_sync_calls = 0         # R4: VK-скан должен сверять диск
         self.added: list[dict] = []
         self.deactivate_calls = 0
         self.reprocess_calls = 0
@@ -45,6 +46,7 @@ class FakeBackend(BaseModule):
         h("sources.parse", self.on_parse)
         h("sources.torrent_file.get", self.on_file)
         h("sources.vk.scan", self.on_vk)
+        h("downloads.fs.sync", self.on_fs_sync_vk)
         h("rules.apply", self.on_rules)
         h("torrents.db.active", self.on_active)
         h("torrents.db.deactivate_all", self.on_deactivate)
@@ -73,6 +75,10 @@ class FakeBackend(BaseModule):
 
     async def on_vk(self, env):
         return {"videos": self.vk_videos}
+
+    async def on_fs_sync_vk(self, env):
+        self.fs_sync_calls += 1
+        return {"adopted": 0, "lost": 0}
 
     async def on_rules(self, env):
         return {"results": self.rules_results, "invalid_rules": []}
@@ -407,6 +413,23 @@ async def test_vk_scan_upserts_plans_and_publishes(system):
     # unique_id — по формуле-констрейнту
     assert rows["Тайтл 1 серия"]["unique_id"] == ids.media_unique_id(
         "https://vk.com/video-1_1", "2026-03-17T20:13:16Z", 2)
+
+
+@pytest.mark.asyncio
+async def test_sim_R4_vk_scan_syncs_disk(system):
+    """R4 (ситуации VF1/VF3/VC1): VK-скан ОБЯЗАН сверить диск
+    (downloads.fs.sync) — иначе пропавший скачанный .mp4 остаётся
+    «completed» навсегда и скан его не перекачивает. Поведение самой
+    сверки (lost→pending) доказано в test_downloads_module
+    (test_fs_sync_detects_lost_and_adopted); здесь — что скан её ЗОВЁТ,
+    симметрично торрент-ветке (fs_verify_calls)."""
+    _, fake, probe, _ = system
+    fake.vk_videos = [_vk_video(1, "Тайтл 1 серия")]
+    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
+    await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
+    assert fake.fs_sync_calls == 1
+    # торрент-сверки на VK-сериале не зовутся
+    assert fake.fs_verify_calls == 0
 
 
 @pytest.mark.asyncio
