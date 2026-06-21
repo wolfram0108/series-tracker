@@ -34,6 +34,8 @@ const newSeries = reactive({
   name: "",
   name_en: "",
   season: "s01",
+  quality_override: "",
+  resolution_override: "",
   qualityByEpisodes: {} as Record<string, string>,
   parser_profile_id: null as number | null,
   vk_search_mode: "search",
@@ -325,6 +327,9 @@ async function addSeries() {
       ...newSeries,
       site: site.value,
       season: isSeasonless.value ? "" : newSeries.season,
+      // пустой ручной ввод → null (как в edit-модалке), а не "" в БД
+      quality_override: newSeries.quality_override || null,
+      resolution_override: newSeries.resolution_override || null,
     }
     if (tmdbSelected.value) {
       payload.tmdb_data = {
@@ -460,6 +465,17 @@ onBeforeUnmount(() => {
             <StGroup :state="seasonState" :class="{ 'is-disabled': isSeasonless }">
               <StIcon icon="pi pi-hashtag" />
               <StInput v-model="newSeries.season" label="Сезон (формат s01)" />
+            </StGroup>
+          </div>
+          <!-- оверрайды качества/разрешения (ручной ввод; как в инфо-модалке) -->
+          <div class="add-grid-2 mt-3">
+            <StGroup>
+              <StIcon icon="pi pi-video" />
+              <StInput v-model="newSeries.quality_override" label="Качество (ручной ввод)" />
+            </StGroup>
+            <StGroup>
+              <StIcon icon="pi pi-desktop" />
+              <StInput v-model="newSeries.resolution_override" label="Разрешение (ручной ввод)" />
             </StGroup>
           </div>
           <div class="field-group mt-3">
