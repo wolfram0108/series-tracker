@@ -307,14 +307,25 @@ class DownloadsModule(BaseModule):
 
     @staticmethod
     def _remove_partial(save_path: str) -> None:
-        """Целевой файл + недокачанные артефакты yt-dlp (.part, .ytdl,
-        .fNNN.*) того же видео — точечно по имени, чужого не трогаем."""
+        """Целевой файл + недокачанные артефакты того же видео — точечно по
+        имени (привязка к base сохраняемого файла), чужого не трогаем.
+
+        VF6: основной мусор этого кода — собственные шаблоны ytdlp.py:
+        `-o <save>.download.<ext>` и tmp `<save>.remux.mp4`. Их подчищает
+        finally в ytdlp.download(), но он обёрнут ТОЛЬКО вокруг фазы remux —
+        при обрыве/отмене в фазе download (cancel, Д2-удаление) finally не
+        отрабатывает, и эти файлы оставались (generic-паттерны .part/.ytdl их
+        не ловят). Чистим их здесь явно — очистка перестаёт зависеть от того,
+        в какой фазе оборвались. Generic-паттерны оставлены поясом и
+        подтяжками на случай иных шаблонов yt-dlp."""
         import glob
         directory = os.path.dirname(save_path)
         base = os.path.basename(save_path)
         stem = os.path.splitext(base)[0]
         targets = {save_path}
-        for pat in (f"{base}.part", f"{stem}.*.part", f"{stem}*.ytdl",
+        for pat in (f"{base}.download.*",   # .download.<ext> (+ его .part/.ytdl/.fNNN)
+                    f"{base}.remux.mp4",    # незавершённый tmp remux
+                    f"{base}.part", f"{stem}.*.part", f"{stem}*.ytdl",
                     f"{stem}.f*.*"):
             targets.update(glob.glob(os.path.join(directory, pat)))
         for path in targets:

@@ -177,8 +177,15 @@ async def test_sim_C5_delete_keeps_completed_removes_partial(system):
     done = os.path.join(media_dir, "done.mp4")   # законченный: final есть
     open(done, "w").close()
     wip = os.path.join(media_dir, "wip.mp4")     # недоделанный: final НЕТ
-    part = wip + ".part"
-    open(part, "w").close()
+    # VF6: реальные артефакты ЭТОГО кода (шаблоны ytdlp.py), а не только
+    # generic .part — обрыв в фазе download оставлял именно их.
+    artifacts = [wip + ".part", wip + ".download.mp4", wip + ".remux.mp4",
+                 wip + ".download.f140.mp4"]
+    for a in artifacts:
+        open(a, "w").close()
+    # соседний эпизод: его артефакты трогать нельзя
+    keep = os.path.join(media_dir, "other.mp4.download.mp4")
+    open(keep, "w").close()
     with sqlite3.connect(db_path) as conn:
         for uid, sp in (("u_done", done), ("u_wip", wip)):
             conn.execute(
@@ -191,8 +198,11 @@ async def test_sim_C5_delete_keeps_completed_removes_partial(system):
     probe.publish_event("series.deleted",
                         {"series_id": 2, "delete_from_qb": False})
 
-    assert await _wait(lambda: not os.path.exists(part))  # полуфайл снесён
+    # все полуфайлы wip снесены (включая .download.*/.remux.mp4 — VF6)
+    for a in artifacts:
+        assert await _wait(lambda a=a: not os.path.exists(a)), a
     assert os.path.exists(done)                  # законченный файл не тронут
+    assert os.path.exists(keep)                  # чужой артефакт не тронут
     assert await _wait(lambda: not _tasks(db_path))  # задачи вычищены
 
 
