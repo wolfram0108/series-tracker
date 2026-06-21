@@ -79,10 +79,11 @@ class CatalogRepository:
         await self._db.execute(
             "DELETE FROM series WHERE id=?", (series_id,), enforce_fk=False)
 
-    async def touch_scan_time(self, series_id: int) -> None:
+    async def touch_scan_time(self, series_id: int) -> str:
         from datetime import datetime, timezone
         # naive-UTC с микросекундами — формат хранения прод-БД
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
         await self._db.execute(
             "UPDATE series SET last_scan_time=? WHERE id=?",
             (now, series_id))
+        return now

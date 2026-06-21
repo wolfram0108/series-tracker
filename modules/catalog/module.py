@@ -190,5 +190,15 @@ class CatalogModule(BaseModule):
 
     async def on_touch(self, env: Envelope) -> None:
         """Обновление last_scan_time («время жизни» карточки) после
-        успешной загрузки/обработки — поведение старой системы."""
-        await self.repo.touch_scan_time(env.payload["series_id"])
+        успешной загрузки/обработки — поведение старой системы.
+
+        Реактивно толкаем новую дату в SSE (series.updated → дельта
+        {id, last_scan_time}, фронт Object.assign в карточку) — иначе
+        пилюля даты обновлялась только по F5. Формат — как у HTTP-пути
+        (_iso: ' '→'T'), чтобы SSE и перезагрузка показывали одно. Без
+        таймеров."""
+        series_id = env.payload["series_id"]
+        now = await self.repo.touch_scan_time(series_id)
+        self.publish_event("series.updated", {
+            "series_id": series_id,
+            "last_scan_time": now.replace(" ", "T", 1)})

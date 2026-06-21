@@ -206,6 +206,21 @@ async def test_contribution_publishes_only_changes(system):
 
 
 @pytest.mark.asyncio
+async def test_touch_scan_time_publishes_date(system):
+    """После скана/загрузки дата толкается в SSE сразу (series.updated с
+    last_scan_time в ISO 'T'-формате, как HTTP _iso) — не только по F5."""
+    import re
+    bus, probe = system
+    sub = bus.subscribe("series.updated")
+    probe.send_command("catalog.series.touch_scan_time", {"series_id": 1})
+    payload = await _next_change(sub)
+    assert payload["series_id"] == 1
+    ts = payload["last_scan_time"]
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", ts)  # 'T', не пробел
+    assert " " not in ts
+
+
+@pytest.mark.asyncio
 async def test_viewing_commands_and_sse_guard(system):
     bus, probe = system
     sub = bus.subscribe("series.status.changed")
