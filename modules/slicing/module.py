@@ -47,29 +47,51 @@ FFMPEG_TIMEOUT = 1800.0  # секунд на одну главу ('-c copy' — 
 
 async def run_ffmpeg(source: str, start: str, duration: str | None,
                      output: str) -> tuple[bool, str]:
-    """Вырезание одной главы. Подменяется в тестах."""
+    """Вырезание одной главы. Подменяется в тестах.
+
+    Атомарность (находка 50, как в yt-dlp remux): ffmpeg пишет во временный
+    файл рядом с целью (тот же каталог → один FS для os.replace), в финал
+    переименовываем ТОЛЬКО при rc==0. Иначе оборванная (kill -9, рестарт),
+    упавшая или зависшая нарезка оставляет частичный ребёнок под финальным
+    именем — и при повторе _init_progress усыновляет его как готовый эпизод
+    (битый файл принимается за нарезанный). tmp под нефинальным именем такой
+    усыновлятор обойдёт; при любом неуспехе tmp сносится."""
     executable = shutil.which("ffmpeg")
     if not executable:
         return False, "ffmpeg не найден в PATH"
+    _, ext = os.path.splitext(output)
+    tmp = f"{output}.slicing{ext or '.mp4'}"
     command = [executable, "-y", "-ss", start, "-i", source]
     if duration:
         command += ["-t", duration]
-    command += ["-c", "copy", output]
-    proc = await asyncio.create_subprocess_exec(
-        *command, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE)
+    command += ["-c", "copy", tmp]
+    success = False
     try:
-        _, stderr = await asyncio.wait_for(proc.communicate(),
-                                           FFMPEG_TIMEOUT)
-    except asyncio.TimeoutError:
-        proc.kill()
-        return False, f"ffmpeg не уложился в {FFMPEG_TIMEOUT:.0f} с"
-    except asyncio.CancelledError:
-        proc.kill()  # отмена (удаление серии, Д2) — убить процесс ffmpeg
-        raise
-    if proc.returncode != 0:
-        return False, stderr.decode("utf-8", "replace").strip()[-500:]
-    return True, ""
+        proc = await asyncio.create_subprocess_exec(
+            *command, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE)
+        try:
+            _, stderr = await asyncio.wait_for(proc.communicate(),
+                                               FFMPEG_TIMEOUT)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return False, f"ffmpeg не уложился в {FFMPEG_TIMEOUT:.0f} с"
+        except asyncio.CancelledError:
+            proc.kill()  # отмена (удаление серии, Д2) — убить процесс ffmpeg
+            await proc.wait()
+            raise
+        if proc.returncode != 0:
+            return False, stderr.decode("utf-8", "replace").strip()[-500:]
+        await asyncio.to_thread(os.replace, tmp, output)  # атомарная публикация
+        success = True
+        return True, ""
+    finally:
+        if not success:  # таймаут / ошибка / отмена — не оставляем tmp
+            try:
+                await asyncio.to_thread(os.remove, tmp)
+            except OSError:
+                pass
 
 
 class SlicingModule(BaseModule):

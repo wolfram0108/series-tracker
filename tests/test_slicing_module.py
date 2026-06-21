@@ -14,6 +14,7 @@ from core import BaseModule, Bus, BusRequestError, Runner
 from core.db import Database
 from modules.slicing import SlicingModule
 from modules.slicing import chapters as ch
+from modules.slicing.module import run_ffmpeg
 
 
 # --- фильтр глав (порт эвристик 1:1) -------------------------------------------------
@@ -61,6 +62,53 @@ def test_time_helpers():
     assert ch.format_seconds(3725) == "01:02:05"
     assert ch.time_to_seconds("01:02:05") == 3725
     assert ch.time_to_seconds("xx") is None
+
+
+# --- атомарность run_ffmpeg (VP7/VL2, находка 50) ------------------------------------
+
+def _stub_ffmpeg(bin_dir: str, *, exit_code: int) -> None:
+    """Поддельный ffmpeg: пишет «партиал» в свой последний аргумент
+    (output) и выходит с заданным кодом. Имитирует частичную запись."""
+    stub = os.path.join(bin_dir, "ffmpeg")
+    with open(stub, "w") as f:
+        f.write("#!/usr/bin/env python3\n"
+                "import sys\n"
+                "open(sys.argv[-1], 'wb').write(b'partial')\n"
+                f"sys.exit({exit_code})\n")
+    os.chmod(stub, 0o755)
+
+
+@pytest.mark.asyncio
+async def test_run_ffmpeg_no_final_on_failure(tmp_path, monkeypatch):
+    """VP7/VL2: ffmpeg упал, записав частичный файл, — финального имени НЕ
+    должно появиться (tmp→os.replace только при rc==0), иначе при повторе
+    _init_progress усыновил бы битый партиал как готовый эпизод."""
+    binp = tmp_path / "bin"
+    binp.mkdir()
+    _stub_ffmpeg(str(binp), exit_code=1)
+    monkeypatch.setenv("PATH", f"{binp}:/usr/bin:/bin")
+    out = str(tmp_path / "Season 01" / "Show s01e03.mp4")
+    os.makedirs(os.path.dirname(out))
+
+    ok, err = await run_ffmpeg("src.mp4", "00:00:00", "10", out)
+    assert ok is False
+    assert not os.path.exists(out)                    # финал не опубликован
+    assert not os.path.exists(out + ".slicing.mp4")   # tmp снесён
+
+
+@pytest.mark.asyncio
+async def test_run_ffmpeg_publishes_final_on_success(tmp_path, monkeypatch):
+    """Успех: tmp атомарно публикуется в финал, временный файл исчезает."""
+    binp = tmp_path / "bin"
+    binp.mkdir()
+    _stub_ffmpeg(str(binp), exit_code=0)
+    monkeypatch.setenv("PATH", f"{binp}:/usr/bin:/bin")
+    out = str(tmp_path / "Show s01e03.mp4")
+
+    ok, err = await run_ffmpeg("src.mp4", "00:00:00", None, out)
+    assert ok is True and err == ""
+    assert os.path.exists(out)                        # атомарно опубликован
+    assert not os.path.exists(out + ".slicing.mp4")   # tmp ушёл в replace
 
 
 # --- сквозные сценарии ----------------------------------------------------------------
