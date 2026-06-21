@@ -145,22 +145,28 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             await gw.request("metadata.map.set", {
                 "series_id": series_id, "tmdb_data": tmdb_data}, timeout=10)
         new_path = data.get("save_path")
-        if new_path and new_path != series.get("save_path"):
+        path_changed = bool(new_path and new_path != series.get("save_path"))
+        is_vk = series.get("source_type") == "vk_video"
+        if path_changed:
             try:
                 await gw.request("library.relocate", {
                     "series_id": series_id, "new_path": new_path},
                     timeout=15)
             except BusRequestError as exc:
                 return _error_response(exc)
-        else:
-            # как в оригинале: каждое сохранение свойств переобрабатывает
-            # имена; при перемещении это сделает сам library (Р-17)
+        elif not is_vk:
+            # торрент без смены пути: переименование на месте (как оригинал;
+            # при перемещении это делает сам library, Р-17)
             gw.send_command("renaming.reprocess", {"series_id": series_id})
-        # VK: сохранение свойств УСЫНОВЛЯЕТ уже лежащие на диске файлы
-        # (контракт: Сохранить → усыновление, НЕ загрузка). fs.sync —
-        # усыновление без создания задач загрузки.
-        if series.get("source_type") == "vk_video":
-            gw.send_command("downloads.fs.sync", {"series_id": series_id})
+        # VK: «Сохранить» = ПОЛНЫЙ процесс без загрузки (смена профиля должна
+        # быть процессно обоснованной): пере-скан по (возможно новому)
+        # профилю + переименование всех файлов + усыновление с диска, но БЕЗ
+        # постановки загрузок. Реюз _run_series(download=False) — он сам в
+        # верном порядке делает reprocess → fs.sync → re-scan → verify →
+        # (без dispatch). Заменяет прежний одиночный fs.sync.
+        if is_vk:
+            gw.send_command("scan.series.run",
+                            {"series_id": series_id, "download": False})
         return {"success": True,
                 "message": "Задача на обновление принята в обработку."}
 

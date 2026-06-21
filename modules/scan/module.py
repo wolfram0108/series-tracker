@@ -121,7 +121,11 @@ class ScanModule(BaseModule):
         force = p.get("force_replace")
         if force is None:  # как старый роут: режим из настройки отладки
             force = await self._debug_force_replace()
-        return await self._run_series(int(p["series_id"]), bool(force))
+        # download=False — «полный процесс без загрузки» (сохранение свойств
+        # VK-серии): пере-скан по профилю + переименование + усыновление, но
+        # БЕЗ постановки новых загрузок (контракт «Сохранить → усыновление»).
+        return await self._run_series(int(p["series_id"]), bool(force),
+                                      download=p.get("download", True))
 
     async def on_media_list(self, env: Envelope) -> list[dict]:
         """Состав медиа-элементов серии (владелец строк — scan, Р-12);
@@ -277,7 +281,8 @@ class ScanModule(BaseModule):
     async def _debug_force_replace(self) -> bool:
         return await self._setting("debug_force_replace", "false") == "true"
 
-    async def _run_series(self, series_id: int, force: bool = False) -> dict:
+    async def _run_series(self, series_id: int, force: bool = False,
+                          download: bool = True) -> dict:
         if series_id in self._running:
             raise ScanError(f"скан сериала {series_id} уже запущен")
         self._running.add(series_id)
@@ -315,9 +320,11 @@ class ScanModule(BaseModule):
                     series_id, await self.repo.items_for_series(series_id))
                 # Явный скан — ЕДИНСТВЕННЫЙ путь к загрузке: после скрейпа
                 # и усыновления (scan.plan.updated) приказываем downloads
-                # докачать недостающее. Открытие композиции этого НЕ делает.
-                self.send_command("downloads.dispatch",
-                                  {"series_id": series_id})
+                # докачать недостающее. Открытие композиции и «Сохранить»
+                # (download=False) этого НЕ делают — только усыновление.
+                if download:
+                    self.send_command("downloads.dispatch",
+                                      {"series_id": series_id})
             else:
                 result = await self._scan_torrents(series, force)
             self._contribute(series_id, scanning=False, error=False)

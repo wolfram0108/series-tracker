@@ -112,7 +112,7 @@ const StatusTabProperties = {
                         </div>
                     </div>
                     
-                    <div v-if="editableSeries.source_type === 'torrent'" class="row mt-3">
+                    <div v-if="editableSeries.source_type === 'torrent' || editableSeries.source_type === 'vk_video'" class="row mt-3">
                         <div class="col-12">
                             <constructor-group>
                                 <div class="constructor-item item-label-icon item-label-text-icon" title="Профиль правил для переименования">

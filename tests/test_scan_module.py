@@ -460,6 +460,31 @@ async def test_sim_VF2_vk_scan_verifies_sliced_children(system):
 
 
 @pytest.mark.asyncio
+async def test_sim_save_vk_full_process_without_download(system):
+    """«Сохранить» VK = полный процесс без загрузки (download=False): скан
+    идёт (fs.sync/usыновление), но downloads.dispatch НЕ шлётся."""
+    bus, fake, probe, _ = system
+    fake.vk_videos = [_vk_video(1, "Тайтл 1 серия")]
+    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
+    sub = bus.subscribe("downloads.dispatch")
+    await probe.request("scan.series.run",
+                        {"series_id": 2, "download": False}, timeout=10)
+    assert fake.fs_sync_calls == 1     # скан реально прошёл (R4-сверка)
+    assert sub.queue.empty()           # загрузка НЕ запускалась
+
+
+@pytest.mark.asyncio
+async def test_vk_scan_default_dispatches_download(system):
+    """По умолчанию (явный скан) загрузка ставится — контроль к download=False."""
+    bus, fake, probe, _ = system
+    fake.vk_videos = [_vk_video(1, "Тайтл 1 серия")]
+    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
+    sub = bus.subscribe("downloads.dispatch")
+    await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
+    assert not sub.queue.empty()       # dispatch отправлен
+
+
+@pytest.mark.asyncio
 async def test_vk_phantom_rules(system):
     _, fake, probe, db_path = system
     fake.vk_videos = [_vk_video(1, "Тайтл 1 серия"),
