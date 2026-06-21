@@ -29,12 +29,16 @@ const level = ref(ALL)
 const limit = ref("200")
 const { request } = useApi()
 
-const GROUPS = [
-  "auth", "agent", "db", "downloader_agent", "kinozal_parser", "monitoring_agent",
-  "parser_api", "qbittorrent", "renaming_agent", "renaming_processor", "run", "scanner",
-  "series_api", "slicing_agent", "smart_collector", "system_api", "vk_scraper",
-]
-const groupOptions = [{ label: "Все группы", value: ALL }, ...[...GROUPS].sort().map((g) => ({ label: g, value: g }))]
+// Группы — динамически из GET /api/logs/groups (distinct из реальных логов),
+// а не статичный список: имя группы = имя модуля, набор меняется с кодовой
+// базой, и фильтр не должен отставать.
+const groupOptions = ref<{ label: string; value: string }[]>([{ label: "Все группы", value: ALL }])
+
+async function loadGroups() {
+  const data = (await request(api.GET("/api/logs/groups", {} as never))) as unknown
+  const groups = Array.isArray(data) ? (data as string[]) : []
+  groupOptions.value = [{ label: "Все группы", value: ALL }, ...groups.map((g) => ({ label: g, value: g }))]
+}
 const levelOptions = [
   { label: "Все уровни", value: ALL },
   { label: "DEBUG", value: "DEBUG" },
@@ -67,7 +71,10 @@ function fmt(iso: string): string {
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("ru-RU")
 }
 
-onMounted(loadLogs)
+onMounted(() => {
+  loadGroups()
+  loadLogs()
+})
 </script>
 
 <template>

@@ -453,6 +453,29 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
         return await asyncio.to_thread(read_logs)
 
+    @r.get("/api/logs/groups", response_model=list[str])
+    async def log_groups():
+        """Динамический список групп логов: distinct поля 'group' из всех
+        лог-файлов. Фильтр просмотрщика берёт его, а не статичный набор,
+        чтобы не отставать от реальных групп (имя группы = имя модуля)."""
+        def collect() -> list[str]:
+            groups: set[str] = set()
+            for fname in ("error.log", "warning.log", "info.log", "debug.log"):
+                path = os.path.join(core_logging.LOG_DIR, fname)
+                if not os.path.exists(path):
+                    continue
+                with open(path, encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            g = json.loads(line).get("group")
+                        except json.JSONDecodeError:
+                            continue
+                        if g:
+                            groups.add(g)
+            return sorted(groups)
+
+        return await asyncio.to_thread(collect)
+
     # --- админ-вкладка БД (сознательный обход Р-7 — отладочный инструмент) -----------
 
     def _db_tables() -> list[str]:
