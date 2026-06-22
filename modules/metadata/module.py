@@ -13,10 +13,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 
-from core import BaseModule
+from core import BaseModule, BusRequestError
 from core.db import Database
 from core.envelope import Envelope
 
@@ -42,6 +43,7 @@ class MetadataModule(BaseModule):
         self.handle("metadata.map.get", self.on_map_get)
         self.handle("metadata.map.list", self.on_map_list)
         self.handle("metadata.map.set", self.on_map_set)
+        self.handle("metadata.seasons.recompute", self.on_seasons_recompute)
         self.handle("series.deleted", self.on_series_deleted)
 
     async def on_start(self) -> None:
@@ -112,7 +114,9 @@ class MetadataModule(BaseModule):
         await self.repo.delete_for_series(env.payload["series_id"])
 
     async def on_details(self, env: Envelope) -> dict:
-        tmdb_id = int(env.payload["tmdb_id"])
+        return await self._details(int(env.payload["tmdb_id"]))
+
+    async def _details(self, tmdb_id: int) -> dict:
         data = await self._get(f"/tv/{tmdb_id}", {"language": "ru-RU"})
         return {
             "name": data.get("name"),
@@ -125,3 +129,73 @@ class MetadataModule(BaseModule):
                 "name": s.get("name"),
             } for s in data.get("seasons", [])],
         }
+
+    # --- агрегат многосезонника (число серий по реальным сезонам) ----------------
+
+    async def on_seasons_recompute(self, env: Envelope) -> dict:
+        """Пересчёт числа серий многосезонной серии. Реальные сезоны берём из
+        нейминга (торрент: Season NN; VK: media_items.season), счётчики серий
+        по сезонам — из TMDB (кэш в маппинге; сеть только на новый сезон),
+        total = сумма по реальным сезонам (сезон 0/спешелы исключены, реш. #2).
+        Публикует series.updated с обновлённым tmdb_info → карточка без F5.
+        Событийный (скан/рейм/усыновление/композиция), без таймеров (реш. #3).
+        Одиночный режим (поле сезона задано) не трогаем — там total уже верен."""
+        series_id = env.payload["series_id"]
+        mapping = await self.repo.get_mapping(series_id)
+        if not mapping or not mapping.get("tmdb_id"):
+            return {"skipped": "no_tmdb"}
+        series = await self.request("catalog.series.get",
+                                    {"series_id": series_id}, timeout=10)
+        if (series.get("season") or "").strip():
+            return {"skipped": "single_season"}
+        real = await self._real_seasons(series)
+        if not real:
+            return {"skipped": "no_seasons"}
+        counts = await self._season_counts(mapping, real)
+        total = sum(counts.get(s, 0) for s in real)
+        await self.repo.set_aggregate(series_id, total, counts)
+        self.publish_event("series.updated", {
+            "series_id": series_id,
+            "tmdb_info": await self.repo.get_mapping(series_id)})
+        self.log.info("агрегат TMDB серии %d: сезоны %s → %d серий",
+                      series_id, sorted(real), total)
+        return {"total": total, "seasons": sorted(real)}
+
+    async def _real_seasons(self, series: dict) -> set[int]:
+        """Реальные сезоны из нейминга (≠0). Источник — владелец данных:
+        торрент → torrents.seasons, VK → scan.seasons (Р-7, чужое — query)."""
+        topic = ("scan.seasons" if series.get("source_type") == "vk_video"
+                 else "torrents.seasons")
+        try:
+            reply = await self.request(topic, {"series_id": series["id"]},
+                                       timeout=30)
+        except BusRequestError as exc:
+            self.log.warning("сезоны серии %d недоступны (%s): %s",
+                             series["id"], topic, exc)
+            return set()
+        out: set[int] = set()
+        for s in reply.get("seasons", []):
+            try:
+                n = int(s)
+            except (TypeError, ValueError):
+                continue
+            if n != 0:  # сезон 0 (спешелы) исключаем — с TMDB не совпадают
+                out.add(n)
+        return out
+
+    async def _season_counts(self, mapping: dict,
+                             real: set[int]) -> dict[int, int]:
+        """Счётчики серий по сезонам шоу. Кэш в маппинге; сеть к TMDB — только
+        когда среди реальных есть сезон не из кэша (новый сезон появился)."""
+        try:
+            cache = {int(k): v for k, v in json.loads(
+                mapping.get("season_episode_counts") or "{}").items()}
+        except (ValueError, TypeError, AttributeError):
+            cache = {}
+        if not real <= set(cache):
+            details = await self._details(int(mapping["tmdb_id"]))
+            cache = {s["season_number"]: s["episode_count"]
+                     for s in details["seasons"]
+                     if s.get("season_number") is not None
+                     and s.get("episode_count") is not None}
+        return cache

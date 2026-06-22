@@ -1,6 +1,7 @@
 """Репозиторий metadata: таблица series_tmdb_mappings (Р-19)."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from core.db import Database
@@ -42,6 +43,17 @@ class MetadataRepository:
                 f"INSERT INTO series_tmdb_mappings (series_id, {cols}, "
                 f"last_updated) VALUES (?, {marks}, ?)",
                 (series_id, *fields.values(), _now()))
+
+    async def set_aggregate(self, series_id: int, total_episodes: int,
+                            season_counts: dict) -> None:
+        """Многосезонный агрегат: total_episodes = сумма по реальным сезонам,
+        season_episode_counts = кэш числа серий по всем сезонам шоу (TMDB)."""
+        await self._db.execute(
+            "UPDATE series_tmdb_mappings SET total_episodes=?, "
+            "season_episode_counts=?, last_updated=? WHERE series_id=?",
+            (total_episodes,
+             json.dumps({str(k): v for k, v in season_counts.items()}),
+             _now(), series_id))
 
     async def delete_for_series(self, series_id: int) -> None:
         await self._db.execute(

@@ -1,4 +1,5 @@
 """Тесты модулей settings, metadata, library (этап 2)."""
+import asyncio
 import subprocess
 import sys
 
@@ -186,3 +187,136 @@ async def test_library_missing_path(system):
     with pytest.raises(BusRequestError, match="не каталог"):
         await _probe(modules).request("library.directories.list",
                                       {"path": "/нет/такого"}, timeout=5)
+
+
+# --- агрегатор многосезонника (TMDB) --------------------------------------------
+
+class _Neighbour(BaseModule):
+    """Соседи агрегатора: catalog.series.get + сезоны из нейминга."""
+    name = "neigh"
+
+    def __init__(self, bus):
+        self.series = {"id": 1, "source_type": "torrent", "season": ""}
+        self.seasons = {"seasons": []}
+        super().__init__(bus)
+
+    def register(self):
+        self.handle("catalog.series.get", self._get)
+        self.handle("torrents.seasons", self._seasons)
+        self.handle("scan.seasons", self._seasons)
+
+    async def _get(self, env):
+        return self.series
+
+    async def _seasons(self, env):
+        return self.seasons
+
+
+def _tmdb_details_stub(calls: list):
+    """Мок TMDB /tv/{id}: сезоны 0→10, 1→26, 2→24, 3→20. Считает вызовы."""
+    async def fake_get(self, path, **kwargs):
+        calls.append(path)
+        return httpx.Response(200, json={
+            "name": "T", "poster_path": None, "status": "x",
+            "seasons": [{"season_number": 0, "episode_count": 10},
+                        {"season_number": 1, "episode_count": 26},
+                        {"season_number": 2, "episode_count": 24},
+                        {"season_number": 3, "episode_count": 20}]},
+            request=httpx.Request("GET", "http://t"))
+    return fake_get
+
+
+@pytest.fixture
+async def agg_system(db_path):
+    import sqlite3
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO series (id, url, name, name_en, site, save_path, "
+            "state, source_type, auto_scan_enabled, vk_search_mode) VALUES "
+            "(1, 'u', 'Т', 'T', 'kinozal', '/m', 'waiting', 'torrent', 0, "
+            "'search')")
+        conn.commit()
+    bus = Bus()
+    db = Database(db_path)
+    neigh = _Neighbour(bus)
+    mods = [SettingsModule(bus, db), MetadataModule(bus, db), neigh, Probe(bus)]
+    runner = Runner(bus, mods)
+    await runner.start()
+    yield bus, neigh, mods
+    await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_seasons_recompute_sums_excluding_season0(agg_system, monkeypatch):
+    bus, neigh, mods = agg_system
+    probe = mods[-1]
+    await probe.request("settings.value.set",
+                        {"key": "tmdb_token", "value": "x"}, timeout=5)
+    await probe.request("metadata.map.set", {"series_id": 1, "tmdb_data": {
+        "tmdb_id": 42, "tmdb_season_number": 1}}, timeout=5)
+    neigh.seasons = {"seasons": [1, 2, 0]}  # сезон 0 (спешелы) должен выпасть
+    calls: list = []
+    monkeypatch.setattr(httpx.AsyncClient, "get", _tmdb_details_stub(calls))
+    sub = bus.subscribe("series.updated")
+
+    reply = await probe.request("metadata.seasons.recompute",
+                                {"series_id": 1}, timeout=10)
+    assert reply == {"total": 50, "seasons": [1, 2]}  # 26+24, без сезона 0
+    mapping = (await probe.request("metadata.map.get",
+                                   {"series_id": 1}, timeout=5))["mapping"]
+    assert mapping["total_episodes"] == 50
+    # реактивность: событие для карточки с обновлённым tmdb_info
+    env = await asyncio.wait_for(sub.queue.get(), 2)
+    assert env.payload["series_id"] == 1
+    assert env.payload["tmdb_info"]["total_episodes"] == 50
+
+
+@pytest.mark.asyncio
+async def test_seasons_recompute_cache_no_network_on_repeat(agg_system, monkeypatch):
+    """Повторный пересчёт без новых сезонов — без сети; новый сезон — снова сеть."""
+    bus, neigh, mods = agg_system
+    probe = mods[-1]
+    await probe.request("settings.value.set",
+                        {"key": "tmdb_token", "value": "x"}, timeout=5)
+    await probe.request("metadata.map.set", {"series_id": 1, "tmdb_data": {
+        "tmdb_id": 42, "tmdb_season_number": 1}}, timeout=5)
+    # TMDB сначала знает сезоны 0,1,2 (без 3); набор изменяемый
+    seasons_data = [{"season_number": 0, "episode_count": 10},
+                    {"season_number": 1, "episode_count": 26},
+                    {"season_number": 2, "episode_count": 24}]
+    calls: list = []
+
+    async def fake_get(self, path, **kwargs):
+        calls.append(path)
+        return httpx.Response(200, json={
+            "name": "T", "poster_path": None, "status": "x",
+            "seasons": list(seasons_data)},
+            request=httpx.Request("GET", "http://t"))
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    neigh.seasons = {"seasons": [1, 2]}
+    await probe.request("metadata.seasons.recompute", {"series_id": 1}, timeout=10)
+    assert len(calls) == 1                       # первый раз — сеть
+    await probe.request("metadata.seasons.recompute", {"series_id": 1}, timeout=10)
+    assert len(calls) == 1                       # повтор — из кэша, без сети
+    # сезон 3 появился и в нейминге, и в TMDB → 3 нет в кэше {0,1,2} → сеть
+    seasons_data.append({"season_number": 3, "episode_count": 20})
+    neigh.seasons = {"seasons": [1, 2, 3]}
+    r = await probe.request("metadata.seasons.recompute", {"series_id": 1}, timeout=10)
+    assert len(calls) == 2
+    assert r["total"] == 70                      # 26+24+20
+
+
+@pytest.mark.asyncio
+async def test_seasons_recompute_skips_single_and_no_tmdb(agg_system):
+    bus, neigh, mods = agg_system
+    probe = mods[-1]
+    # нет TMDB-маппинга → skip
+    assert (await probe.request("metadata.seasons.recompute",
+                                {"series_id": 1}, timeout=5))["skipped"] == "no_tmdb"
+    # одиночный режим (season задан) → skip, total не трогаем
+    await probe.request("metadata.map.set", {"series_id": 1, "tmdb_data": {
+        "tmdb_id": 42, "tmdb_season_number": 1, "total_episodes": 26}}, timeout=5)
+    neigh.series = {"id": 1, "source_type": "torrent", "season": "s01"}
+    assert (await probe.request("metadata.seasons.recompute",
+                                {"series_id": 1}, timeout=5))["skipped"] == "single_season"
