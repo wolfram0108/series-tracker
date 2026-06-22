@@ -33,7 +33,7 @@
 - Жёсткие констрейнты: дизайн/UX фронта неприкосновенны; протоколы
   внешних систем (qBittorrent API, трекеры, TMDB) — как есть.
 
-## Архитектура (кратко; подробно — [docs/architecture.md](docs/architecture.md))
+## Архитектура (кратко; подробно — [README.md](README.md) и докстринги модулей)
 
 Один asyncio-процесс: «тупая» шина (`core/bus.py`, только
 publish/subscribe + wildcards) и модули (`modules/*`), общающиеся
@@ -128,8 +128,6 @@ qBittorrent — Docker, WebUI `:8080`; секреты — в `.env` (вне git,
 - [contracts/bus_topics.md](contracts/bus_topics.md) — карта топиков шины.
 - [contracts/series_situations.md](contracts/series_situations.md) —
   поведенческая матрица (журнал верификации).
-- `docs/*-plan.md`, `docs/frontend-rewrite*.md` — исторические ТЗ/журналы
-  переписывания (для справки, помечены).
 
 ## Язык
 
