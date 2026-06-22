@@ -13,8 +13,7 @@ import type { Series } from "../stores/series"
 
 // Окно «Статус сериала» — та же оболочка, что у Настроек (ModalShell xl,
 // фикс-высота) + вкладки-сегмент (st-tabs). Вкладки зависят от source_type.
-// Футер: «Сохранить» только на «Свойствах». Composition/History/Slicing —
-// следующие шаги (заглушки).
+// Футер: «Сохранить» только на «Свойствах».
 const props = defineProps<{ seriesId: number }>()
 const emit = defineEmits<{ (e: "close"): void; (e: "updated"): void }>()
 const { request } = useApi()
@@ -129,6 +128,3 @@ onMounted(load)
   </ModalShell>
 </template>
 
-<style scoped>
-.status-stub { padding: 40px; text-align: center; color: var(--text-muted); }
-</style>

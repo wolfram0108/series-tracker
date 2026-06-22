@@ -74,12 +74,3 @@ const tabs = [
     </template>
   </ModalShell>
 </template>
-
-<style scoped>
-.tab-stub {
-  display: flex; flex-direction: column; align-items: center; gap: 12px;
-  padding: 48px 16px; color: var(--text-muted); text-align: center;
-}
-.tab-stub .pi { font-size: 2rem; opacity: 0.5; }
-.tab-stub p { margin: 0; }
-</style>

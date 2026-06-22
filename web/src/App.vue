@@ -15,9 +15,8 @@ import { useApi } from "./composables/useApi"
 import { useConfirm } from "./composables/useConfirm"
 import { api } from "./api/client"
 
-// Главный экран (каркас Ф4): шапка + список серий на живых данных из стора.
-// Модалки (add/logs/settings/status/confirmation) — следующие под-вехи Ф4,
-// пока кнопки дают информативную заглушку.
+// Главный экран: шапка + список серий на живых данных из стора. Модалки
+// (add / logs / settings / status / confirmation) подключены и рабочие.
 const seriesStore = useSeriesStore()
 const ui = useUiStore()
 const { request } = useApi()
