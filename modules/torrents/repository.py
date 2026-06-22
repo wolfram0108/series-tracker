@@ -159,6 +159,17 @@ class TorrentsRepository:
             (series_id,))
         return row["n"] if row else 0
 
+    async def seasons_for_series(self, series_id: int) -> list[int]:
+        """Реальные сезоны серии — distinct season из extracted_metadata
+        файлов АКТИВНЫХ раздач (для агрегата TMDB по нескольким сезонам)."""
+        rows = await self._db.fetch_all(
+            "SELECT DISTINCT json_extract(tf.extracted_metadata, '$.season') "
+            "AS season FROM torrent_files tf "
+            "JOIN torrents t ON t.id=tf.torrent_db_id "
+            "WHERE t.is_active=1 AND t.series_id=? AND season IS NOT NULL",
+            (series_id,))
+        return [r["season"] for r in rows if r["season"] is not None]
+
     async def delete_for_series(self, series_id: int) -> None:
         """Каскад Р-19: серия удалена — наши таблицы чистятся."""
         await self._db.execute(

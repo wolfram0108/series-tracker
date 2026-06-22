@@ -90,6 +90,7 @@ class ScanModule(BaseModule):
         self.handle("scan.all.start", self.on_scan_all)
         self.handle("scan.media.list", self.on_media_list)
         self.handle("scan.media.downloaded_counts", self.on_downloaded_counts)
+        self.handle("scan.seasons", self.on_seasons)
         self.handle("scan.item.set_ignored", self.on_set_ignored)
         self.handle("scan.composition", self.on_composition, concurrent=True)
         self.handle("scan.status.get", self.on_status_get)
@@ -242,6 +243,12 @@ class ScanModule(BaseModule):
     async def on_downloaded_counts(self, env: Envelope) -> dict:
         """{counts: {series_id: n}} — скачанные VK-эпизоды (Р-19)."""
         return {"counts": await self.repo.downloaded_counts()}
+
+    async def on_seasons(self, env: Envelope) -> dict:
+        """{seasons: [..]} — реальные сезоны VK-серии (distinct media_items.
+        season) для агрегата TMDB по нескольким сезонам."""
+        return {"seasons": await self.repo.seasons_for_series(
+            env.payload["series_id"])}
 
     async def on_series_deleted(self, env: Envelope) -> None:
         """Каскад Р-19: владелец чистит media_items и scan_tasks."""

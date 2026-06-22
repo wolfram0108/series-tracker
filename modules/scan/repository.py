@@ -157,6 +157,14 @@ class ScanRepository:
             "WHERE final_filename IS NOT NULL GROUP BY series_id")
         return {r["series_id"]: r["n"] for r in rows}
 
+    async def seasons_for_series(self, series_id: int) -> list[int]:
+        """Реальные сезоны серии — distinct media_items.season (для агрегата
+        TMDB по нескольким сезонам)."""
+        rows = await self._db.fetch_all(
+            "SELECT DISTINCT season FROM media_items "
+            "WHERE series_id=? AND season IS NOT NULL", (series_id,))
+        return [r["season"] for r in rows if r["season"] is not None]
+
     async def delete_for_series(self, series_id: int) -> None:
         """Каскад Р-19: серия удалена — наши таблицы чистятся."""
         await self._db.execute(

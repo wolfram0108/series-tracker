@@ -117,6 +117,7 @@ class TorrentsModule(BaseModule):
         self.handle("torrents.db.add", self.on_db_add)
         self.handle("torrents.db.downloaded_counts",
                     self.on_downloaded_counts)
+        self.handle("torrents.seasons", self.on_seasons)
         self.handle("torrents.db.files.for_series", self.on_files_for_series)
         self.handle("torrents.db.progress.list", self.on_progress_list)
         self.handle("torrents.composition", self.on_composition,
@@ -479,6 +480,12 @@ class TorrentsModule(BaseModule):
     async def on_downloaded_counts(self, env: Envelope) -> dict:
         """{counts: {series_id: n}} — переименованные файлы (Р-19)."""
         return {"counts": await self.repo.downloaded_counts()}
+
+    async def on_seasons(self, env: Envelope) -> dict:
+        """{seasons: [..]} — реальные сезоны серии из нейминга (для агрегата
+        TMDB по нескольким сезонам)."""
+        return {"seasons": await self.repo.seasons_for_series(
+            env.payload["series_id"])}
 
     async def on_series_deleted(self, env: Envelope) -> None:
         """Каскад Р-19: чистим реестр, файлы, задачи конвейера; по флагу
