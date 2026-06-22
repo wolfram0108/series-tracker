@@ -163,10 +163,12 @@ class DownloadsRepository:
 
     async def downloaded_count(self, series_id: int) -> int:
         """Счётчик «скачано» VK-серии — как scan.media.downloaded_counts
-        (есть final_filename), для реактивного SSE (Д1)."""
+        (есть final_filename), для реактивного SSE (Д1). Спешелы (сезон 0)
+        не считаем — total их не учитывает (соответствие TMDB)."""
         row = await self._db.fetch_one(
             "SELECT COUNT(*) AS n FROM media_items WHERE series_id=? AND "
-            "final_filename IS NOT NULL", (series_id,))
+            "final_filename IS NOT NULL AND (season IS NULL OR season != 0)",
+            (series_id,))
         return row["n"] if row else 0
 
     # --- свёртка статусов (семантика старого sync_vk_statuses) ---------------------

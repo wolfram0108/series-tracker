@@ -335,7 +335,9 @@ async function addSeries() {
       payload.tmdb_data = {
         tmdb_id: tmdbSelected.value.id,
         tmdb_season_number: tmdbSeasonNumber.value,
-        total_episodes: tmdbEpisodeCount.value,
+        // «несколько сезонов»: число серий неизвестно до нейминга/скана —
+        // не задаём (0), карточка не покажет, агрегатор посчитает позже.
+        total_episodes: isSeasonless.value ? 0 : tmdbEpisodeCount.value,
         poster_path: tmdbSelected.value.poster_path,
         series_name: tmdbName(tmdbSelected.value),
         year: tmdbSelected.value.year,
@@ -568,9 +570,12 @@ onBeforeUnmount(() => {
                     <span class="path-pill-label">Оригинал:</span>
                     <span class="path-pill-value">{{ res.original_name }}</span>
                   </span>
-                  <span v-if="tmdbSelected && tmdbSelected.id === res.id" class="path-pill">
+                  <span v-if="tmdbSelected && tmdbSelected.id === res.id && !isSeasonless" class="path-pill">
                     <span class="path-pill-label">Сезон {{ tmdbSeasonNumber }}:</span>
                     <span class="path-pill-value">{{ tmdbEpisodeCount }} эпизодов</span>
+                  </span>
+                  <span v-else-if="tmdbSelected && tmdbSelected.id === res.id" class="path-pill">
+                    <span class="path-pill-value">Несколько сезонов</span>
                   </span>
                 </div>
               </div>

@@ -154,7 +154,8 @@ class ScanRepository:
         карточек списка (устранение N+1 старого GET /api/series)."""
         rows = await self._db.fetch_all(
             "SELECT series_id, COUNT(*) AS n FROM media_items "
-            "WHERE final_filename IS NOT NULL GROUP BY series_id")
+            "WHERE final_filename IS NOT NULL "
+            "AND (season IS NULL OR season != 0) GROUP BY series_id")
         return {r["series_id"]: r["n"] for r in rows}
 
     async def seasons_for_series(self, series_id: int) -> list[int]:

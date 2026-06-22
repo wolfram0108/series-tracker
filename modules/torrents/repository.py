@@ -13,6 +13,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
+# Счётчик «скачано» не считает спешелы (сезон 0): они не соответствуют TMDB,
+# total их не учитывает — иначе «скачано» вышло бы больше «всего». Файлы без
+# извлечённого сезона (NULL) считаются (одиночные серии без явного сезона).
+_NOT_SPECIALS = ("(json_extract(tf.extracted_metadata, '$.season') IS NULL "
+                 "OR json_extract(tf.extracted_metadata, '$.season') != 0)")
+
+
 class TorrentsRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -146,7 +153,8 @@ class TorrentsRepository:
         rows = await self._db.fetch_all(
             "SELECT t.series_id AS series_id, COUNT(*) AS n "
             "FROM torrent_files tf JOIN torrents t ON t.id=tf.torrent_db_id "
-            "WHERE tf.status='renamed' AND t.is_active=1 GROUP BY t.series_id")
+            f"WHERE tf.status='renamed' AND t.is_active=1 AND {_NOT_SPECIALS} "
+            "GROUP BY t.series_id")
         return {r["series_id"]: r["n"] for r in rows}
 
     async def downloaded_count_for_series(self, series_id: int) -> int:
@@ -155,7 +163,8 @@ class TorrentsRepository:
         row = await self._db.fetch_one(
             "SELECT COUNT(*) AS n FROM torrent_files tf "
             "JOIN torrents t ON t.id=tf.torrent_db_id "
-            "WHERE tf.status='renamed' AND t.is_active=1 AND t.series_id=?",
+            "WHERE tf.status='renamed' AND t.is_active=1 AND t.series_id=? "
+            f"AND {_NOT_SPECIALS}",
             (series_id,))
         return row["n"] if row else 0
 
