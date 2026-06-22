@@ -1,12 +1,25 @@
-# Состояние пересоздания — точка продолжения
+# Состояние — точка продолжения
 
-> Обновлено: 2026-06-12. Этот файл — снимок «где мы» для продолжения
-> работы после сжатия контекста. Правила работы — в [CLAUDE.md](../CLAUDE.md)
+> Обновлено: 2026-06-22. Правила работы — в [CLAUDE.md](../CLAUDE.md)
 > (целеполагание!), решения — в [contracts/revision.md](../contracts/revision.md)
-> (Р-1..Р-23), находки — в [contracts/findings.md](../contracts/findings.md)
-> (1–40), карта топиков шины — в
-> [contracts/bus_topics.md](../contracts/bus_topics.md), план — в
-> [docs/refactoring_bus_plan.md](refactoring_bus_plan.md).
+> (Р-1..Р-23), находки — в [contracts/findings.md](../contracts/findings.md),
+> карта топиков шины — в [contracts/bus_topics.md](../contracts/bus_topics.md),
+> развёртывание — в [docs/deployment.md](deployment.md).
+
+## 🚀 РЕЛИЗ (2026-06-22): v2.0.0 — переписывание завершено и выпущено
+
+Новая модульно-шинная система **выпущена и работает на проде** (этот сервер).
+- `main` = новая система; тег **`v2.0.0`** + GitHub Release.
+- Старая монолитно-агентная версия заархивирована тегом **`legacy/v1-final`**
+  (откат), старый фронт — в `legacy_frontend/` (отдаётся по `/legacy`).
+- Прод: systemd-юнит `series-tracker` (uvicorn :5000), деплой из `main`
+  по [docs/deployment.md](deployment.md).
+- Тесты бэкенда зелёные (кроме намеренно красных `*_match_production`/
+  `*_diff`/`test_sources` — нужны golden/прод-фикстуры).
+
+**Бэклог (не блокеры):** формальная сверка `*_match_production` против копии
+прод-БД; сквозной astar/anilibria_tv на реальной раздаче;
+`torrents._drop_task` рантайм-деактивация; остаточные ◐ матрицы (VU9/VU11).
 
 ## ⭐ ТЕКУЩАЯ РАБОТА (2026-06-21): поведенческая матрица сериалов
 

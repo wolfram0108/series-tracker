@@ -1,0 +1,21 @@
+# systemd-юнит прода. Установка:
+#   sudo cp deploy/series-tracker.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now series-tracker
+# Под другого пользователя/путь — поправить User/Group/WorkingDirectory/ExecStart.
+# Подробности — docs/deployment.md.
+[Unit]
+Description=Series Tracker v2 — uvicorn :5000
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=user
+Group=user
+WorkingDirectory=/home/user/series-tracker
+ExecStart=/home/user/series-tracker/start.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

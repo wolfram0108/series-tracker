@@ -53,25 +53,12 @@ cd web && npm ci && npm run build && cd ..
 
 ### systemd-юнит
 
-`/etc/systemd/system/series-tracker.service`:
+Готовый юнит — в репозитории: [`deploy/series-tracker.service`](../deploy/series-tracker.service)
+(под другого пользователя/путь поправить `User`/`Group`/`WorkingDirectory`/
+`ExecStart`).
 
-```ini
-[Unit]
-Description=Series Tracker — uvicorn :5000
-After=network-online.target docker.service
-Wants=network-online.target
-
-[Service]
-Type=exec
-User=user
-Group=user
-WorkingDirectory=/home/user/series-tracker
-ExecStart=/home/user/series-tracker/start.sh
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
+```bash
+sudo cp deploy/series-tracker.service /etc/systemd/system/
 ```
 
 `start.sh` (в репо) подхватывает `.env` и запускает
