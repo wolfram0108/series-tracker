@@ -176,6 +176,10 @@ class ScanModule(BaseModule):
             await self.repo.set_plan_statuses(plan)
             self.publish_event("scan.plan.updated",
                                {"series_id": series_id})
+        # Построение композиции дало актуальный набор сезонов → пересчёт
+        # агрегата TMDB (число серий по реальным сезонам).
+        self.send_command("metadata.seasons.recompute",
+                          {"series_id": series_id})
         return await self._reconstruct(series)
 
     async def _neighbour_sync(self, series_id: int,
@@ -335,6 +339,10 @@ class ScanModule(BaseModule):
             else:
                 result = await self._scan_torrents(series, force)
             self._contribute(series_id, scanning=False, error=False)
+            # Многосезонный агрегат TMDB: реальные сезоны могли измениться
+            # (новый сезон/файлы) — пересчитать число серий по сезонам.
+            self.send_command("metadata.seasons.recompute",
+                              {"series_id": series_id})
             return result
         except Exception as exc:
             # Носитель ошибки: error-запись в scan_tasks, если её не

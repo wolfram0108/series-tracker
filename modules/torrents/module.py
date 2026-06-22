@@ -674,6 +674,10 @@ class TorrentsModule(BaseModule):
         del self._pipe[qb_hash]
         self.send_command("catalog.series.touch_scan_time",
                           {"series_id": task["series_id"]})
+        # Переименование разложило файлы по Season NN → реальные сезоны
+        # известны: пересчитать многосезонный агрегат TMDB.
+        self.send_command("metadata.seasons.recompute",
+                          {"series_id": task["series_id"]})
         self.log.info("[%s] задача конвейера выполнена", qb_hash[:8])
         self._broadcast_queue()
         await self._contribute(task["series_id"])
