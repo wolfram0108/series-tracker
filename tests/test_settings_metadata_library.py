@@ -308,6 +308,23 @@ async def test_seasons_recompute_cache_no_network_on_repeat(agg_system, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_map_set_triggers_recompute(agg_system, monkeypatch):
+    """Назначение/смена TMDB сразу пересчитывает агрегат — не ждёт скана."""
+    bus, neigh, mods = agg_system
+    probe = mods[-1]
+    await probe.request("settings.value.set",
+                        {"key": "tmdb_token", "value": "x"}, timeout=5)
+    neigh.seasons = {"seasons": [1, 2]}
+    monkeypatch.setattr(httpx.AsyncClient, "get", _tmdb_details_stub([]))
+    sub = bus.subscribe("series.updated")
+    await probe.request("metadata.map.set", {"series_id": 1, "tmdb_data": {
+        "tmdb_id": 42, "tmdb_season_number": 1}}, timeout=5)
+    # recompute сработал автоматически от map.set → событие с агрегатом
+    env = await asyncio.wait_for(sub.queue.get(), 2)
+    assert env.payload["tmdb_info"]["total_episodes"] == 50  # 26+24
+
+
+@pytest.mark.asyncio
 async def test_seasons_recompute_skips_single_and_no_tmdb(agg_system):
     bus, neigh, mods = agg_system
     probe = mods[-1]

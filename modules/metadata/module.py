@@ -107,6 +107,11 @@ class MetadataModule(BaseModule):
     async def on_map_set(self, env: Envelope) -> dict:
         await self.repo.upsert_mapping(env.payload["series_id"],
                                        env.payload["tmdb_data"])
+        # Назначение/смена TMDB — пересчитать многосезонный агрегат СРАЗУ, по
+        # уже известным из нейминга сезонам, не дожидаясь следующего скана
+        # (иначе число серий многосезонника не появляется после назначения).
+        self.send_command("metadata.seasons.recompute",
+                          {"series_id": env.payload["series_id"]})
         return {"ok": True}
 
     async def on_series_deleted(self, env: Envelope) -> None:
