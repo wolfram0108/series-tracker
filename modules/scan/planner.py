@@ -84,15 +84,22 @@ def _cover_gaps(singles: list[dict], compilations: list[dict],
 
 
 def build_plan(candidates: list[dict[str, Any]],
-               quality_priority: list[int] | None = None) -> dict[str, str]:
+               quality_priority: list[int] | None = None,
+               ignored_seasons: set[int] | None = None) -> dict[str, str]:
     """Кандидаты -> {unique_id: plan_status}."""
     priority = quality_priority or []
+    ignored = {int(s) for s in (ignored_seasons or ())}
     # Игнорированные пользователем кандидаты в плане не участвуют: они не
     # должны выигрывать слот эпизода и вытеснять валидную альтернативу.
     # Иначе игнор «битого»/ненужного варианта (напр. 2160p-компиляции,
     # мис-распознанной как одиночка) не освобождает место настоящему файлу,
     # уже лежащему на диске (тот остаётся `replaced` → не усыновляется).
-    candidates = [c for c in candidates if not c.get("is_ignored_by_user")]
+    # Игнор-сезоны (VU11): эпизоды этих сезонов в план не попадают — иначе
+    # пометка «сезон не нужен» в UI не влияла бы на загрузку (был лишь
+    # визуальный гасёж). Сезон None (не извлечён) не трогаем.
+    candidates = [c for c in candidates
+                  if not c.get("is_ignored_by_user")
+                  and c.get("season") not in ignored]
     full_range: set[Episode] = set()
     for item in candidates:
         full_range |= _episodes(item)

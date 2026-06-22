@@ -172,7 +172,8 @@ class ScanModule(BaseModule):
             # reset_plan_status + SmartCollector.collect)
             await self.repo.reset_plan_status(series_id)
             plan = build_plan(await self.repo.candidates(series_id),
-                              self._quality_priority(series))
+                              self._quality_priority(series),
+                              self._ignored_seasons(series))
             await self.repo.set_plan_statuses(plan)
             self.publish_event("scan.plan.updated",
                                {"series_id": series_id})
@@ -394,7 +395,8 @@ class ScanModule(BaseModule):
                       stats["added"], stats["updated"], stats["deleted"])
 
         plan_input = await self.repo.candidates(series_id)
-        plan = build_plan(plan_input, self._quality_priority(series))
+        plan = build_plan(plan_input, self._quality_priority(series),
+                          self._ignored_seasons(series))
         await self.repo.set_plan_statuses(plan)
         in_plan = sum(1 for s in plan.values() if s.startswith("in_plan"))
         self.publish_event("scan.plan.updated", {"series_id": series_id})
@@ -412,6 +414,16 @@ class ScanModule(BaseModule):
             return json.loads(series.get("vk_quality_priority") or "[]")
         except (json.JSONDecodeError, TypeError):
             return []
+
+    @staticmethod
+    def _ignored_seasons(series: dict) -> set[int]:
+        """Сезоны, помеченные пользователем к игнору (VU11): их эпизоды в
+        план не попадают."""
+        try:
+            return {int(s) for s in
+                    json.loads(series.get("ignored_seasons") or "[]")}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return set()
 
     @staticmethod
     def _vk_candidates(series_id: int, videos: list[dict],

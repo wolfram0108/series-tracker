@@ -87,3 +87,26 @@ def test_seasons_are_separate_dimensions():
 
 def test_empty_candidates():
     assert build_plan([]) == {}
+
+
+def test_vu9_quality_priority_change_reselects():
+    """VU9: смена приоритета качества меняет выбор; не выбранное качество →
+    `replaced` (файл остаётся до замены, не удаляется)."""
+    items = [_item("hi", 1, resolution=1080), _item("lo", 1, resolution=480)]
+    assert build_plan(items)["hi"] == "in_plan_single"   # дефолт — большее
+    assert build_plan(items, quality_priority=[480, 1080]) == {
+        "lo": "in_plan_single", "hi": "replaced"}        # приоритет 480 → 1080 уступает
+
+
+def test_vu11_ignored_seasons_excluded_from_plan():
+    """VU11: эпизоды игнор-сезонов в план НЕ попадают. Раньше ignored_seasons
+    только писался в БД, но нигде не применялся — эпизоды планировались и
+    качались, пометка «сезон не нужен» была лишь визуальной."""
+    items = [_item("s1e1", 1, season=1), _item("s2e1", 1, season=2),
+             _item("s2e2", 2, season=2)]
+    assert set(build_plan(items)) == {"s1e1", "s2e1", "s2e2"}   # без игнора — все
+    plan = build_plan(items, ignored_seasons={2})              # игнор сезона 2
+    assert plan == {"s1e1": "in_plan_single"}                  # только сезон 1
+    # сезон без номера (None) игнор не затрагивает
+    assert build_plan([_item("x", 5, season=None)],
+                      ignored_seasons={2}) == {"x": "in_plan_single"}

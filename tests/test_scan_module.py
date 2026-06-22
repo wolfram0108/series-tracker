@@ -485,6 +485,29 @@ async def test_vk_scan_default_dispatches_download(system):
 
 
 @pytest.mark.asyncio
+async def test_sim_VU11_ignored_seasons_excluded_on_scan(system):
+    """VU11 (интеграция): scan читает series.ignored_seasons и исключает их
+    эпизоды из плана — не только визуально гасит в UI. Раньше ignored_seasons
+    нигде не применялся (только писался)."""
+    _, fake, probe, db_path = system
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE series SET ignored_seasons='[2]' WHERE id=2")
+        conn.commit()
+    fake.vk_videos = [_vk_video(1, "Сезон1 эп1"), _vk_video(2, "Сезон2 эп5")]
+    fake.rules_results = [
+        {"excluded": False, "extracted": {"episode": 1, "season": 1}},
+        {"excluded": False, "extracted": {"episode": 5, "season": 2}}]
+    await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = {r["source_title"]: r["plan_status"] for r in conn.execute(
+            "SELECT source_title, plan_status FROM media_items WHERE "
+            "series_id=2")}
+    assert rows["Сезон1 эп1"].startswith("in_plan")       # сезон 1 — в плане
+    assert not rows["Сезон2 эп5"].startswith("in_plan")   # сезон 2 — исключён
+
+
+@pytest.mark.asyncio
 async def test_vk_phantom_rules(system):
     _, fake, probe, db_path = system
     fake.vk_videos = [_vk_video(1, "Тайтл 1 серия"),
