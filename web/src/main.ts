@@ -63,14 +63,19 @@ if (!isGallery) {
     },
   })
 
-  // Первый запуск: если администратор ещё не создан — модалка установки
-  // (имеет приоритет над входом). Иначе обычный поток (401 поднимет вход).
-  void api.GET("/api/auth/status").then(({ data }) => {
-    const st = data as { configured?: boolean } | undefined
-    if (st && !st.configured) useAuthStore().needsSetup = true
-  })
-
-  setupRealtime()
-  void useSeriesStore().load()
-  void useScannerStore().load()
+  // Сначала узнаём состояние входа, ПОТОМ грузим данные — иначе 401 от
+  // загрузки на миг показал бы модалку входа до того, как выяснится, что
+  // нужна установка (первый запуск). Установка имеет приоритет над входом.
+  void (async () => {
+    try {
+      const { data } = await api.GET("/api/auth/status")
+      const st = data as { configured?: boolean } | undefined
+      if (st && !st.configured) useAuthStore().needsSetup = true
+    } catch {
+      /* статус недоступен — пойдём обычным путём (вход по 401) */
+    }
+    setupRealtime()
+    void useSeriesStore().load()
+    void useScannerStore().load()
+  })()
 }

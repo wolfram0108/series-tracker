@@ -1,31 +1,41 @@
 <script setup lang="ts">
-import { onMounted, nextTick, ref } from "vue"
+import { ref, computed, watch } from "vue"
+import Button from "primevue/button"
+import StGroup from "./StGroup.vue"
+import StIcon from "./StIcon.vue"
+import StInput from "./StInput.vue"
 import { api } from "../api/client"
 import { useAuthStore } from "../stores/auth"
 
-// Модалка входа администратора (Этап 1). Блокирующая: закрыть нельзя, пока
-// не вошёл (нет крестика, не закрывается по Esc/клику-вне). Стили — общие
-// (styles/auth-modal.css), оформление черновое (см. docs/security.md).
+// Модалка входа администратора (Этап 1). Блокирующая. Валидация — рамкой
+// StGroup; причина/ошибка — плашкой ПОД карточкой (login-notice).
 const emit = defineEmits<{ (e: "logged-in"): void }>()
 const auth = useAuthStore()
 
 const username = ref("")
 const password = ref("")
-const error = ref("")
 const busy = ref(false)
-const userInput = ref<HTMLInputElement | null>(null)
+const attempted = ref(false)
+const notice = ref("")
 
-onMounted(async () => {
-  await nextTick()
-  userInput.value?.focus()
-})
+type VState = "valid" | "invalid" | null
+const userState = computed<VState>(
+  () => (attempted.value ? (username.value ? "valid" : "invalid") : null))
+const passState = computed<VState>(
+  () => (attempted.value ? (password.value ? "valid" : "invalid") : null))
+
+watch([username, password], () => { notice.value = "" })
 
 async function submit(): Promise<void> {
+  attempted.value = true
   if (busy.value) return
-  error.value = ""
+  if (!username.value || !password.value) {
+    notice.value = "Введите логин и пароль"
+    return
+  }
   busy.value = true
   try {
-    const { data, error: err, response } = await api.POST("/api/login", {
+    const { data, error, response } = await api.POST("/api/login", {
       body: { username: username.value, password: password.value },
     } as never)
     const body = data as unknown as { success?: boolean; username?: string } | null
@@ -34,10 +44,10 @@ async function submit(): Promise<void> {
       emit("logged-in")
       return
     }
-    error.value =
-      (err as unknown as { error?: string } | null)?.error || "Не удалось войти"
+    notice.value = (error as unknown as { error?: string } | null)?.error ||
+      "Неверный логин или пароль"
   } catch {
-    error.value = "Ошибка сети — сервер недоступен"
+    notice.value = "Ошибка сети — сервер недоступен"
   } finally {
     busy.value = false
   }
@@ -51,33 +61,23 @@ async function submit(): Promise<void> {
         <h2 class="login-title">Вход</h2>
         <p class="login-sub">WOLFRAM TS</p>
 
-        <label class="login-field">
-          <span>Логин</span>
-          <input
-            ref="userInput"
-            v-model="username"
-            type="text"
-            autocomplete="username"
-            :disabled="busy"
-          />
-        </label>
+        <StGroup :state="userState">
+          <StIcon icon="pi pi-user" />
+          <StInput v-model="username" label="Логин" />
+        </StGroup>
 
-        <label class="login-field">
-          <span>Пароль</span>
-          <input
-            v-model="password"
-            type="password"
-            autocomplete="current-password"
-            :disabled="busy"
-          />
-        </label>
+        <StGroup :state="passState">
+          <StIcon icon="pi pi-lock" />
+          <StInput v-model="password" label="Пароль" type="password" />
+        </StGroup>
 
-        <p v-if="error" class="login-error">{{ error }}</p>
-
-        <button class="login-btn" type="submit" :disabled="busy">
-          {{ busy ? "Вход…" : "Войти" }}
-        </button>
+        <Button class="login-submit" type="submit" label="Войти"
+                icon="pi pi-sign-in" :loading="busy" />
       </form>
+
+      <Transition name="notice">
+        <div v-if="notice" class="login-notice">{{ notice }}</div>
+      </Transition>
     </div>
   </Teleport>
 </template>
