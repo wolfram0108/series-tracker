@@ -13,6 +13,7 @@ import "./styles/card.css"
 import "./styles/cards.css"
 import "./styles/progress.css"
 import "./styles/modal.css"
+import "./styles/auth-modal.css"
 import "./styles/layout.css"
 import "./styles/add-series.css"
 import "./styles/status.css"
@@ -60,6 +61,13 @@ if (!isGallery) {
       }
       return response
     },
+  })
+
+  // Первый запуск: если администратор ещё не создан — модалка установки
+  // (имеет приоритет над входом). Иначе обычный поток (401 поднимет вход).
+  void api.GET("/api/auth/status").then(({ data }) => {
+    const st = data as { configured?: boolean } | undefined
+    if (st && !st.configured) useAuthStore().needsSetup = true
   })
 
   setupRealtime()

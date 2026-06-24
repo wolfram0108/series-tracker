@@ -76,6 +76,51 @@ def build_router(gw):
         request.session["user"] = username
         return {"success": True, "username": username}
 
+    @r.get("/api/auth/status")
+    async def auth_status(request: Request):
+        """Публичный статус для онбординга: настроен ли администратор и вошёл
+        ли текущий клиент. Фронт по нему выбирает модалку setup/login."""
+        try:
+            reply = await gw.request("auth.exists", {}, timeout=10)
+            configured = bool(reply.get("exists"))
+        except BusRequestError:
+            configured = False
+        return {"configured": configured,
+                "authenticated": bool(request.session.get("user"))}
+
+    @r.post("/api/setup")
+    async def setup(request: Request):
+        """Первичная установка администратора. Доступна ТОЛЬКО пока админа
+        нет; после создания — 403 (пересоздать в обход входа нельзя).
+        Успех сразу логинит (сессия)."""
+        try:
+            exists = (await gw.request("auth.exists", {}, timeout=10)).get("exists")
+        except BusRequestError:
+            return JSONResponse(
+                {"success": False, "error": "Сервис аутентификации недоступен."},
+                status_code=503)
+        if exists:
+            return JSONResponse(
+                {"success": False, "error": "Администратор уже настроен."},
+                status_code=403)
+        data = await request.json()
+        username = (data.get("username") or "").strip()
+        password = data.get("password") or ""
+        if not username or len(password) < 8:
+            return JSONResponse(
+                {"success": False,
+                 "error": "Укажите имя и пароль не короче 8 символов."},
+                status_code=400)
+        reply = await gw.request(
+            "auth.password.set", {"username": username, "password": password},
+            timeout=10)
+        if not reply.get("ok"):
+            return JSONResponse(
+                {"success": False, "error": "Не удалось создать администратора."},
+                status_code=400)
+        request.session["user"] = username
+        return {"success": True, "username": username}
+
     @r.post("/api/logout")
     async def logout(request: Request):
         request.session.clear()

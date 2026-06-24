@@ -33,7 +33,7 @@ class AuthGateMiddleware:
     поэтому scope['session'] уже распарсен."""
 
     _PUBLIC_EXACT = {"/", "/legacy", "/v2", "/v2/", "/favicon.svg",
-                     "/api/login"}
+                     "/api/login", "/api/setup", "/api/auth/status"}
     _PUBLIC_PREFIX = ("/assets/", "/static/")
 
     def __init__(self, app) -> None:

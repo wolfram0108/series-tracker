@@ -10,6 +10,7 @@ import LogsModal from "./components/LogsModal.vue"
 import AddSeriesModal from "./components/AddSeriesModal.vue"
 import StatusModal from "./components/StatusModal.vue"
 import LoginModal from "./components/LoginModal.vue"
+import SetupModal from "./components/SetupModal.vue"
 import { useSeriesStore } from "./stores/series"
 import { useScannerStore } from "./stores/scanner"
 import { useUiStore } from "./stores/ui"
@@ -132,6 +133,7 @@ async function onDelete(id: number) {
       @updated="seriesStore.load()"
     />
     <ConfirmDialog />
-    <LoginModal v-if="auth.showLogin" @logged-in="onLoggedIn" />
+    <SetupModal v-if="auth.needsSetup" @done="onLoggedIn" />
+    <LoginModal v-else-if="auth.showLogin" @logged-in="onLoggedIn" />
   </main>
 </template>

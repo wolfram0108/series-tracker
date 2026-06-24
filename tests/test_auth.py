@@ -128,6 +128,41 @@ async def test_bruteforce_ban_after_5_fails(system):
 
 
 @pytest.mark.asyncio
+async def test_setup_first_run(db_path, tmp_path, monkeypatch):
+    """Первый запуск (админа нет): /api/setup создаёт его и сразу логинит;
+    короткий пароль отклоняется; повторный setup запрещён (403)."""
+    monkeypatch.delenv("ST_ADMIN_USER", raising=False)
+    monkeypatch.delenv("ST_ADMIN_PASSWORD", raising=False)
+    bus = Bus()
+    db = Database(db_path)
+    gateway = GatewayModule(bus, static_dir=str(tmp_path),
+                            templates_dir=str(tmp_path), cookie_secure=False)
+    runner = Runner(bus, [gateway, AuthModule(bus, db), _Queue(bus)])
+    await runner.start()
+    transport = httpx.ASGITransport(app=gateway.app)
+    async with httpx.AsyncClient(transport=transport,
+                                 base_url="http://test") as client:
+        # админа нет
+        assert (await client.get("/api/auth/status")).json() == {
+            "configured": False, "authenticated": False}
+        # короткий пароль отклоняется, админ не создан
+        r = await client.post("/api/setup",
+                              json={"username": "boss", "password": "short"})
+        assert r.status_code == 400
+        # нормальный setup создаёт админа и сразу логинит (сессия)
+        r = await client.post("/api/setup",
+                              json={"username": "boss", "password": "longpass123"})
+        assert r.status_code == 200 and r.json()["success"] is True
+        assert (await client.get("/api/agent/queue")).status_code == 200
+        assert (await client.get("/api/auth/status")).json()["configured"] is True
+        # повторный setup запрещён
+        r2 = await client.post("/api/setup",
+                               json={"username": "x", "password": "longpass123"})
+        assert r2.status_code == 403
+    await runner.stop()
+
+
+@pytest.mark.asyncio
 async def test_auth_module_queries(system):
     """Модуль auth: exists/password.set по шине (без HTTP)."""
     bus, _, _ = system
