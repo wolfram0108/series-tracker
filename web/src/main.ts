@@ -69,8 +69,14 @@ if (!isGallery) {
   void (async () => {
     try {
       const { data } = await api.GET("/api/auth/status")
-      const st = data as { configured?: boolean } | undefined
-      if (st && !st.configured) useAuthStore().needsSetup = true
+      const st = data as
+        { configured?: boolean; authenticated?: boolean; username?: string } | undefined
+      if (st?.authenticated && st.username) {
+        // уже вошли (валидная кука) — восстановить состояние (кнопка выхода)
+        useAuthStore().setAuthenticated(st.username)
+      } else if (st && !st.configured) {
+        useAuthStore().needsSetup = true
+      }
     } catch {
       /* статус недоступен — пойдём обычным путём (вход по 401) */
     }

@@ -85,8 +85,10 @@ def build_router(gw):
             configured = bool(reply.get("exists"))
         except BusRequestError:
             configured = False
+        user = request.session.get("user")
         return {"configured": configured,
-                "authenticated": bool(request.session.get("user"))}
+                "authenticated": bool(user),
+                "username": user or ""}
 
     @r.post("/api/setup")
     async def setup(request: Request):

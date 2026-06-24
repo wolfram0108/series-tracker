@@ -84,6 +84,10 @@ async def test_login_success_opens_api(system):
     me = await client.get("/api/me")
     assert me.status_code == 200
     assert me.json() == {"authenticated": True, "username": "admin"}
+    # статус отдаёт имя вошедшего — фронт восстанавливает кнопку выхода
+    st = await client.get("/api/auth/status")
+    assert st.json() == {"configured": True, "authenticated": True,
+                         "username": "admin"}
 
 
 @pytest.mark.asyncio
@@ -144,7 +148,7 @@ async def test_setup_first_run(db_path, tmp_path, monkeypatch):
                                  base_url="http://test") as client:
         # админа нет
         assert (await client.get("/api/auth/status")).json() == {
-            "configured": False, "authenticated": False}
+            "configured": False, "authenticated": False, "username": ""}
         # короткий пароль отклоняется, админ не создан
         r = await client.post("/api/setup",
                               json={"username": "boss", "password": "short"})
