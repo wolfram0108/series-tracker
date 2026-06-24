@@ -47,6 +47,12 @@ class TrackerauthModule(BaseModule):
         self.handle("trackerauth.credentials.get", self.on_credentials_get)
         self.handle("trackerauth.credentials.set", self.on_credentials_set)
 
+    async def on_start(self) -> None:
+        # Этап 3Б: одноразово зашифровать секреты, лежащие в открытом виде.
+        migrated = await self.repo.encrypt_legacy_secrets()
+        if migrated:
+            self.log.info("зашифровано legacy-секретов в БД: %d", migrated)
+
     # --- учётные данные (владелец таблицы auth, Р-22) -------------------------------
 
     async def on_credentials_get(self, env: Envelope) -> dict:

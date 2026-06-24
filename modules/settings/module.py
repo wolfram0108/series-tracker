@@ -27,6 +27,12 @@ class SettingsModule(BaseModule):
         self.handle("settings.paths.add", self.on_paths_add)
         self.handle("settings.paths.remove", self.on_paths_remove)
 
+    async def on_start(self) -> None:
+        # Этап 3Б: одноразово зашифровать секретные ключи (tmdb_token).
+        migrated = await self.repo.encrypt_legacy_secrets()
+        if migrated:
+            self.log.info("зашифровано legacy-секретов settings: %d", migrated)
+
     async def on_get(self, env: Envelope) -> dict:
         key = env.payload["key"]
         return {"key": key, "value": await self.repo.get(key)}

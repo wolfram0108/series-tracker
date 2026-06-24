@@ -83,6 +83,35 @@ async def test_fetch_with_live_session(system):
 
 
 @pytest.mark.asyncio
+async def test_password_encrypted_at_rest(system):
+    """Этап 3Б: legacy-пароль зашифрован на старте; наружу — флаг, не секрет."""
+    from core import crypto
+    _, db, _, probe, _ = system
+    row = await db.fetch_one(
+        "SELECT password FROM auth WHERE auth_type='kinozal'")
+    assert row["password"] != "pass"            # в БД не открытый текст
+    assert crypto.is_encrypted(row["password"])
+    reply = await probe.request("trackerauth.credentials.get",
+                                {"service": "kinozal"}, timeout=5)
+    assert reply["credentials"]["has_password"] is True
+    assert "password" not in reply["credentials"]  # секрет не отдаётся (Этап 3А)
+
+
+@pytest.mark.asyncio
+async def test_set_credentials_encrypts(system):
+    """Новый пароль через credentials.set ложится в БД зашифрованным."""
+    from core import crypto
+    _, db, _, probe, _ = system
+    await probe.request("trackerauth.credentials.set",
+                        {"service": "rutracker", "username": "u",
+                         "password": "topsecret"}, timeout=5)
+    row = await db.fetch_one(
+        "SELECT password FROM auth WHERE auth_type='rutracker'")
+    assert crypto.is_encrypted(row["password"])
+    assert crypto.decrypt(row["password"]) == "topsecret"
+
+
+@pytest.mark.asyncio
 async def test_stale_session_triggers_relogin_and_retry(system):
     _, db, module, probe, monkeypatch = system
     calls = {"requests": 0, "logins": 0}

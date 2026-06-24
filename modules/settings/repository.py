@@ -1,7 +1,11 @@
 """Репозиторий settings: таблица settings (key/value, схема прод-БД)."""
 from __future__ import annotations
 
+from core import crypto
 from core.db import Database
+
+# Ключи-секреты: их значения хранятся в БД зашифрованными (Этап 3Б).
+_SECRET_KEYS = {"tmdb_token"}
 
 
 class SettingsRepository:
@@ -11,13 +15,30 @@ class SettingsRepository:
     async def get(self, key: str) -> str | None:
         row = await self._db.fetch_one(
             "SELECT value FROM settings WHERE key=?", (key,))
-        return row["value"] if row else None
+        if not row:
+            return None
+        return crypto.decrypt(row["value"]) if key in _SECRET_KEYS else row["value"]
 
     async def set(self, key: str, value: str) -> None:
+        stored = crypto.encrypt(value) if key in _SECRET_KEYS else value
         await self._db.execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (key, value))
+            (key, stored))
+
+    async def encrypt_legacy_secrets(self) -> int:
+        """Одноразовая миграция секретных ключей в шифр (Этап 3Б).
+        Идемпотентна. Возвращает число перешифрованных значений."""
+        migrated = 0
+        for key in _SECRET_KEYS:
+            row = await self._db.fetch_one(
+                "SELECT value FROM settings WHERE key=?", (key,))
+            if row and row["value"] and not crypto.is_encrypted(row["value"]):
+                await self._db.execute(
+                    "UPDATE settings SET value=? WHERE key=?",
+                    (crypto.encrypt(row["value"]), key))
+                migrated += 1
+        return migrated
 
     async def by_prefix(self, prefix: str) -> dict:
         rows = await self._db.fetch_all(
