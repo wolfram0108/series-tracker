@@ -55,9 +55,12 @@ cookie_secure = os.environ.get("ST_COOKIE_SECURE", "true").lower() != "false"
 # (ST_AUTH_REQUIRED=false), пока фронт не умеет логиниться, и включить
 # позже одним флагом. По умолчанию замок включён (безопасно).
 auth_required = os.environ.get("ST_AUTH_REQUIRED", "true").lower() != "false"
+# /docs и /openapi.json выключены в проде (Этап 4); для gen:api поднять с
+# ST_DOCS_ENABLED=true (dev-инстанс или временно).
+docs_enabled = os.environ.get("ST_DOCS_ENABLED", "false").lower() == "true"
 gateway = GatewayModule(bus, db_path=db_path, secret_key=secret_key,
                         cookie_secure=cookie_secure,
-                        auth_required=auth_required)
+                        auth_required=auth_required, docs_enabled=docs_enabled)
 
 modules = [
     gateway,

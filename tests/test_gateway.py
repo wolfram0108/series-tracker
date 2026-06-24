@@ -143,3 +143,21 @@ async def test_sse_contract_mappings_and_transforms(system):
     assert events[2] == ("agent_queue_update", [{"hash": "abc"}])
     # события без трансформации проходят как есть
     assert events[3] == ("renaming_complete", {"series_id": 5})
+
+
+@pytest.mark.asyncio
+async def test_security_headers_present(system):
+    """Этап 4: защитные заголовки на ответах."""
+    _, client, _ = system
+    resp = await client.get("/")
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["x-frame-options"] == "DENY"
+    assert resp.headers["referrer-policy"] == "same-origin"
+
+
+@pytest.mark.asyncio
+async def test_docs_disabled_by_default(system):
+    """Этап 4: /docs и /openapi.json выключены (docs_enabled=False)."""
+    _, client, _ = system
+    assert (await client.get("/docs")).status_code == 404
+    assert (await client.get("/openapi.json")).status_code == 404
