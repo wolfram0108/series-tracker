@@ -129,16 +129,15 @@
 
 ## 5. Чек-лист соответствия (что должно стать зелёным)
 
-- [~] Все эндпоинты, кроме входа/статики, требуют аутентификацию — код
-  готов (замок), на проде ВЫКЛ (`ST_AUTH_REQUIRED=false`) до Этапа 2.
+- [x] Все эндпоинты, кроме входа/статики, требуют аутентификацию — замок
+  включён на проде (`ST_AUTH_REQUIRED=true`). (Этап 1+2)
 - [x] Пароль админа хранится хэшем (argon2), не в открытом виде. (Этап 1)
 - [x] Защита от перебора пароля (лимит + бан по IP). (Этап 1)
-- [ ] TLS включён (через nginx); HTTP редиректит на HTTPS. (Этап 2)
-- [~] Куки: Secure, HttpOnly, SameSite — код готов; Secure на проде ВЫКЛ
-  (`ST_COOKIE_SECURE=false`) до nginx/TLS (Этап 2).
-- [ ] Проверка хоста (TrustedHost), доверие только своему proxy. (Этап 2)
-- [~] Защитные заголовки — X-Content-Type-Options/X-Frame-Options/Referrer-
-  Policy готовы (Этап 4); HSTS — на nginx (Этап 2); CSP отложен (риск для SPA).
+- [x] TLS включён (nginx + Let's Encrypt, setr.mywolfram.ru); HTTP→HTTPS. (Этап 2)
+- [x] Куки: Secure, HttpOnly, SameSite (`ST_COOKIE_SECURE=true` за TLS). (Этап 2)
+- [x] Проверка хоста (TrustedHost) + доверие forwarded только от nginx. (Этап 2)
+- [x] Защитные заголовки: X-Content-Type-Options/X-Frame-Options/Referrer-
+  Policy (Этап 4) + HSTS на nginx (Этап 2). CSP отложен (риск для SPA).
 - [x] Секреты не уходят на фронт; в БД зашифрованы; ключ вне git. (Этап 3)
 - [x] Нет секретов в git и его истории. (Этап 0)
 - [x] `/docs` закрыт; parse_url ходит только на известные трекеры (SSRF
