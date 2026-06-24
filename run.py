@@ -58,9 +58,13 @@ auth_required = os.environ.get("ST_AUTH_REQUIRED", "true").lower() != "false"
 # /docs и /openapi.json выключены в проде (Этап 4); для gen:api поднять с
 # ST_DOCS_ENABLED=true (dev-инстанс или временно).
 docs_enabled = os.environ.get("ST_DOCS_ENABLED", "false").lower() == "true"
+# Проверка Host (Этап 2): домен + loopback. Пусто → проверки нет (dev).
+_hosts = os.environ.get("ST_ALLOWED_HOSTS", "").strip()
+allowed_hosts = [h.strip() for h in _hosts.split(",") if h.strip()] or None
 gateway = GatewayModule(bus, db_path=db_path, secret_key=secret_key,
                         cookie_secure=cookie_secure,
-                        auth_required=auth_required, docs_enabled=docs_enabled)
+                        auth_required=auth_required, docs_enabled=docs_enabled,
+                        allowed_hosts=allowed_hosts)
 
 modules = [
     gateway,

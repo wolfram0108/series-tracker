@@ -20,6 +20,7 @@ from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse,
                                StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import BaseModule, BusRequestError
 
@@ -163,7 +164,8 @@ class GatewayModule(BaseModule):
                  diag: bool = False, db_path: str = "app.db",
                  web_dist_dir: str = "web/dist",
                  secret_key: str = "", cookie_secure: bool = True,
-                 auth_required: bool = True, docs_enabled: bool = False) -> None:
+                 auth_required: bool = True, docs_enabled: bool = False,
+                 allowed_hosts: list[str] | None = None) -> None:
         self._static_dir = static_dir
         self._templates_dir = templates_dir
         self._web_dist_dir = web_dist_dir
@@ -183,6 +185,9 @@ class GatewayModule(BaseModule):
         # /docs и /openapi.json — выключены в проде (Этап 4); включаются
         # флагом ST_DOCS_ENABLED для разработки/генерации типов (gen:api).
         self._docs_enabled = docs_enabled
+        # Разрешённые Host (Этап 2): None → проверки нет (dev); в проде —
+        # домен + loopback (ST_ALLOWED_HOSTS), защита от host-header атак.
+        self._allowed_hosts = allowed_hosts
         super().__init__(bus)
         self.app = self._create_app()
 
@@ -304,6 +309,10 @@ class GatewayModule(BaseModule):
             https_only=self._cookie_secure, max_age=7 * 24 * 3600)
         # самый внешний — заголовки на любой ответ (вкл. 401 замка и логин)
         app.add_middleware(SecurityHeadersMiddleware)
+        # ещё внешнее — проверка Host (отсекаем чужой Host до всякой логики)
+        if self._allowed_hosts:
+            app.add_middleware(TrustedHostMiddleware,
+                               allowed_hosts=self._allowed_hosts)
 
         # Непойманные ошибки наружу — без стек-трейсов (Этап 4); детали — в лог.
         @app.exception_handler(Exception)
