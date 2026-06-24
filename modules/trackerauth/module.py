@@ -50,16 +50,23 @@ class TrackerauthModule(BaseModule):
     # --- учётные данные (владелец таблицы auth, Р-22) -------------------------------
 
     async def on_credentials_get(self, env: Envelope) -> dict:
-        """Креды сервиса для вкладки настроек (контракт GET /api/auth:
-        формы предзаполнены — пароли отдаются, как в оригинале)."""
+        """Креды сервиса для вкладки настроек БЕЗ пароля (Этап 3,
+        docs/security.md): наружу — только логин/URL и флаг has_password
+        (задан ли пароль). Сам пароль никогда не покидает бэкенд."""
         row = await self.repo.get_credentials(env.payload["service"])
-        return {"credentials": row}
+        if not row:
+            return {"credentials": None}
+        return {"credentials": {
+            "username": row["username"], "url": row["url"],
+            "has_password": bool(row["password"])}}
 
     async def on_credentials_set(self, env: Envelope) -> dict:
         p = env.payload
         service = p["service"]
+        # пустой пароль = «не менять» (фронт не присылает текущий) — Этап 3
+        password = p.get("password") or None
         await self.repo.upsert_credentials(service, p.get("username"),
-                                           p.get("password"), p.get("url"))
+                                           password, p.get("url"))
         # сессии сервиса протухли по определению — выбрасываем
         for key in [k for k in self._sessions if k[0] == service]:
             self._sessions.pop(key, None)

@@ -68,36 +68,38 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.get("/api/auth", response_model=DynamicObject)
     async def get_auth():
+        # Секреты НЕ отдаются на фронт (Этап 3, docs/security.md): только
+        # логин/URL и флаг has_password/configured (задан ли секрет).
         out = {}
         for service in AUTH_SERVICES:
             reply = await gw.request("trackerauth.credentials.get",
                                      {"service": service}, timeout=10)
-            out[service] = reply["credentials"]
+            out[service] = reply["credentials"] or {}
         tmdb = await gw.request("settings.value.get",
                                 {"key": "tmdb_token"}, timeout=10)
-        out["tmdb"] = {"token": tmdb.get("value") or ""}
+        out["tmdb"] = {"configured": bool(tmdb.get("value"))}
         return out
 
     @r.post("/api/auth", response_model=OkResponse,
             response_model_exclude_none=True)
     async def save_auth(request: Request):
+        # Пустой пароль/токен = «не менять» (фронт не присылает текущий) — Этап 3.
         data = await request.json()
         for service in ("qbittorrent", "kinozal", "rutracker"):
             if creds := data.get(service):
                 await gw.request("trackerauth.credentials.set", {
                     "service": service,
                     "username": creds.get("username"),
-                    "password": creds.get("password"),
+                    "password": creds.get("password") or None,
                     "url": creds.get("url")}, timeout=10)
         if vk := data.get("vk"):
             # как в оригинале: токен VK — в поле password
             await gw.request("trackerauth.credentials.set", {
                 "service": "vk", "username": "vk_token",
-                "password": vk.get("token")}, timeout=10)
-        if tmdb := data.get("tmdb"):
+                "password": vk.get("token") or None}, timeout=10)
+        if (tmdb := data.get("tmdb")) and tmdb.get("token"):
             await gw.request("settings.value.set", {
-                "key": "tmdb_token", "value": tmdb.get("token", "")},
-                timeout=10)
+                "key": "tmdb_token", "value": tmdb["token"]}, timeout=10)
         return {"success": True}
 
     # --- разбор URL (форма добавления) ---------------------------------------------

@@ -105,13 +105,23 @@ async def test_auth_roundtrip(system):
         "tmdb": {"token": "tmdb-token-1"}})
     assert resp.json() == {"success": True}
 
+    # Этап 3: GET НЕ отдаёт секреты — только логин/URL и флаги «задан».
     resp = await client.get("/api/auth")
     body = resp.json()
     assert body["qbittorrent"] == {"url": "http://qb:8080",
-                                   "username": "admin", "password": "pass"}
-    assert body["vk"]["password"] == "vk-token-1"  # фронт читает password
-    assert body["tmdb"] == {"token": "tmdb-token-1"}
-    assert body["kinozal"] is None
+                                   "username": "admin", "has_password": True}
+    assert "password" not in body["qbittorrent"]
+    assert body["vk"]["has_password"] is True and "password" not in body["vk"]
+    assert body["tmdb"] == {"configured": True}
+    assert body["kinozal"] == {}
+
+    # пустой пароль при сохранении НЕ затирает существующий (Этап 3)
+    await client.post("/api/auth", json={
+        "qbittorrent": {"url": "http://qb:9090", "username": "admin2",
+                        "password": ""}})
+    qb = (await client.get("/api/auth")).json()["qbittorrent"]
+    assert qb["url"] == "http://qb:9090" and qb["username"] == "admin2"
+    assert qb["has_password"] is True  # пароль сохранён, не затёрт
 
 
 @pytest.mark.asyncio

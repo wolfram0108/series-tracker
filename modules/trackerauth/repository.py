@@ -29,10 +29,13 @@ class TrackerAuthRepository:
     async def upsert_credentials(self, service: str, username: str | None,
                                  password: str | None,
                                  url: str | None = None) -> None:
+        # password=NULL → не менять существующий (COALESCE): фронт не присылает
+        # текущий пароль, пустое поле не должно его затирать (Этап 3).
         await self._db.execute(
             "INSERT INTO auth (auth_type, username, password, url) "
             "VALUES (?, ?, ?, ?) ON CONFLICT(auth_type) DO UPDATE SET "
-            "username=excluded.username, password=excluded.password, "
+            "username=excluded.username, "
+            "password=COALESCE(excluded.password, auth.password), "
             "url=excluded.url", (service, username, password, url))
 
     async def load_cookies(self, service: str, domain: str) -> dict | None:
