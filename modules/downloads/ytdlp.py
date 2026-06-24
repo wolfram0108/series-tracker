@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import asyncio
-import glob
 import os
 import re
 import shutil
@@ -130,6 +129,52 @@ async def _probe_duration(video_url: str) -> float:
         return 0.0
 
 
+def _download_artifact(full_output_path: str) -> str | None:
+    """Готовый промежуточный файл фазы download (`<path>.download.<ext>`),
+    либо None, если его нет.
+
+    Имя пути — это ДАННЫЕ и может содержать спецсимволы glob (`[ ] * ?`):
+    каталоги медиатеки именуются с `[tmdbid-NNNN]`. Поэтому ищем файл
+    строковым сопоставлением через listdir, а НЕ glob — glob трактовал
+    `[tmdbid-…]` как класс символов и не находил реально скачанный файл
+    (ложное «yt-dlp не оставил файл»)."""
+    directory = os.path.dirname(full_output_path)
+    prefix = os.path.basename(full_output_path) + ".download."
+    try:
+        for name in sorted(os.listdir(directory)):
+            if name.startswith(prefix):
+                return os.path.join(directory, name)
+    except OSError:
+        pass
+    return None
+
+
+def download_artifacts(full_output_path: str) -> list[str]:
+    """Все временные артефакты загрузки/ремукса для данного финального пути:
+    промежуточный `.download.*`, tmp `.remux.mp4`, `.part`/`.ytdl` и фрагменты
+    yt-dlp (`<stem>.fNNN.*`). Сам финальный файл НЕ включается.
+
+    Сопоставление строками, не glob (причина — см. _download_artifact: имя
+    пути содержит спецсимволы glob из `[tmdbid-…]`)."""
+    directory = os.path.dirname(full_output_path)
+    base = os.path.basename(full_output_path)
+    stem = os.path.splitext(base)[0]
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return []
+    out: list[str] = []
+    for name in names:
+        if (name.startswith(base + ".download.")   # .download.<ext>(.part/.ytdl/.fNNN)
+                or name == base + ".remux.mp4"     # незавершённый tmp remux
+                or name == base + ".part"
+                or (name.startswith(stem + ".") and name.endswith(".part"))
+                or (name.startswith(stem) and name.endswith(".ytdl"))
+                or name.startswith(stem + ".f")):  # фрагменты yt-dlp <stem>.fNNN.*
+            out.append(os.path.join(directory, name))
+    return out
+
+
 async def download(video_url: str, full_output_path: str,
                    on_progress: ProgressCb, *, threads: int = 6,
                    ) -> tuple[bool, str]:
@@ -152,12 +197,11 @@ async def download(video_url: str, full_output_path: str,
     finally:
         # подчищаем промежуточные и недоделанный remux-файл (находка 50:
         # частичный финал нельзя принимать за готовый)
-        for pat in (".download.*", ".remux.mp4"):
-            for leftover in glob.glob(full_output_path + pat):
-                try:
-                    os.remove(leftover)
-                except OSError:
-                    pass
+        for leftover in download_artifacts(full_output_path):
+            try:
+                os.remove(leftover)
+            except OSError:
+                pass
 
 
 async def _phase_download(video_url: str, full_output_path: str,
@@ -198,10 +242,10 @@ async def _phase_download(video_url: str, full_output_path: str,
             error = "видео недоступно или приватно"
         return False, error
 
-    raw_files = glob.glob(full_output_path + ".download.*")
-    if not raw_files:
+    raw = _download_artifact(full_output_path)
+    if raw is None:
         return False, "yt-dlp не оставил файл после загрузки"
-    return raw_files[0]
+    return raw
 
 
 async def _phase_remux(raw: str, full_output_path: str,

@@ -50,6 +50,34 @@ def test_ffmpeg_progress_percent_and_eta():
                                  0.0)["progress"] == 0
 
 
+def test_artifacts_handle_glob_metachars_in_path(tmp_path):
+    """Каталоги медиатеки именуются с [tmdbid-NNNN] — это спецсимволы glob.
+    Поиск скачанного файла и подбор артефактов обязаны работать строками, а
+    не glob: glob трактует [tmdbid-…] как класс символов и не находит реально
+    существующий файл (ложное «yt-dlp не оставил файл» + неубранные сироты)."""
+    series_dir = tmp_path / "Tales of Herding Gods (2024) [tmdbid-236534]"
+    series_dir.mkdir()
+    full = str(series_dir / "Tales of Herding Gods s01e87 2160p.mp4")
+    stem = os.path.splitext(full)[0]
+
+    # фаза download оставила готовый промежуточный файл — должен находиться
+    open(full + ".download.mp4", "wb").close()
+    assert ytdlp._download_artifact(full) == full + ".download.mp4"
+
+    # полный набор артефактов для чистки (раньше glob возвращал [] из-за скобок)
+    open(full + ".remux.mp4", "wb").close()
+    open(full + ".part", "wb").close()
+    open(stem + ".f140.mp4", "wb").close()
+    open(stem + ".ytdl", "wb").close()
+    arts = set(ytdlp.download_artifacts(full))
+    assert arts == {full + ".download.mp4", full + ".remux.mp4",
+                    full + ".part", stem + ".f140.mp4", stem + ".ytdl"}
+
+    # сам финальный файл артефактом НЕ считается (его не сносим как мусор)
+    open(full, "wb").close()
+    assert full not in ytdlp.download_artifacts(full)
+
+
 # --- сквозные сценарии ---------------------------------------------------------------
 
 class FakeNeighbours(BaseModule):
