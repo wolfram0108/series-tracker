@@ -60,7 +60,7 @@ class Queues(BaseModule):
 async def system(db_path, tmp_path):
     bus = Bus()
     db = Database(db_path)
-    gateway = GatewayModule(bus, static_dir=str(tmp_path),
+    gateway = GatewayModule(bus, static_dir=str(tmp_path), auth_required=False,
                             templates_dir=str(tmp_path))
     scan = ScanModule(bus, db, scheduler_tick=None)
     runner = Runner(bus, [gateway, CatalogModule(bus, db),

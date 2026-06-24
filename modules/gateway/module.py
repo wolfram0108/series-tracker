@@ -13,13 +13,44 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import secrets
 
 from fastapi import FastAPI, Request  # Request нужен diag-роуту
 from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse,
                                StreamingResponse)
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
 from core import BaseModule, BusRequestError
+
+
+class AuthGateMiddleware:
+    """ASGI-«замок»: всё, кроме страницы входа и статики фронта, требует
+    валидную сессию (иначе 401). Чистый ASGI (не BaseHTTPMiddleware) —
+    чтобы не сломать потоковый SSE (/api/stream): BaseHTTPMiddleware
+    буферизует StreamingResponse. Ставится ВНУТРИ SessionMiddleware,
+    поэтому scope['session'] уже распарсен."""
+
+    _PUBLIC_EXACT = {"/", "/legacy", "/v2", "/v2/", "/favicon.svg",
+                     "/api/login"}
+    _PUBLIC_PREFIX = ("/assets/", "/static/")
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        session = scope.get("session") or {}
+        if (path in self._PUBLIC_EXACT or path.startswith(self._PUBLIC_PREFIX)
+                or session.get("user")):
+            await self.app(scope, receive, send)
+            return
+        response = JSONResponse({"authenticated": False,
+                                 "error": "Требуется вход"}, status_code=401)
+        await response(scope, receive, send)
 
 
 def _series_delta(p: dict) -> dict:
@@ -98,7 +129,9 @@ class GatewayModule(BaseModule):
     def __init__(self, bus, *, static_dir: str = "legacy_frontend/static",
                  templates_dir: str = "legacy_frontend/templates",
                  diag: bool = False, db_path: str = "app.db",
-                 web_dist_dir: str = "web/dist") -> None:
+                 web_dist_dir: str = "web/dist",
+                 secret_key: str = "", cookie_secure: bool = True,
+                 auth_required: bool = True) -> None:
         self._static_dir = static_dir
         self._templates_dir = templates_dir
         self._web_dist_dir = web_dist_dir
@@ -107,6 +140,14 @@ class GatewayModule(BaseModule):
         # путь к SQLite — только для админ-вкладки БД (Р-22: сознательный
         # обход Р-7, отладочный инструмент пользователя)
         self.db_path = db_path
+        # ключ подписи сессионной куки; пустой → эфемерный (сессии слетят
+        # при рестарте — для прода задаётся ST_SECRET_KEY в run.py).
+        self._secret_key = secret_key or secrets.token_hex(32)
+        # Secure-кука (только по https); за nginx с TLS — True (Этап 2).
+        self._cookie_secure = cookie_secure
+        # «Замок» включён в проде; тесты бизнес-роутов поднимают gateway с
+        # auth_required=False (вход проверяется отдельно — test_auth.py).
+        self._auth_required = auth_required
         super().__init__(bus)
         self.app = self._create_app()
 
@@ -165,10 +206,12 @@ class GatewayModule(BaseModule):
                     return JSONResponse({"error": str(exc)}, status_code=502)
                 return JSONResponse({"reply": result})
 
+        from .api_auth import build_router as auth_router
         from .api_media import build_router as media_router
         from .api_series import build_router as series_router
         from .api_settings import build_router as settings_router
         from .api_system import build_router as system_router
+        app.include_router(auth_router(self))
         app.include_router(series_router(self))
         app.include_router(system_router(self))
         app.include_router(media_router(self))
@@ -211,6 +254,16 @@ class GatewayModule(BaseModule):
             @app.get("/favicon.svg")
             async def favicon() -> FileResponse:
                 return FileResponse(dist_favicon)
+
+        # Замок ставится ВНУТРИ сессии: add_middleware кладёт обёртку в
+        # начало стека, поэтому добавленный последним SessionMiddleware —
+        # внешний и распарсит куку до того, как AuthGate прочитает session.
+        if self._auth_required:
+            app.add_middleware(AuthGateMiddleware)
+        app.add_middleware(
+            SessionMiddleware, secret_key=self._secret_key,
+            session_cookie="st_session", same_site="strict",
+            https_only=self._cookie_secure, max_age=7 * 24 * 3600)
         return app
 
     # --- SSE: шина -> браузер -------------------------------------------------

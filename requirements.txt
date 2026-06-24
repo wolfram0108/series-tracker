@@ -6,6 +6,10 @@ SQLAlchemy==2.0.41
 alembic==1.16.1
 httpx==0.28.1
 requests==2.32.3
+# Аутентификация веб-интерфейса (docs/security.md, Этап 1):
+# argon2 — хэш пароля админа; itsdangerous — подпись сессионной куки.
+argon2-cffi==25.1.0
+itsdangerous==2.2.0
 cloudscraper==1.2.71
 beautifulsoup4==4.12.3
 lxml==6.0.0

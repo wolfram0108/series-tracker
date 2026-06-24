@@ -129,7 +129,7 @@ class Neighbours(BaseModule):
 async def system(db_path, tmp_path):
     bus = Bus()
     db = Database(db_path)
-    gateway = GatewayModule(bus, static_dir=str(tmp_path),
+    gateway = GatewayModule(bus, static_dir=str(tmp_path), auth_required=False,
                             templates_dir=str(tmp_path))
     neighbours = Neighbours(bus)
     runner = Runner(bus, [gateway, CatalogModule(bus, db),
@@ -214,7 +214,7 @@ async def test_delete_cascade_by_owners(db_path, tmp_path):
     """series.deleted: каждый владелец чистит свои таблицы (Р-19)."""
     bus = Bus()
     db = Database(db_path)
-    gateway = GatewayModule(bus, static_dir=str(tmp_path),
+    gateway = GatewayModule(bus, static_dir=str(tmp_path), auth_required=False,
                             templates_dir=str(tmp_path))
     # реальные владельцы без внешних зависимостей; scan требует соседей
     # только в работе, подписка на series.deleted — чистая БД

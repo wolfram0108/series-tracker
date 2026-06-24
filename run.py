@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from core import Bus, Runner
 from core.db import Database
 from core.logging import configure, get_logger
+from modules.auth import AuthModule
 from modules.catalog import CatalogModule
 from modules.downloads import DownloadsModule
 from modules.gateway import GatewayModule
@@ -40,12 +41,29 @@ log = get_logger("run")
 bus = Bus()
 db_path = os.environ.get("ST_DB_PATH", "app.db")
 db = Database(db_path)
-gateway = GatewayModule(bus, db_path=db_path)
+
+# Ключ подписи сессионной куки входа: стабильный из .env, иначе сессии
+# слетают при рестарте (см. docs/security.md, Этап 1).
+secret_key = os.environ.get("ST_SECRET_KEY", "")
+if not secret_key:
+    log.warning("ST_SECRET_KEY не задан — сессии входа будут сбрасываться "
+                "при рестарте; задайте ST_SECRET_KEY в .env")
+# Secure-куки (только https). За nginx с TLS — true; для входа по http
+# (локально, до настройки nginx) временно ST_COOKIE_SECURE=false.
+cookie_secure = os.environ.get("ST_COOKIE_SECURE", "true").lower() != "false"
+# Поэтапный выкат: код входа можно задеплоить с ВЫКЛЮЧЕННЫМ замком
+# (ST_AUTH_REQUIRED=false), пока фронт не умеет логиниться, и включить
+# позже одним флагом. По умолчанию замок включён (безопасно).
+auth_required = os.environ.get("ST_AUTH_REQUIRED", "true").lower() != "false"
+gateway = GatewayModule(bus, db_path=db_path, secret_key=secret_key,
+                        cookie_secure=cookie_secure,
+                        auth_required=auth_required)
 
 modules = [
     gateway,
     CatalogModule(bus, db),
     SettingsModule(bus, db),
+    AuthModule(bus, db),
     RulesModule(bus, db),
     TrackerauthModule(bus, db),
     SourcesModule(bus, db),

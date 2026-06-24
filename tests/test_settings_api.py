@@ -75,7 +75,7 @@ async def fake_parse_by_service(service, url, mirrors):
 async def system(db_path, tmp_path):
     bus = Bus()
     db = Database(db_path)
-    gateway = GatewayModule(bus, static_dir=str(tmp_path),
+    gateway = GatewayModule(bus, static_dir=str(tmp_path), auth_required=False,
                             templates_dir=str(tmp_path), db_path=db_path)
     neighbours = Neighbours(bus)
     sources = SourcesModule(bus, db,

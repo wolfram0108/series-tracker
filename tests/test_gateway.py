@@ -23,7 +23,7 @@ class EchoModule(BaseModule):
 @pytest.fixture
 async def system(tmp_path):
     bus = Bus()
-    gateway = GatewayModule(bus, static_dir=str(tmp_path),
+    gateway = GatewayModule(bus, static_dir=str(tmp_path), auth_required=False,
                             templates_dir=str(tmp_path), diag=True)
     runner = Runner(bus, [gateway, EchoModule(bus)])
     await runner.start()
