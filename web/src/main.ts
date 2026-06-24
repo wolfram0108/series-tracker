@@ -24,6 +24,8 @@ import Gallery from "./Gallery.vue"
 import { setupRealtime } from "./composables/useRealtime"
 import { useSeriesStore } from "./stores/series"
 import { useScannerStore } from "./stores/scanner"
+import { useAuthStore } from "./stores/auth"
+import { api } from "./api/client"
 
 // Галерея согласованных форм/объектов (Ф2) сохранена и доступна по якорю
 // #gallery (например /v2#gallery). На обычном адресе монтируется реальное
@@ -45,6 +47,21 @@ createApp(isGallery ? Gallery : App)
 // Ф3: real-time слой — стартовая загрузка + SSE-подписки сторов (только для
 // реального приложения; галерее живые данные не нужны).
 if (!isGallery) {
+  // Перехват 401: запрос, отклонённый замком, открывает модалку входа.
+  // /api/login и /api/me исключены — их 401 штатный, не повод для модалки.
+  api.use({
+    onResponse({ request, response }) {
+      if (
+        response.status === 401 &&
+        !request.url.includes("/api/login") &&
+        !request.url.includes("/api/me")
+      ) {
+        useAuthStore().showLogin = true
+      }
+      return response
+    },
+  })
+
   setupRealtime()
   void useSeriesStore().load()
   void useScannerStore().load()

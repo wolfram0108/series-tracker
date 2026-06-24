@@ -21,6 +21,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Login */
+        post: operations["login_api_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Logout */
+        post: operations["logout_api_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Me */
+        get: operations["me_api_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/series": {
         parameters: {
             query?: never;
@@ -634,10 +685,10 @@ export interface paths {
             cookie?: never;
         };
         /** Force Replace */
-        get: operations["force_replace_api_settings_force_replace_get"];
+        get: operations["force_replace_api_settings_force_replace_post"];
         put?: never;
         /** Force Replace */
-        post: operations["force_replace_api_settings_force_replace_get"];
+        post: operations["force_replace_api_settings_force_replace_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -652,10 +703,10 @@ export interface paths {
             cookie?: never;
         };
         /** Less Strict Scan */
-        get: operations["less_strict_scan_api_settings_less_strict_scan_get"];
+        get: operations["less_strict_scan_api_settings_less_strict_scan_post"];
         put?: never;
         /** Less Strict Scan */
-        post: operations["less_strict_scan_api_settings_less_strict_scan_get"];
+        post: operations["less_strict_scan_api_settings_less_strict_scan_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -670,10 +721,10 @@ export interface paths {
             cookie?: never;
         };
         /** Slicing Delete Source */
-        get: operations["slicing_delete_source_api_settings_slicing_delete_source_get"];
+        get: operations["slicing_delete_source_api_settings_slicing_delete_source_post"];
         put?: never;
         /** Slicing Delete Source */
-        post: operations["slicing_delete_source_api_settings_slicing_delete_source_get"];
+        post: operations["slicing_delete_source_api_settings_slicing_delete_source_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -688,10 +739,10 @@ export interface paths {
             cookie?: never;
         };
         /** Parallel Downloads */
-        get: operations["parallel_downloads_api_settings_parallel_downloads_get"];
+        get: operations["parallel_downloads_api_settings_parallel_downloads_post"];
         put?: never;
         /** Parallel Downloads */
-        post: operations["parallel_downloads_api_settings_parallel_downloads_get"];
+        post: operations["parallel_downloads_api_settings_parallel_downloads_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -710,14 +761,14 @@ export interface paths {
          * @description Число параллельных фрагментов yt-dlp (-N) — ускорение одной
          *     загрузки на hls-потоках.
          */
-        get: operations["concurrent_fragments_api_settings_concurrent_fragments_get"];
+        get: operations["concurrent_fragments_api_settings_concurrent_fragments_post"];
         put?: never;
         /**
          * Concurrent Fragments
          * @description Число параллельных фрагментов yt-dlp (-N) — ускорение одной
          *     загрузки на hls-потоках.
          */
-        post: operations["concurrent_fragments_api_settings_concurrent_fragments_get"];
+        post: operations["concurrent_fragments_api_settings_concurrent_fragments_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -736,20 +787,20 @@ export interface paths {
          * @description Сохранённые пути загрузки: список, добавление, удаление.
          *     Источник истины — модуль settings (таблица saved_paths).
          */
-        get: operations["saved_paths_api_settings_saved_paths_get"];
+        get: operations["saved_paths_api_settings_saved_paths_delete"];
         put?: never;
         /**
          * Saved Paths
          * @description Сохранённые пути загрузки: список, добавление, удаление.
          *     Источник истины — модуль settings (таблица saved_paths).
          */
-        post: operations["saved_paths_api_settings_saved_paths_get"];
+        post: operations["saved_paths_api_settings_saved_paths_delete"];
         /**
          * Saved Paths
          * @description Сохранённые пути загрузки: список, добавление, удаление.
          *     Источник истины — модуль settings (таблица saved_paths).
          */
-        delete: operations["saved_paths_api_settings_saved_paths_get"];
+        delete: operations["saved_paths_api_settings_saved_paths_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -763,10 +814,10 @@ export interface paths {
             cookie?: never;
         };
         /** Debug Flags */
-        get: operations["debug_flags_api_settings_debug_flags_get"];
+        get: operations["debug_flags_api_settings_debug_flags_post"];
         put?: never;
         /** Debug Flags */
-        post: operations["debug_flags_api_settings_debug_flags_get"];
+        post: operations["debug_flags_api_settings_debug_flags_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1322,6 +1373,66 @@ export interface components {
 export type $defs = Record<string, never>;
 export interface operations {
     stream_api_stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    login_api_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    logout_api_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    me_api_me_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3039,7 +3150,7 @@ export interface operations {
             };
         };
     };
-    force_replace_api_settings_force_replace_get: {
+    force_replace_api_settings_force_replace_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3059,7 +3170,7 @@ export interface operations {
             };
         };
     };
-    force_replace_api_settings_force_replace_get: {
+    force_replace_api_settings_force_replace_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3079,7 +3190,7 @@ export interface operations {
             };
         };
     };
-    less_strict_scan_api_settings_less_strict_scan_get: {
+    less_strict_scan_api_settings_less_strict_scan_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3099,7 +3210,7 @@ export interface operations {
             };
         };
     };
-    less_strict_scan_api_settings_less_strict_scan_get: {
+    less_strict_scan_api_settings_less_strict_scan_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3119,7 +3230,7 @@ export interface operations {
             };
         };
     };
-    slicing_delete_source_api_settings_slicing_delete_source_get: {
+    slicing_delete_source_api_settings_slicing_delete_source_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3139,7 +3250,7 @@ export interface operations {
             };
         };
     };
-    slicing_delete_source_api_settings_slicing_delete_source_get: {
+    slicing_delete_source_api_settings_slicing_delete_source_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3159,7 +3270,7 @@ export interface operations {
             };
         };
     };
-    parallel_downloads_api_settings_parallel_downloads_get: {
+    parallel_downloads_api_settings_parallel_downloads_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3179,7 +3290,7 @@ export interface operations {
             };
         };
     };
-    parallel_downloads_api_settings_parallel_downloads_get: {
+    parallel_downloads_api_settings_parallel_downloads_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3199,7 +3310,7 @@ export interface operations {
             };
         };
     };
-    concurrent_fragments_api_settings_concurrent_fragments_get: {
+    concurrent_fragments_api_settings_concurrent_fragments_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3219,7 +3330,7 @@ export interface operations {
             };
         };
     };
-    concurrent_fragments_api_settings_concurrent_fragments_get: {
+    concurrent_fragments_api_settings_concurrent_fragments_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3239,7 +3350,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_get: {
+    saved_paths_api_settings_saved_paths_delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -3259,7 +3370,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_get: {
+    saved_paths_api_settings_saved_paths_delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -3279,7 +3390,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_get: {
+    saved_paths_api_settings_saved_paths_delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -3299,7 +3410,7 @@ export interface operations {
             };
         };
     };
-    debug_flags_api_settings_debug_flags_get: {
+    debug_flags_api_settings_debug_flags_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3364,7 +3475,7 @@ export interface operations {
             };
         };
     };
-    debug_flags_api_settings_debug_flags_get: {
+    debug_flags_api_settings_debug_flags_post: {
         parameters: {
             query?: never;
             header?: never;

@@ -9,19 +9,42 @@ import SettingsModal from "./components/SettingsModal.vue"
 import LogsModal from "./components/LogsModal.vue"
 import AddSeriesModal from "./components/AddSeriesModal.vue"
 import StatusModal from "./components/StatusModal.vue"
+import LoginModal from "./components/LoginModal.vue"
 import { useSeriesStore } from "./stores/series"
+import { useScannerStore } from "./stores/scanner"
 import { useUiStore } from "./stores/ui"
+import { useAuthStore } from "./stores/auth"
 import { useApi } from "./composables/useApi"
 import { useConfirm } from "./composables/useConfirm"
+import { useSSE } from "./composables/useSSE"
 import { api } from "./api/client"
 
 // Главный экран: шапка + список серий на живых данных из стора. Модалки
 // (add / logs / settings / status / confirmation) подключены и рабочие.
 const seriesStore = useSeriesStore()
+const scannerStore = useScannerStore()
 const ui = useUiStore()
+const auth = useAuthStore()
 const { request } = useApi()
 const confirm = useConfirm()
 const toast = useToast()
+
+// После успешного входа: переподключить SSE (новый EventSource уже с кукой
+// сессии) и перезагрузить данные, упавшие на 401 до входа.
+function onLoggedIn() {
+  const sse = useSSE()
+  sse.disconnect()
+  sse.connect()
+  void seriesStore.load()
+  void scannerStore.load()
+}
+
+async function onLogout() {
+  await request(api.POST("/api/logout", {} as never))
+  auth.reset()
+  useSSE().disconnect()
+  auth.showLogin = true // снова показать вход
+}
 
 // какая модалка открыта (одна за раз). Статус-окно управляется отдельно
 // через ui.activeSeriesId (его ставит ui.openStatus + viewing).
@@ -83,6 +106,7 @@ async function onDelete(id: number) {
       @add="openModal = 'add'"
       @logs="openModal = 'logs'"
       @settings="openModal = 'settings'"
+      @logout="onLogout"
     />
     <div class="series-list">
       <SeriesCard
@@ -108,5 +132,6 @@ async function onDelete(id: number) {
       @updated="seriesStore.load()"
     />
     <ConfirmDialog />
+    <LoginModal v-if="auth.showLogin" @logged-in="onLoggedIn" />
   </main>
 </template>
