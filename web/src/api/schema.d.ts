@@ -47,8 +47,10 @@ export interface paths {
         };
         /**
          * Auth Status
-         * @description Публичный статус для онбординга: настроен ли администратор и вошёл
-         *     ли текущий клиент. Фронт по нему выбирает модалку setup/login.
+         * @description Публичный статус для онбординга: настроен ли администратор, его имя
+         *     и вошёл ли текущий клиент. Фронт по нему выбирает модалку setup/login
+         *     и показывает на экране входа имя администратора (admin) вместо поля
+         *     ввода логина (приложение однопользовательское).
          */
         get: operations["auth_status_api_auth_status_get"];
         put?: never;
@@ -75,6 +77,29 @@ export interface paths {
          *     Успех сразу логинит (сессия).
          */
         post: operations["setup_api_setup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change Password
+         * @description Смена пароля вошедшим администратором (раздел «Аккаунт» настроек).
+         *     За «замком» (нужна сессия): сверяет ТЕКУЩИЙ пароль, проверяет длину
+         *     нового (≥8) и обновляет хэш. Имя не меняется — сессия остаётся
+         *     валидной. Текущий пароль обязателен (нельзя сменить, не зная его).
+         */
+        post: operations["change_password_api_auth_password_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -728,10 +753,10 @@ export interface paths {
             cookie?: never;
         };
         /** Force Replace */
-        get: operations["force_replace_api_settings_force_replace_get"];
+        get: operations["force_replace_api_settings_force_replace_post"];
         put?: never;
         /** Force Replace */
-        post: operations["force_replace_api_settings_force_replace_get"];
+        post: operations["force_replace_api_settings_force_replace_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -746,10 +771,10 @@ export interface paths {
             cookie?: never;
         };
         /** Less Strict Scan */
-        get: operations["less_strict_scan_api_settings_less_strict_scan_get"];
+        get: operations["less_strict_scan_api_settings_less_strict_scan_post"];
         put?: never;
         /** Less Strict Scan */
-        post: operations["less_strict_scan_api_settings_less_strict_scan_get"];
+        post: operations["less_strict_scan_api_settings_less_strict_scan_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -764,10 +789,10 @@ export interface paths {
             cookie?: never;
         };
         /** Slicing Delete Source */
-        get: operations["slicing_delete_source_api_settings_slicing_delete_source_get"];
+        get: operations["slicing_delete_source_api_settings_slicing_delete_source_post"];
         put?: never;
         /** Slicing Delete Source */
-        post: operations["slicing_delete_source_api_settings_slicing_delete_source_get"];
+        post: operations["slicing_delete_source_api_settings_slicing_delete_source_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -782,10 +807,10 @@ export interface paths {
             cookie?: never;
         };
         /** Parallel Downloads */
-        get: operations["parallel_downloads_api_settings_parallel_downloads_get"];
+        get: operations["parallel_downloads_api_settings_parallel_downloads_post"];
         put?: never;
         /** Parallel Downloads */
-        post: operations["parallel_downloads_api_settings_parallel_downloads_get"];
+        post: operations["parallel_downloads_api_settings_parallel_downloads_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -804,14 +829,14 @@ export interface paths {
          * @description Число параллельных фрагментов yt-dlp (-N) — ускорение одной
          *     загрузки на hls-потоках.
          */
-        get: operations["concurrent_fragments_api_settings_concurrent_fragments_get"];
+        get: operations["concurrent_fragments_api_settings_concurrent_fragments_post"];
         put?: never;
         /**
          * Concurrent Fragments
          * @description Число параллельных фрагментов yt-dlp (-N) — ускорение одной
          *     загрузки на hls-потоках.
          */
-        post: operations["concurrent_fragments_api_settings_concurrent_fragments_get"];
+        post: operations["concurrent_fragments_api_settings_concurrent_fragments_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -830,20 +855,20 @@ export interface paths {
          * @description Сохранённые пути загрузки: список, добавление, удаление.
          *     Источник истины — модуль settings (таблица saved_paths).
          */
-        get: operations["saved_paths_api_settings_saved_paths_get"];
+        get: operations["saved_paths_api_settings_saved_paths_delete"];
         put?: never;
         /**
          * Saved Paths
          * @description Сохранённые пути загрузки: список, добавление, удаление.
          *     Источник истины — модуль settings (таблица saved_paths).
          */
-        post: operations["saved_paths_api_settings_saved_paths_get"];
+        post: operations["saved_paths_api_settings_saved_paths_delete"];
         /**
          * Saved Paths
          * @description Сохранённые пути загрузки: список, добавление, удаление.
          *     Источник истины — модуль settings (таблица saved_paths).
          */
-        delete: operations["saved_paths_api_settings_saved_paths_get"];
+        delete: operations["saved_paths_api_settings_saved_paths_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -857,10 +882,10 @@ export interface paths {
             cookie?: never;
         };
         /** Debug Flags */
-        get: operations["debug_flags_api_settings_debug_flags_get"];
+        get: operations["debug_flags_api_settings_debug_flags_post"];
         put?: never;
         /** Debug Flags */
-        post: operations["debug_flags_api_settings_debug_flags_get"];
+        post: operations["debug_flags_api_settings_debug_flags_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1476,6 +1501,26 @@ export interface operations {
         };
     };
     setup_api_setup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    change_password_api_auth_password_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3233,7 +3278,7 @@ export interface operations {
             };
         };
     };
-    force_replace_api_settings_force_replace_get: {
+    force_replace_api_settings_force_replace_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3253,7 +3298,7 @@ export interface operations {
             };
         };
     };
-    force_replace_api_settings_force_replace_get: {
+    force_replace_api_settings_force_replace_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3273,7 +3318,7 @@ export interface operations {
             };
         };
     };
-    less_strict_scan_api_settings_less_strict_scan_get: {
+    less_strict_scan_api_settings_less_strict_scan_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3293,7 +3338,7 @@ export interface operations {
             };
         };
     };
-    less_strict_scan_api_settings_less_strict_scan_get: {
+    less_strict_scan_api_settings_less_strict_scan_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3313,7 +3358,7 @@ export interface operations {
             };
         };
     };
-    slicing_delete_source_api_settings_slicing_delete_source_get: {
+    slicing_delete_source_api_settings_slicing_delete_source_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3333,7 +3378,7 @@ export interface operations {
             };
         };
     };
-    slicing_delete_source_api_settings_slicing_delete_source_get: {
+    slicing_delete_source_api_settings_slicing_delete_source_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3353,7 +3398,7 @@ export interface operations {
             };
         };
     };
-    parallel_downloads_api_settings_parallel_downloads_get: {
+    parallel_downloads_api_settings_parallel_downloads_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3373,7 +3418,7 @@ export interface operations {
             };
         };
     };
-    parallel_downloads_api_settings_parallel_downloads_get: {
+    parallel_downloads_api_settings_parallel_downloads_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3393,7 +3438,7 @@ export interface operations {
             };
         };
     };
-    concurrent_fragments_api_settings_concurrent_fragments_get: {
+    concurrent_fragments_api_settings_concurrent_fragments_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3413,7 +3458,7 @@ export interface operations {
             };
         };
     };
-    concurrent_fragments_api_settings_concurrent_fragments_get: {
+    concurrent_fragments_api_settings_concurrent_fragments_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3433,7 +3478,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_get: {
+    saved_paths_api_settings_saved_paths_delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -3453,7 +3498,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_get: {
+    saved_paths_api_settings_saved_paths_delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -3473,7 +3518,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_get: {
+    saved_paths_api_settings_saved_paths_delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -3493,7 +3538,7 @@ export interface operations {
             };
         };
     };
-    debug_flags_api_settings_debug_flags_get: {
+    debug_flags_api_settings_debug_flags_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3558,7 +3603,7 @@ export interface operations {
             };
         };
     };
-    debug_flags_api_settings_debug_flags_get: {
+    debug_flags_api_settings_debug_flags_post: {
         parameters: {
             query?: never;
             header?: never;

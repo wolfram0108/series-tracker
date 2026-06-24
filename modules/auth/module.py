@@ -9,8 +9,10 @@ Queries:
   auth.login {username, password} -> {ok: bool}
       проверка пары логин/пароль по argon2-хэшу (постоянное время даже
       при неизвестном логине — не выдаём наличие пользователя по времени).
-  auth.exists {} -> {exists: bool}
-      настроен ли администратор (есть ли запись).
+  auth.exists {} -> {exists: bool, username: str}
+      настроен ли администратор (есть ли запись) и его имя (для экрана
+      входа: однопользовательское приложение показывает уже созданного
+      пользователя вместо поля ввода логина). username = "" если записи нет.
   auth.password.set {username, password} -> {ok: bool}
       создать/сменить учётку (хэширует пароль).
 
@@ -78,7 +80,11 @@ class AuthModule(BaseModule):
         return {"ok": True}
 
     async def on_exists(self, env: Envelope) -> dict:
-        return {"exists": await self.repo.get() is not None}
+        # имя нужно экрану входа (однопользовательское приложение — поле
+        # ввода логина не нужно, показываем уже созданного администратора)
+        row = await self.repo.get()
+        return {"exists": row is not None,
+                "username": row["username"] if row else ""}
 
     async def on_password_set(self, env: Envelope) -> dict:
         username = (env.payload.get("username") or "").strip()

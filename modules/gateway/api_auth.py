@@ -78,17 +78,22 @@ def build_router(gw):
 
     @r.get("/api/auth/status")
     async def auth_status(request: Request):
-        """Публичный статус для онбординга: настроен ли администратор и вошёл
-        ли текущий клиент. Фронт по нему выбирает модалку setup/login."""
+        """Публичный статус для онбординга: настроен ли администратор, его имя
+        и вошёл ли текущий клиент. Фронт по нему выбирает модалку setup/login
+        и показывает на экране входа имя администратора (admin) вместо поля
+        ввода логина (приложение однопользовательское)."""
+        admin = ""
         try:
             reply = await gw.request("auth.exists", {}, timeout=10)
             configured = bool(reply.get("exists"))
+            admin = reply.get("username") or ""
         except BusRequestError:
             configured = False
         user = request.session.get("user")
         return {"configured": configured,
                 "authenticated": bool(user),
-                "username": user or ""}
+                "username": user or "",
+                "admin": admin}
 
     @r.post("/api/setup")
     async def setup(request: Request):
@@ -122,6 +127,36 @@ def build_router(gw):
                 status_code=400)
         request.session["user"] = username
         return {"success": True, "username": username}
+
+    @r.post("/api/auth/password")
+    async def change_password(request: Request):
+        """Смена пароля вошедшим администратором (раздел «Аккаунт» настроек).
+        За «замком» (нужна сессия): проверяет длину нового пароля (≥8) и
+        обновляет хэш. Имя не меняется — сессия остаётся валидной.
+
+        Текущий пароль НЕ запрашивается: активная сессия уже подтверждает
+        владельца (осознанное решение для однопользовательского приложения —
+        не заставлять вспоминать старый пароль при смене из-под входа)."""
+        user = request.session.get("user")
+        if not user:
+            return JSONResponse(
+                {"success": False, "error": "Требуется вход."},
+                status_code=401)
+        data = await request.json()
+        new = data.get("new") or ""
+        if len(new) < 8:
+            return JSONResponse(
+                {"success": False,
+                 "error": "Новый пароль не короче 8 символов."},
+                status_code=400)
+        reply = await gw.request(
+            "auth.password.set", {"username": user, "password": new},
+            timeout=10)
+        if not reply.get("ok"):
+            return JSONResponse(
+                {"success": False, "error": "Не удалось сменить пароль."},
+                status_code=400)
+        return {"success": True}
 
     @r.post("/api/logout")
     async def logout(request: Request):

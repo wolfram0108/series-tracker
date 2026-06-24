@@ -69,13 +69,18 @@ if (!isGallery) {
   void (async () => {
     try {
       const { data } = await api.GET("/api/auth/status")
-      const st = data as
-        { configured?: boolean; authenticated?: boolean; username?: string } | undefined
+      const st = data as {
+        configured?: boolean; authenticated?: boolean
+        username?: string; admin?: string
+      } | undefined
+      const auth = useAuthStore()
+      // имя администратора для экрана входа (показываем вместо поля логина)
+      if (st?.admin) auth.adminName = st.admin
       if (st?.authenticated && st.username) {
         // уже вошли (валидная кука) — восстановить состояние (кнопка выхода)
-        useAuthStore().setAuthenticated(st.username)
+        auth.setAuthenticated(st.username)
       } else if (st && !st.configured) {
-        useAuthStore().needsSetup = true
+        auth.needsSetup = true
       }
     } catch {
       /* статус недоступен — пойдём обычным путём (вход по 401) */

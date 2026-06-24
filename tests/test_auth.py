@@ -84,10 +84,11 @@ async def test_login_success_opens_api(system):
     me = await client.get("/api/me")
     assert me.status_code == 200
     assert me.json() == {"authenticated": True, "username": "admin"}
-    # статус отдаёт имя вошедшего — фронт восстанавливает кнопку выхода
+    # статус отдаёт имя вошедшего (восстановление кнопки выхода) и имя
+    # администратора (admin) — экран входа показывает его вместо поля логина
     st = await client.get("/api/auth/status")
     assert st.json() == {"configured": True, "authenticated": True,
-                         "username": "admin"}
+                         "username": "admin", "admin": "admin"}
 
 
 @pytest.mark.asyncio
@@ -148,7 +149,8 @@ async def test_setup_first_run(db_path, tmp_path, monkeypatch):
                                  base_url="http://test") as client:
         # админа нет
         assert (await client.get("/api/auth/status")).json() == {
-            "configured": False, "authenticated": False, "username": ""}
+            "configured": False, "authenticated": False,
+            "username": "", "admin": ""}
         # короткий пароль отклоняется, админ не создан
         r = await client.post("/api/setup",
                               json={"username": "boss", "password": "short"})
@@ -164,6 +166,39 @@ async def test_setup_first_run(db_path, tmp_path, monkeypatch):
                                json={"username": "x", "password": "longpass123"})
         assert r2.status_code == 403
     await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_change_password_requires_login(system):
+    """Смена пароля без сессии → 401 (ручка за «замком»)."""
+    _, _, client = system
+    r = await client.post("/api/auth/password", json={"new": "longnewpass"})
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_change_password_flow(system):
+    """Вошедший меняет пароль без подтверждения старого (активная сессия —
+    достаточное подтверждение): короткий новый — отказ; нормальный — успех,
+    после чего работает только новый пароль."""
+    _, _, client = system
+    await client.post("/api/login",
+                      json={"username": "admin", "password": "s3cret"})
+    # слишком короткий новый → 400
+    r = await client.post("/api/auth/password", json={"new": "short"})
+    assert r.status_code == 400
+    # нормальная смена → 200, сессия осталась валидной
+    r = await client.post("/api/auth/password", json={"new": "longnewpass"})
+    assert r.status_code == 200 and r.json()["success"] is True
+    assert (await client.get("/api/agent/queue")).status_code == 200
+    # после выхода старый пароль не подходит, новый — подходит
+    await client.post("/api/logout")
+    assert (await client.post(
+        "/api/login",
+        json={"username": "admin", "password": "s3cret"})).status_code == 401
+    assert (await client.post(
+        "/api/login",
+        json={"username": "admin", "password": "longnewpass"})).status_code == 200
 
 
 @pytest.mark.asyncio

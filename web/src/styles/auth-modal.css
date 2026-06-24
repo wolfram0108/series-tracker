@@ -68,6 +68,25 @@
   letter-spacing: 0.04em;
 }
 
+/* Имя администратора вместо поля ввода логина (приложение
+   однопользовательское). Крупно, заглавными, заливка текста голубым
+   градиентом в стиле кнопок приложения (overrides.css: .p-button). */
+.login-user {
+  margin: -4px 0 8px;
+  text-align: center;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  word-break: break-word;
+  background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
 /* кнопка на всю ширину карточки */
 .login-submit {
   width: 100%;

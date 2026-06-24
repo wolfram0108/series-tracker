@@ -4,6 +4,7 @@ import Button from "primevue/button"
 import ModalShell from "./ModalShell.vue"
 import SettingsAgents from "./settings/SettingsAgents.vue"
 import SettingsAuth from "./settings/SettingsAuth.vue"
+import SettingsAccount from "./settings/SettingsAccount.vue"
 import SettingsTrackers from "./settings/SettingsTrackers.vue"
 import SettingsDebug from "./settings/SettingsDebug.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
@@ -12,7 +13,7 @@ import SettingsParser from "./settings/SettingsParser.vue"
 // активной вкладки + футер. Вкладка parser — конфигуратор «Фильтры VK».
 const emit = defineEmits<{ (e: "close"): void }>()
 
-const tab = ref<"auth" | "trackers" | "parser" | "agents" | "debug">("auth")
+const tab = ref<"auth" | "account" | "trackers" | "parser" | "agents" | "debug">("auth")
 
 // ссылка на активную вкладку с методом save() (для кнопки в футере)
 const tabRef = ref<{ save?: () => Promise<boolean> } | null>(null)
@@ -29,6 +30,7 @@ async function onSave() {
 }
 const tabs = [
   { label: "Авторизация", value: "auth", icon: "pi-key" },
+  { label: "Аккаунт", value: "account", icon: "pi-user" },
   { label: "Трекеры", value: "trackers", icon: "pi-wifi" },
   { label: "Фильтры VK", value: "parser", icon: "pi-filter" },
   { label: "Агенты", value: "agents", icon: "pi-server" },
@@ -57,6 +59,7 @@ const tabs = [
     </template>
 
     <SettingsAuth v-if="tab === 'auth'" ref="tabRef" />
+    <SettingsAccount v-else-if="tab === 'account'" />
     <SettingsTrackers v-else-if="tab === 'trackers'" />
     <SettingsAgents v-else-if="tab === 'agents'" />
     <SettingsDebug v-else-if="tab === 'debug'" />

@@ -9,6 +9,10 @@ export const useAuthStore = defineStore("auth", () => {
   const authenticated = ref(false)
   const username = ref("")
   const showLogin = ref(false)
+  // имя администратора для экрана входа: приложение однопользовательское,
+  // поле ввода логина не нужно — показываем уже созданного пользователя.
+  // Ставится по GET /api/auth/status при старте (поле admin).
+  const adminName = ref("")
   // первый запуск: администратор ещё не создан → модалка установки (имеет
   // приоритет над входом). Ставится по GET /api/auth/status при старте.
   const needsSetup = ref(false)
@@ -16,6 +20,7 @@ export const useAuthStore = defineStore("auth", () => {
   function setAuthenticated(name: string): void {
     authenticated.value = true
     username.value = name
+    adminName.value = name
     showLogin.value = false
     needsSetup.value = false
   }
@@ -25,5 +30,6 @@ export const useAuthStore = defineStore("auth", () => {
     username.value = ""
   }
 
-  return { authenticated, username, showLogin, needsSetup, setAuthenticated, reset }
+  return { authenticated, username, adminName, showLogin, needsSetup,
+    setAuthenticated, reset }
 })
