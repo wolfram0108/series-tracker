@@ -6,6 +6,7 @@ import StIcon from "./StIcon.vue"
 import StInput from "./StInput.vue"
 import { api } from "../api/client"
 import { useAuthStore } from "../stores/auth"
+import { useBodyScrollLock } from "../composables/useBodyScrollLock"
 
 // Модалка входа администратора (Этап 1). Блокирующая. Приложение
 // однопользовательское — логин не вводят, показываем имя уже созданного
@@ -18,6 +19,8 @@ const password = ref("")
 const busy = ref(false)
 const attempted = ref(false)
 const notice = ref("")
+
+useBodyScrollLock()  // фон не прокручивается, пока окно открыто
 
 type VState = "valid" | "invalid" | null
 const passState = computed<VState>(

@@ -6,6 +6,7 @@ import StIcon from "./StIcon.vue"
 import StInput from "./StInput.vue"
 import { api } from "../api/client"
 import { useAuthStore } from "../stores/auth"
+import { useBodyScrollLock } from "../composables/useBodyScrollLock"
 
 // Модалка первого запуска: создание администратора (имя, пароль, повтор).
 // Валидация — рамкой StGroup; причина/ошибка — плашкой ПОД карточкой
@@ -19,6 +20,8 @@ const password2 = ref("")
 const busy = ref(false)
 const attempted = ref(false)
 const notice = ref("")
+
+useBodyScrollLock()  // фон не прокручивается, пока окно открыто
 
 type VState = "valid" | "invalid" | null
 const touched = (v: string) => attempted.value || v.length > 0

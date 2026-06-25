@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from "vue"
+import { useBodyScrollLock } from "../composables/useBodyScrollLock"
 
 // Переиспользуемая оболочка модального окна (порт modern-modal): оверлей +
 // шапка (заголовок + слот для вкладок/доп. + крестик) + тело + футер.
@@ -32,6 +33,9 @@ function onKey(e: KeyboardEvent) {
 }
 onMounted(() => document.addEventListener("keydown", onKey))
 onUnmounted(() => document.removeEventListener("keydown", onKey))
+
+// фон не прокручивается, пока окно открыто (scroll chaining)
+useBodyScrollLock()
 </script>
 
 <template>
