@@ -7,6 +7,7 @@ POST /series/<id>/relocate (дубль сценария сохранения с�
 """
 from __future__ import annotations
 
+import asyncio
 import os
 
 from fastapi import APIRouter, Request
@@ -43,6 +44,7 @@ def _media_error(exc: BusRequestError):
 
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
     r = APIRouter()
+    _preview_dispatch: set[asyncio.Task] = set()  # ссылки на фоновые задачи префетча
 
     # --- media-items ------------------------------------------------------------
 
@@ -313,5 +315,43 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             names = [i["final_filename"] for i in items
                      if i.get("final_filename")]
         return [os.path.basename(n) for n in names]
+
+    # --- префетч списков файлов для теста нейминга в окне добавления ---------------
+
+    @r.post("/api/preview/naming/fetch", response_model=DynamicObject,
+            responses=_ERR1)
+    async def preview_naming_fetch(request: Request):
+        """Фоновый префетч списков файлов раздач (для вкладки проверки нейминга
+        при добавлении). Отвечает сразу {accepted:[torrent_id...]}; сами списки
+        приходят по SSE (preview_naming_ready/failed). magnet → добор через qBit
+        (модуль torrents); .torrent (link) → скачать из sources и разобрать
+        локально. Побочно прогревает кэш .torrent."""
+        data = await request.json()
+        items = data.get("items") or []
+
+        async def dispatch():
+            for it in items:
+                tid = it.get("torrent_id")
+                if it.get("magnet"):
+                    gw.send_command("torrents.preview.fetch_magnet",
+                                    {"torrent_id": tid, "magnet": it["magnet"]})
+                elif it.get("link"):
+                    try:
+                        reply = await gw.request(
+                            "sources.torrent_file.get",
+                            {"url": it["link"], "torrent_id": tid}, timeout=60)
+                        gw.send_command("torrents.preview.parse_torrent", {
+                            "torrent_id": tid,
+                            "content_b64": reply["content_b64"]})
+                    except BusRequestError as exc:
+                        gw.publish_event("torrents.preview.failed", {
+                            "torrent_id": tid, "infohash": None,
+                            "reason": "не удалось скачать .torrent: "
+                                      + str(exc).split(": ", 1)[-1]})
+
+        task = asyncio.create_task(dispatch())
+        _preview_dispatch.add(task)
+        task.add_done_callback(_preview_dispatch.discard)
+        return {"accepted": [it.get("torrent_id") for it in items]}
 
     return r
