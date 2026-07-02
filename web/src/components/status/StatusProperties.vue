@@ -501,35 +501,37 @@ onMounted(() => {
     </div>
 
     <!-- Доступные раздачи с сайта (торрент) -->
-    <div v-if="!isVk" class="add-torrents">
-      <h6 class="add-torrents-title">Раздачи с сайта (по выбранному качеству)</h6>
-      <div v-if="siteTorrentsLoading" class="status-loading">
-        <i class="pi pi-spin pi-spinner" /> Обновляем список с сайта…
-      </div>
-      <template v-else>
-        <div class="div-table table-site-torrents">
-          <div class="div-table-header">
-            <div class="div-table-cell">ID</div>
-            <div class="div-table-cell">Ссылка</div>
-            <div class="div-table-cell">Дата</div>
-            <div class="div-table-cell">Эпизоды</div>
-            <div class="div-table-cell">Качество</div>
-          </div>
-          <div class="div-table-body">
-            <div v-for="(t, i) in filteredSiteTorrents" :key="t.torrent_id ?? i" class="div-table-row" :class="{ 'row-stale': siteDataIsStale }">
-              <div class="div-table-cell">{{ t.torrent_id }}</div>
-              <div class="div-table-cell">{{ t.link }}</div>
-              <div class="div-table-cell">{{ t.date_time }}</div>
-              <div class="div-table-cell">{{ t.episodes }}</div>
-              <div class="div-table-cell">{{ t.quality }}</div>
-            </div>
-            <div v-if="!filteredSiteTorrents.length" class="div-table-row"><div class="div-table-cell" style="grid-column: 1 / -1">Раздач не найдено</div></div>
-          </div>
+    <div v-if="!isVk" class="modern-fieldset">
+      <div class="fieldset-header"><span class="fieldset-title">Раздачи с сайта (по выбранному качеству)</span></div>
+      <div class="fieldset-content">
+        <div v-if="siteTorrentsLoading" class="status-loading">
+          <i class="pi pi-spin pi-spinner" /> Обновляем список с сайта…
         </div>
-        <small v-if="siteDataIsStale" class="add-error" style="display: block; margin-top: 8px">
-          Не удалось обновить данные с сайта — показана последняя сохранённая версия.
-        </small>
-      </template>
+        <template v-else>
+          <div class="div-table table-site-torrents">
+            <div class="div-table-header">
+              <div class="div-table-cell">ID</div>
+              <div class="div-table-cell">Ссылка</div>
+              <div class="div-table-cell">Дата</div>
+              <div class="div-table-cell">Эпизоды</div>
+              <div class="div-table-cell">Качество</div>
+            </div>
+            <div class="div-table-body">
+              <div v-for="(t, i) in filteredSiteTorrents" :key="t.torrent_id ?? i" class="div-table-row" :class="{ 'row-stale': siteDataIsStale }">
+                <div class="div-table-cell">{{ t.torrent_id }}</div>
+                <div class="div-table-cell">{{ t.link }}</div>
+                <div class="div-table-cell">{{ t.date_time }}</div>
+                <div class="div-table-cell">{{ t.episodes }}</div>
+                <div class="div-table-cell">{{ t.quality }}</div>
+              </div>
+              <div v-if="!filteredSiteTorrents.length" class="div-table-row"><div class="div-table-cell" style="grid-column: 1 / -1">Раздач не найдено</div></div>
+            </div>
+          </div>
+          <small v-if="siteDataIsStale" class="add-error" style="display: block; margin-top: 8px">
+            Не удалось обновить данные с сайта — показана последняя сохранённая версия.
+          </small>
+        </template>
+      </div>
     </div>
 
     <!-- TMDB -->

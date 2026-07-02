@@ -697,23 +697,25 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Доступные торренты -->
-      <div v-if="sourceType === 'torrent' && parserData && parserData.torrents.length" class="add-torrents">
-        <h6 class="add-torrents-title">Доступные торренты ({{ parserData.torrents.length }})</h6>
-        <div class="div-table table-site-torrents">
-          <div class="div-table-header">
-            <div class="div-table-cell">ID</div>
-            <div class="div-table-cell">Ссылка</div>
-            <div class="div-table-cell">Дата</div>
-            <div class="div-table-cell">Эпизоды</div>
-            <div class="div-table-cell">Качество</div>
-          </div>
-          <div class="div-table-body">
-            <div v-for="(t, i) in parserData.torrents" :key="t.torrent_id ?? i" class="div-table-row">
-              <div class="div-table-cell">{{ t.torrent_id }}</div>
-              <div class="div-table-cell">{{ t.link }}</div>
-              <div class="div-table-cell">{{ t.date_time }}</div>
-              <div class="div-table-cell">{{ t.episodes }}</div>
-              <div class="div-table-cell">{{ t.quality }}</div>
+      <div v-if="sourceType === 'torrent' && parserData && parserData.torrents.length" class="modern-fieldset">
+        <div class="fieldset-header"><span class="fieldset-title">Доступные торренты ({{ parserData.torrents.length }})</span></div>
+        <div class="fieldset-content">
+          <div class="div-table table-site-torrents">
+            <div class="div-table-header">
+              <div class="div-table-cell">ID</div>
+              <div class="div-table-cell">Ссылка</div>
+              <div class="div-table-cell">Дата</div>
+              <div class="div-table-cell">Эпизоды</div>
+              <div class="div-table-cell">Качество</div>
+            </div>
+            <div class="div-table-body">
+              <div v-for="(t, i) in parserData.torrents" :key="t.torrent_id ?? i" class="div-table-row">
+                <div class="div-table-cell">{{ t.torrent_id }}</div>
+                <div class="div-table-cell">{{ t.link }}</div>
+                <div class="div-table-cell">{{ t.date_time }}</div>
+                <div class="div-table-cell">{{ t.episodes }}</div>
+                <div class="div-table-cell">{{ t.quality }}</div>
+              </div>
             </div>
           </div>
         </div>
