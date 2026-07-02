@@ -22,12 +22,21 @@ Queries/commands конвейера (контракты Р-12, их ждёт sca
   torrents.fs.verify {series_id}        → {missing, recheck_started}
       — проверка файлов на диске + recheck-задачи для пропавших
       (вызывается сканом и при открытии модалки — решение Р-13/Р-14)
+  torrents.preview.parse_torrent {torrent_id, content_b64}
+      — список файлов из .torrent ЛОКАЛЬНО (bencode), без qBit
+  torrents.preview.fetch_magnet {torrent_id, magnet}
+      — добор метаданных magnet через qBit (STARTED в категории
+        st-naming-preview → файлы → удаление); эфемерно, НЕ ресьюмится;
+        зомби-безопасность: cleanup по infohash + sweep категории в on_start.
+      Оба — fire-and-forget, результат событием preview.ready/failed
 
 События: torrents.queue.changed {count, tasks} (контракт SSE
 agent_queue_update; count=0 — сигнал scan'у назначить следующий проход),
 series.status.contribution {source: torrents, ...} (стадии → флаги по
 карте Р-11 + downloading/ready из прогресса — семантика
-sync_torrent_statuses).
+sync_torrent_statuses), torrents.preview.ready {torrent_id, infohash, name,
+files} / torrents.preview.failed {torrent_id, infohash, reason} (→ SSE:
+предпросмотр нейминга при добавлении).
 
 Переименование файлов — query renaming.process_torrent (зона renaming);
 мониторинг прогресса — адаптивный опрос qBit (часто при активности,
@@ -39,6 +48,7 @@ import asyncio
 import base64
 import json
 import os
+import time
 
 from core import BaseModule, BusRequestError
 from core.db import Database
@@ -46,7 +56,7 @@ from core.envelope import Envelope
 
 from . import pipeline
 from .infohash import (TorrentParseError, infohash_candidates,
-                       infohash_from_magnet)
+                       infohash_from_magnet, torrent_file_list)
 from .qbt_client import QbtClient, QbtError
 from .repository import TorrentsRepository
 
@@ -69,6 +79,11 @@ _ERROR_STATES = {
     "missingFiles": "qBittorrent: файлы недоступны или перемещены",
 }
 
+# Категория qBit для транзиентных preview-раздач (добор метаданных magnet при
+# добавлении сериала). Reconcile при старте сметает всё в ней — бэкстоп от
+# осиротевших раздач при краше между add и delete (зомби-безопасность).
+PREVIEW_CATEGORY = "st-naming-preview"
+
 
 class TorrentsModule(BaseModule):
     name = "torrents"
@@ -88,6 +103,12 @@ class TorrentsModule(BaseModule):
         self._wake = asyncio.Event()
         self._flags_cache: dict[int, dict] = {}
         self._names_cache: dict[int, str] = {}  # имена серий для прогресса
+        # Предпросмотр нейминга при добавлении: кэш списков файлов по infohash,
+        # single-flight (один добор на infohash), кэш дефолтного пути qBit.
+        self._preview_cache: dict[str, dict] = {}
+        self._preview_inflight: set[str] = set()
+        self._preview_tasks: set[asyncio.Task] = set()
+        self._preview_save_path: str | None = None
         self._progress_snapshot: str | None = None
         self._has_incomplete = False
         self._pipeline_poll = pipeline_poll
@@ -99,6 +120,10 @@ class TorrentsModule(BaseModule):
         self.handle("torrents.add", self.on_add)
         self.handle("torrents.info.get", self.on_info)
         self.handle("torrents.files.get", self.on_files)
+        self.handle("torrents.preview.parse_torrent",
+                    self.on_preview_parse_torrent, concurrent=True)
+        self.handle("torrents.preview.fetch_magnet",
+                    self.on_preview_fetch_magnet, concurrent=True)
         self.handle("torrents.pause", self.on_pause)
         self.handle("torrents.resume", self.on_resume)
         self.handle("torrents.recheck", self.on_recheck)
@@ -172,6 +197,7 @@ class TorrentsModule(BaseModule):
         if not self._qbt_injected:
             await self._connect_qbt()
         await self._reconcile_with_qbt()
+        await self._sweep_preview_orphans()
         await self._recover_tasks()
         self._tasks.append(asyncio.create_task(self._pipeline_loop()))
         self._tasks.append(asyncio.create_task(self._monitor_loop()))
@@ -262,6 +288,135 @@ class TorrentsModule(BaseModule):
 
     async def on_files(self, env: Envelope) -> list[dict] | None:
         return await self.qbt.torrent_files(env.payload["hash"])
+
+    # --- предпросмотр нейминга при добавлении (фоновый добор списка файлов) --------
+
+    async def on_preview_parse_torrent(self, env: Envelope) -> None:
+        """.torrent → список файлов ЛОКАЛЬНО (bencode), без qBit. Результат —
+        событием torrents.preview.ready (единый канал с magnet-веткой)."""
+        p = env.payload
+        tid = p.get("torrent_id")
+        try:
+            content = base64.b64decode(p["content_b64"])
+            name, files = torrent_file_list(content)
+            ih = infohash_candidates(content)[0]
+            data = {"name": name, "files": files}
+            self._preview_cache[ih] = data
+            self._emit_preview_ready(tid, ih, data)
+        except Exception as exc:  # noqa: BLE001 — предпросмотр не валит систему
+            self.log.warning("preview .torrent %s: %s", tid, exc)
+            self._emit_preview_failed(
+                tid, None, f"не удалось разобрать .torrent: {exc}")
+
+    async def on_preview_fetch_magnet(self, env: Envelope) -> None:
+        """magnet → добор метаданных из роя через qBit. paused их НЕ качает
+        (проверено), поэтому раздача добавляется STARTED в выделенной категории,
+        читается список файлов и раздача удаляется (контент ≈0 Б). Fire-and-
+        forget: спавним фоновую задачу, чтобы не блокировать шину; single-flight
+        по infohash; кэш переживает переоткрытия окна."""
+        p = env.payload
+        tid = p.get("torrent_id")
+        try:
+            ih = infohash_from_magnet(p["magnet"])
+        except TorrentParseError as exc:
+            self._emit_preview_failed(tid, None, str(exc))
+            return
+        cached = self._preview_cache.get(ih)
+        if cached is not None:
+            self._emit_preview_ready(tid, ih, cached)
+            return
+        if ih in self._preview_inflight:
+            return  # добор уже идёт — событие придёт по его итогу
+        self._preview_inflight.add(ih)
+        task = asyncio.create_task(
+            self._preview_magnet_task(tid, p["magnet"], ih))
+        self._preview_tasks.add(task)
+        task.add_done_callback(self._preview_tasks.discard)
+
+    async def _preview_magnet_task(self, tid, magnet: str, ih: str) -> None:
+        added = False
+        try:
+            if self.qbt is None:
+                self._emit_preview_failed(tid, ih, "qBittorrent не настроен")
+                return
+            save_path = await self._preview_save_path_get()
+            await self.qbt.add_magnet(magnet, save_path, paused=False,
+                                      category=PREVIEW_CATEGORY)
+            added = True
+            files = await self._preview_poll_files(ih, timeout=25.0)
+            if files is None:
+                self._emit_preview_failed(
+                    tid, ih, "метаданные не получены (нет сидов?)")
+                return
+            data = {"name": None, "files": files}
+            self._preview_cache[ih] = data
+            self._emit_preview_ready(tid, ih, data)
+        except Exception as exc:  # noqa: BLE001 — предпросмотр не валит систему
+            self.log.warning("preview magnet %s: %s", ih[:8], exc)
+            self._emit_preview_failed(tid, ih, f"ошибка добора: {exc}")
+        finally:
+            if added:
+                await self._preview_cleanup(ih)
+            self._preview_inflight.discard(ih)
+
+    async def _preview_poll_files(self, ih: str, *, timeout: float,
+                                  poll: float = 0.5) -> list[dict] | None:
+        """Поллинг /torrents/files до появления метаданных. None — таймаут."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            files = await self.qbt.torrent_files(ih)
+            if files:
+                return [{"path": f.get("name"), "size": f.get("size")}
+                        for f in files]
+            await asyncio.sleep(poll)
+        return None
+
+    async def _preview_cleanup(self, ih: str) -> None:
+        """Уборка preview-раздачи по ИЗВЕСТНОМУ infohash с подтверждением:
+        delete повторяется, пока qBit не подтвердит отсутствие (переживает
+        асинхронность add и отмену). deleteFiles=true снимает любые частичные
+        (контента ≈0 — метаданные приходят до пирсов, но подстраховка)."""
+        for _ in range(20):
+            try:
+                await self.qbt.delete([ih], delete_files=True)
+                if not await self.qbt.torrents_info([ih]):
+                    return
+            except QbtError:
+                return  # qBit недоступен — старт-sweep подметёт по категории
+            await asyncio.sleep(0.6)
+        self.log.warning("preview: раздача %s не убралась за отведённое время",
+                         ih[:8])
+
+    async def _preview_save_path_get(self) -> str:
+        if self._preview_save_path is None:
+            self._preview_save_path = await self.qbt.default_save_path()
+        return self._preview_save_path or ""
+
+    async def _sweep_preview_orphans(self) -> None:
+        """BACKSTOP зомби-безопасности: смести все раздачи preview-категории при
+        старте (осиротевшие при краше между add и delete). qBit недоступен —
+        пропускаем (как reconcile, данные не теряем)."""
+        if self.qbt is None:
+            return
+        try:
+            await self.qbt.create_category(PREVIEW_CATEGORY)
+            rows = await self.qbt.torrents_info(category=PREVIEW_CATEGORY)
+            hashes = [t["hash"] for t in rows if t.get("hash")]
+            if hashes:
+                await self.qbt.delete(hashes, delete_files=True)
+                self.log.warning("preview: подметено осиротевших раздач: %d",
+                                 len(hashes))
+        except QbtError as exc:
+            self.log.warning("preview: sweep категории пропущен: %s", exc)
+
+    def _emit_preview_ready(self, tid, ih, data: dict) -> None:
+        self.publish_event("torrents.preview.ready", {
+            "torrent_id": tid, "infohash": ih,
+            "name": data.get("name"), "files": data.get("files") or []})
+
+    def _emit_preview_failed(self, tid, ih, reason: str) -> None:
+        self.publish_event("torrents.preview.failed", {
+            "torrent_id": tid, "infohash": ih, "reason": reason})
 
     # --- commands ------------------------------------------------------------------
 

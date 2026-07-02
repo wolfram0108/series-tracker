@@ -64,7 +64,7 @@ class FakeQbt:
     def _log(self, *call):
         self.calls.append(call)
 
-    async def torrents_info(self, hashes=None):
+    async def torrents_info(self, hashes=None, *, category=None):
         # проверка recheck завершается сама через пару опросов
         for h in list(self._checking):
             self._checking[h] -= 1
@@ -74,6 +74,8 @@ class FakeQbt:
         rows = [{"hash": h, **i} for h, i in self.torrents.items()]
         if hashes is not None:
             rows = [r for r in rows if r["hash"] in hashes]
+        if category is not None:
+            rows = [r for r in rows if r.get("category") == category]
         return rows
 
     async def pause(self, hashes):
@@ -96,6 +98,12 @@ class FakeQbt:
         self._log("delete", tuple(hashes), delete_files)
         for h in hashes:
             self.torrents.pop(h, None)
+
+    async def create_category(self, name, save_path=""):
+        self._log("create_category", name)
+
+    async def default_save_path(self):
+        return "/downloads"
 
     async def login(self):
         pass
