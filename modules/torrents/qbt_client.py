@@ -140,18 +140,37 @@ class QbtClient:
         return self._add_verdict(resp)
 
     async def add_magnet(self, magnet: str, save_path: str, *,
-                         paused: bool = True) -> str:
+                         paused: bool = True,
+                         category: str | None = None) -> str:
         flag = "true" if paused else "false"
+        data = {"urls": magnet, "savepath": save_path,
+                "paused": flag, "stopped": flag}
+        if category:
+            data["category"] = category
         resp = await self._request(
-            "POST", "/api/v2/torrents/add", conflict_ok=True,
-            data={"urls": magnet, "savepath": save_path,
-                  "paused": flag, "stopped": flag})
+            "POST", "/api/v2/torrents/add", conflict_ok=True, data=data)
         return self._add_verdict(resp)
 
-    async def torrents_info(self, hashes: list[str] | None = None) -> list[dict]:
-        params = {"hashes": "|".join(hashes)} if hashes else {}
+    async def torrents_info(self, hashes: list[str] | None = None, *,
+                            category: str | None = None) -> list[dict]:
+        params: dict[str, str] = {}
+        if hashes:
+            params["hashes"] = "|".join(hashes)
+        if category is not None:
+            params["category"] = category
         resp = await self._request("GET", "/api/v2/torrents/info", params=params)
         return resp.json() if resp else []
+
+    async def create_category(self, name: str, save_path: str = "") -> None:
+        """Создать категорию qBit (идемпотентно: уже есть → 409, глотаем)."""
+        await self._request("POST", "/api/v2/torrents/createCategory",
+                            conflict_ok=True,
+                            data={"category": name, "savePath": save_path})
+
+    async def default_save_path(self) -> str:
+        """Путь сохранения по умолчанию — для транзиентных preview-раздач."""
+        resp = await self._request("GET", "/api/v2/app/preferences")
+        return (resp.json() or {}).get("save_path", "") if resp else ""
 
     async def find_hash(self, candidates: list[str], *,
                         attempts: int = 5, delay: float = 0.5) -> Optional[str]:

@@ -84,6 +84,48 @@ def infohash_candidates(content: bytes) -> list[str]:
     return [v1]
 
 
+# --- список файлов (предпросмотр нейминга при добавлении) --------------------
+
+def torrent_file_list(content: bytes) -> tuple[str | None, list[dict]]:
+    """Список файлов из .torrent — для предпросмотра нейминга при добавлении.
+
+    Поверх того же span-декодера, что и infohash (сеть не нужна). Ключи
+    `name.utf-8`/`path.utf-8` предпочитаются: рус-трекеры кладут основной путь
+    в cp1251, а qBittorrent отдаёт именно utf-8-вариант — так предпросмотр
+    совпадёт с фактическим переименованием. Многофайловый torrent →
+    (имя_папки, [{path, size}]); однофайловый → (None, [{path=имя, size}]).
+    """
+    try:
+        top, _ = _decode(content, 0)
+    except (ValueError, IndexError) as exc:
+        raise TorrentParseError(f"не удалось разобрать bencode: {exc}") from exc
+    if not isinstance(top, dict) or b"info" not in top:
+        raise TorrentParseError("в .torrent отсутствует секция info")
+    info = top[b"info"][0]  # _decode хранит значение словаря как (value, start, end)
+
+    def _val(d: dict, key: bytes):
+        item = d.get(key)
+        return item[0] if item is not None else None
+
+    def _text(b) -> str:
+        return (b.decode("utf-8", "replace")
+                if isinstance(b, (bytes, bytearray)) else str(b))
+
+    name = _val(info, b"name.utf-8") or _val(info, b"name")
+    files_raw = _val(info, b"files")
+    if files_raw is not None:  # многофайловый
+        files = []
+        for entry in files_raw:  # элементы списка — «сырые» словари со спанами
+            if not isinstance(entry, dict):
+                continue
+            parts = _val(entry, b"path.utf-8") or _val(entry, b"path") or []
+            files.append({"path": "/".join(_text(p) for p in parts),
+                          "size": _val(entry, b"length")})
+        return (_text(name) if name is not None else None), files
+    return None, [{"path": _text(name) if name is not None else "",
+                   "size": _val(info, b"length")}]
+
+
 # --- magnet ------------------------------------------------------------------
 
 def infohash_from_magnet(link: str) -> str:
