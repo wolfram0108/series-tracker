@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue"
+import { ref, watch } from "vue"
 import { useToast } from "primevue/usetoast"
 import Button from "primevue/button"
 import StGroup from "../StGroup.vue"
@@ -13,7 +13,9 @@ import { api } from "../../api/client"
 // Порт static/js/components/settingsParser.js (scrapeTestTitles, runTest,
 // getResultClass, testResultPills, formatResolution).
 
-const props = defineProps<{ profileId: number }>()
+// initialTitles: если передан (окно добавления сериала) — предзаполняет поле
+// теста списком файлов раздачи. В Настройках не передаётся → поведение как было.
+const props = defineProps<{ profileId: number; initialTitles?: string[] }>()
 
 const { request } = useApi()
 const toast = useToast()
@@ -26,6 +28,16 @@ const scrapedItems = ref<Array<Record<string, unknown>>>([])
 const testTitles = ref("")
 const isTesting = ref(false)
 const testResults = ref<TestResult[]>([])
+
+// Предзаполнение поля списком файлов раздачи (окно добавления сериала):
+// при появлении/смене списка (смена выбранного качества) обновляем textarea.
+if (props.initialTitles?.length) testTitles.value = props.initialTitles.join("\n")
+watch(
+  () => props.initialTitles,
+  (v) => {
+    if (v?.length) testTitles.value = v.join("\n")
+  },
+)
 
 interface MatchEvent { rule?: string; action: string }
 interface Extracted {

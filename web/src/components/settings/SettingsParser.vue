@@ -18,6 +18,12 @@ import { api } from "../../api/client"
 // профиля. Вся API профилей/правил живёт здесь; карточка правила и тест —
 // отдельные компоненты.
 
+// initialProfileId / testInitialTitles — опциональны: заданы при встраивании
+// раздела «Фильтры VK» вкладкой в окно добавления сериала (предвыбор профиля +
+// список файлов раздачи в шаг 3). В Настройках не передаются → поведение как было.
+const props = defineProps<{ initialProfileId?: number | null; testInitialTitles?: string[] }>()
+const emit = defineEmits<{ (e: "update:profileId", v: number | null): void }>()
+
 const { request } = useApi()
 const confirm = useConfirm()
 const toast = useToast()
@@ -36,7 +42,7 @@ interface RawRule {
 const EXTRACT_TYPES = ["extract_single", "extract_range", "extract_season"]
 
 const profiles = ref<Profile[]>([])
-const selectedProfileId = ref<number | null>(null)
+const selectedProfileId = ref<number | null>(props.initialProfileId ?? null)
 const newProfileName = ref("")
 const isLoading = ref(false)
 const rules = ref<EditableRule[]>([])
@@ -301,7 +307,16 @@ watch(selectedProfileId, (id) => {
   } else {
     rules.value = []
   }
+  emit("update:profileId", id)  // синхронизация с формой окна добавления
 })
+
+// внешняя смена профиля (форма окна добавления) → отразить в разделе
+watch(
+  () => props.initialProfileId,
+  (v) => {
+    if (v !== undefined && v !== selectedProfileId.value) selectedProfileId.value = v ?? null
+  },
+)
 
 onMounted(loadProfiles)
 </script>
@@ -414,7 +429,11 @@ onMounted(loadProfiles)
           <i class="pi pi-chevron-down acc-chevron" />
         </button>
         <div v-if="openStep === 'test'" class="accordion-body">
-          <ParserTest :key="selectedProfileId" :profile-id="selectedProfileId" />
+          <ParserTest
+            :key="selectedProfileId"
+            :profile-id="selectedProfileId"
+            :initial-titles="testInitialTitles"
+          />
         </div>
       </div>
     </template>

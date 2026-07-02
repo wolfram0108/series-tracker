@@ -8,8 +8,10 @@ import StIcon from "./StIcon.vue"
 import StInput from "./StInput.vue"
 import StSelect from "./StSelect.vue"
 import SavedPathDropdown from "./SavedPathDropdown.vue"
+import SettingsParser from "./settings/SettingsParser.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
+import { useSSE } from "../composables/useSSE"
 
 // Модалка «Добавить сериал» — полный порт legacy addSeriesModal.js.
 // Поток: ввод URL → debounce-распознавание (vkvideo.ru → VK-режим без
@@ -21,7 +23,7 @@ const { request } = useApi()
 const toast = useToast()
 
 // --- типы ответов (бэк отдаёт DynamicObject; сужаем под контракт) ---
-interface Torrent { torrent_id?: string | number; link?: string; date_time?: string; episodes?: string; quality?: string }
+interface Torrent { torrent_id?: string | number; link?: string; magnet?: string; date_time?: string; episodes?: string; quality?: string }
 interface ParseResult { success?: boolean; title?: { ru?: string; en?: string }; torrents?: Torrent[]; tracker_info?: TrackerInfo; error?: string }
 interface TrackerInfo { ui_features?: { quality_selector?: string } }
 interface TmdbResult { id: number; name?: string; name_en?: string; original_name?: string; year?: string; poster_path?: string }
@@ -55,6 +57,15 @@ const vkQuery = ref("")
 const trackerInfo = ref<TrackerInfo | null>(null)
 const profiles = ref<{ id: number; name: string }[]>([])
 const saving = ref(false)
+
+// --- вкладки окна: форма добавления / раздел «Фильтры VK» (проверка нейминга) ---
+const activeTab = ref<"add" | "naming">("add")
+// списки файлов раздач по torrent_id (приходят по SSE после фонового префетча)
+type PreviewEntry = { files?: { path: string; size?: number }[]; failed?: boolean; reason?: string }
+const previewResults = ref<Record<string, PreviewEntry>>({})
+const sse = useSSE()
+let unsubReady: (() => void) | null = null
+let unsubFailed: (() => void) | null = null
 
 // --- TMDB ---
 const tmdbSearchQuery = ref("")
@@ -169,6 +180,38 @@ const showSeasonlessSwitch = computed(
 )
 const astarHasAlternatives = computed(() => Object.values(episodeQualityOptions).some((o) => o.length > 1))
 
+// --- предпросмотр нейминга: список файлов раздач(и) выбранного качества ---
+function baseName(p: string): string {
+  return p.split("/").pop() || p
+}
+// torrent_id раздач, соответствующих текущему выбору качества (по трекеру)
+const selectedTorrentIds = computed<string[]>(() => {
+  const ts = parserData.value?.torrents ?? []
+  if (!ts.length) return []
+  const idOf = (t: Torrent) => String(t.torrent_id ?? "")
+  if (qualitySelector.value === "anilibria") {
+    return ts.filter((t) => t.quality === newSeries.qualityByEpisodes.all).map(idOf)
+  }
+  if (site.value.includes("rutracker")) {
+    const m = ts.filter((t) => t.quality === newSeries.qualityByEpisodes.all).map(idOf)
+    return m.length ? m : ts.map(idOf)
+  }
+  if (qualitySelector.value === "astar") {
+    const chosen = new Set(sortedQualityOptionsKeys.value.map((ep) => `${ep}|${newSeries.qualityByEpisodes[ep]}`))
+    return ts.filter((t) => t.episodes && chosen.has(`${t.episodes}|${t.quality}`)).map(idOf)
+  }
+  return ts.map(idOf) // kinozal и пр. без селектора — обычно одна раздача
+})
+// имена файлов (basename) для поля шага 3 теста
+const namingTitles = computed<string[]>(() => {
+  const out: string[] = []
+  for (const id of selectedTorrentIds.value) {
+    const r = previewResults.value[id]
+    if (r?.files?.length) out.push(...r.files.map((f) => baseName(f.path)))
+  }
+  return out
+})
+
 // --- автоисправление обратного слэша в путях (порт autoCorrectSlash) ---
 watch(() => newSeries.save_path, (v) => {
   if (v.includes("\\")) newSeries.save_path = v.replace(/\\/g, "/")
@@ -256,11 +299,29 @@ async function parseTorrentUrl() {
     isQualityOptionsReady.value = true
     parsed.value = true
     showValidation.value = true
+    void prefetchNamingFiles(torrents)  // фоновый добор списков файлов для вкладки проверки
   } catch (e) {
     urlError.value = e instanceof Error ? e.message : String(e)
   } finally {
     parsing.value = false
   }
+}
+
+// Фоновый префетч списков файлов раздач (для вкладки «Проверка нейминга»):
+// http(s)-ссылка → .torrent-ветка; magnet → добор через qBit. Результаты
+// приходят по SSE (preview_naming_ready/failed) в previewResults.
+async function prefetchNamingFiles(torrents: Torrent[]): Promise<void> {
+  previewResults.value = {}
+  const items = torrents
+    .map((t) => {
+      const url = t.link || ""
+      if (/^https?:/i.test(url)) return { torrent_id: t.torrent_id, link: url }
+      const magnet = t.magnet || (url.startsWith("magnet:") ? url : "")
+      return magnet ? { torrent_id: t.torrent_id, magnet } : null
+    })
+    .filter((it): it is NonNullable<typeof it> => it !== null)
+  if (!items.length) return
+  await api.POST("/api/preview/naming/fetch", { body: { items } } as never)
 }
 
 // --- TMDB ---
@@ -385,14 +446,41 @@ async function loadProfiles() {
   const { data } = await api.GET("/api/parser-profiles")
   if (Array.isArray(data)) profiles.value = data as { id: number; name: string }[]
 }
-onMounted(loadProfiles)
+onMounted(() => {
+  loadProfiles()
+  unsubReady = sse.on("preview_naming_ready", (d) => {
+    const p = d as { torrent_id?: string | number; files?: { path: string; size?: number }[] }
+    if (p.torrent_id != null) previewResults.value[String(p.torrent_id)] = { files: p.files ?? [] }
+  })
+  unsubFailed = sse.on("preview_naming_failed", (d) => {
+    const p = d as { torrent_id?: string | number; reason?: string }
+    if (p.torrent_id != null) previewResults.value[String(p.torrent_id)] = { failed: true, reason: p.reason, files: [] }
+  })
+})
 onBeforeUnmount(() => {
+  unsubReady?.()
+  unsubFailed?.()
   if (debounceTimer) clearTimeout(debounceTimer)
 })
 </script>
 
 <template>
-  <ModalShell size="xl" title="Добавить новый сериал" @close="emit('close')">
+  <ModalShell size="xl" @close="emit('close')">
+    <template #title><i class="pi pi-plus"></i> Добавить новый сериал</template>
+    <template #header-extra>
+      <div class="header-tabs st-tabs">
+        <button class="st-tab" :class="{ active: activeTab === 'add' }" title="Добавление" @click="activeTab = 'add'">
+          <i class="pi tab-icon pi-plus-circle"></i>
+          <span class="tab-label" data-text="Добавление"><span class="tl-text">Добавление</span></span>
+        </button>
+        <button class="st-tab" :class="{ active: activeTab === 'naming' }" title="Проверка нейминга" @click="activeTab = 'naming'">
+          <i class="pi tab-icon pi-filter"></i>
+          <span class="tab-label" data-text="Проверка нейминга"><span class="tl-text">Проверка нейминга</span></span>
+        </button>
+      </div>
+    </template>
+
+    <div v-show="activeTab === 'add'">
     <!-- URL -->
     <div class="field-group add-url-row">
       <StGroup :state="urlState">
@@ -630,6 +718,15 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
+    </div>
+    </div>
+
+    <div v-show="activeTab === 'naming'">
+      <SettingsParser
+        :initial-profile-id="newSeries.parser_profile_id"
+        :test-initial-titles="namingTitles"
+        @update:profile-id="newSeries.parser_profile_id = $event"
+      />
     </div>
 
     <template #footer>

@@ -95,9 +95,12 @@ export interface paths {
         /**
          * Change Password
          * @description Смена пароля вошедшим администратором (раздел «Аккаунт» настроек).
-         *     За «замком» (нужна сессия): сверяет ТЕКУЩИЙ пароль, проверяет длину
-         *     нового (≥8) и обновляет хэш. Имя не меняется — сессия остаётся
-         *     валидной. Текущий пароль обязателен (нельзя сменить, не зная его).
+         *     За «замком» (нужна сессия): проверяет длину нового пароля (≥8) и
+         *     обновляет хэш. Имя не меняется — сессия остаётся валидной.
+         *
+         *     Текущий пароль НЕ запрашивается: активная сессия уже подтверждает
+         *     владельца (осознанное решение для однопользовательского приложения —
+         *     не заставлять вспоминать старый пароль при смене из-под входа).
          */
         post: operations["change_password_api_auth_password_post"];
         delete?: never;
@@ -704,6 +707,30 @@ export interface paths {
         get: operations["source_filenames_api_series__series_id__source_filenames_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/preview/naming/fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Naming Fetch
+         * @description Фоновый префетч списков файлов раздач (для вкладки проверки нейминга
+         *     при добавлении). Отвечает сразу {accepted:[torrent_id...]}; сами списки
+         *     приходят по SSE (preview_naming_ready/failed). magnet → добор через qBit
+         *     (модуль torrents); .torrent (link) → скачать из sources и разобрать
+         *     локально. Побочно прогревает кэш .torrent.
+         */
+        post: operations["preview_naming_fetch_api_preview_naming_fetch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3178,6 +3205,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_naming_fetch_api_preview_naming_fetch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DynamicObject"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
                 };
             };
         };
