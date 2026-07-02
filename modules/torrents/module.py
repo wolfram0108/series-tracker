@@ -406,7 +406,7 @@ class TorrentsModule(BaseModule):
                 await self.qbt.delete(hashes, delete_files=True)
                 self.log.warning("preview: подметено осиротевших раздач: %d",
                                  len(hashes))
-        except QbtError as exc:
+        except Exception as exc:  # noqa: BLE001 — старт модуля не должен падать
             self.log.warning("preview: sweep категории пропущен: %s", exc)
 
     def _emit_preview_ready(self, tid, ih, data: dict) -> None:
