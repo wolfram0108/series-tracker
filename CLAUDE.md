@@ -11,6 +11,17 @@
 
 ---
 
+# 🎯 АКТИВНЫЕ МИССИИ
+
+Крупные задачи ведутся в `docs/missions/<task>/` (CHARTER + ROADMAP). При работе
+над миссией: СНАЧАЛА прочитать её `CHARTER.md` + `ROADMAP.md`, потом код.
+Завершённые → `docs/missions/_done/`.
+
+- **torrent-naming-preview** — предпросмотр применения правил нейминга к файлам
+  раздачи прямо в окне добавления сериала — `docs/missions/torrent-naming-preview/`
+
+---
+
 ## Прод = этот сервер
 
 - Прод работает **здесь**: systemd-юнит `series-tracker` (uvicorn :5000),
