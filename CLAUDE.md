@@ -17,8 +17,8 @@
 над миссией: СНАЧАЛА прочитать её `CHARTER.md` + `ROADMAP.md`, потом код.
 Завершённые → `docs/missions/_done/`.
 
-- **torrent-naming-preview** — предпросмотр применения правил нейминга к файлам
-  раздачи прямо в окне добавления сериала — `docs/missions/torrent-naming-preview/`
+- (активных миссий нет; завершённые — в `docs/missions/_done/`, напр.
+  `torrent-naming-preview` — предпросмотр нейминга в окне добавления)
 
 ---
 

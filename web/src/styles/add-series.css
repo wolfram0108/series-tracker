@@ -142,7 +142,3 @@
 .tmdb-catalog { margin-top: 4px; }
 .tmdb-catalog-label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 4px; }
 .tmdb-catalog .input-group .form-control { font-family: var(--font-mono); background: var(--bg-light); }
-
-/* заголовок и обёртка таблицы найденных раздач */
-.add-torrents { margin-top: 1.5rem; }
-.add-torrents-title { margin: 0 0 0.5rem; font-size: 1rem; font-weight: 600; }
