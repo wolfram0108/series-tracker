@@ -21,7 +21,13 @@ import { api } from "../../api/client"
 // initialProfileId / testInitialTitles — опциональны: заданы при встраивании
 // раздела «Фильтры VK» вкладкой в окно добавления сериала (предвыбор профиля +
 // список файлов раздачи в шаг 3). В Настройках не передаются → поведение как было.
-const props = defineProps<{ initialProfileId?: number | null; testInitialTitles?: string[] }>()
+// testFirst: при выборе профиля раскрывать сразу Шаг 3 (Тест) вместо Шага 2
+// (окно добавления — цель «проверить нейминг»). В Настройках не передаётся → Шаг 2.
+const props = defineProps<{
+  initialProfileId?: number | null
+  testInitialTitles?: string[]
+  testFirst?: boolean
+}>()
 const emit = defineEmits<{ (e: "update:profileId", v: number | null): void }>()
 
 const { request } = useApi()
@@ -303,7 +309,7 @@ function toggleRule(id: number | string): void {
 watch(selectedProfileId, (id) => {
   if (id) {
     loadRules()
-    openStep.value = "rules"
+    openStep.value = props.testFirst ? "test" : "rules"
   } else {
     rules.value = []
   }

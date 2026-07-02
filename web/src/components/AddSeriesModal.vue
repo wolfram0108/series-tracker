@@ -725,6 +725,7 @@ onBeforeUnmount(() => {
       <SettingsParser
         :initial-profile-id="newSeries.parser_profile_id"
         :test-initial-titles="namingTitles"
+        :test-first="true"
         @update:profile-id="newSeries.parser_profile_id = $event"
       />
     </div>
