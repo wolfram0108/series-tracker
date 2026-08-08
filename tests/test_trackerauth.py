@@ -27,12 +27,12 @@ def db_path(tmp_path):
 
 class FakeResponse:
     def __init__(self, *, url, text="", status_code=200,
-                 content_type="text/html"):
+                 content_type="text/html", headers=None):
         self.url = url
         self.text = text
         self.status_code = status_code
         self.content = text.encode()
-        self.headers = {"Content-Type": content_type}
+        self.headers = {"Content-Type": content_type, **(headers or {})}
         self.cookies = requests.cookies.RequestsCookieJar()
 
     def raise_for_status(self):
@@ -195,6 +195,115 @@ async def test_failed_login_does_not_consume_rate_limit(system):
             "service": "kinozal",
             "url": "https://kinozal.tv/details.php?id=1"}, timeout=5)
     assert posts["n"] == 2, "второй логин должен состояться, не отсечён лимитом"
+
+
+# --- антибот-челлендж (Cloudflare) ------------------------------------------------
+
+RT_URL = "https://rutracker.org/forum/viewtopic.php?t=1"
+
+
+def _challenge_page():
+    """Заглушка CF: статус 403 и служебный заголовок — по нему и судим."""
+    return FakeResponse(url=RT_URL, status_code=403, text="Один момент…",
+                        headers={"cf-mitigated": "challenge"})
+
+
+@pytest.mark.asyncio
+async def test_challenge_passed_by_browser_then_request_retried(system):
+    """Челлендж — не разлогин: сессию не трогаем, поднимаем браузер,
+    забираем клирэнс и повторяем ИСХОДНЫЙ запрос уже с ним."""
+    from core import crypto
+    _, db, _, probe, monkeypatch = system
+    calls = {"requests": 0, "solves": 0, "agents": []}
+
+    def fake_request(self, *args, **kwargs):
+        calls["requests"] += 1
+        calls["agents"].append((kwargs.get("headers") or {}).get("User-Agent"))
+        if not calls["solves"]:
+            return _challenge_page()
+        return FakeResponse(url=RT_URL, text="<html>тема</html>")
+
+    async def fake_solve(url, **kwargs):
+        calls["solves"] += 1
+        return "ClearanceUA/1.0", {"cf_clearance": "КЛИРЭНС"}
+
+    monkeypatch.setattr(requests.Session, "request", fake_request)
+    monkeypatch.setattr(ta_module.cf_challenge, "solve", fake_solve)
+
+    reply = await probe.request("trackerauth.fetch", {
+        "service": "rutracker", "url": RT_URL}, timeout=10)
+
+    assert reply["status"] == 200 and "тема" in reply["text"]
+    assert calls["solves"] == 1, "браузер поднимается ровно один раз"
+    assert calls["requests"] == 2, "исходный запрос должен повториться"
+    assert calls["agents"][1] == "ClearanceUA/1.0", \
+        "повтор идёт с UA, под которым выдан клирэнс"
+
+    row = await db.fetch_one(
+        "SELECT * FROM tracker_sessions WHERE service='rutracker'")
+    assert row["user_agent"] == "ClearanceUA/1.0"
+    assert json.loads(crypto.decrypt(row["cookies_json"]))["cf_clearance"] == \
+        "КЛИРЭНС", \
+        "клирэнс персистится — после рестарта челлендж проходить заново не надо"
+
+
+@pytest.mark.asyncio
+async def test_challenge_rate_limit_protects_from_browser_loop(system):
+    """Если клирэнс не помогает, браузер не должен запускаться по кругу."""
+    _, _, _, probe, monkeypatch = system
+    solves = {"n": 0}
+
+    async def fake_solve(url, **kwargs):
+        solves["n"] += 1
+        return "UA", {"cf_clearance": "x"}
+
+    monkeypatch.setattr(requests.Session, "request",
+                        lambda self, *a, **kw: _challenge_page())
+    monkeypatch.setattr(ta_module.cf_challenge, "solve", fake_solve)
+
+    with pytest.raises(BusRequestError, match="не пускает"):
+        await probe.request("trackerauth.fetch", {
+            "service": "rutracker", "url": RT_URL}, timeout=10)
+
+    with pytest.raises(BusRequestError, match="rate-limit"):
+        await probe.request("trackerauth.fetch", {
+            "service": "rutracker", "url": RT_URL}, timeout=10)
+    assert solves["n"] == 1, "второй заход отсечён лимитом, браузер не поднят"
+
+
+@pytest.mark.asyncio
+async def test_clearance_survives_relogin(system):
+    """Клирэнс — про клиента, а не про учётку: смена логина его не роняет
+    (иначе каждый релогин тянул бы лишний прогон браузера)."""
+    _, _, module, _, monkeypatch = system
+    session = requests.Session()
+    session.cookies.set("cf_clearance", "КЛИРЭНС", domain="kinozal.me")
+    session.cookies.set("uid", "42", domain="kinozal.me")
+    monkeypatch.setattr(requests.Session, "post",
+                        lambda self, url, **kw: FakeResponse(
+                            url="https://kinozal.me/userdetails.php"))
+
+    await module._login("kinozal", "https://kinozal.me/x", session)
+
+    assert session.cookies.get("cf_clearance") == "КЛИРЭНС"
+    assert session.cookies.get("uid") is None, "прочие куки логин сбрасывает"
+
+
+@pytest.mark.asyncio
+async def test_user_agent_restored_with_cookies(system):
+    """UA прогретой сессии восстанавливается вместе с куками: врозь
+    cf_clearance недействителен."""
+    _, db, module, _, _ = system
+    await module.repo.save_cookies(
+        "rutracker", "rutracker.org", requests.Session(),
+        logged_in=False, user_agent="ClearanceUA/1.0")
+
+    module._sessions.clear()
+    module._user_agents.clear()
+    await module._get_session("rutracker", RT_URL)
+
+    assert module._user_agents[("rutracker", "rutracker.org")] == \
+        "ClearanceUA/1.0"
 
 
 @pytest.mark.asyncio

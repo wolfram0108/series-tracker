@@ -1,9 +1,15 @@
 """Провайдеры трекеров: логин-флоу, детект протухания, заголовки.
 
 Вся трекеро-специфика — здесь (решение Р-1): потребители видят только
-query `trackerauth.fetch`. Каждый провайдер отвечает на три вопроса:
-как войти, как понять по ответу, что нас разлогинило, и какие
-заголовки нужны запросу.
+query `trackerauth.fetch`. Каждый провайдер отвечает на четыре вопроса:
+как войти, как понять по ответу, что нас разлогинило, какие заголовки
+нужны запросу и (необязательно) как распознать антибот-челлендж.
+
+Челлендж — отдельное состояние, не путать с разлогином: сессия может
+быть жива, но защита сайта не пускает клиента вовсе. Провайдер, который
+умеет его распознавать, объявляет `is_challenged` (и `challenge_url`,
+если проходить челлендж нужно не на том URL, что запрашивали);
+остальных это не касается — модуль спрашивает через getattr.
 
 Маркеры выбраны детерминированными (вместо гадания по подстрокам
 «login/error/пароль» из старой системы — см. разбор auth.py):
@@ -102,6 +108,14 @@ class RutrackerProvider:
             "User-Agent": UA, "Referer": login_url})
         resp.raise_for_status()
         if "bb_session" not in session.cookies.get_dict():
+            # RuTracker включает капчу в форму входа (скрытое поле cap_sid
+            # и поле ввода cap_code_<хэш>). Автоматически её не решить —
+            # говорим об этом прямо, а не «логин не принят»: причина
+            # разная и лечение разное (проверить пароль ≠ войти руками).
+            if "cap_sid" in page.text or "cap_code" in page.text:
+                raise TrackerLoginError(
+                    f"RuTracker ({domain}) требует капчу при входе — "
+                    "автоматический вход невозможен, нужен ручной")
             raise TrackerLoginError(f"RuTracker ({domain}) не выдал "
                                     "bb_session — логин не принят")
 
@@ -111,6 +125,27 @@ class RutrackerProvider:
         # надёжнее признак формы логина в теле.
         return "login.php" in resp.url or (
             'name="login_username"' in resp.text[:20000])
+
+    def is_challenged(self, resp: requests.Response) -> bool:
+        """Антибот-челлендж Cloudflare (см. cf_challenge.py).
+
+        Маркер детерминированный — служебный заголовок `cf-mitigated:
+        challenge`, который CF ставит на страницу-заглушку. По телу
+        («Один момент…»/«Just a moment…») не гадаем: текст зависит от
+        языка ответа, а заголовок — нет.
+        """
+        return resp.headers.get("cf-mitigated", "").lower() == "challenge"
+
+    def challenge_url(self, url: str) -> str:
+        """Где проходить челлендж для запроса к `url`.
+
+        dl.php отдаёт файл .torrent — открывать его в браузере
+        бессмысленно (челлендж там не показать). Клирэнс общий на домен,
+        поэтому проходим на странице темы того же раздачи.
+        """
+        if "/forum/dl.php" in url:
+            return url.replace("/forum/dl.php", "/forum/viewtopic.php")
+        return url
 
     def request_headers(self, url: str) -> dict:
         headers = {"User-Agent": UA}

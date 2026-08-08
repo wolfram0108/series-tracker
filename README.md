@@ -100,6 +100,8 @@ cd web && npm ci && npm run build && cd ..
 
 # (для браузерной доставки astar/anilibria_tv)
 .venv/bin/playwright install firefox
+# (для прохождения антибот-челленджа rutracker)
+.venv/bin/python -m camoufox fetch
 ```
 
 UI — `http://<host>:5000/`. Учётки трекеров, VK, TMDB вносятся через UI

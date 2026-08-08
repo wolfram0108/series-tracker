@@ -223,9 +223,14 @@ class SourcesModule(BaseModule):
                 if fetcher is not None:
                     html = await fetcher(attempt_url)
                 else:
+                    # Бюджет ожидания покрывает худший случай доставки:
+                    # запрос + прохождение антибот-челленджа браузером в
+                    # trackerauth (до 45 с) + повтор запроса. С прежними
+                    # 60 с ответ отваливался бы по шине прямо посреди
+                    # успешного прохождения челленджа.
                     reply = await self.request("trackerauth.fetch", {
                         "service": service, "url": attempt_url,
-                        "timeout": 20}, timeout=60)
+                        "timeout": 20}, timeout=150)
                     if reply["status"] != 200:
                         raise SourceParseError(f"HTTP {reply['status']}")
                     html = reply["text"]
@@ -317,8 +322,10 @@ class SourcesModule(BaseModule):
         tracker = await self.repo.resolve(url)
         service = tracker["canonical_name"] if tracker else None
         if service in ("kinozal", "rutracker"):
+            # как и при разборе страницы: бюджет покрывает возможное
+            # прохождение антибот-челленджа браузером внутри trackerauth
             reply = await self.request("trackerauth.fetch", {
-                "service": service, "url": url, "timeout": 30}, timeout=90)
+                "service": service, "url": url, "timeout": 30}, timeout=150)
             if reply["status"] != 200:
                 raise SourceParseError(f"скачивание {url}: HTTP {reply['status']}")
             if "text" in reply:  # трекер вернул HTML вместо файла

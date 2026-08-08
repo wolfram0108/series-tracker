@@ -108,6 +108,7 @@ JS-слоя данных согласуются с пользователем.
 | Запуск (dev) | `.venv/bin/uvicorn run:app --port 5000` (без `ST_QBIT_URL` модуль torrents не стартует) |
 | Сборка фронта | `cd web && npm run build` |
 | Браузерная доставка (astar/anilibria_tv) | `.venv/bin/playwright install firefox` |
+| Антибот-челлендж rutracker (Cloudflare) | `.venv/bin/python -m camoufox fetch` |
 | Рестарт прода | `sudo systemctl restart series-tracker` (или `./restart.sh`) |
 
 qBittorrent — Docker, WebUI `:8080`; секреты — в `.env` (вне git, шаблон

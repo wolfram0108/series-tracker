@@ -35,6 +35,7 @@ cd series-tracker
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/playwright install firefox        # для astar/anilibria_tv
+.venv/bin/python -m camoufox fetch          # антибот-челлендж rutracker
 
 # 3. БД: миграции
 ST_DB_PATH=app.db .venv/bin/alembic upgrade head

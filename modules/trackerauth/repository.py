@@ -49,25 +49,40 @@ class TrackerAuthRepository:
             "url=excluded.url",
             (service, username, crypto.encrypt(password), url))
 
-    async def load_cookies(self, service: str, domain: str) -> dict | None:
+    async def load_session(self, service: str,
+                           domain: str) -> tuple[dict, str | None]:
+        """Куки сессии и User-Agent, которым они получены.
+
+        UA возвращается вместе с куками не для красоты: клирэнс
+        антибот-защиты (`cf_clearance`) действителен только в паре с тем
+        UA, под которым выдан, — врозь они бесполезны.
+        """
         row = await self._db.fetch_one(
-            "SELECT cookies_json FROM tracker_sessions "
+            "SELECT cookies_json, user_agent FROM tracker_sessions "
             "WHERE service=? AND domain=?", (service, domain))
-        return json.loads(crypto.decrypt(row["cookies_json"])) if row else None
+        if not row:
+            return {}, None
+        return json.loads(crypto.decrypt(row["cookies_json"])), row["user_agent"]
 
     async def save_cookies(self, service: str, domain: str,
                            session: requests.Session, *,
-                           logged_in: bool) -> None:
+                           logged_in: bool,
+                           user_agent: str | None = None) -> None:
+        # user_agent=NULL → не менять существующий (COALESCE): обычный
+        # запрос не должен затирать UA, добытый прохождением челленджа.
         now = _now()
         cookies = crypto.encrypt(json.dumps(session.cookies.get_dict()))
         await self._db.execute(
             "INSERT INTO tracker_sessions "
-            "(service, domain, cookies_json, last_login_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?) "
+            "(service, domain, cookies_json, last_login_at, updated_at, "
+            "user_agent) VALUES (?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(service, domain) DO UPDATE SET "
-            "cookies_json=excluded.cookies_json, updated_at=excluded.updated_at"
+            "cookies_json=excluded.cookies_json, "
+            "updated_at=excluded.updated_at, "
+            "user_agent=COALESCE(excluded.user_agent, tracker_sessions.user_agent)"
             + (", last_login_at=excluded.last_login_at" if logged_in else ""),
-            (service, domain, cookies, now if logged_in else None, now))
+            (service, domain, cookies, now if logged_in else None, now,
+             user_agent))
 
     async def encrypt_legacy_secrets(self) -> int:
         """Одноразовая миграция: зашифровать секреты, лежащие в открытом
