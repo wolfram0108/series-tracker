@@ -37,6 +37,16 @@ def test_all_candidates_ignored_yields_empty_plan():
     assert build_plan([ig]) == {}
 
 
+def test_reversed_range_candidate_excluded_not_crash():
+    """Живой кейс VK «... 201-110 серия»: episode_end < episode_start — не
+    одиночка (иначе пустой набор эпизодов уронит build_plan) и не
+    компиляция; кандидат просто выпадает из плана."""
+    garbage = _item("g", 201, end=110)
+    normal = _item("n", 1)
+    plan = build_plan([garbage, normal])
+    assert plan == {"n": "in_plan_single"}
+
+
 def test_user_priority_beats_resolution():
     # пользователь предпочитает 480 (например, меньше места)
     plan = build_plan([_item("lo", 1, resolution=480),

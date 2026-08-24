@@ -97,9 +97,15 @@ def build_plan(candidates: list[dict[str, Any]],
     # Игнор-сезоны (VU11): эпизоды этих сезонов в план не попадают — иначе
     # пометка «сезон не нужен» в UI не влияла бы на загрузку (был лишь
     # визуальный гасёж). Сезон None (не извлечён) не трогаем.
+    # Развёрнутый диапазон (episode_end < episode_start) — мусор из
+    # неоднозначного заголовка источника (напр. VK: «... 201-110 серия»);
+    # это не одиночка (для неё _episodes() даст пустое множество и уронит
+    # build_plan) и не компиляция — из планирования исключаем.
     candidates = [c for c in candidates
                   if not c.get("is_ignored_by_user")
-                  and c.get("season") not in ignored]
+                  and c.get("season") not in ignored
+                  and not (c.get("episode_end") is not None
+                           and c["episode_end"] < c["episode_start"])]
     full_range: set[Episode] = set()
     for item in candidates:
         full_range |= _episodes(item)
