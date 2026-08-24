@@ -220,7 +220,8 @@ class ScanModule(BaseModule):
         if profile_id and items:
             reply = await self.request("rules.apply", {
                 "profile_id": profile_id,
-                "titles": [i.get("source_title") or "" for i in items]},
+                "titles": [i.get("source_title") or "" for i in items],
+                "series_season": series.get("season")},
                 timeout=300)
             results = reply["results"]
         plan = []
@@ -386,7 +387,8 @@ class ScanModule(BaseModule):
 
         applied = await self.request("rules.apply", {
             "profile_id": series["parser_profile_id"],
-            "titles": [v["title"] for v in videos]}, timeout=300)
+            "titles": [v["title"] for v in videos],
+            "series_season": series.get("season")}, timeout=300)
         candidates = self._vk_candidates(series_id, videos,
                                          applied["results"])
         stats = await self.repo.upsert_candidates(series_id, candidates)

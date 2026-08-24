@@ -11,6 +11,7 @@ invalid_rules, не применяются, пишутся в лог ошибк�
 from __future__ import annotations
 
 from core import BaseModule
+from core import season as season_rule
 from core.db import Database
 from core.envelope import Envelope
 
@@ -58,14 +59,20 @@ class RulesModule(BaseModule):
     # --- queries -------------------------------------------------------------
 
     async def on_apply(self, env: Envelope) -> dict:
-        """payload: {profile_id, titles: [str, ...]}
+        """payload: {profile_id, titles: [str, ...], series_season?}
+        series_season — карточка сериала (односезонник), бьёт извлечённый
+        из заголовка сезон (core.season, единая точка резолва).
         reply:   {results: [{title, excluded, extracted, events, errors}],
                   invalid_rules: [...]}"""
         profile = await self._profile(int(env.payload["profile_id"]))
+        series_season = env.payload.get("series_season")
         results = []
         for title in env.payload["titles"]:
             outcome = process_title(profile, title)
             outcome["title"] = title
+            if not outcome.get("excluded"):
+                outcome["extracted"]["season"] = season_rule.resolve(
+                    series_season, outcome["extracted"].get("season"))
             results.append(outcome)
         return {"results": results, "invalid_rules": profile.invalid_rules}
 
@@ -166,6 +173,10 @@ class RulesModule(BaseModule):
                                                  p["original_path"])
         if season is None:
             return {"filename": None, "extracted": extracted}
+        # резолвленный сезон (карточка сериала могла его переопределить)
+        # обязан попасть в extracted_metadata — иначе композиция/агрегаты
+        # season, читающие persisted-запись, увидят сырое значение.
+        extracted["season"] = season
         name = formatter.format_name(
             series, extracted, original_filename=p["file_basename"],
             target_directory=f"Season {season:02d}")

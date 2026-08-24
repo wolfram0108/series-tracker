@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 import re
 
+from core import season as season_rule
+
 
 def sanitize(name: str) -> str:
     name = re.sub(r'[<>:"/\\|?*]', "", str(name))
@@ -37,17 +39,14 @@ def build_metadata(series: dict, media_item: dict, extracted: dict) -> dict:
         metadata["quality"] = series["quality_override"]
     if series.get("resolution_override"):
         metadata["resolution"] = series["resolution_override"]
-    if series.get("season"):  # односезонник: сезон сериала бьёт всё
-        metadata["season"] = series["season"]
+    # односезонник: сезон сериала бьёт всё (core.season — единая точка)
+    metadata["season"] = season_rule.resolve(series.get("season"),
+                                             metadata.get("season"))
     return metadata
 
 
 def _season_number(series: dict, metadata: dict) -> int:
-    series_season = series.get("season")
-    if series_season:
-        m = re.search(r"\d+", str(series_season))
-        return int(m.group(0)) if m else 1
-    season = metadata.get("season", 1)
+    season = season_rule.resolve(series.get("season"), metadata.get("season"))
     if isinstance(season, str):
         m = re.search(r"\d+", season)
         return int(m.group(0)) if m else 1
@@ -110,12 +109,10 @@ def torrent_season_folder(series: dict, extracted: dict,
     """Сезонная логика renaming_processor: номер сезона для папки
     'Season NN' или None («сезон не определён, файл пропустить» —
     возможно только у односезонника с нечитаемым series.season)."""
-    season_number = (extracted or {}).get("season")
+    season_number = season_rule.resolve(series.get("season"),
+                                        (extracted or {}).get("season"))
     if series.get("season"):  # односезонник: сезон из свойств сериала
-        m = re.search(r"\d+", str(series["season"]).strip())
-        if m:
-            return int(m.group())
-        return season_number  # как в оригинале: не разобрали — extracted
+        return season_number
     if season_number is None:  # многосезонник без сезона в имени
         if "specials" in os.path.dirname(original_path).lower():
             return 0
