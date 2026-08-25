@@ -117,6 +117,11 @@ class Neighbours(BaseModule):
             self.calls.append(("torrents.composition", env.payload))
             return [{"id": 1, "original_path": "Dir/T.S01E01.mkv"}]
 
+        async def series_prepare(env):
+            self.calls.append(("scan.series.prepare", env.payload))
+            return {"source_type": "torrent", "tasks_created": 1}
+
+        self.handle("scan.series.prepare", series_prepare)
         self.handle("downloads.fs.sync", fs_sync)
         self.handle("rules.apply", rules_apply)
         self.handle("rules.format_filename", format_filename)
@@ -230,6 +235,19 @@ async def test_composition_routes_by_source_type(system):
         "2026-01-01T00:00:00"
     assert plan["uid2"]["plan_status"]  # план пересобран
     assert ("fs.sync", {"series_id": 2}) in neighbours.calls
+
+
+@pytest.mark.asyncio
+async def test_torrent_refresh_prepares_composition(system):
+    """«Получить данные» торрент-серии: сначала добыть раздачу и разобрать
+    состав, потом отдать композицию."""
+    _, _, client, neighbours = system
+    resp = await client.get("/api/series/1/composition?refresh=true")
+    assert resp.status_code == 200
+    assert ("scan.series.prepare", {"series_id": 1}) in neighbours.calls
+    order = [c[0] for c in neighbours.calls]
+    assert order.index("scan.series.prepare") < \
+        order.index("torrents.composition")
 
 
 @pytest.mark.asyncio

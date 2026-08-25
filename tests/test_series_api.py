@@ -344,6 +344,15 @@ async def test_small_endpoints(system):
         "SELECT ignored_seasons FROM series WHERE id=1")
     assert json.loads(row["ignored_seasons"]) == [0, 3]
 
+    resp = await client.put("/api/series/1/ignored-episodes",
+                            json={"episodes": {"1": [5, 6]}})
+    assert resp.status_code == 200
+    row = await db.fetch_one(
+        "SELECT ignored_episodes FROM series WHERE id=1")
+    assert json.loads(row["ignored_episodes"]) == {"1": [5, 6]}
+    resp = await client.put("/api/series/1/ignored-episodes", json={})
+    assert resp.status_code == 400
+
     resp = await client.put("/api/series/2/vk-quality-priority",
                             json={"priority": ["1080p", "720p"]})
     assert resp.status_code == 200

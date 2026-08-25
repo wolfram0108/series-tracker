@@ -211,6 +211,23 @@ async def test_rolling_replace_single_active(system):
 
 
 @pytest.mark.asyncio
+async def test_prepare_registers_without_pipeline(system):
+    """«Получить данные»: раздача добывается, конвейер не запускается —
+    закачку начнёт следующий скан (drive_incomplete)."""
+    _, fake, probe, _ = system
+    fake.releases = [_release("https://dl.kinozal.me/download.php?id=1",
+                              "05.01.2026 12:00:00")]
+
+    reply = await probe.request("scan.series.prepare", {"series_id": 1},
+                                timeout=10)
+
+    assert reply["tasks_created"] == 1
+    assert fake.registered[0]["start_pipeline"] is False
+    assert fake.drive_calls == 0, "подготовка не снимает паузу"
+    assert fake.reprocess_calls == 0, "имена переименует сам скан"
+
+
+@pytest.mark.asyncio
 async def test_unchanged_release_is_skipped(system):
     _, fake, probe, _ = system
     link, date = "https://dl.kinozal.me/download.php?id=1", "01.01.2026 00:00:00"

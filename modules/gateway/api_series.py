@@ -244,6 +244,29 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return _error_response(exc)
         return {"success": True}
 
+    @r.put("/api/series/{series_id}/ignored-episodes",
+           response_model=OkResponse, response_model_exclude_none=True,
+           responses=_ERRORS)
+    async def ignored_episodes(series_id: int, request: Request):
+        """Память отключённых серий: {"episodes": {"<сезон>": [номера]}}.
+
+        Ключ — номер серии сериала, а не файл раздачи: выбор обязан
+        пережить замену релиза."""
+        data = await request.json()
+        episodes = data.get("episodes")
+        if episodes is None:
+            return JSONResponse(
+                {"success": False, "error": "Параметр 'episodes' не указан"},
+                status_code=400)
+        try:
+            await gw.request("catalog.series.update", {
+                "series_id": series_id,
+                "fields": {"ignored_episodes": json.dumps(episodes)}},
+                timeout=10)
+        except BusRequestError as exc:
+            return _error_response(exc)
+        return {"success": True}
+
     @r.put("/api/series/{series_id}/vk-quality-priority",
            response_model=OkResponse, response_model_exclude_none=True,
            responses=_ERRORS)

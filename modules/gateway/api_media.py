@@ -256,10 +256,14 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError:
             return JSONResponse({"error": "Сериал не найден"},
                                 status_code=404)
-        topic = ("scan.composition"
-                 if series.get("source_type") == "vk_video"
-                 else "torrents.composition")
+        is_vk = series.get("source_type") == "vk_video"
+        topic = "scan.composition" if is_vk else "torrents.composition"
         try:
+            if refresh and not is_vk:
+                # Торрентный аналог скрейпа VK: добыть раздачу и разобрать
+                # состав, не начиная закачку.
+                await gw.request("scan.series.prepare",
+                                 {"series_id": series_id}, timeout=900)
             plan = await gw.request(topic, {
                 "series_id": series_id, "refresh": refresh}, timeout=900)
         except BusRequestError as exc:

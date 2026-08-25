@@ -89,6 +89,7 @@ class SeriesObject(ApiModel):
     quality_override: str | None = None
     resolution_override: str | None = None
     ignored_seasons: str | None = None
+    ignored_episodes: str | None = None
     vk_quality_priority: str | None = None
     last_scan_time: str | None = None
     tmdb_info: TmdbInfo | None = None

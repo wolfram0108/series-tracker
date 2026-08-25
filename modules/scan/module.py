@@ -9,6 +9,11 @@ Queries:
       Повторный запуск при идущем скане сериала — ошибка («уже запущен»,
       находка 27).
 
+  scan.series.prepare {series_id} → сводка торрент-скана без запуска
+      закачки: раздача добавляется в qBittorrent, разбирается на состав
+      (torrent_files) и остаётся на паузе — пользователь отбирает серии
+      в композиции, закачку начинает следующий скан.
+
 Commands:
   scan.all.start {} — проход по всем сериалам с auto_scan_enabled
       (то же делает внутренний планировщик по расписанию из settings).
@@ -87,6 +92,7 @@ class ScanModule(BaseModule):
         # concurrent: долгий скан одного сериала не должен блокировать
         # очередь запросов к модулю (защита от гонки — set _running).
         self.handle("scan.series.run", self.on_run, concurrent=True)
+        self.handle("scan.series.prepare", self.on_prepare, concurrent=True)
         self.handle("scan.all.start", self.on_scan_all)
         self.handle("scan.media.list", self.on_media_list)
         self.handle("scan.media.downloaded_counts", self.on_downloaded_counts)
@@ -274,6 +280,11 @@ class ScanModule(BaseModule):
         """Каскад Р-19: владелец чистит media_items и scan_tasks."""
         await self.repo.delete_for_series(env.payload["series_id"])
 
+    async def on_prepare(self, env: Envelope) -> dict:
+        """Контракт «Получить данные» торрент-композиции: раздача попадает
+        в клиент и разбирается на состав, закачка не начинается."""
+        return await self._prepare_series(int(env.payload["series_id"]))
+
     async def on_scan_all(self, env: Envelope) -> dict:
         if self._scan_all_running:
             self.log.warning("полный проход уже идёт — повтор отклонён")
@@ -363,6 +374,33 @@ class ScanModule(BaseModule):
         except Exception as exc:
             # Носитель ошибки: error-запись в scan_tasks, если её не
             # оставила торрент-фаза.
+            if not await self._has_error_task(series_id):
+                task_id = await self.repo.create_task(series_id, [])
+                await self.repo.set_error(task_id, str(exc))
+            self._contribute(series_id, scanning=False, error=True)
+            raise
+        finally:
+            self._running.discard(series_id)
+
+    async def _prepare_series(self, series_id: int) -> dict:
+        """Состав раздачи для композиции без запуска закачки.
+
+        Отдельный путь, а не флаг скана: здесь нет ни переобработки имён,
+        ни диспетчеризации — только «добудь раздачу и покажи, что в ней»."""
+        if series_id in self._running:
+            raise ScanError(f"скан сериала {series_id} уже запущен")
+        self._running.add(series_id)
+        self._contribute(series_id, scanning=True, error=False)
+        try:
+            series = await self.request("catalog.series.get",
+                                        {"series_id": series_id})
+            if series["source_type"] == "vk_video":
+                raise ScanError("подготовка состава — только для торрентов")
+            await self.repo.delete_error_tasks(series_id)
+            result = await self._scan_torrents(series, False, prepare=True)
+            self._contribute(series_id, scanning=False, error=False)
+            return result
+        except Exception as exc:
             if not await self._has_error_task(series_id):
                 task_id = await self.repo.create_task(series_id, [])
                 await self.repo.set_error(task_id, str(exc))
@@ -480,7 +518,8 @@ class ScanModule(BaseModule):
 
     # --- торрент-ветка -------------------------------------------------------------
 
-    async def _scan_torrents(self, series: dict, force: bool) -> dict:
+    async def _scan_torrents(self, series: dict, force: bool,
+                             prepare: bool = False) -> dict:
         series_id = series["id"]
         # Сверка файлов на диске (R1, ситуации F1/F2): пропавший renamed-файл
         # → recheck-задача (восстановление средствами qB). Легаси делал это
@@ -490,9 +529,11 @@ class ScanModule(BaseModule):
             await self.request("torrents.fs.verify",
                                {"series_id": series_id}, timeout=120)
             # реконсиляция застрявших раздач (P10): активная, но не докачана
-            # и без задачи → загнать в конвейер заново.
-            await self.request("torrents.drive_incomplete",
-                               {"series_id": series_id}, timeout=120)
+            # и без задачи → загнать в конвейер заново. В режиме подготовки
+            # пропускается: она бы сняла паузу до выбора серий.
+            if not prepare:
+                await self.request("torrents.drive_incomplete",
+                                   {"series_id": series_id}, timeout=120)
         except BusRequestError as exc:
             self.log.warning("сверка файлов перед сканом пропущена: %s", exc)
         if force:
@@ -513,7 +554,7 @@ class ScanModule(BaseModule):
 
         task_id = await self.repo.create_task(series_id, plan_items)
         return await self._execute_torrent_task(
-            task_id, series, plan_items, {})
+            task_id, series, plan_items, {}, prepare=prepare)
 
     def _replace_plan(self, series: dict, parsed: dict,
                       active: list[dict]) -> list[dict]:
@@ -561,9 +602,13 @@ class ScanModule(BaseModule):
 
     async def _execute_torrent_task(self, task_id: int, series: dict,
                                     plan_items: list[dict],
-                                    results: dict) -> dict:
+                                    results: dict,
+                                    prepare: bool = False) -> dict:
         """Выполнение журнала: каждый шаг идемпотентен, результаты
-        фиксируются по мере — после падения продолжаем отсюда же."""
+        фиксируются по мере — после падения продолжаем отсюда же.
+
+        prepare — раздача добавляется и разбирается на состав, но в
+        конвейер не идёт: закачку запускает следующий скан."""
         series_id = series["id"]
         try:
             for idx, item in enumerate(plan_items):
@@ -597,7 +642,8 @@ class ScanModule(BaseModule):
                     "torrent": item["site_torrent"],
                     "qb_hash": res["hash"],
                     "link_type": res["link_type"],
-                    "replaces": item["old"]}, timeout=120)
+                    "replaces": item["old"],
+                    "start_pipeline": not prepare}, timeout=600)
                 # existed=True — тот же infohash (перевыкладка, ПУНКТ 3):
                 # ничего не создано, в «изменения» не идёт.
                 if not (reg or {}).get("existed"):
