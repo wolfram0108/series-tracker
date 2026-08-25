@@ -11,13 +11,18 @@
 Queries/commands конвейера (контракты Р-12, их ждёт scan):
   torrents.db.active {series_id}        → активные раздачи, сверенные с qBit
   torrents.db.deactivate_all {series_id} → для force_replace
-  torrents.register {series_id, torrent, qb_hash, link_type, replaces}
+  torrents.register {series_id, torrent, qb_hash, link_type, replaces,
+      start_pipeline?}
       — фиксация раздачи по ИДЕНТИЧНОСТИ infohash (qb_hash), не по ярлыку
         с трекера. Тот же infohash уже у серии → ничего не качаем, лишь
         переклеиваем ярлык (ПУНКТ 3). Новый infohash → старую раздачу
         убрать из qBit, прежнюю строку пометить «заменена» (история),
         новую — в конвейер (ПУНКТ 4). replaces.db_id — точная строка для
-        деактивации (по id, не по ярлыку: иначе деактивируется не та)
+        деактивации (по id, не по ярлыку: иначе деактивируется не та).
+        start_pipeline=false — подготовка состава: метаданные, разбор
+        правилами в torrent_files и приоритеты файлов, БЕЗ задачи
+        конвейера. Раздача стоит на паузе, пока пользователь отбирает
+        серии; ближайший скан подхватит её штатным drive_incomplete
   torrents.queue.get {series_id?}       → {count, tasks}
   torrents.fs.verify {series_id}        → {missing, recheck_started}
       — проверка файлов на диске + recheck-задачи для пропавших
@@ -38,6 +43,15 @@ sync_torrent_statuses), torrents.preview.ready {torrent_id, infohash, name,
 files} / torrents.preview.failed {torrent_id, infohash, reason} (→ SSE:
 предпросмотр нейминга при добавлении).
 
+Выборочная загрузка. Память исключений живёт в сериале
+(series.ignored_seasons + series.ignored_episodes, владелец catalog) и
+потому переживает замену раздачи; torrent_files.is_excluded — её
+проекция на файлы текущего релиза, из неё считаются приоритеты qBit
+(0 — не качать). Качается только распознанное и не исключённое,
+единственная точка правды — selection.py. Проекция пересобирается на
+изменение памяти (событие series.updated) и на изменение состава
+(torrents.db.files.upsert).
+
 Переименование файлов — query renaming.process_torrent (зона renaming);
 мониторинг прогресса — адаптивный опрос qBit (часто при активности,
 редко в покое), события только при изменениях.
@@ -54,7 +68,7 @@ from core import BaseModule, BusRequestError
 from core.db import Database
 from core.envelope import Envelope
 
-from . import pipeline
+from . import pipeline, selection
 from .infohash import (TorrentParseError, infohash_candidates,
                        infohash_from_magnet, torrent_file_list)
 from .qbt_client import QbtClient, QbtError
@@ -110,6 +124,7 @@ class TorrentsModule(BaseModule):
         self._preview_tasks: set[asyncio.Task] = set()
         self._preview_save_path: str | None = None
         self._progress_snapshot: str | None = None
+        self._selection_locks: dict[str, asyncio.Lock] = {}
         self._has_incomplete = False
         self._pipeline_poll = pipeline_poll
         self._monitor_active = monitor_active
@@ -148,6 +163,7 @@ class TorrentsModule(BaseModule):
         self.handle("torrents.composition", self.on_composition,
                     concurrent=True)
         self.handle("series.deleted", self.on_series_deleted)
+        self.handle("series.updated", self.on_series_updated)
         self.handle("trackerauth.credentials.changed",
                     self.on_credentials_changed)
 
@@ -442,6 +458,149 @@ class TorrentsModule(BaseModule):
         await self.qbt.set_location(env.payload["hash"],
                                     env.payload["location"])
 
+    # --- выборочная загрузка -----------------------------------------------------------
+
+    @staticmethod
+    def _memory_of(series: dict) -> tuple[set[int], dict[int, set[int]]]:
+        """Память исключений сериала: сезоны и номера серий."""
+        try:
+            seasons = {int(s) for s in
+                       json.loads(series.get("ignored_seasons") or "[]")}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            seasons = set()
+        try:
+            episodes = selection.parse_memory(
+                json.loads(series.get("ignored_episodes") or "{}"))
+        except (json.JSONDecodeError, TypeError):
+            episodes = {}
+        return seasons, episodes
+
+    async def _project_and_apply(self, series_id: int, *,
+                                 allow_resume: bool) -> int:
+        """Память сериала -> колонка is_excluded -> приоритеты в qBit."""
+        try:
+            series = await self.request("catalog.series.get",
+                                        {"series_id": series_id})
+        except BusRequestError as exc:
+            self.log.warning("серия %d: память исключений не получена: %s",
+                             series_id, exc)
+            return 0
+        seasons, episodes = self._memory_of(series)
+        changed = await self.repo.project_selection(series_id, seasons,
+                                                    episodes)
+        for qb_hash in await self.repo.active_hashes(series_id):
+            await self._apply_selection(qb_hash, allow_resume=allow_resume)
+        return changed
+
+    async def _apply_selection(self, qb_hash: str, *,
+                               allow_resume: bool) -> None:
+        """Единственная точка, где выбор превращается в приоритеты qBit.
+
+        БД остаётся истиной: сбой qBit только логируется — ближайшая
+        сверка файлов применит приоритеты заново."""
+        lock = self._selection_locks.setdefault(qb_hash, asyncio.Lock())
+        async with lock:
+            rows = await self.repo.files_by_hash(qb_hash)
+            try:
+                qb_files = await self.qbt.torrent_files(qb_hash) or []
+            except QbtError as exc:
+                self.log.warning("[%s] состав раздачи не получен: %s",
+                                 qb_hash[:8], exc)
+                return
+            plan = selection.resolve(rows, qb_files)
+            if plan.unmatched:
+                self.log.warning("[%s] файлы БД не найдены в раздаче: %s",
+                                 qb_hash[:8], ", ".join(plan.unmatched[:5]))
+            if not plan.to_disable and not plan.to_enable:
+                return
+            try:
+                await self.qbt.set_file_priority(qb_hash, plan.to_disable,
+                                                 selection.PRIORITY_SKIP)
+                await self.qbt.set_file_priority(qb_hash, plan.to_enable,
+                                                 selection.PRIORITY_NORMAL)
+            except QbtError as exc:
+                self.log.warning("[%s] приоритеты файлов не применены: %s",
+                                 qb_hash[:8], exc)
+                return
+            self.log.info("[%s] выбор применён: выключено %d, включено %d",
+                          qb_hash[:8], len(plan.to_disable),
+                          len(plan.to_enable))
+            if plan.to_enable and allow_resume:
+                await self._resume_for_new_files(qb_hash)
+
+    async def _resume_for_new_files(self, qb_hash: str) -> None:
+        """Вернули серию в план — qBit докачает её только запущенным.
+
+        Раздачу в конвейере не трогаем: инвариант ядра требует паузы до
+        конца переименования."""
+        if qb_hash in self._pipe or await self.repo.task_by_hash(qb_hash):
+            return
+        try:
+            infos = await self.qbt.torrents_info([qb_hash])
+        except QbtError:
+            return
+        info = next((i for i in infos if i.get("hash") == qb_hash), None)
+        if info and info.get("state") in pipeline.PAUSED:
+            await self.qbt.resume([qb_hash])
+            self.log.info("[%s] раздача возобновлена: состав расширен",
+                          qb_hash[:8])
+
+    async def _prepare_composition(self, series_id: int,
+                                   qb_hash: str) -> None:
+        """Состав раздачи в БД до закачки: метаданные → правила →
+        приоритеты. Торрент всё это время стоит на паузе."""
+        if not await self._await_metadata(qb_hash):
+            self.log.warning("[%s] метаданные не получены — состав не "
+                             "построен", qb_hash[:8])
+            return
+        await self.request("renaming.process_torrent", {
+            "series_id": series_id, "qb_hash": qb_hash, "dry_run": True},
+            timeout=300)
+        await self._project_and_apply(series_id, allow_resume=False)
+
+    async def _await_metadata(self, qb_hash: str,
+                              attempts: int = 60) -> bool:
+        """Дождаться списка файлов. magnet отдаёт метаданные только
+        запущенным, поэтому его на это время запускаем и сразу возвращаем
+        на паузу — то же исключение из инварианта, что и в конвейере."""
+        started = False
+        try:
+            for _ in range(attempts):
+                infos = await self.qbt.torrents_info([qb_hash])
+                info = next((i for i in infos
+                             if i.get("hash") == qb_hash), None)
+                if info is None:
+                    return False
+                if info.get("total_size", 0) > 0:
+                    return True
+                if not started:
+                    await self.qbt.resume([qb_hash])
+                    started = True
+                await asyncio.sleep(self._pipeline_poll)
+            return False
+        except QbtError as exc:
+            self.log.warning("[%s] ожидание метаданных прервано: %s",
+                             qb_hash[:8], exc)
+            return False
+        finally:
+            if started:
+                try:
+                    await self.qbt.pause([qb_hash])
+                except QbtError:
+                    self.log.warning("[%s] пауза после метаданных не "
+                                     "поставлена", qb_hash[:8])
+
+    async def on_series_updated(self, env: Envelope) -> None:
+        """Память исключений изменилась — пересобрать план загрузки."""
+        payload = env.payload or {}
+        if not ({"ignored_seasons", "ignored_episodes"} & set(payload)):
+            return
+        await self._project_and_apply(int(payload["series_id"]),
+                                      allow_resume=True)
+        await self._broadcast_downloaded(int(payload["series_id"]))
+        self.send_command("metadata.seasons.recompute",
+                          {"series_id": int(payload["series_id"])})
+
     # --- реестр раздач (контракты Р-12) ----------------------------------------------
 
     async def on_db_active(self, env: Envelope) -> list[dict]:
@@ -473,6 +632,10 @@ class TorrentsModule(BaseModule):
             raise LookupError(
                 f"торрент {env.payload['qb_hash'][:8]} не найден в БД")
         await self.repo.upsert_files(row["id"], env.payload["files"])
+        # Состав раздачи сменился (новый релиз, переприменение правил) —
+        # проекция памяти восстанавливает выбор пользователя на новых
+        # строках до того, как qBit начнёт качать лишнее.
+        await self._project_and_apply(row["series_id"], allow_resume=False)
         await self._broadcast_downloaded(row["series_id"])  # Д1
         return {"count": len(env.payload["files"])}
 
@@ -493,9 +656,22 @@ class TorrentsModule(BaseModule):
             return {"existed": True}
 
         link_type = p.get("link_type", "file")
+        start_pipeline = bool(p.get("start_pipeline", True))
         task_row = await self.repo.task_by_hash(qb_hash)
         is_error_retry = bool(task_row and task_row["stage"] == pipeline.ERROR)
         known = await self.repo.row_by_hash(series_id, qb_hash)
+
+        if not start_pipeline:
+            # Подготовка состава: раздача остаётся на паузе, задача
+            # конвейера не создаётся — закачка не начнётся, пока
+            # пользователь не отберёт серии и не запустит скан.
+            if known:
+                await self.repo.refresh_listing(known["id"], torrent, qb_hash)
+            else:
+                await self.repo.upsert_registered(series_id, torrent, qb_hash)
+                await self._retire_replaced(torrent, replaces, qb_hash)
+            await self._prepare_composition(series_id, qb_hash)
+            return {"existed": bool(known), "prepared": True}
 
         if known and not is_error_retry:
             # ПУНКТ 3 — но «ничего не делать» ТОЛЬКО если раздача реально
@@ -513,25 +689,31 @@ class TorrentsModule(BaseModule):
         # ПУНКТ 4 (или перезапуск после ошибки): новый infohash → активной.
         await self.repo.upsert_registered(series_id, torrent, qb_hash)
 
-        old_torrent_id = "None"
-        if replaces and replaces.get("torrent_id") != torrent["torrent_id"]:
-            old_torrent_id = replaces.get("torrent_id") or "None"
-            old_db_id = replaces.get("db_id")
-            if old_db_id is not None:
-                # точная строка по db_id (история сохраняется, файлы снимаются)
-                await self.repo.deactivate_and_clear_files(old_db_id)
-            old_hash = replaces.get("qb_hash")
-            if old_hash and old_hash != qb_hash:
-                # новый infohash → старую раздачу убрать из qBit (обязательно)
-                try:
-                    await self.qbt.delete([old_hash], delete_files=False)
-                except QbtError as exc:
-                    self.log.warning("замена: старый торрент %s не удалён "
-                                     "из qBit: %s", old_hash[:8], exc)
-
+        old_torrent_id = await self._retire_replaced(torrent, replaces,
+                                                     qb_hash)
         await self._enter_pipeline(qb_hash, series_id, torrent, link_type,
                                    old_torrent_id)
         return {"existed": False}
+
+    async def _retire_replaced(self, torrent: dict, replaces: dict | None,
+                               qb_hash: str) -> str:
+        """ПУНКТ 4: прежнюю раздачу — в историю, из qBit убрать."""
+        if not replaces or replaces.get("torrent_id") == torrent["torrent_id"]:
+            return "None"
+        old_torrent_id = replaces.get("torrent_id") or "None"
+        old_db_id = replaces.get("db_id")
+        if old_db_id is not None:
+            # точная строка по db_id (история сохраняется, файлы снимаются)
+            await self.repo.deactivate_and_clear_files(old_db_id)
+        old_hash = replaces.get("qb_hash")
+        if old_hash and old_hash != qb_hash:
+            # новый infohash → старую раздачу убрать из qBit (обязательно)
+            try:
+                await self.qbt.delete([old_hash], delete_files=False)
+            except QbtError as exc:
+                self.log.warning("замена: старый торрент %s не удалён "
+                                 "из qBit: %s", old_hash[:8], exc)
+        return old_torrent_id
 
     async def _is_complete_in_qb(self, qb_hash: str) -> bool:
         """Раздача реально докачана и здорова в qBit (а не просто известна
@@ -598,6 +780,8 @@ class TorrentsModule(BaseModule):
             present = await asyncio.to_thread(
                 os.path.exists,
                 os.path.join(series["save_path"], current))
+            excluded = {"is_excluded": bool(f.get("is_excluded")),
+                        "exclude_reason": f.get("exclude_reason")}
             if not has_profile:
                 # как в оригинале: без профиля — сохранённые метаданные
                 meta = f.get("extracted_metadata")
@@ -608,7 +792,7 @@ class TorrentsModule(BaseModule):
                     "extracted_metadata":
                         json.loads(meta) if meta else {},
                     "is_file_present": present,
-                    "qb_hash": f.get("qb_hash")})
+                    "qb_hash": f.get("qb_hash"), **excluded})
                 continue
             reply = await self.request("rules.format_torrent_file", {
                 "series": series,
@@ -622,8 +806,41 @@ class TorrentsModule(BaseModule):
                 "extracted_metadata": reply.get("extracted") or {},
                 "is_file_present": present,
                 "qb_hash": f.get("qb_hash"),
-                "is_mismatch": current != preview})
+                "is_mismatch": current != preview, **excluded})
+        plan.extend(await self._unregistered_files(series_id, files))
         return plan
+
+    async def _unregistered_files(self, series_id: int,
+                                  known: list[dict]) -> list[dict]:
+        """Файлы раздачи, которых нет в реестре: правила их не разобрали,
+        качаться они не будут — пользователь должен это видеть, а не
+        гадать, куда делась половина раздачи."""
+        seen = {f.get("renamed_path") or f["original_path"] for f in known}
+        seen |= {f["original_path"] for f in known}
+        extra: list[dict] = []
+        for qb_hash in await self.repo.active_hashes(series_id):
+            try:
+                qb_files = await self.qbt.torrent_files(qb_hash) or []
+            except QbtError as exc:
+                self.log.warning("[%s] состав для композиции не получен: %s",
+                                 qb_hash[:8], exc)
+                continue
+            for position, qb_file in enumerate(qb_files):
+                name = qb_file.get("name") or ""
+                if name in seen:
+                    continue
+                extra.append({
+                    "id": f"qb-{qb_hash[:8]}-{qb_file.get('index', position)}",
+                    "original_path": name,
+                    "renamed_path_preview": name,
+                    "status": "unregistered",
+                    "extracted_metadata": {},
+                    "is_file_present": False,
+                    "qb_hash": qb_hash,
+                    "is_mismatch": False,
+                    "is_excluded": True,
+                    "exclude_reason": selection.REASON_UNRECOGNIZED})
+        return extra
 
     async def on_db_add(self, env: Envelope) -> dict:
         """Раздачи формы добавления серии — только реестр в БД, без qBit
@@ -692,6 +909,10 @@ class TorrentsModule(BaseModule):
         missing_hashes: set[str] = set()
         missing = 0
         for f in await self.repo.files_for_series(series_id):
+            # Исключённого файла на диске нет по замыслу: без этой ветки
+            # он на каждом скане уезжал бы в missing и тянул recheck.
+            if f.get("is_excluded"):
+                continue
             if f.get("progress", 0) < 100 or not f.get("renamed_path"):
                 continue
             path = os.path.join(series["save_path"], f["renamed_path"])
@@ -727,6 +948,9 @@ class TorrentsModule(BaseModule):
             self._wake.set()
             self._broadcast_queue()
             await self._contribute(series_id)
+        # Точка самолечения: приоритеты в qBit могли разойтись с БД
+        # (клиент был недоступен, раздачу правили руками).
+        await self._project_and_apply(series_id, allow_resume=False)
         await self._broadcast_downloaded(series_id)  # Д1: missing меняет счёт
         return {"missing": missing, "recheck_started": started}
 
@@ -948,9 +1172,14 @@ class TorrentsModule(BaseModule):
             flag = pipeline.STAGE_FLAGS.get(task["stage"])
             if flag:
                 flags[flag] = True
+        # Раздача, где не нужен ни один файл, отдаёт progress=100 (качать
+        # нечего) — «готов» по ней был бы враньём.
+        fully_excluded = await self.repo.fully_excluded_hashes(series_id)
         for row in await self.repo.torrent_progress(series_id):
             if row["status"] in _ERROR_STATES:
                 flags["error"] = True
+            elif row["task_key"] in fully_excluded:
+                continue
             elif row["progress"] >= 100:
                 flags["ready"] = True
             elif row["status"] in _IDLE_STATES:
