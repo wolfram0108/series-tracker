@@ -434,7 +434,7 @@ onMounted(loadProfiles)
           <span>Шаг 3: Тестирование профиля</span>
           <i class="pi pi-chevron-down acc-chevron" />
         </button>
-        <div v-if="openStep === 'test'" class="accordion-body">
+        <div v-show="openStep === 'test'" class="accordion-body">
           <ParserTest
             :key="selectedProfileId"
             :profile-id="selectedProfileId"
