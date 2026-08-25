@@ -475,6 +475,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/series/{series_id}/media-items/ignore-season": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Ignored Bulk */
+        put: operations["set_ignored_bulk_api_series__series_id__media_items_ignore_season_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/media-items/{unique_id}/chapters": {
         parameters: {
             query?: never;
@@ -780,10 +797,10 @@ export interface paths {
             cookie?: never;
         };
         /** Force Replace */
-        get: operations["force_replace_api_settings_force_replace_post"];
+        get: operations["force_replace_api_settings_force_replace_get"];
         put?: never;
         /** Force Replace */
-        post: operations["force_replace_api_settings_force_replace_post"];
+        post: operations["force_replace_api_settings_force_replace_get"];
         delete?: never;
         options?: never;
         head?: never;
@@ -798,10 +815,10 @@ export interface paths {
             cookie?: never;
         };
         /** Less Strict Scan */
-        get: operations["less_strict_scan_api_settings_less_strict_scan_post"];
+        get: operations["less_strict_scan_api_settings_less_strict_scan_get"];
         put?: never;
         /** Less Strict Scan */
-        post: operations["less_strict_scan_api_settings_less_strict_scan_post"];
+        post: operations["less_strict_scan_api_settings_less_strict_scan_get"];
         delete?: never;
         options?: never;
         head?: never;
@@ -816,10 +833,10 @@ export interface paths {
             cookie?: never;
         };
         /** Slicing Delete Source */
-        get: operations["slicing_delete_source_api_settings_slicing_delete_source_post"];
+        get: operations["slicing_delete_source_api_settings_slicing_delete_source_get"];
         put?: never;
         /** Slicing Delete Source */
-        post: operations["slicing_delete_source_api_settings_slicing_delete_source_post"];
+        post: operations["slicing_delete_source_api_settings_slicing_delete_source_get"];
         delete?: never;
         options?: never;
         head?: never;
@@ -834,10 +851,10 @@ export interface paths {
             cookie?: never;
         };
         /** Parallel Downloads */
-        get: operations["parallel_downloads_api_settings_parallel_downloads_post"];
+        get: operations["parallel_downloads_api_settings_parallel_downloads_get"];
         put?: never;
         /** Parallel Downloads */
-        post: operations["parallel_downloads_api_settings_parallel_downloads_post"];
+        post: operations["parallel_downloads_api_settings_parallel_downloads_get"];
         delete?: never;
         options?: never;
         head?: never;
@@ -856,14 +873,14 @@ export interface paths {
          * @description Число параллельных фрагментов yt-dlp (-N) — ускорение одной
          *     загрузки на hls-потоках.
          */
-        get: operations["concurrent_fragments_api_settings_concurrent_fragments_post"];
+        get: operations["concurrent_fragments_api_settings_concurrent_fragments_get"];
         put?: never;
         /**
          * Concurrent Fragments
          * @description Число параллельных фрагментов yt-dlp (-N) — ускорение одной
          *     загрузки на hls-потоках.
          */
-        post: operations["concurrent_fragments_api_settings_concurrent_fragments_post"];
+        post: operations["concurrent_fragments_api_settings_concurrent_fragments_get"];
         delete?: never;
         options?: never;
         head?: never;
@@ -909,10 +926,10 @@ export interface paths {
             cookie?: never;
         };
         /** Debug Flags */
-        get: operations["debug_flags_api_settings_debug_flags_post"];
+        get: operations["debug_flags_api_settings_debug_flags_get"];
         put?: never;
         /** Debug Flags */
-        post: operations["debug_flags_api_settings_debug_flags_post"];
+        post: operations["debug_flags_api_settings_debug_flags_get"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2467,6 +2484,73 @@ export interface operations {
             };
         };
     };
+    set_ignored_bulk_api_series__series_id__media_items_ignore_season_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     chapters_api_media_items__unique_id__chapters_post: {
         parameters: {
             query?: never;
@@ -3343,7 +3427,7 @@ export interface operations {
             };
         };
     };
-    force_replace_api_settings_force_replace_post: {
+    force_replace_api_settings_force_replace_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3363,7 +3447,7 @@ export interface operations {
             };
         };
     };
-    force_replace_api_settings_force_replace_post: {
+    force_replace_api_settings_force_replace_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3383,7 +3467,7 @@ export interface operations {
             };
         };
     };
-    less_strict_scan_api_settings_less_strict_scan_post: {
+    less_strict_scan_api_settings_less_strict_scan_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3403,7 +3487,7 @@ export interface operations {
             };
         };
     };
-    less_strict_scan_api_settings_less_strict_scan_post: {
+    less_strict_scan_api_settings_less_strict_scan_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3423,7 +3507,7 @@ export interface operations {
             };
         };
     };
-    slicing_delete_source_api_settings_slicing_delete_source_post: {
+    slicing_delete_source_api_settings_slicing_delete_source_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3443,7 +3527,7 @@ export interface operations {
             };
         };
     };
-    slicing_delete_source_api_settings_slicing_delete_source_post: {
+    slicing_delete_source_api_settings_slicing_delete_source_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3463,7 +3547,7 @@ export interface operations {
             };
         };
     };
-    parallel_downloads_api_settings_parallel_downloads_post: {
+    parallel_downloads_api_settings_parallel_downloads_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3483,7 +3567,7 @@ export interface operations {
             };
         };
     };
-    parallel_downloads_api_settings_parallel_downloads_post: {
+    parallel_downloads_api_settings_parallel_downloads_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3503,7 +3587,7 @@ export interface operations {
             };
         };
     };
-    concurrent_fragments_api_settings_concurrent_fragments_post: {
+    concurrent_fragments_api_settings_concurrent_fragments_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3523,27 +3607,7 @@ export interface operations {
             };
         };
     };
-    concurrent_fragments_api_settings_concurrent_fragments_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DynamicObject"];
-                };
-            };
-        };
-    };
-    saved_paths_api_settings_saved_paths_delete: {
+    concurrent_fragments_api_settings_concurrent_fragments_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3603,7 +3667,27 @@ export interface operations {
             };
         };
     };
-    debug_flags_api_settings_debug_flags_post: {
+    saved_paths_api_settings_saved_paths_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DynamicObject"];
+                };
+            };
+        };
+    };
+    debug_flags_api_settings_debug_flags_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3668,7 +3752,7 @@ export interface operations {
             };
         };
     };
-    debug_flags_api_settings_debug_flags_post: {
+    debug_flags_api_settings_debug_flags_get: {
         parameters: {
             query?: never;
             header?: never;

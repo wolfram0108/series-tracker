@@ -10,7 +10,7 @@
 | Модуль | Топики |
 |---|---|
 | catalog | series.list, series.get, status.get, series.create/update/delete (Р-19), series.set_save_path, series.touch_scan_time, viewing.start/stop |
-| scan | series.run {series_id, force_replace?}, all.start → {started}, status.get, composition {series_id, refresh?} (Р-21), media.list, media.downloaded_counts, item.set_ignored (+ scan.plan.updated) |
+| scan | series.run {series_id, force_replace?}, all.start → {started}, status.get, composition {series_id, refresh?} (Р-21), media.list, media.downloaded_counts, item.set_ignored (+ scan.plan.updated), items.set_ignored_bulk {series_id, season, is_ignored} (+ scan.plan.updated) |
 | sources | parse {url} (+torrent_id из core/ids), torrent_file.get/drop, trackers.list, tracker.resolve {url}, tracker.set_mirrors (Р-22), vk.scan |
 | rules | apply, test (Р-22), profiles.list/create/update/delete, rules.list/add/update/delete/reorder (Р-22), cache.invalidate, format_filename, format_torrent_file |
 | torrents | add, info.get, files.get, pause/resume/recheck/delete, rename_file, set_location, db.active, db.deactivate_all, db.files.list/upsert, db.files.for_series, db.history, db.add, db.downloaded_counts, db.progress.list (Р-23), composition (Р-21), register, queue.get, fs.verify |

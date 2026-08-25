@@ -186,6 +186,13 @@ class ScanRepository:
             "UPDATE media_items SET is_ignored_by_user=? WHERE unique_id=?",
             (1 if ignored else 0, unique_id))
 
+    async def set_ignored_bulk_for_season(self, series_id: int, season: int,
+                                          ignored: bool) -> int:
+        return await self._db.execute(
+            "UPDATE media_items SET is_ignored_by_user=? "
+            "WHERE series_id=? AND season=?",
+            (1 if ignored else 0, series_id, season))
+
     async def get_item(self, unique_id: str) -> dict | None:
         return await self._db.fetch_one(
             "SELECT * FROM media_items WHERE unique_id=?", (unique_id,))

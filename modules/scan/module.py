@@ -92,6 +92,7 @@ class ScanModule(BaseModule):
         self.handle("scan.media.downloaded_counts", self.on_downloaded_counts)
         self.handle("scan.seasons", self.on_seasons)
         self.handle("scan.item.set_ignored", self.on_set_ignored)
+        self.handle("scan.items.set_ignored_bulk", self.on_set_ignored_bulk)
         self.handle("scan.composition", self.on_composition, concurrent=True)
         self.handle("scan.status.get", self.on_status_get)
         self.handle("torrents.queue.changed", self.on_queue_changed)
@@ -146,6 +147,19 @@ class ScanModule(BaseModule):
         if item:
             self.publish_event("scan.plan.updated",
                                {"series_id": item["series_id"]})
+
+    async def on_set_ignored_bulk(self, env: Envelope) -> dict:
+        """Второй, независимый от ignored_seasons контрол: разовая массовая
+        правка is_ignored_by_user по текущим элементам ОДНОГО сезона.
+        ignored_seasons (декларативная политика, влияет и на будущие
+        эпизоды) не трогаем — здесь только снимок media_items на сейчас,
+        новые эпизоды сезона по умолчанию останутся is_ignored_by_user=0."""
+        series_id = env.payload["series_id"]
+        n = await self.repo.set_ignored_bulk_for_season(
+            series_id, int(env.payload["season"]),
+            bool(env.payload["is_ignored"]))
+        self.publish_event("scan.plan.updated", {"series_id": series_id})
+        return {"updated": n}
 
     async def on_composition(self, env: Envelope) -> list[dict]:
         """Контракт GET composition для VK-серий (Р-21): при refresh —

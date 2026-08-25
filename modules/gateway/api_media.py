@@ -70,6 +70,22 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             "unique_id": unique_id, "is_ignored": bool(is_ignored)})
         return {"success": True}
 
+    @r.put("/api/series/{series_id}/media-items/ignore-season",
+           response_model=OkResponse, response_model_exclude_none=True,
+           responses=_ERR)
+    async def set_ignored_bulk(series_id: int, request: Request):
+        data = await request.json()
+        season, is_ignored = data.get("season"), data.get("is_ignored")
+        if season is None or is_ignored is None:
+            return JSONResponse({"success": False,
+                                 "error": "Параметр season/is_ignored не "
+                                          "указан"},
+                                status_code=400)
+        gw.send_command("scan.items.set_ignored_bulk", {
+            "series_id": series_id, "season": int(season),
+            "is_ignored": bool(is_ignored)})
+        return {"success": True}
+
     # --- главы и нарезка ----------------------------------------------------------
 
     @r.post("/api/media-items/{unique_id}/chapters",

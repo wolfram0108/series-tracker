@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from "vue"
 import { useToast } from "primevue/usetoast"
 import Button from "primevue/button"
+import Checkbox from "primevue/checkbox"
 import ToggleSwitch from "primevue/toggleswitch"
 import draggable from "vuedraggable"
 import { api } from "../../api/client"
@@ -328,6 +329,34 @@ async function toggleItemIgnored(it: Item) {
   )
   if (ok === null) it.is_ignored_by_user = !next // откат
 }
+// Второй, независимый от ignored_seasons контрол сезона: массово гасит/зажигает
+// is_ignored_by_user у ТЕКУЩИХ элементов сезона; будущие эпизоды не затрагивает.
+function seasonMediaItems(s: string): MediaItem[] {
+  return mediaItems.value.filter((m) => String(m.season ?? "undefined") === s)
+}
+function seasonBulkState(s: string): "on" | "off" | "mixed" {
+  const items = seasonMediaItems(s)
+  if (!items.length) return "on"
+  const ignoredCount = items.filter((m) => m.is_ignored_by_user).length
+  if (ignoredCount === 0) return "on"
+  if (ignoredCount === items.length) return "off"
+  return "mixed"
+}
+async function bulkSetSeasonIgnored(s: string) {
+  const items = seasonMediaItems(s)
+  if (!items.length) return
+  const nextIgnored = seasonBulkState(s) !== "off"
+  const ok = await request(
+    api.PUT("/api/series/{series_id}/media-items/ignore-season", {
+      params: { path: { series_id: props.seriesId } },
+      body: { season: parseInt(s, 10), is_ignored: nextIgnored },
+    } as never),
+    { errorMessage: "Ошибка массового изменения" },
+  )
+  if (ok === null) return
+  for (const m of items) m.is_ignored_by_user = nextIgnored
+  toast.add({ severity: "success", summary: nextIgnored ? "Все выключены" : "Все включены", life: 2000 })
+}
 async function toggleSeasonIgnored(s: string) {
   const n = parseInt(s, 10)
   const was = ignoredSeasons.value.includes(n)
@@ -431,6 +460,10 @@ defineExpose({ reload: () => loadComposition(false) })
           <label v-if="s !== 'undefined'" class="season-ignore">
             <ToggleSwitch :model-value="!isSeasonIgnored(s)" @update:model-value="toggleSeasonIgnored(s)" />
             <span class="season-ignore-label">{{ isSeasonIgnored(s) ? "Игнор" : "В плане" }}</span>
+          </label>
+          <label v-if="s !== 'undefined'" class="season-ignore">
+            <Checkbox binary :model-value="seasonBulkState(s) === 'on'" :indeterminate="seasonBulkState(s) === 'mixed'" @update:model-value="bulkSetSeasonIgnored(s)" />
+            <span class="season-ignore-label">Все серии сезона</span>
           </label>
         </div>
         <div class="composition-cards-container">
