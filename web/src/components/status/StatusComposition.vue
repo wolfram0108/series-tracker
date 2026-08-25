@@ -73,10 +73,11 @@ function seasonTitle(n: string): string {
 }
 function sxxexx(m?: Meta): string {
   if (!m) return ""
-  const season = String(m.season || 1).padStart(2, "0")
-  if (m.episode) return `s${season}e${String(m.episode).padStart(2, "0")}`
-  if (m.start && m.end) return `s${season}e${String(m.start).padStart(2, "0")}-e${String(m.end).padStart(2, "0")}`
-  if (m.start) return `s${season}e${String(m.start).padStart(2, "0")}`
+  // Сезон 0 (спешелы) — валидное значение, а не «сезон не задан».
+  const season = String(m.season ?? 1).padStart(2, "0")
+  if (m.episode != null) return `s${season}e${String(m.episode).padStart(2, "0")}`
+  if (m.start != null && m.end != null) return `s${season}e${String(m.start).padStart(2, "0")}-e${String(m.end).padStart(2, "0")}`
+  if (m.start != null) return `s${season}e${String(m.start).padStart(2, "0")}`
   return `s${season}`
 }
 

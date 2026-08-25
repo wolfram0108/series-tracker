@@ -38,7 +38,7 @@ const torrentHistory = ref<TorrentRow[]>([])
 const mediaHistory = ref<MediaRow[]>([])
 
 function episodeInfo(m: MediaRow): string {
-  const season = `s${String(m.season || 1).padStart(2, "0")}`
+  const season = `s${String(m.season ?? 1).padStart(2, "0")}`
   const ep = m.episode_end
     ? `e${String(m.episode_start).padStart(2, "0")}-e${String(m.episode_end).padStart(2, "0")}`
     : `e${String(m.episode_start).padStart(2, "0")}`
