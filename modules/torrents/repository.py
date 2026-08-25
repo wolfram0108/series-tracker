@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 
 from core.db import Database
 
+from . import selection
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -18,6 +20,8 @@ def _now() -> str:
 # извлечённого сезона (NULL) считаются (одиночные серии без явного сезона).
 _NOT_SPECIALS = ("(json_extract(tf.extracted_metadata, '$.season') IS NULL "
                  "OR json_extract(tf.extracted_metadata, '$.season') != 0)")
+
+_FILE_BOOLS = ("is_excluded",)
 
 
 class TorrentsRepository:
@@ -154,7 +158,7 @@ class TorrentsRepository:
             "SELECT t.series_id AS series_id, COUNT(*) AS n "
             "FROM torrent_files tf JOIN torrents t ON t.id=tf.torrent_db_id "
             f"WHERE tf.status='renamed' AND t.is_active=1 AND {_NOT_SPECIALS} "
-            "GROUP BY t.series_id")
+            "AND tf.is_excluded=0 GROUP BY t.series_id")
         return {r["series_id"]: r["n"] for r in rows}
 
     async def downloaded_count_for_series(self, series_id: int) -> int:
@@ -164,7 +168,7 @@ class TorrentsRepository:
             "SELECT COUNT(*) AS n FROM torrent_files tf "
             "JOIN torrents t ON t.id=tf.torrent_db_id "
             "WHERE tf.status='renamed' AND t.is_active=1 AND t.series_id=? "
-            f"AND {_NOT_SPECIALS}",
+            f"AND {_NOT_SPECIALS} AND tf.is_excluded=0",
             (series_id,))
         return row["n"] if row else 0
 
@@ -175,7 +179,8 @@ class TorrentsRepository:
             "SELECT DISTINCT json_extract(tf.extracted_metadata, '$.season') "
             "AS season FROM torrent_files tf "
             "JOIN torrents t ON t.id=tf.torrent_db_id "
-            "WHERE t.is_active=1 AND t.series_id=? AND season IS NOT NULL",
+            "WHERE t.is_active=1 AND t.series_id=? AND tf.is_excluded=0 "
+            "AND season IS NOT NULL",
             (series_id,))
         return [r["season"] for r in rows if r["season"] is not None]
 
@@ -230,18 +235,71 @@ class TorrentsRepository:
         """Файлы с qb_hash и прогрессом (контракт старого
         get_torrent_files_for_series). Только АКТИВНЫЕ раздачи (И4):
         заменённые — история без файлов."""
-        return await self._db.fetch_all(
+        rows = await self._db.fetch_all(
             "SELECT tf.*, t.qb_hash, COALESCE(dt.progress, 0) AS progress "
             "FROM torrent_files tf "
             "JOIN torrents t ON t.id = tf.torrent_db_id "
             "LEFT JOIN download_tasks dt ON dt.task_key = t.qb_hash "
             "AND dt.task_type='torrent' WHERE t.series_id=? "
             "AND t.is_active=1", (series_id,))
+        return self._db.coerce_bools(rows, _FILE_BOOLS)
 
     async def files_for_torrent(self, torrent_db_id: int) -> list[dict]:
-        return await self._db.fetch_all(
+        rows = await self._db.fetch_all(
             "SELECT * FROM torrent_files WHERE torrent_db_id=?",
             (torrent_db_id,))
+        return self._db.coerce_bools(rows, _FILE_BOOLS)
+
+    async def files_by_hash(self, qb_hash: str) -> list[dict]:
+        """Файлы раздачи по infohash — вход применения приоритетов."""
+        rows = await self._db.fetch_all(
+            "SELECT tf.* FROM torrent_files tf "
+            "JOIN torrents t ON t.id=tf.torrent_db_id WHERE t.qb_hash=?",
+            (qb_hash,))
+        return self._db.coerce_bools(rows, _FILE_BOOLS)
+
+    async def active_hashes(self, series_id: int) -> list[str]:
+        rows = await self._db.fetch_all(
+            "SELECT qb_hash FROM torrents WHERE series_id=? AND is_active=1 "
+            "AND qb_hash IS NOT NULL", (series_id,))
+        return [r["qb_hash"] for r in rows if r["qb_hash"]]
+
+    async def fully_excluded_hashes(self, series_id: int) -> set[str]:
+        """Раздачи, где не нужен ни один файл: qBittorrent отдаёт по ним
+        progress=1.0 (нечего качать), и без этого списка карточка
+        показала бы «готов» при нуле файлов на диске."""
+        rows = await self._db.fetch_all(
+            "SELECT t.qb_hash AS qb_hash, COUNT(*) AS total, "
+            "SUM(tf.is_excluded) AS excluded FROM torrent_files tf "
+            "JOIN torrents t ON t.id=tf.torrent_db_id "
+            "WHERE t.series_id=? AND t.is_active=1 AND t.qb_hash IS NOT NULL "
+            "GROUP BY t.qb_hash", (series_id,))
+        return {r["qb_hash"] for r in rows
+                if r["total"] and r["total"] == (r["excluded"] or 0)}
+
+    async def project_selection(self, series_id: int,
+                                ignored_seasons: set[int],
+                                ignored_episodes: dict[int, set[int]]) -> int:
+        """Память сериала -> колонка is_excluded файлов активных раздач.
+
+        Проекция, а не второй источник правды: агрегаты и приоритеты
+        читают одну колонку, память остаётся в series и переживает
+        замену раздачи."""
+        changed = 0
+        for row in await self.files_for_series(series_id):
+            meta = row.get("extracted_metadata")
+            extracted = json.loads(meta) if meta else {}
+            wanted, reason = selection.is_wanted(
+                extracted, ignored_seasons, ignored_episodes)
+            excluded = 0 if wanted else 1
+            if (int(bool(row.get("is_excluded"))) == excluded
+                    and (row.get("exclude_reason") or None) == reason):
+                continue
+            await self._db.execute(
+                "UPDATE torrent_files SET is_excluded=?, exclude_reason=? "
+                "WHERE id=?", (excluded, reason, row["id"]))
+            changed += 1
+        return changed
 
     async def set_file_status(self, file_id: int, status: str) -> None:
         await self._db.execute(
@@ -266,16 +324,18 @@ class TorrentsRepository:
             if existing:
                 await self._db.execute(
                     "UPDATE torrent_files SET renamed_path=?, status=?, "
-                    "extracted_metadata=? WHERE id=?",
+                    "extracted_metadata=?, qb_file_index=? WHERE id=?",
                     (f.get("renamed_path"), f["status"], meta,
-                     existing["id"]))
+                     f.get("qb_file_index"), existing["id"]))
             else:
                 await self._db.execute(
                     "INSERT INTO torrent_files (torrent_db_id, "
                     "original_path, renamed_path, status, "
-                    "extracted_metadata) VALUES (?, ?, ?, ?, ?)",
+                    "extracted_metadata, qb_file_index) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
                     (torrent_db_id, f["original_path"],
-                     f.get("renamed_path"), f["status"], meta))
+                     f.get("renamed_path"), f["status"], meta,
+                     f.get("qb_file_index")))
 
     # --- download_tasks: прогресс торрентов для UI -------------------------------------
 

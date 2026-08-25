@@ -12,14 +12,16 @@ from core.db import Database
 _COLUMNS = ("id, url, name, name_en, site, save_path, season, quality, "
             "last_scan_time, auto_scan_enabled, quality_override, "
             "resolution_override, source_type, parser_profile_id, "
-            "ignored_seasons, vk_search_mode, vk_quality_priority")
+            "ignored_seasons, ignored_episodes, vk_search_mode, "
+            "vk_quality_priority")
 
 # Колонки, которые можно писать извне (без id и last_scan_time —
 # последняя обновляется только touch_scan_time).
 _WRITABLE = {"url", "name", "name_en", "site", "save_path", "season",
              "quality", "auto_scan_enabled", "quality_override",
              "resolution_override", "source_type", "parser_profile_id",
-             "ignored_seasons", "vk_search_mode", "vk_quality_priority"}
+             "ignored_seasons", "ignored_episodes", "vk_search_mode",
+             "vk_quality_priority"}
 
 
 class CatalogRepository:
@@ -50,6 +52,7 @@ class CatalogRepository:
         fields.setdefault("auto_scan_enabled", False)
         fields.setdefault("vk_search_mode", "search")
         fields.setdefault("ignored_seasons", "[]")
+        fields.setdefault("ignored_episodes", "{}")
         cols = ", ".join(fields)
         marks = ", ".join("?" for _ in fields)
         await self._db.execute(

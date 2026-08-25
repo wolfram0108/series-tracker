@@ -192,6 +192,16 @@ class QbtClient:
                                    params={"hash": torrent_hash})
         return resp.json() if resp else None
 
+    async def set_file_priority(self, torrent_hash: str, indices: list[int],
+                                priority: int) -> None:
+        """Приоритет файлов раздачи (0 — не скачивать)."""
+        if not indices:
+            return
+        await self._request("POST", "/api/v2/torrents/filePrio",
+                            data={"hash": torrent_hash,
+                                  "id": "|".join(str(i) for i in indices),
+                                  "priority": priority})
+
     async def pause(self, hashes: list[str]) -> None:
         await self._request("POST", f"/api/v2/torrents/{self._stop_ep}",
                             data={"hashes": "|".join(hashes)})
