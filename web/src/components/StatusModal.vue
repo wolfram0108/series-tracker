@@ -9,7 +9,7 @@ import StatusSlicing from "./status/StatusSlicing.vue"
 import StatusHistory from "./status/StatusHistory.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
-import type { Series } from "../stores/series"
+import { useSeriesStore, type Series } from "../stores/series"
 
 // Окно «Статус сериала» — та же оболочка, что у Настроек (ModalShell xl,
 // фикс-высота) + вкладки-сегмент (st-tabs). Вкладки зависят от source_type.
@@ -23,7 +23,12 @@ const propsRef = ref<InstanceType<typeof StatusProperties> | null>(null)
 const compRef = ref<InstanceType<typeof StatusComposition> | null>(null)
 const vkCompRef = ref<InstanceType<typeof StatusVkComposition> | null>(null)
 const saving = ref(false)
-const isBusy = computed(() => saving.value || !!series.value?.is_busy)
+// Занятость берём из стора: он живёт на SSE, а локальная копия серии
+// читается один раз и застыла бы на «Обработка…» после сохранения.
+const seriesStore = useSeriesStore()
+const isBusy = computed(
+  () => saving.value || !!(seriesStore.byId(props.seriesId)?.is_busy ?? series.value?.is_busy),
+)
 const isVk = computed(() => series.value?.source_type === "vk_video")
 
 type TabKey = "properties" | "composition" | "slicing" | "history"
