@@ -6,8 +6,11 @@ Queries:
       же запрос — «сохранили свойства сериала в UI», этап 5):
       vk_video → переименование скачанных файлов и нарезанных детей на
       диске; torrent → ревизия имён файлов всех активных раздач в qBit.
-  renaming.process_torrent {series_id, qb_hash} — переименование файлов
-      одной раздачи (контракт Р-14: стадия 'renaming' конвейера).
+  renaming.process_torrent {series_id, qb_hash, dry_run?} —
+      переименование файлов одной раздачи (контракт Р-14: стадия
+      'renaming' конвейера). dry_run — только разбор состава правилами
+      и запись в torrent_files (статус pending_rename), qBit не
+      трогается: состав нужен до закачки, чтобы отобрать серии.
 
 Событие renaming.finished {series_id} — контракт SSE renaming_complete.
 
@@ -256,13 +259,19 @@ class RenamingModule(BaseModule):
         # параллельно (гонка, кривые имена). Сериализуем.
         lock = self._locks.setdefault(series_id, asyncio.Lock())
         async with lock:
-            renamed = await self._process_torrent(series,
-                                                  env.payload["qb_hash"])
+            renamed = await self._process_torrent(
+                series, env.payload["qb_hash"],
+                dry_run=bool(env.payload.get("dry_run")))
         return {"renamed": renamed}
 
-    async def _process_torrent(self, series: dict, qb_hash: str) -> int:
+    async def _process_torrent(self, series: dict, qb_hash: str, *,
+                               dry_run: bool = False) -> int:
         """Логика старого renaming_processor: правила по имени файла →
-        'Season NN/строгое имя' → rename внутри qBittorrent."""
+        'Season NN/строгое имя' → rename внутри qBittorrent.
+
+        dry_run — тот же обход и те же правила, но без касания qBit:
+        состав раздачи попадает в БД до закачки, чтобы пользователь мог
+        отобрать серии, пока торрент стоит на паузе."""
         files = await self.request("torrents.files.get", {"hash": qb_hash})
         if not files:
             self.log.warning("файлы раздачи %s не получены", qb_hash[:8])
@@ -274,8 +283,12 @@ class RenamingModule(BaseModule):
 
         records, renamed = [], 0
         assigned: dict[str, str] = {}  # new_path -> original (детект коллизий)
-        for f in files:
+        for position, f in enumerate(files):
             current_path = f["name"] if isinstance(f, dict) else f
+            # Индекс файла в раздаче не меняется при переименовании —
+            # только он даёт устойчивую привязку строки БД к файлу qBit.
+            file_index = (f.get("index", position) if isinstance(f, dict)
+                          else position)
             if not current_path.lower().endswith(_VIDEO_EXT):
                 continue
             db_record = by_current.get(current_path)
@@ -303,10 +316,18 @@ class RenamingModule(BaseModule):
                 records.append({"original_path": original,
                                 "renamed_path": None,
                                 "status": "rename_error",
+                                "qb_file_index": file_index,
                                 "extracted_metadata": reply["extracted"]})
                 continue
             assigned[new_path] = original
             status = "renamed"
+            if dry_run:
+                records.append({"original_path": original,
+                                "renamed_path": None,
+                                "status": "pending_rename",
+                                "qb_file_index": file_index,
+                                "extracted_metadata": reply["extracted"]})
+                continue
             if new_path != current_path:
                 try:
                     await self.request("torrents.rename_file", {
@@ -319,6 +340,7 @@ class RenamingModule(BaseModule):
                     status, new_path = "rename_error", None
             records.append({"original_path": original,
                             "renamed_path": new_path, "status": status,
+                            "qb_file_index": file_index,
                             "extracted_metadata": reply["extracted"]})
         if records:
             await self.request("torrents.db.files.upsert",

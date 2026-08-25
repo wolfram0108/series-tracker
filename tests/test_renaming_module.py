@@ -211,6 +211,25 @@ async def test_process_torrent_renames_in_qbit(system):
 
 
 @pytest.mark.asyncio
+async def test_dry_run_writes_composition_without_touching_qbit(system):
+    """Состав раздачи нужен до закачки: правила применяются, qBit — нет."""
+    _, fake, probe, _, _ = system
+    fake.series = {**fake.series, "source_type": "torrent"}
+    fake.qbt_files["h3"] = [{"name": "old/ep1.mkv", "index": 4},
+                            {"name": "cover.jpg", "index": 5}]
+
+    reply = await probe.request("renaming.process_torrent", {
+        "series_id": 2, "qb_hash": "h3", "dry_run": True}, timeout=10)
+
+    assert reply == {"renamed": 0}
+    assert fake.renames == [], "в режиме предпросмотра qBit не трогаем"
+    saved = fake.upserts[0]["files"]
+    assert saved[0]["status"] == "pending_rename"
+    assert saved[0]["renamed_path"] is None
+    assert saved[0]["qb_file_index"] == 4
+
+
+@pytest.mark.asyncio
 async def test_process_torrent_uses_original_path_from_db(system):
     _, fake, probe, _, _ = system
     fake.series = {**fake.series, "source_type": "torrent"}
