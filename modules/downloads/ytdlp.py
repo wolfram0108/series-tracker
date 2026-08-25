@@ -29,6 +29,14 @@ ProgressCb = Callable[[dict], Awaitable[None]]
 # (тогда без ускорения, но загрузка работает).
 HLS_FORMAT = "b[protocol*=m3u8]/b"
 
+# Отказ от m3u8: на некоторых VK-роликах CDN отдаёт 404 на хвостовые
+# HLS-фрагменты (манифест шире, чем реально долитые сегменты) — весь
+# файл выходит пустым. DASH/progressive не фрагментированы так же
+# (одно соединение на поток) — не подвержены этой дыре, но без -N
+# параллелизма (медленнее).
+DASH_FALLBACK_FORMAT = "b[protocol!*=m3u8]"
+_EMPTY_FILE_ERROR = "The downloaded file is empty"
+
 # Формат hlsnative+-N отличается от обычного: после '~' идут пробелы,
 # ETA бывает 'Unknown', в хвосте '(frag X/Y)' (находка 47).
 PROGRESS_RE = re.compile(
@@ -188,7 +196,17 @@ async def download(video_url: str, full_output_path: str,
     # НЕ из промежуточного TS (находка 52)
     duration = await _probe_duration(video_url)
     raw = await _phase_download(video_url, full_output_path, on_progress,
-                                threads)
+                                threads, HLS_FORMAT)
+    if not isinstance(raw, str) and _EMPTY_FILE_ERROR in raw[1]:
+        # хвост неудачной HLS-попытки (недокачанные .part/фрагменты) собьёт
+        # DASH-попытку с тем же выходным путём — чистим перед повтором.
+        for leftover in download_artifacts(full_output_path):
+            try:
+                os.remove(leftover)
+            except OSError:
+                pass
+        raw = await _phase_download(video_url, full_output_path, on_progress,
+                                    threads, DASH_FALLBACK_FORMAT)
     if not isinstance(raw, str):
         return raw  # (False, error)
     try:
@@ -205,9 +223,11 @@ async def download(video_url: str, full_output_path: str,
 
 
 async def _phase_download(video_url: str, full_output_path: str,
-                          on_progress: ProgressCb, threads: int):
-    """yt-dlp hls + -N, без постобработки. Возвращает путь промежуточного
-    файла (str) или (False, error)."""
+                          on_progress: ProgressCb, threads: int,
+                          format_selector: str):
+    """yt-dlp (формат — вызывающая сторона: HLS или DASH-фолбэк), без
+    постобработки. Возвращает путь промежуточного файла (str) или
+    (False, error)."""
     executable = shutil.which("yt-dlp")
     if not executable:
         return False, "yt-dlp не найден в PATH"
@@ -215,7 +235,7 @@ async def _phase_download(video_url: str, full_output_path: str,
 
     proc = await asyncio.create_subprocess_exec(
         executable, "--progress", "--newline", "--fixup", "never",
-        "-f", HLS_FORMAT, "-N", str(threads),
+        "-f", format_selector, "-N", str(threads),
         "-o", out_template, video_url,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr))
