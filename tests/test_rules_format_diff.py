@@ -30,11 +30,15 @@ def test_format_compilation_range_and_subdir():
     assert name == "sub/Show s01e01-e03.mp4"
 
 
-def test_series_season_overrides_all():
+def test_series_season_is_default_not_override():
+    """Сезон карточки заполняет пропуск, но не спорит с распознанным."""
     series = {"name_en": "Show", "season": "s03", "source_type": "torrent"}
-    name = formatter.format_name(series, {"season": 1, "episode": 5},
+    name = formatter.format_name(series, {"episode": 5},
                                  original_filename="x.mkv")
     assert name == "Show s03e05.mkv"
+    name = formatter.format_name(series, {"season": 1, "episode": 5},
+                                 original_filename="x.mkv")
+    assert name == "Show s01e05.mkv"
 
 
 def test_torrent_season_folder_logic():
@@ -43,8 +47,14 @@ def test_torrent_season_folder_logic():
     assert formatter.torrent_season_folder(multi, {}, "Specials/a.mkv") == 0
     assert formatter.torrent_season_folder(multi, {}, "a.mkv") == 1
     single = {"name_en": "S", "season": "Season 2"}
+    assert formatter.torrent_season_folder(single, {}, "a.mkv") == 2
+    # спешел из правил не схлопывается в сезон карточки
+    assert formatter.torrent_season_folder(single, {"season": 0},
+                                           "a.mkv") == 0
     assert formatter.torrent_season_folder(single, {"season": 9},
-                                           "a.mkv") == 2
+                                           "a.mkv") == 9
+    unreadable = {"name_en": "S", "season": "Season"}
+    assert formatter.torrent_season_folder(unreadable, {}, "a.mkv") is None
 
 
 # --- дифф со всеми реальными именами фикстуры ------------------------------------------

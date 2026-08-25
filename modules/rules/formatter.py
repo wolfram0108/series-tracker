@@ -111,10 +111,10 @@ def torrent_season_folder(series: dict, extracted: dict,
     возможно только у односезонника с нечитаемым series.season)."""
     season_number = season_rule.resolve(series.get("season"),
                                         (extracted or {}).get("season"))
-    if series.get("season"):  # односезонник: сезон из свойств сериала
+    if season_number is not None:
         return season_number
-    if season_number is None:  # многосезонник без сезона в имени
-        if "specials" in os.path.dirname(original_path).lower():
-            return 0
-        return 1
-    return season_number
+    if series.get("season"):  # односезонник с нечитаемым номером в карточке
+        return None
+    if "specials" in os.path.dirname(original_path).lower():
+        return 0
+    return 1
