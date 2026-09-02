@@ -9,11 +9,18 @@ cloudscraper) не покидают модуль; куки персистятс�
 
 Антибот-челлендж (Cloudflare) — третье состояние, помимо «живая сессия»
 и «протухла»: сайт не пускает клиента вовсе, сессия при этом цела.
-Распознаётся провайдером (`is_challenged`), проходится настоящим
-браузером (cf_challenge.solve), результат — кука `cf_clearance` и UA,
-которым она выдана; оба ложатся в сессию и в БД, после чего запрос
-повторяется обычным requests. Браузер поднимается только по факту
-челленджа, а не на каждый запрос.
+Распознаёт его сама сессия (`cf_challenge.arm`) и поднимает
+`ChallengeSeen` вместо ответа — заглушку защиты не может принять за
+страницу ни один путь модуля, включая логин провайдера. Проходится
+настоящим браузером (cf_challenge.solve), результат — кука
+`cf_clearance` и UA, которым она выдана; оба ложатся в сессию и в БД,
+после чего операция повторяется один раз. Браузер поднимается только по
+факту челленджа, а не на каждый запрос.
+
+UA — свойство сессии, а не места вызова: провайдер объявляет свой
+(`user_agent`), прохождение челленджа перезаписывает его тем, под
+которым выдан клирэнс. Клирэнс без «своего» UA недействителен, поэтому
+единственная точка установки — единственная защита от расхождения.
 
 Rate-limit логинов: не чаще одного на трекер за LOGIN_MIN_INTERVAL —
 даже наш собственный баг не сможет долбить трекер входами. Симметрично
@@ -50,8 +57,6 @@ class TrackerauthModule(BaseModule):
     def __init__(self, bus, db: Database) -> None:
         self.repo = TrackerAuthRepository(db)
         self._sessions: dict[tuple[str, str], requests.Session] = {}
-        # UA прогретой сессии: cf_clearance действует только с ним
-        self._user_agents: dict[tuple[str, str], str] = {}
         self._last_login: dict[str, float] = {}
         self._last_challenge: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
@@ -112,6 +117,9 @@ class TrackerauthModule(BaseModule):
 
         session = (provider.make_session()
                    if hasattr(provider, "make_session") else requests.Session())
+        cf_challenge.arm(session)
+        if provider.user_agent:
+            session.headers["User-Agent"] = provider.user_agent
         cookies, user_agent = await self.repo.load_session(service, domain)
         if cookies:
             for name, value in cookies.items():
@@ -119,7 +127,7 @@ class TrackerauthModule(BaseModule):
             self.log.info("сессия %s/%s восстановлена из БД", service, domain)
         if user_agent:
             # без «своего» UA восстановленный cf_clearance недействителен
-            self._user_agents[key] = user_agent
+            session.headers["User-Agent"] = user_agent
         self._sessions[key] = session
         return session
 
@@ -143,7 +151,10 @@ class TrackerauthModule(BaseModule):
             session.cookies.set(cf_challenge.CLEARANCE_COOKIE, clearance,
                                 domain=domain)
         self.log.info("логин на %s/%s", service, domain)
-        await asyncio.to_thread(provider.login, session, credentials, url)
+        await self._with_clearance(
+            service, url, session, provider,
+            lambda: asyncio.to_thread(provider.login, session,
+                                      credentials, url))
         # Отметку rate-limit ставим ТОЛЬКО после успешного логина: иначе
         # неудачная попытка на одном зеркале (таймаут/сетевая ошибка)
         # «съедала» общий по сервису лимит и блокировала логин на другом
@@ -165,20 +176,17 @@ class TrackerauthModule(BaseModule):
         async with lock:  # одна операция на трекер за раз — не давим сервис
             session = await self._get_session(service, url)
             provider = PROVIDERS[service]
-            resp = await self._do_request(session, provider, p)
-            # Челлендж проверяем ПЕРВЫМ: пока защита не пустила, тело
-            # ответа — её заглушка, и судить по ней о нашей сессии нельзя.
-            if self._is_challenged(provider, resp):
-                await self._pass_challenge(service, url, session, provider)
-                resp = await self._do_request(session, provider, p)
-                if self._is_challenged(provider, resp):
-                    raise cf_challenge.ChallengeError(
-                        f"{service}: челлендж пройден, но сайт всё ещё "
-                        "не пускает")
+
+            def fetch():
+                return self._do_request(session, provider, p)
+
+            resp = await self._with_clearance(service, url, session,
+                                              provider, fetch)
             if provider.is_logged_out(resp):
                 self.log.info("сессия %s протухла — релогин и повтор", service)
                 await self._login(service, url, session)
-                resp = await self._do_request(session, provider, p)
+                resp = await self._with_clearance(service, url, session,
+                                                  provider, fetch)
                 if provider.is_logged_out(resp):
                     raise TrackerLoginError(
                         f"{service}: после релогина всё ещё разлогинены")
@@ -189,12 +197,21 @@ class TrackerauthModule(BaseModule):
 
     # --- антибот-челлендж ------------------------------------------------------------
 
-    @staticmethod
-    def _is_challenged(provider, resp: requests.Response) -> bool:
-        """Умеет ли провайдер распознавать челлендж — и увидел ли его.
-        Трекеров без защиты это не касается (getattr, как make_session)."""
-        detector = getattr(provider, "is_challenged", None)
-        return bool(detector and detector(resp))
+    async def _with_clearance(self, service: str, url: str,
+                              session: requests.Session, provider, operation):
+        """Операция на трекере: увиденный челлендж проходится, операция
+        повторяется один раз. Точка одна — иначе путь, забывший про
+        челлендж, снова читал бы заглушку как ответ сайта."""
+        try:
+            return await operation()
+        except cf_challenge.ChallengeSeen:
+            await self._pass_challenge(service, url, session, provider)
+        try:
+            return await operation()
+        except cf_challenge.ChallengeSeen as exc:
+            raise cf_challenge.ChallengeError(
+                f"{service}: челлендж пройден, но сайт всё ещё "
+                "не пускает") from exc
 
     async def _pass_challenge(self, service: str, url: str,
                               session: requests.Session, provider) -> None:
@@ -216,7 +233,7 @@ class TrackerauthModule(BaseModule):
         user_agent, cookies = await cf_challenge.solve(target)
         for name, value in cookies.items():
             session.cookies.set(name, value, domain=domain)
-        self._user_agents[(service, domain)] = user_agent
+        session.headers["User-Agent"] = user_agent
         self._last_challenge[service] = time.monotonic()
         await self.repo.save_cookies(service, domain, session,
                                      logged_in=False, user_agent=user_agent)
@@ -225,12 +242,6 @@ class TrackerauthModule(BaseModule):
     async def _do_request(self, session: requests.Session, provider,
                           p: dict) -> requests.Response:
         headers = provider.request_headers(p["url"])
-        # UA прогретой сессии перекрывает провайдерский: клирэнс выдан
-        # именно под него, с другим UA сайт снова покажет челлендж.
-        user_agent = self._user_agents.get(
-            (provider.service, provider.normalize_domain(p["url"])))
-        if user_agent:
-            headers["User-Agent"] = user_agent
         headers.update(p.get("headers") or {})
         params = dict(p.get("params") or {})
         if getattr(provider, "needs_credential_params", False):

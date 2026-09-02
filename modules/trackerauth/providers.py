@@ -6,10 +6,15 @@ query `trackerauth.fetch`. Каждый провайдер отвечает на
 нужны запросу и (необязательно) как распознать антибот-челлендж.
 
 Челлендж — отдельное состояние, не путать с разлогином: сессия может
-быть жива, но защита сайта не пускает клиента вовсе. Провайдер, который
-умеет его распознавать, объявляет `is_challenged` (и `challenge_url`,
-если проходить челлендж нужно не на том URL, что запрашивали);
-остальных это не касается — модуль спрашивает через getattr.
+быть жива, но защита сайта не пускает клиента вовсе. Распознаёт его
+транспорт (`cf_challenge.arm` на сессии), одинаково для всех трекеров;
+провайдер объявляет лишь `challenge_url`, если проходить челлендж нужно
+не на том URL, что запрашивали.
+
+`user_agent` — личность сессии: провайдер объявляет её данными, модуль
+ставит на сессию, и все запросы (включая логин) идут под одним UA. Иначе
+клирэнс антибот-защиты, действительный только в паре со «своим» UA,
+рвётся на первом же запросе, собранном мимо общей точки.
 
 Маркеры выбраны детерминированными (вместо гадания по подстрокам
 «login/error/пароль» из старой системы — см. разбор auth.py):
@@ -50,6 +55,7 @@ def _base(url: str, strip_prefixes: tuple[str, ...] = ("www.",)) -> tuple[str, s
 
 class KinozalProvider:
     service = "kinozal"
+    user_agent = UA
 
     def normalize_domain(self, url: str) -> str:
         # dl.kinozal.me (скачивание) живёт на той же сессии, что kinozal.me
@@ -62,7 +68,7 @@ class KinozalProvider:
             f"{base}/takelogin.php",
             data={"username": credentials["username"],
                   "password": credentials["password"], "returnto": ""},
-            headers={"User-Agent": UA}, timeout=15)
+            timeout=15)
         resp.raise_for_status()
         if "takelogin.php" in resp.url:
             raise TrackerLoginError(f"Kinozal ({domain}) не принял логин — "
@@ -79,11 +85,12 @@ class KinozalProvider:
         # Скачивание с dl.* требует Referer основного домена (из разбора
         # старого qbittorrent.py — подтверждено как необходимость).
         _, base = _base(url, ("dl.", "www."))
-        return {"User-Agent": UA, "Referer": f"{base}/"}
+        return {"Referer": f"{base}/"}
 
 
 class RutrackerProvider:
     service = "rutracker"
+    user_agent = UA
 
     def normalize_domain(self, url: str) -> str:
         return _base(url)[0]
@@ -92,7 +99,7 @@ class RutrackerProvider:
               url: str) -> None:
         domain, base = _base(url)
         login_url = f"{base}/forum/login.php"
-        page = session.get(login_url, headers={"User-Agent": UA}, timeout=15)
+        page = session.get(login_url, timeout=15)
         form_data = {}
         form = BeautifulSoup(page.text, "html.parser").find(
             "form", {"method": "post"})
@@ -104,8 +111,8 @@ class RutrackerProvider:
         form_data["login_username"] = credentials["username"]
         form_data["login_password"] = credentials["password"]
         form_data.setdefault("login", "Вход")
-        resp = session.post(login_url, data=form_data, timeout=15, headers={
-            "User-Agent": UA, "Referer": login_url})
+        resp = session.post(login_url, data=form_data, timeout=15,
+                            headers={"Referer": login_url})
         resp.raise_for_status()
         if "bb_session" not in session.cookies.get_dict():
             # RuTracker включает капчу в форму входа (скрытое поле cap_sid
@@ -126,16 +133,6 @@ class RutrackerProvider:
         return "login.php" in resp.url or (
             'name="login_username"' in resp.text[:20000])
 
-    def is_challenged(self, resp: requests.Response) -> bool:
-        """Антибот-челлендж Cloudflare (см. cf_challenge.py).
-
-        Маркер детерминированный — служебный заголовок `cf-mitigated:
-        challenge`, который CF ставит на страницу-заглушку. По телу
-        («Один момент…»/«Just a moment…») не гадаем: текст зависит от
-        языка ответа, а заголовок — нет.
-        """
-        return resp.headers.get("cf-mitigated", "").lower() == "challenge"
-
     def challenge_url(self, url: str) -> str:
         """Где проходить челлендж для запроса к `url`.
 
@@ -148,7 +145,7 @@ class RutrackerProvider:
         return url
 
     def request_headers(self, url: str) -> dict:
-        headers = {"User-Agent": UA}
+        headers: dict = {}
         if "/forum/dl.php" in url:  # скачивание .torrent
             import re
             match = re.search(r"t=(\d+)", url)
@@ -165,6 +162,7 @@ class RutrackerProvider:
 class AstarProvider:
     """Логина нет; Cloudflare проходится cloudscraper'ом."""
     service = "astar"
+    user_agent = None  # cloudscraper подбирает UA под свой обход сам
 
     def normalize_domain(self, url: str) -> str:
         return _base(url)[0]
@@ -190,6 +188,9 @@ class VkProvider:
     как в старой системе). Токен не покидает trackerauth."""
     service = "vk"
     needs_credential_params = True
+    # На браузерном UA VK API отдаёт video без поля files (прямые mp4 и
+    # разрешения вырезаются) — оставляем дефолтный UA requests (находка 44).
+    user_agent = None
 
     def normalize_domain(self, url: str) -> str:
         return "api.vk.com"
@@ -203,10 +204,6 @@ class VkProvider:
         return False  # ошибки API приходят JSON-ом, их разбирает sources
 
     def request_headers(self, url: str) -> dict:
-        # БЕЗ браузерного UA: на Chrome-UA VK API отдаёт video без поля
-        # files (прямые mp4-ссылки и разрешения вырезаются), и resolution
-        # вычислить нельзя. Легаси слал дефолтный requests-UA и получал
-        # files — воспроизводим (находка 44).
         return {}
 
     def credential_params(self, credentials: dict) -> dict:

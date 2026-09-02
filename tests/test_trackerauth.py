@@ -1,5 +1,7 @@
 """Тесты trackerauth: персистентность кук, релогин при протухании,
-rate-limit. Сеть полностью замокана; живые трекеры — только этап 6.
+rate-limit, антибот-челлендж. Сеть замокана на уровне ТРАНСПОРТА —
+путь requests (хуки на ответ, склейка заголовков, куки) остаётся
+настоящим, иначе тест не видит того, что видит боевой код.
 """
 import asyncio
 import json
@@ -8,11 +10,15 @@ import sys
 
 import pytest
 import requests
+import requests.adapters
 
 from core import Bus, BaseModule, BusRequestError, Runner
 from core.db import Database
 from modules.trackerauth import TrackerauthModule
 from modules.trackerauth import module as ta_module
+
+KZ_URL = "https://kinozal.me/details.php?id=1"
+RT_URL = "https://rutracker.org/forum/viewtopic.php?t=1"
 
 
 @pytest.fixture
@@ -25,18 +31,52 @@ def db_path(tmp_path):
     return str(path)
 
 
-class FakeResponse:
-    def __init__(self, *, url, text="", status_code=200,
-                 content_type="text/html", headers=None):
-        self.url = url
-        self.text = text
-        self.status_code = status_code
-        self.content = text.encode()
-        self.headers = {"Content-Type": content_type, **(headers or {})}
-        self.cookies = requests.cookies.RequestsCookieJar()
+def _response(url, *, text="", status=200, content_type="text/html",
+              headers=None):
+    resp = requests.Response()
+    resp.url = url
+    resp.status_code = status
+    resp._content = text.encode()
+    resp.headers.update({"Content-Type": content_type, **(headers or {})})
+    resp.raw = None
+    return resp
 
-    def raise_for_status(self):
-        pass
+
+def _challenge(url):
+    """Заглушка CF: статус 403 и служебный заголовок — по нему и судим."""
+    return _response(url, status=403, text="Один момент…",
+                     headers={"cf-mitigated": "challenge"})
+
+
+def _login_form(url):
+    # реальный Kinozal отдаёт форму со слешем — action="/takelogin.php"
+    # (находка 42: детектор должен распознавать её, а не точную строку)
+    return _response(url, text='<form method="post" action="/takelogin.php">'
+                               'вход</form>')
+
+
+class Transport:
+    """Ответы вместо сети; помнит ушедшие запросы целиком."""
+
+    def __init__(self):
+        self.sent: list[requests.PreparedRequest] = []
+        self.handler = lambda req: _response(req.url, text="<html>ok</html>")
+
+    def send(self, request, **kwargs):
+        self.sent.append(request)
+        return self.handler(request)
+
+    @property
+    def agents(self) -> list[str | None]:
+        return [r.headers.get("User-Agent") for r in self.sent]
+
+
+@pytest.fixture
+def transport(monkeypatch):
+    tr = Transport()
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send",
+                        lambda self, request, **kw: tr.send(request, **kw))
+    return tr
 
 
 @pytest.fixture
@@ -58,26 +98,20 @@ async def system(db_path, monkeypatch):
     await runner.stop()
 
 
-def _ok_page(url="https://kinozal.me/details.php?id=1"):
-    return FakeResponse(url=url, text="<html>раздача</html>")
-
-
-def _login_page(url="https://kinozal.me/details.php?id=1"):
-    # реальный Kinozal отдаёт форму со слешем — action="/takelogin.php"
-    # (находка 42: детектор должен распознавать её, а не точную строку)
-    return FakeResponse(url=url,
-                        text='<form method="post" action="/takelogin.php">'
-                             'вход</form>')
+def _solver(calls, user_agent="ClearanceUA/1.0"):
+    async def fake_solve(url, **kwargs):
+        calls["solves"] += 1
+        return user_agent, {"cf_clearance": "КЛИРЭНС"}
+    return fake_solve
 
 
 @pytest.mark.asyncio
-async def test_fetch_with_live_session(system):
-    _, _, module, probe, monkeypatch = system
-    monkeypatch.setattr(requests.Session, "request",
-                        lambda self, *a, **kw: _ok_page())
+async def test_fetch_with_live_session(system, transport):
+    _, _, module, probe, _ = system
+    transport.handler = lambda req: _response(req.url,
+                                              text="<html>раздача</html>")
     reply = await probe.request("trackerauth.fetch", {
-        "service": "kinozal", "url": "https://kinozal.me/details.php?id=1"},
-        timeout=5)
+        "service": "kinozal", "url": KZ_URL}, timeout=5)
     assert reply["status"] == 200
     assert "раздача" in reply["text"]
 
@@ -112,83 +146,74 @@ async def test_set_credentials_encrypts(system):
 
 
 @pytest.mark.asyncio
-async def test_stale_session_triggers_relogin_and_retry(system):
-    _, db, module, probe, monkeypatch = system
-    calls = {"requests": 0, "logins": 0}
+async def test_stale_session_triggers_relogin_and_retry(system, transport):
+    _, db, module, probe, _ = system
+    state = {"logged_in": False}
 
-    def fake_request(self, *args, **kwargs):
-        calls["requests"] += 1
-        # до логина — страница входа, после — нормальная
-        return _ok_page() if calls["logins"] else _login_page()
+    def handler(req):
+        if "takelogin.php" in req.url:
+            state["logged_in"] = True
+            return _response("https://kinozal.me/userdetails.php")
+        return (_response(req.url, text="<html>раздача</html>")
+                if state["logged_in"] else _login_form(req.url))
 
-    def fake_post(self, url, **kwargs):
-        calls["logins"] += 1
-        return FakeResponse(url="https://kinozal.me/userdetails.php")
-
-    monkeypatch.setattr(requests.Session, "request", fake_request)
-    monkeypatch.setattr(requests.Session, "post", fake_post)
-
+    transport.handler = handler
     reply = await probe.request("trackerauth.fetch", {
-        "service": "kinozal", "url": "https://kinozal.me/details.php?id=1"},
-        timeout=5)
+        "service": "kinozal", "url": KZ_URL}, timeout=5)
     assert reply["status"] == 200 and "раздача" in reply["text"]
-    assert calls["logins"] == 1, "должен был случиться ровно один релогин"
-    assert calls["requests"] == 2, "исходный запрос должен повториться"
+    urls = [r.url for r in transport.sent]
+    assert sum("takelogin.php" in u for u in urls) == 1, \
+        "должен был случиться ровно один релогин"
+    assert sum("details.php" in u for u in urls) == 2, \
+        "исходный запрос должен повториться"
 
-    # куки и факт логина персистированы
     row = await db.fetch_one("SELECT * FROM tracker_sessions "
                              "WHERE service='kinozal'")
     assert row is not None and row["last_login_at"]
 
 
 @pytest.mark.asyncio
-async def test_login_rate_limit_protects_tracker(system):
-    _, _, module, probe, monkeypatch = system
-    monkeypatch.setattr(requests.Session, "request",
-                        lambda self, *a, **kw: _login_page())
-    monkeypatch.setattr(requests.Session, "post",
-                        lambda self, url, **kw: FakeResponse(
-                            url="https://kinozal.me/userdetails.php"))
+async def test_login_rate_limit_protects_tracker(system, transport):
+    _, _, module, probe, _ = system
+    transport.handler = lambda req: (
+        _response("https://kinozal.me/userdetails.php")
+        if "takelogin.php" in req.url else _login_form(req.url))
 
     # первый fetch: протухло → релогин → всё ещё страница логина → ошибка
     with pytest.raises(BusRequestError, match="разлогинены"):
         await probe.request("trackerauth.fetch", {
-            "service": "kinozal",
-            "url": "https://kinozal.me/details.php?id=1"}, timeout=5)
+            "service": "kinozal", "url": KZ_URL}, timeout=5)
 
     # второй fetch сразу же: релогин запрещён rate-limit'ом
     with pytest.raises(BusRequestError, match="rate-limit"):
         await probe.request("trackerauth.fetch", {
-            "service": "kinozal",
-            "url": "https://kinozal.me/details.php?id=1"}, timeout=5)
+            "service": "kinozal", "url": KZ_URL}, timeout=5)
 
 
 @pytest.mark.asyncio
-async def test_failed_login_does_not_consume_rate_limit(system):
+async def test_failed_login_does_not_consume_rate_limit(system, transport):
     """Неудачный логин (сетевая ошибка/таймаут одного зеркала) НЕ должен
     выставлять rate-limit и блокировать логин на другом доступном
     зеркале того же трекера — иначе перебор зеркал теряет смысл."""
-    _, _, module, probe, monkeypatch = system
+    _, _, module, probe, _ = system
     posts = {"n": 0}
-    monkeypatch.setattr(requests.Session, "request",
-                        lambda self, *a, **kw: _login_page())
 
-    def fake_post(self, url, **kwargs):
+    def handler(req):
+        if "takelogin.php" not in req.url:
+            return _login_form(req.url)
         posts["n"] += 1
         if posts["n"] == 1:  # первое зеркало: таймаут на логине
             raise requests.exceptions.ConnectionError("Read timed out")
-        return FakeResponse(url="https://kinozal.tv/userdetails.php")
+        return _response("https://kinozal.tv/userdetails.php")
 
-    monkeypatch.setattr(requests.Session, "post", fake_post)
+    transport.handler = handler
 
-    # первое зеркало (kinozal.me): логин падает по сети
     with pytest.raises(BusRequestError):
         await probe.request("trackerauth.fetch", {
-            "service": "kinozal",
-            "url": "https://kinozal.me/details.php?id=1"}, timeout=5)
+            "service": "kinozal", "url": KZ_URL}, timeout=5)
 
     # второе зеркало сразу же: rate-limit НЕ блокирует — логин реально
-    # вызывается (дальше «разлогинены», т.к. request-мок всё ещё отдаёт
+    # вызывается (дальше «разлогинены», т.к. транспорт всё ещё отдаёт
     # форму входа; до бага здесь была бы ошибка rate-limit)
     with pytest.raises(BusRequestError, match="разлогинены"):
         await probe.request("trackerauth.fetch", {
@@ -199,44 +224,27 @@ async def test_failed_login_does_not_consume_rate_limit(system):
 
 # --- антибот-челлендж (Cloudflare) ------------------------------------------------
 
-RT_URL = "https://rutracker.org/forum/viewtopic.php?t=1"
-
-
-def _challenge_page():
-    """Заглушка CF: статус 403 и служебный заголовок — по нему и судим."""
-    return FakeResponse(url=RT_URL, status_code=403, text="Один момент…",
-                        headers={"cf-mitigated": "challenge"})
-
-
 @pytest.mark.asyncio
-async def test_challenge_passed_by_browser_then_request_retried(system):
+async def test_challenge_passed_by_browser_then_request_retried(system,
+                                                                transport):
     """Челлендж — не разлогин: сессию не трогаем, поднимаем браузер,
     забираем клирэнс и повторяем ИСХОДНЫЙ запрос уже с ним."""
     from core import crypto
     _, db, _, probe, monkeypatch = system
-    calls = {"requests": 0, "solves": 0, "agents": []}
+    calls = {"solves": 0}
 
-    def fake_request(self, *args, **kwargs):
-        calls["requests"] += 1
-        calls["agents"].append((kwargs.get("headers") or {}).get("User-Agent"))
-        if not calls["solves"]:
-            return _challenge_page()
-        return FakeResponse(url=RT_URL, text="<html>тема</html>")
-
-    async def fake_solve(url, **kwargs):
-        calls["solves"] += 1
-        return "ClearanceUA/1.0", {"cf_clearance": "КЛИРЭНС"}
-
-    monkeypatch.setattr(requests.Session, "request", fake_request)
-    monkeypatch.setattr(ta_module.cf_challenge, "solve", fake_solve)
+    transport.handler = lambda req: (_challenge(req.url) if not calls["solves"]
+                                     else _response(req.url,
+                                                    text="<html>тема</html>"))
+    monkeypatch.setattr(ta_module.cf_challenge, "solve", _solver(calls))
 
     reply = await probe.request("trackerauth.fetch", {
         "service": "rutracker", "url": RT_URL}, timeout=10)
 
     assert reply["status"] == 200 and "тема" in reply["text"]
     assert calls["solves"] == 1, "браузер поднимается ровно один раз"
-    assert calls["requests"] == 2, "исходный запрос должен повториться"
-    assert calls["agents"][1] == "ClearanceUA/1.0", \
+    assert len(transport.sent) == 2, "исходный запрос должен повториться"
+    assert transport.agents[1] == "ClearanceUA/1.0", \
         "повтор идёт с UA, под которым выдан клирэнс"
 
     row = await db.fetch_one(
@@ -248,18 +256,88 @@ async def test_challenge_passed_by_browser_then_request_retried(system):
 
 
 @pytest.mark.asyncio
-async def test_challenge_rate_limit_protects_from_browser_loop(system):
+async def test_challenge_detected_for_tracker_that_never_declared_it(
+        system, transport):
+    """Защита включается на стороне сайта и трекеру не принадлежит:
+    челлендж на kinozal распознаётся так же, как на rutracker, без единой
+    строки в провайдере."""
+    _, _, _, probe, monkeypatch = system
+    calls = {"solves": 0}
+
+    transport.handler = lambda req: (_challenge(req.url) if not calls["solves"]
+                                     else _response(req.url,
+                                                    text="<html>раздача</html>"))
+    monkeypatch.setattr(ta_module.cf_challenge, "solve", _solver(calls))
+
+    reply = await probe.request("trackerauth.fetch", {
+        "service": "kinozal", "url": KZ_URL}, timeout=10)
+
+    assert reply["status"] == 200 and "раздача" in reply["text"]
+    assert calls["solves"] == 1
+
+
+@pytest.mark.asyncio
+async def test_login_passes_challenge_and_retries(system, transport):
+    """Челлендж на странице входа: логин обязан пройти его и повториться,
+    иначе разлогиненная сессия не восстанавливается никогда."""
+    _, _, _, probe, monkeypatch = system
+    calls = {"solves": 0, "logins": 0}
+
+    def handler(req):
+        if "takelogin.php" in req.url:
+            calls["logins"] += 1
+            if calls["logins"] == 1:
+                return _challenge(req.url)
+            return _response("https://kinozal.me/userdetails.php")
+        return (_login_form(req.url) if not calls["solves"]
+                else _response(req.url, text="<html>раздача</html>"))
+
+    transport.handler = handler
+    monkeypatch.setattr(ta_module.cf_challenge, "solve", _solver(calls))
+
+    reply = await probe.request("trackerauth.fetch", {
+        "service": "kinozal", "url": KZ_URL}, timeout=10)
+
+    assert reply["status"] == 200 and "раздача" in reply["text"]
+    assert calls["logins"] == 2, "вход повторяется после прохождения"
+    assert calls["solves"] == 1
+
+
+@pytest.mark.asyncio
+async def test_login_request_carries_clearance_user_agent(system, transport):
+    """Клирэнс действителен только со «своим» UA, поэтому и вход обязан
+    идти под ним: иначе защита разворачивает нас прямо на логине."""
+    _, _, _, probe, monkeypatch = system
+    calls = {"solves": 0}
+
+    def handler(req):
+        if "takelogin.php" in req.url:
+            return _response("https://kinozal.me/userdetails.php")
+        if not calls["solves"]:
+            return _challenge(req.url)
+        return (_login_form(req.url) if len(transport.sent) < 3
+                else _response(req.url, text="<html>раздача</html>"))
+
+    transport.handler = handler
+    monkeypatch.setattr(ta_module.cf_challenge, "solve", _solver(calls))
+
+    await probe.request("trackerauth.fetch", {
+        "service": "kinozal", "url": KZ_URL}, timeout=10)
+
+    login = [r for r in transport.sent if "takelogin.php" in r.url]
+    assert login and all(r.headers["User-Agent"] == "ClearanceUA/1.0"
+                         for r in login)
+
+
+@pytest.mark.asyncio
+async def test_challenge_rate_limit_protects_from_browser_loop(system,
+                                                               transport):
     """Если клирэнс не помогает, браузер не должен запускаться по кругу."""
     _, _, _, probe, monkeypatch = system
-    solves = {"n": 0}
+    calls = {"solves": 0}
 
-    async def fake_solve(url, **kwargs):
-        solves["n"] += 1
-        return "UA", {"cf_clearance": "x"}
-
-    monkeypatch.setattr(requests.Session, "request",
-                        lambda self, *a, **kw: _challenge_page())
-    monkeypatch.setattr(ta_module.cf_challenge, "solve", fake_solve)
+    transport.handler = lambda req: _challenge(req.url)
+    monkeypatch.setattr(ta_module.cf_challenge, "solve", _solver(calls, "UA"))
 
     with pytest.raises(BusRequestError, match="не пускает"):
         await probe.request("trackerauth.fetch", {
@@ -268,26 +346,27 @@ async def test_challenge_rate_limit_protects_from_browser_loop(system):
     with pytest.raises(BusRequestError, match="rate-limit"):
         await probe.request("trackerauth.fetch", {
             "service": "rutracker", "url": RT_URL}, timeout=10)
-    assert solves["n"] == 1, "второй заход отсечён лимитом, браузер не поднят"
+    assert calls["solves"] == 1, "второй заход отсечён лимитом, браузер не поднят"
 
 
 @pytest.mark.asyncio
-async def test_clearance_survives_relogin(system):
+async def test_clearance_survives_relogin(system, transport):
     """Клирэнс — про клиента, а не про учётку: смена логина его не роняет
     (иначе каждый релогин тянул бы лишний прогон браузера)."""
-    _, _, module, _, monkeypatch = system
+    _, _, module, _, _ = system
+    transport.handler = lambda req: _response(
+        "https://kinozal.me/userdetails.php")
     session = requests.Session()
     session.cookies.set("cf_clearance", "КЛИРЭНС", domain="kinozal.me")
     session.cookies.set("uid", "42", domain="kinozal.me")
-    monkeypatch.setattr(requests.Session, "post",
-                        lambda self, url, **kw: FakeResponse(
-                            url="https://kinozal.me/userdetails.php"))
 
     await module._login("kinozal", "https://kinozal.me/x", session)
 
     assert session.cookies.get("cf_clearance") == "КЛИРЭНС"
     assert session.cookies.get("uid") is None, "прочие куки логин сбрасывает"
 
+
+# --- личность сессии --------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_user_agent_restored_with_cookies(system):
@@ -299,18 +378,32 @@ async def test_user_agent_restored_with_cookies(system):
         logged_in=False, user_agent="ClearanceUA/1.0")
 
     module._sessions.clear()
-    module._user_agents.clear()
-    await module._get_session("rutracker", RT_URL)
+    session = await module._get_session("rutracker", RT_URL)
 
-    assert module._user_agents[("rutracker", "rutracker.org")] == \
-        "ClearanceUA/1.0"
+    assert session.headers["User-Agent"] == "ClearanceUA/1.0"
 
 
 @pytest.mark.asyncio
-async def test_cookies_survive_restart(system):
-    bus, db, module, probe, monkeypatch = system
-    monkeypatch.setattr(requests.Session, "request",
-                        lambda self, *a, **kw: _ok_page())
+async def test_vk_keeps_default_user_agent(system, transport):
+    """VK API на браузерном UA вырезает поле files (находка 44) — трекерный
+    UA сюда попадать не должен ни при каких правках."""
+    _, db, module, probe, _ = system
+    await db.execute(
+        "INSERT INTO auth (auth_type, username, password) VALUES (?, ?, ?)",
+        ("vk", "u", "token"))
+    transport.handler = lambda req: _response(req.url, text="{}",
+                                              content_type="application/json")
+
+    await probe.request("trackerauth.fetch", {
+        "service": "vk", "url": "https://api.vk.com/method/video.get"},
+        timeout=5)
+
+    assert transport.agents[0].startswith("python-requests/")
+
+
+@pytest.mark.asyncio
+async def test_cookies_survive_restart(system, transport):
+    bus, db, module, probe, _ = system
     await probe.request("trackerauth.fetch", {
         "service": "kinozal", "url": "https://kinozal.me/x"}, timeout=5)
 
