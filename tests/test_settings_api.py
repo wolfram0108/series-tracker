@@ -290,3 +290,13 @@ async def test_logs_endpoint(system, tmp_path, monkeypatch):
     assert [e["message"] for e in body] == ["два", "один"]  # новые первыми
     resp = await client.get("/api/logs", params={"group": "scan"})
     assert [e["message"] for e in resp.json()] == ["один"]
+
+
+@pytest.mark.asyncio
+async def test_saved_paths_are_fs_safe(system):
+    """Saved paths become save_path prefixes: same rule applies."""
+    _, _, client = system
+    resp = await client.post("/api/settings/saved_paths",
+                             json={"path": " /nas/Series: test\\sub "})
+    assert resp.status_code == 200
+    assert [p["path"] for p in resp.json()["paths"]] == ["/nas/Series test/sub"]

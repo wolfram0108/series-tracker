@@ -212,10 +212,7 @@ const namingTitles = computed<string[]>(() => {
   return out
 })
 
-// --- автоисправление обратного слэша в путях (порт autoCorrectSlash) ---
-watch(() => newSeries.save_path, (v) => {
-  if (v.includes("\\")) newSeries.save_path = v.replace(/\\/g, "/")
-})
+// A backslash in a pasted channel URL is a typo for a slash (legacy autoCorrectSlash).
 watch(vkChannelUrl, (v) => {
   if (v.includes("\\")) vkChannelUrl.value = v.replace(/\\/g, "/")
 })
@@ -543,13 +540,13 @@ onBeforeUnmount(() => {
             </StGroup>
             <StGroup :state="nameEnState">
               <StIcon icon="pi pi-language" />
-              <StInput v-model="newSeries.name_en" label="Название (EN)" />
+              <StInput v-model="newSeries.name_en" label="Название (EN)" kind="filename" />
             </StGroup>
           </div>
           <div class="add-grid-2 mt-3">
             <StGroup :state="savePathState">
               <StIcon icon="pi pi-folder-open" />
-              <StInput v-model="newSeries.save_path" label="Путь сохранения" />
+              <StInput v-model="newSeries.save_path" label="Путь сохранения" kind="path" />
               <SavedPathDropdown :catalog-name="tmdbCatalogName" @select="newSeries.save_path = $event" />
             </StGroup>
             <StGroup :state="seasonState" :class="{ 'is-disabled': isSeasonless }">
@@ -561,11 +558,11 @@ onBeforeUnmount(() => {
           <div class="add-grid-2 mt-3">
             <StGroup>
               <StIcon icon="pi pi-video" />
-              <StInput v-model="newSeries.quality_override" label="Качество (ручной ввод)" />
+              <StInput v-model="newSeries.quality_override" label="Качество (ручной ввод)" kind="filename" />
             </StGroup>
             <StGroup>
               <StIcon icon="pi pi-desktop" />
-              <StInput v-model="newSeries.resolution_override" label="Разрешение (ручной ввод)" />
+              <StInput v-model="newSeries.resolution_override" label="Разрешение (ручной ввод)" kind="filename" />
             </StGroup>
           </div>
           <div class="field-group mt-3">

@@ -209,10 +209,6 @@ const seasonState = computed<VState>(() => {
   return vstate(isSeasonValid.value)
 })
 
-watch(() => form.save_path, (v) => {
-  if (v.includes("\\")) form.save_path = v.replace(/\\/g, "/")
-})
-
 async function loadProfiles() {
   const { data } = await api.GET("/api/parser-profiles")
   if (Array.isArray(data)) profiles.value = data as { id: number; name: string }[]
@@ -399,13 +395,13 @@ onMounted(() => {
           </StGroup>
           <StGroup :state="nameEnState">
             <StIcon icon="pi pi-language" />
-            <StInput v-model="form.name_en" label="Название (EN)" />
+            <StInput v-model="form.name_en" label="Название (EN)" kind="filename" />
           </StGroup>
         </div>
         <div class="add-grid-2 mt-3">
           <StGroup :state="savePathState">
             <StIcon icon="pi pi-folder-open" />
-            <StInput v-model="form.save_path" label="Путь сохранения" />
+            <StInput v-model="form.save_path" label="Путь сохранения" kind="path" />
             <SavedPathDropdown :catalog-name="tmdbCatalogName" @select="form.save_path = $event" />
           </StGroup>
           <StGroup :state="seasonState" :class="{ 'is-disabled': isSeasonless }">
@@ -418,11 +414,11 @@ onMounted(() => {
         <div class="add-grid-2 mt-3">
           <StGroup>
             <StIcon icon="pi pi-video" />
-            <StInput v-model="form.quality_override" label="Качество (ручной ввод)" />
+            <StInput v-model="form.quality_override" label="Качество (ручной ввод)" kind="filename" />
           </StGroup>
           <StGroup>
             <StIcon icon="pi pi-desktop" />
-            <StInput v-model="form.resolution_override" label="Разрешение (ручной ввод)" />
+            <StInput v-model="form.resolution_override" label="Разрешение (ручной ввод)" kind="filename" />
           </StGroup>
         </div>
 

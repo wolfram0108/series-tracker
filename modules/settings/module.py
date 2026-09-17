@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from core import BaseModule
+from core import BaseModule, sanitize_path
 from core.db import Database
 from core.envelope import Envelope
 
@@ -53,7 +53,7 @@ class SettingsModule(BaseModule):
         return {"paths": await self.repo.list_paths()}
 
     async def on_paths_add(self, env: Envelope) -> dict:
-        path = (env.payload.get("path") or "").strip()
+        path = sanitize_path(env.payload.get("path") or "")
         if path:
             await self.repo.add_path(path)
         return {"paths": await self.repo.list_paths()}

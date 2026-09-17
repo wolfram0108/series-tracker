@@ -13,11 +13,7 @@ import os
 import re
 
 from core import season as season_rule
-
-
-def sanitize(name: str) -> str:
-    name = re.sub(r'[<>:"/\\|?*]', "", str(name))
-    return re.sub(r"\s+", " ", name).strip()
+from core.fsnames import sanitize_name as sanitize
 
 
 def build_metadata(series: dict, media_item: dict, extracted: dict) -> dict:

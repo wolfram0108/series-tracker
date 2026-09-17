@@ -35,12 +35,28 @@ Events (исходящие):
 """
 from __future__ import annotations
 
-from core import BaseModule
+from core import BaseModule, sanitize_name, sanitize_path
 from core.db import Database
 from core.envelope import Envelope
 
 from .aggregator import StatusAggregator
 from .repository import CatalogRepository
+
+# Columns that end up as path components on disk; the owner normalises
+# them on every write so no client can store an unusable name.
+_PATH_FIELDS = ("save_path",)
+_NAME_FIELDS = ("name_en", "quality_override", "resolution_override")
+
+
+def fs_safe(fields: dict) -> dict:
+    out = dict(fields)
+    for key in _PATH_FIELDS:
+        if isinstance(out.get(key), str):
+            out[key] = sanitize_path(out[key])
+    for key in _NAME_FIELDS:
+        if isinstance(out.get(key), str):
+            out[key] = sanitize_name(out[key])
+    return out
 
 
 class CatalogModule(BaseModule):
@@ -106,7 +122,7 @@ class CatalogModule(BaseModule):
     async def on_set_save_path(self, env: Envelope) -> dict:
         """save_path — наша колонка; library пишет её после перемещения."""
         await self.repo.set_save_path(env.payload["series_id"],
-                                      env.payload["save_path"])
+                                      sanitize_path(env.payload["save_path"]))
         return {"ok": True}
 
     async def on_sse_clients(self, env: Envelope) -> None:
@@ -147,7 +163,7 @@ class CatalogModule(BaseModule):
     # --- CRUD (Р-19) ----------------------------------------------------------
 
     async def on_series_create(self, env: Envelope) -> dict:
-        series_id = await self.repo.create_series(env.payload["data"])
+        series_id = await self.repo.create_series(fs_safe(env.payload["data"]))
         row = await self.repo.get_series(series_id)
         row["statuses"] = self.agg.statuses(series_id)
         row["is_busy"] = False
@@ -159,8 +175,8 @@ class CatalogModule(BaseModule):
         series_id = env.payload["series_id"]
         if await self.repo.get_series(series_id) is None:
             raise LookupError(f"сериал {series_id} не найден")
-        applied = await self.repo.update_series(series_id,
-                                                env.payload["fields"])
+        applied = await self.repo.update_series(
+            series_id, fs_safe(env.payload["fields"]))
         if applied:
             # Дельта для SSE series_updated: применённые поля + обязательные
             # statuses/is_busy (находка 38).

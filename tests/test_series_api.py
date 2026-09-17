@@ -369,3 +369,28 @@ async def test_small_endpoints(system):
     assert body[0]["task_key"] == "h1"
     assert body[0]["series_name"] == "Тайтл"
     assert body[0]["progress"] == 55
+
+
+@pytest.mark.asyncio
+async def test_create_and_update_store_fs_safe_names(system):
+    """The column owner sanitizes path and file-name fields on every
+    write, so forbidden characters never reach the DB from any client."""
+    _, _, client, _ = system
+    resp = await client.post("/api/series", json={
+        "url": "http://kinozal.tv/details.php?id=10", "name": "Кто: доктор",
+        "name_en": '  Doctor "Who"?  ', "site": "kinozal",
+        "save_path": "/media/Doctor Who: Flux (2021)\\extra",
+        "source_type": "torrent", "quality_override": "WEB-DL/1080p"})
+    assert resp.status_code == 200
+    series_id = resp.json()["series_id"]
+    details = (await client.get(f"/api/series/{series_id}")).json()
+    assert details["name"] == "Кто: доктор"  # display title stays as typed
+    assert details["name_en"] == "Doctor Who"
+    assert details["save_path"] == "/media/Doctor Who Flux (2021)/extra"
+    assert details["quality_override"] == "WEB-DL1080p"
+
+    resp = await client.post(f"/api/series/{series_id}",
+                             json={"name_en": "New*Name", "season": "s01"})
+    assert resp.status_code == 200
+    details = (await client.get(f"/api/series/{series_id}")).json()
+    assert details["name_en"] == "NewName"

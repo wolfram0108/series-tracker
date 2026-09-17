@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from core import BaseModule, BusRequestError
+from core import BaseModule, BusRequestError, sanitize_path
 from core.db import Database
 from core.envelope import Envelope
 
@@ -102,7 +102,7 @@ class LibraryModule(BaseModule):
 
     async def on_relocate(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
-        new_path = env.payload["new_path"]
+        new_path = sanitize_path(env.payload["new_path"])
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
         old_path = series["save_path"]

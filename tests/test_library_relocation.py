@@ -197,3 +197,15 @@ async def test_rejects_same_path_and_double_task(system):
     with pytest.raises(BusRequestError, match="уже выполняется"):
         await probe.request("library.relocate", {
             "series_id": 2, "new_path": new_dir}, timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_relocate_sanitizes_target_path(system, tmp_path):
+    """The directory library creates obeys the filesystem-name rule."""
+    bus, _, probe, db_path, _, _ = system
+    sub_fin = bus.subscribe("library.relocation.finished")
+    await probe.request("library.relocate", {
+        "series_id": 2, "new_path": str(tmp_path / "Show: Two?")}, timeout=10)
+    env = await asyncio.wait_for(sub_fin.queue.get(), 3)
+    assert env.payload["success"] is True
+    assert _save_path(db_path) == str(tmp_path / "Show Two")

@@ -8,6 +8,7 @@ import StGroup from "../StGroup.vue"
 import StSelect from "../StSelect.vue"
 import DatabaseViewerModal from "./DatabaseViewerModal.vue"
 import { api } from "../../api/client"
+import { sanitizePath } from "../../lib/fsnames"
 import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { useScannerStore } from "../../stores/scanner"
@@ -85,7 +86,7 @@ async function loadPaths() {
   if (data && Array.isArray(data.paths)) paths.value = data.paths
 }
 async function addPath() {
-  const v = newPath.value.trim()
+  const v = sanitizePath(newPath.value)
   if (!v) return
   const ok = await request(
     api.POST("/api/settings/saved_paths", { body: { path: v } } as never),
