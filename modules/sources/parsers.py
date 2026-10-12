@@ -23,6 +23,22 @@ class SourceParseError(RuntimeError):
     pass
 
 
+class SourceRefusedError(SourceParseError):
+    """Отказ, который не изменится от смены хоста: перебор кандидатов
+    доставки на нём прекращается (суточный лимит на учётку)."""
+
+
+def raise_not_a_torrent(text: str) -> None:
+    """Трекер ответил страницей вместо файла — назвать причину.
+    Известные причины — из разбора старого qbittorrent.py."""
+    if "Вы использовали доступное Вам количество торрент-файлов" in text:
+        raise SourceRefusedError(
+            "достигнут суточный лимит скачиваний на трекере")
+    if "Вам необходимо включить JavaScript" in text:
+        raise SourceParseError("трекер требует JavaScript")
+    raise SourceParseError("трекер вернул страницу вместо .torrent")
+
+
 def _release(link=None, magnet=None, date_marker=None, episodes=None,
              quality=None, **extra) -> dict:
     return {"link": link, "magnet": magnet, "date_marker": date_marker,

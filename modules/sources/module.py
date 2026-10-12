@@ -7,11 +7,13 @@ Queries:
   sources.trackers.list          → [{...}] (владелец таблицы trackers)
   sources.tracker.resolve {url}  → {tracker|null} (tracker_info деталей)
 
-Доставка страниц:
-  kinozal / rutracker — query trackerauth.fetch (сессии — не наша забота);
-  anilibria — официальный API напрямую (httpx, авторизация не нужна);
-  astar / anilibria_tv — браузерная доставка через общий Playwright-пул
-  (firefox, ленивый запуск, контекст на запрос; _browser_html).
+Доставка — ТОЛЬКО через `delivery.Delivery` (единственный выход
+наружу): она перебирает хосты-кандидаты (канонический хост ссылки →
+зеркала трекера → хост как написан) и проверяет, что приехало ожидаемое.
+Транспорт выбирается по трекеру: kinozal / rutracker — trackerauth
+(сессии и челлендж — не наша забота); anilibria — официальный API через
+httpx; astar / anilibria_tv — общий Playwright-пул (_browser_html,
+ленивый запуск, контекст на запрос).
 
 Между запросами к одному трекеру выдерживается пауза (уважение к
 чужому сервису) — обеспечивается замком на сервис + минимальным
@@ -29,7 +31,8 @@ from core import BaseModule, ids
 from core.db import Database
 from core.envelope import Envelope
 
-from . import anilibria, parsers, vk
+from . import anilibria, delivery, parsers, vk
+from .delivery import Delivery
 from .parsers import SourceParseError
 from .repository import SourcesRepository
 
@@ -54,6 +57,13 @@ class SourcesModule(BaseModule):
         self._locks: dict[str, asyncio.Lock] = {}
         self._last_request: dict[str, float] = {}
         super().__init__(bus)
+        # Late binding on purpose: tests replace the transport, not the bus.
+        self._delivery = Delivery(
+            request=lambda topic, payload, **kw: self.request(topic, payload,
+                                                              **kw),
+            http=lambda: self._http,
+            browser_html=lambda service, url: self._browser_html(service, url),
+            log=self.log)
 
     def register(self) -> None:
         self.handle("sources.parse", self.on_parse)
@@ -138,24 +148,23 @@ class SourcesModule(BaseModule):
         if service == "anilibria":
             alias = anilibria.alias_from_url(url)
             api = anilibria.api_base_from_url(url)
-            resp = await self._http.get(f"{api}/anime/releases/{alias}")
-            resp.raise_for_status()
-            return anilibria.release_to_result(resp.json())
+            delivered = await self._delivery.fetch(
+                service, f"{api}/anime/releases/{alias}", expect="json",
+                mirrors=mirrors, transport="http",
+                accept=lambda data, _url: anilibria.release_to_result(data))
+            return delivered.value
 
         if service in ("kinozal", "rutracker"):
             parse = (parsers.kinozal_parse if service == "kinozal"
                      else parsers.rutracker_parse)
-            return await self._parse_with_mirrors(service, url, mirrors,
-                                                  parse)
+            return await self._parse_page(service, url, mirrors, parse,
+                                          transport="auth")
 
         if service in ("astar", "anilibria_tv"):
-            # Разбор готов (parsers.astar_parse / anilibria_tv_parse);
-            # доставка — общий браузерный пул (Р-9, этап 6).
             parse = (parsers.astar_parse if service == "astar"
                      else parsers.anilibria_tv_parse)
-            return await self._parse_with_mirrors(
-                service, url, mirrors, parse,
-                fetcher=lambda u: self._browser_html(service, u))
+            return await self._parse_page(service, url, mirrors, parse,
+                                          transport="browser")
 
         raise SourceParseError(f"нет реализации для трекера {service}")
 
@@ -202,63 +211,29 @@ class SourcesModule(BaseModule):
         finally:
             await context.close()
 
-    async def _parse_with_mirrors(self, service: str, url: str,
-                                  mirrors: list[str], parse,
-                                  fetcher=None) -> dict:
-        """Фоллбэк зеркал живёт здесь, а не в scan: владелец таблицы
-        trackers и доставки страниц — sources (Р-7). Пробуем исходный
-        URL, затем остальные зеркала; неудача всех — громкая ошибка со
-        списком попыток. Результат несёт фактический URL ('url').
-
-        Доставка HTML параметризуется: по умолчанию через trackerauth.fetch
-        (kinozal/rutracker), либо переданным fetcher (браузер — astar/
-        anilibria_tv). Перебор зеркал общий для обоих способов."""
-        from urllib.parse import urlparse
-        original = urlparse(url)
-        candidates = [url] + [original._replace(netloc=m).geturl()
-                              for m in mirrors if m and m != original.netloc]
-        errors = []
-        for attempt_url in candidates:
-            try:
-                if fetcher is not None:
-                    html = await fetcher(attempt_url)
-                else:
-                    # Бюджет ожидания покрывает худший случай доставки:
-                    # запрос + прохождение антибот-челленджа браузером в
-                    # trackerauth (до 45 с) + повтор запроса. С прежними
-                    # 60 с ответ отваливался бы по шине прямо посреди
-                    # успешного прохождения челленджа.
-                    reply = await self.request("trackerauth.fetch", {
-                        "service": service, "url": attempt_url,
-                        "timeout": 20}, timeout=150)
-                    if reply["status"] != 200:
-                        raise SourceParseError(f"HTTP {reply['status']}")
-                    html = reply["text"]
-                result = parse(html, attempt_url)
-                result["url"] = attempt_url
-                if attempt_url != url:
-                    self.log.info("%s: основной URL не сработал, страница "
-                                  "получена с зеркала %s", service,
-                                  urlparse(attempt_url).netloc)
-                return result
-            except Exception as exc:  # сеть, HTTP, разбор — пробуем дальше
-                errors.append(f"{urlparse(attempt_url).netloc}: {exc}")
-                self.log.warning("%s: зеркало не сработало — %s", service,
-                                 errors[-1])
-        raise SourceParseError(
-            f"{service}: не сработало ни одно зеркало ({'; '.join(errors)})")
+    async def _parse_page(self, service: str, url: str,
+                          mirrors: list[str], parse, *,
+                          transport: str) -> dict:
+        """Страница трекера + разбор. Разбор идёт ВНУТРИ попытки
+        доставки, поэтому страница, которую не удалось разобрать,
+        означает переезд на следующий хост, а не отказ. Результат несёт
+        фактический URL ('url')."""
+        delivered = await self._delivery.fetch(
+            service, url, expect="page", mirrors=mirrors,
+            transport=transport,
+            accept=lambda html, attempt_url: parse(html, attempt_url))
+        return {**delivered.value, "url": delivered.url}
 
     # --- VK (находка 15: официальный API, токен живёт в trackerauth) -------------------
 
     async def _vk_call(self, method: str, params: dict) -> dict:
-        import json as _json
-        reply = await self.request("trackerauth.fetch", {
-            "service": "vk", "url": f"{vk.API_BASE}{method}",
-            "params": params, "timeout": 20}, timeout=60)
         try:
-            data = _json.loads(reply.get("text") or "")
-        except _json.JSONDecodeError as exc:
-            raise vk.VkScanError(f"VK {method}: не-JSON ответ") from exc
+            delivered = await self._delivery.fetch(
+                "vk", f"{vk.API_BASE}{method}", expect="json",
+                transport="auth", params=params, bus_timeout=60)
+        except SourceParseError as exc:
+            raise vk.VkScanError(f"VK {method}: {exc}") from exc
+        data = delivered.value
         if "error" in data:
             raise vk.VkScanError(
                 f"VK {method}: {data['error'].get('error_msg')} "
@@ -320,37 +295,17 @@ class SourcesModule(BaseModule):
                     "from_cache": True}
 
         tracker = await self.repo.resolve(url)
-        service = tracker["canonical_name"] if tracker else None
-        if service in ("kinozal", "rutracker"):
-            # как и при разборе страницы: бюджет покрывает возможное
-            # прохождение антибот-челленджа браузером внутри trackerauth
-            reply = await self.request("trackerauth.fetch", {
-                "service": service, "url": url, "timeout": 30}, timeout=150)
-            if reply["status"] != 200:
-                raise SourceParseError(f"скачивание {url}: HTTP {reply['status']}")
-            if "text" in reply:  # трекер вернул HTML вместо файла
-                self._raise_html_error(reply["text"], url)
-            content = base64.b64decode(reply["content_b64"])
-        else:
-            resp = await self._http.get(url)
-            resp.raise_for_status()
-            if "text/html" in resp.headers.get("content-type", ""):
-                self._raise_html_error(resp.text, url)
-            content = resp.content
+        service = tracker["canonical_name"] if tracker else ""
+        mirrors = tracker["mirrors"] if tracker else []
+        delivered = await self._delivery.fetch(
+            service, url, expect="torrent", mirrors=mirrors,
+            transport="auth" if service in ("kinozal", "rutracker") else "http",
+            timeout=delivery.TORRENT_TIMEOUT)
+        content = delivered.value
 
         await asyncio.to_thread(self._cache_write, torrent_id, content)
         return {"content_b64": base64.b64encode(content).decode(),
                 "from_cache": False}
-
-    @staticmethod
-    def _raise_html_error(text: str, url: str) -> None:
-        # Известные причины из разбора старого qbittorrent.py
-        if "Вы использовали доступное Вам количество торрент-файлов" in text:
-            raise SourceParseError(
-                f"{url}: достигнут суточный лимит скачиваний на трекере")
-        if "Вам необходимо включить JavaScript" in text:
-            raise SourceParseError(f"{url}: трекер требует JavaScript")
-        raise SourceParseError(f"{url}: трекер вернул HTML вместо .torrent")
 
     # --- кэш .torrent-файлов ------------------------------------------------------------
 

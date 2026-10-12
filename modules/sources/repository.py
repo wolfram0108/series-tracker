@@ -6,6 +6,8 @@ from urllib.parse import urlparse
 
 from core.db import Database
 
+from . import hosts
+
 
 class SourcesRepository:
     def __init__(self, db: Database) -> None:
@@ -22,8 +24,8 @@ class SourcesRepository:
         return self._cache
 
     async def resolve(self, url: str) -> dict | None:
-        """Определяет трекер по домену URL (с учётом www./dl.-префиксов)."""
-        domain = urlparse(url).netloc.removeprefix("www.").removeprefix("dl.")
+        """Определяет трекер по домену URL (префиксы доставки — hosts)."""
+        domain = hosts.canonical_host(urlparse(url).netloc)
         for tracker in await self.all_trackers():
             if domain in tracker["mirrors"]:
                 return tracker
