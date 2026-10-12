@@ -509,3 +509,47 @@ async def test_session_of_same_account_is_reused(system, transport):
     first_cookies = transport.sent[0].headers.get("Cookie") or ""
     assert "uid=OLDACCOUNT" in first_cookies
     assert not [r for r in transport.sent if "takelogin.php" in r.url]
+
+
+@pytest.mark.asyncio
+async def test_session_without_fingerprint_is_kept(system, transport):
+    """«Неизвестно, под какой учёткой» — не то же, что «под другой».
+    Запись старше привязки обязана работать: форма входа RuTracker
+    содержит капчу (находка 65), автоматически восстановиться нечем."""
+    _, db, module, probe, _ = system
+    await _store_session(module, None)      # отпечатка нет, как у старых записей
+    assert (await db.fetch_one(
+        "SELECT account_fingerprint AS f FROM tracker_sessions "
+        "WHERE service='kinozal'"))["f"] is None
+
+    transport.handler = lambda req: _response(req.url,
+                                              text="<html>раздача</html>")
+    reply = await probe.request("trackerauth.fetch", {
+        "service": "kinozal", "url": KZ_URL}, timeout=5)
+    assert reply["status"] == 200
+
+    assert "uid=OLDACCOUNT" in (transport.sent[0].headers.get("Cookie") or ""), \
+        "сессия без отпечатка должна применяться, а не выбрасываться"
+    assert not [r for r in transport.sent if "takelogin.php" in r.url], \
+        "лишнего входа быть не должно"
+
+
+@pytest.mark.asyncio
+async def test_credentials_change_drops_account_cookies_in_db(system):
+    """Смена учётных данных отменяет прежний вход в ОБОИХ слоях: сброс
+    только памяти оставлял куки в БД, откуда они и восстанавливались."""
+    from core import crypto
+    _, db, module, probe, _ = system
+    await _store_session(module, account_fingerprint(
+        {"username": "user", "password": "pass"}))
+
+    await probe.request("trackerauth.credentials.set",
+                        {"service": "kinozal", "username": "newuser",
+                         "password": "newpass"}, timeout=5)
+
+    row = await db.fetch_one("SELECT cookies_json FROM tracker_sessions "
+                             "WHERE service='kinozal'")
+    cookies = json.loads(crypto.decrypt(row["cookies_json"]))
+    assert "uid" not in cookies, "куки авторизации обязаны уйти из БД"
+    assert cookies.get("cf_clearance") == "CLEARANCE1", \
+        "клирэнс про клиента — переживает смену учётки"

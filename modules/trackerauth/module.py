@@ -103,11 +103,17 @@ class TrackerauthModule(BaseModule):
         password = p.get("password") or None
         await self.repo.upsert_credentials(service, p.get("username"),
                                            password, p.get("url"))
-        # Гигиена кэша: сессии под прежние данные больше не нужны. На
-        # применимость это не влияет — она решается отпечатком учётки и
-        # в памяти (ключ кэша), и в БД (load_session).
+        # Инвалидация в ОБОИХ слоях: кэш в памяти и куки в БД. Сброс
+        # только памяти оставлял прежний вход в БД, откуда он и
+        # восстанавливался — запросы продолжали идти под прежним
+        # аккаунтом. Клирэнс и UA сохраняются (они про клиента).
         for key in [k for k in self._sessions if k[0] == service]:
             self._sessions.pop(key, None)
+        dropped = await self.repo.drop_account_cookies(service)
+        if dropped:
+            self.log.info("%s: учётные данные изменены — куки авторизации "
+                          "сброшены (%d домен(ов)), нужен вход", service,
+                          dropped)
         self.publish_event("trackerauth.credentials.changed",
                            {"service": service})
         return {"ok": True}

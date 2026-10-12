@@ -95,7 +95,13 @@ class TrackerAuthRepository:
         if not row:
             return {}, None, False
         cookies = json.loads(crypto.decrypt(row["cookies_json"]))
-        foreign = row["account_fingerprint"] != fingerprint
+        # NULL — «неизвестно, под какой учёткой получена» (запись старше
+        # привязки), и это НЕ то же, что «получена под другой». Куки
+        # отбрасываются только при явном несовпадении: иначе терялась бы
+        # рабочая сессия там, где автоматический вход невозможен —
+        # форма входа RuTracker содержит капчу (находка 65).
+        stored = row["account_fingerprint"]
+        foreign = stored is not None and stored != fingerprint
         if foreign:
             cookies = {name: value for name, value in cookies.items()
                        if name in CLIENT_COOKIES}
@@ -123,6 +129,30 @@ class TrackerAuthRepository:
             + (", last_login_at=excluded.last_login_at" if logged_in else ""),
             (service, domain, cookies, now if logged_in else None, now,
              user_agent, fingerprint))
+
+    async def drop_account_cookies(self, service: str) -> int:
+        """Выбросить куки авторизации сервиса, сохранив клиентские.
+
+        Вызывается при смене учётных данных: прежний вход больше не
+        применим, и БД обязана это отразить — иначе сессия
+        восстанавливается оттуда и запросы идут под прежним аккаунтом
+        (протухания нет, релогин не запускается). Клирэнс и UA остаются:
+        они про клиента, а не про учётку.
+        """
+        rows = await self._db.fetch_all(
+            "SELECT domain, cookies_json FROM tracker_sessions "
+            "WHERE service=?", (service,))
+        for row in rows:
+            cookies = json.loads(crypto.decrypt(row["cookies_json"]))
+            kept = {name: value for name, value in cookies.items()
+                    if name in CLIENT_COOKIES}
+            await self._db.execute(
+                "UPDATE tracker_sessions SET cookies_json=?, "
+                "account_fingerprint=NULL, updated_at=? "
+                "WHERE service=? AND domain=?",
+                (crypto.encrypt(json.dumps(kept)), _now(), service,
+                 row["domain"]))
+        return len(rows)
 
     async def encrypt_legacy_secrets(self) -> int:
         """Одноразовая миграция: зашифровать секреты, лежащие в открытом
