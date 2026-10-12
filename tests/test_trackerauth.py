@@ -16,6 +16,7 @@ from core import Bus, BaseModule, BusRequestError, Runner
 from core.db import Database
 from modules.trackerauth import TrackerauthModule
 from modules.trackerauth import module as ta_module
+from modules.trackerauth.repository import account_fingerprint
 
 KZ_URL = "https://kinozal.me/details.php?id=1"
 RT_URL = "https://rutracker.org/forum/viewtopic.php?t=1"
@@ -407,10 +408,104 @@ async def test_cookies_survive_restart(system, transport):
     await probe.request("trackerauth.fetch", {
         "service": "kinozal", "url": "https://kinozal.me/x"}, timeout=5)
 
-    # «рестарт»: новый экземпляр модуля с той же БД
+    # «рестарт»: новый экземпляр модуля с той же БД. Отпечаток учётки —
+    # текущий: вход переживает рестарт, пока учётные данные те же.
     module._sessions.clear()
-    await db.execute("UPDATE tracker_sessions SET cookies_json=?",
-                     (json.dumps({"uid": "42", "pass": "secret"}),))
+    await db.execute(
+        "UPDATE tracker_sessions SET cookies_json=?, account_fingerprint=?",
+        (json.dumps({"uid": "42", "pass": "secret"}),
+         account_fingerprint({"username": "user", "password": "pass"})))
     session = await module._get_session("kinozal", "https://kinozal.me/x")
     assert session.cookies.get("uid") == "42", \
         "куки должны восстановиться из БД без нового логина"
+
+
+# --- вход привязан к учётным данным (находка 69) -----------------------------------
+
+def test_account_fingerprint_follows_credentials():
+    """Отпечаток меняется и от логина, и от пароля: при любой смене
+    учётных данных прежний вход становится неприменимым."""
+    base = {"username": "user", "password": "pass"}
+    assert account_fingerprint(base) == account_fingerprint(dict(base))
+    assert account_fingerprint(
+        {"username": "other", "password": "pass"}) != account_fingerprint(base)
+    assert account_fingerprint(
+        {"username": "user", "password": "other"}) != account_fingerprint(base)
+    assert account_fingerprint(None) is None
+
+
+@pytest.mark.asyncio
+async def test_username_trimmed_on_save(system):
+    """Пробелы по краям логина уходили в форму входа как есть."""
+    _, db, _, probe, _ = system
+    await probe.request("trackerauth.credentials.set",
+                        {"service": "rutracker", "username": "  vova  ",
+                         "password": "p"}, timeout=5)
+    row = await db.fetch_one(
+        "SELECT username FROM auth WHERE auth_type='rutracker'")
+    assert row["username"] == "vova"
+
+
+async def _store_session(module, fingerprint):
+    """Живая сессия прежней учётки в БД: куки авторизации + клирэнс."""
+    session = requests.Session()
+    session.cookies.set("uid", "OLDACCOUNT", domain="kinozal.me")
+    session.cookies.set("cf_clearance", "CLEARANCE1", domain="kinozal.me")
+    await module.repo.save_cookies("kinozal", "kinozal.me", session,
+                                   logged_in=True, fingerprint=fingerprint)
+
+
+@pytest.mark.asyncio
+async def test_session_of_other_account_is_not_applied(system, transport):
+    """Смена учётки в настройках: прежний вход не применяется и выполняется
+    вход под новой записью. Без привязки запросы продолжали идти под
+    прежним аккаунтом — с его суточными лимитами и правами."""
+    _, _, module, probe, _ = system
+    await _store_session(module, account_fingerprint(
+        {"username": "user", "password": "pass"}))
+    await probe.request("trackerauth.credentials.set",
+                        {"service": "kinozal", "username": "newuser",
+                         "password": "newpass"}, timeout=5)
+
+    state = {"logged_in": False}
+
+    def handler(req):
+        if "takelogin.php" in req.url:
+            state["logged_in"] = True
+            return _response("https://kinozal.me/userdetails.php")
+        return (_response(req.url, text="<html>раздача</html>")
+                if state["logged_in"] else _login_form(req.url))
+
+    transport.handler = handler
+    reply = await probe.request("trackerauth.fetch", {
+        "service": "kinozal", "url": KZ_URL}, timeout=5)
+    assert reply["status"] == 200
+
+    first_cookies = transport.sent[0].headers.get("Cookie") or ""
+    assert "uid=OLDACCOUNT" not in first_cookies, \
+        "куки прежней учётки применяться не должны"
+    assert "cf_clearance=CLEARANCE1" in first_cookies, \
+        "клирэнс про клиента, а не про учётку — браузер дёргать заново не нужно"
+
+    logins = [r for r in transport.sent if "takelogin.php" in r.url]
+    assert len(logins) == 1, "вход под новой учётной записью обязан произойти"
+    assert "username=newuser" in (logins[0].body or "")
+
+
+@pytest.mark.asyncio
+async def test_session_of_same_account_is_reused(system, transport):
+    """Учётка не менялась — прежний вход применяется, лишнего входа нет
+    (трекер не должен видеть входов на каждый запрос)."""
+    _, _, module, probe, _ = system
+    await _store_session(module, account_fingerprint(
+        {"username": "user", "password": "pass"}))
+
+    transport.handler = lambda req: _response(req.url,
+                                              text="<html>раздача</html>")
+    reply = await probe.request("trackerauth.fetch", {
+        "service": "kinozal", "url": KZ_URL}, timeout=5)
+    assert reply["status"] == 200
+
+    first_cookies = transport.sent[0].headers.get("Cookie") or ""
+    assert "uid=OLDACCOUNT" in first_cookies
+    assert not [r for r in transport.sent if "takelogin.php" in r.url]

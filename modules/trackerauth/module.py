@@ -7,6 +7,13 @@ cloudscraper) не покидают модуль; куки персистятс�
 других»). Протухание детектится провайдером по ответу: релогин и один
 повтор запроса; потребители никогда не получают страницу логина.
 
+Вход привязан к учётным данным, под которыми получен (отпечаток в
+`tracker_sessions.account_fingerprint`): смена логина или пароля делает
+прежнюю сессию неприменимой и там, и в кэше памяти. Без этого смена
+учётки оставалась незамеченной — сессия жива, протухания нет, релогин не
+запускается, запросы идут под прежним аккаунтом. Клирэнс антибот-защиты
+и UA от привязки свободны: они про клиента, а не про учётку.
+
 Антибот-челлендж (Cloudflare) — третье состояние, помимо «живая сессия»
 и «протухла»: сайт не пускает клиента вовсе, сессия при этом цела.
 Распознаёт его сама сессия (`cf_challenge.arm`) и поднимает
@@ -45,7 +52,7 @@ from core.envelope import Envelope
 
 from . import cf_challenge
 from .providers import PROVIDERS, TrackerLoginError
-from .repository import TrackerAuthRepository
+from .repository import TrackerAuthRepository, account_fingerprint
 
 LOGIN_MIN_INTERVAL = 300.0      # секунд между логинами на один трекер
 CHALLENGE_MIN_INTERVAL = 60.0   # секунд между прохождениями челленджа
@@ -56,7 +63,10 @@ class TrackerauthModule(BaseModule):
 
     def __init__(self, bus, db: Database) -> None:
         self.repo = TrackerAuthRepository(db)
-        self._sessions: dict[tuple[str, str], requests.Session] = {}
+        # Ключ включает отпечаток учётки: сессия, полученная под другими
+        # учётными данными, по новому ключу просто не находится.
+        self._sessions: dict[tuple[str, str, str | None],
+                             requests.Session] = {}
         self._last_login: dict[str, float] = {}
         self._last_challenge: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
@@ -93,7 +103,9 @@ class TrackerauthModule(BaseModule):
         password = p.get("password") or None
         await self.repo.upsert_credentials(service, p.get("username"),
                                            password, p.get("url"))
-        # сессии сервиса протухли по определению — выбрасываем
+        # Гигиена кэша: сессии под прежние данные больше не нужны. На
+        # применимость это не влияет — она решается отпечатком учётки и
+        # в памяти (ключ кэша), и в БД (load_session).
         for key in [k for k in self._sessions if k[0] == service]:
             self._sessions.pop(key, None)
         self.publish_event("trackerauth.credentials.changed",
@@ -109,9 +121,14 @@ class TrackerauthModule(BaseModule):
         return row
 
     async def _get_session(self, service: str, url: str) -> requests.Session:
+        """Сессия под ТЕКУЩУЮ учётку сервиса. Вход, полученный под другими
+        учётными данными, не применяется: иначе смена логина в настройках
+        остаётся незамеченной (прежняя сессия жива, протухания нет)."""
         provider = PROVIDERS[service]
         domain = provider.normalize_domain(url)
-        key = (service, domain)
+        fingerprint = account_fingerprint(
+            await self.repo.get_credentials(service))
+        key = (service, domain, fingerprint)
         if key in self._sessions:
             return self._sessions[key]
 
@@ -120,11 +137,18 @@ class TrackerauthModule(BaseModule):
         cf_challenge.arm(session)
         if provider.user_agent:
             session.headers["User-Agent"] = provider.user_agent
-        cookies, user_agent = await self.repo.load_session(service, domain)
+        cookies, user_agent, foreign = await self.repo.load_session(
+            service, domain, fingerprint)
+        if foreign:
+            self.log.info("сессия %s/%s получена под другой учётной записью — "
+                          "куки авторизации не применяются, нужен вход",
+                          service, domain)
         if cookies:
             for name, value in cookies.items():
                 session.cookies.set(name, value, domain=domain)
-            self.log.info("сессия %s/%s восстановлена из БД", service, domain)
+            if not foreign:
+                self.log.info("сессия %s/%s восстановлена из БД",
+                              service, domain)
         if user_agent:
             # без «своего» UA восстановленный cf_clearance недействителен
             session.headers["User-Agent"] = user_agent
@@ -150,7 +174,9 @@ class TrackerauthModule(BaseModule):
         if clearance:
             session.cookies.set(cf_challenge.CLEARANCE_COOKIE, clearance,
                                 domain=domain)
-        self.log.info("логин на %s/%s", service, domain)
+        fingerprint = account_fingerprint(credentials)
+        self.log.info("логин на %s/%s под учётной записью %s", service, domain,
+                      credentials.get("username") or "?")
         await self._with_clearance(
             service, url, session, provider,
             lambda: asyncio.to_thread(provider.login, session,
@@ -160,7 +186,8 @@ class TrackerauthModule(BaseModule):
         # «съедала» общий по сервису лимит и блокировала логин на другом
         # доступном зеркале того же трекера — перебор зеркал терял смысл.
         self._last_login[service] = time.monotonic()
-        await self.repo.save_cookies(service, domain, session, logged_in=True)
+        await self.repo.save_cookies(service, domain, session, logged_in=True,
+                                     fingerprint=fingerprint)
 
     # --- fetch ----------------------------------------------------------------------
 

@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 
@@ -15,6 +16,26 @@ import requests
 
 from core import crypto
 from core.db import Database
+
+from . import cf_challenge
+
+# Про клиента, а не про учётку: клирэнс антибот-защиты переживает смену
+# логина, иначе каждая смена тянула бы лишний прогон браузера.
+CLIENT_COOKIES = frozenset({cf_challenge.CLEARANCE_COOKIE})
+
+
+def account_fingerprint(credentials: dict | None) -> str | None:
+    """Отпечаток учётных данных, под которыми получен вход на трекер.
+
+    Пароль входит хешем, а не открытым текстом. Смена логина ИЛИ пароля
+    даёт другой отпечаток — прежний вход становится неприменимым, и
+    следующий запрос входит заново.
+    """
+    if not credentials:
+        return None
+    raw = (f"{credentials.get('username') or ''}\0"
+           f"{credentials.get('password') or ''}")
+    return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
 def _now() -> str:
@@ -41,6 +62,8 @@ class TrackerAuthRepository:
         # password=NULL → не менять существующий (COALESCE): фронт не присылает
         # текущий пароль, пустое поле не должно его затирать (Этап 3А).
         # Непустой — шифруем перед записью (Этап 3Б).
+        if username is not None:
+            username = username.strip()
         await self._db.execute(
             "INSERT INTO auth (auth_type, username, password, url) "
             "VALUES (?, ?, ?, ?) ON CONFLICT(auth_type) DO UPDATE SET "
@@ -49,40 +72,57 @@ class TrackerAuthRepository:
             "url=excluded.url",
             (service, username, crypto.encrypt(password), url))
 
-    async def load_session(self, service: str,
-                           domain: str) -> tuple[dict, str | None]:
-        """Куки сессии и User-Agent, которым они получены.
+    async def load_session(self, service: str, domain: str,
+                           fingerprint: str | None = None
+                           ) -> tuple[dict, str | None, bool]:
+        """Куки сессии, User-Agent и признак чужой учётки.
 
-        UA возвращается вместе с куками не для красоты: клирэнс
-        антибот-защиты (`cf_clearance`) действителен только в паре с тем
-        UA, под которым выдан, — врозь они бесполезны.
+        Куки авторизации выдаются ТОЛЬКО если вход выполнен под теми же
+        учётными данными, что лежат в настройках сейчас. Иначе смена
+        учётки оставалась бы незамеченной: прежняя сессия жива,
+        протухания нет, релогин не запускается — и запросы идут под
+        прежним аккаунтом, с его лимитами и правами.
+
+        Клирэнс антибот-защиты и UA — про клиента, а не про учётку,
+        поэтому выдаются всегда. UA возвращается вместе с куками не для
+        красоты: клирэнс действителен только в паре с тем UA, под
+        которым выдан, — врозь они бесполезны.
         """
         row = await self._db.fetch_one(
-            "SELECT cookies_json, user_agent FROM tracker_sessions "
-            "WHERE service=? AND domain=?", (service, domain))
+            "SELECT cookies_json, user_agent, account_fingerprint "
+            "FROM tracker_sessions WHERE service=? AND domain=?",
+            (service, domain))
         if not row:
-            return {}, None
-        return json.loads(crypto.decrypt(row["cookies_json"])), row["user_agent"]
+            return {}, None, False
+        cookies = json.loads(crypto.decrypt(row["cookies_json"]))
+        foreign = row["account_fingerprint"] != fingerprint
+        if foreign:
+            cookies = {name: value for name, value in cookies.items()
+                       if name in CLIENT_COOKIES}
+        return cookies, row["user_agent"], foreign
 
     async def save_cookies(self, service: str, domain: str,
                            session: requests.Session, *,
                            logged_in: bool,
-                           user_agent: str | None = None) -> None:
-        # user_agent=NULL → не менять существующий (COALESCE): обычный
-        # запрос не должен затирать UA, добытый прохождением челленджа.
+                           user_agent: str | None = None,
+                           fingerprint: str | None = None) -> None:
+        # NULL → не менять существующее (COALESCE): обычный запрос не
+        # должен затирать ни UA от челленджа, ни отпечаток учётки входа.
         now = _now()
         cookies = crypto.encrypt(json.dumps(session.cookies.get_dict()))
         await self._db.execute(
             "INSERT INTO tracker_sessions "
             "(service, domain, cookies_json, last_login_at, updated_at, "
-            "user_agent) VALUES (?, ?, ?, ?, ?, ?) "
+            "user_agent, account_fingerprint) VALUES (?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(service, domain) DO UPDATE SET "
             "cookies_json=excluded.cookies_json, "
             "updated_at=excluded.updated_at, "
-            "user_agent=COALESCE(excluded.user_agent, tracker_sessions.user_agent)"
+            "user_agent=COALESCE(excluded.user_agent, tracker_sessions.user_agent), "
+            "account_fingerprint=COALESCE(excluded.account_fingerprint, "
+            "tracker_sessions.account_fingerprint)"
             + (", last_login_at=excluded.last_login_at" if logged_in else ""),
             (service, domain, cookies, now if logged_in else None, now,
-             user_agent))
+             user_agent, fingerprint))
 
     async def encrypt_legacy_secrets(self) -> int:
         """Одноразовая миграция: зашифровать секреты, лежащие в открытом
