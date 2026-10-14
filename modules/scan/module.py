@@ -243,9 +243,39 @@ class ScanModule(BaseModule):
                 "titles": [i.get("source_title") or "" for i in items],
                 "series_season": series.get("season")},
                 timeout=300)
-            results = reply["results"]
-        plan = []
+        enriched: list[dict] = []
         for item, r in zip(items, results):
+            ext = dict(r.get("extracted") or {})
+            part = ext.get("part") if ext.get("part") is not None else item.get("part")
+            ep_start = ext.get("episode") if ext.get("episode") is not None else (
+                ext.get("start") if ext.get("start") is not None else item.get("episode_start"))
+            season = ext.get("season") if ext.get("season") is not None else item.get("season")
+            ep_end = ext.get("end") if ext.get("end") is not None else item.get("episode_end")
+            enriched.append({
+                "item": item,
+                "r": r,
+                "ext": ext,
+                "season": season,
+                "episode_start": ep_start,
+                "episode_end": ep_end,
+                "part": part,
+            })
+
+        parts_eps = {
+            (e["season"], e["episode_start"]) for e in enriched
+            if e["part"] is not None and not (e["episode_end"] and e["episode_end"] > e["episode_start"])
+        }
+        for e in enriched:
+            if (e["season"], e["episode_start"]) in parts_eps and e["part"] is None:
+                if not (e["episode_end"] and e["episode_end"] > e["episode_start"]):
+                    e["part"] = 1
+                    e["ext"]["part"] = 1
+            elif e["part"] is not None:
+                e["ext"]["part"] = e["part"]
+
+        plan = []
+        for e in enriched:
+            item, r, ext = e["item"], e["r"], e["ext"]
             plan.append({
                 "source_data": {
                     "title": item.get("source_title"),
@@ -254,8 +284,9 @@ class ScanModule(BaseModule):
                     "resolution": item.get("resolution"),
                 },
                 "match_events": r.get("events") or [],
-                "result": {"extracted": r.get("extracted") or {}},
+                "result": {"extracted": ext},
                 "season": item.get("season"),
+                "part": e["part"],
                 "plan_status": item.get("plan_status"),
                 "status": item.get("status"),
                 "unique_id": item.get("unique_id"),
@@ -505,6 +536,7 @@ class ScanModule(BaseModule):
                 "resolution": video.get("resolution"),
                 "source_title": video["title"],
                 "season": extracted.get("season"),
+                "part": extracted.get("part"),
                 "voiceover_tag": extracted.get("voiceover"),
             }
             if extracted.get("episode") is not None:
@@ -514,7 +546,26 @@ class ScanModule(BaseModule):
                 if extracted.get("end") is not None:
                     item["episode_end"] = extracted["end"]
             candidates.append(item)
+        ScanModule._resolve_part_ones(candidates)
         return candidates
+
+    @staticmethod
+    def _resolve_part_ones(items: list[dict]) -> None:
+        """Если в рамках (season, episode_start) у элемента задана часть,
+        то другие одиночные элементы этой серии без части получают Part 1."""
+        parts_by_ep: set[tuple[int | None, int]] = set()
+        for it in items:
+            if it.get("episode_end") and it["episode_end"] > it["episode_start"]:
+                continue
+            if it.get("part") is not None:
+                parts_by_ep.add((it.get("season"), it["episode_start"]))
+
+        for it in items:
+            if it.get("episode_end") and it["episode_end"] > it["episode_start"]:
+                continue
+            key = (it.get("season"), it["episode_start"])
+            if key in parts_by_ep and it.get("part") is None:
+                it["part"] = 1
 
     # --- торрент-ветка -------------------------------------------------------------
 

@@ -553,3 +553,34 @@ async def test_vk_phantom_rules(system):
         left = conn.execute("SELECT unique_id FROM media_items "
                             "WHERE series_id=2").fetchall()
     assert left == [(uid2,)]
+
+
+@pytest.mark.asyncio
+async def test_vk_candidates_resolve_part_ones(system, db_path):
+    """Тест авторазрешения Part 1 и сохранения part в БД."""
+    _, fake, probe, _ = system
+    fake.vk_videos = [
+        _vk_video(1, "Тайтл 8 серия"),
+        _vk_video(2, "Тайтл 8 серия 2 часть"),
+        _vk_video(3, "Тайтл 9 серия"),
+    ]
+    fake.rules_results = [
+        {"excluded": False, "extracted": {"episode": 8, "part": None}},
+        {"excluded": False, "extracted": {"episode": 8, "part": 2}},
+        {"excluded": False, "extracted": {"episode": 9, "part": None}},
+    ]
+    await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT episode_start, part FROM media_items WHERE series_id=2 "
+            "ORDER BY episode_start, part").fetchall()
+    assert len(rows) == 3
+    # 8 серия часть 1 (авто-разрешилась)
+    assert rows[0]["episode_start"] == 8 and rows[0]["part"] == 1
+    # 8 серия часть 2
+    assert rows[1]["episode_start"] == 8 and rows[1]["part"] == 2
+    # 9 серия без частей (None)
+    assert rows[2]["episode_start"] == 9 and rows[2]["part"] is None
+

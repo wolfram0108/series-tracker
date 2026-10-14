@@ -23,6 +23,7 @@ from collections import defaultdict
 from typing import Any
 
 Episode = tuple[int, int]  # (сезон, эпизод)
+SingleSlot = tuple[int, int, int | None]  # (сезон, эпизод, part)
 
 
 def _episodes(item: dict[str, Any]) -> set[Episode]:
@@ -32,6 +33,23 @@ def _episodes(item: dict[str, Any]) -> set[Episode]:
     start = item["episode_start"]
     end = item.get("episode_end") or start
     return {(season, ep) for ep in range(start, end + 1)}
+
+
+def _part(item: dict[str, Any]) -> int | None:
+    p = item.get("part")
+    if p is None:
+        return None
+    try:
+        return int(p)
+    except (ValueError, TypeError):
+        return None
+
+
+def _single_slot(item: dict[str, Any]) -> SingleSlot:
+    season = item.get("season")
+    if season is None:
+        season = 1
+    return (season, item["episode_start"], _part(item))
 
 
 def _is_compilation(item: dict[str, Any]) -> bool:
@@ -112,26 +130,43 @@ def build_plan(candidates: list[dict[str, Any]],
     if not full_range:
         return {}
 
-    singles_by_ep: dict[Episode, list[dict]] = defaultdict(list)
+    # Авторазрешение Part 1: если для серии (season, ep) есть элемент
+    # с явно указанной частью, то одиночные элементы без части считаются Part 1.
+    parts_by_ep: set[Episode] = set()
+    for item in candidates:
+        if not _is_compilation(item) and _part(item) is not None:
+            season = item.get("season") or 1
+            parts_by_ep.add((season, item["episode_start"]))
+
+    for item in candidates:
+        if not _is_compilation(item) and _part(item) is None:
+            season = item.get("season") or 1
+            if (season, item["episode_start"]) in parts_by_ep:
+                item["part"] = 1
+
+    singles_by_slot: dict[SingleSlot, list[dict]] = defaultdict(list)
     compilations: list[dict] = []
     for item in candidates:
         if _is_compilation(item):
             compilations.append(item)
         else:
-            singles_by_ep[_episodes(item).pop()].append(item)
+            singles_by_slot[_single_slot(item)].append(item)
     # Фикс Г (находка 22, согласован): лучшая одиночка = МИНИМАЛЬНЫЙ ключ
     # качества («меньше = лучше», как и в этапе апгрейда). Оригинал брал
     # max — инверсия: худшее разрешение / последний в списке приоритетов.
     base_singles = [min(group, key=lambda i: _quality_key(i, priority))
-                    for group in singles_by_ep.values()]
+                    for group in singles_by_slot.values()]
 
     plan = _cover_gaps(base_singles, compilations, full_range)
 
     # Шаг 5: апгрейд качества необязательными компиляциями
     final_plan = list(plan)
-    def rebuild_map() -> dict[Episode, dict]:
-        return {_episodes(i).pop(): i for i in final_plan
-                if not _is_compilation(i)}
+    def rebuild_map() -> dict[Episode, list[dict]]:
+        m: dict[Episode, list[dict]] = defaultdict(list)
+        for i in final_plan:
+            if not _is_compilation(i):
+                m[_episodes(i).pop()].append(i)
+        return m
     plan_map = rebuild_map()
 
     for comp in compilations:
@@ -140,16 +175,19 @@ def build_plan(candidates: list[dict[str, Any]],
         comp_q = _quality_key(comp, priority)
         replaceable, valid, strictly_better = [], True, False
         for ep_key in sorted(_episodes(comp)):
-            single = plan_map.get(ep_key)
-            if single is None:
+            singles_for_ep = plan_map.get(ep_key, [])
+            if not singles_for_ep:
                 continue
-            single_q = _quality_key(single, priority)
-            if comp_q > single_q:      # компиляция хуже этой одиночки
-                valid = False
+            for single in singles_for_ep:
+                single_q = _quality_key(single, priority)
+                if comp_q > single_q:      # компиляция хуже этой одиночки
+                    valid = False
+                    break
+                if comp_q < single_q:      # строго лучше
+                    strictly_better = True
+                replaceable.append(single)
+            if not valid:
                 break
-            if comp_q < single_q:      # строго лучше
-                strictly_better = True
-            replaceable.append(single)
         if valid and replaceable and strictly_better:
             final_plan = [i for i in final_plan if i not in replaceable]
             final_plan.append(comp)

@@ -18,7 +18,7 @@ const { request } = useApi()
 const toast = useToast()
 const confirm = useConfirm()
 
-interface Meta { season?: number; episode?: number; start?: number; end?: number; resolution?: string; quality?: string; voiceover?: string }
+interface Meta { season?: number; episode?: number; start?: number; end?: number; part?: number; resolution?: string; quality?: string; voiceover?: string }
 interface TFile {
   id: number | string
   original_path?: string
@@ -51,7 +51,10 @@ const groupedFiles = computed(() => {
     groups[k].sort((a, b) => {
       const ea = a.extracted_metadata?.episode ?? a.extracted_metadata?.start ?? 0
       const eb = b.extracted_metadata?.episode ?? b.extracted_metadata?.start ?? 0
-      return ea - eb
+      if (ea !== eb) return ea - eb
+      const pa = a.extracted_metadata?.part ?? 0
+      const pb = b.extracted_metadata?.part ?? 0
+      return pa - pb
     })
   }
   return groups
@@ -75,10 +78,11 @@ function sxxexx(m?: Meta): string {
   if (!m) return ""
   // Сезон 0 (спешелы) — валидное значение, а не «сезон не задан».
   const season = String(m.season ?? 1).padStart(2, "0")
-  if (m.episode != null) return `s${season}e${String(m.episode).padStart(2, "0")}`
-  if (m.start != null && m.end != null) return `s${season}e${String(m.start).padStart(2, "0")}-e${String(m.end).padStart(2, "0")}`
-  if (m.start != null) return `s${season}e${String(m.start).padStart(2, "0")}`
-  return `s${season}`
+  const partSuffix = m.part ? ` Part ${m.part}` : ""
+  if (m.episode != null) return `s${season}e${String(m.episode).padStart(2, "0")}${partSuffix}`
+  if (m.start != null && m.end != null) return `s${season}e${String(m.start).padStart(2, "0")}-e${String(m.end).padStart(2, "0")}${partSuffix}`
+  if (m.start != null) return `s${season}e${String(m.start).padStart(2, "0")}${partSuffix}`
+  return `s${season}${partSuffix}`
 }
 
 // --- выбор серий -----------------------------------------------------------
@@ -345,6 +349,7 @@ defineExpose({ reload: () => load() })
               </div>
             </div>
             <div class="pills-column">
+              <div v-if="f.extracted_metadata?.part" class="pill"><i class="pi pi-clone" /><span>Часть: <strong>{{ f.extracted_metadata.part }}</strong></span></div>
               <div class="pill"><i class="pi pi-check-square" /><span>Статус: <strong>{{ f.status }}</strong></span></div>
               <div class="pill"><i class="pi pi-tags" /><span>Тег: <strong>{{ f.extracted_metadata?.voiceover || "N/A" }}</strong></span></div>
               <div class="pill"><i class="pi pi-video" /><span>Качество: <strong>{{ f.extracted_metadata?.quality || "N/A" }}</strong></span></div>

@@ -120,3 +120,37 @@ def test_vu11_ignored_seasons_excluded_from_plan():
     # сезон без номера (None) игнор не затрагивает
     assert build_plan([_item("x", 5, season=None)],
                       ignored_seasons={2}) == {"x": "in_plan_single"}
+
+
+def test_parts_both_included_in_plan():
+    """Обе части одной серии (Part 1 и Part 2) должны входить в план."""
+    p1 = {**_item("ep8_p1", 8, season=1, resolution=1080), "part": 1}
+    p2 = {**_item("ep8_p2", 8, season=1, resolution=1080), "part": 2}
+    plan = build_plan([p1, p2])
+    assert plan == {"ep8_p1": "in_plan_single", "ep8_p2": "in_plan_single"}
+
+
+def test_part_auto_resolved_when_partner_has_part():
+    """Если у серии есть элемент с частью 2, а у второго часть не указана (None),
+    второй элемент автоматически считается Part 1 и оба входят в план."""
+    p_unspecified = _item("ep8_auto", 8, season=1, resolution=1080)
+    p2 = {**_item("ep8_p2", 8, season=1, resolution=1080), "part": 2}
+    plan = build_plan([p_unspecified, p2])
+    assert plan == {"ep8_auto": "in_plan_single", "ep8_p2": "in_plan_single"}
+    assert p_unspecified.get("part") == 1
+
+
+def test_part_quality_competition_per_part():
+    """Качество соревнуется отдельно внутри каждой части серии."""
+    p1_hi = {**_item("p1_hi", 8, season=1, resolution=1080), "part": 1}
+    p1_lo = {**_item("p1_lo", 8, season=1, resolution=720), "part": 1}
+    p2_hi = {**_item("p2_hi", 8, season=1, resolution=1080), "part": 2}
+    p2_lo = {**_item("p2_lo", 8, season=1, resolution=720), "part": 2}
+    plan = build_plan([p1_hi, p1_lo, p2_hi, p2_lo])
+    assert plan == {
+        "p1_hi": "in_plan_single",
+        "p1_lo": "replaced",
+        "p2_hi": "in_plan_single",
+        "p2_lo": "replaced",
+    }
+

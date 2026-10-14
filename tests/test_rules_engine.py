@@ -163,3 +163,35 @@ def test_case_insensitive():
     profile = compile_profile(1, [_rule(1, "регистр", [
         _extract("extract_single", "СЕРИЯ", "_", "N")])])
     assert process_title(profile, "серия 4")["extracted"] == {"episode": 4}
+
+
+def test_assign_part():
+    profile = compile_profile(1, [
+        _rule(1, "часть", [{"action_type": "assign_part", "action_pattern": "2"}],
+              conditions=[_cond(_blocks("2 часть"))], continue_after=True),
+        _rule(2, "серия", [_extract("extract_single", "серия", "_", "N")]),
+    ])
+    res = process_title(profile, "серия 8 2 часть")
+    assert res["extracted"] == {"episode": 8, "part": 2}
+
+
+def test_extract_part():
+    profile = compile_profile(1, [
+        _rule(1, "извлечь часть", [_extract("extract_part", "часть", "_", "N")],
+              continue_after=True),
+        _rule(2, "серия", [_extract("extract_single", "серия", "_", "N")]),
+    ])
+    res = process_title(profile, "серия 8 часть 2")
+    assert res["extracted"] == {"part": 2, "episode": 8}
+
+
+def test_formatter_part_suffix():
+    from modules.rules.formatter import format_name
+    series = {"name_en": "Show", "source_type": "vk_video"}
+    # Без части -> Show s01e08.mp4
+    assert format_name(series, {"season": 1, "episode": 8}) == "Show s01e08.mp4"
+    # С частью 1 -> Show s01e08 Part 1.mp4
+    assert format_name(series, {"season": 1, "episode": 8, "part": 1}) == "Show s01e08 Part 1.mp4"
+    # С частью 2 -> Show s01e08 Part 2.mp4
+    assert format_name(series, {"season": 1, "episode": 8, "part": 2}) == "Show s01e08 Part 2.mp4"
+

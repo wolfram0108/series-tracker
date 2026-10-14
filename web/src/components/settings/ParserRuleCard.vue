@@ -56,16 +56,18 @@ const ACTION_TYPES = [
   { value: "assign_voiceover", label: "Назначить озвучку/тег" },
   { value: "assign_episode", label: "Назначить номер серии" },
   { value: "assign_season", label: "Назначить номер сезона" },
+  { value: "assign_part", label: "Назначить часть серии" },
   { value: "assign_quality", label: "Назначить качество" },
   { value: "assign_resolution", label: "Назначить разрешение" },
 ]
 const EXTRACT_TYPES = ["extract_single", "extract_range", "extract_season"]
-const ASSIGN_TYPES = ["assign_voiceover", "assign_episode", "assign_season", "assign_quality", "assign_resolution"]
+const ASSIGN_TYPES = ["assign_voiceover", "assign_episode", "assign_season", "assign_part", "assign_quality", "assign_resolution"]
 
 const ASSIGN_LABELS: Record<string, string> = {
   assign_voiceover: "Назначить озвучку/тег",
   assign_episode: "Назначить номер серии",
   assign_season: "Назначить номер сезона",
+  assign_part: "Назначить часть серии",
   assign_quality: "Назначить качество",
   assign_resolution: "Назначить разрешение",
 }
@@ -93,7 +95,7 @@ function onActionTypeChange(action: Action, value: string): void {
   if (EXTRACT_TYPES.includes(value)) {
     action.action_pattern = "[]"
     action._action_blocks = []
-  } else if (["assign_episode", "assign_season"].includes(value)) {
+  } else if (["assign_episode", "assign_season", "assign_part"].includes(value)) {
     action.action_pattern = "1"
   } else {
     action._action_blocks = []
@@ -225,7 +227,7 @@ function getAssignActionLabel(actionType: string): string {
               <div class="constructor-item item-label">{{ getAssignActionLabel(action.action_type) }}</div>
               <input
                 v-model="action.action_pattern"
-                :type="['assign_episode', 'assign_season'].includes(action.action_type) ? 'number' : 'text'"
+                :type="['assign_episode', 'assign_season', 'assign_part'].includes(action.action_type) ? 'number' : 'text'"
                 class="constructor-item item-input"
                 placeholder="Введите значение..."
               />

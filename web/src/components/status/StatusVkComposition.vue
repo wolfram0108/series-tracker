@@ -19,10 +19,11 @@ const toast = useToast()
 const confirm = useConfirm()
 
 interface SourceData { resolution?: number; url?: string; title?: string }
-interface Extracted { season?: number; episode?: number; start?: number; end?: number; voiceover?: string }
+interface Extracted { season?: number; episode?: number; start?: number; end?: number; part?: number; voiceover?: string }
 interface MediaItem {
   unique_id: string
   season?: number
+  part?: number
   source_data?: SourceData
   source_title?: string
   final_filename?: string
@@ -46,6 +47,7 @@ interface Item {
   type: "compilation" | "sliced" | "missing"
   unique_id: string
   season?: number
+  part?: number
   episode_start?: number
   source_data?: SourceData
   source_title?: string
@@ -90,9 +92,11 @@ function formatEpisode(it: Item): string {
   const season = String(it.season ?? ex.season ?? 1).padStart(2, "0")
   const start = ex.start ?? ex.episode ?? it.episode_start
   const end = ex.end
-  if (start && end && end !== start) return `s${season}e${String(start).padStart(2, "0")}-e${String(end).padStart(2, "0")}`
-  if (start) return `s${season}e${String(start).padStart(2, "0")}`
-  return `s${season}`
+  const part = it.part ?? ex.part
+  const partSuffix = part ? ` Part ${part}` : ""
+  if (start && end && end !== start) return `s${season}e${String(start).padStart(2, "0")}-e${String(end).padStart(2, "0")}${partSuffix}`
+  if (start) return `s${season}e${String(start).padStart(2, "0")}${partSuffix}`
+  return `s${season}${partSuffix}`
 }
 function voiceoverTag(it: Item): string {
   return it.result?.extracted?.voiceover || "N/A"
@@ -155,10 +159,13 @@ const allItems = computed<Item[]>(() => {
       }
     }
   }
-  // сортировка по эпизоду DESC; при равенстве компиляция выше нарезки
+  // сортировка по эпизоду DESC; при равенстве по номеру части ASC; затем компиляция выше нарезки
   items.sort((a, b) => {
     const d = episodeStart(b) - episodeStart(a)
     if (d !== 0) return d
+    const partA = a.part ?? a.result?.extracted?.part ?? 0
+    const partB = b.part ?? b.result?.extracted?.part ?? 0
+    if (partA !== partB) return partA - partB
     const rank = (t: string) => (t === "compilation" ? 0 : t === "missing" ? 1 : 2)
     return rank(a.type) - rank(b.type)
   })
@@ -489,6 +496,7 @@ defineExpose({ reload: () => loadComposition(false) })
                 </div>
               </div>
               <div class="pills-column">
+                <div v-if="it.part ?? it.result?.extracted?.part" class="pill"><i class="pi pi-clone" /><span>Часть: <strong>{{ it.part ?? it.result?.extracted?.part }}</strong></span></div>
                 <div class="pill"><i class="pi pi-list-check" /><span>План: <strong>{{ it.plan_status || "—" }}</strong></span></div>
                 <div class="pill"><i class="pi pi-tags" /><span>Тег: <strong>{{ voiceoverTag(it) }}</strong></span></div>
                 <div class="pill"><i class="pi pi-check-square" /><span>Статус: <strong>{{ it.status || "—" }}</strong></span></div>

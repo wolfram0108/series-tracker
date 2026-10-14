@@ -45,6 +45,7 @@ interface Extracted {
   episode?: number | null
   start?: number | null
   end?: number | null
+  part?: number | null
   voiceover?: string | null
   quality?: string | null
   resolution?: string | null
@@ -87,6 +88,7 @@ function testResultPills(res: TestResult): Pill[] {
   if (e.season != null) pills.push({ key: "season", label: "Сезон", value: String(e.season), icon: "pi pi-th-large" })
   if (e.episode != null) pills.push({ key: "episode", label: "Серия", value: String(e.episode), icon: "pi pi-video" })
   if (e.start != null) pills.push({ key: "range", label: "Диапазон", value: `${e.start}-${e.end}`, icon: "pi pi-list" })
+  if (e.part != null) pills.push({ key: "part", label: "Часть", value: String(e.part), icon: "pi pi-clone" })
   if (e.voiceover) pills.push({ key: "voiceover", label: "Тег", value: String(e.voiceover), icon: "pi pi-tags" })
   if (e.quality) pills.push({ key: "quality", label: "Качество", value: String(e.quality), icon: "pi pi-star" })
   if (e.resolution) pills.push({ key: "resolution", label: "Разрешение", value: String(e.resolution), icon: "pi pi-arrows-h" })

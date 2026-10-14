@@ -15,7 +15,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-EXTRACT_KEYS = {"extract_single": "episode", "extract_season": "season"}
+EXTRACT_KEYS = {
+    "extract_single": "episode",
+    "extract_season": "season",
+    "extract_part": "part",
+}
 
 
 class ProfileValidationError(ValueError):
@@ -127,7 +131,8 @@ def _compile_rule(rule: dict) -> CompiledRule:
         elif a_type and a_type.startswith("assign_"):
             actions.append(CompiledAction(action_type=a_type,
                                           raw_value=raw_pattern))
-        elif a_type in ("extract_single", "extract_season", "extract_range"):
+        elif a_type in ("extract_single", "extract_season", "extract_range",
+                        "extract_part"):
             blocks = _parse_blocks(raw_pattern)
             regex = _blocks_to_regex(blocks, capture_numbers=True)
             modifiers: list[int | None] = []
@@ -215,8 +220,9 @@ def _run_actions(title: str, rule: CompiledRule,
         elif a_type == "assign_resolution":
             extracted["resolution"] = action.raw_value
             produced = True
-        elif a_type in ("assign_episode", "assign_season"):
-            key = "episode" if a_type == "assign_episode" else "season"
+        elif a_type in ("assign_episode", "assign_season", "assign_part"):
+            key = "episode" if a_type == "assign_episode" else (
+                "season" if a_type == "assign_season" else "part")
             try:
                 extracted[key] = int(action.raw_value)
                 produced = True

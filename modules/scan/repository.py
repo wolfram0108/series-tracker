@@ -116,28 +116,29 @@ class ScanRepository:
             if item["unique_id"] in existing_ids:
                 await self._db.execute(
                     "UPDATE media_items SET season=?, episode_start=?, "
-                    "episode_end=?, publication_date=?, voiceover_tag=?, "
+                    "episode_end=?, part=?, publication_date=?, voiceover_tag=?, "
                     "resolution=?, source_title=?, plan_status='candidate' "
                     "WHERE unique_id=?",
                     (item.get("season"), item["episode_start"],
-                     item.get("episode_end"), item["publication_date"],
-                     item.get("voiceover_tag"), item.get("resolution"),
-                     item.get("source_title"), item["unique_id"]))
+                     item.get("episode_end"), item.get("part"),
+                     item["publication_date"], item.get("voiceover_tag"),
+                     item.get("resolution"), item.get("source_title"),
+                     item["unique_id"]))
                 updated += 1
             else:
                 await self._db.execute(
                     "INSERT INTO media_items (series_id, unique_id, "
-                    "source_title, season, episode_start, episode_end, "
+                    "source_title, season, episode_start, episode_end, part, "
                     "plan_status, status, is_ignored_by_user, source_url, "
                     "publication_date, voiceover_tag, slicing_status, "
                     "is_available, resolution) VALUES "
-                    "(?, ?, ?, ?, ?, ?, 'candidate', 'pending', 0, ?, ?, ?, "
+                    "(?, ?, ?, ?, ?, ?, ?, 'candidate', 'pending', 0, ?, ?, ?, "
                     "'none', 1, ?)",
                     (series_id, item["unique_id"], item.get("source_title"),
                      item.get("season"), item["episode_start"],
-                     item.get("episode_end"), item["source_url"],
-                     item["publication_date"], item.get("voiceover_tag"),
-                     item.get("resolution")))
+                     item.get("episode_end"), item.get("part"),
+                     item["source_url"], item["publication_date"],
+                     item.get("voiceover_tag"), item.get("resolution")))
                 added += 1
         return {"added": added, "updated": updated, "deleted": deleted,
                 "kept_phantoms": kept_phantoms}

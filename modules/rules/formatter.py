@@ -25,6 +25,7 @@ def build_metadata(series: dict, media_item: dict, extracted: dict) -> dict:
         "start": (media_item.get("episode_start")
                   if media_item.get("episode_end") else None),
         "end": media_item.get("episode_end"),
+        "part": media_item.get("part"),
         "resolution": media_item.get("resolution"),
         "voiceover": media_item.get("voiceover_tag"),
     }
@@ -58,13 +59,16 @@ def format_name(series: dict, metadata: dict,
 
     episode = metadata.get("episode")
     start, end = metadata.get("start"), metadata.get("end")
+    part = metadata.get("part")
+    part_suffix = f" Part {part}" if part is not None else ""
+
     episode_part = ""
     if episode is not None:
-        episode_part = f"e{str(episode).zfill(2)}"
+        episode_part = f"e{str(episode).zfill(2)}{part_suffix}"
     elif start is not None and end is not None:
-        episode_part = f"e{str(start).zfill(2)}-e{str(end).zfill(2)}"
+        episode_part = f"e{str(start).zfill(2)}-e{str(end).zfill(2)}{part_suffix}"
     elif start is not None:
-        episode_part = f"e{str(start).zfill(2)}"
+        episode_part = f"e{str(start).zfill(2)}{part_suffix}"
 
     voiceover = metadata.get("voiceover")
     quality = series.get("quality_override") or metadata.get("quality")
