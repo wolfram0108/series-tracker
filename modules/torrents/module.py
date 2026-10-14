@@ -782,17 +782,21 @@ class TorrentsModule(BaseModule):
                 os.path.join(series["save_path"], current))
             excluded = {"is_excluded": bool(f.get("is_excluded")),
                         "exclude_reason": f.get("exclude_reason")}
-            if not has_profile:
-                # как в оригинале: без профиля — сохранённые метаданные
-                meta = f.get("extracted_metadata")
+            meta = f.get("extracted_metadata")
+            meta_dict = json.loads(meta) if meta else {}
+            is_non_video = (meta_dict.get("is_extra")
+                            or meta_dict.get("media_type") in ("audio", "subtitles", "extra"))
+            if not has_profile or is_non_video:
+                # как в оригинале: без профиля или для не-видео — сохранённые метаданные
+                preview = f.get("renamed_path") or meta_dict.get("target_path") or current
                 plan.append({
                     "id": f["id"], "original_path": f["original_path"],
-                    "renamed_path_preview": current,
+                    "renamed_path_preview": preview,
                     "status": f["status"],
-                    "extracted_metadata":
-                        json.loads(meta) if meta else {},
+                    "extracted_metadata": meta_dict,
                     "is_file_present": present,
-                    "qb_hash": f.get("qb_hash"), **excluded})
+                    "qb_hash": f.get("qb_hash"),
+                    "is_mismatch": False, **excluded})
                 continue
             reply = await self.request("rules.format_torrent_file", {
                 "series": series,

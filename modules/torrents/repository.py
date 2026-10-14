@@ -21,6 +21,11 @@ def _now() -> str:
 _NOT_SPECIALS = ("(json_extract(tf.extracted_metadata, '$.season') IS NULL "
                  "OR json_extract(tf.extracted_metadata, '$.season') != 0)")
 
+_ONLY_VIDEOS = ("(json_extract(tf.extracted_metadata, '$.media_type') = 'video' "
+                "OR json_extract(tf.extracted_metadata, '$.media_type') IS NULL) "
+                "AND (json_extract(tf.extracted_metadata, '$.is_extra') IS NULL "
+                "OR json_extract(tf.extracted_metadata, '$.is_extra') = 0)")
+
 _FILE_BOOLS = ("is_excluded",)
 
 
@@ -158,7 +163,7 @@ class TorrentsRepository:
             "SELECT t.series_id AS series_id, COUNT(*) AS n "
             "FROM torrent_files tf JOIN torrents t ON t.id=tf.torrent_db_id "
             f"WHERE tf.status='renamed' AND t.is_active=1 AND {_NOT_SPECIALS} "
-            "AND tf.is_excluded=0 GROUP BY t.series_id")
+            f"AND {_ONLY_VIDEOS} AND tf.is_excluded=0 GROUP BY t.series_id")
         return {r["series_id"]: r["n"] for r in rows}
 
     async def downloaded_count_for_series(self, series_id: int) -> int:
@@ -168,7 +173,7 @@ class TorrentsRepository:
             "SELECT COUNT(*) AS n FROM torrent_files tf "
             "JOIN torrents t ON t.id=tf.torrent_db_id "
             "WHERE tf.status='renamed' AND t.is_active=1 AND t.series_id=? "
-            f"AND {_NOT_SPECIALS} AND tf.is_excluded=0",
+            f"AND {_NOT_SPECIALS} AND {_ONLY_VIDEOS} AND tf.is_excluded=0",
             (series_id,))
         return row["n"] if row else 0
 

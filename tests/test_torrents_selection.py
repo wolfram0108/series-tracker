@@ -97,3 +97,16 @@ def test_index_missing_in_qbit_answer_falls_back_to_position():
     result = selection.resolve(rows, [{"name": "x.mkv", "priority": 1},
                                       {"name": "a.mkv", "priority": 1}])
     assert result.to_disable == [0, 1]
+
+
+def test_extra_file_is_wanted_regardless_of_episode():
+    wanted, reason = selection.is_wanted({"is_extra": True}, set(), {})
+    assert wanted is True
+    assert reason is None
+
+    # Дополнительные файлы (шрифты и т.д.) нужны даже при наличии исключений
+    wanted, reason = selection.is_wanted(
+        {"is_extra": True, "media_type": "extra"}, {1}, {1: {1, 2}})
+    assert wanted is True
+    assert reason is None
+

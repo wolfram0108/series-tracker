@@ -66,6 +66,8 @@ def is_wanted(extracted: dict | None, ignored_seasons: set[int],
               ) -> tuple[bool, str | None]:
     """Нужен ли файл. Возвращает (нужен, причина исключения)."""
     meta = extracted or {}
+    if meta.get("is_extra"):
+        return True, None
     season = meta.get("season")
     if season is not None and int(season) in ignored_seasons:
         return False, REASON_USER

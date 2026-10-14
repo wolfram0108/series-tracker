@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 
 from core import BaseModule, BusRequestError
 from core.db import Database
@@ -36,7 +37,37 @@ from core.envelope import Envelope
 from .repository import RenamingRepository
 
 _NO_HANDLER = "нет обработчика"
-_VIDEO_EXT = (".mkv", ".avi", ".mp4", ".mov", ".wmv", ".webm")
+_VIDEO_EXT = (".mkv", ".avi", ".mp4", ".mov", ".wmv", ".webm", ".ts", ".m4v")
+_AUDIO_EXT = (".mka", ".ac3", ".dts", ".aac", ".flac", ".wav", ".ogg", ".eac3", ".m4a")
+_SUB_EXT = (".ass", ".srt", ".vtt", ".sub")
+
+
+def _extract_torrent_root(paths: list[str]) -> str | None:
+    """Если все файлы лежат внутри одной общей директории верхнего уровня
+    (стандартная папка многофайлового торрента), возвращает её имя.
+    Иначе None."""
+    roots = set()
+    for p in paths:
+        parts = p.replace("\\", "/").strip("/").split("/")
+        if len(parts) > 1:
+            roots.add(parts[0])
+        else:
+            return None
+    if len(roots) == 1:
+        return next(iter(roots))
+    return None
+
+
+def _folder_tag(rel_dir: str) -> str:
+    """Нормализует путь подкаталога в тег для имени дорожки:
+    'RUS Sound/AniLiberty' -> 'RUS_Sound_AniLiberty'
+    '/rus/AniLiberty/' -> 'rus_AniLiberty'
+    """
+    cleaned = rel_dir.replace("\\", "/").strip("/")
+    if not cleaned:
+        return ""
+    tag = re.sub(r"[/\\ ]+", "_", cleaned)
+    return re.sub(r"_+", "_", tag).strip("_")
 
 
 class RenamingModule(BaseModule):
@@ -281,67 +312,192 @@ class RenamingModule(BaseModule):
         by_current = {(f.get("renamed_path") or f["original_path"]): f
                       for f in db_files}
 
-        records, renamed = [], 0
-        assigned: dict[str, str] = {}  # new_path -> original (детект коллизий)
+        all_items = []
         for position, f in enumerate(files):
             current_path = f["name"] if isinstance(f, dict) else f
-            # Индекс файла в раздаче не меняется при переименовании —
-            # только он даёт устойчивую привязку строки БД к файлу qBit.
             file_index = (f.get("index", position) if isinstance(f, dict)
                           else position)
-            if not current_path.lower().endswith(_VIDEO_EXT):
-                continue
             db_record = by_current.get(current_path)
             original = (db_record["original_path"] if db_record
                         else current_path)
+            all_items.append({
+                "current_path": current_path,
+                "file_index": file_index,
+                "original_path": original,
+                "basename": os.path.basename(original),
+                "is_video": original.lower().endswith(_VIDEO_EXT),
+            })
+
+        torrent_root = _extract_torrent_root([it["original_path"] for it in all_items])
+        for it in all_items:
+            orig = it["original_path"].replace("\\", "/")
+            if torrent_root and orig.startswith(torrent_root + "/"):
+                it["rel_path"] = orig[len(torrent_root) + 1:]
+            else:
+                it["rel_path"] = orig
+            it["rel_dir"] = os.path.dirname(it["rel_path"])
+
+        records, renamed = [], 0
+        assigned: dict[str, str] = {}  # new_path -> original (детект коллизий)
+        matched_videos: list[dict] = []
+
+        # 1. Сначала обрабатываем видеофайлы
+        video_items = [it for it in all_items if it["is_video"]]
+        for v in video_items:
             reply = await self.request("rules.format_torrent_file", {
                 "series": series,
-                "file_basename": os.path.basename(original),
-                "original_path": original})
+                "file_basename": v["basename"],
+                "original_path": v["original_path"]})
             new_path = reply["filename"]
             if new_path is None:
                 self.log.warning("сезон не определён для '%s' — файл "
-                                 "пропущен", current_path)
+                                 "пропущен", v["current_path"])
                 continue
-            # Консистентность (находка 63): два файла, получивших ОДНО имя
-            # (правила дали неуникальный результат) — это коллизия. qBit
-            # может принять переименование в уже занятый путь и слить
-            # файлы, вернув успех; БД тогда соврала бы «renamed». Не
-            # сливаем — помечаем ошибкой явно, чтобы БД отражала реальность.
+
             prev = assigned.get(new_path)
-            if prev is not None and prev != original:
+            if prev is not None and prev != v["original_path"]:
                 self.log.error("коллизия имён: '%s' и '%s' дают одно имя "
                                "'%s' — переименование пропущено (правила "
-                               "неуникальны)", prev, original, new_path)
-                records.append({"original_path": original,
+                               "неуникальны)", prev, v["original_path"], new_path)
+                records.append({"original_path": v["original_path"],
                                 "renamed_path": None,
                                 "status": "rename_error",
-                                "qb_file_index": file_index,
+                                "qb_file_index": v["file_index"],
                                 "extracted_metadata": reply["extracted"]})
                 continue
-            assigned[new_path] = original
+
+            assigned[new_path] = v["original_path"]
+            meta = dict(reply["extracted"] or {})
+            meta["media_type"] = "video"
+            meta["target_path"] = new_path
+
+            target_dir = os.path.dirname(new_path)
+            target_stem = os.path.splitext(os.path.basename(new_path))[0]
+            video_stem = os.path.splitext(v["basename"])[0]
+            matched_videos.append({
+                "video_stem": video_stem,
+                "target_dir": target_dir,
+                "target_stem": target_stem,
+                "extracted": reply["extracted"],
+                "new_path": new_path,
+            })
+
             status = "renamed"
             if dry_run:
-                records.append({"original_path": original,
+                records.append({"original_path": v["original_path"],
                                 "renamed_path": None,
                                 "status": "pending_rename",
-                                "qb_file_index": file_index,
-                                "extracted_metadata": reply["extracted"]})
+                                "qb_file_index": v["file_index"],
+                                "extracted_metadata": meta})
                 continue
-            if new_path != current_path:
+
+            if new_path != v["current_path"]:
                 try:
                     await self.request("torrents.rename_file", {
-                        "hash": qb_hash, "old_path": current_path,
+                        "hash": qb_hash, "old_path": v["current_path"],
                         "new_path": new_path})
                     renamed += 1
                 except BusRequestError as exc:
                     self.log.error("rename в qBit не удался ('%s' -> "
-                                   "'%s'): %s", current_path, new_path, exc)
+                                   "'%s'): %s", v["current_path"], new_path, exc)
                     status, new_path = "rename_error", None
-            records.append({"original_path": original,
+            records.append({"original_path": v["original_path"],
                             "renamed_path": new_path, "status": status,
-                            "qb_file_index": file_index,
-                            "extracted_metadata": reply["extracted"]})
+                            "qb_file_index": v["file_index"],
+                            "extracted_metadata": meta})
+
+        # 2. Обрабатываем не-видео файлы (дорожки озвучки, субтитры, шрифты, каталоги экстра)
+        non_video_items = [it for it in all_items if not it["is_video"]]
+        sorted_videos = sorted(matched_videos, key=lambda x: len(x["video_stem"]), reverse=True)
+
+        for item in non_video_items:
+            base = item["basename"]
+            matched_v = None
+            for mv in sorted_videos:
+                stem = mv["video_stem"]
+                if base.startswith(stem):
+                    rest = base[len(stem):]
+                    if not rest or rest[0] in (".", "_", "-", " "):
+                        matched_v = mv
+                        break
+
+            if matched_v is not None:
+                tag = _folder_tag(item["rel_dir"])
+                ext = os.path.splitext(base)[1]
+                target_dir = matched_v["target_dir"]
+                target_stem = matched_v["target_stem"]
+
+                rest_tag = ""
+                stem = matched_v["video_stem"]
+                if len(base) > len(stem):
+                    remainder = base[len(stem):]
+                    if remainder.lower().endswith(ext.lower()):
+                        remainder = remainder[:-len(ext)]
+                    rest_tag = remainder.strip("._- ")
+
+                if tag:
+                    new_path = f"{target_dir}/{target_stem}.{tag}{ext}"
+                elif rest_tag:
+                    new_path = f"{target_dir}/{target_stem}.{rest_tag}{ext}"
+                else:
+                    new_path = f"{target_dir}/{target_stem}{ext}"
+
+                if new_path in assigned and assigned[new_path] != item["original_path"]:
+                    if rest_tag and tag and rest_tag not in tag:
+                        new_path = f"{target_dir}/{target_stem}.{tag}_{rest_tag}{ext}"
+
+                meta = dict(matched_v["extracted"] or {})
+                ext_lower = ext.lower()
+                if ext_lower in _AUDIO_EXT:
+                    meta["media_type"] = "audio"
+                elif ext_lower in _SUB_EXT:
+                    meta["media_type"] = "subtitles"
+                else:
+                    meta["media_type"] = "extra"
+                meta["target_path"] = new_path
+            elif item["rel_dir"]:
+                new_path = item["rel_path"]
+                meta = {"is_extra": True, "media_type": "extra", "target_path": new_path}
+            else:
+                continue
+
+            prev = assigned.get(new_path)
+            if prev is not None and prev != item["original_path"]:
+                self.log.error("коллизия имён: '%s' и '%s' дают одно имя "
+                               "'%s' — переименование пропущено", prev,
+                               item["original_path"], new_path)
+                records.append({"original_path": item["original_path"],
+                                "renamed_path": None,
+                                "status": "rename_error",
+                                "qb_file_index": item["file_index"],
+                                "extracted_metadata": meta})
+                continue
+
+            assigned[new_path] = item["original_path"]
+            status = "renamed"
+            if dry_run:
+                records.append({"original_path": item["original_path"],
+                                "renamed_path": None,
+                                "status": "pending_rename",
+                                "qb_file_index": item["file_index"],
+                                "extracted_metadata": meta})
+                continue
+
+            if new_path != item["current_path"]:
+                try:
+                    await self.request("torrents.rename_file", {
+                        "hash": qb_hash, "old_path": item["current_path"],
+                        "new_path": new_path})
+                    renamed += 1
+                except BusRequestError as exc:
+                    self.log.error("rename в qBit не удался ('%s' -> "
+                                   "'%s'): %s", item["current_path"], new_path, exc)
+                    status, new_path = "rename_error", None
+            records.append({"original_path": item["original_path"],
+                            "renamed_path": new_path, "status": status,
+                            "qb_file_index": item["file_index"],
+                            "extracted_metadata": meta})
+
         if records:
             await self.request("torrents.db.files.upsert",
                                {"qb_hash": qb_hash, "files": records})

@@ -298,3 +298,83 @@ async def test_process_torrent_collision_not_merged(system):
     saved = {f["original_path"]: f["status"] for f in fake.upserts[0]["files"]}
     assert saved["old/a.mkv"] == "renamed"
     assert saved["old/b.mkv"] == "rename_error"
+
+
+@pytest.mark.asyncio
+async def test_process_torrent_audio_subs_and_fonts(system):
+    """Раздача со сложной структурой (дорожки озвучки, субтитры, шрифты)."""
+    _, fake, probe, _, _ = system
+    fake.series = {**fake.series, "source_type": "torrent"}
+    root = "Katainaka no Ossan [WEB-DL 1080p]"
+    fake.qbt_files["h_complex"] = [
+        {"name": f"{root}/[VARYG] Katainaka - 01 [1080p].mkv", "index": 0},
+        {"name": f"{root}/RUS Sound/AniLiberty/[VARYG] Katainaka - 01 [1080p].AniLiberty.mka", "index": 1},
+        {"name": f"{root}/RUS Subs/Alvakarp/[VARYG] Katainaka - 01 [1080p].Alvakarp.rus.ass", "index": 2},
+        {"name": f"{root}/RUS Subs/Fonts/Gabriela-Regular.ttf", "index": 3},
+        {"name": f"{root}/readme.txt", "index": 4},
+    ]
+
+    reply = await probe.request("renaming.process_torrent", {
+        "series_id": 2, "qb_hash": "h_complex"}, timeout=10)
+
+    # Переименованы 4 файла: видео, аудио, субтитры и шрифт (отсечена папка root).
+    # readme.txt в корне пропущен.
+    assert reply == {"renamed": 4}
+
+    renames = {r["old_path"]: r["new_path"] for r in fake.renames}
+    assert renames[f"{root}/[VARYG] Katainaka - 01 [1080p].mkv"] == (
+        "Season 01/Show [VARYG] Katainaka - 01 [1080p].mkv"
+    )
+    assert renames[f"{root}/RUS Sound/AniLiberty/[VARYG] Katainaka - 01 [1080p].AniLiberty.mka"] == (
+        "Season 01/Show [VARYG] Katainaka - 01 [1080p].RUS_Sound_AniLiberty.mka"
+    )
+    assert renames[f"{root}/RUS Subs/Alvakarp/[VARYG] Katainaka - 01 [1080p].Alvakarp.rus.ass"] == (
+        "Season 01/Show [VARYG] Katainaka - 01 [1080p].RUS_Subs_Alvakarp.ass"
+    )
+    # Шрифты переносятся в исходной структуре без корневой папки торрента
+    assert renames[f"{root}/RUS Subs/Fonts/Gabriela-Regular.ttf"] == (
+        "RUS Subs/Fonts/Gabriela-Regular.ttf"
+    )
+    assert f"{root}/readme.txt" not in renames
+
+    saved = {f["original_path"]: f for f in fake.upserts[0]["files"]}
+    # Проверяем метаданные
+    audio_meta = saved[f"{root}/RUS Sound/AniLiberty/[VARYG] Katainaka - 01 [1080p].AniLiberty.mka"]["extracted_metadata"]
+    assert audio_meta["media_type"] == "audio"
+    assert audio_meta["episode"] == 1
+
+    subs_meta = saved[f"{root}/RUS Subs/Alvakarp/[VARYG] Katainaka - 01 [1080p].Alvakarp.rus.ass"]["extracted_metadata"]
+    assert subs_meta["media_type"] == "subtitles"
+    assert subs_meta["episode"] == 1
+
+    font_meta = saved[f"{root}/RUS Subs/Fonts/Gabriela-Regular.ttf"]["extracted_metadata"]
+    assert font_meta["is_extra"] is True
+    assert font_meta["media_type"] == "extra"
+
+
+@pytest.mark.asyncio
+async def test_process_torrent_flat_with_subfolders(system):
+    """Плоская раздача (без корневой папки торрента) с подкаталогами озвучки."""
+    _, fake, probe, _, _ = system
+    fake.series = {**fake.series, "source_type": "torrent"}
+    fake.qbt_files["h_flat"] = [
+        {"name": "01.mkv", "index": 0},
+        {"name": "rus/AniLiberty/01.mka", "index": 1},
+        {"name": "Fonts/font.ttf", "index": 2},
+    ]
+
+    reply = await probe.request("renaming.process_torrent", {
+        "series_id": 2, "qb_hash": "h_flat"}, timeout=10)
+
+    # 01.mkv переименован в Season 01/Show 01.mkv
+    # rus/AniLiberty/01.mka переименован в Season 01/Show 01.rus_AniLiberty.mka
+    # Fonts/font.ttf уже лежит в Fonts/font.ttf, qBit rename не нужен
+    assert reply == {"renamed": 2}
+    renames = {r["old_path"]: r["new_path"] for r in fake.renames}
+    assert renames["01.mkv"] == "Season 01/Show 01.mkv"
+    assert renames["rus/AniLiberty/01.mka"] == "Season 01/Show 01.rus_AniLiberty.mka"
+
+    saved = {f["original_path"]: f for f in fake.upserts[0]["files"]}
+    assert saved["Fonts/font.ttf"]["renamed_path"] == "Fonts/font.ttf"
+    assert saved["Fonts/font.ttf"]["extracted_metadata"]["is_extra"] is True
+
