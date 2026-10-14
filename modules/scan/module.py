@@ -243,6 +243,7 @@ class ScanModule(BaseModule):
                 "titles": [i.get("source_title") or "" for i in items],
                 "series_season": series.get("season")},
                 timeout=300)
+            results = reply["results"]
         enriched: list[dict] = []
         for item, r in zip(items, results):
             ext = dict(r.get("extracted") or {})
@@ -286,6 +287,8 @@ class ScanModule(BaseModule):
                 "match_events": r.get("events") or [],
                 "result": {"extracted": ext},
                 "season": item.get("season"),
+                "episode_start": item.get("episode_start"),
+                "episode_end": item.get("episode_end"),
                 "part": e["part"],
                 "plan_status": item.get("plan_status"),
                 "status": item.get("status"),
