@@ -300,3 +300,83 @@ async def test_saved_paths_are_fs_safe(system):
                              json={"path": " /nas/Series: test\\sub "})
     assert resp.status_code == 200
     assert [p["path"] for p in resp.json()["paths"]] == ["/nas/Series test/sub"]
+
+
+@pytest.mark.asyncio
+async def test_scrape_titles_endpoint(system):
+    """Verify scrape-titles validation, VK single-video rejection, and web provider routing."""
+    from modules.sources.video_providers import get_default_registry
+    from modules.sources.video_providers.base import BaseVideoProvider
+
+    class FakeVideoProvider(BaseVideoProvider):
+        name = "fakeprovider"
+        domains = ("fakevideo.org",)
+
+        def match_url(self, url: str) -> bool:
+            return "fakevideo.org" in url
+
+        def canonical_url(self, url: str) -> str:
+            return url
+
+        async def parse_release(self, url: str, http: httpx.AsyncClient) -> dict:
+            return {
+                "canonical_url": url,
+                "title": {"ru": "Тест", "en": "Test"},
+                "titles": ["Серия 1", "Серия 2", "Серия 3 Special"],
+                "resolution": 2160,
+                "videos": [
+                    {"title": "Серия 1", "resolution": 1080},
+                    {"title": "Серия 2", "resolution": 2160},
+                    {"title": "Серия 3 Special", "resolution": 1080},
+                ],
+                "episodes_count": 3,
+                "provider": self.name,
+                "source_type": "web_video",
+                "releases": [],
+            }
+
+        async def scan_episodes(self, url: str, http: httpx.AsyncClient, series: dict) -> list[dict]:
+            return []
+
+        async def resolve_stream(self, url: str, http: httpx.AsyncClient) -> dict | None:
+            return None
+
+    get_default_registry().register(FakeVideoProvider())
+    bus, _, client = system
+
+    # 1. Empty URL
+    resp = await client.post("/api/parser-profiles/scrape-titles", json={"channel_url": ""})
+    assert resp.status_code == 400
+    assert "Необходимо указать ссылку" in resp.json()["error"]
+
+    # 2. Single VK video link (must return 400, not 500 or NameError)
+    resp = await client.post("/api/parser-profiles/scrape-titles",
+                             json={"channel_url": "https://vkvideo.ru/video-170515668_456256365"})
+    assert resp.status_code == 400
+    assert "ссылка на отдельное видео" in resp.json()["error"]
+
+    # 3. Tracker URL rejected with 400
+    resp_tracker = await client.post("/api/parser-profiles/scrape-titles",
+                                     json={"channel_url": "http://kinozal.tv/details.php?id=1"})
+    assert resp_tracker.status_code == 400
+    assert "торрент-трекера" in resp_tracker.json()["error"]
+
+    # 4. Web video release URL returns parsed videos
+    resp_web = await client.post("/api/parser-profiles/scrape-titles",
+                                 json={"channel_url": "https://fakevideo.org/release/battle-spirit"})
+    assert resp_web.status_code == 200
+    items = resp_web.json()
+    assert len(items) == 3
+    assert items[0]["title"] == "Серия 1"
+    assert items[1]["resolution"] == 2160
+
+    # 5. Filtering by query
+    resp_filtered = await client.post("/api/parser-profiles/scrape-titles",
+                                     json={"channel_url": "https://fakevideo.org/release/battle-spirit",
+                                           "query": "Special"})
+    assert resp_filtered.status_code == 200
+    filtered_items = resp_filtered.json()
+    assert len(filtered_items) == 1
+    assert filtered_items[0]["title"] == "Серия 3 Special"
+
+
