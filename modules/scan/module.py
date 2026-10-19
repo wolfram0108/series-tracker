@@ -176,10 +176,13 @@ class ScanModule(BaseModule):
                                     {"series_id": series_id})
         if refresh:
             # полный цикл Р-12: кандидаты + план + scan.plan.updated
-            if series.get("source_type") == "web_video":
-                await self._scan_web_video(series)
-            else:
-                await self._scan_vk(series)
+            try:
+                if series.get("source_type") == "web_video":
+                    await self._scan_web_video(series)
+                else:
+                    await self._scan_vk(series)
+            except Exception as exc:
+                self.log.warning("композиция: скан источника при refresh завершился ошибкой: %s", exc)
         items = await self.repo.items_for_series(series_id)
         # компиляции, выпавшие из плана, теряют записи о нарезке
         for item in items:
@@ -278,6 +281,8 @@ class ScanModule(BaseModule):
         plan = []
         for e in enriched:
             item, r, ext = e["item"], e["r"], e["ext"]
+            is_excluded = bool(r.get("excluded"))
+            plan_status = "excluded" if is_excluded else item.get("plan_status")
             plan.append({
                 "source_data": {
                     "title": item.get("source_title"),
@@ -286,12 +291,12 @@ class ScanModule(BaseModule):
                     "resolution": item.get("resolution"),
                 },
                 "match_events": r.get("events") or [],
-                "result": {"extracted": ext},
-                "season": item.get("season"),
-                "episode_start": item.get("episode_start"),
-                "episode_end": item.get("episode_end"),
+                "result": {"extracted": ext, "excluded": is_excluded},
+                "season": e["season"],
+                "episode_start": e["episode_start"],
+                "episode_end": e["episode_end"],
                 "part": e["part"],
-                "plan_status": item.get("plan_status"),
+                "plan_status": plan_status,
                 "status": item.get("status"),
                 "unique_id": item.get("unique_id"),
                 "final_filename": item.get("final_filename"),

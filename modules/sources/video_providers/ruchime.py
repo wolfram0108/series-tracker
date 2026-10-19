@@ -27,6 +27,25 @@ _MONTHS = {
 }
 
 
+async def _get_with_retry(http: httpx.AsyncClient, url: str, headers: dict | None = None,
+                          max_retries: int = 3, timeout: float = 15.0) -> httpx.Response:
+    last_exc: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            resp = await http.get(url, headers=headers, timeout=timeout, follow_redirects=True)
+            if resp.status_code == 200:
+                return resp
+            if attempt == max_retries - 1:
+                return resp
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            last_exc = exc
+            if attempt < max_retries - 1:
+                await asyncio.sleep(0.5 * (attempt + 1))
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"Failed to fetch {url}")
+
+
 class RuchimeProvider(BaseVideoProvider):
     name = "ruchime"
     domains = ("1.ruchime.org", "ruchime.org")
@@ -139,7 +158,7 @@ class RuchimeProvider(BaseVideoProvider):
 
         async with sem:
             try:
-                r = await http.get(ep_page_url, headers=headers, follow_redirects=True)
+                r = await http.get(ep_page_url, headers=headers, follow_redirects=True, timeout=8.0)
                 if r.status_code == 200:
                     text = html.unescape(r.text)
 
@@ -154,7 +173,7 @@ class RuchimeProvider(BaseVideoProvider):
                                      if m_oid_id else raw_vk)
                         try:
                             r_vk = await http.get(raw_vk, headers={"Referer": ep_page_url},
-                                                  follow_redirects=True)
+                                                  follow_redirects=True, timeout=8.0)
                             if r_vk.status_code == 200:
                                 res_vk = [int(q) for q in re.findall(r'mp4_(\d+)', r_vk.text)]
                                 if res_vk:
@@ -173,7 +192,7 @@ class RuchimeProvider(BaseVideoProvider):
                                 video_url = embed_url
                             try:
                                 r_av = await http.get(embed_url, headers={"Referer": ep_page_url},
-                                                      follow_redirects=True)
+                                                      follow_redirects=True, timeout=8.0)
                                 if r_av.status_code == 200:
                                     res_av = self._extract_allvideo_resolution(r_av.text)
                                     if res_av is not None:
@@ -199,9 +218,12 @@ class RuchimeProvider(BaseVideoProvider):
         slug = self._extract_slug(url)
         canonical = self.canonical_url(url)
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        resp = await http.get(canonical, headers=headers)
+        try:
+            resp = await _get_with_retry(http, canonical, headers=headers)
+        except Exception:
+            resp = await _get_with_retry(http, url, headers=headers)
         if resp.status_code != 200:
-            resp = await http.get(url, headers=headers)
+            resp = await _get_with_retry(http, url, headers=headers)
         resp.raise_for_status()
         raw_text = resp.text
 
@@ -272,10 +294,12 @@ class RuchimeProvider(BaseVideoProvider):
         slug = self._extract_slug(url)
         canonical = f"https://1.ruchime.org/release/{slug}"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-
-        resp = await http.get(canonical, headers=headers)
+        try:
+            resp = await _get_with_retry(http, canonical, headers=headers)
+        except Exception:
+            resp = await _get_with_retry(http, url, headers=headers)
         if resp.status_code != 200:
-            resp = await http.get(url, headers=headers)
+            resp = await _get_with_retry(http, url, headers=headers)
         resp.raise_for_status()
 
         m_eps = re.search(r"const ALL_EPS\s*=\s*(\[.*?\]);", resp.text, re.DOTALL)

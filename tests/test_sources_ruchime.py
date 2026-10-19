@@ -149,7 +149,7 @@ async def test_ruchime_parse_release():
     provider = RuchimeProvider()
     mock_client = AsyncMock(spec=httpx.AsyncClient)
 
-    def side_effect(url, headers=None, follow_redirects=True):
+    def side_effect(url, headers=None, follow_redirects=True, **kwargs):
         resp = AsyncMock(spec=httpx.Response)
         resp.status_code = 200
         if "episode-2" in url:
@@ -197,7 +197,7 @@ async def test_ruchime_scan_episodes_cascade_and_filtering():
     provider = RuchimeProvider()
     mock_client = AsyncMock(spec=httpx.AsyncClient)
 
-    def side_effect(url, headers=None, follow_redirects=True):
+    def side_effect(url, headers=None, follow_redirects=True, **kwargs):
         resp = AsyncMock(spec=httpx.Response)
         resp.status_code = 200
         if "episode-2" in url:
