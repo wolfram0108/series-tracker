@@ -32,7 +32,7 @@ const BLOCK_PALETTE: PaletteItem[] = [
   { type: "end_of_line", label: "Конец", title: "Соответствует концу названия" },
 ]
 
-// «ЕСЛИ» — диапазон без математических операций; «ТО» — математика без диапазона.
+// 'if' context enables range filtering; 'then' context enables mathematical operations.
 const palette = computed(() =>
   props.context === "if"
     ? BLOCK_PALETTE.filter((b) => !["add", "subtract"].includes(b.type))
@@ -86,12 +86,19 @@ function removeBlock(index: number): void {
   props.blocks.splice(index, 1)
 }
 
-// Защита от дурака: блок «диапазон» должен следовать за последним числом
+// Fool-proofing: disallow duplicate range blocks and position range after last number
+function checkPaletteMove(evt: any): boolean {
+  const itemType = evt.draggedContext?.element?.type
+  if (itemType === "range") {
+    const alreadyHasRange = props.blocks.some((b) => b.type === "range")
+    if (alreadyHasRange) return false
+  }
+  return true
+}
+
 function checkMove(evt: any): boolean {
   const draggedType = evt.draggedContext?.element?.type
   if (draggedType === "range") {
-    const hasNumber = props.blocks.some((b) => b.type === "number")
-    if (!hasNumber) return false
     const alreadyHasRange = props.blocks.some(
       (b) => b.type === "range" && b !== evt.draggedContext.element,
     )
@@ -101,23 +108,32 @@ function checkMove(evt: any): boolean {
 }
 
 function ensureRangePosition(): void {
-  const rangeIndex = props.blocks.findIndex((b) => b.type === "range")
-  if (rangeIndex === -1) return
-  const rangeBlock = props.blocks[rangeIndex]
+  const rangeBlocks = props.blocks.filter((b) => b.type === "range")
+  if (!rangeBlocks.length) return
+  const firstRange = rangeBlocks[0]
 
+  // Remove duplicate range blocks if any exist
+  for (let i = props.blocks.length - 1; i >= 0; i--) {
+    if (props.blocks[i].type === "range") {
+      props.blocks.splice(i, 1)
+    }
+  }
+
+  // Find index of the last number block
   let lastNumIndex = -1
   for (let i = 0; i < props.blocks.length; i++) {
     if (props.blocks[i].type === "number") lastNumIndex = i
   }
 
   if (lastNumIndex === -1) {
-    props.blocks.splice(rangeIndex, 1)
+    // If dropped into an empty condition or without numbers, auto-prepend a number block
+    props.blocks.push({ id: Date.now() + Math.random(), type: "number" })
+    props.blocks.push(firstRange)
     return
   }
 
-  props.blocks.splice(rangeIndex, 1)
-  const targetIndex = lastNumIndex > rangeIndex ? lastNumIndex : lastNumIndex + 1
-  props.blocks.splice(targetIndex, 0, rangeBlock)
+  // Insert immediately after the last number
+  props.blocks.splice(lastNumIndex + 1, 0, firstRange)
 }
 </script>
 
@@ -179,6 +195,7 @@ function ensureRangePosition(): void {
         :clone="cloneBlock"
         item-key="type"
         :sort="false"
+        :move="checkPaletteMove"
       >
         <template #item="{ element }">
           <div :class="['palette-btn', 'block-type-' + element.type]" :title="element.title">{{ element.label }}</div>

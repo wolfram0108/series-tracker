@@ -26,9 +26,21 @@ class ProfileValidationError(ValueError):
     """Профиль содержит неисправные правила (решение Б — громко)."""
 
 
-# Lookahead & lookbehind patterns to detect compilations in titles around extracted numbers
-_LOOKAHEAD_COMP = re.compile(r"^\s*(?:[-–—]|по|to)\s*(\d+)(?![pPkK\d])", re.IGNORECASE)
+# Video quality and resolution suffixes (Latin and Cyrillic)
+_RES_SUFFIX_PAT = re.compile(r"^[pPkKiIрРкК](?:[^\w]|$)", re.IGNORECASE)
+
+# Range delimiters indicating compilations in release titles
+_LOOKAHEAD_COMP = re.compile(r"^\s*(?:[-–—]|по|to)\s*(\d+)(?![pPkKiIрРкК\d])", re.IGNORECASE)
 _LOOKBEHIND_COMP = re.compile(r"(\d+)\s*(?:[-–—]|по|to)\s*$", re.IGNORECASE)
+
+# Range specification parsing patterns
+_RANGE_DASH_PAT = re.compile(r"^(\d+)\s*[-–—]\s*(\d+)$")
+_RANGE_SINGLE_PAT = re.compile(r"^(\d+)$")
+
+
+def _has_quality_suffix(tail: str) -> bool:
+    """Return True if string immediately starts with a resolution or quality marker."""
+    return bool(_RES_SUFFIX_PAT.match(tail))
 
 
 def parse_range_spec(raw: str | None) -> list[tuple[int, int]]:
@@ -43,17 +55,15 @@ def parse_range_spec(raw: str | None) -> list[tuple[int, int]]:
     if not parts:
         raise ValueError("диапазон не может быть пустым")
 
-    dash_pat = re.compile(r"^(\d+)\s*[-–—]\s*(\d+)$")
-    single_pat = re.compile(r"^(\d+)$")
     intervals: list[tuple[int, int]] = []
 
     for part in parts:
-        m_dash = dash_pat.match(part)
+        m_dash = _RANGE_DASH_PAT.match(part)
         if m_dash:
             a, b = int(m_dash.group(1)), int(m_dash.group(2))
             intervals.append((min(a, b), max(a, b)))
             continue
-        m_single = single_pat.match(part)
+        m_single = _RANGE_SINGLE_PAT.match(part)
         if m_single:
             val = int(m_single.group(1))
             intervals.append((val, val))
@@ -76,12 +86,17 @@ def parse_range_spec(raw: str | None) -> list[tuple[int, int]]:
 
 # --- блоки -> regex ------------------------------------------------------------
 
-def _blocks_to_regex(blocks: list[dict], *, capture_numbers: bool) -> str:
+def _blocks_to_regex(blocks: list[dict], *, capture_numbers: bool,
+                     allow_range: bool = False) -> str:
     parts = []
     for block in blocks:
         b_type = block.get("type")
-        if b_type in ("add", "subtract", "range"):
-            continue  # модификаторы чисел и диапазоны — не часть шаблона
+        if b_type in ("add", "subtract"):
+            continue  # Number modifiers are evaluated in actions, not part of regex pattern
+        elif b_type == "range":
+            if not allow_range:
+                raise ValueError("блок «Диапазон» недопустим в действиях «ТО»")
+            continue  # Range filters are evaluated in condition checks, not part of regex pattern
         elif b_type == "text":
             parts.append(re.escape(block.get("value", "")))
         elif b_type == "number":
@@ -185,9 +200,9 @@ def _compile_rule(rule: dict) -> CompiledRule:
                 intervals = parse_range_spec(blocks[r_idx].get("value"))
                 num_count = sum(1 for b in blocks if b.get("type") == "number")
                 range_check = ConditionRangeCheck(intervals=intervals, number_count=num_count)
-                regex = _blocks_to_regex(blocks, capture_numbers=True)
+                regex = _blocks_to_regex(blocks, capture_numbers=True, allow_range=True)
             else:
-                regex = _blocks_to_regex(blocks, capture_numbers=False)
+                regex = _blocks_to_regex(blocks, capture_numbers=False, allow_range=True)
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             # Решение Б: битое условие делает НЕИСПРАВНЫМ всё правило.
             raise ValueError(f"условие повреждено: {exc}") from exc
@@ -210,7 +225,7 @@ def _compile_rule(rule: dict) -> CompiledRule:
         elif a_type in ("extract_single", "extract_season", "extract_range",
                         "extract_part"):
             blocks = _parse_blocks(raw_pattern)
-            regex = _blocks_to_regex(blocks, capture_numbers=True)
+            regex = _blocks_to_regex(blocks, capture_numbers=True, allow_range=False)
             modifiers: list[int | None] = []
             for i, block in enumerate(blocks):
                 if block.get("type") != "number":
@@ -246,6 +261,9 @@ def _match_condition(title: str, cond: CompiledCondition) -> bool:
     rc = cond.range_check
     for m in cond.regex.finditer(title):
         if rc.number_count >= 2 and m.lastindex and m.lastindex >= 2:
+            # Symmetrical guard: if either number has a resolution suffix, skip this match
+            if _has_quality_suffix(title[m.end(1):]) or _has_quality_suffix(title[m.end(2):]):
+                continue
             try:
                 a = int(m.group(1))
                 b = int(m.group(2))
@@ -253,13 +271,16 @@ def _match_condition(title: str, cond: CompiledCondition) -> bool:
             except (ValueError, TypeError):
                 continue
         else:
+            # Single captured number: verify it is not immediately suffixed by a quality marker (e.g. 1080p)
+            if _has_quality_suffix(title[m.end(1):]):
+                continue
             try:
                 val = int(m.group(1))
             except (ValueError, TypeError, IndexError):
                 continue
             c_start, c_end = val, val
             m_after = _LOOKAHEAD_COMP.match(title[m.end(1):])
-            if m_after:
+            if m_after and not _has_quality_suffix(title[m.end(1) + m_after.end(1):]):
                 try:
                     after_val = int(m_after.group(1))
                     c_start, c_end = min(val, after_val), max(val, after_val)

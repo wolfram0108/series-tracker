@@ -332,32 +332,85 @@ def test_range_list_intervals():
 
 
 def test_range_foolproofing_validations():
-    # 1. Диапазон стоит первым (нет предшествующего числа)
+    # 1. Range block placed first without preceding number
     b_first = [{"type": "range", "value": "1-10"}]
     p1 = compile_profile(1, [_rule(1, "r1", [{"action_type": "exclude"}],
                                    conditions=[_cond(b_first)])])
     assert len(p1.invalid_rules) == 1
     assert "не может стоять первым" in p1.invalid_rules[0]["error"]
 
-    # 2. Диапазон следует за текстом, а не числом
+    # 2. Range block follows text rather than number
     b_after_text = [{"type": "number"}, {"type": "text", "value": " "}, {"type": "range", "value": "1-10"}]
     p2 = compile_profile(1, [_rule(1, "r2", [{"action_type": "exclude"}],
                                    conditions=[_cond(b_after_text)])])
     assert len(p2.invalid_rules) == 1
     assert "должен следовать сразу за блоком «Число»" in p2.invalid_rules[0]["error"]
 
-    # 3. Диапазон стоит НЕ после последнего числа (следом есть ещё число)
+    # 3. Range block is not after the last number (another number follows)
     b_mid_num = [{"type": "number"}, {"type": "range", "value": "1-10"}, {"type": "number"}]
     p3 = compile_profile(1, [_rule(1, "r3", [{"action_type": "exclude"}],
                                    conditions=[_cond(b_mid_num)])])
     assert len(p3.invalid_rules) == 1
     assert "после последнего числа" in p3.invalid_rules[0]["error"]
 
-    # 4. Некорректное значение диапазона
+    # 4. Invalid range value
     b_broken = [{"type": "number"}, {"type": "range", "value": "не_числа"}]
     p4 = compile_profile(1, [_rule(1, "r4", [{"action_type": "exclude"}],
                                    conditions=[_cond(b_broken)])])
     assert len(p4.invalid_rules) == 1
     assert "некорректный элемент диапазона" in p4.invalid_rules[0]["error"]
+
+
+def test_range_resolution_marker_symmetrical_protection():
+    # F1 fix verification: resolution markers like 1080p, 1080i, 1080р, 4к must not be confused with compilation ends
+    cond_single = {
+        "condition_type": "contains",
+        "logical_operator": "AND",
+        "pattern": json.dumps([
+            {"type": "number"},
+            {"type": "range", "value": "171-200"}
+        ], ensure_ascii=False)
+    }
+    profile_single = compile_profile(1, [
+        _rule(1, "exclude 171-200", [{"action_type": "exclude"}], conditions=[cond_single])
+    ])
+
+    # 170-1080p has episode 170 outside 171-200, and 1080 is a resolution, not an episode number
+    assert process_title(profile_single, "170-1080p")["excluded"] is False
+    assert process_title(profile_single, "170-1080i")["excluded"] is False
+    assert process_title(profile_single, "170-1080р")["excluded"] is False
+    assert process_title(profile_single, "170-4к")["excluded"] is False
+
+    # Real compilations must still be matched and excluded
+    assert process_title(profile_single, "170-190")["excluded"] is True
+    assert process_title(profile_single, "175-190")["excluded"] is True
+
+    # Explicit two-number pattern with resolution attached to second number
+    cond_explicit = {
+        "condition_type": "contains",
+        "logical_operator": "AND",
+        "pattern": json.dumps([
+            {"type": "number"},
+            {"type": "text", "value": "-"},
+            {"type": "number"},
+            {"type": "range", "value": "1-100"}
+        ], ensure_ascii=False)
+    }
+    profile_explicit = compile_profile(2, [
+        _rule(1, "exclude 1-100", [{"action_type": "exclude"}], conditions=[cond_explicit])
+    ])
+    assert process_title(profile_explicit, "10-1080p")["excluded"] is False
+
+
+def test_range_disallowed_in_actions_loudly():
+    # F2 fix verification: range block in actions must loudly mark rule invalid under Decision B
+    bad_action_rule = _rule(1, "bad action", [
+        {"action_type": "extract_single",
+         "action_pattern": json.dumps([{"type": "number"}, {"type": "range", "value": "1-10"}])}
+    ])
+    profile = compile_profile(1, [bad_action_rule])
+    assert len(profile.invalid_rules) == 1
+    assert "недопустим в действиях «ТО»" in profile.invalid_rules[0]["error"]
+
 
 
