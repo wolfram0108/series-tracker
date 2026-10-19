@@ -29,7 +29,7 @@ const seriesStore = useSeriesStore()
 const isBusy = computed(
   () => saving.value || !!(seriesStore.byId(props.seriesId)?.is_busy ?? series.value?.is_busy),
 )
-const isVk = computed(() => series.value?.source_type === "vk_video")
+const isVk = computed(() => series.value?.source_type === "vk_video" || series.value?.source_type === "web_video")
 
 type TabKey = "properties" | "composition" | "slicing" | "history"
 const tab = ref<TabKey>("properties")

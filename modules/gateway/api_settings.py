@@ -118,7 +118,12 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                      "date_time": rel.get("date_marker")}
                     for rel in result.get("releases", [])]
         return {"success": True, "title": result.get("title"),
-                "torrents": torrents, "tracker_info": result.get("tracker")}
+                "torrents": torrents, "tracker_info": result.get("tracker"),
+                "source_type": result.get("source_type"),
+                "titles": result.get("titles", []),
+                "canonical_url": result.get("canonical_url"),
+                "episodes_count": result.get("episodes_count"),
+                "resolution": result.get("resolution")}
 
     # --- настройки -------------------------------------------------------------------
 
@@ -372,12 +377,46 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             response_model=list[DynamicObject], responses=_ERR1)
     async def scrape_titles(request: Request):
         data = await request.json()
-        if not data.get("channel_url"):
+        channel_url = (data.get("channel_url") or "").strip()
+        if not channel_url:
             return JSONResponse(
-                {"error": "Необходимо указать URL канала"}, status_code=400)
+                {"error": "Необходимо указать ссылку или URL канала"}, status_code=400)
+
+        # 1. Если передана ссылка на веб-провайдер видео или трекер (не VK)
+        is_vk = ("vk.com" in channel_url.lower()
+                 or "vkvideo.ru" in channel_url.lower()
+                 or channel_url.startswith("@"))
+        if not is_vk and channel_url.startswith(("http://", "https://")):
+            try:
+                parse_res = await gw.request("sources.parse", {"url": channel_url},
+                                             timeout=30)
+                if parse_res:
+                    videos = parse_res.get("videos") or []
+                    if not videos:
+                        res_val = parse_res.get("resolution")
+                        raw_titles = parse_res.get("titles") or []
+                        if not raw_titles and parse_res.get("releases"):
+                            raw_titles = [r["title"] for r in parse_res["releases"]
+                                          if r.get("title")]
+                        videos = [{"title": t, "resolution": res_val} for t in raw_titles]
+
+                    query = (data.get("query") or "").strip()
+                    terms = [t.strip().lower() for t in query.split("/") if t.strip()]
+                    if terms:
+                        videos = [v for v in videos
+                                  if any(term in v.get("title", "").lower() for term in terms)]
+
+                    return videos
+            except Exception as exc:
+                err_msg = str(exc).split(': ', 1)[-1]
+                return JSONResponse(
+                    {"error": f"Ошибка сбора названий с сайта: {err_msg}"},
+                    status_code=500)
+
+        # 2. Сканирование VK канала
         try:
             reply = await gw.request("sources.vk.scan", {
-                "channel_url": data["channel_url"],
+                "channel_url": channel_url,
                 "query": data.get("query"),
                 "search_mode": data.get("search_mode", "search")},
                 timeout=900)

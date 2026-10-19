@@ -170,12 +170,12 @@ class RenamingModule(BaseModule):
 
             await self.repo.delete_errors(series_id)
             task_type = ("mass_vk_reprocess"
-                         if series["source_type"] == "vk_video"
+                         if series["source_type"] in ("vk_video", "web_video")
                          else "mass_torrent_reprocess")
             task_id = await self.repo.create(series_id, task_type)
             self._busy(series_id, True)
             try:
-                if series["source_type"] == "vk_video":
+                if series["source_type"] in ("vk_video", "web_video"):
                     renamed = await self._reprocess_vk(series)
                 else:
                     renamed = await self._reprocess_torrents(series)

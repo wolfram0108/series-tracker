@@ -23,6 +23,8 @@ import re
 import shutil
 from typing import Awaitable, Callable
 
+import httpx
+
 ProgressCb = Callable[[dict], Awaitable[None]]
 
 # hls + лучший muxed-поток; fallback на обычный best, если hls нет
@@ -183,6 +185,99 @@ def download_artifacts(full_output_path: str) -> list[str]:
     return out
 
 
+def is_allvideo_url(url: str) -> bool:
+    return any(d in url for d in ("fsst.online", "incvideo1.online", "filevideo1.com"))
+
+
+async def _resolve_allvideo_stream(embed_url: str) -> tuple[str, str] | None:
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True,
+                                     headers={"Referer": "https://1.ruchime.org/"}) as client:
+            r = await client.get(embed_url)
+            m = re.search(r'file:\s*\"([^\"]+)\"', r.text)
+            if not m:
+                return None
+            file_val = m.group(1)
+            mp4_url = None
+            for chunk in file_val.split(','):
+                if '[1080p]' in chunk:
+                    mp4_url = chunk.replace('[1080p]', '').strip()
+                    break
+            if not mp4_url:
+                mp4_url = file_val.split(',')[-1].split(']')[-1].strip()
+            return mp4_url, "https://incvideo1.online/"
+    except Exception:
+        return None
+
+
+async def _probe_duration_ffprobe(stream_url: str, referer: str = "") -> float:
+    executable = shutil.which("ffprobe")
+    if not executable:
+        return 0.0
+    cmd = [executable, "-v", "error"]
+    if referer:
+        cmd.extend(["-headers", f"Referer: {referer}\r\n"])
+    cmd.extend(["-show_entries", "format=duration", "-of",
+                "default=noprint_wrappers=1:nokey=1", stream_url])
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out, _ = await proc.communicate()
+        if proc.returncode == 0 and out:
+            return float(out.decode().strip())
+    except Exception:
+        pass
+    return 0.0
+
+
+async def _download_direct_ffmpeg(stream_url: str, referer: str,
+                                  full_output_path: str,
+                                  on_progress: ProgressCb) -> tuple[bool, str]:
+    executable = shutil.which("ffmpeg")
+    if not executable:
+        return False, "ffmpeg не найден в PATH"
+    duration = await _probe_duration_ffprobe(stream_url, referer)
+    tmp_out = full_output_path + ".download.mp4"
+    await on_progress({"phase": "download", "progress": 0, "eta": 0, "speed": 0.0})
+
+    cmd = [executable, "-y"]
+    if referer:
+        cmd.extend(["-headers", f"Referer: {referer}\r\n"])
+    cmd.extend(["-i", stream_url, "-c", "copy", "-progress", "pipe:1", "-nostats", tmp_out])
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr))
+    fields: dict[str, str] = {}
+    try:
+        assert proc.stdout is not None
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").strip()
+            if "=" not in text:
+                continue
+            k, v = text.split("=", 1)
+            fields[k] = v
+            if k == "progress":
+                await on_progress(ffmpeg_progress(fields, duration))
+                fields = {}
+        await proc.wait()
+    finally:
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+    tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
+
+    if proc.returncode == 0:
+        os.replace(tmp_out, full_output_path)
+        await on_progress({"phase": "download", "progress": 100, "eta": 0, "speed": 0.0})
+        return True, ""
+    last = tail.strip().splitlines()[-1] if tail.strip() else ""
+    return False, f"ffmpeg direct download: {last or proc.returncode}"
+
+
 async def download(video_url: str, full_output_path: str,
                    on_progress: ProgressCb, *, threads: int = 6,
                    ) -> tuple[bool, str]:
@@ -191,6 +286,13 @@ async def download(video_url: str, full_output_path: str,
     os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
     if os.path.exists(full_output_path):
         return True, "файл уже существует"
+
+    if is_allvideo_url(video_url):
+        resolved = await _resolve_allvideo_stream(video_url)
+        if not resolved:
+            return False, "не удалось получить ссылку на поток AllVideo"
+        stream_url, referer = resolved
+        return await _download_direct_ffmpeg(stream_url, referer, full_output_path, on_progress)
 
     # длительность для процента remux — из yt-dlp (метаданные источника),
     # НЕ из промежуточного TS (находка 52)

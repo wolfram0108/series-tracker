@@ -140,7 +140,7 @@ class LibraryModule(BaseModule):
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
             old_base, new_base = series["save_path"], task["new_path"]
-            if series["source_type"] == "vk_video":
+            if series["source_type"] in ("vk_video", "web_video"):
                 await self._move_vk_files(series_id, old_base, new_base)
             else:
                 await self._move_torrents(series_id, new_base)

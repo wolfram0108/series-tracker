@@ -27,6 +27,8 @@ type VState = "valid" | "invalid" | null
 
 const s = props.series
 const isVk = s.source_type === "vk_video"
+const isWebVideo = s.source_type === "web_video"
+const isVideo = isVk || isWebVideo
 
 // --- редактируемые поля (инициализация из серии) ---
 const form = reactive({
@@ -195,7 +197,7 @@ const tmdbCatalogName = computed(() => {
 
 // --- валидация ---
 const isSeasonValid = computed(() => {
-  if (isSeasonless.value || isVk) return true
+  if (isSeasonless.value || isVideo) return true
   return /^s\d{2}$/.test(form.season.trim())
 })
 function vstate(ok: boolean): VState {
@@ -205,7 +207,7 @@ const nameState = computed<VState>(() => (showValidation.value ? vstate(!!form.n
 const nameEnState = computed<VState>(() => (showValidation.value ? vstate(!!form.name_en) : null))
 const savePathState = computed<VState>(() => (showValidation.value ? vstate(!!form.save_path) : null))
 const seasonState = computed<VState>(() => {
-  if (!showValidation.value || isSeasonless.value || isVk) return null
+  if (!showValidation.value || isSeasonless.value || isVideo) return null
   return vstate(isSeasonValid.value)
 })
 
@@ -274,6 +276,7 @@ function openUrl() {
 const canSave = computed(() => {
   const base = !!form.name && !!form.name_en && !!form.save_path
   if (isVk) return base && !!vkChannelUrl.value && !!form.parser_profile_id
+  if (isWebVideo) return base && !!form.parser_profile_id
   return base && isSeasonValid.value
 })
 
@@ -298,6 +301,8 @@ async function save(): Promise<boolean> {
     }
     if (isVk) {
       payload.url = `${vkChannelUrl.value}|${vkQuery.value}`
+    } else if (isWebVideo) {
+      payload.url = url
     } else {
       // строка качества (как в оригинале): anilibria/rutracker → одно
       // значение; astar → версии мульти-групп + по одной из одиночных, ';'
@@ -342,7 +347,7 @@ async function save(): Promise<boolean> {
 defineExpose({ save })
 onMounted(() => {
   void loadProfiles()
-  if (!isVk) void refreshSiteTorrents() // автопарсинг доступных раздач + качество
+  if (!isVideo) void refreshSiteTorrents() // автопарсинг доступных раздач + качество
 })
 </script>
 
@@ -459,7 +464,7 @@ onMounted(() => {
     </div>
 
     <!-- Выбор качества (торрент, по tracker_info.ui_features) -->
-    <div v-if="!isVk && qualitySelector === 'anilibria'" class="modern-fieldset">
+    <div v-if="!isVideo && qualitySelector === 'anilibria'" class="modern-fieldset">
       <div class="fieldset-header"><span class="fieldset-title">Выбор качества</span></div>
       <div class="fieldset-content">
         <div v-if="qualityOptionsAnilibria.length" class="field-group">
@@ -475,7 +480,7 @@ onMounted(() => {
         <div v-else-if="!siteTorrentsLoading" class="add-error">Качества не найдены</div>
       </div>
     </div>
-    <div v-if="!isVk && qualitySelector === 'astar'" class="modern-fieldset">
+    <div v-if="!isVideo && qualitySelector === 'astar'" class="modern-fieldset">
       <div class="fieldset-header"><span class="fieldset-title">Выбор качества</span></div>
       <div class="fieldset-content">
         <template v-for="ep in sortedQualityOptionsKeys" :key="ep">
@@ -497,7 +502,7 @@ onMounted(() => {
     </div>
 
     <!-- Доступные раздачи с сайта (торрент) -->
-    <div v-if="!isVk" class="modern-fieldset">
+    <div v-if="!isVideo" class="modern-fieldset">
       <div class="fieldset-header"><span class="fieldset-title">Раздачи с сайта (по выбранному качеству)</span></div>
       <div class="fieldset-content">
         <div v-if="siteTorrentsLoading" class="status-loading">

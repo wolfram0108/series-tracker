@@ -86,7 +86,7 @@ def format_name(series: dict, metadata: dict,
                      else sanitize(resolution_str))
 
     extension = ".mkv"
-    if series.get("source_type") == "vk_video":
+    if series.get("source_type") in ("vk_video", "web_video"):
         extension = ".mp4"
     elif original_filename:
         ext = os.path.splitext(original_filename)[1]

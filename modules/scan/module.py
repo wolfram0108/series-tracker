@@ -178,7 +178,10 @@ class ScanModule(BaseModule):
                                     {"series_id": series_id})
         if refresh:
             # полный цикл Р-12: кандидаты + план + scan.plan.updated
-            await self._scan_vk(series)
+            if series.get("source_type") == "web_video":
+                await self._scan_web_video(series)
+            else:
+                await self._scan_vk(series)
         items = await self.repo.items_for_series(series_id)
         # компиляции, выпавшие из плана, теряют записи о нарезке
         for item in items:
@@ -369,7 +372,7 @@ class ScanModule(BaseModule):
             # Прошлая ошибка сбрасывается новым сканом (Р-11).
             await self.repo.delete_error_tasks(series_id)
             await self._reprocess_names(series_id)
-            if series["source_type"] == "vk_video":
+            if series["source_type"] in ("vk_video", "web_video"):
                 # Сверка диска перед сканом (R4, ситуации VF1/VF3/VC1):
                 # пропавший скачанный .mp4 → сброс completed→pending, чтобы
                 # dispatch перекачал. Симметрично торрент-ветке, которая
@@ -380,9 +383,12 @@ class ScanModule(BaseModule):
                     await self.request("downloads.fs.sync",
                                        {"series_id": series_id}, timeout=120)
                 except BusRequestError as exc:
-                    self.log.warning("сверка диска перед VK-сканом "
+                    self.log.warning("сверка диска перед видео-сканом "
                                      "пропущена: %s", exc)
-                result = await self._scan_vk(series)
+                if series["source_type"] == "vk_video":
+                    result = await self._scan_vk(series)
+                else:
+                    result = await self._scan_web_video(series)
                 # VF2: проверка нарезанных детей на КАЖДОМ скане (а не только
                 # при открытии композиции). Пропавший sliced-файл → missing/
                 # completed_with_errors + исходник назад в дозагрузку, который
@@ -428,7 +434,7 @@ class ScanModule(BaseModule):
         try:
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
-            if series["source_type"] == "vk_video":
+            if series["source_type"] in ("vk_video", "web_video"):
                 raise ScanError("подготовка состава — только для торрентов")
             await self.repo.delete_error_tasks(series_id)
             result = await self._scan_torrents(series, False, prepare=True)
@@ -494,6 +500,34 @@ class ScanModule(BaseModule):
         # «обновление». Иначе «обновлений нет».
         changed = bool(stats["added"] or stats["deleted"])
         return {"source_type": "vk_video", "candidates": stats,
+                "in_plan": in_plan, "changed": changed}
+
+    async def _scan_web_video(self, series: dict) -> dict:
+        series_id = series["id"]
+        reply = await self.request("sources.video.scan", {
+            "url": series["url"], "series": series},
+            timeout=900)
+        videos = reply["videos"]
+
+        applied = await self.request("rules.apply", {
+            "profile_id": series["parser_profile_id"],
+            "titles": [v["title"] for v in videos],
+            "series_season": series.get("season")}, timeout=300)
+        candidates = self._vk_candidates(series_id, videos,
+                                         applied["results"])
+        stats = await self.repo.upsert_candidates(series_id, candidates)
+        self.log.info("Веб-видео-скан %d: кандидатов %d (добавлено %d, обновлено "
+                      "%d, удалено фантомов %d)", series_id, len(candidates),
+                      stats["added"], stats["updated"], stats["deleted"])
+
+        plan_input = await self.repo.candidates(series_id)
+        plan = build_plan(plan_input, self._quality_priority(series),
+                          self._ignored_seasons(series))
+        await self.repo.set_plan_statuses(plan)
+        in_plan = sum(1 for s in plan.values() if s.startswith("in_plan"))
+        self.publish_event("scan.plan.updated", {"series_id": series_id})
+        changed = bool(stats["added"] or stats["deleted"])
+        return {"source_type": "web_video", "candidates": stats,
                 "in_plan": in_plan, "changed": changed}
 
     @staticmethod

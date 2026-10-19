@@ -35,6 +35,7 @@ from . import anilibria, delivery, parsers, vk
 from .delivery import Delivery
 from .parsers import SourceParseError
 from .repository import SourcesRepository
+from .video_providers import RuchimeProvider, VideoProviderRegistry
 
 REQUEST_MIN_INTERVAL = 3.0  # секунд между запросами к одному трекеру
 
@@ -56,6 +57,8 @@ class SourcesModule(BaseModule):
         self.vk_page_interval = vk_page_interval
         self._locks: dict[str, asyncio.Lock] = {}
         self._last_request: dict[str, float] = {}
+        self.video_registry = VideoProviderRegistry()
+        self.video_registry.register(RuchimeProvider())
         super().__init__(bus)
         # Late binding on purpose: tests replace the transport, not the bus.
         self._delivery = Delivery(
@@ -73,6 +76,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.tracker.resolve", self.on_tracker_resolve)
         self.handle("sources.tracker.set_mirrors", self.on_set_mirrors)
         self.handle("sources.vk.scan", self.on_vk_scan)
+        self.handle("sources.video.scan", self.on_video_scan)
 
     async def on_start(self) -> None:
         self._http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
@@ -122,6 +126,27 @@ class SourcesModule(BaseModule):
 
     async def on_parse(self, env: Envelope) -> dict:
         url = env.payload["url"]
+        provider = self.video_registry.find_provider(url)
+        if provider:
+            service = provider.name
+            lock = self._locks.setdefault(service, asyncio.Lock())
+            async with lock:
+                await self._polite(service)
+                parsed = await provider.parse_release(url, self._http)
+            return {
+                "service": service,
+                "source_type": "web_video",
+                "title": parsed["title"],
+                "titles": parsed.get("titles", []),
+                "resolution": parsed.get("resolution"),
+                "videos": parsed.get("videos", []),
+                "releases": parsed.get("releases", []),
+                "canonical_url": parsed.get("canonical_url", url),
+                "episodes_count": parsed.get("episodes_count", 0),
+                "ui_features": {},
+                "tracker": None,
+            }
+
         tracker = await self.repo.resolve(url)
         if not tracker:
             raise SourceParseError(f"трекер не распознан по URL: {url}")
@@ -283,6 +308,22 @@ class SourcesModule(BaseModule):
         facts.sort(key=lambda f: f["publication_date"], reverse=True)
         self.log.info("VK-скан %s: видео %d (сырых %d)", screen_name,
                       len(facts), len(raw))
+        return {"videos": facts}
+
+    async def on_video_scan(self, env: Envelope) -> dict:
+        """payload: {url, series: dict}
+        reply:   {videos: [{title, url, publication_date, resolution}]}"""
+        url = env.payload["url"]
+        provider = self.video_registry.find_provider(url)
+        if not provider:
+            raise SourceParseError(f"видео-провайдер не найден по URL: {url}")
+        service = provider.name
+        lock = self._locks.setdefault(service, asyncio.Lock())
+        async with lock:
+            await self._polite(service)
+            series = env.payload.get("series") or {}
+            facts = await provider.scan_episodes(url, self._http, series)
+        self.log.info("Видео-скан %s (%s): серий %d", service, url, len(facts))
         return {"videos": facts}
 
     # --- скачивание .torrent (Р-1) ----------------------------------------------------

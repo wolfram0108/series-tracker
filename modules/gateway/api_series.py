@@ -70,7 +70,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         for s in series:
             s["last_scan_time"] = _iso(s.get("last_scan_time"))
             _attach_tmdb(s, mappings.get(s["id"]))
-            counts = vk if s.get("source_type") == "vk_video" else torrent
+            counts = vk if s.get("source_type") in ("vk_video", "web_video") else torrent
             s["downloaded_episodes_count"] = counts.get(s["id"], 0)
         return series
 
@@ -146,7 +146,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 "series_id": series_id, "tmdb_data": tmdb_data}, timeout=10)
         new_path = data.get("save_path")
         path_changed = bool(new_path and new_path != series.get("save_path"))
-        is_vk = series.get("source_type") == "vk_video"
+        is_vk = series.get("source_type") in ("vk_video", "web_video")
         if path_changed:
             try:
                 await gw.request("library.relocate", {
@@ -202,7 +202,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             except BusRequestError:
                 return {"success": True}
             sync_topic = ("downloads.fs.sync"
-                          if series.get("source_type") == "vk_video"
+                          if series.get("source_type") in ("vk_video", "web_video")
                           else "torrents.fs.verify")
             gw.send_command(sync_topic, {"series_id": series_id})
         return {"success": True}

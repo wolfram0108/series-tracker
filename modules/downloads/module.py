@@ -85,7 +85,7 @@ class DownloadsModule(BaseModule):
             all_series = await self.request("catalog.series.list", {},
                                             timeout=30)
             for s in all_series:
-                if s.get("source_type") == "vk_video":
+                if s.get("source_type") in ("vk_video", "web_video"):
                     await self._contribute(s["id"])
         except BusRequestError as exc:
             self.log.warning("каталог недоступен при старте: %s", exc)

@@ -104,6 +104,9 @@
   left: 1rem; color: var(--color-gray-600);
   pointer-events: none; transition: all 0.2s ease-in-out;
   transform-origin: left center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: calc(100% - 2rem);
 }
 .item-floating-label .item-input:focus + label,
 .item-floating-label .item-input:not(:placeholder-shown) + label {

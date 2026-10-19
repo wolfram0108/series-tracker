@@ -7,6 +7,8 @@ import sqlite3
 import subprocess
 import sys
 
+from unittest.mock import patch
+
 import pytest
 
 from core import BaseModule, Bus, BusRequestError, Runner
@@ -484,3 +486,30 @@ async def test_cancel_unknown_task_errors(system):
     bus, _, dl, probe, db_path, media_dir = system
     with pytest.raises(BusRequestError, match="не найдена"):
         await probe.request("downloads.cancel", {"task_id": 999}, timeout=5)
+
+
+def test_is_allvideo_url():
+    assert ytdlp.is_allvideo_url("https://fsst.online/embed/992227/")
+    assert ytdlp.is_allvideo_url("https://incvideo1.online/embed/123/")
+    assert not ytdlp.is_allvideo_url("https://vk.com/video-170515668_456247993")
+    assert not ytdlp.is_allvideo_url("https://vkvideo.ru/video_ext.php")
+
+
+@pytest.mark.asyncio
+async def test_download_allvideo_route(tmp_path):
+    out_file = str(tmp_path / "test.mp4")
+    progress = []
+
+    async def on_progress(p):
+        progress.append(p)
+
+    with patch.object(ytdlp, "_resolve_allvideo_stream") as mock_resolve, \
+         patch.object(ytdlp, "_download_direct_ffmpeg") as mock_ffmpeg:
+        mock_resolve.return_value = ("https://cdn.example.com/test.mp4", "https://incvideo1.online/")
+        mock_ffmpeg.return_value = (True, "")
+
+        ok, err = await ytdlp.download("https://fsst.online/embed/992227/", out_file, on_progress)
+        assert ok is True
+        assert err == ""
+        mock_resolve.assert_called_once_with("https://fsst.online/embed/992227/")
+        mock_ffmpeg.assert_called_once_with("https://cdn.example.com/test.mp4", "https://incvideo1.online/", out_file, on_progress)

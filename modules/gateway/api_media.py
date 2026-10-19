@@ -256,7 +256,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError:
             return JSONResponse({"error": "Сериал не найден"},
                                 status_code=404)
-        is_vk = series.get("source_type") == "vk_video"
+        is_vk = series.get("source_type") in ("vk_video", "web_video")
         topic = "scan.composition" if is_vk else "torrents.composition"
         try:
             if refresh and not is_vk:

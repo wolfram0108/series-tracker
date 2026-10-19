@@ -51,7 +51,9 @@ const parserData = ref<{ torrents: Torrent[] } | null>(null)
 const episodeQualityOptions = reactive<Record<string, string[]>>({})
 const isQualityOptionsReady = ref(false)
 const showValidation = ref(false)
-const sourceType = ref<"torrent" | "vk_video">("torrent")
+const sourceType = ref<"torrent" | "vk_video" | "web_video">("torrent")
+const webVideoTitles = ref<string[]>([])
+const canonicalUrl = ref("")
 const vkChannelUrl = ref("")
 const vkQuery = ref("")
 const trackerInfo = ref<TrackerInfo | null>(null)
@@ -91,12 +93,12 @@ function sortEpisodeKeys(keys: string[]): string[] {
 // --- computed ---
 const shouldShowValidation = computed(() => {
   if (showValidation.value) return true
-  if (sourceType.value === "vk_video") return true
+  if (sourceType.value === "vk_video" || sourceType.value === "web_video") return true
   if (sourceType.value === "torrent" && parsed.value) return true
   return false
 })
 const isSeasonValid = computed(() => {
-  if (isSeasonless.value || sourceType.value === "vk_video") return true
+  if (isSeasonless.value || sourceType.value === "vk_video" || sourceType.value === "web_video") return true
   return /^s\d{2}$/.test(newSeries.season.trim())
 })
 const canAddSeries = computed(() => {
@@ -105,6 +107,9 @@ const canAddSeries = computed(() => {
     const vkOk = !!vkChannelUrl.value && !!newSeries.parser_profile_id
     const searchOk = newSeries.vk_search_mode === "search" ? !!vkQuery.value : true
     return base && vkOk && searchOk
+  }
+  if (sourceType.value === "web_video") {
+    return parsed.value && base && !!newSeries.parser_profile_id
   }
   return parsed.value && base && isSeasonValid.value
 })
@@ -160,7 +165,7 @@ const nameState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!
 const nameEnState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!newSeries.name_en) : null))
 const savePathState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!newSeries.save_path) : null))
 const seasonState = computed<VState>(() => {
-  if (!shouldShowValidation.value || isSeasonless.value || sourceType.value === "vk_video") return null
+  if (!shouldShowValidation.value || isSeasonless.value || sourceType.value === "vk_video" || sourceType.value === "web_video") return null
   return vstate(isSeasonValid.value)
 })
 
@@ -176,7 +181,7 @@ const qualityOptionsAnilibria = computed(() => {
 const showQualityBlock = computed(() => !!trackerInfo.value?.ui_features?.quality_selector)
 const qualitySelector = computed(() => trackerInfo.value?.ui_features?.quality_selector || "")
 const showSeasonlessSwitch = computed(
-  () => sourceType.value === "vk_video" || (!!site.value && (site.value.includes("kinozal") || site.value.includes("rutracker"))),
+  () => sourceType.value === "vk_video" || sourceType.value === "web_video" || (!!site.value && (site.value.includes("kinozal") || site.value.includes("rutracker"))),
 )
 const astarHasAlternatives = computed(() => Object.values(episodeQualityOptions).some((o) => o.length > 1))
 
@@ -204,6 +209,9 @@ const selectedTorrentIds = computed<string[]>(() => {
 })
 // имена файлов (basename) для поля шага 3 теста
 const namingTitles = computed<string[]>(() => {
+  if (sourceType.value === "web_video" && webVideoTitles.value.length) {
+    return webVideoTitles.value
+  }
   const out: string[] = []
   for (const id of selectedTorrentIds.value) {
     const r = previewResults.value[id]
@@ -227,6 +235,8 @@ watch(() => newSeries.url, () => {
 function handleUrlInput() {
   urlError.value = ""
   parsed.value = false
+  webVideoTitles.value = []
+  canonicalUrl.value = ""
   if (!newSeries.url) {
     sourceType.value = "torrent"
     return
@@ -259,10 +269,23 @@ async function parseTorrentUrl() {
   }
   try {
     const { data, error } = await api.POST("/api/parse_url", { body: { url: newSeries.url } } as never)
-    const res = (data ?? null) as ParseResult | null
+    const res = (data ?? null) as (ParseResult & {
+      source_type?: string
+      titles?: string[]
+      canonical_url?: string
+      resolution?: number | string | null
+    }) | null
     if (error || !res) {
       const err = (error ?? null) as { error?: string } | null
       throw new Error(err?.error || "Ошибка парсинга URL")
+    }
+    if (res.source_type === "web_video") {
+      sourceType.value = "web_video"
+      webVideoTitles.value = res.titles ?? []
+      canonicalUrl.value = res.canonical_url || ""
+      if (res.resolution && !newSeries.resolution_override) {
+        newSeries.resolution_override = String(res.resolution)
+      }
     }
     trackerInfo.value = res.tracker_info ?? null
     newSeries.name = res.title?.ru || ""
@@ -296,7 +319,9 @@ async function parseTorrentUrl() {
     isQualityOptionsReady.value = true
     parsed.value = true
     showValidation.value = true
-    void prefetchNamingFiles(torrents)  // фоновый добор списков файлов для вкладки проверки
+    if (res.source_type !== "web_video") {
+      void prefetchNamingFiles(torrents)  // фоновый добор списков файлов для вкладки проверки
+    }
   } catch (e) {
     urlError.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -405,6 +430,11 @@ async function addSeries() {
       payload.source_type = "vk_video"
       payload.url = `${vkChannelUrl.value}|${vkQuery.value}`
       payload.site = "vkvideo.ru"
+    } else if (sourceType.value === "web_video") {
+      payload.source_type = "web_video"
+      payload.url = canonicalUrl.value || newSeries.url
+      payload.site = site.value
+      payload.parser_profile_id = newSeries.parser_profile_id
     } else {
       payload.source_type = "torrent"
       let quality = ""

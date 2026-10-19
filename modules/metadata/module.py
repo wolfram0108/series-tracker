@@ -169,7 +169,7 @@ class MetadataModule(BaseModule):
     async def _real_seasons(self, series: dict) -> set[int]:
         """Реальные сезоны из нейминга (≠0). Источник — владелец данных:
         торрент → torrents.seasons, VK → scan.seasons (Р-7, чужое — query)."""
-        topic = ("scan.seasons" if series.get("source_type") == "vk_video"
+        topic = ("scan.seasons" if series.get("source_type") in ("vk_video", "web_video")
                  else "torrents.seasons")
         try:
             reply = await self.request(topic, {"series_id": series["id"]},

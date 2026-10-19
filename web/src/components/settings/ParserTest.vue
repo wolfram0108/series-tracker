@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue"
+import { ref, computed, watch } from "vue"
 import { useToast } from "primevue/usetoast"
 import Button from "primevue/button"
 import StGroup from "../StGroup.vue"
@@ -95,6 +95,35 @@ function testResultPills(res: TestResult): Pill[] {
   return pills
 }
 
+const isWebUrl = computed(() => {
+  const url = scrapeChannelUrl.value.trim().toLowerCase()
+  return (url.startsWith("http://") || url.startsWith("https://")) &&
+    !url.includes("vk.com") && !url.includes("vkvideo.ru")
+})
+
+const isDbId = computed(() => {
+  return /^ID\d+$/i.test(scrapeChannelUrl.value.trim())
+})
+
+const scrapeIcon = computed(() => {
+  if (isDbId.value) return "pi pi-database"
+  if (isWebUrl.value) return "pi pi-globe"
+  return "pi pi-youtube"
+})
+
+const fetchButtonLabel = computed(() => {
+  if (isDbId.value) return "Загрузить из БД"
+  if (isWebUrl.value) return "Получить с сайта"
+  return "Получить с VK"
+})
+
+const fetchButtonIcon = computed(() => {
+  if (isScraping.value) return "pi-spin pi-spinner"
+  if (isDbId.value) return "pi-database"
+  if (isWebUrl.value) return "pi-globe"
+  return "pi-cloud-download"
+})
+
 async function scrapeTestTitles(): Promise<void> {
   const input = scrapeChannelUrl.value.trim().toUpperCase()
   const idMatch = input.match(/^ID(\d+)$/)
@@ -120,10 +149,16 @@ async function scrapeTestTitles(): Promise<void> {
     }
     return
   }
-  // Скрейп названий с VK-канала.
+  // Скрейп названий с VK-канала или веб-сайта видеопровайдера.
   if (!scrapeChannelUrl.value) return
   isScraping.value = true
-  toast.add({ severity: "info", summary: "Сбор названий", detail: "Запущен сбор через VK API…", life: 2500 })
+  const isWeb = isWebUrl.value
+  toast.add({
+    severity: "info",
+    summary: "Сбор названий",
+    detail: isWeb ? "Загрузка названий с сайта…" : "Запущен сбор через VK API…",
+    life: 2500,
+  })
   try {
     const data = (await request(
       api.POST("/api/parser-profiles/scrape-titles", {
@@ -150,13 +185,12 @@ async function runTest(): Promise<void> {
   isTesting.value = true
   testResults.value = []
   try {
-    const videos =
-      scrapedItems.value.length > 0
-        ? scrapedItems.value
-        : testTitles.value
-            .split("\n")
-            .filter((t) => t.trim() !== "")
-            .map((title) => ({ title }))
+    const currentLines = testTitles.value
+      .split("\n")
+      .map((t) => t.trim())
+      .filter((t) => t !== "")
+    const itemsMap = new Map(scrapedItems.value.map((it) => [String(it.title ?? "").trim(), it]))
+    const videos = currentLines.map((title) => itemsMap.get(title) || { title })
     const data = (await request(
       api.POST("/api/parser-profiles/test", {
         body: { profile_id: props.profileId, videos },
@@ -173,7 +207,7 @@ async function runTest(): Promise<void> {
 <template>
   <div class="parser-test">
     <p class="parser-hint">
-      Вставьте «сырые» названия видео в поле ниже или получите их с VK, а затем запустите тест.
+      Вставьте «сырые» названия видео в поле ниже или загрузите их с сайта/VK, а затем запустите тест.
     </p>
 
     <div class="modern-fieldset">
@@ -199,12 +233,13 @@ async function runTest(): Promise<void> {
         </div>
         <small class="fieldset-hint">
           <b>Быстрый поиск:</b> использует API поиска VK. Быстро, но может пропустить некоторые видео.<br />
-          <b>Полное сканирование:</b> загружает список всех видео с канала, затем фильтрует. Медленнее, но надёжнее.
+          <b>Полное сканирование:</b> загружает список всех видео с канала, затем фильтрует. Медленнее, но надёжнее.<br />
+          <b>Для сайтов (Ruchime и др.):</b> вставьте ссылку на страницу релиза и нажмите «Получить с сайта».
         </small>
         <div class="field-group mt-3">
           <StGroup>
-            <StIcon icon="pi pi-youtube" />
-            <StInput v-model="scrapeChannelUrl" label="Ссылка на канал VK или ID сериала" />
+            <StIcon :icon="scrapeIcon" />
+            <StInput v-model="scrapeChannelUrl" label="Ссылка на сайт/VK или ID" />
             <StIcon icon="pi pi-search" />
             <StInput v-model="scrapeQuery" label="Запросы через /" />
             <div class="constructor-item item-button-group">
@@ -213,8 +248,8 @@ async function runTest(): Promise<void> {
                 :disabled="!scrapeChannelUrl || isScraping"
                 @click="scrapeTestTitles"
               >
-                <i class="pi" :class="isScraping ? 'pi-spin pi-spinner' : 'pi-cloud-download'" />
-                <span>Получить с VK</span>
+                <i class="pi" :class="fetchButtonIcon" />
+                <span>{{ fetchButtonLabel }}</span>
               </button>
             </div>
           </StGroup>
