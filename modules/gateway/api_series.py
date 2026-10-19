@@ -11,7 +11,7 @@ import json
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from core import BusRequestError
+from core import BusRequestError, is_video_source
 
 from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, OkResponse,
                       QueueTask, SeriesObject)
@@ -70,7 +70,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         for s in series:
             s["last_scan_time"] = _iso(s.get("last_scan_time"))
             _attach_tmdb(s, mappings.get(s["id"]))
-            counts = vk if s.get("source_type") in ("vk_video", "web_video") else torrent
+            counts = vk if is_video_source(s.get("source_type")) else torrent
             s["downloaded_episodes_count"] = counts.get(s["id"], 0)
         return series
 
@@ -146,7 +146,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 "series_id": series_id, "tmdb_data": tmdb_data}, timeout=10)
         new_path = data.get("save_path")
         path_changed = bool(new_path and new_path != series.get("save_path"))
-        is_vk = series.get("source_type") in ("vk_video", "web_video")
+        is_vk = is_video_source(series.get("source_type"))
         if path_changed:
             try:
                 await gw.request("library.relocate", {
@@ -202,7 +202,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             except BusRequestError:
                 return {"success": True}
             sync_topic = ("downloads.fs.sync"
-                          if series.get("source_type") in ("vk_video", "web_video")
+                          if is_video_source(series.get("source_type"))
                           else "torrents.fs.verify")
             gw.send_command(sync_topic, {"series_id": series_id})
         return {"success": True}

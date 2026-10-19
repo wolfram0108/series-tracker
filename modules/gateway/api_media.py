@@ -13,7 +13,7 @@ import os
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from core import BusRequestError
+from core import BusRequestError, is_video_source
 
 from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, OkResponse)
 
@@ -256,7 +256,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError:
             return JSONResponse({"error": "Сериал не найден"},
                                 status_code=404)
-        is_vk = series.get("source_type") in ("vk_video", "web_video")
+        is_vk = is_video_source(series.get("source_type"))
         topic = "scan.composition" if is_vk else "torrents.composition"
         try:
             if refresh and not is_vk:
@@ -308,7 +308,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             responses=_ERR)
     async def reprocess_vk(series_id: int):
         return await _reprocess(
-            series_id, "Задача на переобработку файлов VK-сериала "
+            series_id, "Задача на переобработку файлов видео-сериала "
                        "создана.")
 
     # --- имена для теста парсера ----------------------------------------------------

@@ -109,6 +109,7 @@ onMounted(load)
         v-show="tab === 'composition'"
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
+        :source-type="String(series.source_type ?? 'vk_video')"
       />
       <StatusSlicing
         v-if="isVk"

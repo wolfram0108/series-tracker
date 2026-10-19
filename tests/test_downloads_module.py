@@ -113,7 +113,7 @@ class FakeDownloader:
         self.concurrent = 0
         self.max_concurrent = 0
 
-    async def __call__(self, url, path, on_progress, *, threads=6):
+    async def __call__(self, url, path, on_progress, *, threads=6, **kw):
         self.threads = threads
         self.started.append(url)
         self.concurrent += 1
@@ -513,3 +513,29 @@ async def test_download_allvideo_route(tmp_path):
         assert err == ""
         mock_resolve.assert_called_once_with("https://fsst.online/embed/992227/")
         mock_ffmpeg.assert_called_once_with("https://cdn.example.com/test.mp4", "https://incvideo1.online/", out_file, on_progress)
+
+
+@pytest.mark.asyncio
+async def test_download_direct_stream_with_headers(tmp_path):
+    out_file = str(tmp_path / "direct.mp4")
+    progress = []
+
+    async def on_progress(p):
+        progress.append(p)
+
+    with patch.object(ytdlp, "_download_direct_ffmpeg") as mock_ffmpeg:
+        mock_ffmpeg.return_value = (True, "")
+        ok, err = await ytdlp.download(
+            "https://cdn.example.com/video_2160p.mp4",
+            out_file,
+            on_progress,
+            headers={"Referer": "https://fsst.online/"}
+        )
+        assert ok is True
+        assert err == ""
+        mock_ffmpeg.assert_called_once_with(
+            "https://cdn.example.com/video_2160p.mp4",
+            "https://fsst.online/",
+            out_file,
+            on_progress
+        )

@@ -382,22 +382,30 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return JSONResponse(
                 {"error": "Необходимо указать ссылку или URL канала"}, status_code=400)
 
-        # 1. Если передана ссылка на веб-провайдер видео или трекер (не VK)
+        # Reject individual VK video links with a clear explanatory error
+        if re.search(r"(?:vk\.com|vkvideo\.ru)/video-?\d+_\d+", channel_url):
+            return JSONResponse(
+                {"error": "Указана ссылка на отдельное видео. Для сбора названий укажите ссылку на канал VK (например https://vkvideo.ru/@channel_name)."},
+                status_code=400)
+
+        # 1. Web video provider branch
         is_vk = ("vk.com" in channel_url.lower()
                  or "vkvideo.ru" in channel_url.lower()
                  or channel_url.startswith("@"))
         if not is_vk and channel_url.startswith(("http://", "https://")):
             try:
                 parse_res = await gw.request("sources.parse", {"url": channel_url},
-                                             timeout=30)
+                                             timeout=180)
                 if parse_res:
+                    if parse_res.get("source_type") != "web_video" or parse_res.get("tracker"):
+                        return JSONResponse(
+                            {"error": "Указан URL торрент-трекера. Функция 'Получить с сайта' предназначена для видеохостингов и веб-релизов. Для торрентов используйте проверку по именам раздач."},
+                            status_code=400)
+
                     videos = parse_res.get("videos") or []
                     if not videos:
                         res_val = parse_res.get("resolution")
                         raw_titles = parse_res.get("titles") or []
-                        if not raw_titles and parse_res.get("releases"):
-                            raw_titles = [r["title"] for r in parse_res["releases"]
-                                          if r.get("title")]
                         videos = [{"title": t, "resolution": res_val} for t in raw_titles]
 
                     query = (data.get("query") or "").strip()
@@ -413,7 +421,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                     {"error": f"Ошибка сбора названий с сайта: {err_msg}"},
                     status_code=500)
 
-        # 2. Сканирование VK канала
+        # 2. VK channel scan
         try:
             reply = await gw.request("sources.vk.scan", {
                 "channel_url": channel_url,
@@ -421,9 +429,13 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 "search_mode": data.get("search_mode", "search")},
                 timeout=900)
         except BusRequestError as exc:
+            err_msg = str(exc).split(': ', 1)[-1]
+            if "в URL канала нет имени" in err_msg:
+                return JSONResponse(
+                    {"error": "В URL канала нет имени (@...). Укажите ссылку на канал VK Video (например https://vkvideo.ru/@channel_name)."},
+                    status_code=400)
             return JSONResponse(
-                {"error": f"Ошибка на сервере при скрапинге: "
-                          f"{str(exc).split(': ', 1)[-1]}"},
+                {"error": f"Ошибка на сервере при скрапинге: {err_msg}"},
                 status_code=500)
         return reply["videos"]
 
@@ -546,7 +558,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             with sqlite3.connect(gw.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(
-                    f"SELECT * FROM {table_name}").fetchall()  # noqa: S608 — имя проверено по списку таблиц
+                    f'SELECT * FROM "{table_name}"').fetchall()  # noqa: S608 — verified against table list
             return [dict(r) for r in rows]
 
         return await asyncio.to_thread(read_table)
@@ -570,7 +582,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         def clear() -> None:
             import sqlite3
             with sqlite3.connect(gw.db_path) as conn:
-                conn.execute(f"DELETE FROM {table_name}")  # noqa: S608 — имя проверено по списку таблиц
+                conn.execute(f'DELETE FROM "{table_name}"')  # noqa: S608 — verified against table list
                 conn.commit()
 
         await asyncio.to_thread(clear)

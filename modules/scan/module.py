@@ -54,11 +54,9 @@ import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
-from core import BaseModule, BusRequestError
+from core import BaseModule, BusRequestError, ids, is_video_source
 from core.db import Database
 from core.envelope import Envelope
-
-from core import ids
 from .planner import build_plan
 from .repository import ScanRepository
 
@@ -372,7 +370,7 @@ class ScanModule(BaseModule):
             # Прошлая ошибка сбрасывается новым сканом (Р-11).
             await self.repo.delete_error_tasks(series_id)
             await self._reprocess_names(series_id)
-            if series["source_type"] in ("vk_video", "web_video"):
+            if is_video_source(series["source_type"]):
                 # Сверка диска перед сканом (R4, ситуации VF1/VF3/VC1):
                 # пропавший скачанный .mp4 → сброс completed→pending, чтобы
                 # dispatch перекачал. Симметрично торрент-ветке, которая
@@ -434,7 +432,7 @@ class ScanModule(BaseModule):
         try:
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
-            if series["source_type"] in ("vk_video", "web_video"):
+            if is_video_source(series["source_type"]):
                 raise ScanError("подготовка состава — только для торрентов")
             await self.repo.delete_error_tasks(series_id)
             result = await self._scan_torrents(series, False, prepare=True)
@@ -468,67 +466,54 @@ class ScanModule(BaseModule):
 
     # --- VK-ветка ---------------------------------------------------------------
 
-    async def _scan_vk(self, series: dict) -> dict:
+    async def _process_video_candidates(self, series: dict, videos: list[dict],
+                                        source_type: str) -> dict:
         series_id = series["id"]
+        applied = await self.request("rules.apply", {
+            "profile_id": series["parser_profile_id"],
+            "titles": [v["title"] for v in videos],
+            "series_season": series.get("season")}, timeout=300)
+        candidates = self._vk_candidates(series_id, videos,
+                                         applied["results"])
+        try:
+            stats = await self.repo.upsert_candidates(series_id, candidates)
+        except Exception as exc:
+            if "FOREIGN KEY" in str(exc) or "not found" in str(exc).lower():
+                self.log.warning("Сериал %d удалён во время видео-сканирования: %s",
+                                 series_id, exc)
+                return {"source_type": source_type,
+                        "candidates": {"added": 0, "updated": 0, "deleted": 0},
+                        "in_plan": 0, "changed": False}
+            raise
+
+        self.log.info("Видео-скан %s %d: кандидатов %d (добавлено %d, обновлено "
+                      "%d, удалено фантомов %d)", source_type, series_id,
+                      len(candidates), stats["added"], stats["updated"],
+                      stats["deleted"])
+
+        plan_input = await self.repo.candidates(series_id)
+        plan = build_plan(plan_input, self._quality_priority(series),
+                          self._ignored_seasons(series))
+        await self.repo.set_plan_statuses(plan)
+        in_plan = sum(1 for s in plan.values() if s.startswith("in_plan"))
+        self.publish_event("scan.plan.updated", {"series_id": series_id})
+        changed = bool(stats["added"] or stats["deleted"])
+        return {"source_type": source_type, "candidates": stats,
+                "in_plan": in_plan, "changed": changed}
+
+    async def _scan_vk(self, series: dict) -> dict:
         channel_url, _, query = series["url"].partition("|")
         reply = await self.request("sources.vk.scan", {
             "channel_url": channel_url, "query": query,
             "search_mode": series.get("vk_search_mode") or "search"},
             timeout=900)
-        videos = reply["videos"]
-
-        applied = await self.request("rules.apply", {
-            "profile_id": series["parser_profile_id"],
-            "titles": [v["title"] for v in videos],
-            "series_season": series.get("season")}, timeout=300)
-        candidates = self._vk_candidates(series_id, videos,
-                                         applied["results"])
-        stats = await self.repo.upsert_candidates(series_id, candidates)
-        self.log.info("VK-скан %d: кандидатов %d (добавлено %d, обновлено "
-                      "%d, удалено фантомов %d)", series_id, len(candidates),
-                      stats["added"], stats["updated"], stats["deleted"])
-
-        plan_input = await self.repo.candidates(series_id)
-        plan = build_plan(plan_input, self._quality_priority(series),
-                          self._ignored_seasons(series))
-        await self.repo.set_plan_statuses(plan)
-        in_plan = sum(1 for s in plan.values() if s.startswith("in_plan"))
-        self.publish_event("scan.plan.updated", {"series_id": series_id})
-        # «изменения есть» = СОСТАВ кандидатов изменился: появился новый
-        # эпизод (added) или пропал (deleted). updated НЕ берём — он растёт
-        # на каждом перескане (безусловная перезапись существующих), это не
-        # «обновление». Иначе «обновлений нет».
-        changed = bool(stats["added"] or stats["deleted"])
-        return {"source_type": "vk_video", "candidates": stats,
-                "in_plan": in_plan, "changed": changed}
+        return await self._process_video_candidates(series, reply["videos"], "vk_video")
 
     async def _scan_web_video(self, series: dict) -> dict:
-        series_id = series["id"]
         reply = await self.request("sources.video.scan", {
             "url": series["url"], "series": series},
             timeout=900)
-        videos = reply["videos"]
-
-        applied = await self.request("rules.apply", {
-            "profile_id": series["parser_profile_id"],
-            "titles": [v["title"] for v in videos],
-            "series_season": series.get("season")}, timeout=300)
-        candidates = self._vk_candidates(series_id, videos,
-                                         applied["results"])
-        stats = await self.repo.upsert_candidates(series_id, candidates)
-        self.log.info("Веб-видео-скан %d: кандидатов %d (добавлено %d, обновлено "
-                      "%d, удалено фантомов %d)", series_id, len(candidates),
-                      stats["added"], stats["updated"], stats["deleted"])
-
-        plan_input = await self.repo.candidates(series_id)
-        plan = build_plan(plan_input, self._quality_priority(series),
-                          self._ignored_seasons(series))
-        await self.repo.set_plan_statuses(plan)
-        in_plan = sum(1 for s in plan.values() if s.startswith("in_plan"))
-        self.publish_event("scan.plan.updated", {"series_id": series_id})
-        changed = bool(stats["added"] or stats["deleted"])
-        return {"source_type": "web_video", "candidates": stats,
-                "in_plan": in_plan, "changed": changed}
+        return await self._process_video_candidates(series, reply["videos"], "web_video")
 
     @staticmethod
     def _quality_priority(series: dict) -> list[int]:

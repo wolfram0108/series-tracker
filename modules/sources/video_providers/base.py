@@ -1,4 +1,4 @@
-"""Базовый контракт провайдера видео-источников (веб-сайтов онлайн-просмотра)."""
+"""Base contract for web video providers."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -9,44 +9,62 @@ if TYPE_CHECKING:
 
 
 class BaseVideoProvider(ABC):
-    """Интерфейс для провайдеров веб-видео (Ruchime, Kodik, AnimeLib и др.)."""
+    """Interface for web video providers (Ruchime, etc.)."""
 
     name: str
     domains: tuple[str, ...]
 
     @abstractmethod
     def match_url(self, url: str) -> bool:
-        """Проверяет, обслуживает ли провайдер данный URL."""
+        """Check if provider handles the given URL."""
+        ...
+
+    @abstractmethod
+    def canonical_url(self, url: str) -> str:
+        """Return the canonical URL for the release."""
         ...
 
     @abstractmethod
     async def parse_release(self, url: str, http: httpx.AsyncClient) -> dict:
-        """Первичный разбор ссылки релиза:
-        Возвращает:
-        {
-            "canonical_url": str,
-            "title": {"ru": str | None, "en": str | None},
-            "titles": list[str],
-            "episodes_count": int,
-            "provider": str,
-            "source_type": "web_video",
-        }
+        """Parse release page and probe episodes for titles and resolutions.
+
+        Returns:
+            {
+                "canonical_url": str,
+                "title": {"ru": str | None, "en": str | None},
+                "titles": list[str],
+                "resolution": int | None,
+                "videos": list[dict],
+                "episodes_count": int,
+                "provider": str,
+                "source_type": "web_video",
+                "releases": list[dict],
+            }
         """
         ...
 
     @abstractmethod
     async def scan_episodes(self, url: str, http: httpx.AsyncClient,
                             series: dict) -> list[dict]:
-        """Сканирование эпизодов для формирования списка видео-фактов:
-        Возвращает:
-        [
-            {
-                "title": str,
-                "url": str,
-                "publication_date": str,  # ISO в формате UTC (Z)
-                "resolution": int | None,
-            },
-            ...
-        ]
+        """Scan episodes and return video facts for scan planner.
+
+        Returns:
+            [
+                {
+                    "title": str,
+                    "url": str,
+                    "publication_date": str,
+                    "resolution": int | None,
+                },
+                ...
+            ]
         """
         ...
+
+    async def resolve_stream(self, url: str, http: httpx.AsyncClient) -> dict | None:
+        """Optionally resolve a direct stream URL and required HTTP headers.
+
+        Returns:
+            {"stream_url": str, "headers": dict} or None if not handled.
+        """
+        return None

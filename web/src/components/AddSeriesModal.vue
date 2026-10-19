@@ -237,6 +237,7 @@ function handleUrlInput() {
   parsed.value = false
   webVideoTitles.value = []
   canonicalUrl.value = ""
+  newSeries.resolution_override = ""
   if (!newSeries.url) {
     sourceType.value = "torrent"
     return
@@ -283,9 +284,6 @@ async function parseTorrentUrl() {
       sourceType.value = "web_video"
       webVideoTitles.value = res.titles ?? []
       canonicalUrl.value = res.canonical_url || ""
-      if (res.resolution && !newSeries.resolution_override) {
-        newSeries.resolution_override = String(res.resolution)
-      }
     }
     trackerInfo.value = res.tracker_info ?? null
     newSeries.name = res.title?.ru || ""

@@ -37,7 +37,7 @@ import asyncio
 import os
 import time
 
-from core import BaseModule, BusRequestError
+from core import BaseModule, BusRequestError, is_video_source
 from core.db import Database
 from core.envelope import Envelope
 
@@ -85,7 +85,7 @@ class DownloadsModule(BaseModule):
             all_series = await self.request("catalog.series.list", {},
                                             timeout=30)
             for s in all_series:
-                if s.get("source_type") in ("vk_video", "web_video"):
+                if is_video_source(s.get("source_type")):
                     await self._contribute(s["id"])
         except BusRequestError as exc:
             self.log.warning("каталог недоступен при старте: %s", exc)
@@ -381,9 +381,25 @@ class DownloadsModule(BaseModule):
                     self._last_event = now
                     await self._broadcast_queue()
 
-            ok, error = await self._download(task["video_url"],
+            stream_url = task["video_url"]
+            stream_headers: dict | None = None
+            try:
+                reply = await self.request("sources.video.stream",
+                                           {"url": task["video_url"]},
+                                           timeout=15)
+                if reply.get("handled"):
+                    stream_url = reply["stream_url"]
+                    stream_headers = reply.get("headers")
+            except Exception as exc:
+                self.log.debug("sources.video.stream не обработан для %s: %s",
+                               task["video_url"], exc)
+
+            kw = {"threads": self._threads}
+            if stream_headers:
+                kw["headers"] = stream_headers
+            ok, error = await self._download(stream_url,
                                              task["save_path"], on_progress,
-                                             threads=self._threads)
+                                             **kw)
             if ok:
                 series = await self.request("catalog.series.get",
                                             {"series_id": series_id})

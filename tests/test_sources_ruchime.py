@@ -1,11 +1,11 @@
-"""Тесты для провайдера Ruchime и реестра VideoProviderRegistry."""
+"""Unit tests for RuchimeProvider, VideoProviderRegistry, and sources bus topics."""
 import asyncio
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
-from core import Bus, Envelope
+from core import BaseModule, Bus, Envelope
 from core.db import Database
 from modules.sources.module import SourcesModule
 from modules.sources.video_providers.base import BaseVideoProvider
@@ -32,14 +32,15 @@ SAMPLE_RELEASE_HTML = """
     const ALL_EPS = [
         {"id": 102702, "number": 2, "compilation_from": null, "compilation_to": null, "title": "Серия 2", "date": "22 Aug 2026"},
         {"id": 102703, "number": 3, "compilation_from": null, "compilation_to": null, "title": "Серия 3", "date": "23 Aug 2026"},
-        {"id": 102704, "number": 4, "compilation_from": 1, "compilation_to": 10, "title": "Серии 1-10", "date": "24 Aug 2026"}
+        {"id": 102704, "number": 4, "compilation_from": 1, "compilation_to": 10, "title": "Серии 1-10", "date": "24 Aug 2026"},
+        {"id": 102705, "number": 5, "compilation_from": null, "compilation_to": null, "title": "Серия 5", "date": "25 Aug 2026"}
     ];
     </script>
 </body>
 </html>
 """
 
-SAMPLE_EPISODE_VK_HTML = """
+SAMPLE_EPISODE_2_VK_HTML = """
 <!DOCTYPE html>
 <html>
 <body>
@@ -48,11 +49,67 @@ SAMPLE_EPISODE_VK_HTML = """
 </html>
 """
 
-SAMPLE_EPISODE_ALLVIDEO_HTML = """
+SAMPLE_VK_EMBED_1080_HTML = """
+<!DOCTYPE html>
+<html>
+<body>
+    <script>
+    var playerParams = {"params": [{"mp4_720": "https://vk.com/720.mp4", "mp4_1080": "https://vk.com/1080.mp4"}]};
+    </script>
+</body>
+</html>
+"""
+
+SAMPLE_EPISODE_3_ALLVIDEO_HTML = """
 <!DOCTYPE html>
 <html>
 <body>
     <button class="source-btn on" data-player="allvideo" onclick="switchSource('https://fsst.online/embed/992227/',this)">AllVideo</button>
+</body>
+</html>
+"""
+
+SAMPLE_ALLVIDEO_EMBED_HTML = """
+<!DOCTYPE html>
+<html>
+<head><title>Player</title></head>
+<body>
+    <script>
+    var player = new Playerjs({
+        file: "[360p]https://www.incvideo1.online/get_file/360.mp4/,[720p]https://www.incvideo1.online/get_file/720.mp4/,[1080p]https://www.incvideo1.online/get_file/1080.mp4/"
+    });
+    </script>
+</body>
+</html>
+"""
+
+SAMPLE_EPISODE_4_4K_HTML = """
+<!DOCTYPE html>
+<html>
+<body>
+    <button class="source-btn on" data-player="allvideo" onclick="switchSource('https://fsst.online/embed/992228/',this)">AllVideo</button>
+</body>
+</html>
+"""
+
+SAMPLE_ALLVIDEO_4K_EMBED_HTML = """
+<!DOCTYPE html>
+<html>
+<body>
+    <script>
+    var player = new Playerjs({
+        file: "[1080p]https://www.incvideo1.online/get_file/1080.mp4/,[4k]https://www.incvideo1.online/get_file/2160.mp4/"
+    });
+    </script>
+</body>
+</html>
+"""
+
+SAMPLE_EPISODE_5_NO_PLAYER_HTML = """
+<!DOCTYPE html>
+<html>
+<body>
+    <div>No players available yet</div>
 </body>
 </html>
 """
@@ -79,15 +136,41 @@ def test_video_provider_registry():
     assert registry.get_provider("nonexistent") is None
 
 
+def test_ruchime_date_deterministic():
+    provider = RuchimeProvider()
+    assert provider._parse_date("22 Aug 2026") == "2026-08-22T12:00:00Z"
+    assert provider._parse_date("5 сен 2024") == "2024-09-05T12:00:00Z"
+    assert provider._parse_date(None) == "1970-01-01T12:00:00Z"
+    assert provider._parse_date("invalid date string") == "1970-01-01T12:00:00Z"
+
+
 @pytest.mark.asyncio
 async def test_ruchime_parse_release():
     provider = RuchimeProvider()
-
     mock_client = AsyncMock(spec=httpx.AsyncClient)
-    mock_resp = AsyncMock(spec=httpx.Response)
-    mock_resp.status_code = 200
-    mock_resp.text = SAMPLE_RELEASE_HTML
-    mock_client.get.return_value = mock_resp
+
+    def side_effect(url, headers=None, follow_redirects=True):
+        resp = AsyncMock(spec=httpx.Response)
+        resp.status_code = 200
+        if "episode-2" in url:
+            resp.text = SAMPLE_EPISODE_2_VK_HTML
+        elif "video_ext.php" in url:
+            resp.text = SAMPLE_VK_EMBED_1080_HTML
+        elif "episode-3" in url:
+            resp.text = SAMPLE_EPISODE_3_ALLVIDEO_HTML
+        elif "992227" in url:
+            resp.text = SAMPLE_ALLVIDEO_EMBED_HTML
+        elif "episode-4" in url:
+            resp.text = SAMPLE_EPISODE_4_4K_HTML
+        elif "992228" in url:
+            resp.text = SAMPLE_ALLVIDEO_4K_EMBED_HTML
+        elif "episode-5" in url:
+            resp.text = SAMPLE_EPISODE_5_NO_PLAYER_HTML
+        else:
+            resp.text = SAMPLE_RELEASE_HTML
+        return resp
+
+    mock_client.get.side_effect = side_effect
 
     result = await provider.parse_release("https://1.ruchime.org/release/nesravnennyi-boevoi-dux/episode-2", mock_client)
 
@@ -96,25 +179,41 @@ async def test_ruchime_parse_release():
     assert result["canonical_url"] == "https://1.ruchime.org/release/nesravnennyi-boevoi-dux"
     assert result["title"]["ru"] == "Несравненный боевой дух"
     assert result["title"]["en"] == "Peerless Martial Spirit"
-    assert len(result["titles"]) == 3
+    assert len(result["titles"]) == 4
     assert result["titles"][0] == "Несравненный боевой дух - 2 серия"
-    assert result["titles"][1] == "Несравненный боевой дух - 3 серия"
-    assert result["titles"][2] == "Несравненный боевой дух - 1-10 серия"
+    assert result["resolution"] == 2160  # Highest found across episodes
+
+    # Ensure individual videos have exact probed resolutions, not overwritten
+    assert len(result["videos"]) == 4
+    assert result["videos"][0]["title"] == "Несравненный боевой дух - 2 серия"
+    assert result["videos"][0]["resolution"] == 1080
+    assert result["videos"][1]["resolution"] == 1080
+    assert result["videos"][2]["resolution"] == 2160
+    assert result["videos"][3]["resolution"] is None  # Episode 5 had no player, must remain None!
 
 
 @pytest.mark.asyncio
-async def test_ruchime_scan_episodes_cascade():
+async def test_ruchime_scan_episodes_cascade_and_filtering():
     provider = RuchimeProvider()
-
     mock_client = AsyncMock(spec=httpx.AsyncClient)
 
-    def side_effect(url, headers=None):
+    def side_effect(url, headers=None, follow_redirects=True):
         resp = AsyncMock(spec=httpx.Response)
         resp.status_code = 200
         if "episode-2" in url:
-            resp.text = SAMPLE_EPISODE_VK_HTML
+            resp.text = SAMPLE_EPISODE_2_VK_HTML
+        elif "video_ext.php" in url:
+            resp.text = SAMPLE_VK_EMBED_1080_HTML
         elif "episode-3" in url:
-            resp.text = SAMPLE_EPISODE_ALLVIDEO_HTML
+            resp.text = SAMPLE_EPISODE_3_ALLVIDEO_HTML
+        elif "992227" in url:
+            resp.text = SAMPLE_ALLVIDEO_EMBED_HTML
+        elif "episode-4" in url:
+            resp.text = SAMPLE_EPISODE_4_4K_HTML
+        elif "992228" in url:
+            resp.text = SAMPLE_ALLVIDEO_4K_EMBED_HTML
+        elif "episode-5" in url:
+            resp.text = SAMPLE_EPISODE_5_NO_PLAYER_HTML
         else:
             resp.text = SAMPLE_RELEASE_HTML
         return resp
@@ -127,23 +226,56 @@ async def test_ruchime_scan_episodes_cascade():
         {"name": "Несравненный боевой дух"}
     )
 
+    # Episode 5 had no player and should be filtered out (not dead HTML URL)
     assert len(facts) == 3
-    # Эпизод 2: найден VK
+
+    # Episode 2: VK primary
     assert facts[0]["url"] == "https://vk.com/video-170515668_456247993"
     assert facts[0]["title"] == "Несравненный боевой дух - 2 серия"
     assert facts[0]["publication_date"] == "2026-08-22T12:00:00Z"
     assert facts[0]["resolution"] == 1080
 
-    # Эпизод 3: VK нет, фолбэк на AllVideo
+    # Episode 3: AllVideo secondary
     assert facts[1]["url"] == "https://fsst.online/embed/992227/"
     assert facts[1]["title"] == "Несравненный боевой дух - 3 серия"
     assert facts[1]["publication_date"] == "2026-08-23T12:00:00Z"
+    assert facts[1]["resolution"] == 1080
 
-    # Эпизод 4 (компиляция)
+    # Episode 4: AllVideo 4K
+    assert facts[2]["url"] == "https://fsst.online/embed/992228/"
     assert facts[2]["title"] == "Несравненный боевой дух - 1-10 серия"
+    assert facts[2]["publication_date"] == "2026-08-24T12:00:00Z"
+    assert facts[2]["resolution"] == 2160
 
 
-from core import BaseModule, Bus, Envelope
+@pytest.mark.asyncio
+async def test_ruchime_resolve_stream():
+    provider = RuchimeProvider()
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+
+    # 1. 1080p AllVideo embed
+    resp_1080 = AsyncMock(spec=httpx.Response)
+    resp_1080.status_code = 200
+    resp_1080.text = SAMPLE_ALLVIDEO_EMBED_HTML
+    mock_client.get.return_value = resp_1080
+
+    stream = await provider.resolve_stream("https://fsst.online/embed/992227/", mock_client)
+    assert stream is not None
+    assert stream["stream_url"] == "https://www.incvideo1.online/get_file/1080.mp4/"
+    assert stream["headers"]["Referer"] == "https://fsst.online/"
+
+    # 2. 4K AllVideo embed
+    resp_4k = AsyncMock(spec=httpx.Response)
+    resp_4k.status_code = 200
+    resp_4k.text = SAMPLE_ALLVIDEO_4K_EMBED_HTML
+    mock_client.get.return_value = resp_4k
+
+    stream_4k = await provider.resolve_stream("https://fsst.online/embed/992228/", mock_client)
+    assert stream_4k is not None
+    assert stream_4k["stream_url"] == "https://www.incvideo1.online/get_file/2160.mp4/"
+
+    # 3. Non-AllVideo URL returns None
+    assert await provider.resolve_stream("https://vk.com/video-1_2", mock_client) is None
 
 
 class DummyClientModule(BaseModule):
@@ -172,7 +304,6 @@ async def test_sources_module_bus_parse_and_scan():
     await client.start()
 
     try:
-        # Мокаем http-клиент в провайдере
         with patch.object(sources._http, "get") as mock_get:
             resp = AsyncMock(spec=httpx.Response)
             resp.status_code = 200
@@ -186,7 +317,7 @@ async def test_sources_module_bus_parse_and_scan():
             assert parsed["source_type"] == "web_video"
             assert parsed["service"] == "ruchime"
             assert parsed["title"]["ru"] == "Несравненный боевой дух"
-            assert len(parsed["titles"]) == 3
+            assert len(parsed["titles"]) == 4
 
         with patch.object(RuchimeProvider, "scan_episodes") as mock_scan:
             mock_scan.return_value = [
@@ -201,12 +332,26 @@ async def test_sources_module_bus_parse_and_scan():
             assert "videos" in scan_reply
             assert len(scan_reply["videos"]) == 1
             assert scan_reply["videos"][0]["url"] == "https://vk.com/video-1_2"
+
+        with patch.object(RuchimeProvider, "resolve_stream") as mock_stream:
+            mock_stream.return_value = {
+                "stream_url": "https://cdn.example.com/stream.mp4",
+                "headers": {"Referer": "https://fsst.online/"}
+            }
+
+            # 3. sources.video.stream
+            stream_reply = await client.request("sources.video.stream", {
+                "url": "https://fsst.online/embed/992227/"
+            })
+            assert stream_reply["handled"] is True
+            assert stream_reply["stream_url"] == "https://cdn.example.com/stream.mp4"
+            assert stream_reply["headers"]["Referer"] == "https://fsst.online/"
     finally:
         await client.stop()
         await sources.stop()
 
 
-def test_allvideo_and_vk_resolution_extraction():
+def test_allvideo_resolution_extraction():
     provider = RuchimeProvider()
 
     # 1. Playerjs quality brackets [360p] ... [1080p]
@@ -228,4 +373,3 @@ def test_allvideo_and_vk_resolution_extraction():
     # 4. Fallback to title
     html_title = "<title>Watch video 1080p HD</title>"
     assert provider._extract_allvideo_resolution(html_title) == 1080
-

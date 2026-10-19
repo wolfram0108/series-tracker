@@ -35,7 +35,7 @@ from . import anilibria, delivery, parsers, vk
 from .delivery import Delivery
 from .parsers import SourceParseError
 from .repository import SourcesRepository
-from .video_providers import RuchimeProvider, VideoProviderRegistry
+from .video_providers import VideoProviderRegistry, get_default_registry
 
 REQUEST_MIN_INTERVAL = 3.0  # секунд между запросами к одному трекеру
 
@@ -57,8 +57,7 @@ class SourcesModule(BaseModule):
         self.vk_page_interval = vk_page_interval
         self._locks: dict[str, asyncio.Lock] = {}
         self._last_request: dict[str, float] = {}
-        self.video_registry = VideoProviderRegistry()
-        self.video_registry.register(RuchimeProvider())
+        self.video_registry = get_default_registry()
         super().__init__(bus)
         # Late binding on purpose: tests replace the transport, not the bus.
         self._delivery = Delivery(
@@ -77,6 +76,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.tracker.set_mirrors", self.on_set_mirrors)
         self.handle("sources.vk.scan", self.on_vk_scan)
         self.handle("sources.video.scan", self.on_video_scan)
+        self.handle("sources.video.stream", self.on_video_stream)
 
     async def on_start(self) -> None:
         self._http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
@@ -325,6 +325,17 @@ class SourcesModule(BaseModule):
             facts = await provider.scan_episodes(url, self._http, series)
         self.log.info("Видео-скан %s (%s): серий %d", service, url, len(facts))
         return {"videos": facts}
+
+    async def on_video_stream(self, env: Envelope) -> dict:
+        url = env.payload["url"]
+        stream_info = await self.video_registry.resolve_stream(url, self._http)
+        if stream_info:
+            return {
+                "handled": True,
+                "stream_url": stream_info["stream_url"],
+                "headers": stream_info.get("headers", {}),
+            }
+        return {"handled": False}
 
     # --- скачивание .torrent (Р-1) ----------------------------------------------------
 

@@ -8,7 +8,8 @@ import { useApi } from "../../composables/useApi"
 // (GET media-items). Только просмотр.
 const props = defineProps<{ seriesId: number; sourceType: string }>()
 const { request } = useApi()
-const isVk = props.sourceType === "vk_video"
+const isVideo = props.sourceType === "vk_video" || props.sourceType === "web_video"
+const isVk = isVideo
 
 interface TorrentRow {
   id: number

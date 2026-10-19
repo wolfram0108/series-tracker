@@ -13,7 +13,7 @@ import { useConfirm } from "../../composables/useConfirm"
 // нарезанные файлы + «дыры» (missing), сгруппированы по сезонам; приоритет
 // качества (DnD), игнор сезонов/элементов, глубокое усыновление, переприменить
 // правила, обновить с VK. См. порт-карту в snapshot.
-const props = defineProps<{ seriesId: number; seriesName: string }>()
+const props = defineProps<{ seriesId: number; seriesName: string; sourceType?: string }>()
 const { request } = useApi()
 const toast = useToast()
 const confirm = useConfirm()
@@ -427,7 +427,7 @@ defineExpose({ reload: () => loadComposition(false) })
         <div class="vk-comp-actions">
           <Button label="Глубокое усыновление" icon="pi pi-sparkles" size="small" severity="info" :loading="deepAdopting" :disabled="loading" @click="deepAdoption" />
           <Button label="Переприменить правила" icon="pi pi-pencil" size="small" severity="warn" :loading="reprocessing" :disabled="loading || !renameableCount" @click="reprocessVk" />
-          <Button label="Обновить с VK" icon="pi pi-refresh" size="small" :loading="loading && manualRefresh" :disabled="loading" @click="manualRefreshClick" />
+          <Button :label="props.sourceType === 'web_video' ? 'Обновить с сайта' : 'Обновить с VK'" icon="pi pi-refresh" size="small" :loading="loading && manualRefresh" :disabled="loading" @click="manualRefreshClick" />
         </div>
       </div>
       <div class="fieldset-content">

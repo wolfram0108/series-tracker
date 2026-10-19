@@ -186,7 +186,31 @@ def download_artifacts(full_output_path: str) -> list[str]:
 
 
 def is_allvideo_url(url: str) -> bool:
-    return any(d in url for d in ("fsst.online", "incvideo1.online", "filevideo1.com"))
+    # Match embed player pages, not direct stream URLs.
+    return "/embed/" in url and any(d in url for d in ("fsst.online", "incvideo1.online"))
+
+
+def _extract_best_stream_from_playerjs(file_val: str) -> str | None:
+    streams: list[tuple[int, str]] = []
+    for chunk in file_val.split(','):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        m = re.search(r'\[(?:(\d+)p?|(4k))\]', chunk, re.IGNORECASE)
+        if m:
+            tag_num, tag_4k = m.group(1), m.group(2)
+            quality = 2160 if tag_4k else int(tag_num)
+            stream_url = re.sub(r'\[[^\]]+\]', '', chunk).strip()
+            if stream_url:
+                streams.append((quality, stream_url))
+        else:
+            cleaned = re.sub(r'\[[^\]]+\]', '', chunk).strip()
+            if cleaned:
+                streams.append((0, cleaned))
+    if streams:
+        streams.sort(key=lambda s: s[0], reverse=True)
+        return streams[0][1]
+    return file_val.split(',')[-1].split(']')[-1].strip() or None
 
 
 async def _resolve_allvideo_stream(embed_url: str) -> tuple[str, str] | None:
@@ -194,17 +218,12 @@ async def _resolve_allvideo_stream(embed_url: str) -> tuple[str, str] | None:
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True,
                                      headers={"Referer": "https://1.ruchime.org/"}) as client:
             r = await client.get(embed_url)
-            m = re.search(r'file:\s*\"([^\"]+)\"', r.text)
+            m = re.search(r'file:\s*["\']([^"\']+)["\']', r.text)
             if not m:
                 return None
-            file_val = m.group(1)
-            mp4_url = None
-            for chunk in file_val.split(','):
-                if '[1080p]' in chunk:
-                    mp4_url = chunk.replace('[1080p]', '').strip()
-                    break
+            mp4_url = _extract_best_stream_from_playerjs(m.group(1))
             if not mp4_url:
-                mp4_url = file_val.split(',')[-1].split(']')[-1].strip()
+                return None
             return mp4_url, "https://incvideo1.online/"
     except Exception:
         return None
@@ -279,13 +298,18 @@ async def _download_direct_ffmpeg(stream_url: str, referer: str,
 
 
 async def download(video_url: str, full_output_path: str,
-                   on_progress: ProgressCb, *, threads: int = 6,
-                   ) -> tuple[bool, str]:
-    """Двухфазная загрузка. (успех, текст ошибки). Существующий файл —
-    успех (идемпотентность)."""
+                   on_progress: ProgressCb, *,
+                   headers: dict | None = None,
+                   threads: int = 6) -> tuple[bool, str]:
+    """Two-phase video download. Supports direct ffmpeg copy and yt-dlp."""
     os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
     if os.path.exists(full_output_path):
         return True, "файл уже существует"
+
+    # Direct stream download if headers (e.g. Referer) are provided or URL is already an mp4 stream
+    if headers or (video_url.startswith("http") and ".mp4" in video_url and "vk.com" not in video_url and "vkvideo.ru" not in video_url):
+        referer = (headers or {}).get("Referer", "https://incvideo1.online/")
+        return await _download_direct_ffmpeg(video_url, referer, full_output_path, on_progress)
 
     if is_allvideo_url(video_url):
         resolved = await _resolve_allvideo_stream(video_url)

@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from core import BaseModule, BusRequestError, sanitize_path
+from core import BaseModule, BusRequestError, is_video_source, sanitize_path
 from core.db import Database
 from core.envelope import Envelope
 
@@ -140,7 +140,7 @@ class LibraryModule(BaseModule):
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
             old_base, new_base = series["save_path"], task["new_path"]
-            if series["source_type"] in ("vk_video", "web_video"):
+            if is_video_source(series["source_type"]):
                 await self._move_vk_files(series_id, old_base, new_base)
             else:
                 await self._move_torrents(series_id, new_base)

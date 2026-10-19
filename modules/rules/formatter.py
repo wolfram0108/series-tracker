@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 
+from core import is_video_source
 from core import season as season_rule
 from core.fsnames import sanitize_name as sanitize
 
@@ -86,7 +87,7 @@ def format_name(series: dict, metadata: dict,
                      else sanitize(resolution_str))
 
     extension = ".mkv"
-    if series.get("source_type") in ("vk_video", "web_video"):
+    if is_video_source(series.get("source_type")):
         extension = ".mp4"
     elif original_filename:
         ext = os.path.splitext(original_filename)[1]
