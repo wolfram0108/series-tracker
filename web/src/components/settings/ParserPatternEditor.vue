@@ -172,7 +172,7 @@ function ensureRangePosition(): void {
               contenteditable="true"
               class="pattern-block-input range-value"
               @blur="updateBlockValue(element, ($event.target as HTMLElement).innerText)"
-              @keydown.enter.prevent
+              @keydown.enter.prevent="($event.target as HTMLElement).blur()"
             >{{ element.value || '1, 3-10' }}</div>
           </template>
           <template v-else>
@@ -180,7 +180,7 @@ function ensureRangePosition(): void {
               :contenteditable="isBlockEditable(element)"
               class="pattern-block-input"
               @blur="isBlockEditable(element) ? updateBlockValue(element, ($event.target as HTMLElement).innerText) : null"
-              @keydown.enter.prevent
+              @keydown.enter.prevent="($event.target as HTMLElement).blur()"
             >{{ getBlockDisplayText(element) }}</div>
           </template>
           <button class="pattern-block-remove" title="Удалить блок" @click="removeBlock(index)" />
