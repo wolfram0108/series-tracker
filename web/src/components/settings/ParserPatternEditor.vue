@@ -23,6 +23,7 @@ const props = defineProps<{
 const BLOCK_PALETTE: PaletteItem[] = [
   { type: "text", label: "Текст", title: "Точный текст" },
   { type: "number", label: "Число", title: "Любое число (1, 2, 10, 155...)" },
+  { type: "range", label: "Диапазон", title: "Диапазон номеров (например, 1, 3-10 или 1-180)" },
   { type: "add", label: "+", title: "Сложение" },
   { type: "subtract", label: "-", title: "Вычитание" },
   { type: "whitespace", label: "Пробел", title: "Один или несколько пробелов" },
@@ -31,22 +32,23 @@ const BLOCK_PALETTE: PaletteItem[] = [
   { type: "end_of_line", label: "Конец", title: "Соответствует концу названия" },
 ]
 
-// «ЕСЛИ» — без математических операций; «ТО» — все блоки.
+// «ЕСЛИ» — диапазон без математических операций; «ТО» — математика без диапазона.
 const palette = computed(() =>
   props.context === "if"
     ? BLOCK_PALETTE.filter((b) => !["add", "subtract"].includes(b.type))
-    : BLOCK_PALETTE,
+    : BLOCK_PALETTE.filter((b) => b.type !== "range"),
 )
 
 function cloneBlock(original: PaletteItem): PatternBlock {
   const newBlock: PatternBlock = { id: Date.now() + Math.random(), type: original.type }
   if (original.type === "text") newBlock.value = ""
   if (original.type === "add" || original.type === "subtract") newBlock.value = "1"
+  if (original.type === "range") newBlock.value = "1, 3-10"
   return newBlock
 }
 
 function isBlockEditable(block: PatternBlock): boolean {
-  return ["text", "add", "subtract"].includes(block.type)
+  return ["text", "add", "subtract", "range"].includes(block.type)
 }
 
 function getBlockClasses(block: PatternBlock): string {
@@ -73,6 +75,8 @@ function updateBlockValue(block: PatternBlock, newText: string): void {
   if (block.type === "add" || block.type === "subtract") {
     const intValue = parseInt(processed, 10)
     block.value = isNaN(intValue) ? "0" : String(intValue)
+  } else if (block.type === "range") {
+    block.value = processed || "1, 3-10"
   } else {
     block.value = processed
   }
@@ -80,6 +84,40 @@ function updateBlockValue(block: PatternBlock, newText: string): void {
 
 function removeBlock(index: number): void {
   props.blocks.splice(index, 1)
+}
+
+// Защита от дурака: блок «диапазон» должен следовать за последним числом
+function checkMove(evt: any): boolean {
+  const draggedType = evt.draggedContext?.element?.type
+  if (draggedType === "range") {
+    const hasNumber = props.blocks.some((b) => b.type === "number")
+    if (!hasNumber) return false
+    const alreadyHasRange = props.blocks.some(
+      (b) => b.type === "range" && b !== evt.draggedContext.element,
+    )
+    if (alreadyHasRange) return false
+  }
+  return true
+}
+
+function ensureRangePosition(): void {
+  const rangeIndex = props.blocks.findIndex((b) => b.type === "range")
+  if (rangeIndex === -1) return
+  const rangeBlock = props.blocks[rangeIndex]
+
+  let lastNumIndex = -1
+  for (let i = 0; i < props.blocks.length; i++) {
+    if (props.blocks[i].type === "number") lastNumIndex = i
+  }
+
+  if (lastNumIndex === -1) {
+    props.blocks.splice(rangeIndex, 1)
+    return
+  }
+
+  props.blocks.splice(rangeIndex, 1)
+  const targetIndex = lastNumIndex > rangeIndex ? lastNumIndex : lastNumIndex + 1
+  props.blocks.splice(targetIndex, 0, rangeBlock)
 }
 </script>
 
@@ -93,6 +131,8 @@ function removeBlock(index: number): void {
       item-key="id"
       ghost-class="ghost-block"
       :animation="200"
+      :move="checkMove"
+      @change="ensureRangePosition"
     >
       <template #item="{ element, index }">
         <div :class="getBlockClasses(element)">
@@ -109,6 +149,15 @@ function removeBlock(index: number): void {
               @blur="updateBlockValue(element, ($event.target as HTMLElement).innerText)"
               @keydown.enter.prevent
             >{{ element.value }}</div>
+          </template>
+          <template v-else-if="element.type === 'range'">
+            <span class="range-prefix">диапазон:</span>
+            <div
+              contenteditable="true"
+              class="pattern-block-input range-value"
+              @blur="updateBlockValue(element, ($event.target as HTMLElement).innerText)"
+              @keydown.enter.prevent
+            >{{ element.value || '1, 3-10' }}</div>
           </template>
           <template v-else>
             <div

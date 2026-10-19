@@ -26,14 +26,62 @@ class ProfileValidationError(ValueError):
     """Профиль содержит неисправные правила (решение Б — громко)."""
 
 
+# Lookahead & lookbehind patterns to detect compilations in titles around extracted numbers
+_LOOKAHEAD_COMP = re.compile(r"^\s*(?:[-–—]|по|to)\s*(\d+)(?![pPkK\d])", re.IGNORECASE)
+_LOOKBEHIND_COMP = re.compile(r"(\d+)\s*(?:[-–—]|по|to)\s*$", re.IGNORECASE)
+
+
+def parse_range_spec(raw: str | None) -> list[tuple[int, int]]:
+    """Parse range specification string like '1-180', '1, 3-10', '5, 10-20'.
+
+    Returns a sorted list of non-overlapping intervals [(start, end), ...].
+    Raises ValueError for empty or malformed input.
+    """
+    if not raw or not raw.strip():
+        raise ValueError("диапазон не может быть пустым")
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    if not parts:
+        raise ValueError("диапазон не может быть пустым")
+
+    dash_pat = re.compile(r"^(\d+)\s*[-–—]\s*(\d+)$")
+    single_pat = re.compile(r"^(\d+)$")
+    intervals: list[tuple[int, int]] = []
+
+    for part in parts:
+        m_dash = dash_pat.match(part)
+        if m_dash:
+            a, b = int(m_dash.group(1)), int(m_dash.group(2))
+            intervals.append((min(a, b), max(a, b)))
+            continue
+        m_single = single_pat.match(part)
+        if m_single:
+            val = int(m_single.group(1))
+            intervals.append((val, val))
+            continue
+        raise ValueError(f"некорректный элемент диапазона: {part!r}")
+
+    intervals.sort()
+    merged: list[tuple[int, int]] = []
+    for start, end in intervals:
+        if not merged:
+            merged.append((start, end))
+        else:
+            prev_s, prev_e = merged[-1]
+            if start <= prev_e + 1:
+                merged[-1] = (prev_s, max(prev_e, end))
+            else:
+                merged.append((start, end))
+    return merged
+
+
 # --- блоки -> regex ------------------------------------------------------------
 
 def _blocks_to_regex(blocks: list[dict], *, capture_numbers: bool) -> str:
     parts = []
     for block in blocks:
         b_type = block.get("type")
-        if b_type in ("add", "subtract"):
-            continue  # модификаторы чисел — не часть шаблона
+        if b_type in ("add", "subtract", "range"):
+            continue  # модификаторы чисел и диапазоны — не часть шаблона
         elif b_type == "text":
             parts.append(re.escape(block.get("value", "")))
         elif b_type == "number":
@@ -64,10 +112,17 @@ def _parse_blocks(raw: str | None) -> list[dict]:
 # --- скомпилированная модель -----------------------------------------------------
 
 @dataclass(slots=True)
+class ConditionRangeCheck:
+    intervals: list[tuple[int, int]]
+    number_count: int  # 1 for single number with lookahead, >=2 for explicit pairs
+
+
+@dataclass(slots=True)
 class CompiledCondition:
     regex: re.Pattern
     negate: bool                 # not_contains
     or_after: bool               # оператор OR закрывает И-группу ПОСЛЕ этого условия
+    range_check: ConditionRangeCheck | None = None
 
 
 @dataclass(slots=True)
@@ -112,15 +167,36 @@ def _compile_rule(rule: dict) -> CompiledRule:
     conditions = []
     for cond in rule.get("conditions", []):
         try:
-            regex = _blocks_to_regex(_parse_blocks(cond["pattern"]),
-                                     capture_numbers=False)
+            blocks = _parse_blocks(cond["pattern"])
+            range_indices = [i for i, b in enumerate(blocks) if b.get("type") == "range"]
+            range_check: ConditionRangeCheck | None = None
+
+            if range_indices:
+                if len(range_indices) > 1:
+                    raise ValueError("в одном условии может быть только один блок «Диапазон»")
+                r_idx = range_indices[0]
+                if r_idx == 0:
+                    raise ValueError("блок «Диапазон» не может стоять первым — он должен следовать за числом")
+                if blocks[r_idx - 1].get("type") != "number":
+                    raise ValueError(f"блок «Диапазон» должен следовать сразу за блоком «Число», а не {blocks[r_idx - 1].get('type')!r}")
+                if any(b.get("type") == "number" for b in blocks[r_idx + 1:]):
+                    raise ValueError("блок «Диапазон» должен стоять после последнего числа в условии")
+
+                intervals = parse_range_spec(blocks[r_idx].get("value"))
+                num_count = sum(1 for b in blocks if b.get("type") == "number")
+                range_check = ConditionRangeCheck(intervals=intervals, number_count=num_count)
+                regex = _blocks_to_regex(blocks, capture_numbers=True)
+            else:
+                regex = _blocks_to_regex(blocks, capture_numbers=False)
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             # Решение Б: битое условие делает НЕИСПРАВНЫМ всё правило.
             raise ValueError(f"условие повреждено: {exc}") from exc
+
         conditions.append(CompiledCondition(
             regex=re.compile(regex, re.IGNORECASE),
             negate=cond["condition_type"] != "contains",
-            or_after=cond.get("logical_operator") == "OR"))
+            or_after=cond.get("logical_operator") == "OR",
+            range_check=range_check))
 
     actions = []
     for action in json.loads(rule.get("action_pattern") or "[]"):
@@ -163,6 +239,47 @@ def _compile_rule(rule: dict) -> CompiledRule:
 
 # --- выполнение -----------------------------------------------------------------
 
+def _match_condition(title: str, cond: CompiledCondition) -> bool:
+    if not cond.range_check:
+        return bool(cond.regex.search(title))
+
+    rc = cond.range_check
+    for m in cond.regex.finditer(title):
+        if rc.number_count >= 2 and m.lastindex and m.lastindex >= 2:
+            try:
+                a = int(m.group(1))
+                b = int(m.group(2))
+                c_start, c_end = min(a, b), max(a, b)
+            except (ValueError, TypeError):
+                continue
+        else:
+            try:
+                val = int(m.group(1))
+            except (ValueError, TypeError, IndexError):
+                continue
+            c_start, c_end = val, val
+            m_after = _LOOKAHEAD_COMP.match(title[m.end(1):])
+            if m_after:
+                try:
+                    after_val = int(m_after.group(1))
+                    c_start, c_end = min(val, after_val), max(val, after_val)
+                except (ValueError, TypeError):
+                    pass
+            else:
+                m_before = _LOOKBEHIND_COMP.search(title[:m.start(1)])
+                if m_before:
+                    try:
+                        before_val = int(m_before.group(1))
+                        c_start, c_end = min(val, before_val), max(val, before_val)
+                    except (ValueError, TypeError):
+                        pass
+
+        if any(max(c_start, r_start) <= min(c_end, r_end)
+               for r_start, r_end in rc.intervals):
+            return True
+    return False
+
+
 def _conditions_match(title: str, conditions: list[CompiledCondition]) -> bool:
     if not conditions:
         return True
@@ -170,7 +287,7 @@ def _conditions_match(title: str, conditions: list[CompiledCondition]) -> bool:
     # «хотя бы одна И-группа целиком истинна» (семантика старой системы).
     or_groups, current = [], []
     for cond in conditions:
-        hit = bool(cond.regex.search(title))
+        hit = _match_condition(title, cond)
         current.append(hit if not cond.negate else not hit)
         if cond.or_after:
             or_groups.append(all(current))

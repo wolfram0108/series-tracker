@@ -186,6 +186,12 @@
   height: auto;
 }
 .block-type-number { background-color: #cfe2ff; color: #004085; font-weight: bold; }
+.block-type-range {
+  background-color: #ede9fe;
+  color: #5b21b6;
+  font-weight: 600;
+  border: 1px solid #ddd6fe;
+}
 .block-type-whitespace { background-color: #f8f9fa; border: 1px dashed #ced4da; }
 .block-type-any_text,
 .block-type-start_of_line,
@@ -250,6 +256,12 @@
 }
 .palette-btn.block-type-text { background-color: #e9ecef; border: 1px solid #dee2e6; }
 .palette-btn.block-type-number { background-color: #cfe2ff; color: #004085; font-weight: bold; border: 1px solid #b8daff; }
+.palette-btn.block-type-range {
+  background-color: #ede9fe;
+  color: #5b21b6;
+  font-weight: 600;
+  border: 1px solid #ddd6fe;
+}
 .palette-btn.block-type-add,
 .palette-btn.block-type-subtract {
   background-color: #ffedd5;
@@ -275,6 +287,24 @@
   text-align: center;
 }
 .pattern-block .operation-value:focus {
+  background-color: #fff;
+  box-shadow: 0 0 0 2px var(--border-color-focus);
+}
+
+.pattern-block .range-prefix {
+  font-size: 0.75rem;
+  color: #6d28d9;
+  font-weight: 600;
+  padding-right: 0.25rem;
+  user-select: none;
+}
+.pattern-block .range-value {
+  padding: 2px 4px;
+  border-radius: 4px;
+  min-width: 4ch;
+  text-align: center;
+}
+.pattern-block .range-value:focus {
   background-color: #fff;
   box-shadow: 0 0 0 2px var(--border-color-focus);
 }

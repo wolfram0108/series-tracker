@@ -195,3 +195,169 @@ def test_formatter_part_suffix():
     # С частью 2 -> Show s01e08 Part 2.mp4
     assert format_name(series, {"season": 1, "episode": 8, "part": 2}) == "Show s01e08 Part 2.mp4"
 
+
+# --- тесты блока диапазона («Диапазон») ------------------------------------------
+
+def test_parse_range_spec_valid():
+    from modules.rules.engine import parse_range_spec
+    assert parse_range_spec("1-180") == [(1, 180)]
+    assert parse_range_spec("1, 3-10") == [(1, 1), (3, 10)]
+    assert parse_range_spec(" 1 - 5 , 6 - 10 ") == [(1, 10)]  # объединение смежных
+    assert parse_range_spec("10-1") == [(1, 10)]  # нормализация инвертированных
+    assert parse_range_spec("1–5, 8—12") == [(1, 5), (8, 12)]  # разные дефисы
+
+
+def test_parse_range_spec_invalid():
+    from modules.rules.engine import parse_range_spec
+    with pytest.raises(ValueError, match="не может быть пустым"):
+        parse_range_spec("")
+    with pytest.raises(ValueError, match="не может быть пустым"):
+        parse_range_spec("   ")
+    with pytest.raises(ValueError, match="некорректный элемент"):
+        parse_range_spec("abc")
+    with pytest.raises(ValueError, match="некорректный элемент"):
+        parse_range_spec("1-abc")
+
+
+def test_range_filter_single_episodes():
+    # Правило 1: исключить 1-180
+    cond_exclude = {
+        "condition_type": "contains",
+        "logical_operator": "AND",
+        "pattern": json.dumps([
+            {"type": "text", "value": "Несравненный боевой дух - "},
+            {"type": "number"},
+            {"type": "range", "value": "1-180"}
+        ], ensure_ascii=False)
+    }
+    rule_exclude = _rule(1, "исключить 1-180", [{"action_type": "exclude", "action_pattern": "[]"}],
+                         conditions=[cond_exclude])
+
+    # Правило 2: извлечь серии 181+
+    rule_extract = _rule(2, "извлечь серию", [
+        _extract("extract_single", "Несравненный боевой дух - ", "N")
+    ])
+
+    profile = compile_profile(43, [rule_exclude, rule_extract])
+    assert not profile.invalid_rules
+
+    # Серии 1..180 должны исключаться
+    assert process_title(profile, "Несравненный боевой дух - 2 серия")["excluded"] is True
+    assert process_title(profile, "Несравненный боевой дух - 180 серия")["excluded"] is True
+
+    # Серии 181..212 не должны исключаться и должны извлекаться
+    res_181 = process_title(profile, "Несравненный боевой дух - 181 серия")
+    assert res_181["excluded"] is False
+    assert res_181["extracted"] == {"episode": 181}
+
+    res_212 = process_title(profile, "Несравненный боевой дух - 212 серия")
+    assert res_212["excluded"] is False
+    assert res_212["extracted"] == {"episode": 212}
+
+
+def test_range_filter_compilations_overlap_auto_detected():
+    # Проверка ключевого требования: если компиляция задета исключением, она исключается
+    cond_exclude = {
+        "condition_type": "contains",
+        "logical_operator": "AND",
+        "pattern": json.dumps([
+            {"type": "text", "value": "Тайтл - "},
+            {"type": "number"},
+            {"type": "range", "value": "1-180"}
+        ], ensure_ascii=False)
+    }
+    profile = compile_profile(1, [
+        _rule(1, "исключить 1-180", [{"action_type": "exclude", "action_pattern": "[]"}],
+              conditions=[cond_exclude]),
+        _rule(2, "серия", [_extract("extract_single", "Тайтл - ", "N")])
+    ])
+
+    # 10-30: внутри 1-180 -> исключается
+    assert process_title(profile, "Тайтл - 10-30 серия")["excluded"] is True
+    # 170-190: пересекает 1-180 (серии 170..180 задеты) -> исключается!
+    assert process_title(profile, "Тайтл - 170-190 серия")["excluded"] is True
+    # 180-185: серия 180 задета -> исключается!
+    assert process_title(profile, "Тайтл - 180-185 серия")["excluded"] is True
+    # 181-190: строго после 180 (пересечения нет) -> НЕ исключается!
+    assert process_title(profile, "Тайтл - 181-190 серия")["excluded"] is False
+    # 200-212: строго после 180 -> НЕ исключается!
+    assert process_title(profile, "Тайтл - 200-212 серия")["excluded"] is False
+
+
+def test_range_filter_explicit_compilation_pattern():
+    # Явный шаблон компиляции из двух чисел с диапазоном
+    cond = {
+        "condition_type": "contains",
+        "logical_operator": "AND",
+        "pattern": json.dumps([
+            {"type": "number"},
+            {"type": "text", "value": "-"},
+            {"type": "number"},
+            {"type": "range", "value": "1-20"}
+        ], ensure_ascii=False)
+    }
+    profile = compile_profile(1, [
+        _rule(1, "исключить компиляции", [{"action_type": "exclude", "action_pattern": "[]"}],
+              conditions=[cond])
+    ])
+
+    # 10-30 пересекает 1-20 -> исключается
+    assert process_title(profile, "Серии 10-30")["excluded"] is True
+    # 21-40 не пересекает 1-20 -> не исключается
+    assert process_title(profile, "Серии 21-40")["excluded"] is False
+
+
+def test_range_list_intervals():
+    # Список интервалов: '1, 3-10'
+    cond = {
+        "condition_type": "contains",
+        "logical_operator": "AND",
+        "pattern": json.dumps([
+            {"type": "text", "value": "эп "},
+            {"type": "number"},
+            {"type": "range", "value": "1, 3-10"}
+        ], ensure_ascii=False)
+    }
+    profile = compile_profile(1, [
+        _rule(1, "исключить", [{"action_type": "exclude", "action_pattern": "[]"}],
+              conditions=[cond])
+    ])
+
+    assert process_title(profile, "эп 1")["excluded"] is True
+    assert process_title(profile, "эп 2")["excluded"] is False
+    assert process_title(profile, "эп 5")["excluded"] is True
+    assert process_title(profile, "эп 11")["excluded"] is False
+    # Компиляция 2-4 задевает серию 3 и 4 -> исключается
+    assert process_title(profile, "эп 2-4")["excluded"] is True
+
+
+def test_range_foolproofing_validations():
+    # 1. Диапазон стоит первым (нет предшествующего числа)
+    b_first = [{"type": "range", "value": "1-10"}]
+    p1 = compile_profile(1, [_rule(1, "r1", [{"action_type": "exclude"}],
+                                   conditions=[_cond(b_first)])])
+    assert len(p1.invalid_rules) == 1
+    assert "не может стоять первым" in p1.invalid_rules[0]["error"]
+
+    # 2. Диапазон следует за текстом, а не числом
+    b_after_text = [{"type": "number"}, {"type": "text", "value": " "}, {"type": "range", "value": "1-10"}]
+    p2 = compile_profile(1, [_rule(1, "r2", [{"action_type": "exclude"}],
+                                   conditions=[_cond(b_after_text)])])
+    assert len(p2.invalid_rules) == 1
+    assert "должен следовать сразу за блоком «Число»" in p2.invalid_rules[0]["error"]
+
+    # 3. Диапазон стоит НЕ после последнего числа (следом есть ещё число)
+    b_mid_num = [{"type": "number"}, {"type": "range", "value": "1-10"}, {"type": "number"}]
+    p3 = compile_profile(1, [_rule(1, "r3", [{"action_type": "exclude"}],
+                                   conditions=[_cond(b_mid_num)])])
+    assert len(p3.invalid_rules) == 1
+    assert "после последнего числа" in p3.invalid_rules[0]["error"]
+
+    # 4. Некорректное значение диапазона
+    b_broken = [{"type": "number"}, {"type": "range", "value": "не_числа"}]
+    p4 = compile_profile(1, [_rule(1, "r4", [{"action_type": "exclude"}],
+                                   conditions=[_cond(b_broken)])])
+    assert len(p4.invalid_rules) == 1
+    assert "некорректный элемент диапазона" in p4.invalid_rules[0]["error"]
+
+
