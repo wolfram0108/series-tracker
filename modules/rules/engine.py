@@ -143,8 +143,8 @@ def _suffix_block_index(blocks: list[dict], kinds: tuple[str, ...], label: str,
                         where: str) -> int | None:
     """Index of the attachment block (range, +/-) when it hangs on a number.
 
-    One attachment per template, standing right after the last number:
-    otherwise the number it refers to would be ambiguous.
+    One attachment per template, standing right after the only number:
+    with several numbers the block would point at an ambiguous one.
     """
     indices = [i for i, b in enumerate(blocks) if b.get("type") in kinds]
     if not indices:
@@ -161,6 +161,8 @@ def _suffix_block_index(blocks: list[dict], kinds: tuple[str, ...], label: str,
     if any(b.get("type") == "number" for b in blocks[idx + 1:]):
         raise ValueError(f"блок «{label}» должен стоять после последнего числа "
                          f"в {where}")
+    if sum(1 for b in blocks if b.get("type") == "number") != 1:
+        raise ValueError(f"в шаблоне с блоком «{label}» должно быть ровно одно число")
     return idx
 
 
@@ -169,7 +171,6 @@ def _suffix_block_index(blocks: list[dict], kinds: tuple[str, ...], label: str,
 @dataclass(slots=True)
 class ConditionRangeCheck:
     intervals: list[tuple[int, int]]
-    number_count: int  # 1 for single number with lookahead, >=2 for explicit pairs
 
 
 @dataclass(slots=True)
@@ -233,8 +234,7 @@ def _compile_rule(rule: dict) -> CompiledRule:
             r_idx = _suffix_block_index(blocks, ("range",), "Диапазон", "условии")
             if r_idx is not None:
                 intervals = parse_range_spec(blocks[r_idx].get("value"))
-                num_count = sum(1 for b in blocks if b.get("type") == "number")
-                range_check = ConditionRangeCheck(intervals=intervals, number_count=num_count)
+                range_check = ConditionRangeCheck(intervals=intervals)
                 regex = _blocks_to_regex(blocks, capture_numbers=True, allow_range=True)
             else:
                 regex = _blocks_to_regex(blocks, capture_numbers=False, allow_range=True)
@@ -314,40 +314,30 @@ def _match_condition(title: str, cond: CompiledCondition) -> bool:
 
     rc = cond.range_check
     for m in cond.regex.finditer(title):
-        if rc.number_count >= 2 and m.lastindex and m.lastindex >= 2:
-            # Symmetrical guard: if either number has a resolution suffix, skip this match
-            if _has_quality_suffix(title[m.end(1):]) or _has_quality_suffix(title[m.end(2):]):
-                continue
+        # A range filter always hangs on the only number of the template:
+        # the compilation around it is detected from the title itself.
+        if _has_quality_suffix(title[m.end(1):]):
+            continue
+        try:
+            val = int(m.group(1))
+        except (ValueError, TypeError, IndexError):
+            continue
+        c_start, c_end = val, val
+        m_after = _LOOKAHEAD_COMP.match(title[m.end(1):])
+        if m_after and not _has_quality_suffix(title[m.end(1) + m_after.end(1):]):
             try:
-                a = int(m.group(1))
-                b = int(m.group(2))
-                c_start, c_end = min(a, b), max(a, b)
+                after_val = int(m_after.group(1))
+                c_start, c_end = min(val, after_val), max(val, after_val)
             except (ValueError, TypeError):
-                continue
+                pass
         else:
-            # Single captured number: verify it is not immediately suffixed by a quality marker (e.g. 1080p)
-            if _has_quality_suffix(title[m.end(1):]):
-                continue
-            try:
-                val = int(m.group(1))
-            except (ValueError, TypeError, IndexError):
-                continue
-            c_start, c_end = val, val
-            m_after = _LOOKAHEAD_COMP.match(title[m.end(1):])
-            if m_after and not _has_quality_suffix(title[m.end(1) + m_after.end(1):]):
+            m_before = _LOOKBEHIND_COMP.search(title[:m.start(1)])
+            if m_before:
                 try:
-                    after_val = int(m_after.group(1))
-                    c_start, c_end = min(val, after_val), max(val, after_val)
+                    before_val = int(m_before.group(1))
+                    c_start, c_end = min(val, before_val), max(val, before_val)
                 except (ValueError, TypeError):
                     pass
-            else:
-                m_before = _LOOKBEHIND_COMP.search(title[:m.start(1)])
-                if m_before:
-                    try:
-                        before_val = int(m_before.group(1))
-                        c_start, c_end = min(val, before_val), max(val, before_val)
-                    except (ValueError, TypeError):
-                        pass
 
         if any(max(c_start, r_start) <= min(c_end, r_end)
                for r_start, r_end in rc.intervals):

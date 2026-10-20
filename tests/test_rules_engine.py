@@ -284,8 +284,11 @@ def test_range_filter_compilations_overlap_auto_detected():
     assert process_title(profile, "Тайтл - 200-212 серия")["excluded"] is False
 
 
-def test_range_filter_explicit_compilation_pattern():
-    # Явный шаблон компиляции из двух чисел с диапазоном
+def test_range_rejected_with_explicit_compilation_pattern():
+    # Явный шаблон компиляции из двух чисел с диапазоном недопустим: блок-приложение
+    # принадлежит единственному числу шаблона. Тот же смысл («исключить
+    # компиляции, задевающие 1-20») даёт форма с одним числом — компиляция
+    # определяется по самому названию.
     cond = {
         "condition_type": "contains",
         "logical_operator": "AND",
@@ -300,11 +303,8 @@ def test_range_filter_explicit_compilation_pattern():
         _rule(1, "исключить компиляции", [{"action_type": "exclude", "action_pattern": "[]"}],
               conditions=[cond])
     ])
-
-    # 10-30 пересекает 1-20 -> исключается
-    assert process_title(profile, "Серии 10-30")["excluded"] is True
-    # 21-40 не пересекает 1-20 -> не исключается
-    assert process_title(profile, "Серии 21-40")["excluded"] is False
+    assert len(profile.invalid_rules) == 1
+    assert "должно быть ровно одно число" in profile.invalid_rules[0]["error"]
 
 
 def test_range_list_intervals():
@@ -426,6 +426,32 @@ def test_range_rejected_in_action():
     ])
     assert len(profile.invalid_rules) == 1
     assert "недопустим в действиях «ТО»" in profile.invalid_rules[0]["error"]
+
+
+def test_attachment_rejected_with_several_numbers():
+    # Блок-приложение принадлежит единственному числу шаблона.
+    profile = compile_profile(1, [
+        _rule(1, "два числа", [], conditions=[_cond([{"type": "number"}, {"type": "number"},
+                                                     {"type": "range", "value": "1-10"}])])
+    ])
+    assert len(profile.invalid_rules) == 1
+    assert "должно быть ровно одно число" in profile.invalid_rules[0]["error"]
+
+
+def test_modifier_rejected_with_several_numbers():
+    profile = compile_profile(1, [
+        _rule(1, "сдвиг", [_extract("extract_single", "N", "N", ("add", "5"))])
+    ])
+    assert len(profile.invalid_rules) == 1
+    assert "должно быть ровно одно число" in profile.invalid_rules[0]["error"]
+
+
+def test_attachment_with_single_number_allowed():
+    profile = compile_profile(1, [
+        _rule(1, "диапазон", [], conditions=[_cond([{"type": "number"},
+                                                     {"type": "range", "value": "1-10"}])])
+    ])
+    assert not profile.invalid_rules
 
 
 def test_validate_rule_rejects_misplaced_modifier():
