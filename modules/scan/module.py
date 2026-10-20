@@ -28,6 +28,7 @@ Commands:
       (контракт старого scanner_status_update).
   series.status.contribution — свёртка scanning/error (Р-11); носитель
       ошибки — scan_tasks.status='error'.
+  series.purged {series_id, owner} — отчёт: таблицы серии вычищены.
 
 События (входящие):
   torrents.queue.changed {count} — опустошение конвейера: после полного
@@ -74,6 +75,10 @@ class ScanError(RuntimeError):
     pass
 
 
+class ScanAborted(RuntimeError):
+    """Серию удалили во время скана — работа прекращается (Д2)."""
+
+
 class ScanModule(BaseModule):
     name = "scan"
 
@@ -82,6 +87,7 @@ class ScanModule(BaseModule):
         self.repo = ScanRepository(db)
         self._tick = scheduler_tick  # None — без планировщика (тесты)
         self._running: set[int] = set()
+        self._aborted: set[int] = set()
         self._scan_all_running = False
         self._awaiting_pipeline = False
         super().__init__(bus)
@@ -181,6 +187,8 @@ class ScanModule(BaseModule):
                     await self._scan_web_video(series)
                 else:
                     await self._scan_vk(series)
+            except ScanAborted as exc:
+                self.log.info("композиция: скан прерван — %s", exc)
             except Exception as exc:
                 self.log.warning("композиция: скан источника при refresh завершился ошибкой: %s", exc)
         items = await self.repo.items_for_series(series_id)
@@ -317,8 +325,13 @@ class ScanModule(BaseModule):
             env.payload["series_id"])}
 
     async def on_series_deleted(self, env: Envelope) -> None:
-        """Каскад Р-19: владелец чистит media_items и scan_tasks."""
-        await self.repo.delete_for_series(env.payload["series_id"])
+        """Каскад Р-19: владелец чистит media_items и scan_tasks; идущий
+        скан серии прерывается (Д2 — как у загрузки, нарезки и переноса)."""
+        series_id = env.payload["series_id"]
+        self._aborted.add(series_id)
+        await self.repo.delete_for_series(series_id)
+        self.publish_event("series.purged",
+                           {"series_id": series_id, "owner": self.name})
 
     async def on_prepare(self, env: Envelope) -> dict:
         """Контракт «Получить данные» торрент-композиции: раздача попадает
@@ -414,10 +427,15 @@ class ScanModule(BaseModule):
             self.send_command("metadata.seasons.recompute",
                               {"series_id": series_id})
             return result
+        except ScanAborted as exc:
+            self.log.info("скан сериала %d прерван: %s", series_id, exc)
+            self._contribute(series_id, scanning=False, error=False)
+            return {"changed": False, "aborted": True}
         except Exception as exc:
             # Носитель ошибки: error-запись в scan_tasks, если её не
-            # оставила торрент-фаза.
-            if not await self._has_error_task(series_id):
+            # оставила торрент-фаза. Серии нет — носитель не пишем.
+            if await self._series_alive(series_id) \
+                    and not await self._has_error_task(series_id):
                 task_id = await self.repo.create_task(series_id, [])
                 await self.repo.set_error(task_id, str(exc))
             self._contribute(series_id, scanning=False, error=True)
@@ -443,8 +461,14 @@ class ScanModule(BaseModule):
             result = await self._scan_torrents(series, False, prepare=True)
             self._contribute(series_id, scanning=False, error=False)
             return result
+        except ScanAborted as exc:
+            self.log.info("подготовка сериала %d прервана: %s", series_id, exc)
+            self._contribute(series_id, scanning=False, error=False)
+            return {"source_type": "torrent", "tasks_created": 0,
+                    "changed": False, "aborted": True}
         except Exception as exc:
-            if not await self._has_error_task(series_id):
+            if await self._series_alive(series_id) \
+                    and not await self._has_error_task(series_id):
                 task_id = await self.repo.create_task(series_id, [])
                 await self.repo.set_error(task_id, str(exc))
             self._contribute(series_id, scanning=False, error=True)
@@ -455,6 +479,16 @@ class ScanModule(BaseModule):
     async def _has_error_task(self, series_id: int) -> bool:
         return any(t["series_id"] == series_id
                    for t in await self.repo.error_tasks())
+
+    async def _series_alive(self, series_id: int) -> bool:
+        """Есть ли серия в каталоге: носитель ошибки пишется только
+        существующей серии — иначе внешний ключ не даст записать."""
+        try:
+            await self.request("catalog.series.get",
+                                {"series_id": series_id}, timeout=10)
+            return True
+        except BusRequestError:
+            return False
 
     async def _reprocess_names(self, series_id: int) -> None:
         """Переобработка имён до скана — request/reply вместо
@@ -474,6 +508,8 @@ class ScanModule(BaseModule):
     async def _process_video_candidates(self, series: dict, videos: list[dict],
                                         source_type: str) -> dict:
         series_id = series["id"]
+        if series_id in self._aborted:
+            raise ScanAborted(f"сериал {series_id} удалён во время скана")
         applied = await self.request("rules.apply", {
             "profile_id": series["parser_profile_id"],
             "titles": [v["title"] for v in videos],
@@ -624,6 +660,8 @@ class ScanModule(BaseModule):
 
         parsed = await self.request("sources.parse", {"url": series["url"]},
                                     timeout=300)
+        if series_id in self._aborted:
+            raise ScanAborted(f"сериал {series_id} удалён во время скана")
         plan_items = self._replace_plan(series, parsed, active)
         if not plan_items:
             self.log.info("сериал %d: новых раздач нет", series_id)
@@ -690,6 +728,8 @@ class ScanModule(BaseModule):
         series_id = series["id"]
         try:
             for idx, item in enumerate(plan_items):
+                if series_id in self._aborted:
+                    raise ScanAborted(f"сериал {series_id} удалён во время скана")
                 if str(idx) in results:
                     continue  # сделано до падения
                 st = item["site_torrent"]
@@ -730,6 +770,8 @@ class ScanModule(BaseModule):
             await self.repo.delete_task(task_id)
             return {"source_type": "torrent", "tasks_created": created,
                     "changed": created > 0}
+        except ScanAborted:
+            raise
         except Exception as exc:
             await self.repo.set_error(task_id, str(exc))
             raise
