@@ -279,10 +279,9 @@ class RuchimeProvider(BaseVideoProvider):
 
     @staticmethod
     def _needs_lower_source(episodes: list[_Episode], adapter_name: str) -> list[_Episode]:
-        """Check lower sources only while a higher resolution is still possible."""
+        """Check lower sources while a higher resolution is still possible."""
         return [item for item in episodes
                 if adapter_name in item.refs
-                and not item.unverified
                 and item.best_resolution < RESOLUTION_CEILING]
 
     async def _apply_adapter(self, episodes: list[_Episode], adapter: PlayerAdapter,

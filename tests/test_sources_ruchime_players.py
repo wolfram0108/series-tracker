@@ -215,7 +215,7 @@ async def test_resolve_vibix_writes_absolute_manifest(monkeypatch, tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_unconfirmed_vk_does_not_switch_source():
+async def test_unconfirmed_vk_falls_back_to_allvideo():
     provider = RuchimeProvider()
     counts = {"fsst.online": 0}
     client = make_client({
@@ -228,8 +228,10 @@ async def test_unconfirmed_vk_does_not_switch_source():
     result = await provider.scan_episodes(
         "https://1.ruchime.org/release/test", client, {"name": "Тест"})
 
-    assert result["videos"] == []
-    assert counts["fsst.online"] == 0
+    assert len(result["videos"]) == 1
+    assert result["videos"][0]["url"] == ALLVIDEO_URL
+    assert result["videos"][0]["resolution"] == 1080
+    assert counts["fsst.online"] == 1
     assert result["players"]["players"]["vk"]["unverified"] == 1
 
 
