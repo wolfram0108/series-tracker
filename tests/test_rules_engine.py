@@ -361,6 +361,92 @@ def test_range_foolproofing_validations():
     assert "некорректный элемент диапазона" in p4.invalid_rules[0]["error"]
 
 
+# --- тесты блоков «+»/«−» (модификаторов числа) ---------------------------------
+
+def test_modifier_after_number_applies():
+    profile = compile_profile(1, [
+        _rule(1, "серия", [_extract("extract_single", "серия ", "N", ("subtract", "180"))])
+    ])
+    assert not profile.invalid_rules
+    assert process_title(profile, "серия 181")["extracted"] == {"episode": 1}
+    assert process_title(profile, "серия 212")["extracted"] == {"episode": 32}
+
+
+def test_modifier_add_applies():
+    profile = compile_profile(1, [
+        _rule(1, "серия", [_extract("extract_single", "N", ("add", "5"))])
+    ])
+    assert not profile.invalid_rules
+    assert process_title(profile, "7")["extracted"] == {"episode": 12}
+
+
+def test_modifier_must_follow_number():
+    profile = compile_profile(1, [
+        _rule(1, "сдвиг", [_extract("extract_single", "серия ", ("add", "5"), "N")])
+    ])
+    assert len(profile.invalid_rules) == 1
+    assert "должен следовать сразу за блоком «Число»" in profile.invalid_rules[0]["error"]
+
+
+def test_modifier_cannot_stand_first():
+    profile = compile_profile(1, [
+        _rule(1, "сдвиг", [_extract("extract_single", ("add", "5"))])
+    ])
+    assert len(profile.invalid_rules) == 1
+    assert "не может стоять первым" in profile.invalid_rules[0]["error"]
+
+
+def test_modifier_must_follow_last_number():
+    profile = compile_profile(1, [
+        _rule(1, "сдвиг", [_extract("extract_single", "N", ("add", "5"), "N")])
+    ])
+    assert len(profile.invalid_rules) == 1
+    assert "после последнего числа" in profile.invalid_rules[0]["error"]
+
+
+def test_modifier_rejected_in_condition():
+    profile = compile_profile(1, [
+        _rule(1, "условие", [], conditions=[_cond([{"type": "number"}, {"type": "add", "value": "5"}])])
+    ])
+    assert len(profile.invalid_rules) == 1
+    assert "допустим только в действиях «ТО»" in profile.invalid_rules[0]["error"]
+
+
+def test_only_one_modifier_per_action():
+    profile = compile_profile(1, [
+        _rule(1, "сдвиг", [_extract("extract_single", "N", ("add", "5"), ("add", "3"))])
+    ])
+    assert len(profile.invalid_rules) == 1
+    assert "может быть только один блок «±»" in profile.invalid_rules[0]["error"]
+
+
+def test_range_rejected_in_action():
+    profile = compile_profile(1, [
+        _rule(1, "диапазон", [_extract("extract_single", "N", ("range", "1-10"))])
+    ])
+    assert len(profile.invalid_rules) == 1
+    assert "недопустим в действиях «ТО»" in profile.invalid_rules[0]["error"]
+
+
+def test_validate_rule_rejects_misplaced_modifier():
+    with pytest.raises(ValueError, match="должен следовать сразу за блоком «Число»"):
+        validate_rule({
+            "name": "сдвиг",
+            "action_pattern": json.dumps([_extract("extract_single", "серия ", ("add", "5"), "N")],
+                                         ensure_ascii=False),
+            "conditions": [],
+        })
+
+
+def test_validate_rule_accepts_modifier_after_number():
+    validate_rule({
+        "name": "сдвиг",
+        "action_pattern": json.dumps([_extract("extract_single", "N", ("subtract", "180"))],
+                                     ensure_ascii=False),
+        "conditions": [],
+    })
+
+
 def test_range_resolution_marker_symmetrical_protection():
     # F1 fix verification: resolution markers like 1080p, 1080i, 1080р, 4к must not be confused with compilation ends
     cond_single = {

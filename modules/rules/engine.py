@@ -32,6 +32,7 @@ ASSIGN_TYPES = ("assign_voiceover", "assign_episode", "assign_season",
 ACTION_TYPES = ("exclude",) + EXTRACT_TYPES + ASSIGN_TYPES
 BLOCK_TYPES = ("text", "number", "range", "add", "subtract", "whitespace",
                "any_text", "start_of_line", "end_of_line")
+MODIFIER_TYPES = ("add", "subtract")
 
 
 class ProfileValidationError(ValueError):
@@ -138,6 +139,31 @@ def _parse_blocks(raw: str | None) -> list[dict]:
     return blocks
 
 
+def _suffix_block_index(blocks: list[dict], kinds: tuple[str, ...], label: str,
+                        where: str) -> int | None:
+    """Индекс блока-хвоста (диапазон, ±), если он пристёгнут к числу.
+
+    Хвост один на шаблон и стоит сразу за последним числом: иначе он
+    указывал бы на неоднозначное число.
+    """
+    indices = [i for i, b in enumerate(blocks) if b.get("type") in kinds]
+    if not indices:
+        return None
+    if len(indices) > 1:
+        raise ValueError(f"в одном {where} может быть только один блок «{label}»")
+    idx = indices[0]
+    if idx == 0:
+        raise ValueError(f"блок «{label}» не может стоять первым — "
+                         "он должен следовать за числом")
+    if blocks[idx - 1].get("type") != "number":
+        raise ValueError(f"блок «{label}» должен следовать сразу за блоком «Число», "
+                         f"а не {blocks[idx - 1].get('type')!r}")
+    if any(b.get("type") == "number" for b in blocks[idx + 1:]):
+        raise ValueError(f"блок «{label}» должен стоять после последнего числа "
+                         f"в {where}")
+    return idx
+
+
 # --- скомпилированная модель -----------------------------------------------------
 
 @dataclass(slots=True)
@@ -200,20 +226,12 @@ def _compile_rule(rule: dict) -> CompiledRule:
             raise ValueError(f"неизвестный тип условия: {ctype!r}")
         try:
             blocks = _parse_blocks(cond["pattern"])
-            range_indices = [i for i, b in enumerate(blocks) if b.get("type") == "range"]
+            if any(b.get("type") in MODIFIER_TYPES for b in blocks):
+                raise ValueError("блок «±» допустим только в действиях «ТО»")
             range_check: ConditionRangeCheck | None = None
 
-            if range_indices:
-                if len(range_indices) > 1:
-                    raise ValueError("в одном условии может быть только один блок «Диапазон»")
-                r_idx = range_indices[0]
-                if r_idx == 0:
-                    raise ValueError("блок «Диапазон» не может стоять первым — он должен следовать за числом")
-                if blocks[r_idx - 1].get("type") != "number":
-                    raise ValueError(f"блок «Диапазон» должен следовать сразу за блоком «Число», а не {blocks[r_idx - 1].get('type')!r}")
-                if any(b.get("type") == "number" for b in blocks[r_idx + 1:]):
-                    raise ValueError("блок «Диапазон» должен стоять после последнего числа в условии")
-
+            r_idx = _suffix_block_index(blocks, ("range",), "Диапазон", "условии")
+            if r_idx is not None:
                 intervals = parse_range_spec(blocks[r_idx].get("value"))
                 num_count = sum(1 for b in blocks if b.get("type") == "number")
                 range_check = ConditionRangeCheck(intervals=intervals, number_count=num_count)
@@ -243,6 +261,7 @@ def _compile_rule(rule: dict) -> CompiledRule:
                                           raw_value=raw_pattern))
         else:  # extract_*
             blocks = _parse_blocks(raw_pattern)
+            _suffix_block_index(blocks, MODIFIER_TYPES, "±", "действии")
             regex = _blocks_to_regex(blocks, capture_numbers=True, allow_range=False)
             modifiers: list[int | None] = []
             for i, block in enumerate(blocks):
