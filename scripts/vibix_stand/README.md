@@ -1,0 +1,93 @@
+# Стенд Vibix (1.ruchime.org)
+
+Отдельный стенд для исследования плеера Vibix и получения видео по списку серий.
+В боевую систему не входит, модули `modules/*` не импортирует и не меняет.
+
+## Что умеет
+
+- `list` — список серий со страницы релиза (`ALL_EPS`), без браузера.
+- `probe` — открывает страницу серии, выбирает Vibix, перехватывает подписанный
+  ответ API и показывает список серий, доступные качества и ссылки.
+- `download` — по списку серий получает HLS-манифесты, расшифровывает их и
+  скачивает видео через `ffmpeg`.
+
+## Как устроен протокол
+
+1. Страница серии содержит кнопку `data-player="vibix"`; SDK создаёт iframe
+   Kinescope с `data-publisher-id` и `data-id` релиза.
+2. iframe запрашивает `/api/v1/embed-serials/<id>?...&sig=...`; ответ — конверт
+   `{"p": "...", "v": 1}`.
+3. Конверт раскрывается так: строка `p` переворачивается, декодируется из
+   base64 и XOR-ится со статическим ключом из embed-бандла. Внутри — JSON с
+   деревом сезонов, серий и ссылками `[480p]{RuChiMe}https://...m3u8`.
+4. Каждый манифест — обычный HLS (`#EXTM3U`), сегменты — обычные `.ts` с
+   абсолютными подписанными ссылками. `ffmpeg` скачивает его без браузера.
+   Подписанные ссылки живут около 12 часов, поэтому стенд обновляет плейлист
+   при истечении.
+
+Ключ и формат конверта относятся к текущей версии embed-бандла. При его
+обновлении ключ может смениться — тогда `probe`/`download` сообщат об ошибке
+декодирования, и ключ нужно перепроверить.
+
+## Запуск
+
+Из корня репозитория, тем же Python, что и приложение:
+
+```bash
+# Список серий релиза
+.venv/bin/python -m scripts.vibix_stand list \
+  https://1.ruchime.org/release/praktikuia-ci-sto-tysiac-let
+
+# Проверка плейлиста Vibix для серии 387
+.venv/bin/python -m scripts.vibix_stand probe \
+  https://1.ruchime.org/release/praktikuia-ci-sto-tysiac-let/episode-387 \
+  --save-dir /tmp/vibix-probe
+
+# Одна серия, 1080p
+.venv/bin/python -m scripts.vibix_stand download \
+  https://1.ruchime.org/release/praktikuia-ci-sto-tysiac-let/episode-387 \
+  --episodes 387 --quality 1080 --out /tmp/vibix
+
+# Диапазон серий, две параллельные загрузки
+.venv/bin/python -m scripts.vibix_stand download \
+  https://1.ruchime.org/release/praktikuia-ci-sto-tysiac-let/episode-387 \
+  --episodes 1-10 --quality 720 --jobs 2 --out /tmp/vibix
+```
+
+Полезные ключи `download`:
+
+- `--skip-existing` — не перекачивать готовые файлы;
+- `--max-seconds 30` — скачать только начало (проверка стенда);
+- `--keep-manifests` — сохранить расшифрованные `.m3u8` рядом с видео;
+- `--browser chromium` — если Firefox не проходит.
+
+## Требования
+
+- `playwright` и установленный Firefox: `.venv/bin/playwright install firefox`.
+- `ffmpeg` в `PATH`.
+- Доступ к `1.ruchime.org` и `*.kinescopecdn.net`.
+
+## Проверка
+
+```bash
+.venv/bin/python -m pytest tests/test_vibix_stand.py -q
+```
+
+Полный цикл проверяется на живой серии: `probe` должен показать 387 серий и
+качества 480/720/1080, а `download --max-seconds 30` — создать mp4, у которого
+`ffprobe` видит видео 1920×1080 и звук.
+
+Полная серия 387 в 1080p проверена: 437 с, 1920×1080, H.264, AAC 44,1 кГц,
+157 654 698 байт.
+
+## Ограничения
+
+- Нужен браузер при запуске и при обновлении подписи: подпись API (`sig`,
+  `nonce`, `meta`) считает обфусцированный SDK, чистым HTTP она не
+  воспроизводится.
+- API-хост Kinescope (`river-*`) может меняться; стенд берёт его из фактического
+  запроса браузера, поэтому не зависит от конкретного имени.
+- Стенд не интегрирован в `sources`/`downloads`: это исследовательский инструмент
+  для этапа 5 миссии `ruchime-players`.
+- Ответственность за соблюдение прав на контент и условий сайта — на операторе
+  стенда.
