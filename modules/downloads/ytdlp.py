@@ -232,14 +232,20 @@ async def _resolve_allvideo_stream(embed_url: str) -> tuple[str, str] | None:
         return None
 
 
+def _headers_args(stream_url: str, referer: str) -> list[str]:
+    """A local decoded manifest rejects HTTP options like -headers."""
+    if referer and not stream_url.startswith("file:"):
+        return ["-headers", f"Referer: {referer}\r\n"]
+    return []
+
+
 async def _probe_duration_ffprobe(stream_url: str, referer: str = "") -> float:
     executable = shutil.which("ffprobe")
     if not executable:
         return 0.0
     cmd = [executable, "-v", "error"]
     cmd.extend(PROTOCOL_WHITELIST)
-    if referer:
-        cmd.extend(["-headers", f"Referer: {referer}\r\n"])
+    cmd.extend(_headers_args(stream_url, referer))
     cmd.extend(["-show_entries", "format=duration", "-of",
                 "default=noprint_wrappers=1:nokey=1", stream_url])
     try:
@@ -265,8 +271,7 @@ async def _download_direct_ffmpeg(stream_url: str, referer: str,
 
     cmd = [executable, "-y"]
     cmd.extend(PROTOCOL_WHITELIST)
-    if referer:
-        cmd.extend(["-headers", f"Referer: {referer}\r\n"])
+    cmd.extend(_headers_args(stream_url, referer))
     cmd.extend(["-i", stream_url, "-c", "copy", "-progress", "pipe:1", "-nostats", tmp_out])
 
     proc = await asyncio.create_subprocess_exec(

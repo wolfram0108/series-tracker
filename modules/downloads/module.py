@@ -46,6 +46,16 @@ from .repository import DownloadsRepository
 
 PROGRESS_DB_THROTTLE = 2.0   # секунд между записями прогресса в БД
 PROGRESS_EVENT_THROTTLE = 1.0  # секунд между событиями очереди при прогрессе
+MAX_DOWNLOAD_ATTEMPTS = 3
+RETRY_DELAY_S = 5.0
+_TRANSIENT_MARKERS = ("timed out", "timeout", "connection", "network",
+                      "temporarily", "server returned 5", "server returned 429",
+                      "server returned 403")
+
+
+def _transient_download_error(error: str) -> bool:
+    lowered = (error or "").lower()
+    return any(marker in lowered for marker in _TRANSIENT_MARKERS)
 
 
 class DownloadsModule(BaseModule):
@@ -418,9 +428,17 @@ class DownloadsModule(BaseModule):
                                   {"series_id": series_id})
                 self.log.info("загрузка завершена: %s", rel)
             else:
-                await self.repo.mark_error(task_id, error)
-                await self.repo.set_item_status(uid, "error")
-                self.log.error("загрузка %s не удалась: %s", uid, error)
+                attempt = int(task.get("attempts") or 0) + 1
+                if attempt < MAX_DOWNLOAD_ATTEMPTS and _transient_download_error(error):
+                    self.log.warning(
+                        "загрузка %s: %s — повтор %d/%d через %.0f с",
+                        uid, error, attempt, MAX_DOWNLOAD_ATTEMPTS, RETRY_DELAY_S)
+                    await asyncio.sleep(RETRY_DELAY_S)
+                    await self.repo.requeue_task(task_id)
+                else:
+                    await self.repo.mark_error(task_id, error)
+                    await self.repo.set_item_status(uid, "error")
+                    self.log.error("загрузка %s не удалась: %s", uid, error)
         except Exception as exc:  # noqa: BLE001 — ошибка не валит модуль
             self.log.exception("сбой воркера загрузки %d", task_id)
             await self.repo.mark_error(task_id, f"внутренняя ошибка: {exc}")

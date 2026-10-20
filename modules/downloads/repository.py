@@ -81,6 +81,13 @@ class DownloadsRepository:
             "UPDATE download_tasks SET status='error', error_message=?, "
             "updated_at=? WHERE id=?", (message, _now(), task_id))
 
+    async def requeue_task(self, task_id: int) -> None:
+        """Transient failure: back to pending, attempts keep growing."""
+        await self._db.execute(
+            "UPDATE download_tasks SET status='pending', progress=0, "
+            "dlspeed=0, eta=0, error_message=NULL, updated_at=? WHERE id=?",
+            (_now(), task_id))
+
     async def update_progress(self, task_id: int, data: dict) -> None:
         # фаза remux отражается статусом 'processing' (постобработка) —
         # прогресс и ETA там из метрик ffmpeg (ТЗ: постобработка обязана

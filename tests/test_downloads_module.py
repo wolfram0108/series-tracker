@@ -552,3 +552,19 @@ async def test_download_rejects_relative_path():
 
     assert ok is False
     assert "абсолютн" in err
+
+
+def test_transient_download_errors():
+    from modules.downloads.module import _transient_download_error
+
+    assert _transient_download_error("ffmpeg: Connection timed out")
+    assert _transient_download_error("Server returned 503 Service Unavailable")
+    assert _transient_download_error("Server returned 429 Too Many Requests")
+    assert not _transient_download_error("путь сохранения должен быть абсолютным")
+    assert not _transient_download_error("Option not found")
+
+
+def test_file_manifest_has_no_http_headers():
+    assert ytdlp._headers_args("file:///tmp/x.m3u8", "https://r/") == []
+    assert ytdlp._headers_args("https://cdn.test/x.mp4", "https://r/") == [
+        "-headers", "Referer: https://r/\r\n"]
