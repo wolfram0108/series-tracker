@@ -17,8 +17,25 @@ from core import season as season_rule
 from core.fsnames import sanitize_name as sanitize
 
 
+def merge_series_defaults(series: dict, metadata: dict,
+                          extracted: dict | None = None) -> dict:
+    """Карточка сериала — дефолт: правило, сработавшее на этом файле, важнее.
+
+    Тот же принцип, что у сезона (core.season): извлечённое побеждает,
+    значение карточки используется, только если правило ничего не дало.
+    """
+    extracted = extracted or {}
+    for key, override in (("quality", series.get("quality_override")),
+                          ("resolution", series.get("resolution_override"))):
+        if override and key not in extracted:
+            metadata[key] = override
+    metadata["season"] = season_rule.resolve(series.get("season"),
+                                             metadata.get("season"))
+    return metadata
+
+
 def build_metadata(series: dict, media_item: dict, extracted: dict) -> dict:
-    """Иерархия: овер-райды сериала > данные правил > факты БД."""
+    """Иерархия: правила > значения карточки > факты БД."""
     metadata = {
         "season": media_item.get("season"),
         "episode": (media_item.get("episode_start")
@@ -33,14 +50,7 @@ def build_metadata(series: dict, media_item: dict, extracted: dict) -> dict:
     for key, value in (extracted or {}).items():
         if value is not None:
             metadata[key] = value
-    if series.get("quality_override"):
-        metadata["quality"] = series["quality_override"]
-    if series.get("resolution_override"):
-        metadata["resolution"] = series["resolution_override"]
-    # односезонник: сезон сериала бьёт всё (core.season — единая точка)
-    metadata["season"] = season_rule.resolve(series.get("season"),
-                                             metadata.get("season"))
-    return metadata
+    return merge_series_defaults(series, metadata, extracted)
 
 
 def _season_number(series: dict, metadata: dict) -> int:
@@ -54,7 +64,11 @@ def _season_number(series: dict, metadata: dict) -> int:
 def format_name(series: dict, metadata: dict,
                 original_filename: str | None = None,
                 target_directory: str | None = None) -> str:
-    """Полное воспроизведение старого FilenameFormatter.format_filename."""
+    """Полное воспроизведение старого FilenameFormatter.format_filename.
+
+    metadata — сводные метаданные файла; значения карточки сериала уже
+    подставлены в них (merge_series_defaults), здесь только форматирование.
+    """
     name_en = sanitize(series.get("name_en") or "Unknown Series")
     season_part = f"s{str(_season_number(series, metadata)).zfill(2)}"
 
@@ -72,9 +86,8 @@ def format_name(series: dict, metadata: dict,
         episode_part = f"e{str(start).zfill(2)}{part_suffix}"
 
     voiceover = metadata.get("voiceover")
-    quality = series.get("quality_override") or metadata.get("quality")
-    resolution = (series.get("resolution_override")
-                  or metadata.get("resolution"))
+    quality = metadata.get("quality")
+    resolution = metadata.get("resolution")
 
     parts = [name_en, f"{season_part}{episode_part}"]
     if voiceover:

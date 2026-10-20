@@ -103,10 +103,13 @@ class RulesRepository:
              1 if data.get("continue_after_match",
                            rule["continue_after_match"]) else 0,
              rule_id))
-        await self._db.execute(
-            "DELETE FROM parser_rule_conditions WHERE rule_id=?",
-            (rule_id,))
-        await self._set_conditions(rule_id, data.get("conditions"))
+        # conditions отсутствует — условия не трогаем (как name/action_pattern);
+        # удалить их можно, прислав пустой список.
+        if data.get("conditions") is not None:
+            await self._db.execute(
+                "DELETE FROM parser_rule_conditions WHERE rule_id=?",
+                (rule_id,))
+            await self._set_conditions(rule_id, data["conditions"])
 
     async def _set_conditions(self, rule_id: int,
                               conditions: list[dict] | None) -> None:

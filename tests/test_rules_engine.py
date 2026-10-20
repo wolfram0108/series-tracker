@@ -447,3 +447,43 @@ def test_unknown_action_type_disables_rule_not_profile():
 
 
 
+
+
+# --- приоритет: правила важнее карточки сериала -----------------------------------
+
+def _series(**kw):
+    base = {"name_en": "Show", "source_type": "torrent", "season": "1"}
+    base.update(kw)
+    return base
+
+
+def _item(**kw):
+    base = {"season": None, "episode_start": 5, "episode_end": None,
+            "part": None, "resolution": "1080p", "voiceover_tag": None}
+    base.update(kw)
+    return base
+
+
+def _name(series, item, extracted):
+    from modules.rules import formatter
+    metadata = formatter.build_metadata(series, item, extracted)
+    return formatter.format_name(series, metadata, original_filename="x.mkv")
+
+
+def test_rules_beat_series_card_overrides():
+    series = _series(quality_override="BDRip", resolution_override="2160p")
+    name = _name(series, _item(), {"quality": "WEB-DL", "resolution": "1080p"})
+    assert name == "Show s01e05 WEB-DL 1080p.mkv"
+
+
+def test_series_card_is_default_when_rules_silent():
+    series = _series(quality_override="BDRip", resolution_override="2160p")
+    assert _name(series, _item(), {}) == "Show s01e05 BDRip 2160p.mkv"
+
+
+def test_database_facts_used_without_rules_and_card():
+    assert _name(_series(), _item(), {}) == "Show s01e05 1080p.mkv"
+
+
+def test_extracted_season_beats_series_season():
+    assert _name(_series(), _item(), {"season": 2}) == "Show s02e05 1080p.mkv"

@@ -429,3 +429,33 @@ async def test_parser_rule_rejects_unknown_vocabulary(system):
                                   "action_pattern": "X"}])})
     assert resp.status_code == 400
     assert "неизвестный тип действия" in resp.json()["error"]
+
+
+@pytest.mark.asyncio
+async def test_parser_rule_update_keeps_conditions_when_absent(system):
+    _, _, client = system
+    resp = await client.post("/api/parser-profiles", json={"name": "Условия"})
+    profile_id = resp.json()["id"]
+    resp = await client.post(f"/api/parser-profiles/{profile_id}/rules",
+                             json={"name": "Сезон",
+                                   "conditions": [{"condition_type": "contains",
+                                                   "pattern": '[{"type":'
+                                               '"text","value":"сезон"}]'}]})
+    rule_id = resp.json()["id"]
+
+    # обновление без conditions — условия сохраняются
+    resp = await client.put(f"/api/parser-rules/{rule_id}",
+                            json={"name": "Сезон 2"})
+    assert resp.json()["success"] is True
+    resp = await client.get(f"/api/parser-profiles/{profile_id}/rules")
+    rules = resp.json()
+    assert rules[0]["name"] == "Сезон 2"
+    assert len(rules[0]["conditions"]) == 1
+
+    # пустой список — условия удаляются
+    resp = await client.put(f"/api/parser-rules/{rule_id}",
+                            json={"conditions": []})
+    assert resp.json()["success"] is True
+    resp = await client.get(f"/api/parser-profiles/{profile_id}/rules")
+    assert resp.json()[0]["conditions"] == []
+

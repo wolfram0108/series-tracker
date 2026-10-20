@@ -98,7 +98,15 @@ class RulesModule(BaseModule):
         return {"ok": True}
 
     async def on_rules_list(self, env: Envelope) -> list[dict]:
-        return await self.repo.get_rules(env.payload["profile_id"])
+        profile_id = int(env.payload["profile_id"])
+        rules = await self.repo.get_rules(profile_id)
+        profile = await self._profile(profile_id)
+        errors = {bad["rule_id"]: bad["error"] for bad in profile.invalid_rules}
+        for rule in rules:
+            error = errors.get(rule.get("id"))
+            rule["valid"] = error is None
+            rule["error"] = error
+        return rules
 
     async def on_rule_add(self, env: Envelope) -> dict:
         profile_id = env.payload["profile_id"]
@@ -179,6 +187,7 @@ class RulesModule(BaseModule):
         # обязан попасть в extracted_metadata — иначе композиция/агрегаты
         # season, читающие persisted-запись, увидят сырое значение.
         extracted["season"] = season
+        formatter.merge_series_defaults(series, extracted, extracted)
         name = formatter.format_name(
             series, extracted, original_filename=p["file_basename"],
             target_directory=f"Season {season:02d}")
