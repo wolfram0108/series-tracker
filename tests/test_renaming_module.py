@@ -113,6 +113,13 @@ async def system(tmp_path):
                    cwd=".", check=True, capture_output=True)
     media = tmp_path / "media"
     media.mkdir()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO series (id, url, name, name_en, site, save_path, "
+            "state, source_type, auto_scan_enabled, vk_search_mode) VALUES "
+            "(2, 'u|q/2', 'Show', 'Show', 'vk', ?, 'waiting', 'vk_video', "
+            "0, 'search')", (str(media),))
+        conn.commit()
     series = {"id": 2, "name_en": "Show", "source_type": "vk_video",
               "save_path": str(media), "parser_profile_id": 1,
               "season": None}
