@@ -30,6 +30,8 @@ EXTRACT_TYPES = ("extract_single", "extract_range", "extract_season",
 ASSIGN_TYPES = ("assign_voiceover", "assign_episode", "assign_season",
                 "assign_part", "assign_quality", "assign_resolution")
 ACTION_TYPES = ("exclude",) + EXTRACT_TYPES + ASSIGN_TYPES
+BLOCK_TYPES = ("text", "number", "range", "add", "subtract", "whitespace",
+               "any_text", "start_of_line", "end_of_line")
 
 
 class ProfileValidationError(ValueError):
@@ -101,6 +103,8 @@ def _blocks_to_regex(blocks: list[dict], *, capture_numbers: bool,
     parts = []
     for block in blocks:
         b_type = block.get("type")
+        if b_type not in BLOCK_TYPES:
+            raise ValueError(f"неизвестный тип блока: {b_type!r}")
         if b_type in ("add", "subtract"):
             continue  # Number modifiers are evaluated in actions, not part of regex pattern
         elif b_type == "range":
@@ -120,7 +124,7 @@ def _blocks_to_regex(blocks: list[dict], *, capture_numbers: bool,
         elif b_type == "end_of_line":
             parts.append(r"$")
         else:
-            raise ValueError(f"неизвестный тип блока: {b_type!r}")
+            raise ValueError(f"тип блока не поддерживается: {b_type!r}")
     regex = "".join(parts)
     if not regex:
         raise ValueError("пустой шаблон")
