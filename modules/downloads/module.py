@@ -157,6 +157,11 @@ class DownloadsModule(BaseModule):
         series_id = env.payload["series_id"]
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
+        base_path = series.get("save_path") or ""
+        if not os.path.isabs(base_path):
+            self.log.error("серия %d: путь сохранения не абсолютный (%r) — "
+                           "загрузка не запущена", series_id, base_path)
+            return
         adopted = await self._adopt_existing_files(series)
         created = 0
         for item in await self.repo.planned_pending_items(series_id):

@@ -210,6 +210,18 @@ async def test_add_series_with_torrents_and_event(system):
 
 
 @pytest.mark.asyncio
+async def test_add_series_rejects_relative_save_path(system):
+    _, _, client, _ = system
+    resp = await client.post("/api/series", json={
+        "url": "http://kinozal.tv/details.php?id=10", "name": "Кривой",
+        "name_en": "Bad", "site": "kinozal", "save_path": "Z/Donghua",
+        "source_type": "torrent"})
+
+    assert resp.status_code == 400
+    assert "абсолютн" in resp.json()["error"]
+
+
+@pytest.mark.asyncio
 async def test_delete_cascade_by_owners(db_path, tmp_path):
     """series.deleted: каждый владелец чистит свои таблицы (Р-19)."""
     bus = Bus()

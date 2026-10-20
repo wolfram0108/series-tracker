@@ -103,6 +103,9 @@ class LibraryModule(BaseModule):
     async def on_relocate(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
         new_path = sanitize_path(env.payload["new_path"])
+        if not os.path.isabs(new_path):
+            raise LibraryError(
+                "путь сохранения должен быть абсолютным (например, /nas/...)")
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
         old_path = series["save_path"]

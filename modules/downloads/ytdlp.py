@@ -307,6 +307,8 @@ async def download(video_url: str, full_output_path: str,
                    headers: dict | None = None,
                    threads: int = 6) -> tuple[bool, str]:
     """Two-phase video download. Supports direct ffmpeg copy and yt-dlp."""
+    if not os.path.isabs(full_output_path):
+        return False, "путь сохранения должен быть абсолютным"
     os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
     if os.path.exists(full_output_path):
         return True, "файл уже существует"

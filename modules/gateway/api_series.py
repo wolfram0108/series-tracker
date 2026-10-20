@@ -35,6 +35,8 @@ def _error_response(exc: BusRequestError, *, with_success: bool = True):
         code, text = 409, msg.split(": ", 1)[-1]
     elif "LibraryError" in msg:
         code, text = 400, msg.split(": ", 1)[-1]
+    elif "ValueError" in msg:
+        code, text = 400, msg.split(": ", 1)[-1]
     else:
         code, text = 500, msg
     body = {"success": False, "error": text} if with_success \
@@ -77,8 +79,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/series", response_model=CreatedSeries)
     async def add_series(request: Request):
         data = await request.json()
-        series = await gw.request("catalog.series.create", {"data": data},
-                                  timeout=15)
+        try:
+            series = await gw.request("catalog.series.create", {"data": data},
+                                      timeout=15)
+        except BusRequestError as exc:
+            return _error_response(exc)
         series_id = series["id"]
         if tmdb_data := data.get("tmdb_data"):
             await gw.request("metadata.map.set", {

@@ -106,7 +106,7 @@ const isSeasonValid = computed(() => {
   return /^s\d{2}$/.test(newSeries.season.trim())
 })
 const canAddSeries = computed(() => {
-  const base = !!newSeries.name && !!newSeries.name_en && !!newSeries.save_path
+  const base = !!newSeries.name && !!newSeries.name_en && isAbsolutePath(newSeries.save_path)
   if (sourceType.value === "vk_video") {
     const vkOk = !!vkChannelUrl.value && !!newSeries.parser_profile_id
     const searchOk = newSeries.vk_search_mode === "search" ? !!vkQuery.value : true
@@ -154,6 +154,9 @@ type VState = "valid" | "invalid" | null
 function vstate(ok: boolean): VState {
   return ok ? "valid" : "invalid"
 }
+function isAbsolutePath(value: string): boolean {
+  return value.trim().startsWith("/")
+}
 const urlState = computed<VState>(() => {
   if (!shouldShowValidation.value) return null
   if (urlError.value) return "invalid"
@@ -167,7 +170,7 @@ const vkQueryState = computed<VState>(() => {
 const profileState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!newSeries.parser_profile_id) : null))
 const nameState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!newSeries.name) : null))
 const nameEnState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!newSeries.name_en) : null))
-const savePathState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!newSeries.save_path) : null))
+const savePathState = computed<VState>(() => (shouldShowValidation.value ? vstate(isAbsolutePath(newSeries.save_path)) : null))
 const seasonState = computed<VState>(() => {
   if (!shouldShowValidation.value || isSeasonless.value || sourceType.value === "vk_video" || sourceType.value === "web_video") return null
   return vstate(isSeasonValid.value)
@@ -607,6 +610,9 @@ onBeforeUnmount(() => {
               <StIcon icon="pi pi-hashtag" />
               <StInput v-model="newSeries.season" label="Сезон (формат s01)" />
             </StGroup>
+          </div>
+          <div v-if="newSeries.save_path && !isAbsolutePath(newSeries.save_path)" class="add-error">
+            Путь должен быть абсолютным и начинаться с «/», например /nas/...
           </div>
           <!-- оверрайды качества/разрешения (ручной ввод; как в инфо-модалке) -->
           <div class="add-grid-2 mt-3">

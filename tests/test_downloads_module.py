@@ -539,3 +539,16 @@ async def test_download_direct_stream_with_headers(tmp_path):
             out_file,
             on_progress
         )
+
+
+@pytest.mark.asyncio
+async def test_download_rejects_relative_path():
+    async def on_progress(_data):
+        pass
+
+    ok, err = await ytdlp.download(
+        "https://example.test/video.mp4", "Z/Donghua/video.mp4",
+        on_progress)
+
+    assert ok is False
+    assert "абсолютн" in err

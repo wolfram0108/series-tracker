@@ -40,6 +40,7 @@ Events (исходящие):
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 
 from core import BaseModule, sanitize_name, sanitize_path
@@ -68,6 +69,9 @@ def fs_safe(fields: dict) -> dict:
     for key in _PATH_FIELDS:
         if isinstance(out.get(key), str):
             out[key] = sanitize_path(out[key])
+            if out[key] and not os.path.isabs(out[key]):
+                raise ValueError(
+                    "путь сохранения должен быть абсолютным (например, /nas/...)")
     for key in _NAME_FIELDS:
         if isinstance(out.get(key), str):
             out[key] = sanitize_name(out[key])
@@ -139,8 +143,11 @@ class CatalogModule(BaseModule):
 
     async def on_set_save_path(self, env: Envelope) -> dict:
         """save_path — наша колонка; library пишет её после перемещения."""
-        await self.repo.set_save_path(env.payload["series_id"],
-                                      sanitize_path(env.payload["save_path"]))
+        path = sanitize_path(env.payload["save_path"])
+        if not os.path.isabs(path):
+            raise ValueError(
+                "путь сохранения должен быть абсолютным (например, /nas/...)")
+        await self.repo.set_save_path(env.payload["series_id"], path)
         return {"ok": True}
 
     async def on_sse_clients(self, env: Envelope) -> None:
