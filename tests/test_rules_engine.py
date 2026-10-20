@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from modules.rules import compile_profile, process_title
+from modules.rules import compile_profile, process_title, validate_rule
 
 
 def _rule(rule_id, name, actions, conditions=(), continue_after=False):
@@ -411,6 +411,39 @@ def test_range_disallowed_in_actions_loudly():
     profile = compile_profile(1, [bad_action_rule])
     assert len(profile.invalid_rules) == 1
     assert "недопустим в действиях «ТО»" in profile.invalid_rules[0]["error"]
+
+
+# --- словарь конструктора: неизвестные значения не принимаются --------------------
+
+def test_unknown_action_type_rejected_by_validation():
+    with pytest.raises(ValueError, match="неизвестный тип действия"):
+        validate_rule({"name": "r", "action_pattern": json.dumps(
+            [{"action_type": "assign_voiceoverr", "action_pattern": "X"}])})
+
+
+def test_unknown_condition_type_rejected_by_validation():
+    with pytest.raises(ValueError, match="неизвестный тип условия"):
+        validate_rule({"name": "r",
+                       "conditions": [_cond(_blocks("S01"), ctype="Contains")]})
+
+
+def test_valid_rule_passes_validation():
+    validate_rule({
+        "name": "r",
+        "action_pattern": json.dumps([_extract("extract_single", "N")]),
+        "conditions": [_cond(_blocks("S01"))]})
+
+
+def test_unknown_action_type_disables_rule_not_profile():
+    """Опечатка в типе действия отключает правило, но не роняет профиль."""
+    profile = compile_profile(1, [
+        _rule(1, "r", [{"action_type": "assign_voiceoverr",
+                        "action_pattern": "X"}],
+              conditions=[_cond(_blocks("S01"))])])
+    assert profile.rules == []
+    assert len(profile.invalid_rules) == 1
+    assert "неизвестный тип действия" in profile.invalid_rules[0]["error"]
+    assert process_title(profile, "Some.Show.S01E02")["excluded"] is False
 
 
 

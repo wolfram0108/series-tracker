@@ -367,11 +367,15 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                 {"profile_id": profile_id}, timeout=10)
 
     @r.post("/api/parser-profiles/{profile_id}/rules",
-            response_model=OkResponse, response_model_exclude_none=True)
+            response_model=OkResponse, response_model_exclude_none=True,
+            responses=_ERR)
     async def rule_add(profile_id: int, request: Request):
         data = await request.json()
-        reply = await gw.request("rules.rules.add", {
-            "profile_id": profile_id, "data": data}, timeout=10)
+        try:
+            reply = await gw.request("rules.rules.add", {
+                "profile_id": profile_id, "data": data}, timeout=10)
+        except BusRequestError as exc:
+            return _value_error(exc, 400)
         return {"success": True, "id": reply["id"]}
 
     @r.post("/api/parser-profiles/scrape-titles",
@@ -457,11 +461,14 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             timeout=60)
 
     @r.put("/api/parser-rules/{rule_id}", response_model=OkResponse,
-           response_model_exclude_none=True)
+           response_model_exclude_none=True, responses=_ERR)
     async def rule_update(rule_id: int, request: Request):
         data = await request.json()
-        await gw.request("rules.rules.update",
-                         {"rule_id": rule_id, "data": data}, timeout=10)
+        try:
+            await gw.request("rules.rules.update",
+                             {"rule_id": rule_id, "data": data}, timeout=10)
+        except BusRequestError as exc:
+            return _value_error(exc, 400)
         return {"success": True}
 
     @r.delete("/api/parser-rules/{rule_id}", response_model=OkResponse,

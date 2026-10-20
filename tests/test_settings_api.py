@@ -1,6 +1,7 @@
 """Тесты блока «настройки и справочники» этапа 5 (Р-22): авторизации,
 parse_url, настройки и debug-группы, конструктор правил, трекеры,
 каталоги, админ-вкладка БД."""
+import json
 import sqlite3
 import subprocess
 import sys
@@ -223,12 +224,15 @@ async def test_parser_profiles_crud_flow(system):
                              json={"name": "Сезон", "action_pattern": "[]",
                                    "conditions": [{"condition_type":
                                                    "contains",
-                                                   "pattern": "сезон"}]})
+                                                   "pattern": '[{"type":'
+                                                   '"text","value":'
+                                                   '"сезон"}]'}]})
     rule_id = resp.json()["id"]
     resp = await client.get(f"/api/parser-profiles/{profile_id}/rules")
     rules = resp.json()
     assert rules[0]["name"] == "Сезон"
-    assert rules[0]["conditions"][0]["pattern"] == "сезон"
+    assert rules[0]["conditions"][0]["pattern"] == (
+        '[{"type":"text","value":"сезон"}]')
 
     resp = await client.put(f"/api/parser-rules/{rule_id}",
                             json={"name": "Сезон 2"})
@@ -380,3 +384,48 @@ async def test_scrape_titles_endpoint(system):
     assert filtered_items[0]["title"] == "Серия 3 Special"
 
 
+
+
+@pytest.mark.asyncio
+async def test_parser_rule_rejects_unknown_vocabulary(system):
+    _, _, client = system
+    resp = await client.post("/api/parser-profiles", json={"name": "Словарь"})
+    profile_id = resp.json()["id"]
+
+    # опечатка в типе действия
+    resp = await client.post(f"/api/parser-profiles/{profile_id}/rules",
+                             json={"name": "Опечатка",
+                                   "action_pattern": json.dumps(
+                                       [{"action_type": "assign_voiceoverr",
+                                         "action_pattern": "X"}])})
+    assert resp.status_code == 400
+    assert "неизвестный тип действия" in resp.json()["error"]
+
+    # опечатка в типе условия
+    resp = await client.post(f"/api/parser-profiles/{profile_id}/rules",
+                             json={"name": "Опечатка условия",
+                                   "conditions": [{"condition_type": "Contains",
+                                                   "pattern": '[{"type":'
+                                               '"text","value":"x"}]'}]})
+    assert resp.status_code == 400
+    assert "неизвестный тип условия" in resp.json()["error"]
+
+    # корректное правило принимается
+    resp = await client.post(f"/api/parser-profiles/{profile_id}/rules",
+                             json={"name": "Рабочее",
+                                   "action_pattern": json.dumps(
+                                       [{"action_type": "assign_voiceover",
+                                         "action_pattern": "LostFilm"}]),
+                                   "conditions": [{"condition_type": "contains",
+                                                   "pattern": '[{"type":'
+                                               '"text","value":"x"}]'}]})
+    assert resp.status_code == 200
+    rule_id = resp.json()["id"]
+
+    # то же самое при обновлении
+    resp = await client.put(f"/api/parser-rules/{rule_id}",
+                            json={"action_pattern": json.dumps(
+                                [{"action_type": "assign_voiceoverr",
+                                  "action_pattern": "X"}])})
+    assert resp.status_code == 400
+    assert "неизвестный тип действия" in resp.json()["error"]

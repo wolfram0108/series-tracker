@@ -21,6 +21,16 @@ EXTRACT_KEYS = {
     "extract_part": "part",
 }
 
+# Словарь конструктора: значения, которые понимает движок. Источник — сам
+# движок, а не списки панелей: панель предлагает подмножество, а клиент API
+# может прислать что угодно.
+CONDITION_TYPES = ("contains", "not_contains")
+EXTRACT_TYPES = ("extract_single", "extract_range", "extract_season",
+                 "extract_part")
+ASSIGN_TYPES = ("assign_voiceover", "assign_episode", "assign_season",
+                "assign_part", "assign_quality", "assign_resolution")
+ACTION_TYPES = ("exclude",) + EXTRACT_TYPES + ASSIGN_TYPES
+
 
 class ProfileValidationError(ValueError):
     """Профиль содержит неисправные правила (решение Б — громко)."""
@@ -181,6 +191,9 @@ def compile_profile(profile_id: int, raw_rules: list[dict]) -> CompiledProfile:
 def _compile_rule(rule: dict) -> CompiledRule:
     conditions = []
     for cond in rule.get("conditions", []):
+        ctype = cond.get("condition_type")
+        if ctype not in CONDITION_TYPES:
+            raise ValueError(f"неизвестный тип условия: {ctype!r}")
         try:
             blocks = _parse_blocks(cond["pattern"])
             range_indices = [i for i, b in enumerate(blocks) if b.get("type") == "range"]
@@ -217,13 +230,14 @@ def _compile_rule(rule: dict) -> CompiledRule:
     for action in json.loads(rule.get("action_pattern") or "[]"):
         a_type = action.get("action_type")
         raw_pattern = action.get("action_pattern", "[]")
+        if a_type not in ACTION_TYPES:
+            raise ValueError(f"неизвестный тип действия: {a_type!r}")
         if a_type == "exclude":
             actions.append(CompiledAction(action_type="exclude"))
-        elif a_type and a_type.startswith("assign_"):
+        elif a_type in ASSIGN_TYPES:
             actions.append(CompiledAction(action_type=a_type,
                                           raw_value=raw_pattern))
-        elif a_type in ("extract_single", "extract_season", "extract_range",
-                        "extract_part"):
+        else:  # extract_*
             blocks = _parse_blocks(raw_pattern)
             regex = _blocks_to_regex(blocks, capture_numbers=True, allow_range=False)
             modifiers: list[int | None] = []
@@ -243,13 +257,30 @@ def _compile_rule(rule: dict) -> CompiledRule:
             actions.append(CompiledAction(
                 action_type=a_type, modifiers=modifiers,
                 regex=re.compile(regex, re.IGNORECASE)))
-        else:
-            raise ValueError(f"неизвестный тип действия: {a_type!r}")
 
     return CompiledRule(
         rule_id=rule["id"], name=rule["name"],
         continue_after_match=bool(rule.get("continue_after_match")),
         conditions=conditions, actions=actions)
+
+
+def validate_rule(data: dict) -> None:
+    """Проверяет правило до записи: поднимает ValueError с причиной.
+
+    Компилирует правило тем же кодом, что и применение профиля, —
+    отдельного валидатора нет, чтобы проверка и исполнение не разошлись.
+    """
+    rule = {
+        "id": 0,
+        "name": data.get("name") or "Новое правило",
+        "action_pattern": data.get("action_pattern") or "[]",
+        "continue_after_match": data.get("continue_after_match") or 0,
+        "conditions": data.get("conditions") or [],
+    }
+    try:
+        _compile_rule(rule)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"шаблоны правила — некорректный JSON: {exc}") from exc
 
 
 # --- выполнение -----------------------------------------------------------------
@@ -368,6 +399,10 @@ def _run_actions(title: str, rule: CompiledRule,
                 errors.append(f"правило «{rule.name}»: нечисловое значение "
                               f"{a_type}: {action.raw_value!r}")
         else:  # extract_*: у каждого действия СВОЙ матч и СВОИ группы (фикс А)
+            if action.regex is None:
+                errors.append(f"правило «{rule.name}»: действие {a_type!r} "
+                              "без шаблона")
+                continue
             match = action.regex.search(title)
             if not match:
                 continue

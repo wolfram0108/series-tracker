@@ -16,7 +16,7 @@ from core.db import Database
 from core.envelope import Envelope
 
 from . import formatter
-from .engine import CompiledProfile, compile_profile, process_title
+from .engine import CompiledProfile, compile_profile, process_title, validate_rule
 from .repository import RulesRepository
 
 
@@ -102,12 +102,14 @@ class RulesModule(BaseModule):
 
     async def on_rule_add(self, env: Envelope) -> dict:
         profile_id = env.payload["profile_id"]
+        validate_rule(env.payload.get("data") or {})
         rule_id = await self.repo.add_rule(profile_id, env.payload["data"])
         self._cache.pop(profile_id, None)
         return {"id": rule_id}
 
     async def on_rule_update(self, env: Envelope) -> dict:
         rule_id = env.payload["rule_id"]
+        validate_rule(env.payload.get("data") or {})
         profile_id = await self.repo.profile_id_of_rule(rule_id)
         await self.repo.update_rule(rule_id, env.payload["data"])
         self._cache.pop(profile_id, None)
