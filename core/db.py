@@ -10,7 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import time
 from typing import Any, Iterable
+
+# Сколько ждём переключения журнала в WAL: PRAGMA journal_mode требует
+# эксклюзивной блокировки и не ждёт busy-timeout.
+_WAL_TIMEOUT = 5.0
+_WAL_RETRY = 0.05
 
 
 class Database:
@@ -20,10 +26,30 @@ class Database:
     def _connect(self, *, enforce_fk: bool = True) -> sqlite3.Connection:
         conn = sqlite3.connect(self._path, timeout=30)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
+        self._ensure_wal(conn)
         if enforce_fk:
             conn.execute("PRAGMA foreign_keys=ON")
         return conn
+
+    @staticmethod
+    def _ensure_wal(conn: sqlite3.Connection) -> None:
+        """Журнал WAL переключается один раз на файл.
+
+        PRAGMA journal_mode требует эксклюзивной блокировки и НЕ ждёт
+        busy-timeout: база, созданная alembic, живёт в режиме delete,
+        и параллельные подключения при старте роняют друг друга
+        «database is locked». Уже переключённая база — no-op.
+        """
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        if str(mode).lower() == "wal":
+            return
+        deadline = time.monotonic() + _WAL_TIMEOUT
+        while time.monotonic() < deadline:
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                return
+            except sqlite3.OperationalError:
+                time.sleep(_WAL_RETRY)
 
     def _fetch_all_sync(self, query: str, params: Iterable[Any]) -> list[dict]:
         with self._connect() as conn:
