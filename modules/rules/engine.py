@@ -141,10 +141,10 @@ def _parse_blocks(raw: str | None) -> list[dict]:
 
 def _suffix_block_index(blocks: list[dict], kinds: tuple[str, ...], label: str,
                         where: str) -> int | None:
-    """Индекс блока-хвоста (диапазон, ±), если он пристёгнут к числу.
+    """Index of the attachment block (range, +/-) when it hangs on a number.
 
-    Хвост один на шаблон и стоит сразу за последним числом: иначе он
-    указывал бы на неоднозначное число.
+    One attachment per template, standing right after the last number:
+    otherwise the number it refers to would be ambiguous.
     """
     indices = [i for i, b in enumerate(blocks) if b.get("type") in kinds]
     if not indices:

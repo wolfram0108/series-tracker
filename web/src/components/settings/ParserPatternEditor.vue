@@ -7,6 +7,7 @@ import {
   isAttachmentType,
   isGlued,
   normalizeAttachments,
+  removeBlockAt,
   type PatternBlock,
 } from "../../lib/patternBlocks"
 
@@ -90,7 +91,9 @@ function updateBlockValue(block: PatternBlock, newText: string): void {
 }
 
 function removeBlock(index: number): void {
-  props.blocks.splice(index, 1)
+  // Removing the number must not leave the attachment orphaned: the sortable
+  // change event does not fire for a programmatic removal.
+  removeBlockAt(props.blocks, index)
 }
 
 // Fool-proofing: a template holds one attachment, and it belongs to a number.

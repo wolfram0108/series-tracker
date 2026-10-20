@@ -5,6 +5,7 @@ import {
   isGlued,
   lastNumberIndex,
   normalizeAttachments,
+  removeBlockAt,
   type PatternBlock,
 } from "./patternBlocks"
 
@@ -52,8 +53,22 @@ describe("normalizeAttachments", () => {
   })
 })
 
-describe("glued state", () => {
-  it("marks the attachment and the number it hangs on", () => {
+describe("removeBlockAt", () => {
+  it("keeps the attachment glued when the number is removed", () => {
+    const blocks = [text("t"), num("n"), range("r")]
+    removeBlockAt(blocks, 1)
+    expect(blocks.map((b) => b.type)).toEqual(["text", "number", "range"])
+    expect(isGlued(blocks, 2)).toBe(true)
+  })
+
+  it("removes the attachment itself without adding a number", () => {
+    const blocks = [text("t"), num("n"), range("r")]
+    removeBlockAt(blocks, 2)
+    expect(blocks.map((b) => b.id)).toEqual(["t", "n"])
+  })
+})
+
+describe("glued state", () => {  it("marks the attachment and the number it hangs on", () => {
     const blocks = [text("t"), num("n"), range("r")]
     expect(isGlued(blocks, 2)).toBe(true)
     expect(carriesAttachment(blocks, 1)).toBe(true)

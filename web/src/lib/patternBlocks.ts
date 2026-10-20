@@ -65,3 +65,9 @@ export function normalizeAttachments(blocks: PatternBlock[]): void {
   }
   blocks.splice(numIndexAfter + 1, 0, attachment)
 }
+
+// Removing the number must not leave the attachment orphaned.
+export function removeBlockAt(blocks: PatternBlock[], index: number): void {
+  blocks.splice(index, 1)
+  normalizeAttachments(blocks)
+}
