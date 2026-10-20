@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest"
 import {
-  allowsAttachment,
+  allowsAttachmentFor,
+  allowsNumber,
+  canDrop,
   carriesAttachment,
   isGlued,
   lastNumberIndex,
@@ -83,11 +85,50 @@ describe("glued state", () => {  it("marks the attachment and the number it hang
   })
 })
 
-describe("allowsAttachment", () => {
-  it("permits one attachment per template", () => {
+describe("guards", () => {
+  it("withholds the number when the template already has an attachment", () => {
     const blocks = [num("n"), range("r")]
-    expect(allowsAttachment(blocks)).toBe(false)
-    expect(allowsAttachment(blocks, blocks[1])).toBe(true)
-    expect(allowsAttachment([num("n")])).toBe(true)
+    expect(allowsNumber(blocks)).toBe(false)
+    expect(allowsNumber([num("n"), num("m")])).toBe(true)
+  })
+
+  it("withholds the attachment when the template already has two numbers", () => {
+    const blocks = [num("n"), num("m")]
+    expect(allowsAttachmentFor(blocks)).toBe(false)
+    expect(allowsAttachmentFor([num("n")])).toBe(true)
+  })
+
+  it("withholds a second attachment", () => {
+    const blocks = [num("n"), range("r")]
+    expect(allowsAttachmentFor(blocks)).toBe(false)
+  })
+
+  it("drops a number into a template with an attachment", () => {
+    const target = [num("n"), range("r")]
+    expect(canDrop(target, num("x"))).toBe(false)
+  })
+
+  it("drops an attachment into a template with two numbers", () => {
+    const target = [num("n"), num("m")]
+    expect(canDrop(target, range("r"))).toBe(false)
+  })
+
+  it("allows reordering inside one template", () => {
+    const target = [num("n"), range("r")]
+    expect(canDrop(target, target[0])).toBe(true)
+    expect(canDrop(target, target[1])).toBe(true)
+  })
+
+  it("allows a fresh number into a template without attachment", () => {
+    const target = [num("n"), num("m")]
+    expect(canDrop(target, num("x"))).toBe(true)
+  })
+
+  it("keeps the range out of actions and the +/- out of conditions", () => {
+    const target = [num("n")]
+    expect(canDrop(target, range("r"), "if")).toBe(true)
+    expect(canDrop(target, range("r"), "then")).toBe(false)
+    expect(canDrop(target, add("a"), "then")).toBe(true)
+    expect(canDrop(target, add("a"), "if")).toBe(false)
   })
 })

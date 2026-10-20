@@ -2,11 +2,13 @@
 import { computed } from "vue"
 import draggable from "vuedraggable"
 import {
-  allowsAttachment,
+  attachmentBlockCount,
+  canDrop,
   carriesAttachment,
   isAttachmentType,
   isGlued,
   normalizeAttachments,
+  numberBlockCount,
   removeBlockAt,
   type PatternBlock,
 } from "../../lib/patternBlocks"
@@ -19,7 +21,7 @@ export type { PatternBlock }
 // Порт логики из static/js/components/settingsParser.js (cloneBlock,
 // isBlockEditable, getBlockDisplayText, updateBlockValue, getBlockClasses).
 
-interface PaletteItem { type: string; label: string; title: string }
+interface PaletteItem { type: string; label: string; title: string; disabled?: boolean; reason?: string }
 const props = defineProps<{
   blocks: PatternBlock[]
   context: "if" | "then"
@@ -38,11 +40,28 @@ const BLOCK_PALETTE: PaletteItem[] = [
 ]
 
 // 'if' context enables range filtering; 'then' context enables mathematical operations.
-const palette = computed(() =>
-  props.context === "if"
+const palette = computed<PaletteItem[]>(() => {
+  const items = props.context === "if"
     ? BLOCK_PALETTE.filter((b) => !["add", "subtract"].includes(b.type))
-    : BLOCK_PALETTE.filter((b) => b.type !== "range"),
-)
+    : BLOCK_PALETTE.filter((b) => b.type !== "range")
+  return items.map((item) => {
+    const reason = disabledReason(item.type)
+    return reason ? { ...item, disabled: true, reason } : item
+  })
+})
+
+// A template holds either several numbers or a single number with an attachment:
+// the attachment belongs to that one number, so the two cannot be combined.
+function disabledReason(type: string): string {
+  const hasAttachment = attachmentBlockCount(props.blocks) > 0
+  if (isAttachmentType(type)) {
+    if (hasAttachment) return "В шаблоне уже есть блок-приложение"
+    if (numberBlockCount(props.blocks) >= 2) return "В шаблоне уже два числа"
+    return ""
+  }
+  if (type === "number" && hasAttachment) return "В шаблоне уже есть блок-приложение"
+  return ""
+}
 
 function cloneBlock(original: PaletteItem): PatternBlock {
   const newBlock: PatternBlock = { id: Date.now() + Math.random(), type: original.type }
@@ -97,18 +116,14 @@ function removeBlock(index: number): void {
 }
 
 // Fool-proofing: a template holds one attachment, and it belongs to a number.
-function checkPaletteMove(evt: any): boolean {
-  const type = evt.draggedContext?.element?.type
-  if (type && isAttachmentType(type) && !allowsAttachment(props.blocks)) return false
-  return true
-}
-
+// The sortable fires the check on the dragged list, so the template that
+// receives the block is taken from the drop target, not from this editor.
 function checkMove(evt: any): boolean {
-  const dragged = evt.draggedContext?.element
-  if (dragged && isAttachmentType(dragged.type) && !allowsAttachment(props.blocks, dragged)) {
-    return false
-  }
-  return true
+  const dragged = evt.draggedContext?.element as PatternBlock | undefined
+  const target = evt.relatedContext?.list as PatternBlock[] | undefined
+  if (!dragged || !target) return true
+  const targetContext = evt.to?.getAttribute?.("data-context") ?? undefined
+  return canDrop(target, dragged, targetContext)
 }
 </script>
 
@@ -122,6 +137,7 @@ function checkMove(evt: any): boolean {
       item-key="id"
       ghost-class="ghost-block"
       :animation="200"
+      :data-context="context"
       :move="checkMove"
       @change="normalizeAttachments(blocks)"
     >
@@ -170,10 +186,14 @@ function checkMove(evt: any): boolean {
         :clone="cloneBlock"
         item-key="type"
         :sort="false"
-        :move="checkPaletteMove"
+        :filter="'.palette-btn.is-disabled'"
+        :move="checkMove"
       >
         <template #item="{ element }">
-          <div :class="['palette-btn', 'block-type-' + element.type]" :title="element.title">{{ element.label }}</div>
+          <div
+            :class="['palette-btn', 'block-type-' + element.type, { 'is-disabled': element.disabled }]"
+            :title="element.disabled ? element.reason : element.title"
+          >{{ element.label }}</div>
         </template>
       </draggable>
     </div>

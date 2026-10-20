@@ -37,8 +37,44 @@ export function carriesAttachment(blocks: PatternBlock[], index: number): boolea
   return isAttachmentType(next.type)
 }
 
-export function allowsAttachment(blocks: PatternBlock[], dragged?: PatternBlock): boolean {
-  return !blocks.some((b) => isAttachmentType(b.type) && b !== dragged)
+// A template holds either several numbers or a single number with an attachment.
+export function numberBlockCount(blocks: PatternBlock[]): number {
+  return blocks.filter((b) => b.type === "number").length
+}
+
+export function attachmentBlockCount(blocks: PatternBlock[]): number {
+  return blocks.filter((b) => isAttachmentType(b.type)).length
+}
+
+export function allowsNumber(blocks: PatternBlock[]): boolean {
+  return attachmentBlockCount(blocks) === 0
+}
+
+// The attachment belongs to the only number of the template.
+export function allowsAttachmentFor(blocks: PatternBlock[], dragged?: PatternBlock): boolean {
+  const inTemplate = dragged ? blocks.includes(dragged) : false
+  if (attachmentBlockCount(blocks) > (inTemplate ? 1 : 0)) return false
+  if (inTemplate) return true
+  return numberBlockCount(blocks) < 2
+}
+
+// The range filters a condition, the +/- shifts an extracted number.
+export function attachmentAllowedInContext(type: string, context: string): boolean {
+  if (type === "range") return context === "if"
+  return context === "then"
+}
+
+// Reordering inside one template is always allowed; a block coming from
+// elsewhere must fit the template it lands in.
+export function canDrop(blocks: PatternBlock[], dragged: PatternBlock,
+                       targetContext?: string): boolean {
+  if (blocks.includes(dragged)) return true
+  if (isAttachmentType(dragged.type)) {
+    if (targetContext && !attachmentAllowedInContext(dragged.type, targetContext)) return false
+    return allowsAttachmentFor(blocks, dragged)
+  }
+  if (dragged.type === "number") return allowsNumber(blocks)
+  return true
 }
 
 let autoIdCounter = 0
