@@ -358,7 +358,7 @@
   "summary": "Список профилей парсера",
   "panel_sites": [
    "components/AddSeriesModal.vue:471",
-   "components/settings/SettingsParser.vue:78",
+   "components/settings/SettingsParser.vue:80",
    "components/status/StatusProperties.vue:215"
   ]
  },
@@ -372,7 +372,7 @@
   "conditional": null,
   "summary": "Создание профиля парсера",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:89"
+   "components/settings/SettingsParser.vue:91"
   ]
  },
  {
@@ -411,7 +411,7 @@
   "conditional": null,
   "summary": "Удаление профиля парсера с правилами",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:141"
+   "components/settings/SettingsParser.vue:143"
   ]
  },
  {
@@ -424,7 +424,7 @@
   "conditional": null,
   "summary": "Переименование профиля парсера",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:117"
+   "components/settings/SettingsParser.vue:119"
   ]
  },
  {
@@ -437,7 +437,7 @@
   "conditional": null,
   "summary": "Правила профиля",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:172"
+   "components/settings/SettingsParser.vue:174"
   ]
  },
  {
@@ -450,7 +450,7 @@
   "conditional": null,
   "summary": "Добавление правила в профиль",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:251"
+   "components/settings/SettingsParser.vue:255"
   ]
  },
  {
@@ -463,7 +463,7 @@
   "conditional": null,
   "summary": "Перестановка правил",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:299"
+   "components/settings/SettingsParser.vue:303"
   ]
  },
  {
@@ -476,7 +476,7 @@
   "conditional": null,
   "summary": "Удаление правила",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:282"
+   "components/settings/SettingsParser.vue:286"
   ]
  },
  {
@@ -489,7 +489,7 @@
   "conditional": null,
   "summary": "Изменение правила",
   "panel_sites": [
-   "components/settings/SettingsParser.vue:264"
+   "components/settings/SettingsParser.vue:268"
   ]
  },
  {
