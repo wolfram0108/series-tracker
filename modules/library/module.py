@@ -226,3 +226,5 @@ class LibraryModule(BaseModule):
         if t and not t.done():
             t.cancel()
         await self.repo.delete_for_series(series_id)
+        self.publish_event("series.purged",
+                           {"series_id": series_id, "owner": self.name})

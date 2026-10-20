@@ -506,3 +506,6 @@ class RenamingModule(BaseModule):
     async def on_series_deleted(self, env):
         """Каскад Р-19: владелец чистит renaming_tasks."""
         await self.repo.delete_for_series(env.payload["series_id"])
+        self.publish_event("series.purged",
+                           {"series_id": env.payload["series_id"],
+                            "owner": self.name})

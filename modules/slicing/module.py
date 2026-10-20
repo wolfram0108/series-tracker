@@ -627,3 +627,5 @@ class SlicingModule(BaseModule):
                 and not self._current_ffmpeg.done()):
             self._current_ffmpeg.cancel()
         await self.repo.delete_for_series(series_id)
+        self.publish_event("series.purged",
+                           {"series_id": series_id, "owner": self.name})

@@ -890,6 +890,8 @@ class TorrentsModule(BaseModule):
         self._names_cache.pop(series_id, None)
         if dropped:
             self._broadcast_queue()
+        self.publish_event("series.purged",
+                           {"series_id": series_id, "owner": self.name})
 
     async def on_queue_get(self, env: Envelope) -> dict:
         series_id = (env.payload or {}).get("series_id")

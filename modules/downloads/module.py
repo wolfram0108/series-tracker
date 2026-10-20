@@ -270,6 +270,8 @@ class DownloadsModule(BaseModule):
                 await asyncio.to_thread(self._remove_partial, sp)
         await self.repo.delete_for_series(series_id)
         await self._broadcast_queue()
+        self.publish_event("series.purged",
+                           {"series_id": series_id, "owner": self.name})
 
     async def on_cancel(self, env: Envelope) -> dict:
         """Точечная отмена загрузки (приказ пользователя): убить активный

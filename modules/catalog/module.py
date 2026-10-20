@@ -7,6 +7,8 @@ Events (входящие):
   gateway.sse.clients {count} — счётчик SSE-подключений; при 0 все
       эфемерные viewing сбрасываются (вкладка не может держать модалку
       без живого SSE).
+  series.purged {series_id, owner} — отчёт владельца серийных таблиц:
+      его данные по удалённой серии вычищены.
 
 Commands:
   catalog.viewing.start {series_id} / catalog.viewing.stop {series_id}
@@ -22,6 +24,8 @@ Queries:
   catalog.series.delete {series_id, delete_from_qb?} → {ok}
       — удаляет строку series и публикует series.deleted; владельцы
       остальных таблиц чистят своё по подписке (Р-19, событийный каскад)
+      и отчитываются series.purged — молчащий владелец означает
+      оборванный каскад и попадает в лог
 
 Events (исходящие):
   series.status.changed {series_id, statuses, is_busy} — только при
@@ -35,6 +39,9 @@ Events (исходящие):
 """
 from __future__ import annotations
 
+import asyncio
+import time
+
 from core import BaseModule, sanitize_name, sanitize_path
 from core.db import Database
 from core.envelope import Envelope
@@ -46,6 +53,14 @@ from .repository import CatalogRepository
 # them on every write so no client can store an unusable name.
 _PATH_FIELDS = ("save_path",)
 _NAME_FIELDS = ("name_en", "quality_override", "resolution_override")
+
+# Владельцы серийных таблиц: после series.deleted каждый чистит своё и
+# отчитывается series.purged. Молчание — обрыв каскада.
+PURGE_OWNERS = ("scan", "torrents", "downloads", "slicing", "renaming",
+                 "library", "metadata")
+
+# Сколько ждём отчёты владельцев, прежде чем считать каскад оборванным.
+PURGE_REPORT_TIMEOUT = 15.0
 
 
 def fs_safe(fields: dict) -> dict:
@@ -69,11 +84,14 @@ class CatalogModule(BaseModule):
         # series_id -> {источники активной работы} (Р-17). Ошибка
         # больше не держит busy (находка 36) — только активная работа.
         self._busy: dict[int, set[str]] = {}
+        # Отчёты владельцев о чистке удалённой серии: series_id -> owners.
+        self._purged: dict[int, set[str]] = {}
         super().__init__(bus)
 
     def register(self) -> None:
         self.handle("series.status.contribution", self.on_contribution)
         self.handle("series.busy.contribution", self.on_busy_contribution)
+        self.handle("series.purged", self.on_series_purged)
         self.handle("gateway.sse.clients", self.on_sse_clients)
         self.handle("catalog.series.set_save_path", self.on_set_save_path)
         self.handle("catalog.viewing.start", self.on_viewing_start)
@@ -198,7 +216,29 @@ class CatalogModule(BaseModule):
         self.publish_event("series.deleted", {
             "series_id": series_id,
             "delete_from_qb": bool(env.payload.get("delete_from_qb"))})
+        self._spawn(self._await_purge_reports(series_id))
         return {"ok": True}
+
+    def on_series_purged(self, env: Envelope) -> None:
+        """Отчёт владельца: его таблицы вычищены."""
+        p = env.payload
+        self._purged.setdefault(p["series_id"], set()).add(p["owner"])
+
+    async def _await_purge_reports(self, series_id: int) -> None:
+        """Ждём отчёты владельцев о чистке: молчание — обрыв каскада."""
+        deadline = time.monotonic() + PURGE_REPORT_TIMEOUT
+        while time.monotonic() < deadline:
+            if set(PURGE_OWNERS) <= self._purged.get(series_id, set()):
+                break
+            await asyncio.sleep(0.2)
+        missing = set(PURGE_OWNERS) - self._purged.get(series_id, set())
+        self._purged.pop(series_id, None)
+        if missing:
+            self.log.warning("сериал %d: не отчитались о чистке: %s",
+                             series_id, ", ".join(sorted(missing)))
+
+    def _spawn(self, coro) -> None:
+        self._tasks.append(asyncio.create_task(coro))
 
     async def on_status_get(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]

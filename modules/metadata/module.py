@@ -116,7 +116,10 @@ class MetadataModule(BaseModule):
 
     async def on_series_deleted(self, env: Envelope) -> None:
         """Каскад Р-19: владелец чистит своё по событию."""
-        await self.repo.delete_for_series(env.payload["series_id"])
+        series_id = env.payload["series_id"]
+        await self.repo.delete_for_series(series_id)
+        self.publish_event("series.purged",
+                           {"series_id": series_id, "owner": self.name})
 
     async def on_details(self, env: Envelope) -> dict:
         return await self._details(int(env.payload["tmdb_id"]))
