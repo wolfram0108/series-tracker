@@ -106,12 +106,16 @@ class VkPlayer(PlayerAdapter):
             return PlayerProbe(ref, False,
                                reason=f"VK ответил {response.status_code}",
                                transient=True)
+        lowered = response.text.lower()
+        # A private video can still expose mp4 URLs in the page config.
+        if ("access denied" in lowered or "access restricted" in lowered
+                or "protected by privacy" in lowered
+                or "private video" in lowered):
+            return PlayerProbe(ref, False,
+                               reason="видео закрыто настройками приватности")
         resolutions = [int(q) for q in re.findall(r"mp4_(\d+)", response.text)]
         if resolutions:
             return PlayerProbe(ref, True, max(resolutions))
-        lowered = response.text.lower()
-        if "access denied" in lowered or "private" in lowered:
-            return PlayerProbe(ref, False, reason="видео закрыто настройками приватности")
         # A page without markers and without an explicit refusal is inconclusive.
         return PlayerProbe(ref, False, reason="VK не подтвердил источник", transient=True)
 

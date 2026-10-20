@@ -14,6 +14,7 @@ ALLVIDEO_URL = "https://fsst.online/embed/77/"
 VK_OPEN = '<script>{"mp4_720":"a","mp4_1080":"b"}</script>'
 VK_OPEN_4K = '<script>{"mp4_1080":"b","mp4_2160":"c"}</script>'
 VK_CLOSED = '<script>{"error_msg":"Access denied"}</script>'
+VK_OPEN_DENIED = VK_OPEN + "<div>Access denied</div>"
 VK_AMBIGUOUS = "<html><body>no player data, no refusal</body></html>"
 AV_EMBED_1080 = '<script>file:"[360p]https://cdn.test/360.mp4/,[1080p]https://cdn.test/1080.mp4/"</script>'
 AV_EMBED_4K = '<script>file:"[1080p]https://cdn.test/1080.mp4/,[4k]https://cdn.test/2160.mp4/"</script>'
@@ -347,3 +348,19 @@ async def test_scan_episodes_reports_progress():
     assert (2, 2, "players") in calls
     pages = [call for call in calls if call[2] == "pages"]
     assert pages and pages[-1] == (2, 2, "pages")
+
+
+@pytest.mark.asyncio
+async def test_vk_refusal_wins_over_markers():
+    provider = RuchimeProvider()
+    client = make_client({
+        "episode-1": page_html(vk=True),
+        "video_ext.php": VK_OPEN_DENIED,
+        "release/test": release_html([1]),
+    })
+
+    result = await provider.scan_episodes(
+        "https://1.ruchime.org/release/test", client, {"name": "Тест"})
+
+    assert result["videos"] == []
+    assert result["players"]["players"]["vk"]["available"] == 0
