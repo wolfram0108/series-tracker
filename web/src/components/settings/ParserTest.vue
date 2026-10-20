@@ -7,6 +7,7 @@ import StIcon from "../StIcon.vue"
 import StInput from "../StInput.vue"
 import { useApi } from "../../composables/useApi"
 import { api } from "../../api/client"
+import { useVideoScanStore } from "../../stores/videoScan"
 
 // Шаг 3: тестирование профиля. Сбор «сырых» названий с VK (или имён
 // файлов сериала по ID#N) + прогон правил профиля и карточки результата.
@@ -19,6 +20,7 @@ const props = defineProps<{ profileId: number; initialTitles?: string[] }>()
 
 const { request } = useApi()
 const toast = useToast()
+const videoScan = useVideoScanStore()
 
 const scrapeChannelUrl = ref("")
 const scrapeQuery = ref("")
@@ -253,6 +255,9 @@ async function runTest(): Promise<void> {
               </button>
             </div>
           </StGroup>
+        </div>
+        <div v-if="isScraping && videoScan.text" class="scan-progress">
+          Опрос серий: {{ videoScan.text }}
         </div>
       </div>
     </div>

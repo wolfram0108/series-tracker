@@ -46,7 +46,8 @@ class BaseVideoProvider(ABC):
     @abstractmethod
     async def scan_episodes(self, url: str, http: httpx.AsyncClient,
                             series: dict,
-                            episodes: list[int] | None = None) -> dict:
+                            episodes: list[int] | None = None,
+                            progress=None) -> dict:
         """Scan episodes and return video facts for scan planner.
 
         `episodes` limits page fetches to the given numbers (rules already

@@ -2,6 +2,7 @@ import { useSSE } from "./useSSE"
 import { useSeriesStore, type Series, type SeriesDelta } from "../stores/series"
 import { useQueuesStore, type QueueTask } from "../stores/queues"
 import { useScannerStore, type ScannerStatus } from "../stores/scanner"
+import { useVideoScanStore, type VideoScanProgress } from "../stores/videoScan"
 
 /** Связывает SSE-события со сторами и открывает соединение. Вызывается один
  *  раз при старте приложения (после установки Pinia). Маппинг 1:1 с SSE_MAP
@@ -11,6 +12,7 @@ export function setupRealtime(): void {
   const series = useSeriesStore()
   const queues = useQueuesStore()
   const scanner = useScannerStore()
+  const videoScan = useVideoScanStore()
 
   sse.on("series_updated", (d) => series.applyDelta(d as SeriesDelta))
   sse.on("series_added", (d) => series.upsert(d as Series))
@@ -22,6 +24,7 @@ export function setupRealtime(): void {
   sse.on("slicing_queue_update", (d) => queues.setSlicing(d as QueueTask[]))
 
   sse.on("scanner_status_update", (d) => scanner.set(d as ScannerStatus))
+  sse.on("video_scan_progress", (d) => videoScan.set(d as VideoScanProgress))
 
   // relocation: бэк помечает серию занятой на старте и шлёт обновление в конце
   sse.on("relocation_started", (d) =>

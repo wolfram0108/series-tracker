@@ -8,6 +8,7 @@ import draggable from "vuedraggable"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
+import { useVideoScanStore } from "../../stores/videoScan"
 
 // Вкладка «Композиция» VK — порт seriesCompositionManager. Компиляции +
 // нарезанные файлы + «дыры» (missing), сгруппированы по сезонам; приоритет
@@ -17,6 +18,7 @@ const props = defineProps<{ seriesId: number; seriesName: string; sourceType?: s
 const { request } = useApi()
 const toast = useToast()
 const confirm = useConfirm()
+const videoScan = useVideoScanStore()
 
 interface SourceData { resolution?: number; url?: string; title?: string }
 interface Extracted { season?: number; episode?: number; start?: number; end?: number; part?: number; voiceover?: string }
@@ -76,6 +78,7 @@ const savingPriority = ref(false)
 const showOnlyPlanned = ref(false)
 const autoUpdate = ref(false)
 const isWebVideo = computed(() => props.sourceType === "web_video")
+const scanProgress = computed(() => videoScan.forSeries(props.seriesId))
 const searchMode = ref("search")
 const ignoredSeasons = ref<number[]>([])
 const qualityPriority = ref<{ quality: number }[]>([])
@@ -485,6 +488,10 @@ defineExpose({ reload: () => loadComposition(false) })
             <ToggleSwitch v-model="showOnlyPlanned" />
             <span>Только запланированные</span>
           </label>
+        </div>
+
+        <div v-if="scanProgress" class="scan-progress">
+          Опрос серий: {{ videoScan.format(scanProgress) }}
         </div>
 
         <div v-if="availabilityRows.length" class="player-report">

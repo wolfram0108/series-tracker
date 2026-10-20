@@ -329,8 +329,30 @@ class SourcesModule(BaseModule):
         async with lock:
             await self._polite(service)
             series = env.payload.get("series") or {}
-            result = await provider.scan_episodes(
-                url, self._http, series, episodes=env.payload.get("episodes"))
+            series_id = series.get("id")
+            started = time.monotonic()
+            state = {"current": 0, "total": 0}
+
+            def report(current: int, total: int, phase: str) -> None:
+                state["current"] = current
+                state["total"] = total
+                elapsed = time.monotonic() - started
+                self.publish_event("sources.video.progress", {
+                    "series_id": series_id, "current": current,
+                    "total": total,
+                    "rate": round(elapsed / current, 2) if current else 0.0,
+                    "phase": phase, "active": phase != "done"})
+
+            try:
+                result = await provider.scan_episodes(
+                    url, self._http, series,
+                    episodes=env.payload.get("episodes"), progress=report)
+            except Exception:
+                self.publish_event("sources.video.progress", {
+                    "series_id": series_id, "current": state["current"],
+                    "total": state["total"], "rate": 0.0,
+                    "phase": "error", "active": False})
+                raise
         videos = result.get("videos", []) if isinstance(result, dict) else result
         players = result.get("players", {}) if isinstance(result, dict) else {}
         self.log.info("Видео-скан %s (%s): серий %d", service, url, len(videos))

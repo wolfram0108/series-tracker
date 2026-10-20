@@ -340,7 +340,8 @@ async def test_scrape_titles_endpoint(system):
             }
 
         async def scan_episodes(self, url: str, http: httpx.AsyncClient,
-                                series: dict, episodes: list[int] | None = None) -> dict:
+                                series: dict, episodes: list[int] | None = None,
+                                progress=None) -> dict:
             return {"videos": [
                 {"title": "Серия 1", "url": "https://fake/1",
                  "publication_date": "2026-10-01T12:00:00Z", "resolution": 1080},

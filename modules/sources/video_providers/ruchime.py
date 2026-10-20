@@ -15,6 +15,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -514,7 +515,8 @@ class RuchimeProvider(BaseVideoProvider):
 
     async def scan_episodes(self, url: str, http: httpx.AsyncClient,
                             series: dict,
-                            episodes: list[int] | None = None) -> dict:
+                            episodes: list[int] | None = None,
+                            progress: Callable[[int, int, str], None] | None = None) -> dict:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         resp, slug = await self._read_release(url, http, headers)
 
@@ -533,10 +535,26 @@ class RuchimeProvider(BaseVideoProvider):
             name_ru = match.group(1) if match else slug
 
         sem = asyncio.Semaphore(MAX_CONCURRENT_PROBES)
-        resolved = await asyncio.gather(
-            *(self._read_episode(slug, name_ru, ep, http, headers, sem,
-                                 first_adapter=PLAYER_ORDER[0])
-              for ep in episodes_raw))
+        total = len(episodes_raw)
+        done = 0
+        last_emit = 0.0
+        counter_lock = asyncio.Lock()
+
+        async def read_one(ep: dict) -> _Episode | None:
+            nonlocal done, last_emit
+            info = await self._read_episode(slug, name_ru, ep, http, headers, sem,
+                                            first_adapter=PLAYER_ORDER[0])
+            async with counter_lock:
+                done += 1
+                now = time.monotonic()
+                if progress is not None and (done == total or now - last_emit >= 0.5):
+                    last_emit = now
+                    progress(done, total, "pages")
+            return info
+
+        resolved = await asyncio.gather(*(read_one(ep) for ep in episodes_raw))
+        if progress is not None:
+            progress(total, total, "players")
         episodes = [item for item in resolved if item is not None]
 
         failed = [item for item in episodes if item.page_failed]
@@ -579,6 +597,8 @@ class RuchimeProvider(BaseVideoProvider):
         report = self._availability_report(episodes)
         logger.info("Ruchime scan %s: серий %d, источники %s",
                     slug, len(facts), report["sources"])
+        if progress is not None:
+            progress(total, total, "done")
         return {"videos": facts, "players": report}
 
     async def resolve_stream(self, url: str, http: httpx.AsyncClient) -> dict | None:

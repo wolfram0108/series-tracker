@@ -324,3 +324,24 @@ async def test_scan_episodes_can_limit_page_fetches():
     assert [fact["title"] for fact in result["videos"]] == ["Тест - 2 серия"]
     assert counts["episode-1"] == 0
     assert counts["episode-2"] == 1
+
+
+@pytest.mark.asyncio
+async def test_scan_episodes_reports_progress():
+    provider = RuchimeProvider()
+    client = make_client({
+        "episode-1": page_html(vk=True),
+        "episode-2": page_html(vk=True),
+        "video_ext.php": VK_OPEN,
+        "release/test": release_html([1, 2]),
+    })
+    calls: list[tuple[int, int, str]] = []
+
+    await provider.scan_episodes(
+        "https://1.ruchime.org/release/test", client, {"name": "Тест"},
+        progress=lambda current, total, phase: calls.append((current, total, phase)))
+
+    assert calls[-1] == (2, 2, "done")
+    assert (2, 2, "players") in calls
+    pages = [call for call in calls if call[2] == "pages"]
+    assert pages and pages[-1] == (2, 2, "pages")

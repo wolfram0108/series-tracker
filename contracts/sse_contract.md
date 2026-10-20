@@ -28,6 +28,7 @@
 | `download_queue_update` | голый массив задач | подтверждено | `downloads.queue.changed {tasks, count}` | голый массив `tasks` |
 | `slicing_queue_update` | голый массив задач | подтверждено | `slicing.queue.changed {tasks}` | голый массив `tasks` |
 | `scanner_status_update` | `{scanner_enabled, scan_interval, is_scanning, is_awaiting_tasks, next_scan_time}` | подтверждено | `scan.status.changed` | как есть (форма совпадает) |
+| `video_scan_progress` | — (новое) | прогресс опроса серий web-источника | `sources.video.progress {series_id, current, total, rate, phase, active}` | как есть |
 | `agent_heartbeat` | `{name, activity?}` | **удалено по согласованию** (см. ниже) | — | — |
 | `relocation_started` | `{series_id}` | подтверждено | `library.relocation.started` | как есть |
 | `relocation_finished` | `{series_id, success, message}` | подтверждено | `library.relocation.finished` | как есть |

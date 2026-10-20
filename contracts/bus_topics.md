@@ -36,6 +36,7 @@
 | series.purged {series_id, owner} | scan, torrents, downloads, slicing, renaming, library, metadata | catalog (учёт отчётов о чистке) | — |
 | scan.plan.updated {series_id} | scan | downloads | — |
 | scan.status.changed | scan | — | scanner_status_update |
+| sources.video.progress {series_id, current, total, rate, phase, active} | sources | gateway | video_scan_progress |
 | torrents.queue.changed {count, tasks} | torrents | scan (count=0 → следующий скан) | agent_queue_update |
 | torrents.progress.changed {tasks} | torrents | gateway | torrent_progress_update (Р-23, замена поллинга) |
 | downloads.queue.changed {tasks, count} | downloads | — | download_queue_update |
