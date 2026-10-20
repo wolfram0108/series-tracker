@@ -33,6 +33,7 @@
 | series.added {…series} | catalog | gateway | series_added (полный объект, Р-19) |
 | series.updated {series_id, …поля, statuses, is_busy} | catalog | gateway, torrents (память исключений → приоритеты файлов) | series_updated (дельта, Р-19) |
 | series.deleted {series_id, delete_from_qb} | catalog | scan, torrents, downloads, slicing, renaming, library, metadata (каскад), gateway | series_deleted {id} (Р-19) |
+| series.purged {series_id, owner} | scan, torrents, downloads, slicing, renaming, library, metadata | catalog (учёт отчётов о чистке) | — |
 | scan.plan.updated {series_id} | scan | downloads | — |
 | scan.status.changed | scan | — | scanner_status_update |
 | torrents.queue.changed {count, tasks} | torrents | scan (count=0 → следующий скан) | agent_queue_update |
