@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import draggable from "vuedraggable"
+import {
+  allowsAttachment,
+  carriesAttachment,
+  isAttachmentType,
+  isGlued,
+  normalizeAttachments,
+  type PatternBlock,
+} from "../../lib/patternBlocks"
+
+export type { PatternBlock }
 
 // Конструктор паттерна: контейнер блоков (DnD-перестановка) + палитра
 // (клон при перетаскивании). Общий для условий «ЕСЛИ» и действий «ТО».
@@ -8,13 +18,7 @@ import draggable from "vuedraggable"
 // Порт логики из static/js/components/settingsParser.js (cloneBlock,
 // isBlockEditable, getBlockDisplayText, updateBlockValue, getBlockClasses).
 
-export interface PatternBlock {
-  id: number | string
-  type: string
-  value?: string
-}
 interface PaletteItem { type: string; label: string; title: string }
-
 const props = defineProps<{
   blocks: PatternBlock[]
   context: "if" | "then"
@@ -51,11 +55,14 @@ function isBlockEditable(block: PatternBlock): boolean {
   return ["text", "add", "subtract", "range"].includes(block.type)
 }
 
-function getBlockClasses(block: PatternBlock): string {
+function getBlockClasses(block: PatternBlock, index: number): string {
   const classes = ["pattern-block"]
   if (["add", "subtract"].includes(block.type)) classes.push("block-type-operation")
   else if (block.type === "text") classes.push("block-type-text")
   else classes.push(`block-type-${block.type}`)
+  // Glued pair: the suffix touches the number it modifies.
+  if (isGlued(props.blocks, index)) classes.push("is-glued")
+  if (carriesAttachment(props.blocks, index)) classes.push("carries-attachment")
   return classes.join(" ")
 }
 
@@ -86,54 +93,19 @@ function removeBlock(index: number): void {
   props.blocks.splice(index, 1)
 }
 
-// Fool-proofing: disallow duplicate range blocks and position range after last number
+// Fool-proofing: a template holds one attachment, and it belongs to a number.
 function checkPaletteMove(evt: any): boolean {
-  const itemType = evt.draggedContext?.element?.type
-  if (itemType === "range") {
-    const alreadyHasRange = props.blocks.some((b) => b.type === "range")
-    if (alreadyHasRange) return false
-  }
+  const type = evt.draggedContext?.element?.type
+  if (type && isAttachmentType(type) && !allowsAttachment(props.blocks)) return false
   return true
 }
 
 function checkMove(evt: any): boolean {
-  const draggedType = evt.draggedContext?.element?.type
-  if (draggedType === "range") {
-    const alreadyHasRange = props.blocks.some(
-      (b) => b.type === "range" && b !== evt.draggedContext.element,
-    )
-    if (alreadyHasRange) return false
+  const dragged = evt.draggedContext?.element
+  if (dragged && isAttachmentType(dragged.type) && !allowsAttachment(props.blocks, dragged)) {
+    return false
   }
   return true
-}
-
-function ensureRangePosition(): void {
-  const rangeBlocks = props.blocks.filter((b) => b.type === "range")
-  if (!rangeBlocks.length) return
-  const firstRange = rangeBlocks[0]
-
-  // Remove duplicate range blocks if any exist
-  for (let i = props.blocks.length - 1; i >= 0; i--) {
-    if (props.blocks[i].type === "range") {
-      props.blocks.splice(i, 1)
-    }
-  }
-
-  // Find index of the last number block
-  let lastNumIndex = -1
-  for (let i = 0; i < props.blocks.length; i++) {
-    if (props.blocks[i].type === "number") lastNumIndex = i
-  }
-
-  if (lastNumIndex === -1) {
-    // If dropped into an empty condition or without numbers, auto-prepend a number block
-    props.blocks.push({ id: Date.now() + Math.random(), type: "number" })
-    props.blocks.push(firstRange)
-    return
-  }
-
-  // Insert immediately after the last number
-  props.blocks.splice(lastNumIndex + 1, 0, firstRange)
 }
 </script>
 
@@ -148,10 +120,10 @@ function ensureRangePosition(): void {
       ghost-class="ghost-block"
       :animation="200"
       :move="checkMove"
-      @change="ensureRangePosition"
+      @change="normalizeAttachments(blocks)"
     >
       <template #item="{ element, index }">
-        <div :class="getBlockClasses(element)">
+        <div :class="getBlockClasses(element, index)">
           <span class="drag-handle">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
               <path d="M7 2a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-3 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z" />
