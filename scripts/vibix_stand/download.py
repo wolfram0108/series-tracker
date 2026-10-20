@@ -14,7 +14,7 @@ import httpx
 from .capture import Capture, capture_playlist
 from .keys import KeyStore
 from .protocol import (Episode, Stream, VibixProtocolError, decode_playlist,
-                       DEFAULT_DECODER_KEY, parse_manifest, stream_expires)
+                       parse_manifest, stream_expires)
 
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (X11; Linux x86_64; rv:128.0) "
@@ -192,7 +192,7 @@ async def _fetch_manifest_with_refresh(*, session: PlaylistSession, client: http
 
 
 async def fetch_manifest(client: httpx.AsyncClient, url: str,
-                         key: str | bytes = DEFAULT_DECODER_KEY) -> str:
+                         key: str | bytes) -> str:
     response = await client.get(url)
     if response.status_code in (401, 403, 404, 410):
         raise ManifestExpired(f"manifest HTTP {response.status_code}")

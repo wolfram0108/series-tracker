@@ -302,7 +302,7 @@ async def test_parse_release_reports_preview_players():
     assert result["players"]["allvideo"]["resolution"] == 1080
     assert result["players"]["vibix"]["present"] is True
     assert result["players"]["vibix"]["available"] is None
-    assert result["resolution"] == 1080
+    assert result["resolution"] is None
     # Per-episode quality is a scan fact; the parse does not invent it.
     assert all(video["resolution"] is None for video in result["videos"])
     assert [episode["number"] for episode in result["episodes"]] == [1, 2]

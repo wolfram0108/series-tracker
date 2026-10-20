@@ -560,6 +560,8 @@ def test_transient_download_errors():
     assert _transient_download_error("ffmpeg: Connection timed out")
     assert _transient_download_error("Server returned 503 Service Unavailable")
     assert _transient_download_error("Server returned 429 Too Many Requests")
+    assert _transient_download_error("ERROR: HTTP Error 403: Forbidden")
+    assert _transient_download_error("HTTP Error 503: Service Unavailable")
     assert not _transient_download_error("путь сохранения должен быть абсолютным")
     assert not _transient_download_error("Option not found")
 

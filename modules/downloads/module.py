@@ -50,7 +50,8 @@ MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
 _TRANSIENT_MARKERS = ("timed out", "timeout", "connection", "network",
                       "temporarily", "server returned 5", "server returned 429",
-                      "server returned 403")
+                      "server returned 403", "http error 403", "http error 408",
+                      "http error 429", "http error 5")
 
 
 def _transient_download_error(error: str) -> bool:

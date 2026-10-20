@@ -54,12 +54,16 @@ class EchoModule(BaseModule):
     def register(self):
         self.handle("echo.ping", self.on_ping)
         self.handle("echo.fail", self.on_fail)
+        self.handle("echo.sync", self.on_sync)
 
     async def on_ping(self, env):
         return {"pong": env.payload}
 
     async def on_fail(self, env):
         raise ValueError("намеренная ошибка")
+
+    def on_sync(self, env):
+        return {"sync": env.payload}
 
 
 class ClientModule(BaseModule):
@@ -75,6 +79,20 @@ async def test_request_reply_roundtrip():
     try:
         result = await client.request("echo.ping", {"msg": "привет"}, timeout=2)
         assert result == {"pong": {"msg": "привет"}}
+    finally:
+        await client.stop()
+        await echo.stop()
+
+
+@pytest.mark.asyncio
+async def test_sync_handler_is_supported():
+    bus = Bus()
+    echo, client = EchoModule(bus), ClientModule(bus)
+    await echo.start()
+    await client.start()
+    try:
+        result = await client.request("echo.sync", {"msg": "x"}, timeout=2)
+        assert result == {"sync": {"msg": "x"}}
     finally:
         await client.stop()
         await echo.stop()

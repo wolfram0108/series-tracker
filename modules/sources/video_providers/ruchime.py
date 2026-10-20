@@ -408,7 +408,8 @@ class RuchimeProvider(BaseVideoProvider):
         name_ru, name_en = self._release_names(raw_text, slug, url)
         episodes_raw = self._release_episodes(raw_text)
 
-        report, resolution = await self._quick_report(raw_text, self.canonical_url(url), http)
+        report, _preview_resolution = await self._quick_report(
+            raw_text, self.canonical_url(url), http)
         episodes = [
             {"number": ep.get("number"),
              "title": self._episode_title(name_ru, ep),
@@ -423,7 +424,8 @@ class RuchimeProvider(BaseVideoProvider):
             "title": {"ru": name_ru, "en": name_en},
             "titles": titles,
             "episodes": episodes,
-            "resolution": resolution,
+            # Quality is a per-episode scan fact, not a release preview.
+            "resolution": None,
             "videos": videos,
             "episodes_count": len(titles),
             "provider": self.name,

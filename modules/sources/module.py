@@ -61,8 +61,10 @@ class SourcesModule(BaseModule):
         self.video_registry = get_default_registry()
         self.video_registry.configure(
             browser_getter=self._ensure_browser,
-            key_path=os.path.join(torrent_cache_dir, "vibix-key.json"),
-            manifest_dir=os.path.join(torrent_cache_dir, "manifests"))
+            key_path=os.path.abspath(os.path.join(torrent_cache_dir,
+                                                  "vibix-key.json")),
+            manifest_dir=os.path.abspath(os.path.join(torrent_cache_dir,
+                                                      "manifests")))
         super().__init__(bus)
         # Late binding on purpose: tests replace the transport, not the bus.
         self._delivery = Delivery(

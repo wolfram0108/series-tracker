@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any, Awaitable, Callable
 
 from .bus import Bus, Subscription
@@ -131,7 +132,9 @@ class BaseModule:
 
     async def _handle_one(self, env: Envelope, handler: Handler) -> None:
         try:
-            result = await handler(env)
+            result = handler(env)
+            if inspect.isawaitable(result):
+                result = await result
             if env.kind == "query" and env.reply_to:
                 self.bus.publish(Envelope(
                     topic=env.reply_to, kind="reply", payload=result,

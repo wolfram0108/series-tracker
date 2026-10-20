@@ -173,7 +173,7 @@ class ScanModule(BaseModule):
         return {"updated": n}
 
     async def on_availability(self, env: Envelope) -> dict:
-        """Последний отчёт о доступности плееров web-серии."""
+        """Last player availability report for a web series."""
         return await self.repo.get_availability(int(env.payload["series_id"]))
 
     async def on_composition(self, env: Envelope) -> list[dict]:
@@ -194,8 +194,10 @@ class ScanModule(BaseModule):
                     await self._scan_vk(series)
             except ScanAborted as exc:
                 self.log.info("композиция: скан прерван — %s", exc)
+                raise
             except Exception as exc:
                 self.log.warning("композиция: скан источника при refresh завершился ошибкой: %s", exc)
+                raise
         items = await self.repo.items_for_series(series_id)
         # компиляции, выпавшие из плана, теряют записи о нарезке
         for item in items:

@@ -203,9 +203,12 @@ const isSeasonValid = computed(() => {
 function vstate(ok: boolean): VState {
   return ok ? "valid" : "invalid"
 }
+function isAbsolutePath(value: string): boolean {
+  return value.trim().startsWith("/")
+}
 const nameState = computed<VState>(() => (showValidation.value ? vstate(!!form.name) : null))
 const nameEnState = computed<VState>(() => (showValidation.value ? vstate(!!form.name_en) : null))
-const savePathState = computed<VState>(() => (showValidation.value ? vstate(!!form.save_path) : null))
+const savePathState = computed<VState>(() => (showValidation.value ? vstate(isAbsolutePath(form.save_path)) : null))
 const seasonState = computed<VState>(() => {
   if (!showValidation.value || isSeasonless.value || isVideo) return null
   return vstate(isSeasonValid.value)
@@ -274,7 +277,7 @@ function openUrl() {
 }
 
 const canSave = computed(() => {
-  const base = !!form.name && !!form.name_en && !!form.save_path
+  const base = !!form.name && !!form.name_en && isAbsolutePath(form.save_path)
   if (isVk) return base && !!vkChannelUrl.value && !!form.parser_profile_id
   if (isWebVideo) return base && !!form.parser_profile_id
   return base && isSeasonValid.value
@@ -413,6 +416,9 @@ onMounted(() => {
             <StIcon icon="pi pi-hashtag" />
             <StInput v-model="form.season" label="Сезон (формат s01)" />
           </StGroup>
+        </div>
+        <div v-if="form.save_path && !isAbsolutePath(form.save_path)" class="add-error">
+          Путь должен быть абсолютным и начинаться с «/», например /nas/...
         </div>
 
         <!-- оверрайды качества/разрешения -->

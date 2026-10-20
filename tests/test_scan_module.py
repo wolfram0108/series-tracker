@@ -27,6 +27,7 @@ class FakeBackend(BaseModule):
         self.vk_videos: list[dict] = []
         self.web_videos: list[dict] = []
         self.web_players: dict = {}
+        self.web_scan_error: str | None = None
         self.web_scan_payloads: list[dict] = []
         self.parse_titles: list[str] = []
         self.parse_episodes: list[dict] = []
@@ -88,6 +89,8 @@ class FakeBackend(BaseModule):
         return {"videos": self.vk_videos}
 
     async def on_web_scan(self, env):
+        if self.web_scan_error:
+            raise RuntimeError(self.web_scan_error)
         self.web_scan_payloads.append(env.payload)
         return {"videos": self.web_videos, "players": self.web_players}
 
@@ -694,3 +697,14 @@ async def test_web_video_scan_skips_excluded_episodes(system):
 
     assert fake.web_scan_payloads[-1]["episodes"] == [2]
     assert reply["candidates"]["added"] == 1
+
+
+@pytest.mark.asyncio
+async def test_composition_refresh_surfaces_scan_error(system):
+    """Ошибка скана при refresh не маскируется старыми данными."""
+    _, fake, probe, _ = system
+    fake.web_scan_error = "сайт недоступен"
+
+    with pytest.raises(BusRequestError):
+        await probe.request("scan.composition",
+                            {"series_id": 3, "refresh": True}, timeout=10)

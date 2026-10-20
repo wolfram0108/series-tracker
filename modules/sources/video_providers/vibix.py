@@ -23,12 +23,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("sources.video.vibix")
 
-DEFAULT_DECODER_KEY = "RySdvcyu5iTUxn97vn4HwoniwgxaCynA"
+# The key is not shipped with the code: it lives in the shared store and is
+# recovered from an encrypted manifest when the publisher rotates it.
 KEY_LENGTH = 32
 KEY_TTL_S = 12 * 3600
 API_PATH = "/api/v1/embed-serials/"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_KEY_PATH = Path(os.environ.get(
-    "VIBIX_KEY_STORE", "~/.cache/series-tracker/vibix-key.json")).expanduser()
+    "VIBIX_KEY_STORE", str(_REPO_ROOT / "torrent_cache" / "vibix-key.json")))
 
 _QUALITY_CHUNK = re.compile(r"^\[(\d+p|4k)\]\{[^}]*\}(https?://.+)$", re.IGNORECASE)
 _EPISODE_NUMBER = re.compile(r"\d+")
@@ -86,7 +88,10 @@ class KeyState:
 
 
 def _key_bytes(key: str | bytes) -> bytes:
-    return key.encode("latin-1") if isinstance(key, str) else key
+    data = key.encode("latin-1") if isinstance(key, str) else key
+    if not data:
+        raise VibixProtocolError("decoder key is empty")
+    return data
 
 
 def _xor(data: bytes, key: bytes) -> bytes:
@@ -110,7 +115,7 @@ def envelope_bytes(raw: bytes) -> bytes | None:
         raise VibixProtocolError("invalid base64 in Vibix envelope") from exc
 
 
-def decode_envelope(raw: bytes, key: str | bytes = DEFAULT_DECODER_KEY) -> bytes:
+def decode_envelope(raw: bytes, key: str | bytes) -> bytes:
     """Decode a Kinescope/Vibix `{"p": "...", "v": 1}` envelope."""
     cipher = envelope_bytes(raw)
     if cipher is None:
@@ -118,7 +123,7 @@ def decode_envelope(raw: bytes, key: str | bytes = DEFAULT_DECODER_KEY) -> bytes
     return _xor(cipher, _key_bytes(key))
 
 
-def encode_envelope(payload: bytes, key: str | bytes = DEFAULT_DECODER_KEY) -> bytes:
+def encode_envelope(payload: bytes, key: str | bytes) -> bytes:
     """Inverse of decode_envelope, used by tests and protocol probes."""
     encoded = base64.b64encode(_xor(payload, _key_bytes(key))).decode()[::-1]
     return json.dumps({"p": encoded, "v": 1}, separators=(",", ":")).encode()
@@ -166,7 +171,7 @@ def _is_payload(body: bytes, key: bytes) -> bool:
     return isinstance(data, dict) and isinstance(data.get("playlist"), list)
 
 
-def parse_manifest(raw: bytes, key: str | bytes = DEFAULT_DECODER_KEY) -> str:
+def parse_manifest(raw: bytes, key: str | bytes) -> str:
     """Return an HLS manifest as text, decoding the envelope when present."""
     decoded = decode_envelope(raw, key)
     try:
@@ -178,7 +183,7 @@ def parse_manifest(raw: bytes, key: str | bytes = DEFAULT_DECODER_KEY) -> str:
     return text
 
 
-def decode_payload(raw: bytes, key: str | bytes = DEFAULT_DECODER_KEY) -> Any:
+def decode_payload(raw: bytes, key: str | bytes) -> Any:
     """Decode an enveloped API response into JSON."""
     decoded = decode_envelope(raw, key)
     try:
@@ -187,7 +192,7 @@ def decode_payload(raw: bytes, key: str | bytes = DEFAULT_DECODER_KEY) -> Any:
         raise VibixProtocolError("Vibix API response is not valid JSON") from exc
 
 
-def decode_playlist(raw: bytes, key: str | bytes = DEFAULT_DECODER_KEY) -> list[Episode]:
+def decode_playlist(raw: bytes, key: str | bytes) -> list[Episode]:
     """Decode an enveloped API response and return its episodes."""
     return parse_playlist(decode_payload(raw, key))
 

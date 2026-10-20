@@ -10,21 +10,23 @@ from scripts.vibix_stand.protocol import (VibixProtocolError, decode_envelope,
                                           parse_manifest, parse_playlist,
                                           pick_stream, stream_expires)
 
+TEST_KEY = b"0123456789abcdef0123456789abcdef"
+
 
 def test_envelope_roundtrip() -> None:
     payload = b"#EXTM3U\n#EXTINF:12.0,\nhttps://example.test/seg.ts\n"
-    encoded = encode_envelope(payload)
-    assert decode_envelope(encoded) == payload
+    encoded = encode_envelope(payload, TEST_KEY)
+    assert decode_envelope(encoded, TEST_KEY) == payload
 
 
 def test_plain_response_is_not_modified() -> None:
     raw = b'{"success": true}'
-    assert decode_envelope(raw) == raw
+    assert decode_envelope(raw, TEST_KEY) == raw
 
 
 def test_parse_manifest_rejects_non_hls() -> None:
     with pytest.raises(VibixProtocolError):
-        parse_manifest(b"not a manifest")
+        parse_manifest(b"not a manifest", TEST_KEY)
 
 
 def test_parse_playlist_flattens_seasons() -> None:
@@ -88,14 +90,14 @@ def test_decode_playlist_from_envelope() -> None:
     payload = {"data": {"playlist": [{"title": "Сезон 1", "folder": [
         {"title": "Серия 1", "file": "[720p]{RuChiMe}https://cdn.test/1.m3u8"}
     ]}]}}
-    raw = encode_envelope(json.dumps(payload).encode())
-    assert decode_payload(raw) == payload
-    assert [episode.number for episode in decode_playlist(raw)] == [1]
+    raw = encode_envelope(json.dumps(payload).encode(), TEST_KEY)
+    assert decode_payload(raw, TEST_KEY) == payload
+    assert [episode.number for episode in decode_playlist(raw, TEST_KEY)] == [1]
 
 
 def test_decode_playlist_rejects_invalid_json() -> None:
     with pytest.raises(VibixProtocolError):
-        decode_playlist(encode_envelope(b"not json"))
+        decode_playlist(encode_envelope(b"not json", TEST_KEY), TEST_KEY)
 
 
 def test_parse_all_eps() -> None:
@@ -125,5 +127,5 @@ def test_parse_selection() -> None:
 
 def test_encoded_playlist_payload() -> None:
     payload = {"data": {"playlist": []}}
-    raw = encode_envelope(json.dumps(payload).encode())
-    assert json.loads(decode_envelope(raw)) == payload
+    raw = encode_envelope(json.dumps(payload).encode(), TEST_KEY)
+    assert json.loads(decode_envelope(raw, TEST_KEY)) == payload

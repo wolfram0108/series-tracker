@@ -27,6 +27,12 @@ const scrapeQuery = ref("")
 const scrapeSearchMode = ref<"search" | "get_all">("search")
 const isScraping = ref(false)
 const scrapedItems = ref<Array<Record<string, unknown>>>([])
+const scrapeProgress = computed(() => {
+  if (!isScraping.value) return null
+  const value = videoScan.progress
+  // The rules scrape has no series yet; a background series scan must not leak here.
+  return value && value.series_id === null ? value : null
+})
 const testTitles = ref("")
 const isTesting = ref(false)
 const testResults = ref<TestResult[]>([])
@@ -256,8 +262,8 @@ async function runTest(): Promise<void> {
             </div>
           </StGroup>
         </div>
-        <div v-if="isScraping && videoScan.text" class="scan-progress">
-          Опрос серий: {{ videoScan.text }}
+        <div v-if="scrapeProgress" class="scan-progress">
+          Опрос серий: {{ videoScan.format(scrapeProgress) }}
         </div>
       </div>
     </div>

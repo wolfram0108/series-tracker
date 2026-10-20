@@ -5,7 +5,7 @@ import json
 import re
 
 from modules.sources.video_providers.vibix import (  # noqa: F401 - re-exported for the stand
-    DEFAULT_DECODER_KEY, Episode, KeyState, KeyStore, Stream, VibixProtocolError,
+    Episode, KeyState, KeyStore, Stream, VibixProtocolError,
     decode_envelope, decode_payload, decode_playlist, encode_envelope,
     envelope_bytes, parse_manifest, parse_playlist, pick_stream, recover_key,
     stream_expires)

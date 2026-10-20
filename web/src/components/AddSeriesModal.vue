@@ -12,7 +12,6 @@ import SettingsParser from "./settings/SettingsParser.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
 import { useSSE } from "../composables/useSSE"
-import { useVideoScanStore } from "../stores/videoScan"
 
 // Модалка «Добавить сериал» — полный порт legacy addSeriesModal.js.
 // Поток: ввод URL → debounce-распознавание (vkvideo.ru → VK-режим без
@@ -22,7 +21,6 @@ import { useVideoScanStore } from "../stores/videoScan"
 const emit = defineEmits<{ (e: "close"): void; (e: "created"): void }>()
 const { request } = useApi()
 const toast = useToast()
-const videoScan = useVideoScanStore()
 
 // --- типы ответов (бэк отдаёт DynamicObject; сужаем под контракт) ---
 interface Torrent { torrent_id?: string | number; link?: string; magnet?: string; date_time?: string; episodes?: string; quality?: string }
@@ -542,7 +540,6 @@ onBeforeUnmount(() => {
       </StGroup>
       <div v-if="urlError" class="add-error">{{ urlError }}</div>
       <div v-if="parsing" class="add-hint">Распознаём ссылку…</div>
-      <div v-if="videoScan.progress" class="add-hint">Опрос серий: {{ videoScan.text }}</div>
     </div>
 
     <div v-if="parsed || sourceType === 'vk_video'">
@@ -649,6 +646,9 @@ onBeforeUnmount(() => {
             >
               <b>{{ p.label }}</b><span>{{ p.text }}</span>
             </span>
+          </div>
+          <div class="fieldset-hint">
+            Предварительная проверка по первой серии; точное качество — после скана.
           </div>
         </div>
       </div>
