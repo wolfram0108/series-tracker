@@ -1,37 +1,16 @@
-"""Capture the signed Vibix playlist API response through a real browser."""
+"""Stand browser capture facade over the production implementation."""
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass
 from typing import Literal
 
-API_PATH = "/api/v1/embed-serials/"
-_BLOCKED_HOSTS = (
-    "googlesyndication.com",
-    "doubleclick.net",
-    "adfinity.pro",
-    "umami.is",
-    "mc.yandex.ru",
-    "google-analytics.com",
-)
+from modules.sources.video_providers.vibix import (  # noqa: F401 - re-exported for the stand
+    Capture, VibixUnavailable, capture_with_browser)
 
 
-class VibixUnavailable(RuntimeError):
-    """Raised when a page has no Vibix player or the API never responds."""
-
-
-@dataclass(frozen=True)
-class Capture:
-    page_url: str
-    api_url: str
-    body: bytes
-    manifest_url: str = ""
-    manifest_body: bytes | None = None
-
-
-async def capture_playlist(page_url: str, *, browser_name: Literal["firefox", "chromium"] = "firefox",
+async def capture_playlist(page_url: str, *,
+                           browser_name: Literal["firefox", "chromium"] = "firefox",
                            timeout_s: float = 60.0) -> Capture:
-    """Open an episode page, select Vibix, and return the encrypted API response."""
+    """Open the page with a stand-owned browser and capture the Vibix playlist."""
     try:
         from playwright.async_api import async_playwright
     except ImportError as exc:
@@ -40,55 +19,8 @@ async def capture_playlist(page_url: str, *, browser_name: Literal["firefox", "c
         ) from exc
 
     async with async_playwright() as playwright:
-        browser_type = getattr(playwright, browser_name)
-        browser = await browser_type.launch(headless=True)
-        context = await browser.new_context(locale="ru-RU", viewport={"width": 1366, "height": 900})
-        await context.route("**/*", _block_ads)
-        page = await context.new_page()
-        response_future: asyncio.Future = asyncio.get_running_loop().create_future()
-        manifest_future: asyncio.Future = asyncio.get_running_loop().create_future()
-
-        def on_response(response) -> None:
-            if API_PATH in response.url and not response_future.done():
-                response_future.set_result(response)
-            elif ".m3u8" in response.url and not manifest_future.done():
-                manifest_future.set_result(response)
-
-        page.on("response", on_response)
+        browser = await getattr(playwright, browser_name).launch(headless=True)
         try:
-            await page.goto(page_url, wait_until="domcontentloaded", timeout=timeout_s * 1000)
-            try:
-                button = await page.wait_for_selector(
-                    '.source-btn[data-player="vibix"]', timeout=15_000
-                )
-            except Exception as exc:
-                raise VibixUnavailable("на странице нет кнопки Vibix") from exc
-            await button.click(timeout=15_000)
-            response = await asyncio.wait_for(response_future, timeout=timeout_s)
-            body = await response.body()
-            manifest_url, manifest_body = await _manifest(manifest_future)
-            return Capture(page_url=page_url, api_url=response.url, body=body,
-                           manifest_url=manifest_url, manifest_body=manifest_body)
-        except asyncio.TimeoutError as exc:
-            raise VibixUnavailable(
-                "Vibix API не ответил за отведённое время; проверьте страницу и браузер"
-            ) from exc
+            return await capture_with_browser(browser, page_url, timeout_s=timeout_s)
         finally:
             await browser.close()
-
-
-async def _manifest(future: asyncio.Future) -> tuple[str, bytes | None]:
-    """Best-effort manifest capture: the key is recoverable only from it."""
-    try:
-        response = await asyncio.wait_for(future, timeout=20)
-        return response.url, await response.body()
-    except Exception:  # noqa: BLE001 - a missing manifest must not fail the capture
-        return "", None
-
-
-async def _block_ads(route) -> None:
-    url = route.request.url
-    if any(host in url for host in _BLOCKED_HOSTS):
-        await route.abort()
-    else:
-        await route.continue_()

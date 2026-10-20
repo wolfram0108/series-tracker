@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import os
 import time
 
 import httpx
@@ -58,6 +59,10 @@ class SourcesModule(BaseModule):
         self._locks: dict[str, asyncio.Lock] = {}
         self._last_request: dict[str, float] = {}
         self.video_registry = get_default_registry()
+        self.video_registry.configure(
+            browser_getter=self._ensure_browser,
+            key_path=os.path.join(torrent_cache_dir, "vibix-key.json"),
+            manifest_dir=os.path.join(torrent_cache_dir, "manifests"))
         super().__init__(bus)
         # Late binding on purpose: tests replace the transport, not the bus.
         self._delivery = Delivery(
@@ -143,6 +148,7 @@ class SourcesModule(BaseModule):
                 "releases": parsed.get("releases", []),
                 "canonical_url": parsed.get("canonical_url", url),
                 "episodes_count": parsed.get("episodes_count", 0),
+                "players": parsed.get("players", {}),
                 "ui_features": {},
                 "tracker": None,
             }

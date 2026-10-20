@@ -181,15 +181,14 @@ async def test_ruchime_parse_release():
     assert result["title"]["en"] == "Peerless Martial Spirit"
     assert len(result["titles"]) == 4
     assert result["titles"][0] == "Несравненный боевой дух - 2 серия"
-    assert result["resolution"] == 2160  # Highest found across episodes
 
-    # Ensure individual videos have exact probed resolutions, not overwritten
+    # The release page has no preview player here; its per-episode qualities
+    # are intentionally not probed during parse anymore.
+    assert result["resolution"] is None
     assert len(result["videos"]) == 4
-    assert result["videos"][0]["title"] == "Несравненный боевой дух - 2 серия"
-    assert result["videos"][0]["resolution"] == 1080
-    assert result["videos"][1]["resolution"] == 1080
-    assert result["videos"][2]["resolution"] == 2160
-    assert result["videos"][3]["resolution"] is None  # Episode 5 had no player, must remain None!
+    assert all(video["resolution"] is None for video in result["videos"])
+    assert result["players"]["vk"]["present"] is False
+    assert result["players"]["vibix"]["present"] is False
 
 
 @pytest.mark.asyncio

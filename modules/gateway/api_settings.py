@@ -124,6 +124,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 "titles": result.get("titles", []),
                 "canonical_url": result.get("canonical_url"),
                 "episodes_count": result.get("episodes_count"),
+                "players": result.get("players", {}),
                 "resolution": result.get("resolution")}
 
     # --- настройки -------------------------------------------------------------------

@@ -29,6 +29,13 @@ class VideoProviderRegistry:
                 return p
         return None
 
+    def configure(self, **options) -> None:
+        """Forward late wiring (browser pool, cache paths) to capable providers."""
+        for provider in self._providers:
+            configure = getattr(provider, "configure", None)
+            if callable(configure):
+                configure(**options)
+
     async def resolve_stream(self, url: str, http: httpx.AsyncClient) -> dict | None:
         """Query registered providers to resolve a direct stream descriptor."""
         for p in self._providers:

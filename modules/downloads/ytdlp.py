@@ -27,6 +27,9 @@ import httpx
 
 ProgressCb = Callable[[dict], Awaitable[None]]
 
+# Decoded manifests live on disk while their segments stay remote (Vibix).
+PROTOCOL_WHITELIST = ["-protocol_whitelist", "file,http,https,tcp,tls"]
+
 # hls + лучший muxed-поток; fallback на обычный best, если hls нет
 # (тогда без ускорения, но загрузка работает).
 HLS_FORMAT = "b[protocol*=m3u8]/b"
@@ -234,6 +237,7 @@ async def _probe_duration_ffprobe(stream_url: str, referer: str = "") -> float:
     if not executable:
         return 0.0
     cmd = [executable, "-v", "error"]
+    cmd.extend(PROTOCOL_WHITELIST)
     if referer:
         cmd.extend(["-headers", f"Referer: {referer}\r\n"])
     cmd.extend(["-show_entries", "format=duration", "-of",
@@ -260,6 +264,7 @@ async def _download_direct_ffmpeg(stream_url: str, referer: str,
     await on_progress({"phase": "download", "progress": 0, "eta": 0, "speed": 0.0})
 
     cmd = [executable, "-y"]
+    cmd.extend(PROTOCOL_WHITELIST)
     if referer:
         cmd.extend(["-headers", f"Referer: {referer}\r\n"])
     cmd.extend(["-i", stream_url, "-c", "copy", "-progress", "pipe:1", "-nostats", tmp_out])
