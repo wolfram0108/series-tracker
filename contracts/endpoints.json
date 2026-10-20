@@ -1,810 +1,1173 @@
 [
  {
-  "file": "routes/__init__.py",
-  "line": 22,
-  "blueprint": "main_bp",
-  "route": "/",
-  "methods": [
-   "GET"
-  ],
+  "method": "GET",
+  "path": "/",
   "func": "index",
-  "full_path": "/"
+  "file": "modules/gateway/module.py",
+  "line": 273,
+  "access": "public",
+  "conditional": null,
+  "summary": "Боевой фронт панели (web/dist/index.html)",
+  "panel_sites": []
  },
  {
-  "file": "routes/__init__.py",
-  "line": 26,
-  "blueprint": "main_bp",
-  "route": "/directory-picker-test",
-  "methods": [
-   "GET"
-  ],
-  "func": "directory_picker_test",
-  "full_path": "/directory-picker-test"
+  "method": "POST",
+  "path": "/api/_diag/echo",
+  "func": "diag_echo",
+  "file": "modules/gateway/module.py",
+  "line": 243,
+  "access": "session",
+  "conditional": "diag",
+  "summary": "Диагностический прокси к шине (только при diag=True)",
+  "panel_sites": []
  },
  {
-  "file": "routes/__init__.py",
-  "line": 30,
-  "blueprint": "main_bp",
-  "route": "/hello-world",
-  "methods": [
-   "GET"
-  ],
-  "func": "hello_world",
-  "full_path": "/hello-world"
+  "method": "GET",
+  "path": "/api/agent/queue",
+  "func": "agent_queue",
+  "file": "modules/gateway/api_system.py",
+  "line": 55,
+  "access": "session",
+  "conditional": null,
+  "summary": "Очередь торрент-конвейера",
+  "panel_sites": []
  },
  {
-  "file": "routes/__init__.py",
-  "line": 34,
-  "blueprint": "main_bp",
-  "route": "/api/hello-info",
-  "methods": [
-   "GET"
-  ],
-  "func": "hello_info",
-  "full_path": "/api/hello-info"
+  "method": "GET",
+  "path": "/api/auth",
+  "func": "get_auth",
+  "file": "modules/gateway/api_settings.py",
+  "line": 70,
+  "access": "session",
+  "conditional": null,
+  "summary": "Креды внешних сервисов без секретов",
+  "panel_sites": [
+   "components/settings/SettingsAuth.vue:39"
+  ]
  },
  {
-  "file": "routes/filebrowser.py",
-  "line": 11,
-  "blueprint": "filebrowser_bp",
-  "route": "/api/directories",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_directories",
-  "full_path": "/api/directories"
+  "method": "POST",
+  "path": "/api/auth",
+  "func": "save_auth",
+  "file": "modules/gateway/api_settings.py",
+  "line": 84,
+  "access": "session",
+  "conditional": null,
+  "summary": "Сохранение кредов сервисов",
+  "panel_sites": [
+   "components/settings/SettingsAuth.vue:63"
+  ]
  },
  {
-  "file": "routes/media.py",
-  "line": 12,
-  "blueprint": "media_bp",
-  "route": "/series/<int:series_id>/media-items",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_media_items_for_series",
-  "full_path": "/api/series/<int:series_id>/media-items"
+  "method": "POST",
+  "path": "/api/auth/password",
+  "func": "change_password",
+  "file": "modules/gateway/api_auth.py",
+  "line": 131,
+  "access": "session",
+  "conditional": null,
+  "summary": "Смена пароля администратором",
+  "panel_sites": [
+   "components/settings/SettingsAccount.vue:48"
+  ]
  },
  {
-  "file": "routes/media.py",
-  "line": 26,
-  "blueprint": "media_bp",
-  "route": "/media-items/<string:unique_id>/chapters",
-  "methods": [
-   "POST"
-  ],
-  "func": "fetch_and_save_chapters",
-  "full_path": "/api/media-items/<string:unique_id>/chapters"
+  "method": "GET",
+  "path": "/api/auth/status",
+  "func": "auth_status",
+  "file": "modules/gateway/api_auth.py",
+  "line": 79,
+  "access": "public",
+  "conditional": null,
+  "summary": "Статус онбординга: настроен ли админ, вошёл ли клиент",
+  "panel_sites": [
+   "main.ts:71"
+  ]
  },
  {
-  "file": "routes/media.py",
-  "line": 56,
-  "blueprint": "media_bp",
-  "route": "/media-items/<int:item_id>/ignore",
-  "methods": [
-   "PUT"
-  ],
-  "func": "set_item_ignored_status",
-  "full_path": "/api/media-items/<int:item_id>/ignore"
- },
- {
-  "file": "routes/media.py",
-  "line": 85,
-  "blueprint": "media_bp",
-  "route": "/media-items/<string:unique_id>/ignore",
-  "methods": [
-   "PUT"
-  ],
-  "func": "set_item_ignored_status_by_uid",
-  "full_path": "/api/media-items/<string:unique_id>/ignore"
- },
- {
-  "file": "routes/media.py",
-  "line": 112,
-  "blueprint": "media_bp",
-  "route": "/media-items/<string:unique_id>/slice",
-  "methods": [
-   "POST"
-  ],
-  "func": "create_slice_task",
-  "full_path": "/api/media-items/<string:unique_id>/slice"
- },
- {
-  "file": "routes/media.py",
-  "line": 144,
-  "blueprint": "media_bp",
-  "route": "/media-items/<string:unique_id>/verify-sliced-files",
-  "methods": [
-   "POST"
-  ],
-  "func": "verify_sliced_files",
-  "full_path": "/api/media-items/<string:unique_id>/verify-sliced-files"
- },
- {
-  "file": "routes/media.py",
-  "line": 270,
-  "blueprint": "media_bp",
-  "route": "/series/<int:series_id>/deep-adoption",
-  "methods": [
-   "POST"
-  ],
-  "func": "deep_adoption",
-  "full_path": "/api/series/<int:series_id>/deep-adoption"
- },
- {
-  "file": "routes/media.py",
-  "line": 284,
-  "blueprint": "media_bp",
-  "route": "/media-items/<string:unique_id>/chapters/filtered",
-  "methods": [
-   "POST"
-  ],
-  "func": "get_filtered_chapters",
-  "full_path": "/api/media-items/<string:unique_id>/chapters/filtered"
- },
- {
-  "file": "routes/media.py",
-  "line": 335,
-  "blueprint": "media_bp",
-  "route": "/media-items/<string:unique_id>/chapters/mark-garbage",
-  "methods": [
-   "POST"
-  ],
-  "func": "mark_garbage_chapters",
-  "full_path": "/api/media-items/<string:unique_id>/chapters/mark-garbage"
- },
- {
-  "file": "routes/media.py",
-  "line": 388,
-  "blueprint": "media_bp",
-  "route": "/media-items/<string:unique_id>/slice-with-filter",
-  "methods": [
-   "POST"
-  ],
-  "func": "create_slice_task_with_filter",
-  "full_path": "/api/media-items/<string:unique_id>/slice-with-filter"
- },
- {
-  "file": "routes/parser.py",
-  "line": 10,
-  "blueprint": "profiles_bp",
-  "route": "",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_parser_profiles",
-  "full_path": "/api/parser-profiles"
- },
- {
-  "file": "routes/parser.py",
-  "line": 15,
-  "blueprint": "profiles_bp",
-  "route": "",
-  "methods": [
-   "POST"
-  ],
-  "func": "create_parser_profile",
-  "full_path": "/api/parser-profiles"
- },
- {
-  "file": "routes/parser.py",
-  "line": 34,
-  "blueprint": "profiles_bp",
-  "route": "/<int:profile_id>",
-  "methods": [
-   "PUT"
-  ],
-  "func": "update_parser_profile",
-  "full_path": "/api/parser-profiles/<int:profile_id>"
- },
- {
-  "file": "routes/parser.py",
-  "line": 49,
-  "blueprint": "profiles_bp",
-  "route": "/<int:profile_id>",
-  "methods": [
-   "DELETE"
-  ],
-  "func": "delete_parser_profile",
-  "full_path": "/api/parser-profiles/<int:profile_id>"
- },
- {
-  "file": "routes/parser.py",
-  "line": 59,
-  "blueprint": "profiles_bp",
-  "route": "/<int:profile_id>/rules",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_rules_for_profile",
-  "full_path": "/api/parser-profiles/<int:profile_id>/rules"
- },
- {
-  "file": "routes/parser.py",
-  "line": 64,
-  "blueprint": "profiles_bp",
-  "route": "/<int:profile_id>/rules",
-  "methods": [
-   "POST"
-  ],
-  "func": "add_rule_to_profile",
-  "full_path": "/api/parser-profiles/<int:profile_id>/rules"
- },
- {
-  "file": "routes/parser.py",
-  "line": 74,
-  "blueprint": "profiles_bp",
-  "route": "/scrape-titles",
-  "methods": [
-   "POST"
-  ],
-  "func": "scrape_vk_titles",
-  "full_path": "/api/parser-profiles/scrape-titles"
- },
- {
-  "file": "routes/parser.py",
-  "line": 95,
-  "blueprint": "rules_bp",
-  "route": "/<int:rule_id>",
-  "methods": [
-   "PUT"
-  ],
-  "func": "update_rule",
-  "full_path": "/api/parser-rules/<int:rule_id>"
- },
- {
-  "file": "routes/parser.py",
-  "line": 105,
-  "blueprint": "rules_bp",
-  "route": "/<int:rule_id>",
-  "methods": [
-   "DELETE"
-  ],
-  "func": "delete_rule",
-  "full_path": "/api/parser-rules/<int:rule_id>"
- },
- {
-  "file": "routes/parser.py",
-  "line": 114,
-  "blueprint": "rules_bp",
-  "route": "/reorder",
-  "methods": [
-   "POST"
-  ],
-  "func": "reorder_rules",
-  "full_path": "/api/parser-rules/reorder"
- },
- {
-  "file": "routes/parser.py",
-  "line": 123,
-  "blueprint": "profiles_bp",
-  "route": "/test",
-  "methods": [
-   "POST"
-  ],
-  "func": "test_parser_rules",
-  "full_path": "/api/parser-profiles/test"
- },
- {
-  "file": "routes/series.py",
-  "line": 21,
-  "blueprint": "series_bp",
-  "route": "",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_series",
-  "full_path": "/api/series"
- },
- {
-  "file": "routes/series.py",
-  "line": 51,
-  "blueprint": "series_bp",
-  "route": "",
-  "methods": [
-   "POST"
-  ],
-  "func": "add_series",
-  "full_path": "/api/series"
- },
- {
-  "file": "routes/series.py",
-  "line": 75,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_series_details",
-  "full_path": "/api/series/<int:series_id>"
- },
- {
-  "file": "routes/series.py",
-  "line": 105,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/rename_preview",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_rename_preview",
-  "full_path": "/api/series/<int:series_id>/rename_preview"
- },
- {
-  "file": "routes/series.py",
-  "line": 189,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/reprocess_vk_files",
-  "methods": [
-   "POST"
-  ],
-  "func": "reprocess_vk_files_route",
-  "full_path": "/api/series/<int:series_id>/reprocess_vk_files"
- },
- {
-  "file": "routes/series.py",
-  "line": 210,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/composition",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_series_composition",
-  "full_path": "/api/series/<int:series_id>/composition"
- },
- {
-  "file": "routes/series.py",
-  "line": 403,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/reprocess",
-  "methods": [
-   "POST"
-  ],
-  "func": "reprocess_series_torrents_route",
-  "full_path": "/api/series/<int:series_id>/reprocess"
- },
- {
-  "file": "routes/series.py",
-  "line": 427,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>",
-  "methods": [
-   "POST"
-  ],
-  "func": "update_series",
-  "full_path": "/api/series/<int:series_id>"
- },
- {
-  "file": "routes/series.py",
-  "line": 496,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/toggle_auto_scan",
-  "methods": [
-   "POST"
-  ],
-  "func": "toggle_auto_scan",
-  "full_path": "/api/series/<int:series_id>/toggle_auto_scan"
- },
- {
-  "file": "routes/series.py",
-  "line": 507,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>",
-  "methods": [
-   "DELETE"
-  ],
-  "func": "delete_series",
-  "full_path": "/api/series/<int:series_id>"
- },
- {
-  "file": "routes/series.py",
-  "line": 531,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/state",
-  "methods": [
-   "POST"
-  ],
-  "func": "set_series_state_route",
-  "full_path": "/api/series/<int:series_id>/state"
- },
- {
-  "file": "routes/series.py",
-  "line": 540,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/viewing_heartbeat",
-  "methods": [
-   "POST"
-  ],
-  "func": "viewing_heartbeat",
-  "full_path": "/api/series/<int:series_id>/viewing_heartbeat"
- },
- {
-  "file": "routes/series.py",
-  "line": 545,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/scan",
-  "methods": [
-   "POST"
-  ],
-  "func": "scan_series_route",
-  "full_path": "/api/series/<int:series_id>/scan"
- },
- {
-  "file": "routes/series.py",
-  "line": 555,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/torrents/history",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_series_torrents_history",
-  "full_path": "/api/series/<int:series_id>/torrents/history"
- },
- {
-  "file": "routes/series.py",
-  "line": 560,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/ignored-seasons",
-  "methods": [
-   "POST"
-  ],
-  "func": "update_ignored_seasons",
-  "full_path": "/api/series/<int:series_id>/ignored-seasons"
- },
- {
-  "file": "routes/series.py",
+  "method": "POST",
+  "path": "/api/database/clear_table",
+  "func": "database_clear_table",
+  "file": "modules/gateway/api_settings.py",
   "line": 574,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/sliced-files",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_sliced_files_for_series",
-  "full_path": "/api/series/<int:series_id>/sliced-files"
+  "access": "session",
+  "conditional": null,
+  "summary": "Очистка таблицы БД",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:151"
+  ]
  },
  {
-  "file": "routes/series.py",
-  "line": 596,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/vk-quality-priority",
-  "methods": [
-   "PUT"
-  ],
-  "func": "set_vk_quality_priority",
-  "full_path": "/api/series/<int:series_id>/vk-quality-priority"
+  "method": "GET",
+  "path": "/api/database/table/{table_name}",
+  "func": "database_table",
+  "file": "modules/gateway/api_settings.py",
+  "line": 556,
+  "access": "session",
+  "conditional": null,
+  "summary": "Все строки таблицы БД",
+  "panel_sites": [
+   "components/settings/DatabaseViewerModal.vue:39"
+  ]
  },
  {
-  "file": "routes/series.py",
-  "line": 611,
-  "blueprint": "series_bp",
-  "route": "/active_torrents",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_active_torrents_monitoring",
-  "full_path": "/api/series/active_torrents"
+  "method": "GET",
+  "path": "/api/database/tables",
+  "func": "database_tables",
+  "file": "modules/gateway/api_settings.py",
+  "line": 551,
+  "access": "session",
+  "conditional": null,
+  "summary": "Список таблиц БД",
+  "panel_sites": [
+   "components/settings/DatabaseViewerModal.vue:23",
+   "components/settings/SettingsDebug.vue:137"
+  ]
  },
  {
-  "file": "routes/series.py",
-  "line": 620,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/reset_torrents",
-  "methods": [
-   "POST"
-  ],
-  "func": "reset_torrents",
-  "full_path": "/api/series/<int:series_id>/reset_torrents"
+  "method": "GET",
+  "path": "/api/directories",
+  "func": "directories",
+  "file": "modules/gateway/api_settings.py",
+  "line": 298,
+  "access": "session",
+  "conditional": null,
+  "summary": "Листинг каталогов",
+  "panel_sites": []
  },
  {
-  "file": "routes/series.py",
-  "line": 662,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/source-filenames",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_series_source_filenames",
-  "full_path": "/api/series/<int:series_id>/source-filenames"
+  "method": "GET",
+  "path": "/api/downloads/queue",
+  "func": "downloads_queue",
+  "file": "modules/gateway/api_system.py",
+  "line": 63,
+  "access": "session",
+  "conditional": null,
+  "summary": "Очередь загрузок видео",
+  "panel_sites": []
  },
  {
-  "file": "routes/series.py",
-  "line": 671,
-  "blueprint": "series_bp",
-  "route": "/<int:series_id>/relocate",
-  "methods": [
-   "POST"
-  ],
-  "func": "relocate_series",
-  "full_path": "/api/series/<int:series_id>/relocate"
- },
- {
-  "file": "routes/settings.py",
-  "line": 58,
-  "blueprint": "settings_bp",
-  "route": "/auth",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_all_auth",
-  "full_path": "/api/auth"
- },
- {
-  "file": "routes/settings.py",
-  "line": 68,
-  "blueprint": "settings_bp",
-  "route": "/auth",
-  "methods": [
-   "POST"
-  ],
-  "func": "save_all_auth",
-  "full_path": "/api/auth"
- },
- {
-  "file": "routes/settings.py",
-  "line": 87,
-  "blueprint": "settings_bp",
-  "route": "/parse_url",
-  "methods": [
-   "POST"
-  ],
-  "func": "parse_url",
-  "full_path": "/api/parse_url"
- },
- {
-  "file": "routes/settings.py",
-  "line": 139,
-  "blueprint": "settings_bp",
-  "route": "/settings/debug_flags",
-  "methods": [
-   "GET",
-   "POST"
-  ],
-  "func": "handle_debug_flags",
-  "full_path": "/api/settings/debug_flags"
- },
- {
-  "file": "routes/settings.py",
-  "line": 171,
-  "blueprint": "settings_bp",
-  "route": "/settings/force_replace",
-  "methods": [
-   "GET",
-   "POST"
-  ],
-  "func": "handle_force_replace_setting",
-  "full_path": "/api/settings/force_replace"
- },
- {
-  "file": "routes/settings.py",
-  "line": 182,
-  "blueprint": "settings_bp",
-  "route": "/settings/parallel_downloads",
-  "methods": [
-   "GET",
-   "POST"
-  ],
-  "func": "handle_parallel_downloads",
-  "full_path": "/api/settings/parallel_downloads"
- },
- {
-  "file": "routes/settings.py",
-  "line": 193,
-  "blueprint": "settings_bp",
-  "route": "/settings/less_strict_scan",
-  "methods": [
-   "GET",
-   "POST"
-  ],
-  "func": "handle_less_strict_scan_setting",
-  "full_path": "/api/settings/less_strict_scan"
- },
- {
-  "file": "routes/settings.py",
-  "line": 205,
-  "blueprint": "settings_bp",
-  "route": "/settings/slicing_delete_source",
-  "methods": [
-   "GET",
-   "POST"
-  ],
-  "func": "handle_slicing_delete_source",
-  "full_path": "/api/settings/slicing_delete_source"
- },
- {
-  "file": "routes/system.py",
-  "line": 7,
-  "blueprint": "system_bp",
-  "route": "/stream",
-  "methods": [
-   "GET"
-  ],
-  "func": "stream",
-  "full_path": "/api/stream"
- },
- {
-  "file": "routes/system.py",
-  "line": 32,
-  "blueprint": "system_bp",
-  "route": "/database/clear",
-  "methods": [
-   "POST"
-  ],
-  "func": "clear_database",
-  "full_path": "/api/database/clear"
- },
- {
-  "file": "routes/system.py",
-  "line": 42,
-  "blueprint": "system_bp",
-  "route": "/database/tables",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_db_tables",
-  "full_path": "/api/database/tables"
- },
- {
-  "file": "routes/system.py",
-  "line": 53,
-  "blueprint": "system_bp",
-  "route": "/database/clear_table",
-  "methods": [
-   "POST"
-  ],
-  "func": "clear_table",
-  "full_path": "/api/database/clear_table"
- },
- {
-  "file": "routes/system.py",
+  "method": "POST",
+  "path": "/api/downloads/queue/clear",
+  "func": "downloads_queue_clear",
+  "file": "modules/gateway/api_system.py",
   "line": 71,
-  "blueprint": "system_bp",
-  "route": "/logs",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_logs",
-  "full_path": "/api/logs"
+  "access": "session",
+  "conditional": null,
+  "summary": "Очистка очереди загрузок",
+  "panel_sites": []
  },
  {
-  "file": "routes/system.py",
+  "method": "POST",
+  "path": "/api/downloads/{task_id}/cancel",
+  "func": "downloads_cancel",
+  "file": "modules/gateway/api_system.py",
+  "line": 83,
+  "access": "session",
+  "conditional": null,
+  "summary": "Отмена загрузки: процесс, файл, задача",
+  "panel_sites": []
+ },
+ {
+  "method": "POST",
+  "path": "/api/login",
+  "func": "login",
+  "file": "modules/gateway/api_auth.py",
+  "line": 49,
+  "access": "public",
+  "conditional": null,
+  "summary": "Вход администратора",
+  "panel_sites": [
+   "components/LoginModal.vue:40"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/logout",
+  "func": "logout",
+  "file": "modules/gateway/api_auth.py",
+  "line": 161,
+  "access": "session",
+  "conditional": null,
+  "summary": "Выход (очистка сессии)",
+  "panel_sites": [
+   "App.vue:44"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/logs",
+  "func": "logs",
+  "file": "modules/gateway/api_settings.py",
+  "line": 491,
+  "access": "session",
+  "conditional": null,
+  "summary": "Чтение логов из logs/*.log",
+  "panel_sites": [
+   "components/LogsModal.vue:52"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/logs/groups",
+  "func": "log_groups",
+  "file": "modules/gateway/api_settings.py",
+  "line": 517,
+  "access": "session",
+  "conditional": null,
+  "summary": "Список групп логов",
+  "panel_sites": [
+   "components/LogsModal.vue:38"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/me",
+  "func": "me",
+  "file": "modules/gateway/api_auth.py",
+  "line": 166,
+  "access": "session",
+  "conditional": null,
+  "summary": "Кто сейчас вошёл",
+  "panel_sites": []
+ },
+ {
+  "method": "POST",
+  "path": "/api/media-items/{unique_id}/chapters",
+  "func": "chapters",
+  "file": "modules/gateway/api_media.py",
+  "line": 91,
+  "access": "session",
+  "conditional": null,
+  "summary": "Оглавление исходника",
+  "panel_sites": [
+   "components/status/StatusSlicing.vue:123"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/media-items/{unique_id}/chapters/filtered",
+  "func": "chapters_filtered",
+  "file": "modules/gateway/api_media.py",
+  "line": 104,
+  "access": "session",
+  "conditional": null,
+  "summary": "Оглавление с автофильтром мусора",
+  "panel_sites": [
+   "components/status/StatusSlicing.vue:140"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/media-items/{unique_id}/chapters/mark-garbage",
+  "func": "chapters_mark",
+  "file": "modules/gateway/api_media.py",
+  "line": 119,
+  "access": "session",
+  "conditional": null,
+  "summary": "Ручная разметка мусорных глав",
+  "panel_sites": [
+   "components/status/StatusSlicing.vue:170"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/media-items/{unique_id}/delete-source",
+  "func": "delete_source",
+  "file": "modules/gateway/api_media.py",
+  "line": 189,
+  "access": "session",
+  "conditional": null,
+  "summary": "Удаление исходника нарезанной компиляции",
+  "panel_sites": [
+   "components/status/StatusSlicing.vue:243"
+  ]
+ },
+ {
+  "method": "PUT",
+  "path": "/api/media-items/{unique_id}/ignore",
+  "func": "set_ignored",
+  "file": "modules/gateway/api_media.py",
+  "line": 60,
+  "access": "session",
+  "conditional": null,
+  "summary": "Игнор одного медиа-элемента",
+  "panel_sites": [
+   "components/status/StatusVkComposition.vue:334"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/media-items/{unique_id}/slice",
+  "func": "slice_task",
+  "file": "modules/gateway/api_media.py",
+  "line": 155,
+  "access": "session",
+  "conditional": null,
+  "summary": "Задача нарезки компиляции",
+  "panel_sites": [
+   "components/status/StatusSlicing.vue:194"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/media-items/{unique_id}/slice-with-filter",
+  "func": "slice_with_filter",
+  "file": "modules/gateway/api_media.py",
+  "line": 169,
+  "access": "session",
+  "conditional": null,
+  "summary": "Нарезка с заданным списком отброшенных глав",
+  "panel_sites": [
+   "components/status/StatusSlicing.vue:219"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/media-items/{unique_id}/verify-sliced-files",
+  "func": "verify_sliced",
+  "file": "modules/gateway/api_media.py",
+  "line": 204,
+  "access": "session",
+  "conditional": null,
+  "summary": "Сверка нарезок с диском",
+  "panel_sites": []
+ },
+ {
+  "method": "POST",
+  "path": "/api/parse_url",
+  "func": "parse_url",
+  "file": "modules/gateway/api_settings.py",
+  "line": 108,
+  "access": "session",
+  "conditional": null,
+  "summary": "Разбор URL серии: заголовок, раздачи, трекер",
+  "panel_sites": [
+   "components/AddSeriesModal.vue:272",
+   "components/status/StatusProperties.vue:123"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/parser-profiles",
+  "func": "profiles_list",
+  "file": "modules/gateway/api_settings.py",
+  "line": 315,
+  "access": "session",
+  "conditional": null,
+  "summary": "Список профилей парсера",
+  "panel_sites": [
+   "components/AddSeriesModal.vue:471",
+   "components/settings/SettingsParser.vue:78",
+   "components/status/StatusProperties.vue:215"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/parser-profiles",
+  "func": "profile_create",
+  "file": "modules/gateway/api_settings.py",
+  "line": 319,
+  "access": "session",
+  "conditional": null,
+  "summary": "Создание профиля парсера",
+  "panel_sites": [
+   "components/settings/SettingsParser.vue:89"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/parser-profiles/scrape-titles",
+  "func": "scrape_titles",
+  "file": "modules/gateway/api_settings.py",
+  "line": 381,
+  "access": "session",
+  "conditional": null,
+  "summary": "Сбор названий с VK-канала или видеохостинга",
+  "panel_sites": [
+   "components/settings/ParserTest.vue:164"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/parser-profiles/test",
+  "func": "rules_test",
+  "file": "modules/gateway/api_settings.py",
+  "line": 447,
+  "access": "session",
+  "conditional": null,
+  "summary": "Тест профиля правил",
+  "panel_sites": [
+   "components/settings/ParserTest.vue:195"
+  ]
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/parser-profiles/{profile_id}",
+  "func": "profile_delete",
+  "file": "modules/gateway/api_settings.py",
+  "line": 353,
+  "access": "session",
+  "conditional": null,
+  "summary": "Удаление профиля парсера с правилами",
+  "panel_sites": [
+   "components/settings/SettingsParser.vue:141"
+  ]
+ },
+ {
+  "method": "PUT",
+  "path": "/api/parser-profiles/{profile_id}",
+  "func": "profile_update",
+  "file": "modules/gateway/api_settings.py",
+  "line": 337,
+  "access": "session",
+  "conditional": null,
+  "summary": "Переименование профиля парсера",
+  "panel_sites": [
+   "components/settings/SettingsParser.vue:117"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/parser-profiles/{profile_id}/rules",
+  "func": "rules_list",
+  "file": "modules/gateway/api_settings.py",
+  "line": 363,
+  "access": "session",
+  "conditional": null,
+  "summary": "Правила профиля",
+  "panel_sites": [
+   "components/settings/SettingsParser.vue:172"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/parser-profiles/{profile_id}/rules",
+  "func": "rule_add",
+  "file": "modules/gateway/api_settings.py",
+  "line": 369,
+  "access": "session",
+  "conditional": null,
+  "summary": "Добавление правила в профиль",
+  "panel_sites": [
+   "components/settings/SettingsParser.vue:251"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/parser-rules/reorder",
+  "func": "rules_reorder",
+  "file": "modules/gateway/api_settings.py",
+  "line": 481,
+  "access": "session",
+  "conditional": null,
+  "summary": "Перестановка правил",
+  "panel_sites": [
+   "components/settings/SettingsParser.vue:299"
+  ]
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/parser-rules/{rule_id}",
+  "func": "rule_delete",
+  "file": "modules/gateway/api_settings.py",
+  "line": 474,
+  "access": "session",
+  "conditional": null,
+  "summary": "Удаление правила",
+  "panel_sites": [
+   "components/settings/SettingsParser.vue:282"
+  ]
+ },
+ {
+  "method": "PUT",
+  "path": "/api/parser-rules/{rule_id}",
+  "func": "rule_update",
+  "file": "modules/gateway/api_settings.py",
+  "line": 463,
+  "access": "session",
+  "conditional": null,
+  "summary": "Изменение правила",
+  "panel_sites": [
+   "components/settings/SettingsParser.vue:264"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/preview/naming/fetch",
+  "func": "preview_naming_fetch",
+  "file": "modules/gateway/api_media.py",
+  "line": 341,
+  "access": "session",
+  "conditional": null,
+  "summary": "Фоновый префетч списков файлов раздач",
+  "panel_sites": [
+   "components/AddSeriesModal.vue:344"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/scanner/scan_all",
+  "func": "scan_all",
+  "file": "modules/gateway/api_system.py",
+  "line": 40,
+  "access": "session",
+  "conditional": null,
+  "summary": "Полный проход по всем сериалам",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:44"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/scanner/settings",
+  "func": "scanner_settings",
+  "file": "modules/gateway/api_system.py",
+  "line": 24,
+  "access": "session",
+  "conditional": null,
+  "summary": "Настройки планировщика (вкл/выкл, интервал)",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:37"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/scanner/status",
+  "func": "scanner_status",
+  "file": "modules/gateway/api_system.py",
+  "line": 20,
+  "access": "session",
+  "conditional": null,
+  "summary": "Состояние планировщика сканирования",
+  "panel_sites": [
+   "stores/scanner.ts:24"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/series",
+  "func": "list_series",
+  "file": "modules/gateway/api_series.py",
+  "line": 63,
+  "access": "session",
+  "conditional": null,
+  "summary": "Список сериалов",
+  "panel_sites": [
+   "stores/series.ts:34"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/series",
+  "func": "add_series",
+  "file": "modules/gateway/api_series.py",
+  "line": 77,
+  "access": "session",
+  "conditional": null,
+  "summary": "Создание серии",
+  "panel_sites": [
+   "components/AddSeriesModal.vue:457"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/series/active_torrents",
+  "func": "active_torrents",
+  "file": "modules/gateway/api_series.py",
+  "line": 98,
+  "access": "session",
+  "conditional": null,
+  "summary": "Прогресс активных загрузок",
+  "panel_sites": []
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/series/{series_id}",
+  "func": "delete_series",
+  "file": "modules/gateway/api_series.py",
+  "line": 173,
+  "access": "session",
+  "conditional": null,
+  "summary": "Удаление серии",
+  "panel_sites": [
+   "App.vue:95"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/series/{series_id}",
+  "func": "series_details",
+  "file": "modules/gateway/api_series.py",
+  "line": 110,
+  "access": "session",
+  "conditional": null,
+  "summary": "Карточка серии",
+  "panel_sites": [
+   "components/StatusModal.vue:46",
+   "components/status/StatusComposition.vue:219",
+   "components/status/StatusVkComposition.vue:249",
+   "components/status/StatusVkComposition.vue:287"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/series/{series_id}",
+  "func": "update_series",
+  "file": "modules/gateway/api_series.py",
   "line": 128,
-  "blueprint": "system_bp",
-  "route": "/agent/queue",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_agent_queue",
-  "full_path": "/api/agent/queue"
+  "access": "session",
+  "conditional": null,
+  "summary": "Сохранение свойств серии",
+  "panel_sites": [
+   "components/status/StatusProperties.vue:334"
+  ]
  },
  {
-  "file": "routes/system.py",
-  "line": 133,
-  "blueprint": "system_bp",
-  "route": "/agent/reset",
-  "methods": [
-   "POST"
-  ],
-  "func": "reset_agent",
-  "full_path": "/api/agent/reset"
+  "method": "GET",
+  "path": "/api/series/{series_id}/composition",
+  "func": "composition",
+  "file": "modules/gateway/api_media.py",
+  "line": 250,
+  "access": "session",
+  "conditional": null,
+  "summary": "Состав композиции",
+  "panel_sites": [
+   "components/status/StatusComposition.vue:230",
+   "components/status/StatusVkComposition.vue:234"
+  ]
  },
  {
-  "file": "routes/system.py",
-  "line": 153,
-  "blueprint": "system_bp",
-  "route": "/scanner/status",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_scanner_status",
-  "full_path": "/api/scanner/status"
+  "method": "POST",
+  "path": "/api/series/{series_id}/deep-adoption",
+  "func": "deep_adoption",
+  "file": "modules/gateway/api_media.py",
+  "line": 221,
+  "access": "session",
+  "conditional": null,
+  "summary": "Глубокое усыновление (фон)",
+  "panel_sites": [
+   "components/status/StatusVkComposition.vue:401"
+  ]
  },
  {
-  "file": "routes/system.py",
-  "line": 157,
-  "blueprint": "system_bp",
-  "route": "/scanner/settings",
-  "methods": [
-   "POST"
-  ],
-  "func": "update_scanner_settings",
-  "full_path": "/api/scanner/settings"
+  "method": "PUT",
+  "path": "/api/series/{series_id}/ignored-episodes",
+  "func": "ignored_episodes",
+  "file": "modules/gateway/api_series.py",
+  "line": 247,
+  "access": "session",
+  "conditional": null,
+  "summary": "Память отключённых серий",
+  "panel_sites": [
+   "components/status/StatusComposition.vue:129"
+  ]
  },
  {
-  "file": "routes/system.py",
-  "line": 170,
-  "blueprint": "system_bp",
-  "route": "/scanner/scan_all",
-  "methods": [
-   "POST"
-  ],
-  "func": "scan_all_now",
-  "full_path": "/api/scanner/scan_all"
+  "method": "POST",
+  "path": "/api/series/{series_id}/ignored-seasons",
+  "func": "ignored_seasons",
+  "file": "modules/gateway/api_series.py",
+  "line": 228,
+  "access": "session",
+  "conditional": null,
+  "summary": "Список игнорируемых сезонов",
+  "panel_sites": [
+   "components/status/StatusComposition.vue:178",
+   "components/status/StatusVkComposition.vue:372"
+  ]
  },
  {
-  "file": "routes/system.py",
-  "line": 182,
-  "blueprint": "system_bp",
-  "route": "/downloads/queue",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_download_queue",
-  "full_path": "/api/downloads/queue"
+  "method": "GET",
+  "path": "/api/series/{series_id}/media-items",
+  "func": "media_items",
+  "file": "modules/gateway/api_media.py",
+  "line": 51,
+  "access": "session",
+  "conditional": null,
+  "summary": "Медиа-элементы серии",
+  "panel_sites": [
+   "components/status/StatusHistory.vue:70",
+   "components/status/StatusSlicing.vue:84"
+  ]
  },
  {
-  "file": "routes/system.py",
-  "line": 190,
-  "blueprint": "system_bp",
-  "route": "/downloads/queue/clear",
-  "methods": [
-   "POST"
-  ],
-  "func": "clear_download_queue",
-  "full_path": "/api/downloads/queue/clear"
+  "method": "PUT",
+  "path": "/api/series/{series_id}/media-items/ignore-season",
+  "func": "set_ignored_bulk",
+  "file": "modules/gateway/api_media.py",
+  "line": 73,
+  "access": "session",
+  "conditional": null,
+  "summary": "Массовый игнор сезона",
+  "panel_sites": [
+   "components/status/StatusVkComposition.vue:357"
+  ]
  },
  {
-  "file": "routes/system.py",
-  "line": 200,
-  "blueprint": "system_bp",
-  "route": "/database/table/<string:table_name>",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_table_content",
-  "full_path": "/api/database/table/<string:table_name>"
+  "method": "GET",
+  "path": "/api/series/{series_id}/rename_preview",
+  "func": "rename_preview",
+  "file": "modules/gateway/api_media.py",
+  "line": 277,
+  "access": "session",
+  "conditional": null,
+  "summary": "Предпросмотр новых имён файлов",
+  "panel_sites": [
+   "components/status/StatusVkComposition.vue:241"
+  ]
  },
  {
-  "file": "routes/test.py",
-  "line": 6,
-  "blueprint": "test_bp",
-  "route": "/directory-picker-test",
-  "methods": [
-   "GET"
-  ],
-  "func": "directory_picker_test",
-  "full_path": "/directory-picker-test"
+  "method": "POST",
+  "path": "/api/series/{series_id}/reprocess",
+  "func": "reprocess",
+  "file": "modules/gateway/api_media.py",
+  "line": 299,
+  "access": "session",
+  "conditional": null,
+  "summary": "Переобработка имён файлов (торрент)",
+  "panel_sites": [
+   "components/status/StatusComposition.vue:256"
+  ]
  },
  {
-  "file": "routes/tmdb.py",
-  "line": 9,
-  "blueprint": "tmdb_bp",
-  "route": "/search",
-  "methods": [
-   "POST"
-  ],
-  "func": "search",
-  "full_path": "/api/tmdb/search"
+  "method": "POST",
+  "path": "/api/series/{series_id}/reprocess_vk_files",
+  "func": "reprocess_vk",
+  "file": "modules/gateway/api_media.py",
+  "line": 306,
+  "access": "session",
+  "conditional": null,
+  "summary": "Переобработка имён файлов (видео)",
+  "panel_sites": [
+   "components/status/StatusVkComposition.vue:381"
+  ]
  },
  {
-  "file": "routes/tmdb.py",
-  "line": 36,
-  "blueprint": "tmdb_bp",
-  "route": "/details/<int:tmdb_id>",
-  "methods": [
-   "GET"
-  ],
-  "func": "details",
-  "full_path": "/api/tmdb/details/<int:tmdb_id>"
+  "method": "POST",
+  "path": "/api/series/{series_id}/scan",
+  "func": "scan_series",
+  "file": "modules/gateway/api_series.py",
+  "line": 298,
+  "access": "session",
+  "conditional": null,
+  "summary": "Синхронный скан одной серии",
+  "panel_sites": [
+   "App.vue:58"
+  ]
  },
  {
-  "file": "routes/trackers.py",
-  "line": 5,
-  "blueprint": "trackers_bp",
-  "route": "",
-  "methods": [
-   "GET"
-  ],
-  "func": "get_trackers",
-  "full_path": "/api/trackers"
+  "method": "GET",
+  "path": "/api/series/{series_id}/sliced-files",
+  "func": "sliced_files",
+  "file": "modules/gateway/api_media.py",
+  "line": 229,
+  "access": "session",
+  "conditional": null,
+  "summary": "Нарезки с именем родителя и сезоном",
+  "panel_sites": [
+   "components/status/StatusVkComposition.vue:261"
+  ]
  },
  {
-  "file": "routes/trackers.py",
-  "line": 15,
-  "blueprint": "trackers_bp",
-  "route": "/<int:tracker_id>",
-  "methods": [
-   "PUT"
-  ],
-  "func": "update_tracker",
-  "full_path": "/api/trackers/<int:tracker_id>"
+  "method": "GET",
+  "path": "/api/series/{series_id}/source-filenames",
+  "func": "source_filenames",
+  "file": "modules/gateway/api_media.py",
+  "line": 316,
+  "access": "session",
+  "conditional": null,
+  "summary": "Имена исходных файлов серии",
+  "panel_sites": [
+   "components/settings/ParserTest.vue:137"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/series/{series_id}/state",
+  "func": "set_state",
+  "file": "modules/gateway/api_series.py",
+  "line": 186,
+  "access": "session",
+  "conditional": null,
+  "summary": "Открытие/закрытие статус-окна (viewing)",
+  "panel_sites": [
+   "stores/ui.ts:12"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/series/{series_id}/toggle_auto_scan",
+  "func": "toggle_auto_scan",
+  "file": "modules/gateway/api_series.py",
+  "line": 210,
+  "access": "session",
+  "conditional": null,
+  "summary": "Включение/выключение автоскана",
+  "panel_sites": [
+   "App.vue:69"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/series/{series_id}/torrents/history",
+  "func": "torrents_history",
+  "file": "modules/gateway/api_series.py",
+  "line": 289,
+  "access": "session",
+  "conditional": null,
+  "summary": "История раздач серии",
+  "panel_sites": [
+   "components/status/StatusHistory.vue:76",
+   "components/status/StatusProperties.vue:117"
+  ]
+ },
+ {
+  "method": "PUT",
+  "path": "/api/series/{series_id}/vk-quality-priority",
+  "func": "vk_quality_priority",
+  "file": "modules/gateway/api_series.py",
+  "line": 270,
+  "access": "session",
+  "conditional": null,
+  "summary": "Приоритет качества для видео-источника",
+  "panel_sites": [
+   "components/status/StatusVkComposition.vue:316"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings/concurrent_fragments",
+  "func": "concurrent_fragments",
+  "file": "modules/gateway/api_settings.py",
+  "line": 174,
+  "access": "session",
+  "conditional": null,
+  "summary": "Чтение числа параллельных фрагментов yt-dlp",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:167",
+   "components/settings/SettingsDebug.vue:228",
+   "components/settings/SettingsDebug.vue:68"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/settings/concurrent_fragments",
+  "func": "concurrent_fragments",
+  "file": "modules/gateway/api_settings.py",
+  "line": 174,
+  "access": "session",
+  "conditional": null,
+  "summary": "Запись числа параллельных фрагментов yt-dlp",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:228",
+   "components/settings/SettingsDebug.vue:73"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings/debug_flags",
+  "func": "debug_flags",
+  "file": "modules/gateway/api_settings.py",
+  "line": 218,
+  "access": "session",
+  "conditional": null,
+  "summary": "Структура логирования с флагами отладки",
+  "panel_sites": [
+   "components/LogsLoggingTab.vue:25"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/settings/debug_flags",
+  "func": "debug_flags",
+  "file": "modules/gateway/api_settings.py",
+  "line": 218,
+  "access": "session",
+  "conditional": null,
+  "summary": "Включение/выключение отладочного логирования",
+  "panel_sites": [
+   "components/LogsLoggingTab.vue:41"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings/force_replace",
+  "func": "force_replace",
+  "file": "modules/gateway/api_settings.py",
+  "line": 144,
+  "access": "session",
+  "conditional": null,
+  "summary": "Чтение флага «всегда заменять торренты»",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:163",
+   "components/settings/SettingsDebug.vue:200",
+   "components/settings/SettingsDebug.vue:53"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/settings/force_replace",
+  "func": "force_replace",
+  "file": "modules/gateway/api_settings.py",
+  "line": 144,
+  "access": "session",
+  "conditional": null,
+  "summary": "Запись флага «всегда заменять торренты»",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:200",
+   "components/settings/SettingsDebug.vue:57"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings/less_strict_scan",
+  "func": "less_strict_scan",
+  "file": "modules/gateway/api_settings.py",
+  "line": 149,
+  "access": "session",
+  "conditional": null,
+  "summary": "Чтение флага «менее строгий скан»",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:164",
+   "components/settings/SettingsDebug.vue:204",
+   "components/settings/SettingsDebug.vue:53"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/settings/less_strict_scan",
+  "func": "less_strict_scan",
+  "file": "modules/gateway/api_settings.py",
+  "line": 149,
+  "access": "session",
+  "conditional": null,
+  "summary": "Запись флага «менее строгий скан»",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:204",
+   "components/settings/SettingsDebug.vue:57"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings/parallel_downloads",
+  "func": "parallel_downloads",
+  "file": "modules/gateway/api_settings.py",
+  "line": 159,
+  "access": "session",
+  "conditional": null,
+  "summary": "Чтение числа параллельных загрузок",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:166",
+   "components/settings/SettingsDebug.vue:219",
+   "components/settings/SettingsDebug.vue:68"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/settings/parallel_downloads",
+  "func": "parallel_downloads",
+  "file": "modules/gateway/api_settings.py",
+  "line": 159,
+  "access": "session",
+  "conditional": null,
+  "summary": "Запись числа параллельных загрузок",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:219",
+   "components/settings/SettingsDebug.vue:73"
+  ]
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/settings/saved_paths",
+  "func": "saved_paths",
+  "file": "modules/gateway/api_settings.py",
+  "line": 191,
+  "access": "session",
+  "conditional": null,
+  "summary": "Удаление сохранённого пути",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:102"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings/saved_paths",
+  "func": "saved_paths",
+  "file": "modules/gateway/api_settings.py",
+  "line": 191,
+  "access": "session",
+  "conditional": null,
+  "summary": "Список сохранённых путей загрузки",
+  "panel_sites": [
+   "components/SavedPathDropdown.vue:33",
+   "components/settings/SettingsDebug.vue:85"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/settings/saved_paths",
+  "func": "saved_paths",
+  "file": "modules/gateway/api_settings.py",
+  "line": 191,
+  "access": "session",
+  "conditional": null,
+  "summary": "Добавление сохранённого пути",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:92"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings/slicing_delete_source",
+  "func": "slicing_delete_source",
+  "file": "modules/gateway/api_settings.py",
+  "line": 154,
+  "access": "session",
+  "conditional": null,
+  "summary": "Чтение флага «удалять исходник после нарезки»",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:165",
+   "components/settings/SettingsDebug.vue:208",
+   "components/settings/SettingsDebug.vue:53"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/settings/slicing_delete_source",
+  "func": "slicing_delete_source",
+  "file": "modules/gateway/api_settings.py",
+  "line": 154,
+  "access": "session",
+  "conditional": null,
+  "summary": "Запись флага «удалять исходник после нарезки»",
+  "panel_sites": [
+   "components/settings/SettingsDebug.vue:208",
+   "components/settings/SettingsDebug.vue:57"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/setup",
+  "func": "setup",
+  "file": "modules/gateway/api_auth.py",
+  "line": 98,
+  "access": "public",
+  "conditional": null,
+  "summary": "Первичное создание администратора",
+  "panel_sites": [
+   "components/SetupModal.vue:58"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/stream",
+  "func": "stream",
+  "file": "modules/gateway/module.py",
+  "line": 237,
+  "access": "session",
+  "conditional": null,
+  "summary": "SSE-поток событий шины",
+  "panel_sites": [
+   "composables/useSSE.ts:44"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/tmdb/details/{tmdb_id}",
+  "func": "tmdb_details",
+  "file": "modules/gateway/api_settings.py",
+  "line": 266,
+  "access": "session",
+  "conditional": null,
+  "summary": "Детали сериала TMDB",
+  "panel_sites": [
+   "components/AddSeriesModal.vue:367",
+   "components/status/StatusProperties.vue:235"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/tmdb/search",
+  "func": "tmdb_search",
+  "file": "modules/gateway/api_settings.py",
+  "line": 248,
+  "access": "session",
+  "conditional": null,
+  "summary": "Поиск сериала в TMDB",
+  "panel_sites": [
+   "components/AddSeriesModal.vue:354",
+   "components/status/StatusProperties.vue:225"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/trackers",
+  "func": "trackers_list",
+  "file": "modules/gateway/api_settings.py",
+  "line": 280,
+  "access": "session",
+  "conditional": null,
+  "summary": "Список трекеров с зеркалами",
+  "panel_sites": [
+   "components/settings/SettingsTrackers.vue:23"
+  ]
+ },
+ {
+  "method": "PUT",
+  "path": "/api/trackers/{tracker_id}",
+  "func": "tracker_update",
+  "file": "modules/gateway/api_settings.py",
+  "line": 284,
+  "access": "session",
+  "conditional": null,
+  "summary": "Обновление зеркал трекера",
+  "panel_sites": [
+   "components/settings/SettingsTrackers.vue:52"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/favicon.svg",
+  "func": "favicon",
+  "file": "modules/gateway/module.py",
+  "line": 299,
+  "access": "public",
+  "conditional": null,
+  "summary": "Фавикон",
+  "panel_sites": []
+ },
+ {
+  "method": "GET",
+  "path": "/legacy",
+  "func": "legacy",
+  "file": "modules/gateway/module.py",
+  "line": 278,
+  "access": "public",
+  "conditional": null,
+  "summary": "Старый фронт (откат), ассеты по /static",
+  "panel_sites": []
+ },
+ {
+  "method": "GET",
+  "path": "/v2",
+  "func": "v2_redirect",
+  "file": "modules/gateway/module.py",
+  "line": 287,
+  "access": "public",
+  "conditional": null,
+  "summary": "Редирект 307 на корень",
+  "panel_sites": []
+ },
+ {
+  "method": "GET",
+  "path": "/v2/",
+  "func": "v2_redirect",
+  "file": "modules/gateway/module.py",
+  "line": 287,
+  "access": "public",
+  "conditional": null,
+  "summary": "Редирект 307 на корень",
+  "panel_sites": []
  }
 ]
