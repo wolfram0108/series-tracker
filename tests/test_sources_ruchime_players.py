@@ -238,3 +238,19 @@ async def test_parse_release_reports_preview_players():
     assert result["players"]["vibix"]["present"] is True
     assert result["players"]["vibix"]["available"] is None
     assert result["resolution"] == 1080
+    assert all(video["resolution"] == 1080 for video in result["videos"])
+
+
+def test_merge_reports_prefers_best_resolution():
+    from modules.sources.video_providers.ruchime import _merge_reports
+
+    first = {"vk": {"present": True, "available": True,
+                    "resolution": 1080, "reason": ""}}
+    second = {"vk": {"present": True, "available": True,
+                     "resolution": 2160, "reason": ""},
+              "vibix": {"present": True, "available": None,
+                        "resolution": None, "reason": "проверяется при сканировании"}}
+    merged = _merge_reports(first, second)
+    assert merged["vk"]["resolution"] == 2160
+    assert merged["vibix"]["present"] is True
+    assert merged["vibix"]["available"] is None
