@@ -521,6 +521,7 @@ class ScanModule(BaseModule):
             "series_season": series.get("season")}, timeout=300)
         candidates = self._vk_candidates(series_id, videos,
                                          applied["results"])
+        candidates = await self._skip_completed_downgrades(series_id, candidates)
         try:
             stats = await self.repo.upsert_candidates(series_id, candidates)
         except Exception as exc:
@@ -586,6 +587,35 @@ class ScanModule(BaseModule):
                     json.loads(series.get("ignored_seasons") or "[]")}
         except (json.JSONDecodeError, TypeError, ValueError):
             return set()
+
+    async def _skip_completed_downgrades(self, series_id: int,
+                                         candidates: list[dict]) -> list[dict]:
+        """Never replace a downloaded item with a lower-resolution source."""
+        if not candidates:
+            return candidates
+        existing = await self.repo.items_for_series(series_id)
+        downloaded: dict[tuple, int] = {}
+        for row in existing:
+            if row.get("status") != "completed" and not row.get("final_filename"):
+                continue
+            key = (row.get("season"), row["episode_start"], row.get("part"))
+            downloaded[key] = max(downloaded.get(key, 0), row.get("resolution") or 0)
+        if not downloaded:
+            return candidates
+
+        kept: list[dict] = []
+        for candidate in candidates:
+            key = (candidate.get("season"), candidate["episode_start"],
+                   candidate.get("part"))
+            old = downloaded.get(key)
+            if old is not None and old >= (candidate.get("resolution") or 0):
+                self.log.info(
+                    "сериал %d: кандидат s%s e%s %sp пропущен — уже скачано в %sp",
+                    series_id, candidate.get("season"),
+                    candidate["episode_start"], candidate.get("resolution"), old)
+                continue
+            kept.append(candidate)
+        return kept
 
     @staticmethod
     def _vk_candidates(series_id: int, videos: list[dict],

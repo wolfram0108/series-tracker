@@ -627,3 +627,34 @@ async def test_web_video_scan_stores_availability(system):
     assert availability["report"]["episodes"] == 2
     assert availability["report"]["players"]["vibix"]["selected"] == 1
     assert availability["report"]["holes"] == [{"episode": 2, "reason": "нет источника"}]
+
+
+@pytest.mark.asyncio
+async def test_web_video_scan_does_not_downgrade_completed(system, db_path):
+    """Скачанный 2160p не заменяется новым кандидатом в 1080p."""
+    _, fake, probe, _ = system
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO media_items (series_id, unique_id, source_title, season, "
+            "episode_start, episode_end, part, plan_status, status, "
+            "is_ignored_by_user, source_url, publication_date, voiceover_tag, "
+            "slicing_status, is_available, resolution) VALUES "
+            "(3, 'old', 'Т3 1 серия', NULL, 1, NULL, NULL, 'in_plan_single', "
+            "'completed', 0, 'https://vk.com/video-1_1', "
+            "'2026-10-19 12:00:00', NULL, 'none', 1, 2160)")
+        conn.commit()
+    fake.web_videos = [{
+        "title": "Т3 1 серия", "url": "https://fsst.online/embed/1/",
+        "publication_date": "2026-10-20T12:00:00Z", "resolution": 1080,
+    }]
+    fake.web_players = {"episodes": 1, "sources": {"allvideo": 1},
+                        "players": {}, "holes": []}
+    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
+
+    reply = await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
+
+    assert reply["candidates"]["added"] == 0
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT resolution, status FROM media_items WHERE series_id=3").fetchall()
+    assert rows == [(2160, "completed")]

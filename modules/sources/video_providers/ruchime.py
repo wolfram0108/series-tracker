@@ -85,6 +85,7 @@ class _Episode:
     source: str | None = None
     reason: str = ""
     page_failed: bool = False
+    unverified: bool = False
 
     @property
     def best_resolution(self) -> int:
@@ -271,6 +272,8 @@ class RuchimeProvider(BaseVideoProvider):
             else:
                 info.reason = probe.reason
                 info.player_reasons[first_adapter.name] = probe.reason
+                if probe.transient:
+                    info.unverified = True
         return info
 
     @staticmethod
@@ -278,6 +281,7 @@ class RuchimeProvider(BaseVideoProvider):
         """Check lower sources only while a higher resolution is still possible."""
         return [item for item in episodes
                 if adapter_name in item.refs
+                and not item.unverified
                 and item.best_resolution < RESOLUTION_CEILING]
 
     async def _apply_adapter(self, episodes: list[_Episode], adapter: PlayerAdapter,
@@ -286,7 +290,6 @@ class RuchimeProvider(BaseVideoProvider):
         targets = self._needs_lower_source(episodes, adapter.name)
         if not targets:
             return
-
         async def probe_one(item: _Episode):
             await self._wait_probe_slot()
             return await adapter.probe(item.refs[adapter.name], http, item.page_url)
@@ -306,6 +309,8 @@ class RuchimeProvider(BaseVideoProvider):
             else:
                 item.reason = probe.reason
                 item.player_reasons[adapter.name] = probe.reason
+                if probe.transient:
+                    item.unverified = True
 
     async def _apply_vibix(self, episodes: list[_Episode],
                            http: httpx.AsyncClient) -> None:
@@ -353,12 +358,14 @@ class RuchimeProvider(BaseVideoProvider):
                 "present": len(present),
                 "available": len(available),
                 "selected": len(selected),
+                "unverified": sum(1 for item in present if item.unverified),
                 "max_resolution": max(
                     (item.resolution for item in selected if item.resolution),
                     default=None),
                 "reason": reasons.most_common(1)[0][0] if reasons else "",
             }
-        holes = [{"episode": item.number, "reason": item.reason}
+        holes = [{"episode": item.number, "reason": item.reason,
+                  "unverified": item.unverified}
                  for item in episodes if not item.candidates]
         return {
             "episodes": len(episodes),
@@ -562,8 +569,12 @@ class RuchimeProvider(BaseVideoProvider):
         facts: list[dict] = []
         for item in episodes:
             if not item.candidates:
-                logger.warning("Skipping episode %s: no playable player (%s)",
-                               item.page_url, item.reason or "нет источника")
+                if item.unverified:
+                    logger.warning("Skipping episode %s: source not confirmed (%s)",
+                                   item.page_url, item.reason or "нет данных")
+                else:
+                    logger.warning("Skipping episode %s: no playable player (%s)",
+                                   item.page_url, item.reason or "нет источника")
                 continue
             resolution, source, url = max(
                 item.candidates,
@@ -602,10 +613,14 @@ class RuchimeProvider(BaseVideoProvider):
             stream_url = self._extract_best_stream_url(match.group(1))
             if not stream_url:
                 return None
-            parsed = urlparse(url)
+            final_url = str(getattr(response, "url", "") or url)
+            parsed = urlparse(final_url)
+            if not parsed.scheme or not parsed.netloc:
+                parsed = urlparse(url)
             origin = (f"{parsed.scheme}://{parsed.netloc}/"
-                      if parsed.scheme and parsed.netloc else "https://incvideo1.online/")
-            return {"stream_url": stream_url, "headers": {"Referer": origin}}
+                      if parsed.scheme and parsed.netloc else "")
+            return {"stream_url": stream_url,
+                    "headers": {"Referer": origin} if origin else {}}
         except Exception as exc:  # noqa: BLE001 - resolution is retried by download
             logger.warning("Failed resolving AllVideo stream for %s: %s", url, exc)
             return None
@@ -636,7 +651,7 @@ class RuchimeProvider(BaseVideoProvider):
             logger.warning("Failed resolving Vibix manifest for %s: %s", url, exc)
             return None
         manifest = self._write_manifest(text, stream.url, self._extract_slug(url),
-                                        number, stream.quality)
+                                        number, stream.quality).resolve()
         return {"stream_url": f"file://{manifest}",
                 "headers": {"Referer": "https://1.ruchime.org/"}}
 

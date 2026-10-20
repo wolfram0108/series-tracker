@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import httpx
 
+_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+
 
 def _retry_after(response: "httpx.Response | None") -> float | None:
     if response is None:
@@ -56,6 +58,7 @@ class PlayerProbe:
     available: bool
     resolution: int | None = None
     reason: str = ""
+    transient: bool = False
 
 
 class PlayerAdapter:
@@ -90,18 +93,27 @@ class VkPlayer(PlayerAdapter):
     async def probe(self, ref: PlayerRef, http: httpx.AsyncClient,
                     page_url: str) -> PlayerProbe:
         response = await _get_with_retry(http, ref.raw_url,
-                                         {"Referer": page_url})
+                                         {"Referer": page_url, "User-Agent": _UA})
         if response is None:
-            return PlayerProbe(ref, False, reason="VK не ответил")
+            return PlayerProbe(ref, False, reason="VK не ответил", transient=True)
+        if response.status_code in (403, 408, 425, 429) or response.status_code >= 500:
+            return PlayerProbe(ref, False,
+                               reason=f"VK ответил {response.status_code}",
+                               transient=True)
+        if response.status_code == 404:
+            return PlayerProbe(ref, False, reason="VK: видео не найдено")
         if response.status_code != 200:
-            return PlayerProbe(ref, False, reason=f"VK ответил {response.status_code}")
+            return PlayerProbe(ref, False,
+                               reason=f"VK ответил {response.status_code}",
+                               transient=True)
         resolutions = [int(q) for q in re.findall(r"mp4_(\d+)", response.text)]
         if resolutions:
             return PlayerProbe(ref, True, max(resolutions))
         lowered = response.text.lower()
         if "access denied" in lowered or "private" in lowered:
             return PlayerProbe(ref, False, reason="видео закрыто настройками приватности")
-        return PlayerProbe(ref, False, reason="VK не отдал доступных качеств")
+        # A page without markers and without an explicit refusal is inconclusive.
+        return PlayerProbe(ref, False, reason="VK не подтвердил источник", transient=True)
 
 
 class AllVideoPlayer(PlayerAdapter):
@@ -119,9 +131,14 @@ class AllVideoPlayer(PlayerAdapter):
 
     async def probe(self, ref: PlayerRef, http: httpx.AsyncClient,
                     page_url: str) -> PlayerProbe:
-        response = await _get_with_retry(http, ref.url, {"Referer": page_url})
+        response = await _get_with_retry(http, ref.url,
+                                         {"Referer": page_url, "User-Agent": _UA})
         if response is None:
-            return PlayerProbe(ref, False, reason="AllVideo не ответил")
+            return PlayerProbe(ref, False, reason="AllVideo не ответил", transient=True)
+        if response.status_code in (403, 408, 425, 429) or response.status_code >= 500:
+            return PlayerProbe(ref, False,
+                               reason=f"AllVideo ответил {response.status_code}",
+                               transient=True)
         if response.status_code != 200:
             return PlayerProbe(ref, False,
                                reason=f"AllVideo ответил {response.status_code}")

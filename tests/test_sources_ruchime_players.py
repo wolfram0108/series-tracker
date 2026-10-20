@@ -14,6 +14,7 @@ ALLVIDEO_URL = "https://fsst.online/embed/77/"
 VK_OPEN = '<script>{"mp4_720":"a","mp4_1080":"b"}</script>'
 VK_OPEN_4K = '<script>{"mp4_1080":"b","mp4_2160":"c"}</script>'
 VK_CLOSED = '<script>{"error_msg":"Access denied"}</script>'
+VK_AMBIGUOUS = "<html><body>no player data, no refusal</body></html>"
 AV_EMBED_1080 = '<script>file:"[360p]https://cdn.test/360.mp4/,[1080p]https://cdn.test/1080.mp4/"</script>'
 AV_EMBED_4K = '<script>file:"[1080p]https://cdn.test/1080.mp4/,[4k]https://cdn.test/2160.mp4/"</script>'
 AV_EMBED_EMPTY = "<html><body>no player</body></html>"
@@ -211,6 +212,68 @@ async def test_resolve_vibix_writes_absolute_manifest(monkeypatch, tmp_path: Pat
     written = Path(resolved["stream_url"][len("file://"):]).read_text(encoding="utf-8")
     assert "https://cdn.test/hls/a/b/b_1080p.mp4/720.mp4:hls:seg-1-v1-a1.ts" in written
     assert written.startswith("#EXTM3U")
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_vk_does_not_switch_source():
+    provider = RuchimeProvider()
+    counts = {"fsst.online": 0}
+    client = make_client({
+        "episode-1": page_html(vk=True, allvideo=True),
+        "video_ext.php": VK_AMBIGUOUS,
+        "fsst.online/embed/77": AV_EMBED_1080,
+        "release/test": release_html([1]),
+    }, counts)
+
+    result = await provider.scan_episodes(
+        "https://1.ruchime.org/release/test", client, {"name": "Тест"})
+
+    assert result["videos"] == []
+    assert counts["fsst.online"] == 0
+    assert result["players"]["players"]["vk"]["unverified"] == 1
+
+
+@pytest.mark.asyncio
+async def test_allvideo_referer_uses_final_host():
+    provider = RuchimeProvider()
+    response = httpx.Response(
+        200, text='<script>file:"[1080p]https://cdn.test/1080.mp4/"</script>',
+        request=httpx.Request("GET", "https://incvideo1.online/embed/77/"))
+    client = AsyncMock(spec=httpx.AsyncClient)
+    client.get.return_value = response
+
+    resolved = await provider.resolve_stream("https://fsst.online/embed/77/", client)
+
+    assert resolved is not None
+    assert resolved["headers"]["Referer"] == "https://incvideo1.online/"
+
+
+@pytest.mark.asyncio
+async def test_resolve_vibix_returns_absolute_file_url(monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(tmp_path)
+    provider = RuchimeProvider(manifest_dir=Path("manifests"))
+    key = b"Z" * 32
+    manifest = (b"#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.000,\n"
+                b"https://cdn.test/seg-1.ts\n#EXT-X-ENDLIST\n")
+    stream = Stream(1080, "https://cdn.test/1.m3u8")
+
+    async def fake_playlist(page_url: str):
+        return ([Episode(1, "Серия 1", "Сезон 1", (stream,))], key)
+
+    monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
+    response = AsyncMock(spec=httpx.Response)
+    response.status_code = 200
+    response.content = encode_envelope(manifest, key)
+    client = AsyncMock(spec=httpx.AsyncClient)
+    client.get.return_value = response
+
+    resolved = await provider.resolve_stream(
+        "https://1.ruchime.org/release/test/episode-1", client)
+
+    assert resolved is not None
+    path = Path(resolved["stream_url"][len("file://"):])
+    assert path.is_absolute()
+    assert path.exists()
 
 
 @pytest.mark.asyncio

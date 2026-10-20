@@ -253,7 +253,7 @@ async def test_ruchime_scan_episodes_cascade_and_filtering():
     assert report["players"]["vk"]["available"] == 1
     assert report["players"]["allvideo"]["available"] == 2
     assert report["players"]["vibix"]["present"] == 0
-    assert report["holes"] == [{"episode": 5, "reason": ""}]
+    assert report["holes"] == [{"episode": 5, "reason": "", "unverified": False}]
 
 
 @pytest.mark.asyncio
