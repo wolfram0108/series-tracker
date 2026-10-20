@@ -79,6 +79,7 @@ class _Episode:
     publication_date: str
     refs: dict[str, PlayerRef] = field(default_factory=dict)
     candidates: list[tuple[int, str, str]] = field(default_factory=list)
+    player_reasons: dict[str, str] = field(default_factory=dict)
     video_url: str | None = None
     resolution: int | None = None
     source: str | None = None
@@ -269,6 +270,7 @@ class RuchimeProvider(BaseVideoProvider):
                                         probe.ref.url))
             else:
                 info.reason = probe.reason
+                info.player_reasons[first_adapter.name] = probe.reason
         return info
 
     @staticmethod
@@ -294,6 +296,7 @@ class RuchimeProvider(BaseVideoProvider):
         for item, probe in zip(targets, probes):
             if isinstance(probe, Exception):
                 item.reason = f"{adapter.name}: {probe}"
+                item.player_reasons[adapter.name] = item.reason
                 logger.warning("%s probe failed for %s: %s",
                                adapter.name, item.page_url, probe)
                 continue
@@ -302,6 +305,7 @@ class RuchimeProvider(BaseVideoProvider):
                                         probe.ref.url))
             else:
                 item.reason = probe.reason
+                item.player_reasons[adapter.name] = probe.reason
 
     async def _apply_vibix(self, episodes: list[_Episode],
                            http: httpx.AsyncClient) -> None:
@@ -316,17 +320,52 @@ class RuchimeProvider(BaseVideoProvider):
                            targets[0].page_url, exc)
             for item in targets:
                 item.reason = f"Vibix: {exc}"
+                item.player_reasons["vibix"] = str(exc)
             return
 
         by_number = {episode.number: episode for episode in playlist}
         for item in targets:
             episode = by_number.get(item.number)
             if episode is None or not episode.streams:
+                item.player_reasons["vibix"] = "серии нет в плейлисте Vibix"
                 if not item.candidates:
                     item.reason = "серии нет в плейлисте Vibix"
                 continue
             resolution = max(stream.quality for stream in episode.streams)
             item.candidates.append((resolution, "vibix", item.page_url))
+
+    @staticmethod
+    def _availability_report(episodes: list[_Episode]) -> dict:
+        """Aggregate per-player availability for the series status."""
+        players: dict[str, dict] = {}
+        for adapter in PLAYER_ORDER:
+            present = [item for item in episodes if adapter.name in item.refs]
+            available = [item for item in episodes
+                         if any(source == adapter.name
+                                for _resolution, source, _url in item.candidates)]
+            available_numbers = {item.number for item in available}
+            selected = [item for item in episodes if item.source == adapter.name]
+            reasons = Counter(item.player_reasons.get(adapter.name)
+                              for item in present
+                              if item.number not in available_numbers)
+            reasons.pop(None, None)
+            players[adapter.name] = {
+                "present": len(present),
+                "available": len(available),
+                "selected": len(selected),
+                "max_resolution": max(
+                    (item.resolution for item in selected if item.resolution),
+                    default=None),
+                "reason": reasons.most_common(1)[0][0] if reasons else "",
+            }
+        holes = [{"episode": item.number, "reason": item.reason}
+                 for item in episodes if not item.candidates]
+        return {
+            "episodes": len(episodes),
+            "sources": dict(Counter(item.source for item in episodes if item.source)),
+            "players": players,
+            "holes": holes,
+        }
 
     async def _vibix_playlist(self, page_url: str) -> tuple[list[Episode], bytes]:
         """Return the cached series playlist; capture it once per signature window."""
@@ -514,10 +553,10 @@ class RuchimeProvider(BaseVideoProvider):
             })
 
         facts.sort(key=lambda fact: fact["publication_date"])
-        counts = Counter(item.source for item in episodes if item.source)
+        report = self._availability_report(episodes)
         logger.info("Ruchime scan %s: серий %d, источники %s",
-                    slug, len(facts), dict(counts))
-        return facts
+                    slug, len(facts), report["sources"])
+        return {"videos": facts, "players": report}
 
     async def resolve_stream(self, url: str, http: httpx.AsyncClient) -> dict | None:
         """Resolve AllVideo embeds and Vibix episode references to a stream."""

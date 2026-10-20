@@ -42,6 +42,12 @@ def page_html(vk: bool = False, allvideo: bool = False, vibix: bool = False) -> 
     return "<html><body>" + "".join(parts) + "</body></html>"
 
 
+async def scan(provider: RuchimeProvider, client) -> list[dict]:
+    result = await provider.scan_episodes(
+        "https://1.ruchime.org/release/test", client, {"name": "Тест"})
+    return result["videos"]
+
+
 def make_client(routes: dict[str, str], counts: dict[str, int] | None = None):
     async def side_effect(url, headers=None, follow_redirects=True, **kwargs):
         if counts is not None:
@@ -73,8 +79,7 @@ async def test_closed_vk_falls_back_to_allvideo():
         "release/test": release_html([1]),
     })
 
-    facts = await provider.scan_episodes(
-        "https://1.ruchime.org/release/test", client, {"name": "Тест"})
+    facts = await scan(provider, client)
 
     assert len(facts) == 1
     assert facts[0]["url"] == ALLVIDEO_URL
@@ -92,8 +97,7 @@ async def test_vk_priority_does_not_touch_allvideo_at_ceiling():
         "release/test": release_html([1]),
     }, counts)
 
-    facts = await provider.scan_episodes(
-        "https://1.ruchime.org/release/test", client, {"name": "Тест"})
+    facts = await scan(provider, client)
 
     assert facts[0]["url"] == "https://vk.com/video-1_100"
     assert facts[0]["resolution"] == 2160
@@ -110,8 +114,7 @@ async def test_higher_resolution_wins_over_priority_tie_break():
         "release/test": release_html([1]),
     })
 
-    facts = await provider.scan_episodes(
-        "https://1.ruchime.org/release/test", client, {"name": "Тест"})
+    facts = await scan(provider, client)
 
     assert facts[0]["url"] == ALLVIDEO_URL
     assert facts[0]["resolution"] == 2160
@@ -127,8 +130,7 @@ async def test_unplayable_players_are_not_candidates():
         "release/test": release_html([1]),
     })
 
-    facts = await provider.scan_episodes(
-        "https://1.ruchime.org/release/test", client, {"name": "Тест"})
+    facts = await scan(provider, client)
 
     assert facts == []
 
@@ -153,8 +155,7 @@ async def test_vibix_fallback_maps_episode_numbers(monkeypatch):
         "release/test": release_html([1, 2]),
     })
 
-    facts = await provider.scan_episodes(
-        "https://1.ruchime.org/release/test", client, {"name": "Тест"})
+    facts = await scan(provider, client)
 
     assert len(facts) == 2
     assert facts[0]["url"] == "https://1.ruchime.org/release/test/episode-1"
@@ -178,8 +179,7 @@ async def test_vibix_skips_episode_missing_from_playlist(monkeypatch):
         "release/test": release_html([1, 2]),
     })
 
-    facts = await provider.scan_episodes(
-        "https://1.ruchime.org/release/test", client, {"name": "Тест"})
+    facts = await scan(provider, client)
 
     assert [fact["url"] for fact in facts] == [
         "https://1.ruchime.org/release/test/episode-1"]

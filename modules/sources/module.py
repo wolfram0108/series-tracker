@@ -318,7 +318,8 @@ class SourcesModule(BaseModule):
 
     async def on_video_scan(self, env: Envelope) -> dict:
         """payload: {url, series: dict}
-        reply:   {videos: [{title, url, publication_date, resolution}]}"""
+        reply:   {videos: [{title, url, publication_date, resolution}],
+                  players: {name: {present, available, selected, ...}}}"""
         url = env.payload["url"]
         provider = self.video_registry.find_provider(url)
         if not provider:
@@ -328,9 +329,11 @@ class SourcesModule(BaseModule):
         async with lock:
             await self._polite(service)
             series = env.payload.get("series") or {}
-            facts = await provider.scan_episodes(url, self._http, series)
-        self.log.info("Видео-скан %s (%s): серий %d", service, url, len(facts))
-        return {"videos": facts}
+            result = await provider.scan_episodes(url, self._http, series)
+        videos = result.get("videos", []) if isinstance(result, dict) else result
+        players = result.get("players", {}) if isinstance(result, dict) else {}
+        self.log.info("Видео-скан %s (%s): серий %d", service, url, len(videos))
+        return {"videos": videos, "players": players}
 
     async def on_video_stream(self, env: Envelope) -> dict:
         url = env.payload["url"]

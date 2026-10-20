@@ -104,6 +104,7 @@ class ScanModule(BaseModule):
         self.handle("scan.item.set_ignored", self.on_set_ignored)
         self.handle("scan.items.set_ignored_bulk", self.on_set_ignored_bulk)
         self.handle("scan.composition", self.on_composition, concurrent=True)
+        self.handle("scan.availability", self.on_availability)
         self.handle("scan.status.get", self.on_status_get)
         self.handle("torrents.queue.changed", self.on_queue_changed)
         self.handle("series.deleted", self.on_series_deleted)
@@ -170,6 +171,10 @@ class ScanModule(BaseModule):
             bool(env.payload["is_ignored"]))
         self.publish_event("scan.plan.updated", {"series_id": series_id})
         return {"updated": n}
+
+    async def on_availability(self, env: Envelope) -> dict:
+        """Последний отчёт о доступности плееров web-серии."""
+        return await self.repo.get_availability(int(env.payload["series_id"]))
 
     async def on_composition(self, env: Envelope) -> list[dict]:
         """Контракт GET composition для VK-серий (Р-21): при refresh —
@@ -554,7 +559,16 @@ class ScanModule(BaseModule):
         reply = await self.request("sources.video.scan", {
             "url": series["url"], "series": series},
             timeout=900)
-        return await self._process_video_candidates(series, reply["videos"], "web_video")
+        result = await self._process_video_candidates(series, reply["videos"],
+                                                      "web_video")
+        report = reply.get("players") or {}
+        if report:
+            try:
+                await self.repo.save_availability(series["id"], report)
+            except Exception as exc:  # noqa: BLE001 - deleted series must not fail the scan
+                self.log.warning("отчёт о плеерах не сохранён (%d): %s",
+                                 series["id"], exc)
+        return result
 
     @staticmethod
     def _quality_priority(series: dict) -> list[int]:

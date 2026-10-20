@@ -219,11 +219,12 @@ async def test_ruchime_scan_episodes_cascade_and_filtering():
 
     mock_client.get.side_effect = side_effect
 
-    facts = await provider.scan_episodes(
+    result = await provider.scan_episodes(
         "https://1.ruchime.org/release/nesravnennyi-boevoi-dux",
         mock_client,
         {"name": "Несравненный боевой дух"}
     )
+    facts = result["videos"]
 
     # Episode 5 had no player and should be filtered out (not dead HTML URL)
     assert len(facts) == 3
@@ -245,6 +246,14 @@ async def test_ruchime_scan_episodes_cascade_and_filtering():
     assert facts[2]["title"] == "Несравненный боевой дух - 1-10 серия"
     assert facts[2]["publication_date"] == "2026-08-24T12:00:00Z"
     assert facts[2]["resolution"] == 2160
+
+    report = result["players"]
+    assert report["episodes"] == 4
+    assert report["sources"] == {"vk": 1, "allvideo": 2}
+    assert report["players"]["vk"]["available"] == 1
+    assert report["players"]["allvideo"]["available"] == 2
+    assert report["players"]["vibix"]["present"] == 0
+    assert report["holes"] == [{"episode": 5, "reason": ""}]
 
 
 @pytest.mark.asyncio

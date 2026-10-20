@@ -173,6 +173,26 @@ class ScanRepository:
             "DELETE FROM media_items WHERE series_id=?", (series_id,))
         await self._db.execute(
             "DELETE FROM scan_tasks WHERE series_id=?", (series_id,))
+        await self._db.execute(
+            "DELETE FROM video_availability WHERE series_id=?", (series_id,))
+
+    async def save_availability(self, series_id: int, report: dict) -> None:
+        """Remember the last player report; a failed scan keeps the old one."""
+        await self._db.execute(
+            "INSERT INTO video_availability (series_id, report, checked_at) "
+            "VALUES (?, ?, ?) ON CONFLICT(series_id) DO UPDATE SET "
+            "report=excluded.report, checked_at=excluded.checked_at",
+            (series_id, json.dumps(report, ensure_ascii=False),
+             datetime.now(timezone.utc).isoformat()))
+
+    async def get_availability(self, series_id: int) -> dict:
+        row = await self._db.fetch_one(
+            "SELECT report, checked_at FROM video_availability "
+            "WHERE series_id=?", (series_id,))
+        if not row:
+            return {"report": None, "checked_at": None}
+        return {"report": json.loads(row["report"] or "{}"),
+                "checked_at": row["checked_at"]}
 
     async def candidates(self, series_id: int) -> list[dict]:
         """Вход планировщика — только plan_status='candidate' (семантика

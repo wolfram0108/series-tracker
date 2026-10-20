@@ -120,6 +120,12 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             reply = await gw.request("sources.tracker.resolve",
                                      {"url": s["url"]}, timeout=10)
             s["tracker_info"] = reply["tracker"]
+        if is_video_source(s.get("source_type")):
+            try:
+                s["availability"] = await gw.request(
+                    "scan.availability", {"series_id": series_id}, timeout=10)
+            except BusRequestError:
+                s["availability"] = None
         reply = await gw.request("metadata.map.get",
                                  {"series_id": series_id}, timeout=10)
         _attach_tmdb(s, reply["mapping"])

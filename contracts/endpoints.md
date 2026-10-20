@@ -91,7 +91,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | GET | `/api/series` | Список сериалов со статусами и счётчиком скачанного | `stores/series.ts` |
 | POST | `/api/series` | Создание серии (+ TMDB-маппинг, + раздачи) | `AddSeriesModal.vue` |
 | GET | `/api/series/active_torrents` | Прогресс активных загрузок с именами серий | — |
-| GET | `/api/series/{series_id}` | Карточка серии (+ `tracker_info` для торрентов) | `StatusModal.vue`, `StatusComposition.vue`, `StatusVkComposition.vue` |
+| GET | `/api/series/{series_id}` | Карточка серии (+ `tracker_info` для торрентов, `availability` для web-видео) | `StatusModal.vue`, `StatusComposition.vue`, `StatusVkComposition.vue` |
 | POST | `/api/series/{series_id}` | Сохранение свойств: catalog → metadata → library/renaming | `StatusProperties.vue` |
 | DELETE | `/api/series/{series_id}` | Удаление серии (каскад по событию) | `App.vue` |
 | POST | `/api/series/{series_id}/state` | Эфемерный viewing: открытие/закрытие статус-окна | `stores/ui.ts` |

@@ -57,6 +57,8 @@ const canonicalUrl = ref("")
 const vkChannelUrl = ref("")
 const vkQuery = ref("")
 const trackerInfo = ref<TrackerInfo | null>(null)
+type PlayerReport = { present: boolean; available: boolean | null; resolution: number | null; reason?: string }
+const parsePlayers = ref<Record<string, PlayerReport>>({})
 const profiles = ref<{ id: number; name: string }[]>([])
 const saving = ref(false)
 
@@ -220,6 +222,24 @@ const namingTitles = computed<string[]>(() => {
   return out
 })
 
+// отчёт о плеерах web-источника (приходит с разбором ссылки)
+const playerReportRows = computed(() => {
+  const labels: Record<string, string> = { vk: "VK", allvideo: "AllVideo", vibix: "Vibix" }
+  return Object.entries(parsePlayers.value).map(([name, report]) => {
+    let text = report.reason || "недоступен"
+    if (!report.present) text = "нет на странице"
+    else if (report.available === null) text = "проверяется при сканировании"
+    else if (report.available) text = report.resolution ? `${report.resolution}p` : "доступен"
+    return {
+      name,
+      label: labels[name] ?? name.toUpperCase(),
+      text,
+      ok: report.available === true,
+      off: report.available === false,
+    }
+  })
+})
+
 // A backslash in a pasted channel URL is a typo for a slash (legacy autoCorrectSlash).
 watch(vkChannelUrl, (v) => {
   if (v.includes("\\")) vkChannelUrl.value = v.replace(/\\/g, "/")
@@ -237,6 +257,7 @@ function handleUrlInput() {
   parsed.value = false
   webVideoTitles.value = []
   canonicalUrl.value = ""
+  parsePlayers.value = {}
   newSeries.resolution_override = ""
   if (!newSeries.url) {
     sourceType.value = "torrent"
@@ -261,6 +282,7 @@ function handleUrlInput() {
 
 async function parseTorrentUrl() {
   parsing.value = true
+  parsePlayers.value = {}
   try {
     site.value = new URL(newSeries.url).hostname.replace(/^www\./, "")
   } catch {
@@ -284,6 +306,7 @@ async function parseTorrentUrl() {
       sourceType.value = "web_video"
       webVideoTitles.value = res.titles ?? []
       canonicalUrl.value = res.canonical_url || ""
+      parsePlayers.value = (res as { players?: Record<string, PlayerReport> }).players ?? {}
     }
     trackerInfo.value = res.tracker_info ?? null
     newSeries.name = res.title?.ru || ""
@@ -600,6 +623,23 @@ onBeforeUnmount(() => {
               </div>
               <StSelect v-model="newSeries.parser_profile_id" :options="profileOptions" placeholder="Выберите профиль..." />
             </StGroup>
+          </div>
+        </div>
+      </div>
+
+      <!-- Источники web-видео -->
+      <div v-if="sourceType === 'web_video' && playerReportRows.length" class="modern-fieldset">
+        <div class="fieldset-header"><span class="fieldset-title">Источники</span></div>
+        <div class="fieldset-content">
+          <div class="player-report">
+            <span
+              v-for="p in playerReportRows"
+              :key="p.name"
+              class="player-report-item"
+              :class="{ 'is-ok': p.ok, 'is-off': p.off }"
+            >
+              <b>{{ p.label }}</b><span>{{ p.text }}</span>
+            </span>
           </div>
         </div>
       </div>

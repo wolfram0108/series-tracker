@@ -54,6 +54,13 @@
 .fieldset-content { padding: 20px; }
 .fieldset-hint { display: block; margin-top: 8px; font-size: 0.85rem; color: var(--text-muted); }
 
+/* Отчёт о доступности плееров web-источника (окно добавления и статус). */
+.player-report { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; font-size: 0.9rem; }
+.player-report-item { display: inline-flex; align-items: baseline; gap: 6px; color: var(--text-muted); }
+.player-report-item b { color: #2c3e50; font-weight: 600; }
+.player-report-item.is-ok span { color: #146c43; }
+.player-report-item.is-off span { color: #b02a37; }
+
 .series-list { display: flex; flex-direction: column; }
 .empty-state {
   text-align: center; padding: 48px 16px; color: var(--text-muted);

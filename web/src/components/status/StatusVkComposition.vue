@@ -78,6 +78,23 @@ const autoUpdate = ref(false)
 const searchMode = ref("search")
 const ignoredSeasons = ref<number[]>([])
 const qualityPriority = ref<{ quality: number }[]>([])
+interface AvailabilityPlayer {
+  present?: number
+  available?: number
+  selected?: number
+  max_resolution?: number | null
+  reason?: string
+}
+interface Availability {
+  report?: {
+    episodes?: number
+    sources?: Record<string, number>
+    players?: Record<string, AvailabilityPlayer>
+    holes?: { episode: number; reason?: string }[]
+  }
+  checked_at?: string | null
+}
+const availability = ref<Availability | null>(null)
 
 // --- форматтеры ---
 function baseName(p?: string): string {
@@ -205,8 +222,30 @@ const sortedSeasons = computed(() =>
     if (a === "undefined") return 1
     if (b === "undefined") return -1
     return parseInt(a, 10) - parseInt(b, 10)
-  }),
+  })
 )
+
+// отчёт о плеерах: последнее состояние, сохранённое сканом
+const availabilityRows = computed(() => {
+  const report = availability.value?.report
+  if (!report?.players) return []
+  const labels: Record<string, string> = { vk: "VK", allvideo: "AllVideo", vibix: "Vibix" }
+  const total = report.episodes ?? 0
+  return Object.entries(report.players).map(([name, player]) => {
+    const selected = player.selected ?? 0
+    const available = player.available ?? 0
+    let text = player.reason || "нет на странице"
+    if (selected) text = `${player.max_resolution ? `${player.max_resolution}p` : "доступен"} · ${selected} из ${total}`
+    else if (available) text = `доступен · ${available} из ${total}`
+    return {
+      name,
+      label: labels[name] ?? name.toUpperCase(),
+      text,
+      ok: selected > 0,
+      off: !available,
+    }
+  })
+})
 
 function seasonTitle(s: string): string {
   return s === "undefined" ? "Не определено" : `Сезон ${s.padStart(2, "0")}`
@@ -249,6 +288,7 @@ async function loadComposition(forceRefresh: boolean) {
       api.GET("/api/series/{series_id}", { params: { path: { series_id: props.seriesId } } } as never),
     )) as Record<string, unknown> | null
     initQualityPriority(series)
+    availability.value = (series?.availability as Availability | undefined) ?? null
     await loadSliced()
   } finally {
     loading.value = false
@@ -440,6 +480,17 @@ defineExpose({ reload: () => loadComposition(false) })
             <ToggleSwitch v-model="showOnlyPlanned" />
             <span>Только запланированные</span>
           </label>
+        </div>
+
+        <div v-if="availabilityRows.length" class="player-report">
+          <span
+            v-for="row in availabilityRows"
+            :key="row.name"
+            class="player-report-item"
+            :class="{ 'is-ok': row.ok, 'is-off': row.off }"
+          >
+            <b>{{ row.label }}</b><span>{{ row.text }}</span>
+          </span>
         </div>
 
         <!-- Приоритет качества (DnD) -->

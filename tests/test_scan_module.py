@@ -25,6 +25,8 @@ class FakeBackend(BaseModule):
         self.service = "kinozal"
         self.releases: list[dict] = []
         self.vk_videos: list[dict] = []
+        self.web_videos: list[dict] = []
+        self.web_players: dict = {}
         self.rules_results: list[dict] = []
         self.active: list[dict] = []
         self.settings = {"scan_interval_minutes": "60"}
@@ -45,6 +47,7 @@ class FakeBackend(BaseModule):
         h = self.handle
         h("renaming.reprocess", self.on_reprocess)
         h("sources.parse", self.on_parse)
+        h("sources.video.scan", self.on_web_scan)
         h("sources.torrent_file.get", self.on_file)
         h("sources.vk.scan", self.on_vk)
         h("downloads.fs.sync", self.on_fs_sync_vk)
@@ -77,6 +80,9 @@ class FakeBackend(BaseModule):
 
     async def on_vk(self, env):
         return {"videos": self.vk_videos}
+
+    async def on_web_scan(self, env):
+        return {"videos": self.web_videos, "players": self.web_players}
 
     async def on_fs_sync_vk(self, env):
         self.fs_sync_calls += 1
@@ -155,7 +161,10 @@ def db_path(tmp_path):
             "'kinozal.me', '/media/t1', 'waiting', 'torrent', 0, 'search', "
             "1, NULL), "
             "(2, 'https://vkvideo.ru/@chan|тайтл', 'Т2', 'T2', 'vk', "
-            "'/media/t2', 'waiting', 'vk_video', 0, 'get_all', 1, NULL)")
+            "'/media/t2', 'waiting', 'vk_video', 0, 'get_all', 1, NULL), "
+            "(3, 'https://1.ruchime.org/release/test', 'Т3', 'T3', "
+            "'1.ruchime.org', '/media/t3', 'waiting', 'web_video', 0, "
+            "'search', 1, NULL)")
         conn.commit()
     return str(path)
 
@@ -584,3 +593,37 @@ async def test_vk_candidates_resolve_part_ones(system, db_path):
     # 9 серия без частей (None)
     assert rows[2]["episode_start"] == 9 and rows[2]["part"] is None
 
+
+
+@pytest.mark.asyncio
+async def test_web_video_scan_stores_availability(system):
+    """Отчёт о плеерах сохраняется и читается отдельным запросом."""
+    _, fake, probe, _ = system
+    fake.web_videos = [{
+        "title": "Т3 1 серия", "url": "https://vk.com/video-1_9",
+        "publication_date": "2026-10-20T12:00:00Z", "resolution": 1080,
+    }]
+    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
+    fake.web_players = {
+        "episodes": 2,
+        "sources": {"vk": 1},
+        "players": {
+            "vk": {"present": 2, "available": 1, "selected": 1,
+                   "max_resolution": 1080, "reason": "закрыто"},
+            "allvideo": {"present": 0, "available": 0, "selected": 0,
+                         "max_resolution": None, "reason": ""},
+            "vibix": {"present": 2, "available": 1, "selected": 1,
+                      "max_resolution": 1080, "reason": ""},
+        },
+        "holes": [{"episode": 2, "reason": "нет источника"}],
+    }
+
+    reply = await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
+    assert reply["candidates"]["added"] == 1
+
+    availability = await probe.request("scan.availability",
+                                       {"series_id": 3}, timeout=10)
+    assert availability["checked_at"]
+    assert availability["report"]["episodes"] == 2
+    assert availability["report"]["players"]["vibix"]["selected"] == 1
+    assert availability["report"]["holes"] == [{"episode": 2, "reason": "нет источника"}]
