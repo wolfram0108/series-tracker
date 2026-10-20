@@ -40,7 +40,29 @@ HLS_FORMAT = "b[protocol*=m3u8]/b"
 # (одно соединение на поток) — не подвержены этой дыре, но без -N
 # параллелизма (медленнее).
 DASH_FALLBACK_FORMAT = "b[protocol!*=m3u8]"
-_EMPTY_FILE_ERROR = "The downloaded file is empty"
+_WARNING_LINE = re.compile(
+    r"^\s*(?:WARNING:|It is strongly recommended|Run \"yt-dlp --update\"|"
+    r"To suppress this warning)", re.IGNORECASE)
+
+
+def _ytdlp_error(tail: str, default: str) -> str:
+    """The real failure is the ERROR line, not yt-dlp's version warning."""
+    lines = [line.strip() for line in tail.splitlines() if line.strip()]
+    for line in reversed(lines):
+        if line.startswith("ERROR:"):
+            return line[len("ERROR:"):].strip() or line
+    for line in reversed(lines):
+        if not _WARNING_LINE.match(line):
+            return line
+    return default
+
+
+def _cleanup_artifacts(full_output_path: str) -> None:
+    for leftover in download_artifacts(full_output_path):
+        try:
+            os.remove(leftover)
+        except OSError:
+            pass
 
 # Формат hlsnative+-N отличается от обычного: после '~' идут пробелы,
 # ETA бывает 'Unknown', в хвосте '(frag X/Y)' (находка 47).
@@ -307,6 +329,12 @@ async def _download_direct_ffmpeg(stream_url: str, referer: str,
     return False, f"ffmpeg direct download: {last or proc.returncode}"
 
 
+def _unavailable_error(error: str) -> bool:
+    lowered = (error or "").lower()
+    return ("недоступно" in lowered or "приватн" in lowered
+            or "video unavailable" in lowered or "private video" in lowered)
+
+
 async def download(video_url: str, full_output_path: str,
                    on_progress: ProgressCb, *,
                    headers: dict | None = None,
@@ -335,29 +363,20 @@ async def download(video_url: str, full_output_path: str,
     duration = await _probe_duration(video_url)
     raw = await _phase_download(video_url, full_output_path, on_progress,
                                 threads, HLS_FORMAT)
-    if not isinstance(raw, str) and _EMPTY_FILE_ERROR in raw[1]:
-        # хвост неудачной HLS-попытки (недокачанные .part/фрагменты) собьёт
-        # DASH-попытку с тем же выходным путём — чистим перед повтором.
-        for leftover in download_artifacts(full_output_path):
-            try:
-                os.remove(leftover)
-            except OSError:
-                pass
+    if not isinstance(raw, str) and not _unavailable_error(raw[1]):
+        # VK HLS fragments are fragile; progressive/DASH retry is reliable.
+        _cleanup_artifacts(full_output_path)
         raw = await _phase_download(video_url, full_output_path, on_progress,
                                     threads, DASH_FALLBACK_FORMAT)
     if not isinstance(raw, str):
+        _cleanup_artifacts(full_output_path)
         return raw  # (False, error)
     try:
         return await _phase_remux(raw, full_output_path, on_progress,
                                   duration)
     finally:
-        # подчищаем промежуточные и недоделанный remux-файл (находка 50:
-        # частичный финал нельзя принимать за готовый)
-        for leftover in download_artifacts(full_output_path):
-            try:
-                os.remove(leftover)
-            except OSError:
-                pass
+        # A partial final must never be accepted as ready (finding 50).
+        _cleanup_artifacts(full_output_path)
 
 
 async def _phase_download(video_url: str, full_output_path: str,
@@ -394,8 +413,8 @@ async def _phase_download(video_url: str, full_output_path: str,
     tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
 
     if proc.returncode != 0:
-        error = tail.strip().splitlines()[-1] if tail.strip() else \
-            f"yt-dlp завершился с кодом {proc.returncode}"
+        error = _ytdlp_error(
+            tail, f"yt-dlp завершился с кодом {proc.returncode}")
         if "Video unavailable" in tail or "Private video" in tail:
             error = "видео недоступно или приватно"
         return False, error

@@ -7,7 +7,7 @@ import sqlite3
 import subprocess
 import sys
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -570,3 +570,59 @@ def test_file_manifest_has_no_http_headers():
     assert ytdlp._headers_args("file:///tmp/x.m3u8", "https://r/") == []
     assert ytdlp._headers_args("https://cdn.test/x.mp4", "https://r/") == [
         "-headers", "Referer: https://r/\r\n"]
+
+
+def test_ytdlp_error_prefers_error_line():
+    tail = (
+        "WARNING: Your yt-dlp version is older than 90 days!\n"
+        "         It is strongly recommended to update.\n"
+        "         Run \"yt-dlp --update\"\n"
+        "To suppress this warning, add --no-update to your command/config.\n"
+        "ERROR: unable to download video data: HTTP Error 403: Forbidden\n"
+    )
+    assert "HTTP Error 403" in ytdlp._ytdlp_error(tail, "fallback")
+
+
+def test_ytdlp_error_ignores_warning_only_tail():
+    tail = (
+        "WARNING: Your yt-dlp version is older than 90 days!\n"
+        "To suppress this warning, add --no-update to your command/config.\n"
+    )
+    assert ytdlp._ytdlp_error(tail, "fallback") == "fallback"
+
+
+@pytest.mark.asyncio
+async def test_download_falls_back_to_dash_on_hls_error(tmp_path):
+    out = str(tmp_path / "x.mp4")
+
+    async def on_progress(_data):
+        pass
+
+    with patch.object(ytdlp, "_probe_duration", AsyncMock(return_value=1.0)), \
+         patch.object(ytdlp, "_phase_download", side_effect=[
+             (False, "unable to download video data: HTTP Error 403"),
+             "/tmp/raw"]) as phase, \
+         patch.object(ytdlp, "_phase_remux", AsyncMock(return_value=(True, ""))):
+        ok, err = await ytdlp.download("https://vk.com/video-1_2", out, on_progress)
+
+    assert ok is True
+    assert err == ""
+    assert phase.call_count == 2
+    assert phase.call_args_list[1].args[4] == ytdlp.DASH_FALLBACK_FORMAT
+
+
+@pytest.mark.asyncio
+async def test_download_does_not_fall_back_for_private_video(tmp_path):
+    out = str(tmp_path / "x.mp4")
+
+    async def on_progress(_data):
+        pass
+
+    with patch.object(ytdlp, "_probe_duration", AsyncMock(return_value=1.0)), \
+         patch.object(ytdlp, "_phase_download",
+                      return_value=(False, "видео недоступно или приватно")) as phase:
+        ok, err = await ytdlp.download("https://vk.com/video-1_2", out, on_progress)
+
+    assert ok is False
+    assert "приватно" in err
+    assert phase.call_count == 1
