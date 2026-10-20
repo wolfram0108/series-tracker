@@ -326,6 +326,8 @@ async def test_sources_module_bus_parse_and_scan():
             assert parsed["service"] == "ruchime"
             assert parsed["title"]["ru"] == "Несравненный боевой дух"
             assert len(parsed["titles"]) == 4
+            assert len(parsed["episodes"]) == 4
+            assert parsed["episodes"][0]["number"] == 2
 
         with patch.object(RuchimeProvider, "scan_episodes") as mock_scan:
             mock_scan.return_value = [

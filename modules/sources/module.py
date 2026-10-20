@@ -143,6 +143,7 @@ class SourcesModule(BaseModule):
                 "source_type": "web_video",
                 "title": parsed["title"],
                 "titles": parsed.get("titles", []),
+                "episodes": parsed.get("episodes", []),
                 "resolution": parsed.get("resolution"),
                 "videos": parsed.get("videos", []),
                 "releases": parsed.get("releases", []),
