@@ -161,16 +161,16 @@ def env_paths(tmp_path):
 
 
 def _add_item(db_path, uid, episode, *, plan="in_plan_single",
-              status="pending", filename=None, ignored=0):
+              status="pending", filename=None, ignored=0, download_url=None):
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             "INSERT INTO media_items (series_id, unique_id, source_title, "
             "episode_start, plan_status, status, is_ignored_by_user, "
             "source_url, publication_date, slicing_status, is_available, "
-            "final_filename) VALUES (2, ?, ?, ?, ?, ?, ?, ?, "
-            "'2026-01-01 00:00:00', 'none', 1, ?)",
+            "final_filename, download_url) VALUES (2, ?, ?, ?, ?, ?, ?, ?, "
+            "'2026-01-01 00:00:00', 'none', 1, ?, ?)",
             (uid, f"Серия {episode}", episode, plan, status, ignored,
-             f"https://vk.com/video-1_{episode}", filename))
+             f"https://vk.com/video-1_{episode}", filename, download_url))
         conn.commit()
 
 
@@ -247,6 +247,21 @@ def _tasks(db_path):
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         return [dict(r) for r in conn.execute("SELECT * FROM download_tasks")]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_prefers_download_url(system):
+    """VK: канонический source_url остаётся идентичностью, а качается
+    embed-ссылка с hash (каноническая страница отдаёт Access restricted)."""
+    bus, _, dl, probe, db_path, media_dir = system
+    raw = "https://vkvideo.ru/video_ext.php?oid=-1&id=1&hash=abc"
+    _add_item(db_path, "uid1", 1, download_url=raw)
+
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
+
+    assert await _wait(lambda: bool(dl.started))
+    assert dl.started[0] == raw
+    assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "completed")
 
 
 @pytest.mark.asyncio

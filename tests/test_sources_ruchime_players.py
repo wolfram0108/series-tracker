@@ -16,6 +16,8 @@ VK_OPEN_4K = '<script>{"mp4_1080":"b","mp4_2160":"c"}</script>'
 VK_CLOSED = '<script>{"error_msg":"Access denied"}</script>'
 VK_OPEN_DENIED = VK_OPEN + "<div>Access denied</div>"
 VK_AMBIGUOUS = "<html><body>no player data, no refusal</body></html>"
+VK_EMBED_STREAMS = ('<script>{"mp4_1080":"https:\\/\\/cdn.test\\/1080.mp4",'
+                    '"mp4_2160":"https:\\/\\/cdn.test\\/2160.mp4"}</script>')
 AV_EMBED_1080 = '<script>file:"[360p]https://cdn.test/360.mp4/,[1080p]https://cdn.test/1080.mp4/"</script>'
 AV_EMBED_4K = '<script>file:"[1080p]https://cdn.test/1080.mp4/,[4k]https://cdn.test/2160.mp4/"</script>'
 AV_EMBED_EMPTY = "<html><body>no player</body></html>"
@@ -102,6 +104,7 @@ async def test_vk_priority_does_not_touch_allvideo_at_ceiling():
     facts = await scan(provider, client)
 
     assert facts[0]["url"] == "https://vk.com/video-1_100"
+    assert facts[0]["download_url"] == VK_URL.replace("&amp;", "&")
     assert facts[0]["resolution"] == 2160
     assert counts["fsst.online"] == 0
 
@@ -364,3 +367,15 @@ async def test_vk_refusal_wins_over_markers():
 
     assert result["videos"] == []
     assert result["players"]["players"]["vk"]["available"] == 0
+
+
+@pytest.mark.asyncio
+async def test_resolve_vk_returns_best_fresh_mp4():
+    provider = RuchimeProvider()
+    client = make_client({"video_ext.php": VK_EMBED_STREAMS})
+    raw = "https://vkvideo.ru/video_ext.php?oid=-1&id=100&hash=abc"
+
+    resolved = await provider.resolve_stream(raw, client)
+
+    assert resolved["stream_url"] == "https://cdn.test/2160.mp4"
+    assert resolved["headers"]["Referer"] == "https://vk.com/"

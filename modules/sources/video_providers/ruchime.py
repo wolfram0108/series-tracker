@@ -587,9 +587,13 @@ class RuchimeProvider(BaseVideoProvider):
                 item.candidates,
                 key=lambda candidate: (candidate[0], -_PRIORITY[candidate[1]]))
             item.video_url, item.resolution, item.source = url, resolution, source
+            download_url = None
+            if source == "vk" and "vk" in item.refs:
+                download_url = item.refs["vk"].raw_url or None
             facts.append({
                 "title": item.title,
                 "url": item.video_url,
+                "download_url": download_url,
                 "publication_date": item.publication_date,
                 "resolution": item.resolution,
             })
@@ -603,12 +607,52 @@ class RuchimeProvider(BaseVideoProvider):
         return {"videos": facts, "players": report}
 
     async def resolve_stream(self, url: str, http: httpx.AsyncClient) -> dict | None:
-        """Resolve AllVideo embeds and Vibix episode references to a stream."""
+        """Resolve VK embeds, AllVideo embeds and Vibix episode references."""
+        if "video_ext.php" in url and ("vk.com" in url or "vkvideo.ru" in url):
+            return await self._resolve_vk(url, http)
         if any(domain in url for domain in ("fsst.online", "incvideo1.online")):
             return await self._resolve_allvideo(url, http)
         if self.match_url(url) and _EPISODE_IN_URL.search(url):
             return await self._resolve_vibix(url, http)
         return None
+
+    async def _resolve_vk(self, url: str, http: httpx.AsyncClient) -> dict | None:
+        """Fresh direct stream from the VK embed page.
+
+        The canonical `vk.com/video...` page is rejected by yt-dlp as
+        «Access restricted» for some videos, while the embed page with hash
+        still exposes signed mp4 URLs. Resolve them at download time so the
+        signature is fresh.
+        """
+        try:
+            response = await http.get(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                         "Referer": "https://vk.com/"},
+                follow_redirects=True, timeout=15.0)
+            if response.status_code != 200:
+                logger.warning("VK embed HTTP %s for %s",
+                               response.status_code, url)
+                return None
+            streams = [
+                (int(quality), html.unescape(raw.replace("\\/", "/")))
+                for quality, raw in re.findall(r'"mp4_(\d+)":"([^"]+)"',
+                                                response.text)
+            ]
+            if streams:
+                _quality, stream_url = max(streams, key=lambda item: item[0])
+                return {"stream_url": stream_url,
+                        "headers": {"Referer": "https://vk.com/"}}
+            hls = re.search(r'"hls":"([^"]+)"', response.text)
+            if hls:
+                stream_url = html.unescape(hls.group(1).replace("\\/", "/"))
+                return {"stream_url": stream_url,
+                        "headers": {"Referer": "https://vk.com/"}}
+            logger.warning("VK embed has no playable stream: %s", url)
+            return None
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Failed resolving VK stream for %s: %s", url, exc)
+            return None
 
     async def _resolve_allvideo(self, url: str, http: httpx.AsyncClient) -> dict | None:
         try:

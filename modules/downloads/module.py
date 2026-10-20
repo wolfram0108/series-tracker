@@ -179,7 +179,8 @@ class DownloadsModule(BaseModule):
             filename = await self._format_filename(series, item)
             save_path = os.path.join(series["save_path"], filename)
             if await self.repo.replace_or_create_task(
-                    item["unique_id"], series_id, item["source_url"],
+                    item["unique_id"], series_id,
+                    item.get("download_url") or item["source_url"],
                     save_path):
                 created += 1
                 if item["status"] == "error":  # ретрай сканом снимает ошибку

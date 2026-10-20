@@ -674,6 +674,7 @@ class ScanModule(BaseModule):
                 "publication_date": pub.astimezone(timezone.utc)
                                        .strftime("%Y-%m-%d %H:%M:%S"),
                 "resolution": video.get("resolution"),
+                "download_url": video.get("download_url"),
                 "source_title": video["title"],
                 "season": extracted.get("season"),
                 "part": extracted.get("part"),
