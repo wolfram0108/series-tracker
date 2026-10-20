@@ -47,6 +47,9 @@ def test_ffmpeg_progress_percent_and_eta():
         {"out_time": "00:00:30.000000", "speed": "60x",
          "progress": "continue"}, duration=120.0)
     assert out == {"phase": "remux", "progress": 25, "eta": 1, "speed": 60.0}
+    assert ytdlp.ffmpeg_progress(
+        {"out_time": "00:00:30.000000", "speed": "60x"},
+        duration=120.0, phase="download")["phase"] == "download"
     # нулевая длительность не делит на ноль
     assert ytdlp.ffmpeg_progress({"out_time": "00:00:10", "speed": "1x"},
                                  0.0)["progress"] == 0

@@ -21,6 +21,7 @@ import asyncio
 import os
 import re
 import shutil
+import time
 from typing import Awaitable, Callable
 
 import httpx
@@ -114,9 +115,10 @@ def _hms_to_seconds(text: str) -> float:
         return 0.0
 
 
-def ffmpeg_progress(fields: dict, duration: float) -> dict:
+def ffmpeg_progress(fields: dict, duration: float,
+                    phase: str = "remux") -> dict:
     """Блок метрик ffmpeg -progress (out_time, speed) + длительность ->
-    прогресс remux в % и ETA. Чистая функция (тестируется отдельно)."""
+    прогресс фазы в % и ETA. Чистая функция (тестируется отдельно)."""
     out_time = _hms_to_seconds(fields.get("out_time", "") or "")
     speed_raw = (fields.get("speed", "") or "").replace("x", "").strip()
     try:
@@ -126,7 +128,7 @@ def ffmpeg_progress(fields: dict, duration: float) -> dict:
     percent = int(min(100, out_time / duration * 100)) if duration > 0 else 0
     remaining = max(0.0, duration - out_time)
     eta = int(remaining / speed) if speed > 0 else 0
-    return {"phase": "remux", "progress": percent, "eta": eta,
+    return {"phase": phase, "progress": percent, "eta": eta,
             "speed": round(speed, 1)}
 
 
@@ -300,6 +302,8 @@ async def _download_direct_ffmpeg(stream_url: str, referer: str,
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr))
     fields: dict[str, str] = {}
+    last_size = 0
+    last_at = time.monotonic()
     try:
         assert proc.stdout is not None
         while True:
@@ -312,7 +316,13 @@ async def _download_direct_ffmpeg(stream_url: str, referer: str,
             k, v = text.split("=", 1)
             fields[k] = v
             if k == "progress":
-                await on_progress(ffmpeg_progress(fields, duration))
+                data = ffmpeg_progress(fields, duration, phase="download")
+                size = int(fields.get("total_size") or 0)
+                now = time.monotonic()
+                if now > last_at and size >= last_size:
+                    data["dlspeed"] = int((size - last_size) / (now - last_at))
+                last_size, last_at = size, now
+                await on_progress(data)
                 fields = {}
         await proc.wait()
     finally:

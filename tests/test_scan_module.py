@@ -611,11 +611,12 @@ async def test_vk_candidates_resolve_part_ones(system, db_path):
 
 
 @pytest.mark.asyncio
-async def test_web_video_scan_stores_availability(system):
+async def test_web_video_scan_stores_availability(system, db_path):
     """Отчёт о плеерах сохраняется и читается отдельным запросом."""
     _, fake, probe, _ = system
     fake.web_videos = [{
         "title": "Т3 1 серия", "url": "https://vk.com/video-1_9",
+        "download_url": "https://vkvideo.ru/video_ext.php?oid=-1&id=9&hash=abc",
         "publication_date": "2026-10-20T12:00:00Z", "resolution": 1080,
     }]
     fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
@@ -642,6 +643,11 @@ async def test_web_video_scan_stores_availability(system):
     assert availability["report"]["episodes"] == 2
     assert availability["report"]["players"]["vibix"]["selected"] == 1
     assert availability["report"]["holes"] == [{"episode": 2, "reason": "нет источника"}]
+    with sqlite3.connect(db_path) as conn:
+        url = conn.execute(
+            "SELECT download_url FROM media_items WHERE series_id=3 "
+            "AND episode_start=1").fetchone()[0]
+    assert url.endswith("hash=abc")
 
 
 @pytest.mark.asyncio
