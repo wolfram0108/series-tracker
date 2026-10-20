@@ -13,6 +13,7 @@ import httpx
 
 from .capture import VibixUnavailable, capture_playlist
 from .download import HEADERS, download_many
+from .keys import KeyStore
 from .protocol import (VibixProtocolError, decode_payload, parse_all_eps,
                        parse_playlist)
 
@@ -57,9 +58,13 @@ def command_probe(args: argparse.Namespace) -> int:
         page_url = page_url.rstrip("/") + "/episode-1"
     capture = asyncio.run(capture_playlist(page_url, browser_name=args.browser,
                                            timeout_s=args.timeout))
-    payload = decode_payload(capture.body)
+    store = KeyStore()
+    key, refreshed = store.resolve(api_body=capture.body,
+                                   manifest_body=capture.manifest_body)
+    payload = decode_payload(capture.body, key)
     episodes = parse_playlist(payload)
     print(f"API: {capture.api_url}")
+    print(f"Ключ: {'восстановлен' if refreshed else 'из кэша'} ({store.path})")
     print(f"Серий в плейлисте: {len(episodes)}")
     if episodes:
         first, last = episodes[0], episodes[-1]

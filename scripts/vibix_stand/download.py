@@ -12,8 +12,9 @@ from typing import Callable, Iterable
 import httpx
 
 from .capture import Capture, capture_playlist
+from .keys import KeyStore
 from .protocol import (Episode, Stream, VibixProtocolError, decode_playlist,
-                       parse_manifest, stream_expires)
+                       DEFAULT_DECODER_KEY, parse_manifest, stream_expires)
 
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (X11; Linux x86_64; rv:128.0) "
@@ -31,10 +32,12 @@ class ManifestExpired(RuntimeError):
 class PlaylistSession:
     episode_url: str
     browser_name: str = "firefox"
+    key_store: KeyStore = field(default_factory=KeyStore)
     episodes: list[Episode] = field(default_factory=list)
     expires: int | None = None
     generation: int = 0
     api_url: str = ""
+    key: bytes = b""
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
     async def refresh(self, *, force: bool = False) -> None:
@@ -47,9 +50,12 @@ class PlaylistSession:
             self._apply(capture)
 
     def _apply(self, capture: Capture) -> None:
-        episodes = decode_playlist(capture.body)
+        key, _ = self.key_store.resolve(api_body=capture.body,
+                                        manifest_body=capture.manifest_body)
+        episodes = decode_playlist(capture.body, key)
         if not episodes:
             raise VibixProtocolError("Vibix API returned an empty playlist")
+        self.key = key
         self.episodes = episodes
         self.api_url = capture.api_url
         self.generation += 1
@@ -176,21 +182,22 @@ async def _fetch_manifest_with_refresh(*, session: PlaylistSession, client: http
                                        stream: Stream) -> str:
     generation = session.generation
     try:
-        return await fetch_manifest(client, stream.url)
-    except ManifestExpired:
+        return await fetch_manifest(client, stream.url, session.key)
+    except (ManifestExpired, VibixProtocolError):
         await session.refresh(force=True)
         if session.generation == generation:
             raise
         episode = session.by_number(number)
-        return await fetch_manifest(client, episode.pick_stream(quality).url)
+        return await fetch_manifest(client, episode.pick_stream(quality).url, session.key)
 
 
-async def fetch_manifest(client: httpx.AsyncClient, url: str) -> str:
+async def fetch_manifest(client: httpx.AsyncClient, url: str,
+                         key: str | bytes = DEFAULT_DECODER_KEY) -> str:
     response = await client.get(url)
     if response.status_code in (401, 403, 404, 410):
         raise ManifestExpired(f"manifest HTTP {response.status_code}")
     response.raise_for_status()
-    return parse_manifest(response.content)
+    return parse_manifest(response.content, key)
 
 
 def _write_manifest(text: str, keep_dir: Path | None, number: int) -> Path:

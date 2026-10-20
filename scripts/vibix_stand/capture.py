@@ -25,6 +25,8 @@ class Capture:
     page_url: str
     api_url: str
     body: bytes
+    manifest_url: str = ""
+    manifest_body: bytes | None = None
 
 
 async def capture_playlist(page_url: str, *, browser_name: Literal["firefox", "chromium"] = "firefox",
@@ -44,10 +46,13 @@ async def capture_playlist(page_url: str, *, browser_name: Literal["firefox", "c
         await context.route("**/*", _block_ads)
         page = await context.new_page()
         response_future: asyncio.Future = asyncio.get_running_loop().create_future()
+        manifest_future: asyncio.Future = asyncio.get_running_loop().create_future()
 
         def on_response(response) -> None:
             if API_PATH in response.url and not response_future.done():
                 response_future.set_result(response)
+            elif ".m3u8" in response.url and not manifest_future.done():
+                manifest_future.set_result(response)
 
         page.on("response", on_response)
         try:
@@ -61,13 +66,24 @@ async def capture_playlist(page_url: str, *, browser_name: Literal["firefox", "c
             await button.click(timeout=15_000)
             response = await asyncio.wait_for(response_future, timeout=timeout_s)
             body = await response.body()
-            return Capture(page_url=page_url, api_url=response.url, body=body)
+            manifest_url, manifest_body = await _manifest(manifest_future)
+            return Capture(page_url=page_url, api_url=response.url, body=body,
+                           manifest_url=manifest_url, manifest_body=manifest_body)
         except asyncio.TimeoutError as exc:
             raise VibixUnavailable(
                 "Vibix API не ответил за отведённое время; проверьте страницу и браузер"
             ) from exc
         finally:
             await browser.close()
+
+
+async def _manifest(future: asyncio.Future) -> tuple[str, bytes | None]:
+    """Best-effort manifest capture: the key is recoverable only from it."""
+    try:
+        response = await asyncio.wait_for(future, timeout=20)
+        return response.url, await response.body()
+    except Exception:  # noqa: BLE001 - a missing manifest must not fail the capture
+        return "", None
 
 
 async def _block_ads(route) -> None:

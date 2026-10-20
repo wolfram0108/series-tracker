@@ -8,12 +8,15 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-# Static key from the publisher's embed bundle; override when the bundle rotates it.
+# Last known key; the store replaces it when the bundle rotates the keystream.
 DEFAULT_DECODER_KEY = "RySdvcyu5iTUxn97vn4HwoniwgxaCynA"
+KEY_LENGTH = 32
 
 _QUALITY_CHUNK = re.compile(r"^\[(\d+p|4k)\]\{[^}]*\}(https?://.+)$", re.IGNORECASE)
 _EPISODE_NUMBER = re.compile(r"\d+")
 _ALL_EPS = re.compile(r"const ALL_EPS\s*=\s*(\[.*?\]);", re.DOTALL)
+_HLS_HEADER = ("#EXTM3U\n#EXT-X-TARGETDURATION:{duration}\n{blank}"
+               "#EXT-X-ALLOW-CACHE:YES\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-VERSION:3\n")
 
 
 class VibixProtocolError(RuntimeError):
@@ -37,42 +40,92 @@ class Episode:
         return pick_stream(self.streams, preferred)
 
 
-def decode_envelope(raw: bytes, key: str = DEFAULT_DECODER_KEY) -> bytes:
-    """Decode a Kinescope/Vibix `{"p": "...", "v": 1}` envelope.
+def _key_bytes(key: str | bytes) -> bytes:
+    return key.encode("latin-1") if isinstance(key, str) else key
 
-    The publisher reverses the base64 text and XORs the decoded bytes with a
-    static key. Non-envelope responses are returned unchanged.
-    """
+
+def _xor(data: bytes, key: bytes) -> bytes:
+    return bytes(byte ^ key[index % len(key)] for index, byte in enumerate(data))
+
+
+def envelope_bytes(raw: bytes) -> bytes | None:
+    """Return the reversed-base64 payload of an envelope, or None for plain data."""
     try:
         envelope = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return raw
+        return None
     if not isinstance(envelope, dict) or "p" not in envelope:
-        return raw
+        return None
 
-    encoded = str(envelope["p"]).replace("-", "+").replace("_", "/")
-    encoded = encoded[::-1]
+    encoded = str(envelope["p"]).replace("-", "+").replace("_", "/")[::-1]
     encoded += "=" * (-len(encoded) % 4)
     try:
-        decoded = base64.b64decode(encoded)
+        return base64.b64decode(encoded)
     except (ValueError, TypeError) as exc:
         raise VibixProtocolError("invalid base64 in Vibix envelope") from exc
 
-    key_bytes = key.encode()
-    return bytes(byte ^ key_bytes[index % len(key_bytes)]
-                 for index, byte in enumerate(decoded))
+
+def decode_envelope(raw: bytes, key: str | bytes = DEFAULT_DECODER_KEY) -> bytes:
+    """Decode a Kinescope/Vibix `{"p": "...", "v": 1}` envelope.
+
+    The publisher reverses the base64 text and XORs the decoded bytes with a
+    rotating key; plain responses are returned unchanged.
+    """
+    cipher = envelope_bytes(raw)
+    if cipher is None:
+        return raw
+    return _xor(cipher, _key_bytes(key))
 
 
-def encode_envelope(payload: bytes, key: str = DEFAULT_DECODER_KEY) -> bytes:
+def encode_envelope(payload: bytes, key: str | bytes = DEFAULT_DECODER_KEY) -> bytes:
     """Inverse of decode_envelope, used by tests and protocol probes."""
-    key_bytes = key.encode()
-    xored = bytes(byte ^ key_bytes[index % len(key_bytes)]
-                  for index, byte in enumerate(payload))
-    encoded = base64.b64encode(xored).decode()[::-1]
+    encoded = base64.b64encode(_xor(payload, _key_bytes(key))).decode()[::-1]
     return json.dumps({"p": encoded, "v": 1}, separators=(",", ":")).encode()
 
 
-def parse_manifest(raw: bytes, key: str = DEFAULT_DECODER_KEY) -> str:
+def recover_key(manifest_body: bytes, api_body: bytes | None = None) -> bytes:
+    """Recover the keystream from an encrypted manifest with a known HLS header."""
+    cipher = envelope_bytes(manifest_body)
+    if cipher is None or len(cipher) < KEY_LENGTH:
+        raise VibixProtocolError("manifest is not an encrypted Kinescope envelope")
+
+    seen: set[bytes] = set()
+    for duration in range(1, 61):
+        for blank in ("", "\n"):
+            prefix = _HLS_HEADER.format(duration=duration, blank=blank)[:KEY_LENGTH]
+            key = bytes(a ^ b for a, b in zip(cipher[:KEY_LENGTH], prefix.encode()))
+            if key in seen:
+                continue
+            seen.add(key)
+            if not _is_manifest(cipher, key):
+                continue
+            if api_body is not None and not _is_payload(api_body, key):
+                continue
+            return key
+    raise VibixProtocolError("cannot recover Vibix decoder key from the manifest")
+
+
+def _is_manifest(cipher: bytes, key: bytes) -> bool:
+    try:
+        text = _xor(cipher, key).decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    if not text.startswith("#EXTM3U") or "#EXTINF" not in text:
+        return False
+    return all(not line.strip() or line.startswith("#") or ".ts" in line
+               for line in text.splitlines())
+
+
+def _is_payload(body: bytes, key: bytes) -> bool:
+    try:
+        payload = json.loads(decode_envelope(body, key).decode("utf-8"))
+    except (VibixProtocolError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    data = payload.get("data") if isinstance(payload, dict) else None
+    return isinstance(data, dict) and isinstance(data.get("playlist"), list)
+
+
+def parse_manifest(raw: bytes, key: str | bytes = DEFAULT_DECODER_KEY) -> str:
     """Return an HLS manifest as text, decoding the envelope when present."""
     decoded = decode_envelope(raw, key)
     try:
@@ -84,7 +137,7 @@ def parse_manifest(raw: bytes, key: str = DEFAULT_DECODER_KEY) -> str:
     return text
 
 
-def decode_payload(raw: bytes, key: str = DEFAULT_DECODER_KEY) -> Any:
+def decode_payload(raw: bytes, key: str | bytes = DEFAULT_DECODER_KEY) -> Any:
     """Decode an enveloped API response into JSON."""
     decoded = decode_envelope(raw, key)
     try:
@@ -93,7 +146,7 @@ def decode_payload(raw: bytes, key: str = DEFAULT_DECODER_KEY) -> Any:
         raise VibixProtocolError("Vibix API response is not valid JSON") from exc
 
 
-def decode_playlist(raw: bytes, key: str = DEFAULT_DECODER_KEY) -> list[Episode]:
+def decode_playlist(raw: bytes, key: str | bytes = DEFAULT_DECODER_KEY) -> list[Episode]:
     """Decode an enveloped API response and return its episodes."""
     return parse_playlist(decode_payload(raw, key))
 
