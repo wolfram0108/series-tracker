@@ -27,6 +27,10 @@ class FakeBackend(BaseModule):
         self.vk_videos: list[dict] = []
         self.web_videos: list[dict] = []
         self.web_players: dict = {}
+        self.web_scan_payloads: list[dict] = []
+        self.parse_titles: list[str] = []
+        self.parse_episodes: list[dict] = []
+        self.rules_by_title: dict[str, dict] | None = None
         self.rules_results: list[dict] = []
         self.active: list[dict] = []
         self.settings = {"scan_interval_minutes": "60"}
@@ -71,6 +75,8 @@ class FakeBackend(BaseModule):
 
     async def on_parse(self, env):
         return {"service": self.service, "title": {"ru": "Т", "en": None},
+                "titles": self.parse_titles,
+                "episodes": self.parse_episodes,
                 "releases": self.releases}
 
     async def on_file(self, env):
@@ -82,6 +88,7 @@ class FakeBackend(BaseModule):
         return {"videos": self.vk_videos}
 
     async def on_web_scan(self, env):
+        self.web_scan_payloads.append(env.payload)
         return {"videos": self.web_videos, "players": self.web_players}
 
     async def on_fs_sync_vk(self, env):
@@ -93,6 +100,11 @@ class FakeBackend(BaseModule):
         return {"status": "completed"}
 
     async def on_rules(self, env):
+        titles = env.payload.get("titles") or []
+        if self.rules_by_title is not None and titles:
+            return {"results": [self.rules_by_title.get(
+                        title, {"excluded": False, "extracted": {}})
+                    for title in titles], "invalid_rules": []}
         return {"results": self.rules_results, "invalid_rules": []}
 
     async def on_active(self, env):
@@ -658,3 +670,27 @@ async def test_web_video_scan_does_not_downgrade_completed(system, db_path):
         rows = conn.execute(
             "SELECT resolution, status FROM media_items WHERE series_id=3").fetchall()
     assert rows == [(2160, "completed")]
+
+
+@pytest.mark.asyncio
+async def test_web_video_scan_skips_excluded_episodes(system):
+    """Правила применяются до обхода: исключённые серии не запрашиваются."""
+    _, fake, probe, _ = system
+    fake.parse_titles = ["Т3 1 серия", "Т3 2 серия", "Т3 3 серия"]
+    fake.parse_episodes = [{"number": 1}, {"number": 2}, {"number": 3}]
+    fake.rules_by_title = {
+        "Т3 1 серия": {"excluded": True, "extracted": {}},
+        "Т3 2 серия": {"excluded": False, "extracted": {"episode": 2}},
+        "Т3 3 серия": {"excluded": True, "extracted": {}},
+    }
+    fake.web_videos = [{
+        "title": "Т3 2 серия", "url": "https://fsst.online/embed/2/",
+        "publication_date": "2026-10-20T12:00:00Z", "resolution": 1080,
+    }]
+    fake.web_players = {"episodes": 1, "sources": {"allvideo": 1},
+                        "players": {}, "holes": []}
+
+    reply = await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
+
+    assert fake.web_scan_payloads[-1]["episodes"] == [2]
+    assert reply["candidates"]["added"] == 1

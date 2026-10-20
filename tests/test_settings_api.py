@@ -339,8 +339,16 @@ async def test_scrape_titles_endpoint(system):
                 "releases": [],
             }
 
-        async def scan_episodes(self, url: str, http: httpx.AsyncClient, series: dict) -> list[dict]:
-            return []
+        async def scan_episodes(self, url: str, http: httpx.AsyncClient,
+                                series: dict, episodes: list[int] | None = None) -> dict:
+            return {"videos": [
+                {"title": "Серия 1", "url": "https://fake/1",
+                 "publication_date": "2026-10-01T12:00:00Z", "resolution": 1080},
+                {"title": "Серия 2", "url": "https://fake/2",
+                 "publication_date": "2026-10-02T12:00:00Z", "resolution": 2160},
+                {"title": "Серия 3 Special", "url": "https://fake/3",
+                 "publication_date": "2026-10-03T12:00:00Z", "resolution": 1080},
+            ], "players": {}}
 
         async def resolve_stream(self, url: str, http: httpx.AsyncClient) -> dict | None:
             return None

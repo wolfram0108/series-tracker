@@ -408,20 +408,21 @@ class RuchimeProvider(BaseVideoProvider):
         name_ru, name_en = self._release_names(raw_text, slug, url)
         episodes_raw = self._release_episodes(raw_text)
 
-        titles = [self._episode_title(name_ru, ep)
-                  for ep in episodes_raw if ep.get("number") is not None]
         report, resolution = await self._quick_report(raw_text, self.canonical_url(url), http)
-        last_report, last_resolution = await self._probe_last_episode(
-            slug, episodes_raw, http, headers)
-        report = _merge_reports(report, last_report)
-        resolution = max((value for value in (resolution, last_resolution)
-                          if value is not None), default=None)
-        videos = [{"title": title, "resolution": resolution} for title in titles]
+        episodes = [
+            {"number": ep.get("number"),
+             "title": self._episode_title(name_ru, ep),
+             "date": ep.get("date")}
+            for ep in episodes_raw if ep.get("number") is not None]
+        titles = [episode["title"] for episode in episodes]
+        # Per-episode quality is a fact from the scan, not a release preview.
+        videos = [{"title": title, "resolution": None} for title in titles]
 
         return {
             "canonical_url": self.canonical_url(url),
             "title": {"ru": name_ru, "en": name_en},
             "titles": titles,
+            "episodes": episodes,
             "resolution": resolution,
             "videos": videos,
             "episodes_count": len(titles),
@@ -464,25 +465,6 @@ class RuchimeProvider(BaseVideoProvider):
             logger.warning("Failed parsing ALL_EPS JSON: %s", exc)
             return []
         return episodes if isinstance(episodes, list) else []
-
-    async def _probe_last_episode(self, slug: str, episodes_raw: list[dict],
-                                  http: httpx.AsyncClient,
-                                  headers: dict) -> tuple[dict, int | None]:
-        """Sample the newest episode so the release badge does not lag behind."""
-        numbers = [ep.get("number") for ep in episodes_raw
-                   if ep.get("number") is not None]
-        if not numbers:
-            return {}, None
-        page_url = f"https://1.ruchime.org/release/{slug}/episode-{max(numbers)}"
-        try:
-            response = await http.get(page_url, headers=headers,
-                                      follow_redirects=True, timeout=REQUEST_TIMEOUT)
-        except Exception as exc:  # noqa: BLE001 - the badge is best-effort
-            logger.warning("Quick probe of the last episode failed: %s", exc)
-            return {}, None
-        if response.status_code != 200:
-            return {}, None
-        return await self._quick_report(response.text, page_url, http)
 
     async def _quick_report(self, raw_text: str, page_url: str,
                             http: httpx.AsyncClient) -> tuple[dict, int | None]:
@@ -531,13 +513,19 @@ class RuchimeProvider(BaseVideoProvider):
         return report, (max(resolutions) if resolutions else None)
 
     async def scan_episodes(self, url: str, http: httpx.AsyncClient,
-                            series: dict) -> list[dict]:
+                            series: dict,
+                            episodes: list[int] | None = None) -> dict:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         resp, slug = await self._read_release(url, http, headers)
 
-        episodes_raw = self._release_episodes(resp.text)
-        if not episodes_raw:
+        all_episodes = self._release_episodes(resp.text)
+        if not all_episodes:
             raise ValueError(f"Ruchime: array ALL_EPS not found on page {url}")
+        if episodes is not None:
+            allowed = set(episodes)
+            episodes_raw = [ep for ep in all_episodes if ep.get("number") in allowed]
+        else:
+            episodes_raw = all_episodes
 
         name_ru = series.get("name")
         if not name_ru:
@@ -675,27 +663,6 @@ class RuchimeProvider(BaseVideoProvider):
                 lines.append(line)
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return path
-
-
-def _merge_reports(first: dict, second: dict) -> dict:
-    """Merge two preview reports, keeping the best resolution per player."""
-    merged: dict[str, dict] = {}
-    for name in list(first) + [key for key in second if key not in first]:
-        left = first.get(name) or {}
-        right = second.get(name) or {}
-        resolutions = [value for value in (left.get("resolution"),
-                                           right.get("resolution"))
-                       if value is not None]
-        available = None
-        if left.get("available") is not None or right.get("available") is not None:
-            available = bool(left.get("available") or right.get("available"))
-        merged[name] = {
-            "present": bool(left.get("present") or right.get("present")),
-            "available": available,
-            "resolution": max(resolutions) if resolutions else None,
-            "reason": left.get("reason") or right.get("reason") or "",
-        }
-    return merged
 
 
 def _retry_after(response: httpx.Response) -> float | None:

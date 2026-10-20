@@ -329,7 +329,8 @@ class SourcesModule(BaseModule):
         async with lock:
             await self._polite(service)
             series = env.payload.get("series") or {}
-            result = await provider.scan_episodes(url, self._http, series)
+            result = await provider.scan_episodes(
+                url, self._http, series, episodes=env.payload.get("episodes"))
         videos = result.get("videos", []) if isinstance(result, dict) else result
         players = result.get("players", {}) if isinstance(result, dict) else {}
         self.log.info("Видео-скан %s (%s): серий %d", service, url, len(videos))

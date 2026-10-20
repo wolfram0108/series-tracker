@@ -156,7 +156,7 @@ async function scrapeTestTitles(): Promise<void> {
   toast.add({
     severity: "info",
     summary: "Сбор названий",
-    detail: isWeb ? "Загрузка названий с сайта…" : "Запущен сбор через VK API…",
+    detail: isWeb ? "Полный опрос серий с качеством — может занять минуты…" : "Запущен сбор через VK API…",
     life: 2500,
   })
   try {

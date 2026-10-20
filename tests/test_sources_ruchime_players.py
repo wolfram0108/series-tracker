@@ -301,19 +301,26 @@ async def test_parse_release_reports_preview_players():
     assert result["players"]["vibix"]["present"] is True
     assert result["players"]["vibix"]["available"] is None
     assert result["resolution"] == 1080
-    assert all(video["resolution"] == 1080 for video in result["videos"])
+    # Per-episode quality is a scan fact; the parse does not invent it.
+    assert all(video["resolution"] is None for video in result["videos"])
+    assert [episode["number"] for episode in result["episodes"]] == [1, 2]
 
 
-def test_merge_reports_prefers_best_resolution():
-    from modules.sources.video_providers.ruchime import _merge_reports
+@pytest.mark.asyncio
+async def test_scan_episodes_can_limit_page_fetches():
+    provider = RuchimeProvider()
+    counts = {"episode-1": 0, "episode-2": 0}
+    client = make_client({
+        "episode-1": page_html(vk=True),
+        "episode-2": page_html(vk=True),
+        "video_ext.php": VK_OPEN,
+        "release/test": release_html([1, 2]),
+    }, counts)
 
-    first = {"vk": {"present": True, "available": True,
-                    "resolution": 1080, "reason": ""}}
-    second = {"vk": {"present": True, "available": True,
-                     "resolution": 2160, "reason": ""},
-              "vibix": {"present": True, "available": None,
-                        "resolution": None, "reason": "проверяется при сканировании"}}
-    merged = _merge_reports(first, second)
-    assert merged["vk"]["resolution"] == 2160
-    assert merged["vibix"]["present"] is True
-    assert merged["vibix"]["available"] is None
+    result = await provider.scan_episodes(
+        "https://1.ruchime.org/release/test", client, {"name": "Тест"},
+        episodes=[2])
+
+    assert [fact["title"] for fact in result["videos"]] == ["Тест - 2 серия"]
+    assert counts["episode-1"] == 0
+    assert counts["episode-2"] == 1

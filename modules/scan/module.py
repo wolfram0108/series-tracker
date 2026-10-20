@@ -556,9 +556,39 @@ class ScanModule(BaseModule):
             timeout=900)
         return await self._process_video_candidates(series, reply["videos"], "vk_video")
 
+    async def _included_episodes(self, series: dict) -> list[int] | None:
+        """Fast release list + rules: excluded episodes are never fetched."""
+        try:
+            parsed = await self.request("sources.parse", {"url": series["url"]},
+                                        timeout=120)
+        except BusRequestError as exc:
+            self.log.warning("скан: быстрый список серий недоступен: %s", exc)
+            return None
+        titles = parsed.get("titles") or []
+        episodes = parsed.get("episodes") or []
+        profile_id = series.get("parser_profile_id")
+        if not titles or not episodes or not profile_id:
+            return None
+        try:
+            applied = await self.request("rules.apply", {
+                "profile_id": profile_id, "titles": titles,
+                "series_season": series.get("season")}, timeout=300)
+        except BusRequestError as exc:
+            self.log.warning("скан: правила не применились к списку: %s", exc)
+            return None
+        results = applied.get("results") or []
+        if len(results) != len(episodes):
+            return None
+        included = [episode["number"] for episode, outcome
+                    in zip(episodes, results) if not outcome.get("excluded")]
+        self.log.info("скан %d: быстрый список %d серий, после правил %d",
+                      series["id"], len(episodes), len(included))
+        return included
+
     async def _scan_web_video(self, series: dict) -> dict:
+        episodes = await self._included_episodes(series)
         reply = await self.request("sources.video.scan", {
-            "url": series["url"], "series": series},
+            "url": series["url"], "series": series, "episodes": episodes},
             timeout=900)
         result = await self._process_video_candidates(series, reply["videos"],
                                                       "web_video")

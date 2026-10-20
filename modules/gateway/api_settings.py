@@ -408,11 +408,16 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                             {"error": "Указан URL торрент-трекера. Функция 'Получить с сайта' предназначена для видеохостингов и веб-релизов. Для торрентов используйте проверку по именам раздач."},
                             status_code=400)
 
-                    videos = parse_res.get("videos") or []
+                    # Rule-test cards must carry facts: probe every episode page,
+                    # exactly like the scan does, instead of a release preview.
+                    scan = await gw.request("sources.video.scan", {
+                        "url": parse_res.get("canonical_url") or channel_url,
+                        "series": {"name": (parse_res.get("title") or {}).get("ru")},
+                    }, timeout=900)
+                    videos = scan.get("videos") or []
                     if not videos:
-                        res_val = parse_res.get("resolution")
-                        raw_titles = parse_res.get("titles") or []
-                        videos = [{"title": t, "resolution": res_val} for t in raw_titles]
+                        videos = [{"title": title, "resolution": None}
+                                  for title in parse_res.get("titles") or []]
 
                     query = (data.get("query") or "").strip()
                     terms = [t.strip().lower() for t in query.split("/") if t.strip()]

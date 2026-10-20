@@ -75,6 +75,7 @@ const deepAdopting = ref(false)
 const savingPriority = ref(false)
 const showOnlyPlanned = ref(false)
 const autoUpdate = ref(false)
+const isWebVideo = computed(() => props.sourceType === "web_video")
 const searchMode = ref("search")
 const ignoredSeasons = ref<number[]>([])
 const qualityPriority = ref<{ quality: number }[]>([])
@@ -332,7 +333,7 @@ async function initialize() {
   // дефолт авто-обновления = true (как в оригинале: при открытии VK-серии
   // автоматически скрейпим/усыновляем). false только для get_all или если
   // пользователь явно выключил (сохранено в localStorage).
-  if (searchMode.value === "get_all") {
+  if (searchMode.value === "get_all" || isWebVideo.value) {
     autoUpdate.value = false
   } else {
     const saved = localStorage.getItem(`composition_autoupdate_${props.seriesId}`)
@@ -347,6 +348,10 @@ async function manualRefreshClick() {
   await loadComposition(true)
 }
 function onAutoUpdateChange() {
+  if (isWebVideo.value) {
+    autoUpdate.value = false
+    return
+  }
   localStorage.setItem(`composition_autoupdate_${props.seriesId}`, autoUpdate.value ? "1" : "0")
 }
 async function saveQualityPriority() {
@@ -472,8 +477,8 @@ defineExpose({ reload: () => loadComposition(false) })
       </div>
       <div class="fieldset-content">
         <div class="vk-comp-controls">
-          <label class="vk-toggle">
-            <ToggleSwitch v-model="autoUpdate" :disabled="searchMode === 'get_all'" @change="onAutoUpdateChange" />
+          <label class="vk-toggle" :title="isWebVideo ? 'Для веб-источников обновление только по кнопке' : ''">
+            <ToggleSwitch v-model="autoUpdate" :disabled="searchMode === 'get_all' || isWebVideo" @change="onAutoUpdateChange" />
             <span>Авто-обновление</span>
           </label>
           <label class="vk-toggle">
