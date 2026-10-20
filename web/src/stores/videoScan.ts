@@ -9,6 +9,7 @@ export interface VideoScanProgress {
   rate: number
   phase: string
   active: boolean
+  kind?: string
 }
 
 export const useVideoScanStore = defineStore("videoScan", () => {
@@ -25,10 +26,18 @@ export const useVideoScanStore = defineStore("videoScan", () => {
 
   function format(value: VideoScanProgress | null): string {
     if (!value) return ""
-    return `${value.current} из ${value.total} | ${value.rate.toFixed(1)} с/с`
+    const rate = value.rate >= 0.1
+      ? value.rate.toFixed(1)
+      : value.rate.toFixed(2)
+    return `${value.current} из ${value.total} | ${rate} с/с`
+  }
+
+  function label(value: VideoScanProgress | null): string {
+    if (!value) return ""
+    return value.kind === "videos" ? "Опрос видео" : "Опрос серий"
   }
 
   const text = computed(() => format(progress.value))
 
-  return { progress, set, forSeries, format, text }
+  return { progress, set, forSeries, format, label, text }
 })

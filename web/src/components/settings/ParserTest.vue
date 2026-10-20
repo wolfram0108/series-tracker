@@ -262,9 +262,6 @@ async function runTest(): Promise<void> {
             </div>
           </StGroup>
         </div>
-        <div v-if="scrapeProgress" class="scan-progress">
-          Опрос серий: {{ videoScan.format(scrapeProgress) }}
-        </div>
       </div>
     </div>
 
@@ -276,6 +273,10 @@ async function runTest(): Promise<void> {
         placeholder="Название видео 1&#10;Название видео 2"
       />
     </StGroup>
+
+    <div v-if="scrapeProgress" class="scan-progress">
+      {{ videoScan.label(scrapeProgress) }}: {{ videoScan.format(scrapeProgress) }}
+    </div>
 
     <div class="parser-test-actions">
       <Button

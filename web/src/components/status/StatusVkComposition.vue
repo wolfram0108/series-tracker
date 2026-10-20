@@ -491,7 +491,7 @@ defineExpose({ reload: () => loadComposition(false) })
         </div>
 
         <div v-if="scanProgress" class="scan-progress">
-          Опрос серий: {{ videoScan.format(scanProgress) }}
+          {{ videoScan.label(scanProgress) }}: {{ videoScan.format(scanProgress) }}
         </div>
 
         <div v-if="availabilityRows.length" class="player-report">

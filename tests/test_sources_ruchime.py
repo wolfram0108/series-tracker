@@ -383,3 +383,59 @@ def test_allvideo_resolution_extraction():
     # 4. Fallback to title
     html_title = "<title>Watch video 1080p HD</title>"
     assert provider._extract_allvideo_resolution(html_title) == 1080
+
+
+@pytest.mark.asyncio
+async def test_vk_paginate_reports_progress():
+    bus = Bus()
+    db = Database(":memory:")
+    sources = SourcesModule(bus, db, vk_page_interval=0)
+    pages = [
+        {"response": {"count": 3, "items": [{"id": 1}, {"id": 2}]}},
+        {"response": {"count": 3, "items": [{"id": 3}]}},
+        {"response": {"count": 3, "items": []}},
+    ]
+
+    async def fake_call(method, params):
+        return pages.pop(0)
+
+    sources._vk_call = fake_call
+    calls = []
+    items = await sources._vk_paginate(
+        "video.get", {}, progress=lambda c, t, p: calls.append((c, t, p)))
+
+    assert len(items) == 3
+    assert calls == [(2, 3, "videos"), (3, 3, "videos")]
+
+
+@pytest.mark.asyncio
+async def test_vk_scan_publishes_progress():
+    bus = Bus()
+    db = Database(":memory:")
+    sources = SourcesModule(bus, db, vk_page_interval=0)
+    pages = [
+        {"response": {"count": 1, "items": [{
+            "id": 7, "owner_id": -1, "title": "Серия 1", "date": 0,
+            "files": {"mp4_1080": "u"}}]}},
+        {"response": {"count": 1, "items": []}},
+    ]
+
+    async def fake_call(method, params):
+        if method == "utils.resolveScreenName":
+            return {"response": {"object_id": 1, "type": "group"}}
+        return pages.pop(0)
+
+    sources._vk_call = fake_call
+    sub = bus.subscribe("sources.video.progress")
+    await sources.on_vk_scan(Envelope(
+        topic="sources.vk.scan", kind="query",
+        payload={"channel_url": "https://vkvideo.ru/@chan", "query": "",
+                 "search_mode": "get_all", "series_id": 80}))
+
+    events = []
+    while not sub.queue.empty():
+        events.append((await sub.queue.get()).payload)
+    assert events[0]["kind"] == "videos"
+    assert events[0]["series_id"] == 80
+    assert events[-1]["phase"] == "done"
+    assert events[-1]["active"] is False

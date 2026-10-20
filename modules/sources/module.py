@@ -275,17 +275,22 @@ class SourcesModule(BaseModule):
         return data
 
     async def _vk_paginate(self, method: str, params: dict,
-                           *, max_pages: int = 50) -> list[dict]:
-        items, offset = [], 0
+                           *, max_pages: int = 50, progress=None) -> list[dict]:
+        items, offset, total = [], 0, 0
         for page in range(max_pages):
             data = await self._vk_call(method, {
                 **params, "offset": offset, "count": vk.PAGE_SIZE})
-            page_items = (data.get("response") or {}).get("items", [])
+            response = data.get("response") or {}
+            page_items = response.get("items", [])
+            if page == 0:
+                total = int(response.get("count") or 0)
             if not page_items:
                 break
             items.extend(page_items)
             offset += vk.PAGE_SIZE
-            await asyncio.sleep(self.vk_page_interval)  # пауза — уважение к API
+            if progress is not None:
+                progress(len(items), max(total, len(items)), "videos")
+            await asyncio.sleep(self.vk_page_interval)  # pause respects the API
         else:
             self.log.warning("VK %s: достигнут предел %d страниц", method,
                              max_pages)
@@ -295,6 +300,21 @@ class SourcesModule(BaseModule):
         """payload: {channel_url, query, search_mode: 'search'|'get_all'}
         reply:   {videos: [{title, url, publication_date, resolution}]}"""
         p = env.payload
+        series_id = p.get("series_id")
+        started = time.monotonic()
+        state = {"current": 0, "total": 0}
+
+        def report(current: int, total: int, phase: str) -> None:
+            state["current"] = current
+            state["total"] = total
+            elapsed = time.monotonic() - started
+            self.publish_event("sources.video.progress", {
+                "series_id": series_id, "current": current,
+                "total": total,
+                "rate": round(elapsed / current, 2) if current else 0.0,
+                "phase": phase, "active": phase not in ("done", "error"),
+                "kind": "videos"})
+
         screen_name = vk.screen_name_from_url(p["channel_url"])
         resolve = await self._vk_call("utils.resolveScreenName",
                                       {"screen_name": screen_name})
@@ -303,18 +323,25 @@ class SourcesModule(BaseModule):
         terms = [t.strip() for t in (p.get("query") or "").split("/")
                  if t.strip()]
 
-        if p.get("search_mode", "search") == "search":
-            raw: list[dict] = []
-            for term in terms:
-                raw.extend(await self._vk_paginate("video.search",
-                                                   {**base, "q": term}))
-            raw = vk.dedupe_by_id(raw)
-        else:  # get_all: весь канал + локальный фильтр
-            raw = vk.filter_by_terms(
-                await self._vk_paginate("video.get", base), terms)
+        try:
+            if p.get("search_mode", "search") == "search":
+                raw: list[dict] = []
+                for term in terms:
+                    raw.extend(await self._vk_paginate(
+                        "video.search", {**base, "q": term},
+                        progress=report))
+                raw = vk.dedupe_by_id(raw)
+            else:  # get_all: весь канал + локальный фильтр
+                raw = vk.filter_by_terms(
+                    await self._vk_paginate("video.get", base,
+                                            progress=report), terms)
+        except Exception:
+            report(state["current"], state["total"], "error")
+            raise
 
         facts = [f for f in (vk.video_to_fact(v) for v in raw) if f]
         facts.sort(key=lambda f: f["publication_date"], reverse=True)
+        report(state["current"], state["total"], "done")
         self.log.info("VK-скан %s: видео %d (сырых %d)", screen_name,
                       len(facts), len(raw))
         return {"videos": facts}
@@ -344,7 +371,8 @@ class SourcesModule(BaseModule):
                     "series_id": series_id, "current": current,
                     "total": total,
                     "rate": round(elapsed / current, 2) if current else 0.0,
-                    "phase": phase, "active": phase != "done"})
+                    "phase": phase, "active": phase != "done",
+                    "kind": "episodes"})
 
             try:
                 result = await provider.scan_episodes(
@@ -354,7 +382,8 @@ class SourcesModule(BaseModule):
                 self.publish_event("sources.video.progress", {
                     "series_id": series_id, "current": state["current"],
                     "total": state["total"], "rate": 0.0,
-                    "phase": "error", "active": False})
+                    "phase": "error", "active": False,
+                    "kind": "episodes"})
                 raise
         videos = result.get("videos", []) if isinstance(result, dict) else result
         players = result.get("players", {}) if isinstance(result, dict) else {}

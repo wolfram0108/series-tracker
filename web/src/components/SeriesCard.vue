@@ -138,7 +138,7 @@ const scanTime = computed(() => {
             <span v-if="p.title">{{ p.title }}</span>
           </div>
         </TransitionGroup>
-        <div v-if="scanProgress" class="status-pill">
+        <div v-if="scanProgress" class="status-pill" :title="videoScan.label(scanProgress)">
           <i class="pi pi-spin pi-spinner"></i>
           <span>{{ videoScan.format(scanProgress) }}</span>
         </div>

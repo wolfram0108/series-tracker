@@ -554,7 +554,8 @@ class ScanModule(BaseModule):
         channel_url, _, query = series["url"].partition("|")
         reply = await self.request("sources.vk.scan", {
             "channel_url": channel_url, "query": query,
-            "search_mode": series.get("vk_search_mode") or "search"},
+            "search_mode": series.get("vk_search_mode") or "search",
+            "series_id": series["id"]},
             timeout=900)
         return await self._process_video_candidates(series, reply["videos"], "vk_video")
 
