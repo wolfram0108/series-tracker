@@ -36,6 +36,19 @@ class Database:
             conn.commit()
             return cur.rowcount
 
+    def _insert_sync(self, query: str, params: Iterable[Any]) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(query, tuple(params))
+            conn.commit()
+            return cur.lastrowid
+
+    async def insert(self, query: str, params: Iterable[Any] = ()) -> int:
+        """id вставленной строки — его выдаёт сама база (lastrowid).
+
+        Чтение «максимального id» вместо lastrowid отдаёт id чужой
+        строки при параллельной вставке."""
+        return await asyncio.to_thread(self._insert_sync, query, params)
+
     async def fetch_all(self, query: str, params: Iterable[Any] = ()) -> list[dict]:
         return await asyncio.to_thread(self._fetch_all_sync, query, params)
 

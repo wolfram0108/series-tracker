@@ -55,12 +55,9 @@ class CatalogRepository:
         fields.setdefault("ignored_episodes", "{}")
         cols = ", ".join(fields)
         marks = ", ".join("?" for _ in fields)
-        await self._db.execute(
+        return await self._db.insert(
             f"INSERT INTO series ({cols}) VALUES ({marks})",
             tuple(fields.values()))
-        row = await self._db.fetch_one(
-            "SELECT id FROM series ORDER BY id DESC LIMIT 1")
-        return row["id"]
 
     async def update_series(self, series_id: int, data: dict) -> dict:
         """Обновляет только живые колонки; возвращает применённые поля."""
