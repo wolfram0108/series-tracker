@@ -17,7 +17,9 @@
 над миссией: СНАЧАЛА прочитать её `CHARTER.md` + `ROADMAP.md`, потом код.
 Завершённые → `docs/missions/_done/`.
 
-- (активных миссий нет; завершённые — в `docs/missions/_done/`, напр.
+- `ruchime-players` — парсер 1.ruchime.org: любой доступный плеер (Kodik и др.),
+  а не только VK; отчёт о доступности серии — `docs/missions/ruchime-players/`
+- (завершённые — в `docs/missions/_done/`, напр.
   `torrent-naming-preview` — предпросмотр нейминга в окне добавления)
 
 ---
