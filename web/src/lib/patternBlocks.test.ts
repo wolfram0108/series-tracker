@@ -8,6 +8,7 @@ import {
   lastNumberIndex,
   normalizeAttachments,
   removeBlockAt,
+  splitsAttachment,
   type PatternBlock,
 } from "./patternBlocks"
 
@@ -67,6 +68,28 @@ describe("removeBlockAt", () => {
     const blocks = [text("t"), num("n"), range("r")]
     removeBlockAt(blocks, 2)
     expect(blocks.map((b) => b.id)).toEqual(["t", "n"])
+  })
+
+  it("keeps the template shape when text follows the attachment", () => {
+    // The number returns to the place of the attachment: the template keeps
+    // its meaning, otherwise the pattern would match another title.
+    const blocks = [num("n"), range("r"), text("t")]
+    removeBlockAt(blocks, 0)
+    expect(blocks.map((b) => b.type)).toEqual(["number", "range", "text"])
+    expect(isGlued(blocks, 1)).toBe(true)
+  })
+})
+
+describe("splitsAttachment", () => {
+  it("sees a number with an attachment", () => {
+    const blocks = [num("n"), range("r")]
+    expect(splitsAttachment(blocks, blocks[0])).toBe(true)
+  })
+
+  it("leaves a plain number alone", () => {
+    const blocks = [num("n"), text("t")]
+    expect(splitsAttachment(blocks, blocks[0])).toBe(false)
+    expect(splitsAttachment(blocks, range("r"))).toBe(false)
   })
 })
 

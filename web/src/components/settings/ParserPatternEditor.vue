@@ -10,6 +10,7 @@ import {
   normalizeAttachments,
   numberBlockCount,
   removeBlockAt,
+  splitsAttachment,
   type PatternBlock,
 } from "../../lib/patternBlocks"
 
@@ -110,18 +111,19 @@ function updateBlockValue(block: PatternBlock, newText: string): void {
 }
 
 function removeBlock(index: number): void {
-  // Removing the number must not leave the attachment orphaned: the sortable
-  // change event does not fire for a programmatic removal.
+  // The sortable change event does not fire for a programmatic removal.
   removeBlockAt(props.blocks, index)
 }
 
-// Fool-proofing: a template holds one attachment, and it belongs to a number.
-// The sortable fires the check on the dragged list, so the template that
-// receives the block is taken from the drop target, not from this editor.
+// Fool-proofing: the template that receives the block is taken from the drop
+// target, not from this editor: the sortable fires the check on the source.
 function checkMove(evt: any): boolean {
   const dragged = evt.draggedContext?.element as PatternBlock | undefined
+  const source = evt.draggedContext?.list as PatternBlock[] | undefined
   const target = evt.relatedContext?.list as PatternBlock[] | undefined
   if (!dragged || !target) return true
+  // A number and its attachment are one unit and are not split apart.
+  if (source && source !== target && splitsAttachment(source, dragged)) return false
   const targetContext = evt.to?.getAttribute?.("data-context") ?? undefined
   return canDrop(target, dragged, targetContext)
 }
@@ -174,7 +176,15 @@ function checkMove(evt: any): boolean {
               @keydown.enter.prevent="($event.target as HTMLElement).blur()"
             >{{ getBlockDisplayText(element) }}</div>
           </template>
-          <button class="pattern-block-remove" title="Удалить блок" @click="removeBlock(index)" />
+          <button
+            class="pattern-block-remove"
+            :class="{ 'is-disabled': carriesAttachment(props.blocks, index) }"
+            :disabled="carriesAttachment(props.blocks, index)"
+            :title="carriesAttachment(props.blocks, index)
+              ? 'У числа прикреплён блок-приложение — удалите приложение'
+              : 'Удалить блок'"
+            @click="removeBlock(index)"
+          />
         </div>
       </template>
     </draggable>

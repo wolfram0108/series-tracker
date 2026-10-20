@@ -161,6 +161,7 @@
   align-items: stretch;
 }
 .pattern-constructor {
+  --pattern-gap: 0.5rem;
   flex: 1 1 auto;
   border-radius: 6px;
   padding: 0.5rem;
@@ -172,7 +173,7 @@
 .pattern-blocks-container {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: var(--pattern-gap);
   min-height: 38px;
   align-items: flex-start;
   padding: 0.25rem;
@@ -210,7 +211,7 @@
 
 /* Glued pair: the attachment suffix touches the number it modifies. */
 .pattern-block.is-glued {
-  margin-left: -0.5rem;
+  margin-left: calc(var(--pattern-gap) * -1);
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }
@@ -248,6 +249,10 @@
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%236c757d'/%3E%3Cpath d='M5 5l6 6M11 5l-6 6' stroke='%23fff' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
 }
 .pattern-block:hover .pattern-block-remove { opacity: 1; }
+.pattern-block-remove.is-disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
 
 .palette-footer {
   display: flex;

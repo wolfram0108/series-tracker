@@ -1,6 +1,5 @@
-// Attachment blocks (range, +/-) are tails of a number: they change or filter
-// the number they follow, so they only make sense glued to the last one.
-// The engine enforces the same invariant (modules/rules/engine.py).
+// Attachment blocks (range, +/-) are tails of a number: they only make sense
+// glued to the only number of the template. The engine requires the same.
 
 export interface PatternBlock {
   id: number | string
@@ -64,6 +63,13 @@ export function attachmentAllowedInContext(type: string, context: string): boole
   return context === "then"
 }
 
+// The number and its attachment are one unit: they are not split between templates.
+export function splitsAttachment(source: PatternBlock[], dragged: PatternBlock): boolean {
+  if (dragged.type !== "number") return false
+  const index = source.indexOf(dragged)
+  return index !== -1 && carriesAttachment(source, index)
+}
+
 // Reordering inside one template is always allowed; a block coming from
 // elsewhere must fit the template it lands in.
 export function canDrop(blocks: PatternBlock[], dragged: PatternBlock,
@@ -91,12 +97,13 @@ export function normalizeAttachments(blocks: PatternBlock[]): void {
   const numIndex = lastNumberIndex(blocks)
   if (numIndex !== -1 && blocks[numIndex + 1] === attachment) return
 
-  blocks.splice(blocks.indexOf(attachment), 1)
+  const at = blocks.indexOf(attachment)
+  blocks.splice(at, 1)
   const numIndexAfter = lastNumberIndex(blocks)
   if (numIndexAfter === -1) {
     autoIdCounter += 1
-    blocks.push({ id: `auto-${autoIdCounter}`, type: "number" })
-    blocks.push(attachment)
+    // The number takes the place of the attachment: the template keeps its shape.
+    blocks.splice(at, 0, { id: `auto-${autoIdCounter}`, type: "number" }, attachment)
     return
   }
   blocks.splice(numIndexAfter + 1, 0, attachment)

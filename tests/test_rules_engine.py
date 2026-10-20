@@ -285,10 +285,8 @@ def test_range_filter_compilations_overlap_auto_detected():
 
 
 def test_range_rejected_with_explicit_compilation_pattern():
-    # Явный шаблон компиляции из двух чисел с диапазоном недопустим: блок-приложение
-    # принадлежит единственному числу шаблона. Тот же смысл («исключить
-    # компиляции, задевающие 1-20») даёт форма с одним числом — компиляция
-    # определяется по самому названию.
+    # Two numbers with a range are rejected: the attachment belongs to the only
+    # number of the template. The one-number form detects the compilation itself.
     cond = {
         "condition_type": "contains",
         "logical_operator": "AND",
@@ -429,7 +427,7 @@ def test_range_rejected_in_action():
 
 
 def test_attachment_rejected_with_several_numbers():
-    # Блок-приложение принадлежит единственному числу шаблона.
+    # The attachment belongs to the only number of the template.
     profile = compile_profile(1, [
         _rule(1, "два числа", [], conditions=[_cond([{"type": "number"}, {"type": "number"},
                                                      {"type": "range", "value": "1-10"}])])
@@ -444,6 +442,43 @@ def test_modifier_rejected_with_several_numbers():
     ])
     assert len(profile.invalid_rules) == 1
     assert "должно быть ровно одно число" in profile.invalid_rules[0]["error"]
+
+
+def test_modifier_rejected_in_extract_range_with_two_numbers():
+    # extract_range with two numbers and a modifier was accepted before (the
+    # second bound was shifted); now the template is rejected as in the panel.
+    profile = compile_profile(1, [
+        _rule(1, "диапазон серий", [_extract("extract_range", "N", "-", "N", ("add", "5"))])
+    ])
+    assert len(profile.invalid_rules) == 1
+    assert "должно быть ровно одно число" in profile.invalid_rules[0]["error"]
+
+
+def test_non_numeric_modifier_value_rejected():
+    profile = compile_profile(1, [
+        _rule(1, "сдвиг", [_extract("extract_single", "N", ("add", "abc"))])
+    ])
+    assert len(profile.invalid_rules) == 1
+    assert "нечисловое значение блока" in profile.invalid_rules[0]["error"]
+
+
+def test_range_filter_compilation_separators():
+    # The compilation is detected from the title: the separators the engine knows.
+    for sep in ("-", "–", "—", " по ", " to "):
+        cond = {
+            "condition_type": "contains",
+            "logical_operator": "AND",
+            "pattern": json.dumps([
+                {"type": "number"},
+                {"type": "range", "value": "1-20"}
+            ], ensure_ascii=False)
+        }
+        profile = compile_profile(1, [
+            _rule(1, "исключить компиляции", [{"action_type": "exclude"}], conditions=[cond])
+        ])
+        assert not profile.invalid_rules
+        assert process_title(profile, f"10{sep}30 серия")["excluded"] is True
+        assert process_title(profile, f"21{sep}40 серия")["excluded"] is False
 
 
 def test_attachment_with_single_number_allowed():
@@ -497,7 +532,8 @@ def test_range_resolution_marker_symmetrical_protection():
     assert process_title(profile_single, "170-190")["excluded"] is True
     assert process_title(profile_single, "175-190")["excluded"] is True
 
-    # Explicit two-number pattern with resolution attached to second number
+    # Явный шаблон с двумя числами и диапазоном недопустим (Р-31): блок-приложение
+    # принадлежит единственному числу. Проверяем отказ, а не исключение.
     cond_explicit = {
         "condition_type": "contains",
         "logical_operator": "AND",
@@ -511,7 +547,8 @@ def test_range_resolution_marker_symmetrical_protection():
     profile_explicit = compile_profile(2, [
         _rule(1, "exclude 1-100", [{"action_type": "exclude"}], conditions=[cond_explicit])
     ])
-    assert process_title(profile_explicit, "10-1080p")["excluded"] is False
+    assert len(profile_explicit.invalid_rules) == 1
+    assert "должно быть ровно одно число" in profile_explicit.invalid_rules[0]["error"]
 
 
 def test_range_disallowed_in_actions_loudly():

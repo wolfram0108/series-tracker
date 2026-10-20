@@ -271,11 +271,14 @@ def _compile_rule(rule: dict) -> CompiledRule:
                 if i + 1 < len(blocks):
                     nxt = blocks[i + 1]
                     if nxt.get("type") in ("add", "subtract"):
+                        sign = "+" if nxt["type"] == "add" else "−"
                         try:
                             value = int(nxt.get("value", 0))
-                            mod = value if nxt["type"] == "add" else -value
                         except (ValueError, TypeError):
-                            mod = None  # нечисловой модификатор игнорируется
+                            raise ValueError(
+                                f"нечисловое значение блока «{sign}»: "
+                                f"{nxt.get('value')!r}") from None
+                        mod = value if nxt["type"] == "add" else -value
                 modifiers.append(mod)
             actions.append(CompiledAction(
                 action_type=a_type, modifiers=modifiers,
