@@ -95,6 +95,17 @@
   cursor: pointer;
 }
 .rule-toggle-icon { transition: transform 0.2s ease-in-out; color: var(--text-muted); }
+.rule-invalid-badge {
+  flex-shrink: 0;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--color-red-1);
+  border-radius: 4px;
+  color: var(--color-red-1);
+  font-size: 0.7rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: help;
+}
 .rule-name-input {
   border: none;
   background: transparent;

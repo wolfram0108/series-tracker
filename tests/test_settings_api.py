@@ -459,3 +459,24 @@ async def test_parser_rule_update_keeps_conditions_when_absent(system):
     resp = await client.get(f"/api/parser-profiles/{profile_id}/rules")
     assert resp.json()[0]["conditions"] == []
 
+
+@pytest.mark.asyncio
+async def test_parser_rules_list_marks_invalid_rule(system):
+    _, db, client = system
+    resp = await client.post("/api/parser-profiles", json={"name": "Битое"})
+    profile_id = resp.json()["id"]
+    # правило с негодным шаблоном — мимо API: валидация его бы отвергла
+    await db.execute(
+        "INSERT INTO parser_rules (profile_id, name, priority, "
+        "action_pattern, continue_after_match) VALUES (?, ?, ?, ?, 0)",
+        (profile_id, "Битое", 1, "[]"))
+    rule = await db.fetch_one(
+        "SELECT id FROM parser_rules WHERE profile_id=?", (profile_id,))
+    await db.execute(
+        "INSERT INTO parser_rule_conditions (rule_id, condition_type, "
+        "pattern, logical_operator) VALUES (?, ?, ?, ?)",
+        (rule["id"], "contains", "не json", "AND"))
+    resp = await client.get(f"/api/parser-profiles/{profile_id}/rules")
+    rules = resp.json()
+    assert rules[0]["valid"] is False
+    assert rules[0]["error"]

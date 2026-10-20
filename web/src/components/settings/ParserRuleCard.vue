@@ -26,6 +26,8 @@ export interface EditableRule {
   name: string
   continue_after_match: boolean
   is_new?: boolean
+  valid?: boolean
+  error?: string | null
   conditions: Condition[]
   actions: Action[]
 }
@@ -113,6 +115,11 @@ function getAssignActionLabel(actionType: string): string {
       <div class="rule-title" @click="emit('toggle')">
         <i class="pi rule-toggle-icon" :class="toggleIcon" />
         <input v-model="rule.name" type="text" class="rule-name-input" placeholder="Имя правила..." @click.stop />
+        <span
+          v-if="rule.valid === false"
+          class="rule-invalid-badge"
+          :title="rule.error || 'Правило отключено'"
+        >правило отключено</span>
       </div>
       <div class="rule-controls">
         <button class="control-btn" :disabled="index === 0" title="Поднять приоритет" @click="emit('move', -1)">

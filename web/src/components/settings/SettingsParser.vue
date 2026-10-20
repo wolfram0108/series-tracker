@@ -42,6 +42,8 @@ interface RawRule {
   priority: number
   action_pattern: string
   continue_after_match: boolean | number
+  valid?: boolean
+  error?: string | null
   conditions: RawCondition[]
 }
 
@@ -188,6 +190,8 @@ async function loadRules(): Promise<void> {
       id: rule.id,
       name: rule.name,
       continue_after_match: !!rule.continue_after_match,
+      valid: rule.valid !== false,
+      error: rule.error ?? null,
       conditions: (rule.conditions || []).map((c) => ({
         id: c.id,
         condition_type: c.condition_type,
