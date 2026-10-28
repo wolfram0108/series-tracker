@@ -60,10 +60,10 @@ CVH и Kodik) отдаёт одну серию в нескольких озву�
 
 | Что | Команда | Ожидание |
 |---|---|---|
-| Сборка фронтенда (до серверных тестов: часть тестов читает `web/dist`) | `cd web && npm run build` | без ошибок |
 | Серверные тесты | `.venv/bin/python -m pytest -q -p no:cacheprovider --ignore=tests/test_sources.py --deselect tests/test_rules_format_diff.py --deselect tests/verify_planner_diff.py` | 687 прошли, 2 пропущены, 5 отобраны; 2 ошибки в `tests/test_scan_ids.py` — намеренные (нужны данные прод-системы); исключённые файлы требуют тех же данных; около 4,5 минут |
 | Тесты озвучек | `.venv/bin/python -m pytest tests/test_voices.py tests/test_voices_settings.py tests/test_voices_reasons.py tests/test_conform_module.py -q -p no:cacheprovider` | около 70 секунд |
 | Тесты фронтенда | `cd web && npx vitest run src` | 64 прошли; запуск без `src` подхватывает e2e-спеки Playwright и краснеет |
+| Типы и сборка | `cd web && npm run build` | без ошибок; серверные тесты `test_voices_reasons.py` и `test_ui_literals.py` читают исходники `web/src`, сборка им не нужна |
 
 ## 4. Нормативные требования
 
