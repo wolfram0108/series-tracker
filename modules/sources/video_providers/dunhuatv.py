@@ -59,6 +59,14 @@ class TitlePage:
     kodik_frame: str | None
 
 
+def _seasons_of(items: list) -> dict[tuple[str, str, int], set[int]]:
+    """Seasons in which each voice-over of the playlist has each episode number."""
+    found: dict[tuple[str, str, int], set[int]] = {}
+    for item in items:
+        found.setdefault((item.studio, item.voice_type, item.episode), set()).add(item.season)
+    return found
+
+
 @dataclass(frozen=True)
 class Choice:
     """A player and a voice-over: what a series downloads."""
@@ -303,6 +311,11 @@ class DunhuaTvProvider(BaseVideoProvider):
             items = await cdnvideohub.fetch_playlist(http, page.aggregator_id, page.publisher_id)
         except CdnVideoHubError as exc:
             catalog.reasons["cvh"], catalog.transient = exc.reason, catalog.transient or exc.transient
+            return
+        clashing = sorted({episode for (_, _, episode), found in _seasons_of(items).items() if len(found) > 1})
+        if clashing:
+            catalog.reasons["cvh"] = ("в плеере CVH несколько сезонов с одинаковыми номерами серий "
+                                      f"({', '.join(map(str, clashing))}): сезоны не различаются")
             return
         grouped: dict[tuple[str, str], dict[int, str]] = {}
         for item in items:

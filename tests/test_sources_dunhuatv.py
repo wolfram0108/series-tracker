@@ -391,6 +391,40 @@ async def test_parse_release_falls_back_to_kodik_when_cvh_is_absent(site, provid
     assert "нет плеера CVH" in release["players"]["cvh"]["reason"]
 
 
+def _second_season(*episodes):
+    items = [{"cvhId": f"s2-{n}", "vkId": f"s2v{n}", "voiceStudio": "AniStar", "voiceType": "Многоголосый",
+              "season": 2, "episode": n} for n in episodes]
+    return {"isSerial": True, "items": PLAYLIST["items"] + items}
+
+
+@pytest.mark.asyncio
+async def test_parse_release_refuses_a_cvh_catalog_whose_seasons_share_episode_numbers(site, provider):
+    site.playlist = _second_season(1)
+    async with site.client() as http:
+        release = await provider.parse_release(PAGE_URL, http)
+    assert {s["player"] for s in release["sources"]} == {"kodik"}
+    reason = release["players"]["cvh"]["reason"]
+    assert not release["players"]["cvh"]["available"] and "несколько сезонов" in reason and "(1)" in reason
+
+
+@pytest.mark.asyncio
+async def test_a_cvh_catalog_without_other_players_names_the_season_clash(site, provider):
+    site.playlist = _second_season(1, 2)
+    site.page = PAGE_HTML.replace("<iframe", "<x-frame")
+    async with site.client() as http:
+        with pytest.raises(ValueError, match="несколько сезонов.*1, 2"):
+            await provider.parse_release(PAGE_URL, http)
+
+
+@pytest.mark.asyncio
+async def test_seasons_with_distinct_episode_numbers_lose_nothing(site, provider):
+    site.playlist = _second_season(4, 5)
+    async with site.client() as http:
+        release = await provider.parse_release(PAGE_URL, http)
+    cvh = {(s["studio"], s["kind"]): s["episodes"] for s in release["sources"] if s["player"] == "cvh"}
+    assert cvh[("AniStar", "Многоголосый")] == [1, 2, 4, 5] and cvh[("AniMy / RuChiMe", "Многоголосый")] == [1, 2]
+
+
 @pytest.mark.asyncio
 async def test_parse_release_without_any_player_is_an_error(site, provider):
     site.page = "<h1>Пусто</h1>"
