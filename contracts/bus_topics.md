@@ -44,6 +44,7 @@
 | downloads.queue.changed {tasks, count} | downloads | — | download_queue_update |
 | downloads.fetch.finished {key, ok, error, transient, path, series_id} | downloads | voices (ключи `dub:<id>`) | — |
 | voices.dub.changed {series_id, season, episode, voice_key, status} | voices | — | — |
+| downloads.item.renamed {series_id, unique_id, filename} | downloads | voices | — |
 | voices.episode.settled {series_id, season, episode} | voices | — | — |
 | conform.job.finished {job_id, status, error, results} | conform | voices | — |
 | conform.daemon.up {} | conform | voices | — |
@@ -51,7 +52,7 @@
 | conform.queue.changed {daemon, tasks} | conform | — | conform_queue_update (Р-39; вся картина на каждое изменение и при подключении клиента SSE) |
 | gateway.sse.clients {count} | gateway | catalog, conform | — |
 | renaming.finished {series_id} | renaming | — | renaming_complete |
-| library.relocation.started/finished | library | — | relocation_started/finished |
+| library.relocation.started/finished | library | voices (finished) | relocation_started/finished |
 | settings.changed {key, value} | settings | downloads (max_parallel_downloads), scan (настройки сканера → пересчёт расписания, Р-20) | — |
 | gateway.sse.clients {count} | gateway | catalog (count=0 → сброс viewing), scan (count>0 → публикация статуса, Р-20) | — |
 | trackerauth.credentials.changed {service} | trackerauth | torrents (qbittorrent → пересоздание клиента, Р-22) | — |
