@@ -19,6 +19,9 @@
 
 - `ruchime-players` — парсер 1.ruchime.org: любой доступный плеер (Kodik и др.),
   а не только VK; отчёт о доступности серии — `docs/missions/ruchime-players/`
+- `voice-alignment` — несколько источников на сериал (ruchime + dunhuatv.ru),
+  парсер dunhuatv.ru (Kodik-озвучки) и автоматическое выравнивание озвучек
+  по референсу через сервис `track-muxer` — `docs/missions/voice-alignment/`
 - (завершённые — в `docs/missions/_done/`, напр.
   `torrent-naming-preview` — предпросмотр нейминга в окне добавления)
 
