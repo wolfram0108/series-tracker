@@ -21,7 +21,7 @@ CVH и Kodik) отдаёт одну серию в нескольких озву�
 
 ## 2. Область ревью
 
-Диапазон: `git diff ec23a2d^..HEAD` (первый коммит работ — `ec23a2d`). 44 коммита, 82 файла, около 8,8 тыс. добавленных и 86 удалённых строк (без учёта самого этого документа). Код вне диапазона не оценивается, кроме мест, где диапазон меняет
+Диапазон: `git diff ec23a2d^..HEAD` (первый коммит работ — `ec23a2d`). 51 коммит, 96 файлов, около 9,9 тыс. добавленных и 104 удалённые строки (без учёта самого этого документа). Код вне диапазона не оценивается, кроме мест, где диапазон меняет
 его поведение.
 
 | Этап | Суть | Где смотреть |
@@ -60,7 +60,7 @@ CVH и Kodik) отдаёт одну серию в нескольких озву�
 
 | Что | Команда | Ожидание |
 |---|---|---|
-| Серверные тесты | `.venv/bin/python -m pytest -q -p no:cacheprovider --ignore=tests/test_sources.py --deselect tests/test_rules_format_diff.py --deselect tests/verify_planner_diff.py` | 683–684 прошли, 2 пропущены, 5 отобраны; 2 ошибки в `tests/test_scan_ids.py` — намеренные (нужны данные прод-системы); исключённые файлы требуют тех же данных; около 4,5 минут. `tests/test_downloads_module.py::test_dispatch_creates_downloads_and_completes` зависит от времени: в полном прогоне изредка падает, отдельно проходит; в полном прогоне и в `tests/test_voices.py` наблюдалось редкое зависание теста, причина не установлена |
+| Серверные тесты | `.venv/bin/python -m pytest -q -p no:cacheprovider --ignore=tests/test_sources.py --deselect tests/test_rules_format_diff.py --deselect tests/verify_planner_diff.py` | 780 прошли, 2 пропущены, 5 отобраны; 2 ошибки в `tests/test_scan_ids.py` — намеренные (нужны данные прод-системы); исключённые файлы требуют тех же данных; около 4,5 минут. Тест, стоящий дольше 180 секунд, останавливает процесс и печатает стеки (`tests/conftest.py`); `tests/test_downloads_module.py::test_dispatch_creates_downloads_and_completes` зависит от времени и изредка падает в полном прогоне |
 | Тесты озвучек | `.venv/bin/python -m pytest tests/test_voices.py tests/test_voices_settings.py tests/test_voices_reasons.py tests/test_conform_module.py -q -p no:cacheprovider` | около 70 секунд |
 | Тесты фронтенда | `cd web && npx vitest run src` | 64 прошли; запуск без `src` подхватывает e2e-спеки Playwright и краснеет |
 | Типы и сборка | `cd web && npm run build` | без ошибок; серверные тесты `test_voices_reasons.py` и `test_ui_literals.py` читают исходники `web/src`, сборка им не нужна |
