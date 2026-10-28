@@ -5,6 +5,9 @@
 
 Окружение:
   ST_DB_PATH   путь к SQLite (по умолчанию app.db)
+  ST_CONFORM_URL
+               адрес демона выравнивания (track-muxer); пусто — модуль conform
+               простаивает
   ST_QBIT_URL / ST_QBIT_USER / ST_QBIT_PASS
                qBittorrent; без ST_QBIT_URL модуль torrents не стартует
                (удобно для разработки без qBit)
@@ -22,6 +25,7 @@ from core.db import Database
 from core.logging import configure, get_logger
 from modules.auth import AuthModule
 from modules.catalog import CatalogModule
+from modules.conform import ConformModule, DaemonClient
 from modules.downloads import DownloadsModule
 from modules.gateway import GatewayModule
 from modules.library import LibraryModule
@@ -84,6 +88,9 @@ modules = [
     RenamingModule(bus, db),
     SlicingModule(bus, db),
     VoicesModule(bus),
+    # Alignment daemon (track-muxer): mirrored read-only; no address, no bridge.
+    ConformModule(bus, DaemonClient(os.environ["ST_CONFORM_URL"])
+                  if os.environ.get("ST_CONFORM_URL") else None),
 ]
 
 # env имеет приоритет (стенд/тесты); без env torrents возьмёт креды
