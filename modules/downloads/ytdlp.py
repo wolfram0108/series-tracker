@@ -31,6 +31,18 @@ ProgressCb = Callable[[dict], Awaitable[None]]
 # Decoded manifests live on disk while their segments stay remote (Vibix).
 PROTOCOL_WHITELIST = ["-protocol_whitelist", "file,http,https,tcp,tls"]
 
+# CDNs of the web players stall on open and drop a stream halfway: ffmpeg reconnects instead of failing.
+RECONNECT_ARGS = ["-reconnect", "1", "-reconnect_streamed", "1",
+                  "-reconnect_on_network_error", "1", "-reconnect_delay_max", "30"]
+# ffmpeg exits 0 on a broken-off HLS stream, so a download counts only above this share of the
+# duration the stream announces.
+MIN_COMPLETE_FRACTION = 0.85
+STALL_TIMEOUT_S = 180.0
+DOWNLOAD_TIMEOUT_S = 3600.0
+PROBE_ATTEMPTS = 3
+PROBE_RETRY_S = 2.0
+PROBE_TIMEOUT_S = 60.0
+
 # hls + лучший muxed-поток; fallback на обычный best, если hls нет
 # (тогда без ускорения, но загрузка работает).
 HLS_FORMAT = "b[protocol*=m3u8]/b"
@@ -256,6 +268,11 @@ async def _resolve_allvideo_stream(embed_url: str) -> tuple[str, str] | None:
         return None
 
 
+def _reconnect_args(stream_url: str) -> list[str]:
+    """Network options do not apply to a local decoded manifest (same as the header options)."""
+    return [] if stream_url.startswith("file:") else list(RECONNECT_ARGS)
+
+
 def _headers_args(stream_url: str, headers: dict) -> list[str]:
     """A local decoded manifest rejects HTTP options like -headers; the agent has its own option."""
     if not headers or stream_url.startswith("file:"):
@@ -279,15 +296,41 @@ async def _probe_duration_ffprobe(stream_url: str, headers: dict | None = None) 
     cmd.extend(_headers_args(stream_url, headers or {}))
     cmd.extend(["-show_entries", "format=duration", "-of",
                 "default=noprint_wrappers=1:nokey=1", stream_url])
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        out, _ = await proc.communicate()
-        if proc.returncode == 0 and out:
-            return float(out.decode().strip())
-    except Exception:
-        pass
+    for attempt in range(PROBE_ATTEMPTS):
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            try:
+                out, _ = await asyncio.wait_for(proc.communicate(), PROBE_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                raise
+            if proc.returncode == 0 and out:
+                return float(out.decode().strip())
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a flaky CDN: look again before giving up on the duration
+            pass
+        if attempt + 1 < PROBE_ATTEMPTS:
+            await asyncio.sleep(PROBE_RETRY_S)
     return 0.0
+
+
+async def _local_duration(path: str) -> float:
+    """Duration of a file on disk; 0 when it cannot be read."""
+    executable = shutil.which("ffprobe")
+    if not executable:
+        return 0.0
+    proc = await asyncio.create_subprocess_exec(
+        executable, "-v", "error", "-show_entries", "format=duration", "-of",
+        "default=noprint_wrappers=1:nokey=1", path,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    out, _ = await proc.communicate()
+    try:
+        return float(out.decode().strip()) if proc.returncode == 0 and out else 0.0
+    except ValueError:
+        return 0.0
 
 
 async def _download_direct_ffmpeg(stream_url: str, headers: dict,
@@ -302,6 +345,7 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
 
     cmd = [executable, "-y"]
     cmd.extend(PROTOCOL_WHITELIST)
+    cmd.extend(_reconnect_args(stream_url))
     cmd.extend(_headers_args(stream_url, headers))
     cmd.extend(["-i", stream_url, "-c", "copy", "-progress", "pipe:1", "-nostats", tmp_out])
 
@@ -311,11 +355,20 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
     fields: dict[str, str] = {}
     last_size = 0
     last_at = time.monotonic()
+    started = last_at
+    stopped = ""
     try:
         assert proc.stdout is not None
         while True:
-            line = await proc.stdout.readline()
+            try:
+                line = await asyncio.wait_for(proc.stdout.readline(), STALL_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                stopped = f"ffmpeg: нет прогресса {STALL_TIMEOUT_S:.0f} с (timeout)"
+                break
             if not line:
+                break
+            if time.monotonic() - started > DOWNLOAD_TIMEOUT_S:
+                stopped = f"ffmpeg: загрузка дольше {DOWNLOAD_TIMEOUT_S:.0f} с (timeout)"
                 break
             text = line.decode("utf-8", errors="replace").strip()
             if "=" not in text:
@@ -331,19 +384,35 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
                 last_size, last_at = size, now
                 await on_progress(data)
                 fields = {}
-        await proc.wait()
+        if not stopped:
+            await proc.wait()
     finally:
         if proc.returncode is None:
             proc.kill()
             await proc.wait()
     tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
 
+    if stopped:
+        _remove_file(tmp_out)
+        return False, stopped
     if proc.returncode == 0:
+        got = await _local_duration(tmp_out)
+        if got <= 0 or (duration > 0 and got < duration * MIN_COMPLETE_FRACTION):
+            _remove_file(tmp_out)
+            return False, (f"обрыв: скачано {got:.0f} с из ожидаемых ~{duration:.0f} с — "
+                           "неполная загрузка")
         os.replace(tmp_out, full_output_path)
         await on_progress({"phase": "download", "progress": 100, "eta": 0, "speed": 0.0})
         return True, ""
     last = tail.strip().splitlines()[-1] if tail.strip() else ""
     return False, f"ffmpeg direct download: {last or proc.returncode}"
+
+
+def _remove_file(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def _unavailable_error(error: str) -> bool:
