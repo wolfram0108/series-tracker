@@ -6,6 +6,8 @@ Queries:
   sources.torrent_file.drop {torrent_id} — чистка кэша (каскад Р-19)
   sources.trackers.list          → [{...}] (владелец таблицы trackers)
   sources.tracker.resolve {url}  → {tracker|null} (tracker_info деталей)
+  sources.provider.info {url}    → {provider|null, voices} — провайдер веб-видео по адресу и
+                                   есть ли у него каталог озвучек (без обращения в сеть)
 
 Доставка — ТОЛЬКО через `delivery.Delivery` (единственный выход
 наружу): она перебирает хосты-кандидаты (канонический хост ссылки →
@@ -85,6 +87,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.vk.scan", self.on_vk_scan)
         self.handle("sources.video.scan", self.on_video_scan)
         self.handle("sources.video.stream", self.on_video_stream)
+        self.handle("sources.provider.info", self.on_provider_info)
 
     async def on_start(self) -> None:
         self._http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
@@ -396,6 +399,13 @@ class SourcesModule(BaseModule):
         players = result.get("players", {}) if isinstance(result, dict) else {}
         self.log.info("Видео-скан %s (%s): серий %d", service, url, len(videos))
         return {"videos": videos, "players": players}
+
+    async def on_provider_info(self, env: Envelope) -> dict:
+        """payload: {url}; reply: {provider: name | None, voices: bool}. No network: what the
+        provider declares about itself, so that callers do not parse a page to find out."""
+        provider = self.video_registry.find_provider(env.payload["url"])
+        return {"provider": provider.name if provider else None,
+                "voices": bool(provider and provider.has_voice_catalog)}
 
     async def on_video_stream(self, env: Envelope) -> dict:
         """payload: {url, max_height?}

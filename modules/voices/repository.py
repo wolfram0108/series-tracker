@@ -59,10 +59,19 @@ class VoicesRepository:
         rows = await self._db.fetch_all(f"SELECT * FROM voice_dubs {where} ORDER BY id", args)
         return [self._row(row) for row in rows]
 
-    async def mark_downloading(self, dub_id: int, temp_path: str) -> None:
-        await self._db.execute(
-            "UPDATE voice_dubs SET status='downloading', temp_path=?, error=NULL, updated_at=? WHERE id=?",
-            (temp_path, _now(), dub_id))
+    async def claim_download(self, dub_id: int, temp_path: str) -> bool:
+        """Take a waiting voice-over for download; False when someone else has already taken it."""
+        taken = await self._db.execute(
+            "UPDATE voice_dubs SET status='downloading', temp_path=?, error=NULL, updated_at=? "
+            "WHERE id=? AND status='pending'", (temp_path, _now(), dub_id))
+        return bool(taken)
+
+    async def active_episodes(self) -> set[tuple[int, int, int]]:
+        """Episodes that hold temporary files or are on their way to them: (series, season, episode)."""
+        rows = await self._db.fetch_all(
+            "SELECT DISTINCT series_id, season, episode FROM voice_dubs WHERE "
+            "status IN ('downloading', 'ready', 'aligning', 'aligned') OR (status='pending' AND attempt>0)")
+        return {(row["series_id"], row["season"], row["episode"]) for row in rows}
 
     async def mark_ready(self, dub_id: int) -> None:
         await self._db.execute(
@@ -117,10 +126,11 @@ class VoicesRepository:
         return [row["job_id"] for row in rows]
 
     async def mark_aligning(self, dub_ids: list[int], job_id: str, ref_uid: str, ref_path: str) -> None:
-        for dub_id in dub_ids:
-            await self._db.execute(
-                "UPDATE voice_dubs SET status='aligning', job_id=?, ref_uid=?, ref_path=?, error=NULL, "
-                "outcome=NULL, updated_at=? WHERE id=?", (job_id, ref_uid, ref_path, _now(), dub_id))
+        """All voice-overs of a job at once: a reader sees the job with all of them or with none."""
+        marks = ",".join("?" * len(dub_ids))
+        await self._db.execute(
+            "UPDATE voice_dubs SET status='aligning', job_id=?, ref_uid=?, ref_path=?, error=NULL, "
+            f"outcome=NULL, updated_at=? WHERE id IN ({marks})", (job_id, ref_uid, ref_path, _now(), *dub_ids))
 
     async def mark_aligned(self, dub_id: int, aligned_path: str) -> None:
         await self._db.execute(

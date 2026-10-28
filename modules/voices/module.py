@@ -3,6 +3,10 @@
 Owns voice_dubs: one row per (series, episode, voice) — the additional voice-overs that are
 downloaded next to the reference video and later aligned to it.
 
+Settings: voices.source_priority (JSON list of player kinds), voices.aliases and voices.player_aliases
+(JSON objects {alias: canonical}: which voice-over names and which player kinds mean the same),
+voices.temp_root, voices.max_temp_episodes.
+
 Query:
   voices.layout {sources: [{url, player, studio, kind, episodes, links?}], mode?, reference?}
       -> {mode, reference, voices: [{key, label, role, source, fallbacks}], skipped, priority}
@@ -16,6 +20,8 @@ Command:
       lay the voices out around the selected reference, record a voice_dubs row per planned
       reference episode and voice, and download what is not on disk yet into the temporary
       directory (setting `voices.temp_root`, default /nas/torrents/series-tracker).
+Commands out: downloads.fetch, downloads.fetch.cancel, conform.submit, conform.cancel (a job whose
+            reference was replaced or whose series was deleted: its result is no longer wanted).
 Events in:  downloads.fetch.started and .finished (our keys `dub:<id>`), conform.queue.changed (waiting or running
             jobs of the service), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished,
@@ -54,6 +60,9 @@ video, and the voice-overs start over against the new reference. An episode that
 and whose video is gone loses its whole set; a track the user deleted is not made again.
 Deleting a series removes only records and temporary files: videos stay, and so do their tracks.
 
+Setting `voices.max_temp_episodes` (integer; 0 or unset: no limit) caps how many episodes may hold
+temporary files at once: further voice-overs stay planned until an episode settles.
+
 The service leaves an empty `_tmp` directory
 next to every reference video it worked on; it is removed once no job of the series is running.
 The series' own folder in the temporary directory goes when every voice-over of the series is
@@ -66,19 +75,23 @@ import json
 import os
 import re
 import shutil
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 
 from core import BaseModule, BusRequestError, is_video_source
 from core.db import Database
 from core.envelope import Envelope
 
+from .identity import Equivalence
 from .layout import DEFAULT_PRIORITY, download_chain, plan_layout
 from .placement import move, place, sidecar_path
 from .repository import VoicesRepository
 from .states import public_state
 
 PRIORITY_KEY = "voices.source_priority"
+VOICE_ALIASES_KEY = "voices.aliases"
+PLAYER_ALIASES_KEY = "voices.player_aliases"
 TEMP_ROOT_KEY = "voices.temp_root"
+MAX_TEMP_KEY = "voices.max_temp_episodes"
 DEFAULT_TEMP_ROOT = "/nas/torrents/series-tracker"
 DUB_MAX_HEIGHT = 720
 PARSE_TIMEOUT_S = 180
@@ -86,6 +99,7 @@ SUBMIT_TIMEOUT_S = 60
 SUBMIT_RETRY_S = 30.0
 SUBMIT_RETRIES = 5
 SCRATCH_DIR = "_tmp"
+UNCLAIMED_JOBS = 256
 WORKING = ("pending", "downloading", "aligning")
 FINAL = ("placed", "rejected", "failed")
 
@@ -117,6 +131,8 @@ class VoicesModule(BaseModule):
         self._retry_pending: set[int] = set()
         self._job_status: dict[str, str] = {}
         self._fetching: set[int] = set()
+        self._admit_lock = asyncio.Lock()
+        self._unclaimed: OrderedDict[str, dict] = OrderedDict()
         super().__init__(bus)
 
     def register(self) -> None:
@@ -140,8 +156,7 @@ class VoicesModule(BaseModule):
         pending = await self.repo.pending()
         if requeued or pending:
             self.log.info("озвучки: к докачке %d (прерванных %d)", len(pending), requeued)
-        for row in pending:
-            await self._start(row)
+        await self._admit()
         for series_id in await self.repo.series_waiting():
             self._kick(series_id)
 
@@ -160,6 +175,17 @@ class VoicesModule(BaseModule):
             return value
         return list(DEFAULT_PRIORITY)
 
+    async def _rules(self) -> Equivalence:
+        """Which names mean the same voice or player: settings holding JSON objects {alias: canonical}."""
+        def parse(raw: str | None) -> object:
+            try:
+                return json.loads(raw or "null")
+            except json.JSONDecodeError:
+                return None
+
+        return Equivalence.of(parse(await self._setting(VOICE_ALIASES_KEY)),
+                              parse(await self._setting(PLAYER_ALIASES_KEY)))
+
     async def _temp_root(self) -> str:
         return (await self._setting(TEMP_ROOT_KEY)) or DEFAULT_TEMP_ROOT
 
@@ -168,7 +194,7 @@ class VoicesModule(BaseModule):
     async def on_layout(self, env: Envelope) -> dict:
         payload = env.payload
         return plan_layout(payload["sources"], payload.get("mode") or "manual",
-                           payload.get("reference"), await self._priority())
+                           payload.get("reference"), await self._priority(), await self._rules())
 
     async def on_dubs_get(self, env: Envelope) -> dict:
         rows = await self.repo.for_series(int(env.payload["series_id"]))
@@ -193,12 +219,16 @@ class VoicesModule(BaseModule):
         series = await self.request("catalog.series.get", {"series_id": series_id})
         if not is_video_source(series["source_type"]) or series["source_type"] == "vk_video":
             return
+        info = await self.request("sources.provider.info", {"url": series["url"]}, timeout=10)
+        if not info.get("voices"):
+            return
         parsed = await self.request("sources.parse", {"url": series["url"], "with_links": True},
                                     timeout=PARSE_TIMEOUT_S)
         sources = parsed.get("sources") or []
         if not sources:
             return
-        layout = plan_layout(sources, "manual", parsed.get("selected_source"), await self._priority())
+        layout = plan_layout(sources, "manual", parsed.get("selected_source"), await self._priority(),
+                             await self._rules())
         dubs = [voice for voice in layout["voices"] if voice["role"] == "dub"]
         reference = layout["reference"]
         if not dubs or reference is None:
@@ -207,7 +237,6 @@ class VoicesModule(BaseModule):
         episodes = await self._reference_episodes(series_id, reference)
         self.log.info("сериал %d: озвучки — референс %s, дополнительных %d, серий плана на сайте %d",
                       series_id, reference["studio"], len(dubs), len(episodes))
-        root = await self._temp_root()
         planned: set[tuple[int, int, str]] = set()
         for season, episode, site_episode in episodes:
             for voice in dubs:
@@ -222,8 +251,7 @@ class VoicesModule(BaseModule):
             self.log.info("сериал %d: озвучка %s серии %d вышла из плана", series_id,
                           gone["voice_label"], gone["episode"])
         await self._recheck_ready(series_id)
-        for row in await self.repo.pending(series_id):
-            await self._start(row, root)
+        await self._admit()
         for row in await self.repo.for_series(series_id):
             if row["status"] == "failed":
                 self.log.warning("сериал %d, s%02de%02d: озвучка %s недоступна: %s", series_id,
@@ -258,6 +286,32 @@ class VoicesModule(BaseModule):
 
     # --- downloads --------------------------------------------------------------------
 
+    async def _temp_cap(self) -> int:
+        try:
+            return max(0, int(await self._setting(MAX_TEMP_KEY) or 0))
+        except ValueError:
+            return 0
+
+    async def _admit(self) -> None:
+        """Start the waiting downloads, as many episodes at a time as the setting allows (0: no limit).
+
+        An episode that is already under way takes all its voice-overs; the others wait, planned,
+        until an episode settles and frees its place."""
+        async with self._admit_lock:
+            waiting = await self.repo.pending()
+            if not waiting:
+                return
+            cap = await self._temp_cap()
+            root = await self._temp_root()
+            active = await self.repo.active_episodes() if cap else set()
+            for row in sorted(waiting, key=lambda r: (r["series_id"], r["season"], r["episode"], r["id"])):
+                episode = (row["series_id"], row["season"], row["episode"])
+                if cap and episode not in active:
+                    if len(active) >= cap:
+                        continue
+                    active.add(episode)
+                await self._start(row, root)
+
     async def _start(self, row: dict, root: str | None = None) -> None:
         chain = row["chain"]
         if row["attempt"] >= len(chain):
@@ -265,7 +319,8 @@ class VoicesModule(BaseModule):
             return
         path = temp_path(root or await self._temp_root(), row["series_id"], row["season"],
                          row["episode"], row["voice_key"])
-        await self.repo.mark_downloading(row["id"], path)
+        if not await self.repo.claim_download(row["id"], path):
+            return
         self._fetching.discard(row["id"])
         self.send_command("downloads.fetch", {
             "key": f"dub:{row['id']}", "url": chain[row["attempt"]]["url"], "path": path,
@@ -289,8 +344,8 @@ class VoicesModule(BaseModule):
             return
         self._fetching.discard(int(key[4:]))
         row = await self.repo.get(int(key[4:]))
-        if row is None:
-            return
+        if row is None or row["status"] != "downloading":
+            return  # a late or repeated ending of a download that this voice-over no longer waits for
         if payload.get("ok"):
             await self.repo.mark_ready(row["id"])
             self.log.info("сериал %d, s%02de%02d: озвучка %s скачана (%s)", row["series_id"],
@@ -314,6 +369,7 @@ class VoicesModule(BaseModule):
         self.log.warning("сериал %d, s%02de%02d: озвучка %s не скачана ни из одного источника: %s",
                          row["series_id"], row["season"], row["episode"], row["voice_label"], error)
         self._changed(row, "failed", error)
+        self._kick(row["series_id"])
 
     def _changed(self, row: dict, status: str, detail: str | None = None, job_id: str | None = None) -> None:
         job_status = self._job_status.get(job_id or row.get("job_id"))
@@ -397,6 +453,7 @@ class VoicesModule(BaseModule):
             if ready and not any(row["status"] in WORKING for row in group):
                 await self._submit(series, season, episode, reference, uid, ready, root)
             await self._tidy(series_id, season, episode, root)
+        await self._admit()
         if restart:
             self.send_command("voices.dispatch", {"series_id": series_id})
         await self._sweep_scratch(series_id, {os.path.dirname(path) for path, _ in references.values()})
@@ -441,6 +498,8 @@ class VoicesModule(BaseModule):
         """Keep the tracks of an episode in step with its reference; True when they went stale."""
         stale = [row for row in group if row["ref_uid"] and row["ref_uid"] != uid]
         if stale:
+            for job_id in {row["job_id"] for row in stale if row["status"] == "aligning" and row["job_id"]}:
+                self.send_command("conform.cancel", {"job_id": job_id})
             for row in group:
                 if row["ref_uid"] and row["ref_uid"] != uid:
                     await self._discard_files(row)
@@ -458,7 +517,8 @@ class VoicesModule(BaseModule):
         old = row["sidecar_path"]
         if not old:
             return
-        expected = sidecar_path(reference, row["voice_label"], os.path.splitext(old)[1] or ".flac")
+        expected = sidecar_path(reference, row["voice_label"], os.path.splitext(old)[1] or ".flac",
+                                await self._taken_paths(row))
         present = await asyncio.to_thread(os.path.isfile, old)
         if expected == old and present:
             if row["ref_path"] != reference:
@@ -510,6 +570,9 @@ class VoicesModule(BaseModule):
                       ready: list[dict], root: str) -> None:
         folder = episode_dir(root, series["id"], season, episode)
         label = f"{series['name']} s{season:02d}e{episode:02d}"
+        ready = await self._with_files(ready, label)
+        if not ready:
+            return
         try:
             reply = await self.request("conform.submit", {
                 "ref": reference, "dubs": [row["temp_path"] for row in ready],
@@ -534,6 +597,24 @@ class VoicesModule(BaseModule):
         await self.repo.mark_aligning([row["id"] for row in ready], reply["job_id"], uid, reference)
         for row in ready:
             self._changed(row, "aligning", job_id=reply["job_id"])
+        early = self._unclaimed.pop(reply["job_id"], None)
+        if early is not None:
+            await self._apply_job(early)
+
+    async def _with_files(self, ready: list[dict], label: str) -> list[dict]:
+        """The ready voice-overs whose files are really on disk; the others are downloaded again."""
+        present = []
+        for row in ready:
+            if row["temp_path"] and await asyncio.to_thread(os.path.isfile, row["temp_path"]):
+                present.append(row)
+                continue
+            self.log.warning("%s: файла озвучки %s нет на месте (%s), скачивается заново", label,
+                             row["voice_label"], row["temp_path"])
+            await self.repo.mark_pending(row["id"], "файл озвучки пропал")
+            self._changed({**row, "status": "pending"}, "stale", "файл озвучки пропал")
+        if len(present) != len(ready):
+            self.send_command("voices.dispatch", {"series_id": ready[0]["series_id"]})
+        return present
 
     def _retry_later(self, series_id: int) -> None:
         """A transient failure with the service up: ask again after a pause, a few times only."""
@@ -558,7 +639,12 @@ class VoicesModule(BaseModule):
         task.add_done_callback(self._bg.discard)
 
     async def on_job_finished(self, env: Envelope) -> None:
-        await self._apply_job(env.payload)
+        if not await self._apply_job(env.payload):
+            # The service can end a job before its number is written to the voice-overs: keep the
+            # ending until they claim it.
+            self._unclaimed[env.payload["job_id"]] = env.payload
+            while len(self._unclaimed) > UNCLAIMED_JOBS:
+                self._unclaimed.popitem(last=False)
 
     async def _reconcile(self, job_id: str) -> None:
         """A job sent before a restart: learn how it ended, or send its voice-overs again."""
@@ -575,10 +661,11 @@ class VoicesModule(BaseModule):
         elif view["status"] in ("done", "failed", "cancelled"):
             await self._apply_job(view)
 
-    async def _apply_job(self, view: dict) -> None:
+    async def _apply_job(self, view: dict) -> bool:
+        """Take the end of a job into the voice-overs that wait for it; False when none does."""
         rows = [row for row in await self.repo.by_job(view["job_id"]) if row["status"] == "aligning"]
         if not rows:
-            return
+            return False
         results = {stem(result["dub"]): result for result in view.get("results") or []}
         for row in rows:
             if view["status"] != "done":
@@ -600,6 +687,7 @@ class VoicesModule(BaseModule):
                 self._changed(row, "rejected", verdict)
         for series_id in {row["series_id"] for row in rows}:
             self._kick(series_id)
+        return True
 
     @staticmethod
     async def _verdict(result: dict | None) -> str | None:
@@ -616,13 +704,19 @@ class VoicesModule(BaseModule):
             return "выходной файл не найден"
         return None
 
+    async def _taken_paths(self, row: dict) -> set[str]:
+        """Tracks that other voice-overs of the series already have next to their videos."""
+        return {other["sidecar_path"] for other in await self.repo.for_series(row["series_id"])
+                if other["id"] != row["id"] and other["sidecar_path"]}
+
     async def _place(self, row: dict, reference: str) -> None:
         source = row["aligned_path"]
         if not source or not await asyncio.to_thread(os.path.isfile, source):
             await self.repo.mark_failed(row["id"], "выровненный файл пропал")
             self._changed(row, "failed", "выровненный файл пропал")
             return
-        destination = sidecar_path(reference, row["voice_label"], os.path.splitext(source)[1] or ".flac")
+        destination = sidecar_path(reference, row["voice_label"], os.path.splitext(source)[1] or ".flac",
+                                   await self._taken_paths(row))
         await asyncio.to_thread(place, source, destination)
         await self.repo.mark_placed(row["id"], destination, reference)
         self.log.info("сериал %d, s%02de%02d: дорожка %s рядом с видео: %s", row["series_id"],
@@ -648,8 +742,12 @@ class VoicesModule(BaseModule):
     async def on_series_deleted(self, env: Envelope) -> None:
         series_id = env.payload["series_id"]
         self.send_command("downloads.fetch.cancel", {"series_id": series_id})
+        for job_id in {row["job_id"] for row in await self.repo.for_series(series_id)
+                       if row["status"] == "aligning" and row["job_id"]}:
+            self.send_command("conform.cancel", {"job_id": job_id})
         await self.repo.delete_for_series(series_id)
         root = await self._temp_root()
         folder = os.path.join(root, str(series_id))
         await asyncio.to_thread(shutil.rmtree, folder, True)
+        await self._admit()
         self.publish_event("series.purged", {"series_id": series_id, "owner": self.name})

@@ -27,6 +27,7 @@ class FakeClient:
         self.scripts = list(scripts)
         self.connections = 0
         self.enqueued = []
+        self.cancelled = []
         self.refuse = False
         self.known = {}
 
@@ -54,6 +55,12 @@ class FakeClient:
 
     async def job(self, job_id):
         return self.known.get(job_id)
+
+    async def cancel(self, job_id):
+        self.cancelled.append(job_id)
+        if isinstance(self.refuse, Exception):
+            raise self.refuse
+        return job_id in self.known
 
     async def close(self):
         pass
@@ -442,3 +449,39 @@ async def test_client_job_is_none_for_a_job_the_daemon_forgot():
     client = DaemonClient("http://daemon.test", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     assert (await client.job("known"))["status"] == "done"
     assert await client.job("lost") is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_reaches_the_daemon_and_never_raises():
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    client.known["j1"] = job("j1")
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: s["daemon"]["up"])
+        probe.send_command("conform.cancel", {"job_id": "j1"})
+        probe.send_command("conform.cancel", {"job_id": "nope"})
+        client.refuse = httpx.ConnectError("lost")
+        probe.send_command("conform.cancel", {"job_id": "j1"})
+        end = asyncio.get_running_loop().time() + 3
+        while len(client.cancelled) < 3:
+            assert asyncio.get_running_loop().time() < end
+            await asyncio.sleep(0.01)
+        assert client.cancelled == ["j1", "nope", "j1"]
+        assert (await probe.request("conform.status", {}, timeout=2))["daemon"]["up"] is True
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_client_cancel_separates_a_known_job_from_a_forgotten_one():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        if request.url.path.endswith("/known"):
+            return httpx.Response(200, json={"cancelled": "known"})
+        return httpx.Response(404)
+
+    client = DaemonClient("http://daemon.test", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    assert await client.cancel("known") is True and await client.cancel("lost") is False
+    assert seen == [("DELETE", "/conform/jobs/known"), ("DELETE", "/conform/jobs/lost")]

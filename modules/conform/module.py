@@ -15,6 +15,7 @@ Query:
       `unavailable` is not: with retry=false the daemon is not configured or down and the caller
       waits for conform.daemon.up; with retry=true the daemon is up but the request failed in
       transit and asking again soon may work.
+  conform.cancel {job_id} (command) — stop a job whose result nobody needs any more; best effort.
   conform.job.get {job_id} -> {job_id, status, error, results}   status `gone` when the daemon
       no longer knows the job; results as in conform.job.finished.
 Event:
@@ -101,6 +102,7 @@ class ConformModule(BaseModule):
         self.handle("conform.status", self.on_status)
         self.handle("conform.submit", self.on_submit)
         self.handle("conform.job.get", self.on_job_get)
+        self.handle("conform.cancel", self.on_cancel)
         self.handle("gateway.sse.clients", self.on_clients)
 
     def snapshot(self) -> dict[str, Any]:
@@ -147,6 +149,18 @@ class ConformModule(BaseModule):
         self.log.info("conform: поставлена задача %s (%s), озвучек %d", job.get("id"),
                       payload.get("label") or "", len(body["dubs"]))
         return {"job_id": job["id"]}
+
+    async def on_cancel(self, env: Envelope) -> None:
+        job_id = env.payload["job_id"]
+        if self._client is None or not self._daemon.get("up"):
+            self.log.info("conform: задачу %s отменить некому — демон недоступен", job_id)
+            return
+        try:
+            known = await self._client.cancel(job_id)
+        except httpx.HTTPError as exc:
+            self.log.warning("conform: задача %s не отменена: %s", job_id, exc)
+            return
+        self.log.info("conform: задача %s %s", job_id, "отменена" if known else "демону неизвестна")
 
     async def on_job_get(self, env: Envelope) -> dict:
         job_id = env.payload["job_id"]

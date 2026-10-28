@@ -14,9 +14,15 @@ def track_title(label: str) -> str:
     return re.sub(r"\s+", " ", _FORBIDDEN.sub(" ", label)).strip() or "dub"
 
 
-def sidecar_path(reference: str, label: str, extension: str) -> str:
+def sidecar_path(reference: str, label: str, extension: str, taken: frozenset[str] | set[str] = frozenset()) -> str:
+    """Path of a track next to its video; a title that another track of the video already has gets a number."""
     stem, _ = os.path.splitext(reference)
-    return f"{stem}.{track_title(label)}.{SIDECAR_LANG}{extension}"
+    title, number = track_title(label), 1
+    while True:
+        path = f"{stem}.{title}{'' if number == 1 else f' {number}'}.{SIDECAR_LANG}{extension}"
+        if path not in taken:
+            return path
+        number += 1
 
 
 def move(source: str, destination: str) -> None:

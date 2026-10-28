@@ -647,3 +647,26 @@ async def test_sources_carry_the_link_of_every_episode(site, provider):
     async with site.client() as http:
         scan = await provider.scan_episodes(PAGE_URL, http, {})
     assert {f["url"] for f in scan["videos"]} == set(first["links"].values())
+
+
+@pytest.mark.asyncio
+async def test_provider_info_tells_which_provider_has_a_voice_catalog_without_the_network():
+    from core import Bus
+    from core.db import Database
+    from modules.sources import SourcesModule
+
+    bus = Bus()
+    sources = SourcesModule(bus, Database(":memory:"))
+    asked = {}
+
+    class Env:
+        def __init__(self, url):
+            self.payload = {"url": url}
+
+    dunhua = await sources.on_provider_info(Env("https://dunhuatv.ru/500-stat-pobeditelem.html?player=cvh"))
+    ruchime = await sources.on_provider_info(Env("https://1.ruchime.org/release/some-title"))
+    unknown = await sources.on_provider_info(Env("https://example.org/x"))
+    assert dunhua == {"provider": "dunhuatv", "voices": True}
+    assert ruchime == {"provider": "ruchime", "voices": False}
+    assert unknown == {"provider": None, "voices": False}
+    assert asked == {}

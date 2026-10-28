@@ -163,6 +163,7 @@ def episode_ranges(numbers) -> str:
 class DunhuaTvProvider(BaseVideoProvider):
     name = "dunhuatv"
     domains = ("dunhuatv.ru",)
+    has_voice_catalog = True
 
     def __init__(self, measure: cdnvideohub.Measure | None = None) -> None:
         self._measure = measure or cdnvideohub.measure_rung

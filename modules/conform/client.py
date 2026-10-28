@@ -39,6 +39,14 @@ class DaemonClient:
         response.raise_for_status()
         return response.json()
 
+    async def cancel(self, job_id: str) -> bool:
+        """Stop a job and let the daemon drop its temporary files; False when it knows no such job."""
+        response = await self._http.delete(f"{self.base_url}/conform/jobs/{job_id}", timeout=REQUEST_TIMEOUT_S)
+        if response.status_code == 404:
+            return False
+        response.raise_for_status()
+        return True
+
     async def job(self, job_id: str) -> dict[str, Any] | None:
         """The whole job, or None when the daemon no longer knows it."""
         response = await self._http.get(f"{self.base_url}/conform/jobs/{job_id}",

@@ -832,3 +832,46 @@ async def test_offered_error_row_keeps_its_slot(system, db_path):
     await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
 
     assert _web_rows(db_path)[stale]["plan_status"] == "in_plan_single"
+
+
+def _web_scan(fake):
+    fake.web_videos = [{
+        "title": "Т3 1 серия", "url": "https://vk.com/video-1_9",
+        "download_url": "https://vkvideo.ru/video_ext.php?oid=-1&id=9&hash=abc",
+        "publication_date": "2026-10-20T12:00:00Z", "resolution": 1080}]
+    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
+
+
+@pytest.mark.asyncio
+async def test_a_web_video_scan_asks_for_the_voice_overs_after_the_media_download(system):
+    bus, fake, probe, _ = system
+    _web_scan(fake)
+    order = bus.subscribe("downloads.dispatch")
+    voices = bus.subscribe("voices.dispatch")
+    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
+    assert not order.queue.empty()
+    assert (await asyncio.wait_for(voices.queue.get(), 3)).payload == {"series_id": 3}
+
+
+@pytest.mark.asyncio
+async def test_only_a_scan_that_downloads_asks_for_voice_overs_and_only_for_web_video(system):
+    bus, fake, probe, _ = system
+    _web_scan(fake)
+    voices = bus.subscribe("voices.dispatch")
+    await probe.request("scan.series.run", {"series_id": 3, "download": False}, timeout=10)
+    fake.vk_videos = [_vk_video(1, "Тайтл 1 серия")]
+    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
+    await probe.request("scan.series.run", {"series_id": 2}, timeout=10)  # a VK series
+    assert voices.queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_the_scheduled_pass_over_all_series_asks_for_voice_overs_too(system, db_path):
+    bus, fake, probe, _ = system
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE series SET auto_scan_enabled=1 WHERE id=3")
+        conn.commit()
+    _web_scan(fake)
+    voices = bus.subscribe("voices.dispatch")
+    await probe.request("scan.all.start", {}, timeout=10)
+    assert (await asyncio.wait_for(voices.queue.get(), 10)).payload == {"series_id": 3}

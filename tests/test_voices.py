@@ -11,7 +11,7 @@ from core import BaseModule, Bus, Runner
 from core.db import Database
 from modules.settings import SettingsModule
 from modules.voices import VoicesModule
-from modules.voices.identity import same_voice, tokens, voice_groups
+from modules.voices.identity import Equivalence, group_key, same_voice, tokens, voice_groups
 from modules.voices.layout import (DEFAULT_PRIORITY, choose_reference, download_chain,
                                    plan_layout, rank)
 from modules.voices.states import public_state
@@ -57,6 +57,19 @@ def test_groups_are_transitive_and_keep_listing_order():
 def test_an_alias_joins_two_spellings(monkeypatch):
     monkeypatch.setattr("modules.voices.identity.ALIASES", {"aniliberty": "anilibria"})
     assert same_voice("AniLiberty", "AniLibria")
+
+
+def test_rules_given_as_data_join_two_spellings_without_touching_the_built_in_table():
+    rules = Equivalence.of({"AniLiberty": "AniLibria", " Red-Head ": "Red Head Sound"})
+    assert same_voice("AniLiberty", "AniLibria", rules) and same_voice("Red Head", "RedHeadSound", rules)
+    assert not same_voice("AniLiberty", "AniLibria")
+    assert group_key(["AniLiberty", "AniLibria"], rules) == "anilibria"
+
+
+def test_rules_that_are_not_names_are_ignored():
+    assert Equivalence.of(["not", "a", "mapping"]).voices == {}
+    assert Equivalence.of({"a": 1, 2: "b", "": "c", "d": "   ", "ok": "fine"}).voices == {"ok": "fine"}
+    assert Equivalence.of(None, "text").players == {}
 
 
 # --- reference choice -----------------------------------------------------------------
@@ -250,23 +263,33 @@ class Neighbours(BaseModule):
         self.submit_reply = None
         self.jobs = {}  # job id -> reply of conform.job.get
         self.source_type = "web_video"
+        self.has_voices = True
+        self.parses = 0
+        self.conform_cancels = []
+        self.finish_at_once = False
         super().__init__(bus)
 
     def register(self):
         self.handle("catalog.series.get", self.on_series)
+        self.handle("sources.provider.info", self.on_provider_info)
         self.handle("sources.parse", self.on_parse)
         self.handle("downloads.episodes.get", self.on_episodes)
         self.handle("settings.value.get", self.on_setting)
         self.handle("downloads.fetch", self.on_fetch)
         self.handle("downloads.fetch.cancel", self.on_cancel)
         self.handle("conform.submit", self.on_submit)
+        self.handle("conform.cancel", self.on_conform_cancel)
         self.handle("conform.job.get", self.on_job_get)
 
     async def on_series(self, env):
         return {"id": env.payload["series_id"], "url": "https://site/title.html", "name": "Series",
                 "save_path": self.library, "source_type": self.source_type}
 
+    async def on_provider_info(self, env):
+        return {"provider": "fake", "voices": self.has_voices}
+
     async def on_parse(self, env):
+        self.parses += 1
         assert env.payload.get("with_links") is True
         return {"sources": self.sources, "selected_source": self.reference_url}
 
@@ -289,7 +312,13 @@ class Neighbours(BaseModule):
 
     async def on_submit(self, env):
         self.submits.append(dict(env.payload))
-        return self.submit_reply or {"job_id": f"job-{len(self.submits)}"}
+        job_id = f"job-{len(self.submits)}"
+        if self.finish_at_once:  # the service ends the job before it has even answered
+            self.publish_event("conform.job.finished", job_result(self.submits[-1], job_id))
+        return self.submit_reply or {"job_id": job_id}
+
+    async def on_conform_cancel(self, env):
+        self.conform_cancels.append(env.payload["job_id"])
 
     async def on_job_get(self, env):
         return self.jobs.get(env.payload["job_id"], {"job_id": env.payload["job_id"], "status": "gone",
@@ -561,7 +590,10 @@ async def two_voices_ready(dubs, plan=((1, 1, 1),), reference=True, finished=Tru
 
 def job_done(neighbours, job_id, **per_dub):
     """A finished job whose aligned tracks exist; per_dub overrides fields of a dub's result."""
-    submit = neighbours.submits[-1]
+    return job_result(neighbours.submits[-1], job_id, **per_dub)
+
+
+def job_result(submit, job_id, **per_dub):
     results = []
     for path in submit["dubs"]:
         name = os.path.basename(path)
@@ -1148,3 +1180,331 @@ async def test_a_start_of_a_foreign_download_is_none_of_our_business(dubs):
     probe.publish_event("downloads.fetch.started", {"key": "dub:99999", "series_id": 7, "path": "/x"})
     await asyncio.sleep(0.2)
     assert changes.queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_a_series_whose_provider_has_no_voice_catalog_is_not_even_parsed(dubs):
+    probe, neighbours, _, _ = dubs
+    neighbours.has_voices = False
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await asyncio.sleep(0.3)
+    assert neighbours.parses == 0 and neighbours.fetches == [] and await rows(probe) == []
+    neighbours.has_voices = True
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    assert neighbours.parses == 1
+
+
+# --- the limit of episodes that hold temporary files ----------------------------------------
+
+
+async def capped_two_episodes(dubs, cap="1"):
+    probe, neighbours, voices, bus = dubs
+    neighbours.sources.append(linked("kodik", "RedHeadSound", range(1, 4)))
+    neighbours.plan[:] = [(1, 1, 1), (1, 2, 2)]
+    neighbours.settings["voices.max_temp_episodes"] = cap
+    for episode in (1, 2):
+        reference_on_disk(neighbours, episode)
+    sub = bus.subscribe("voices.dub.changed")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 2)
+    await asyncio.sleep(0.3)
+    return probe, neighbours, bus, sub
+
+
+@pytest.mark.asyncio
+async def test_with_a_limit_the_next_episode_waits_planned_and_starts_when_a_place_is_free(dubs):
+    probe, neighbours, bus, sub = await capped_two_episodes(dubs)
+    assert len(neighbours.fetches) == 2 and all("-1" in f["url"] or "#kodik" in f["url"] for f in neighbours.fetches)
+    by_episode = {}
+    for row in await rows(probe):
+        by_episode.setdefault(row["episode"], set()).add(row["state"])
+    assert by_episode == {1: {"download_queued"}, 2: {"planned"}}
+    settled_sub = bus.subscribe("voices.episode.settled")
+    for fetch in list(neighbours.fetches):
+        touch(fetch["path"], b"video")
+        finish(probe, fetch["key"])
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    assert len(neighbours.fetches) == 2  # still no place for the second episode
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await asyncio.wait_for(settled_sub.queue.get(), 5)
+    await settled(neighbours, 4)
+    assert {f["path"].split("/")[-2] for f in neighbours.fetches[2:]} == {"s01e02"}
+
+
+@pytest.mark.asyncio
+async def test_an_episode_whose_voices_all_failed_frees_its_place_too(dubs):
+    probe, neighbours, bus, sub = await capped_two_episodes(dubs)
+    black = next(f for f in neighbours.fetches if "BlackCat" in f["url"])
+    red = next(f for f in neighbours.fetches if "RedHeadSound" in f["url"])
+    finish(probe, black["key"], ok=False, error="gone")
+    await settled(neighbours, 3)  # BlackCat tries its fallback source
+    finish(probe, neighbours.fetches[2]["key"], ok=False, error="gone")
+    finish(probe, red["key"], ok=False, error="gone")
+    await settled(neighbours, 5)
+    assert {f["path"].split("/")[-2] for f in neighbours.fetches[3:]} == {"s01e02"}
+
+
+@pytest.mark.asyncio
+async def test_without_a_limit_every_episode_starts_at_once(dubs):
+    probe, neighbours, bus, sub = await capped_two_episodes(dubs, cap="0")
+    await settled(neighbours, 4)
+    assert len(neighbours.fetches) == 4
+
+
+@pytest.mark.asyncio
+async def test_a_waiting_voice_over_is_taken_for_download_only_once(dubs):
+    probe, neighbours, voices, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    row = (await voices.repo.for_series(7))[0]
+    sent = len(neighbours.fetches)
+    await voices._start(await voices.repo.get(row["id"]))  # taken already: nothing is sent again
+    await asyncio.sleep(0.1)
+    assert len(neighbours.fetches) == sent
+
+
+@pytest.mark.asyncio
+async def test_the_job_of_a_replaced_reference_is_cancelled_in_the_service(dubs):
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    new_ref = os.path.join(neighbours.library, "Series s01e01 2160p.mp4")
+    touch(new_ref)
+    neighbours.uids[1] = "u1-new"
+    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
+    await statuses_until(sub, ["stale", "stale"])
+    await asyncio.sleep(0.1)
+    assert neighbours.conform_cancels == ["job-1"]  # one job for the two voice-overs
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_series_cancels_its_job_in_the_service_and_a_finished_one_is_left(dubs):
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    report = bus.subscribe("series.purged")
+    probe.publish_event("series.deleted", {"series_id": 7})
+    await asyncio.wait_for(report.queue.get(), 5)
+    await asyncio.sleep(0.1)
+    assert neighbours.conform_cancels == ["job-1"]
+
+
+@pytest.mark.asyncio
+async def test_a_placed_track_costs_no_cancel_when_its_reference_is_replaced(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    touch(os.path.join(neighbours.library, "Series s01e01 2160p.mp4"))
+    neighbours.uids[1] = "u1-new"
+    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
+    await statuses_until(sub, ["stale", "stale"])
+    await asyncio.sleep(0.1)
+    assert neighbours.conform_cancels == []
+
+
+# --- rules of equivalence as settings ---------------------------------------------------------
+
+
+def test_layout_takes_synonymous_voices_of_different_sites_as_one_voice():
+    sources = [src("cvh", "FumoDub", [1, 2], url="https://site/?player=cvh&voice=FumoDub"),
+               src("kodik", "AniLibria", [1, 2, 3]), src("cvh", "AniLiberty", [1, 2])]
+    without = plan_layout(sources, "manual", sources[0]["url"])
+    assert sorted(r["label"] for r in without["voices"] if r["role"] == "dub") == ["AniLiberty", "AniLibria"]
+    rules = Equivalence.of({"aniliberty": "anilibria"})
+    with_rules = plan_layout(sources, "manual", sources[0]["url"], rules=rules)
+    dub = [r for r in with_rules["voices"] if r["role"] == "dub"]
+    assert len(dub) == 1 and dub[0]["key"] == "anilibria"
+    assert dub[0]["source"]["player"] == "kodik" and [f["player"] for f in dub[0]["fallbacks"]] == ["cvh"]
+
+
+def test_players_that_the_rules_call_the_same_take_one_place_in_the_priority():
+    assert rank("vk", ["alloha", "cvh", "kodik"]) == 3
+    rules = Equivalence.of(players={"vk": "cvh"})
+    assert rank("vk", ["alloha", "cvh", "kodik"], rules) == 1 == rank("cvh", ["alloha", "cvh", "kodik"], rules)
+    candidates = [{"player": "kodik", "resolution": 720}, {"player": "vk", "resolution": 720}]
+    assert choose_reference(candidates, ["alloha", "cvh", "kodik"], rules)["player"] == "vk"
+
+
+@pytest.mark.asyncio
+async def test_the_module_reads_the_rules_from_settings_and_survives_garbage(system):
+    sources = [src("cvh", "Ref", [1], url="https://site/?player=cvh&voice=Ref"),
+               src("kodik", "AniLibria", [1, 2]), src("cvh", "AniLiberty", [1])]
+    query = {"sources": sources, "reference": sources[0]["url"]}
+    plain = await system.request("voices.layout", query, timeout=5)
+    assert len([r for r in plain["voices"] if r["role"] == "dub"]) == 2
+    await system.request("settings.value.set", {"key": "voices.aliases",
+                                                "value": '{"aniliberty": "anilibria"}'}, timeout=5)
+    merged = await system.request("voices.layout", query, timeout=5)
+    assert len([r for r in merged["voices"] if r["role"] == "dub"]) == 1
+    await system.request("settings.value.set", {"key": "voices.aliases", "value": "{broken"}, timeout=5)
+    again = await system.request("voices.layout", query, timeout=5)
+    assert len([r for r in again["voices"] if r["role"] == "dub"]) == 2
+
+
+# --- names of tracks that would collide ------------------------------------------------------
+
+
+def test_two_voices_with_the_same_safe_title_get_two_names():
+    from modules.voices.placement import sidecar_path as path_of
+    first = path_of("/lib/Show s01e01.mp4", "AniMy / RuChiMe", ".flac")
+    assert first == "/lib/Show s01e01.AniMy RuChiMe.ru.flac"
+    second = path_of("/lib/Show s01e01.mp4", "AniMy RuChiMe", ".flac", {first})
+    third = path_of("/lib/Show s01e01.mp4", "AniMy: RuChiMe", ".flac", {first, second})
+    assert second == "/lib/Show s01e01.AniMy RuChiMe 2.ru.flac" and third.endswith("RuChiMe 3.ru.flac")
+
+
+@pytest.mark.asyncio
+async def test_a_track_never_overwrites_the_track_of_another_voice(dubs):
+    probe, neighbours, voices, bus = dubs
+    # Two different voices (the credit names two studios; the other is one word) with one safe title.
+    neighbours.sources.append(linked("kodik", "AniMy / RuChiMe", range(1, 4)))
+    neighbours.sources.append(linked("kodik", "AniMy RuChiMe", range(1, 4)))
+    neighbours.plan[:] = [(1, 1, 1)]
+    reference_on_disk(neighbours)
+    sub = bus.subscribe("voices.dub.changed")
+    settled_sub = bus.subscribe("voices.episode.settled")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    assert len({r["voice_key"] for r in await rows(probe)}) == 3
+    for fetch in neighbours.fetches:
+        touch(fetch["path"], b"video")
+        finish(probe, fetch["key"])
+    await statuses_until(sub, ["ready"] * 3 + ["aligning"] * 3)
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await asyncio.wait_for(settled_sub.queue.get(), 5)
+    placed = {r["sidecar_path"] for r in await rows(probe)}
+    assert len(placed) == 3 and all(os.path.isfile(p) for p in placed)
+    assert sum(" 2.ru.flac" in p for p in placed) == 1
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
+    await asyncio.sleep(0.3)
+    assert {r["sidecar_path"] for r in await rows(probe)} == placed  # a later look moves nothing
+
+
+# --- a whole series at once -------------------------------------------------------------------
+
+
+async def serve(probe, neighbours, holder, finished, progress, seconds=60.0):
+    """Stands in for downloads and the alignment service until `finished()` is true.
+
+    `progress` remembers how much has been served, so a second call never serves anything twice.
+    Returns the most episodes that held temporary files at one moment."""
+    peak = 0
+    end = asyncio.get_running_loop().time() + seconds
+    while not await finished():
+        if asyncio.get_running_loop().time() >= end:
+            from collections import Counter
+            stuck = Counter((r["episode"], r["status"]) for r in await rows(probe) if r["status"] != "pending")
+            raise AssertionError((len(neighbours.fetches), len(neighbours.submits), sorted(stuck.items()),
+                                  sorted(await holder[0].repo.active_episodes())))
+        for fetch in neighbours.fetches[progress["fetches"]:]:
+            start(probe, fetch)
+            touch(fetch["path"], b"video")
+            finish(probe, fetch["key"])
+        progress["fetches"] = len(neighbours.fetches)
+        for number, submit in enumerate(neighbours.submits[progress["submits"]:], start=progress["submits"] + 1):
+            view = job_result(submit, f"job-{number}")
+            neighbours.jobs[f"job-{number}"] = view
+            probe.publish_event("conform.job.finished", view)
+        progress["submits"] = len(neighbours.submits)
+        peak = max(peak, len(await holder[0].repo.active_episodes()))
+        await asyncio.sleep(0.005)
+    return peak
+
+
+async def a_series_of(dubs, episodes, voices_count, cap):
+    probe, neighbours, voices, bus = dubs
+    names = ["BlackCat", "RedHeadSound", "AniStar", "Animy", "FumoSub", "Lostfilm"][:voices_count]
+    reference = linked("cvh", "FumoDub", episodes, url="https://site/?player=cvh&voice=FumoDub")
+    neighbours.sources[:] = [reference] + [linked("kodik", name, episodes) for name in names]
+    neighbours.reference_url = reference["url"]
+    neighbours.plan[:] = [(1, n, n) for n in episodes]
+    neighbours.settings["voices.max_temp_episodes"] = str(cap)
+    for n in episodes:
+        reference_on_disk(neighbours, n)
+    return probe, neighbours, voices, bus
+
+
+@pytest.mark.asyncio
+async def test_twelve_episodes_of_four_voices_flow_through_under_a_limit_of_three(dubs, caplog):
+    caplog.set_level("WARNING")
+    episodes = range(1, 13)
+    probe, neighbours, voices, bus = await a_series_of(dubs, episodes, 4, 3)
+    probe.send_command("voices.dispatch", {"series_id": 7})
+
+    async def all_placed():
+        return sum(r["status"] == "placed" for r in await rows(probe)) == 48
+
+    peak = await serve(probe, neighbours, [voices], all_placed, {"fetches": 0, "submits": 0})
+    assert peak <= 3
+    keys = [f["key"] for f in neighbours.fetches]
+    assert len(keys) == 48 == len(set(keys))  # every voice-over of every episode was fetched once
+    assert len(neighbours.submits) == 12 and all(len(s["dubs"]) == 4 for s in neighbours.submits)
+    assert len(neighbours.submits) == len({s["ref"] for s in neighbours.submits})
+    await asyncio.sleep(0.3)
+    flacs = [name for name in library_files(neighbours) if name.endswith(".flac")]
+    assert len(flacs) == 48 and neighbours.conform_cancels == []
+    temp_root = neighbours.settings["voices.temp_root"]
+    assert not os.path.exists(temp_root) or os.listdir(temp_root) == []
+    assert not any("нет на месте" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_the_whole_series_still_arrives_when_the_module_restarts_midway(dubs, db_path, caplog):
+    caplog.set_level("WARNING")
+    episodes = range(1, 9)
+    probe, neighbours, voices, bus = await a_series_of(dubs, episodes, 3, 2)
+    holder = [voices]
+    probe.send_command("voices.dispatch", {"series_id": 7})
+
+    async def placed_at_least(count):
+        return sum(r["status"] == "placed" for r in await rows(probe)) >= count
+
+    async def enough():
+        return await placed_at_least(8)
+
+    progress = {"fetches": 0, "submits": 0}
+    await serve(probe, neighbours, holder, enough, progress)
+    await voices.stop()
+    progress["fetches"], progress["submits"] = len(neighbours.fetches), len(neighbours.submits)
+    again = VoicesModule(bus, Database(db_path))
+    holder[0] = again
+    await again.start()
+    probe.publish_event("conform.daemon.up", {})
+
+    async def all_placed():
+        return sum(r["status"] == "placed" for r in await rows(probe)) == 24
+
+    try:
+        await serve(probe, neighbours, holder, all_placed, progress)
+        await asyncio.sleep(0.3)
+        assert len([n for n in library_files(neighbours) if n.endswith(".flac")]) == 24
+        assert {r["status"] for r in await rows(probe)} == {"placed"}
+        assert not any("нет на месте" in record.getMessage() for record in caplog.records)
+    finally:
+        await again.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_ends_before_the_voices_know_its_number_still_ends_them(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs, finished=False)
+    neighbours.finish_at_once = True
+    settled_sub = bus.subscribe("voices.episode.settled")
+    for fetch in neighbours.fetches:
+        touch(fetch["path"], b"video")
+        finish(probe, fetch["key"])
+    await asyncio.wait_for(settled_sub.queue.get(), 5)
+    assert {r["status"] for r in await rows(probe)} == {"placed"}
+    assert not voices._unclaimed
+
+
+@pytest.mark.asyncio
+async def test_a_late_ending_of_a_download_does_not_turn_a_waiting_voice_into_a_ready_one(dubs):
+    probe, neighbours, voices, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    row = (await rows(probe))[0]
+    stale = (await voices.repo.for_series(7))[0]
+    await voices.repo.advance(stale["id"], "x")  # waits for its next source: not downloading now
+    finish(probe, f"dub:{stale['id']}")
+    await asyncio.sleep(0.2)
+    after = await voices.repo.get(stale["id"])
+    assert after["status"] == "pending" and row["voice_key"] == after["voice_key"]

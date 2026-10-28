@@ -22,6 +22,9 @@ class BaseVideoProvider(ABC):
 
     name: str
     domains: tuple[str, ...]
+    # True when parse_release lists the voice-overs of a release with the episodes of each
+    # (`sources`, `selected_source`); the voices module asks only such providers.
+    has_voice_catalog: bool = False
 
     @abstractmethod
     def match_url(self, url: str) -> bool:
