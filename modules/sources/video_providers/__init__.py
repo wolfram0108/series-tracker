@@ -1,4 +1,5 @@
 from .base import BaseVideoProvider, StreamUnavailable
+from .dunhuatv import DunhuaTvProvider
 from .registry import VideoProviderRegistry
 from .ruchime import RuchimeProvider
 
@@ -11,9 +12,10 @@ def get_default_registry() -> VideoProviderRegistry:
     if _DEFAULT_REGISTRY is None:
         _DEFAULT_REGISTRY = VideoProviderRegistry()
         _DEFAULT_REGISTRY.register(RuchimeProvider())
+        _DEFAULT_REGISTRY.register(DunhuaTvProvider())
     return _DEFAULT_REGISTRY
 
 
 
 __all__ = ["BaseVideoProvider", "StreamUnavailable", "VideoProviderRegistry", "RuchimeProvider",
-           "get_default_registry"]
+           "DunhuaTvProvider", "get_default_registry"]
