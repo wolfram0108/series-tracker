@@ -153,6 +153,8 @@ class SourcesModule(BaseModule):
                 "canonical_url": parsed.get("canonical_url", url),
                 "episodes_count": parsed.get("episodes_count", 0),
                 "players": parsed.get("players", {}),
+                "sources": parsed.get("sources", []),
+                "selected_source": parsed.get("selected_source"),
                 "ui_features": {},
                 "tracker": None,
             }

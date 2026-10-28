@@ -1,8 +1,9 @@
-"""Video provider for dunhuatv.ru: one title page, two players.
+"""Video provider for dunhuatv.ru: one title page, two players, several voice-overs.
 
-VK (CDN VideoHub) carries the high resolutions and several voice-overs; Kodik covers the
-episodes VK does not have yet. A candidate link is a fragment of the title page, so the
-identity of an episode stays stable and the stream is resolved right before the download.
+A series takes its episodes from ONE player and ONE voice-over; the choice travels in the
+series address (`?player=vk&voice=<studio>&kind=<type>`). A candidate link is a fragment of
+the title page, so the identity of an episode stays stable and the stream is resolved right
+before the download.
 """
 from __future__ import annotations
 
@@ -13,13 +14,13 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
 from . import cdnvideohub, kodik
 from .base import BaseVideoProvider, StreamUnavailable
-from .cdnvideohub import CdnVideoHubError, Rung, VoiceVideo
+from .cdnvideohub import CdnVideoHubError, Rung
 from .kodik import KodikError, KodikSession
 from .retry import send_with_retry
 
@@ -29,11 +30,11 @@ SITE = "https://dunhuatv.ru"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 PAGE_TIMEOUT = 20.0
 MAX_CONCURRENT = 6
-# Kodik never offers more than 720p, so a VK video at that height makes a Kodik probe pointless.
-KODIK_PROBE_BELOW = 720
 # The site publishes no per-episode dates; a fixed one keeps candidate ids stable across scans.
 DEFAULT_DATE = "1970-01-01T12:00:00Z"
 DEFAULT_PUBLISHER = 1110
+# Player order as the user sees it: player 1 is VK, player 2 is Kodik.
+PLAYERS = ("vk", "kodik")
 
 _TITLE_PATH = re.compile(r"^/(\d+)-[^/]+\.html$")
 _PLAYER_WIDGET = re.compile(r"<video-player\b([^>]*)>", re.IGNORECASE)
@@ -44,7 +45,6 @@ _KODIK_FRAME = re.compile(r"""<iframe\b[^>]*\bdata-src=["']([^"']*kodikplayer\.c
                           re.IGNORECASE)
 _ORIGINAL_NAME = re.compile(r"Как называется в оригинале\?</summary>\s*<div[^>]*>([^<]*)",
                             re.IGNORECASE)
-_KODIK_SERIAL = re.compile(r"/serial/(\d+)/([a-f0-9]+)/")
 _LINK = re.compile(r"^(vk|kodik)=(.+)$")
 
 
@@ -58,19 +58,34 @@ class TitlePage:
 
 
 @dataclass(frozen=True)
-class _Pick:
-    """The best offer of one player for one episode."""
+class Choice:
+    """A player and a voice-over: what a series downloads."""
 
-    source: str
-    resolution: int
-    link: str
+    player: str
+    studio: str
+    kind: str = ""
+
+
+@dataclass
+class Source:
+    """One selectable (player, voice-over) with the episodes it really has."""
+
+    choice: Choice
+    episodes: dict[int, str]
+    serial: tuple[str, str] | None = None
+    session: KodikSession | None = None
+
+
+@dataclass
+class _Catalog:
+    sources: list[Source] = field(default_factory=list)
+    reasons: dict[str, str] = field(default_factory=dict)
+    transient: bool = False
 
 
 @dataclass
 class _Probes:
-    """What one player yielded over a set of episodes."""
-
-    picks: dict[int, _Pick] = field(default_factory=dict)
+    resolutions: dict[int, tuple[int, str]] = field(default_factory=dict)
     failures: dict[int, str] = field(default_factory=dict)
     transient: int = 0
 
@@ -94,12 +109,44 @@ def parse_title_page(text: str, fallback_name: str = "") -> TitlePage:
         kodik_frame=kodik.normalize_iframe(html.unescape(frame.group(1))) if frame else None)
 
 
+def split_address(url: str) -> tuple[str, Choice | None]:
+    """Title page address without the query, and the choice the query carries."""
+    parsed = urlparse(url)
+    if not _TITLE_PATH.match(parsed.path):
+        raise ValueError(f"Не страница тайтла dunhuatv.ru: {url}")
+    query = parse_qs(parsed.query)
+    player = (query.get("player") or [""])[0]
+    studio = (query.get("voice") or [""])[0]
+    choice = (Choice(player, studio, (query.get("kind") or [""])[0])
+              if player in PLAYERS and studio else None)
+    return f"{SITE}{parsed.path}", choice
+
+
+def address_of(page_url: str, choice: Choice) -> str:
+    query = {"player": choice.player, "voice": choice.studio}
+    if choice.kind:
+        query["kind"] = choice.kind
+    return f"{page_url}?{urlencode(query)}"
+
+
 def vk_link(page_url: str, vk_id: str) -> str:
     return f"{page_url}#vk={vk_id}"
 
 
 def kodik_link(page_url: str, media_id: str, media_hash: str, episode: int) -> str:
     return f"{page_url}#kodik={media_id}/{media_hash}/{episode}"
+
+
+def episode_ranges(numbers) -> str:
+    """'1-471, 473-501': the real coverage of a voice-over, holes included."""
+    ordered = sorted(set(numbers))
+    spans: list[list[int]] = []
+    for number in ordered:
+        if spans and number == spans[-1][1] + 1:
+            spans[-1][1] = number
+        else:
+            spans.append([number, number])
+    return ", ".join(str(a) if a == b else f"{a}-{b}" for a, b in spans)
 
 
 class DunhuaTvProvider(BaseVideoProvider):
@@ -119,23 +166,22 @@ class DunhuaTvProvider(BaseVideoProvider):
         return host in self.domains and _TITLE_PATH.match(parsed.path) is not None
 
     def canonical_url(self, url: str) -> str:
-        path = urlparse(url).path
-        if not _TITLE_PATH.match(path):
-            raise ValueError(f"Не страница тайтла dunhuatv.ru: {url}")
-        return f"{SITE}{path}"
+        page_url, choice = split_address(url)
+        return address_of(page_url, choice) if choice else page_url
 
     async def parse_release(self, url: str, http: httpx.AsyncClient) -> dict:
-        """Title page, the VK playlist and the Kodik episode list: no per-episode probing."""
-        page_url = self.canonical_url(url)
+        """Title page and every selectable voice-over; titles are those of the chosen one."""
+        page_url, wanted = split_address(url)
         page = parse_title_page(await self._read_page(page_url, http), page_url)
-        voices, vk_reason, _ = await self._playlist(page, http)
-        session, kodik_reason, _ = await self._kodik_session(page, http)
-
-        numbers = sorted({item.episode for item in voices}
-                         | (set(session.episodes) if session else set()))
+        catalog = await self._catalog(page, http, wanted, everything=True)
+        if not catalog.sources:
+            raise ValueError("dunhuatv.ru: у тайтла нет доступных плееров "
+                             f"({'; '.join(catalog.reasons.values()) or 'пусто'})")
+        chosen = self._choose(catalog.sources, wanted)
+        numbers = sorted(chosen.episodes)
         titles = [self._episode_title(page.name_ru, number) for number in numbers]
         return {
-            "canonical_url": page_url,
+            "canonical_url": address_of(page_url, chosen.choice),
             "title": {"ru": page.name_ru, "en": page.name_en},
             "titles": titles,
             "episodes": [{"number": number, "title": title, "date": None}
@@ -147,27 +193,24 @@ class DunhuaTvProvider(BaseVideoProvider):
             "provider": self.name,
             "source_type": "web_video",
             "releases": [],
-            "players": {"vk": self._quick_report(bool(voices), vk_reason),
-                        "kodik": self._quick_report(session is not None, kodik_reason)},
+            "players": {player: self._quick_report(catalog, player) for player in PLAYERS},
+            "sources": [self._describe(page_url, source) for source in catalog.sources],
+            "selected_source": address_of(page_url, chosen.choice),
         }
 
     async def scan_episodes(self, url: str, http: httpx.AsyncClient, series: dict,
                             episodes: list[int] | None = None,
                             progress: Callable[[int, int, str], None] | None = None) -> dict:
-        page_url = self.canonical_url(url)
+        page_url, wanted = split_address(url)
         page = parse_title_page(await self._read_page(page_url, http), page_url)
-        name = series.get("name") or page.name_ru
-        voices, vk_reason, vk_transient = await self._playlist(page, http)
-        session, kodik_reason, kodik_transient = await self._kodik_session(page, http)
-        if vk_transient or kodik_transient:
+        catalog = await self._catalog(page, http, wanted, everything=False)
+        if catalog.transient and not catalog.sources:
             raise ValueError("dunhuatv.ru: плеер не ответил "
-                             f"({vk_reason or kodik_reason}) — повторный скан позже")
-
-        wanted = set(episodes) if episodes is not None else None
-        items = [item for item in voices if wanted is None or item.episode in wanted]
-        kodik_numbers = {number for number in (session.episodes if session else {})
-                         if wanted is None or number in wanted}
-        done, total = 0, len(items) + len(kodik_numbers)
+                             f"({'; '.join(catalog.reasons.values())}) — повторный скан позже")
+        chosen = self._choose(catalog.sources, wanted)
+        name = series.get("name") or page.name_ru
+        numbers = [n for n in sorted(chosen.episodes) if episodes is None or n in set(episodes)]
+        done, total = 0, len(numbers)
         gate = asyncio.Semaphore(MAX_CONCURRENT)
 
         def tick() -> None:
@@ -176,41 +219,33 @@ class DunhuaTvProvider(BaseVideoProvider):
             if progress is not None:
                 progress(done, total, "players")
 
-        vk = await self._probe_vk(items, page_url, http, gate, tick)
-        fallback = sorted(number for number in kodik_numbers if number not in vk.picks
-                          or vk.picks[number].resolution < KODIK_PROBE_BELOW)
-        ko = (await self._probe_kodik(session, fallback, page_url, http, gate, tick)
-              if session and fallback else _Probes())
-        if vk.transient or ko.transient:
-            raise ValueError(f"dunhuatv.ru: не прочитаны {vk.transient + ko.transient} серий "
+        probes = await self._probe(chosen, numbers, page_url, http, gate, tick)
+        if probes.transient:
+            raise ValueError(f"dunhuatv.ru: не прочитаны {probes.transient} серий "
                              "(плеер ограничил доступ) — повторный скан позже")
-
-        facts, selected, holes = [], Counter(), []
-        numbers = sorted({item.episode for item in items} | kodik_numbers)
-        for number in numbers:
-            offers = [pick for pick in (vk.picks.get(number), ko.picks.get(number)) if pick]
-            if not offers:
-                holes.append({"episode": number, "unverified": False,
-                              "reason": vk.failures.get(number) or ko.failures.get(number)
-                              or "нет доступного плеера"})
-                continue
-            selected[max(offers, key=lambda pick: pick.resolution).source] += 1
-            facts.extend({"title": self._episode_title(name, number), "url": pick.link,
-                          "download_url": None, "publication_date": DEFAULT_DATE,
-                          "resolution": pick.resolution} for pick in offers)
+        facts = [{"title": self._episode_title(name, number), "url": link,
+                  "download_url": None, "publication_date": DEFAULT_DATE,
+                  "resolution": resolution}
+                 for number, (resolution, link) in sorted(probes.resolutions.items())]
+        holes = [{"episode": number, "unverified": False,
+                  "reason": probes.failures.get(number) or "нет доступного плеера"}
+                 for number in numbers if number not in probes.resolutions]
         if progress is not None:
             progress(total, total, "done")
-        logger.info("Dunhuatv scan %s: серий %d, источники %s", page_url, len(numbers),
-                    dict(selected))
+        player = chosen.choice.player
+        logger.info("Dunhuatv scan %s (%s): серий %d из %d", page_url, player, len(facts), total)
         return {"videos": facts, "players": {
-            "episodes": len(numbers),
-            "sources": dict(selected),
-            "players": {
-                "vk": self._player_report(vk, selected["vk"],
-                                          len({item.episode for item in items}), vk_reason),
-                "kodik": self._player_report(ko, selected["kodik"], len(kodik_numbers),
-                                             kodik_reason),
-            },
+            "episodes": len(facts),
+            "sources": {player: len(facts)},
+            "players": {player: {
+                "present": total, "available": len(facts), "selected": len(facts),
+                "unverified": 0,
+                "max_resolution": max((r for r, _ in probes.resolutions.values()), default=None),
+                "reason": (Counter(probes.failures.values()).most_common(1)[0][0]
+                           if probes.failures else ""),
+            }},
+            "source": {"player": player, "studio": chosen.choice.studio,
+                       "kind": chosen.choice.kind},
             "holes": holes,
         }}
 
@@ -224,7 +259,7 @@ class DunhuaTvProvider(BaseVideoProvider):
             return await self._resolve_vk(value, http)
         return await self._resolve_kodik(value, http)
 
-    # --- page and playlists -------------------------------------------------------------
+    # --- page and catalog ---------------------------------------------------------------
 
     async def _read_page(self, url: str, http: httpx.AsyncClient) -> str:
         try:
@@ -237,80 +272,118 @@ class DunhuaTvProvider(BaseVideoProvider):
             raise ValueError(f"dunhuatv.ru: страница вернула {response.status_code}: {url}")
         return response.text
 
-    async def _playlist(self, page: TitlePage, http: httpx.AsyncClient,
-                        ) -> tuple[list[VoiceVideo], str, bool]:
-        """(items, reason it is empty, whether the failure is worth a later retry)."""
+    async def _catalog(self, page: TitlePage, http: httpx.AsyncClient, wanted: Choice | None,
+                       everything: bool) -> _Catalog:
+        """The sources worth loading: all of them for the choice list, else just the wanted one."""
+        catalog = _Catalog()
+        if everything or wanted is None or wanted.player == "vk":
+            await self._add_vk(catalog, page, http)
+        needs_kodik = everything or (wanted.player == "kodik" if wanted else not catalog.sources)
+        if needs_kodik:
+            await self._add_kodik(catalog, page, http, None if everything else wanted)
+        return catalog
+
+    async def _add_vk(self, catalog: _Catalog, page: TitlePage, http: httpx.AsyncClient) -> None:
         if page.aggregator_id is None:
-            return [], "на странице нет плеера VK", False
+            catalog.reasons["vk"] = "на странице нет плеера VK"
+            return
         try:
             items = await cdnvideohub.fetch_playlist(http, page.aggregator_id, page.publisher_id)
         except CdnVideoHubError as exc:
-            return [], exc.reason, exc.transient
-        return items, "" if items else "у тайтла нет VK-видео", False
+            catalog.reasons["vk"], catalog.transient = exc.reason, catalog.transient or exc.transient
+            return
+        grouped: dict[tuple[str, str], dict[int, str]] = {}
+        for item in items:
+            grouped.setdefault((item.studio, item.voice_type), {})[item.episode] = item.vk_id
+        catalog.sources += [Source(Choice("vk", studio or "без студии", kind), episodes)
+                            for (studio, kind), episodes in grouped.items()]
+        if not grouped:
+            catalog.reasons["vk"] = "у тайтла нет VK-видео"
 
-    async def _kodik_session(self, page: TitlePage, http: httpx.AsyncClient,
-                             ) -> tuple[KodikSession | None, str, bool]:
+    async def _add_kodik(self, catalog: _Catalog, page: TitlePage, http: httpx.AsyncClient,
+                         wanted: Choice | None) -> None:
         if not page.kodik_frame:
-            return None, "на странице нет плеера Kodik", False
+            catalog.reasons["kodik"] = "на странице нет плеера Kodik"
+            return
         try:
-            return await kodik.open_session(http, page.kodik_frame, SITE + "/"), "", False
+            default = await kodik.open_session(http, page.kodik_frame, SITE + "/")
         except KodikError as exc:
-            return None, exc.reason, exc.transient
+            catalog.reasons["kodik"], catalog.transient = exc.reason, catalog.transient or exc.transient
+            return
+        for voice in default.voices:
+            choice = Choice("kodik", voice.studio, voice.kind)
+            if wanted is not None and choice != wanted:
+                continue
+            try:
+                session = (default if kodik.voice_iframe(voice) == page.kodik_frame
+                           else await kodik.open_session(http, kodik.voice_iframe(voice), SITE + "/"))
+            except KodikError as exc:
+                logger.warning("Dunhuatv: озвучка Kodik %s не открылась: %s", voice.studio, exc.reason)
+                catalog.reasons["kodik"] = f"{voice.studio}: {exc.reason}"
+                catalog.transient = catalog.transient or exc.transient
+                continue
+            catalog.sources.append(Source(
+                choice, {number: "" for number in session.episodes},
+                (voice.media_id, voice.media_hash), session))
+        if not any(s.choice.player == "kodik" for s in catalog.sources):
+            catalog.reasons["kodik"] = "у тайтла нет озвучек Kodik"
+
+    @staticmethod
+    def _choose(sources: list[Source], wanted: Choice | None) -> Source:
+        """The wanted source, or the first one (player 1 before player 2) when none is named."""
+        if wanted is None:
+            if not sources:
+                raise ValueError("dunhuatv.ru: у тайтла нет доступных плееров")
+            return min(sources, key=lambda s: PLAYERS.index(s.choice.player))
+        for source in sources:
+            if source.choice == wanted:
+                return source
+        raise ValueError(f"dunhuatv.ru: озвучка «{wanted.studio}» ({wanted.player}) "
+                         "не найдена у тайтла — выберите источник заново")
+
+    @staticmethod
+    def _describe(page_url: str, source: Source) -> dict:
+        numbers = sorted(source.episodes)
+        return {
+            "url": address_of(page_url, source.choice),
+            "player": source.choice.player,
+            "studio": source.choice.studio,
+            "kind": source.choice.kind,
+            "first": numbers[0] if numbers else None,
+            "last": numbers[-1] if numbers else None,
+            "count": len(numbers),
+            "ranges": episode_ranges(numbers),
+        }
 
     # --- probes -------------------------------------------------------------------------
 
-    async def _probe_vk(self, items: list[VoiceVideo], page_url: str, http: httpx.AsyncClient,
-                        gate: asyncio.Semaphore, tick: Callable[[], None]) -> _Probes:
-        async def probe(item: VoiceVideo) -> Rung | CdnVideoHubError:
+    async def _probe(self, source: Source, numbers: list[int], page_url: str,
+                     http: httpx.AsyncClient, gate: asyncio.Semaphore,
+                     tick: Callable[[], None]) -> _Probes:
+        async def one(number: int) -> tuple[int, str] | CdnVideoHubError | KodikError:
             async with gate:
                 try:
-                    return await cdnvideohub.best_rung(
-                        await cdnvideohub.fetch_rungs(http, item.vk_id),
-                        self._cached_measure(item.vk_id))
-                except CdnVideoHubError as exc:
+                    if source.choice.player == "vk":
+                        vk_id = source.episodes[number]
+                        rung = await cdnvideohub.best_rung(
+                            await cdnvideohub.fetch_rungs(http, vk_id), self._cached_measure(vk_id))
+                        return rung.height, vk_link(page_url, vk_id)
+                    assert source.session is not None and source.serial is not None
+                    qualities = await kodik.episode_qualities(http, source.session, number)
+                    return max(qualities), kodik_link(page_url, *source.serial, number)
+                except (CdnVideoHubError, KodikError) as exc:
                     return exc
                 finally:
                     tick()
 
+        label = "VK" if source.choice.player == "vk" else "Kodik"
         result = _Probes()
-        for item, outcome in zip(items, await asyncio.gather(*(probe(i) for i in items))):
-            if isinstance(outcome, CdnVideoHubError):
+        for number, outcome in zip(numbers, await asyncio.gather(*(one(n) for n in numbers))):
+            if isinstance(outcome, (CdnVideoHubError, KodikError)):
                 result.transient += outcome.transient
-                result.failures.setdefault(
-                    item.episode, f"VK ({item.studio or 'без студии'}): {outcome.reason}")
-                continue
-            known = result.picks.get(item.episode)
-            # Equal resolutions: the voice-over the aggregator lists first keeps the episode.
-            if known is None or outcome.height > known.resolution:
-                result.picks[item.episode] = _Pick("vk", outcome.height,
-                                                   vk_link(page_url, item.vk_id))
-        return result
-
-    async def _probe_kodik(self, session: KodikSession, numbers: list[int], page_url: str,
-                           http: httpx.AsyncClient, gate: asyncio.Semaphore,
-                           tick: Callable[[], None]) -> _Probes:
-        served = _KODIK_SERIAL.search(session.iframe_url)
-        if served is None:
-            return _Probes()
-        media_id, media_hash = served.groups()
-
-        async def probe(number: int) -> dict[int, str] | KodikError:
-            async with gate:
-                try:
-                    return await kodik.episode_qualities(http, session, number)
-                except KodikError as exc:
-                    return exc
-                finally:
-                    tick()
-
-        result = _Probes()
-        for number, outcome in zip(numbers, await asyncio.gather(*(probe(n) for n in numbers))):
-            if isinstance(outcome, KodikError):
-                result.transient += outcome.transient
-                result.failures[number] = f"Kodik: {outcome.reason}"
-                continue
-            result.picks[number] = _Pick("kodik", max(outcome),
-                                         kodik_link(page_url, media_id, media_hash, number))
+                result.failures[number] = f"{label}: {outcome.reason}"
+            else:
+                result.resolutions[number] = outcome
         return result
 
     def _cached_measure(self, vk_id: str) -> cdnvideohub.Measure:
@@ -345,7 +418,7 @@ class DunhuaTvProvider(BaseVideoProvider):
         return {"stream_url": qualities[max(qualities)],
                 "headers": {"Referer": kodik.ORIGIN + "/"}}
 
-    # --- reports and names --------------------------------------------------------------
+    # --- names and reports --------------------------------------------------------------
 
     def _parse_link(self, url: str) -> tuple[str, str] | None:
         try:
@@ -363,19 +436,8 @@ class DunhuaTvProvider(BaseVideoProvider):
         return f"{name} - {number} серия"
 
     @staticmethod
-    def _quick_report(present: bool, reason: str) -> dict:
+    def _quick_report(catalog: _Catalog, player: str) -> dict:
+        present = any(source.choice.player == player for source in catalog.sources)
         return {"present": present, "available": present, "resolution": None,
-                "reason": "проверяется при сканировании" if present else reason}
-
-    @staticmethod
-    def _player_report(probes: _Probes, selected: int, present: int, reason: str) -> dict:
-        reasons = Counter(probes.failures.values())
-        return {
-            "present": present,
-            "available": len(probes.picks),
-            "selected": selected,
-            "unverified": 0,
-            "max_resolution": max((pick.resolution for pick in probes.picks.values()),
-                                  default=None),
-            "reason": reasons.most_common(1)[0][0] if reasons else ("" if present else reason),
-        }
+                "reason": ("проверяется при сканировании" if present
+                           else catalog.reasons.get(player, "нет данных"))}

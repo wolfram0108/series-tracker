@@ -59,6 +59,10 @@ const vkQuery = ref("")
 const trackerInfo = ref<TrackerInfo | null>(null)
 type PlayerReport = { present: boolean; available: boolean | null; resolution: number | null; reason?: string }
 const parsePlayers = ref<Record<string, PlayerReport>>({})
+// плеер и озвучка web-источника (список приходит с разбором ссылки)
+interface WebSource { url: string; player: string; studio: string; kind: string; first: number | null; last: number | null; count: number }
+const webSources = ref<WebSource[]>([])
+const selectedSource = ref("")
 const profiles = ref<{ id: number; name: string }[]>([])
 const saving = ref(false)
 
@@ -225,6 +229,16 @@ const namingTitles = computed<string[]>(() => {
   return out
 })
 
+// «Плеер 1 — VK, плеер 2 — Kodik»: порядок и названия как у пользователя в голове
+const webKindLabels: Record<string, string> = { voice: "озвучка", subtitles: "субтитры" }
+const webSourceOptions = computed(() => webSources.value.map((s) => {
+  const holes = s.first !== null && s.last !== null && s.count !== s.last - s.first + 1
+  const range = s.first === null ? "нет серий" : `${s.first}–${s.last}, ${s.count} сер.${holes ? ", есть пропуски" : ""}`
+  const player = s.player === "vk" ? "Плеер 1 (VK)" : "Плеер 2 (Kodik)"
+  const kind = webKindLabels[s.kind] ?? s.kind
+  return { value: s.url, label: `${player} · ${s.studio}${kind ? ` · ${kind}` : ""} · ${range}` }
+}))
+
 // отчёт о плеерах web-источника (приходит с разбором ссылки)
 const playerReportRows = computed(() => {
   const labels: Record<string, string> = { vk: "VK", allvideo: "AllVideo", vibix: "Vibix" }
@@ -261,6 +275,8 @@ function handleUrlInput() {
   webVideoTitles.value = []
   canonicalUrl.value = ""
   parsePlayers.value = {}
+  webSources.value = []
+  selectedSource.value = ""
   newSeries.resolution_override = ""
   if (!newSeries.url) {
     sourceType.value = "torrent"
@@ -280,6 +296,43 @@ function handleUrlInput() {
   } else {
     sourceType.value = "torrent"
     void parseTorrentUrl()
+  }
+}
+
+interface WebParse {
+  titles?: string[]
+  canonical_url?: string
+  players?: Record<string, PlayerReport>
+  sources?: WebSource[]
+  selected_source?: string
+}
+function applyWebParse(res: WebParse) {
+  webVideoTitles.value = res.titles ?? []
+  canonicalUrl.value = res.canonical_url || ""
+  parsePlayers.value = res.players ?? {}
+  webSources.value = res.sources ?? []
+  selectedSource.value = res.selected_source ?? ""
+}
+
+// Смена плеера/озвучки: список серий и адрес сериала пересчитываются, поля формы не трогаем.
+async function pickSource(address: string) {
+  const previous = selectedSource.value
+  selectedSource.value = address
+  urlError.value = ""
+  parsing.value = true
+  try {
+    const { data, error } = await api.POST("/api/parse_url", { body: { url: address } } as never)
+    const res = (data ?? null) as WebParse | null
+    if (error || !res) {
+      const err = (error ?? null) as { error?: string } | null
+      throw new Error(err?.error || "Ошибка парсинга URL")
+    }
+    applyWebParse(res)
+  } catch (e) {
+    selectedSource.value = previous
+    urlError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    parsing.value = false
   }
 }
 
@@ -307,9 +360,7 @@ async function parseTorrentUrl() {
     }
     if (res.source_type === "web_video") {
       sourceType.value = "web_video"
-      webVideoTitles.value = res.titles ?? []
-      canonicalUrl.value = res.canonical_url || ""
-      parsePlayers.value = (res as { players?: Record<string, PlayerReport> }).players ?? {}
+      applyWebParse(res)
     }
     trackerInfo.value = res.tracker_info ?? null
     newSeries.name = res.title?.ru || ""
@@ -637,6 +688,18 @@ onBeforeUnmount(() => {
       <div v-if="sourceType === 'web_video' && playerReportRows.length" class="modern-fieldset">
         <div class="fieldset-header"><span class="fieldset-title">Источники</span></div>
         <div class="fieldset-content">
+          <div v-if="webSourceOptions.length" class="field-group mb-3">
+            <StGroup>
+              <div class="constructor-item item-label-icon item-label-text-icon" title="Плеер и озвучка">
+                <i class="pi pi-volume-up" /><span>Плеер и озвучка</span>
+              </div>
+              <StSelect
+                :model-value="selectedSource"
+                :options="webSourceOptions"
+                @update:model-value="pickSource($event as string)"
+              />
+            </StGroup>
+          </div>
           <div class="player-report">
             <span
               v-for="p in playerReportRows"
@@ -801,6 +864,7 @@ onBeforeUnmount(() => {
       <SettingsParser
         :initial-profile-id="newSeries.parser_profile_id"
         :test-initial-titles="namingTitles"
+        :test-initial-url="sourceType === 'web_video' ? canonicalUrl : ''"
         :test-first="true"
         @update:profile-id="newSeries.parser_profile_id = $event"
       />

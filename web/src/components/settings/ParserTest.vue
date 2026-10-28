@@ -16,7 +16,9 @@ import { useVideoScanStore } from "../../stores/videoScan"
 
 // initialTitles: если передан (окно добавления сериала) — предзаполняет поле
 // теста списком файлов раздачи. В Настройках не передаётся → поведение как было.
-const props = defineProps<{ profileId: number; initialTitles?: string[] }>()
+// initialUrl: адрес выбранного источника web-видео (окно добавления) — поле ссылки
+// предзаполняется, чтобы «Получить с сайта» опрашивало именно выбранную озвучку.
+const props = defineProps<{ profileId: number; initialTitles?: string[]; initialUrl?: string }>()
 
 const { request } = useApi()
 const toast = useToast()
@@ -40,6 +42,13 @@ const testResults = ref<TestResult[]>([])
 // Предзаполнение поля списком файлов раздачи (окно добавления сериала):
 // при появлении/смене списка (смена выбранного качества) обновляем textarea.
 if (props.initialTitles?.length) testTitles.value = props.initialTitles.join("\n")
+if (props.initialUrl) scrapeChannelUrl.value = props.initialUrl
+watch(
+  () => props.initialUrl,
+  (v) => {
+    if (v) scrapeChannelUrl.value = v
+  },
+)
 watch(
   () => props.initialTitles,
   (v) => {

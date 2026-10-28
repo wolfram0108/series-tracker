@@ -26,6 +26,7 @@ import { api } from "../../api/client"
 const props = defineProps<{
   initialProfileId?: number | null
   testInitialTitles?: string[]
+  testInitialUrl?: string
   testFirst?: boolean
 }>()
 const emit = defineEmits<{ (e: "update:profileId", v: number | null): void }>()
@@ -443,6 +444,7 @@ onMounted(loadProfiles)
             :key="selectedProfileId"
             :profile-id="selectedProfileId"
             :initial-titles="testInitialTitles"
+            :initial-url="testInitialUrl"
           />
         </div>
       </div>

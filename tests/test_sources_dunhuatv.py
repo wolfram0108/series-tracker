@@ -65,6 +65,8 @@ PLAYLIST = {"isSerial": True, "items": [
      "season": 1, "episode": 2},
     {"cvhId": "c4", "vkId": "v2s", "voiceStudio": "AniStar", "voiceType": "Многоголосый",
      "season": 1, "episode": 2},
+    {"cvhId": "c5", "vkId": "v3x", "voiceStudio": "AniStar", "voiceType": "Неизвестный",
+     "season": 1, "episode": 3},
 ]}
 
 VIDEO_SOURCES = {
@@ -72,8 +74,17 @@ VIDEO_SOURCES = {
     "v1s": {"mpegHighUrl": "https://okcdn.test/v1s/720", "mpegFullHdUrl": "https://okcdn.test/v1s/1080"},
     "v2": {"mpegLowUrl": "https://okcdn.test/v2/360"},
     "v2s": {"mpegLowUrl": "https://okcdn.test/v2s/360"},
+    "v3x": {"mpegMediumUrl": "https://okcdn.test/v3x/480"},
     "v4k": {"mpegHighUrl": "https://okcdn.test/v4k/720", "mpeg4kUrl": "https://okcdn.test/v4k/4k"},
 }
+
+
+KODIK_ANISTAR_HTML = KODIK_HTML.split('<div class="serial-series-box">')[0] + """
+<div class="serial-series-box"><select>
+<option value="2" data-id="902" data-hash="bb02" data-title="2 серия">2</option>
+<option value="3" data-id="903" data-hash="bb03" data-title="3 серия">3</option>
+<option value="9" data-id="909" data-hash="bb09" data-title="9 серия">9</option>
+</select></div>"""
 
 
 def obfuscate(url: str) -> str:
@@ -102,9 +113,10 @@ class Site:
         self.playlist: dict | int = PLAYLIST
         self.sources = dict(VIDEO_SOURCES)
         self.failing_videos: dict[str, int] = {}
-        self.kodik_html = KODIK_HTML
+        self.kodik_pages = {"50228": KODIK_HTML, "49002": KODIK_ANISTAR_HTML}
         self.ftor = {"aa01": ftor_links(360, 720), "aa02": ftor_links(480, 720),
-                     "aa03": ftor_links(360, 480, 720)}
+                     "aa03": ftor_links(360, 480, 720), "bb02": ftor_links(360),
+                     "bb03": ftor_links(480), "bb09": ftor_links(720)}
         self.requests: list[httpx.Request] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -124,7 +136,8 @@ class Site:
                 return httpx.Response(404)
             return httpx.Response(200, json={"sources": self.sources[vk_id], "duration": 600})
         if url.startswith("https://kodikplayer.com/serial/"):
-            return httpx.Response(200, text=self.kodik_html)
+            page = self.kodik_pages.get(url.split("/serial/")[1].split("/")[0])
+            return httpx.Response(200, text=page) if page else httpx.Response(404)
         if url == kodik.FTOR_URL:
             form = dict(x.split("=", 1) for x in request.content.decode().split("&"))
             body = self.ftor.get(form["hash"])
@@ -290,56 +303,146 @@ async def test_kodik_qualities(site):
             await kodik.episode_qualities(http, session, 99)
 
 
-# --- provider: release and scan -------------------------------------------------------
+# --- provider: addresses carry the choice ---------------------------------------------
+
+
+def test_address_roundtrip_keeps_the_choice():
+    from modules.sources.video_providers.dunhuatv import (Choice, address_of, split_address)
+    choice = Choice("vk", "AniMy / RuChiMe", "Многоголосый")
+    address = address_of(PAGE_URL, choice)
+    assert split_address(address) == (PAGE_URL, choice)
+    assert split_address(PAGE_URL) == (PAGE_URL, None)
+    assert split_address(f"{PAGE_URL}?player=bogus&voice=x") == (PAGE_URL, None)
+    assert DunhuaTvProvider().canonical_url(address) == address
+    assert DunhuaTvProvider().canonical_url(PAGE_URL + "#vk=1") == PAGE_URL
+    assert DunhuaTvProvider().match_url(address)
+
+
+def test_episode_ranges_show_holes():
+    from modules.sources.video_providers.dunhuatv import episode_ranges
+    assert episode_ranges([1, 2, 3, 5, 7, 8, 3]) == "1-3, 5, 7-8"
+    assert episode_ranges([]) == ""
+
+
+# --- provider: release (the choice list) ----------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_parse_release_unites_both_players(site, provider):
+async def test_parse_release_lists_every_player_and_voice(site, provider):
     async with site.client() as http:
         release = await provider.parse_release(PAGE_URL, http)
-    assert release["canonical_url"] == PAGE_URL
+    options = [(s["player"], s["studio"], s["kind"], s["ranges"], s["count"])
+               for s in release["sources"]]
+    assert options == [
+        ("vk", "AniMy / RuChiMe", "Многоголосый", "1-2", 2),
+        ("vk", "AniStar", "Многоголосый", "1-2", 2),
+        ("vk", "AniStar", "Неизвестный", "3", 1),
+        ("kodik", "Animy", "voice", "1-3", 3),
+        ("kodik", "AniStar", "voice", "2-3, 9", 3),
+    ]
+    first = release["sources"][0]
+    assert release["selected_source"] == first["url"] == release["canonical_url"]
+    assert (first["first"], first["last"]) == (1, 2)
     assert release["title"] == {"ru": "Практикуя ци сто тысяч лет", "en": "Lian Qi Shi Wan Nian"}
-    assert [e["number"] for e in release["episodes"]] == [1, 2, 3]
-    assert release["titles"][0] == "Практикуя ци сто тысяч лет - 1 серия"
     assert release["resolution"] is None and release["source_type"] == "web_video"
     assert release["players"]["vk"]["available"] and release["players"]["kodik"]["available"]
-    assert not any(r.url.path.startswith("/api/v1/player/sv/video/") for r in site.requests)
+    assert not any("/player/sv/video/" in str(r.url) or r.url.path.endswith("/ftor")
+                   for r in site.requests)
 
 
 @pytest.mark.asyncio
-async def test_scan_picks_best_per_player_and_falls_back_to_kodik(site, provider):
+async def test_parse_release_titles_follow_the_chosen_voice(site, provider):
+    from modules.sources.video_providers.dunhuatv import Choice, address_of
     async with site.client() as http:
-        scan = await provider.scan_episodes(PAGE_URL, http, {})
-    by_episode: dict[int, list[tuple[str, int]]] = {}
-    for fact in scan["videos"]:
-        number = int(fact["title"].split(" - ")[1].split()[0])
-        by_episode.setdefault(number, []).append((fact["url"].split("#")[1].split("=")[0],
-                                                  fact["resolution"]))
-    assert by_episode == {
-        1: [("vk", 1080)],                       # VK at 1080: Kodik is not even probed
-        2: [("vk", 360), ("kodik", 720)],        # VK below 720: Kodik is offered too
-        3: [("kodik", 720)],                     # no VK video at all
-    }
-    vk_link = next(f["url"] for f in scan["videos"] if "#vk=" in f["url"])
-    assert vk_link == f"{PAGE_URL}#vk=v1s"
+        vk = await provider.parse_release(
+            address_of(PAGE_URL, Choice("vk", "AniStar", "Неизвестный")), http)
+        kodik_release = await provider.parse_release(
+            address_of(PAGE_URL, Choice("kodik", "AniStar", "voice")), http)
+    assert [e["number"] for e in vk["episodes"]] == [3]
+    assert vk["titles"] == ["Практикуя ци сто тысяч лет - 3 серия"]
+    assert [e["number"] for e in kodik_release["episodes"]] == [2, 3, 9]
+    assert kodik_release["episodes_count"] == 3
+    assert "player=kodik" in kodik_release["canonical_url"]
+
+
+@pytest.mark.asyncio
+async def test_parse_release_rejects_an_unknown_voice(site, provider):
+    from modules.sources.video_providers.dunhuatv import Choice, address_of
+    async with site.client() as http:
+        with pytest.raises(ValueError, match="не найдена"):
+            await provider.parse_release(address_of(PAGE_URL, Choice("vk", "Nobody")), http)
+
+
+@pytest.mark.asyncio
+async def test_parse_release_falls_back_to_kodik_when_vk_is_absent(site, provider):
+    site.page = PAGE_HTML.replace("<video-player", "<x-player")
+    async with site.client() as http:
+        release = await provider.parse_release(PAGE_URL, http)
+    assert {s["player"] for s in release["sources"]} == {"kodik"}
+    assert "player=kodik" in release["selected_source"]
+    assert not release["players"]["vk"]["available"]
+    assert "нет плеера VK" in release["players"]["vk"]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_parse_release_without_any_player_is_an_error(site, provider):
+    site.page = "<h1>Пусто</h1>"
+    async with site.client() as http:
+        with pytest.raises(ValueError, match="нет доступных плееров"):
+            await provider.parse_release(PAGE_URL, http)
+
+
+# --- provider: scan takes exactly the chosen voice ------------------------------------
+
+
+def _links(scan):
+    return {int(f["title"].split(" - ")[1].split()[0]): (f["url"].split("#")[1], f["resolution"])
+            for f in scan["videos"]}
+
+
+@pytest.mark.asyncio
+async def test_scan_takes_only_the_chosen_vk_voice(site, provider):
+    from modules.sources.video_providers.dunhuatv import Choice, address_of
+    url = address_of(PAGE_URL, Choice("vk", "AniStar", "Многоголосый"))
+    async with site.client() as http:
+        scan = await provider.scan_episodes(url, http, {})
+    assert _links(scan) == {1: ("vk=v1s", 1080), 2: ("vk=v2s", 360)}
+    probed = {str(r.url).rsplit("/", 1)[1] for r in site.requests if "/player/sv/video/" in str(r.url)}
+    assert probed == {"v1s", "v2s"}
+    assert not any(r.url.path.endswith("/ftor") for r in site.requests)
     assert all(f["download_url"] is None and f["publication_date"] == "1970-01-01T12:00:00Z"
                for f in scan["videos"])
     report = scan["players"]
-    assert report["sources"] == {"vk": 1, "kodik": 2} and report["holes"] == []
+    assert report["sources"] == {"vk": 2} and report["holes"] == []
+    assert report["source"] == {"player": "vk", "studio": "AniStar", "kind": "Многоголосый"}
     assert report["players"]["vk"]["max_resolution"] == 1080
-    assert not any(r.url.path.endswith("/ftor") and b"aa01" in r.content for r in site.requests)
 
 
 @pytest.mark.asyncio
-async def test_scan_equal_resolution_keeps_first_listed_voice(site, provider):
-    site.sources["v1s"] = {"mpegHighUrl": "https://okcdn.test/v1s/720"}
+async def test_scan_takes_only_the_chosen_kodik_voice(site, provider):
+    from modules.sources.video_providers.dunhuatv import Choice, address_of
+    url = address_of(PAGE_URL, Choice("kodik", "AniStar", "voice"))
     async with site.client() as http:
-        scan = await provider.scan_episodes(PAGE_URL, http, {}, episodes=[1])
-    assert [f["url"] for f in scan["videos"]] == [f"{PAGE_URL}#vk=v1"]
+        scan = await provider.scan_episodes(url, http, {})
+    base = f"kodik=49002/b1b36deb/"
+    assert _links(scan) == {2: (base + "2", 360), 3: (base + "3", 480), 9: (base + "9", 720)}
+    assert not any("/player/sv/" in str(r.url) for r in site.requests)
+    hashes = {r.content.decode().split("hash=")[1].split("&")[0]
+              for r in site.requests if r.url.path.endswith("/ftor")}
+    assert hashes == {"bb02", "bb03", "bb09"}
 
 
 @pytest.mark.asyncio
-async def test_scan_measures_an_unlabelled_rung_once(site, provider):
+async def test_scan_without_a_choice_uses_the_first_player_and_voice(site, provider):
+    async with site.client() as http:
+        scan = await provider.scan_episodes(PAGE_URL, http, {})
+    assert scan["players"]["source"]["studio"] == "AniMy / RuChiMe"
+    assert _links(scan) == {1: ("vk=v1", 720), 2: ("vk=v2", 360)}
+
+
+@pytest.mark.asyncio
+async def test_scan_measures_an_unlabelled_rung_once(site):
+    from modules.sources.video_providers.dunhuatv import Choice, address_of
     site.playlist = {"items": [{"vkId": "v4k", "voiceStudio": "A", "voiceType": "x",
                                 "season": 1, "episode": 1}]}
     calls = []
@@ -349,7 +452,8 @@ async def test_scan_measures_an_unlabelled_rung_once(site, provider):
         return 1440
     provider = DunhuaTvProvider(measure=counting)
     async with site.client() as http:
-        scan = await provider.scan_episodes(PAGE_URL, http, {}, episodes=[1])
+        scan = await provider.scan_episodes(
+            address_of(PAGE_URL, Choice("vk", "A", "x")), http, {})
         await provider.resolve_stream(scan["videos"][0]["url"], http)
     assert scan["videos"][0]["resolution"] == 1440
     assert calls == ["mpeg4kUrl"]
@@ -357,39 +461,53 @@ async def test_scan_measures_an_unlabelled_rung_once(site, provider):
 
 @pytest.mark.asyncio
 async def test_scan_respects_episode_filter_and_series_name(site, provider):
+    from modules.sources.video_providers.dunhuatv import Choice, address_of
+    url = address_of(PAGE_URL, Choice("kodik", "Animy", "voice"))
     async with site.client() as http:
-        scan = await provider.scan_episodes(PAGE_URL, http, {"name": "Моя серия"}, episodes=[3])
+        scan = await provider.scan_episodes(url, http, {"name": "Моя серия"}, episodes=[3])
     assert [f["title"] for f in scan["videos"]] == ["Моя серия - 3 серия"]
-    assert not any("/player/sv/video/" in str(r.url) for r in site.requests)
+    assert sum(r.url.path.endswith("/ftor") for r in site.requests) == 1
 
 
 @pytest.mark.asyncio
-async def test_scan_reports_episode_without_any_stream(site, provider):
-    site.playlist = {"items": [{"vkId": "v2", "voiceStudio": "A", "voiceType": "x",
-                                "season": 1, "episode": 7}]}
+async def test_scan_reports_episode_without_a_stream(site, provider):
+    from modules.sources.video_providers.dunhuatv import Choice, address_of
     site.sources["v2"] = {}
-    site.kodik_html = KODIK_HTML.replace('value="3"', 'value="30"')
     async with site.client() as http:
-        scan = await provider.scan_episodes(PAGE_URL, http, {}, episodes=[7])
-    assert scan["videos"] == []
-    assert scan["players"]["holes"][0]["episode"] == 7
+        scan = await provider.scan_episodes(
+            address_of(PAGE_URL, Choice("vk", "AniMy / RuChiMe", "Многоголосый")), http, {})
+    assert _links(scan) == {1: ("vk=v1", 720)}
+    assert scan["players"]["holes"][0]["episode"] == 2
     assert "VK" in scan["players"]["holes"][0]["reason"]
 
 
 @pytest.mark.asyncio
 async def test_scan_asks_for_a_retry_when_a_player_throttles(site, provider):
+    from modules.sources.video_providers.dunhuatv import Choice, address_of
     site.failing_videos["v2"] = 503
     async with site.client() as http:
         with pytest.raises(ValueError, match="повторный скан"):
-            await provider.scan_episodes(PAGE_URL, http, {})
+            await provider.scan_episodes(
+                address_of(PAGE_URL, Choice("vk", "AniMy / RuChiMe", "Многоголосый")), http, {})
 
 
 @pytest.mark.asyncio
 async def test_scan_asks_for_a_retry_when_the_playlist_is_down(site, provider):
+    from modules.sources.video_providers.dunhuatv import Choice, address_of
     site.playlist = 503
     async with site.client() as http:
         with pytest.raises(ValueError, match="повторный скан"):
-            await provider.scan_episodes(PAGE_URL, http, {})
+            await provider.scan_episodes(
+                address_of(PAGE_URL, Choice("vk", "AniMy / RuChiMe", "Многоголосый")), http, {})
+
+
+@pytest.mark.asyncio
+async def test_scan_of_a_vanished_voice_is_an_error_not_a_switch(site, provider):
+    from modules.sources.video_providers.dunhuatv import Choice, address_of
+    async with site.client() as http:
+        with pytest.raises(ValueError, match="не найдена"):
+            await provider.scan_episodes(address_of(PAGE_URL, Choice("kodik", "Gone", "voice")),
+                                         http, {})
 
 
 @pytest.mark.asyncio
@@ -398,8 +516,7 @@ async def test_scan_reports_progress(site, provider):
     async with site.client() as http:
         await provider.scan_episodes(PAGE_URL, http, {},
                                      progress=lambda done, total, phase: seen.append((done, total, phase)))
-    assert seen[-1] == (seen[-1][1], seen[-1][1], "done")
-    assert seen[0][2] == "players"
+    assert seen[-1] == (2, 2, "done") and seen[0][2] == "players"
 
 
 # --- provider: stream resolution ------------------------------------------------------
