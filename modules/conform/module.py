@@ -8,10 +8,13 @@ The daemon owns the state; this module keeps no database. Without a daemon addre
 
 Query:
   conform.status {} -> {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks: [...]}
-  conform.submit {ref, dubs: [path], out_dir, cache_dir, label?} -> {job_id} | {rejected: reason}
+  conform.submit {ref, dubs: [path], out_dir, cache_dir, label?}
+      -> {job_id} | {rejected: reason} | {unavailable: reason, retry: bool}
       One episode: a reference video and the voice-over files to align to it, local paths.
-      `rejected` is final (a path outside the shared storage, a refusal of the daemon); the call
-      fails when asking again may work: no daemon configured, daemon down, transport error.
+      `rejected` is final (a path outside the shared storage, a refusal of the daemon).
+      `unavailable` is not: with retry=false the daemon is not configured or down and the caller
+      waits for conform.daemon.up; with retry=true the daemon is up but the request failed in
+      transit and asking again soon may work.
   conform.job.get {job_id} -> {job_id, status, error, results}   status `gone` when the daemon
       no longer knows the job; results as in conform.job.finished.
 Event:
@@ -30,6 +33,8 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
+
+import httpx
 
 from core import BaseModule, BusRequestError
 from core.envelope import Envelope
@@ -119,9 +124,10 @@ class ConformModule(BaseModule):
 
     async def on_submit(self, env: Envelope) -> dict:
         if self._client is None:
-            raise RuntimeError("сервис выравнивания не настроен (ST_CONFORM_URL)")
+            return {"unavailable": "сервис выравнивания не настроен (ST_CONFORM_URL)", "retry": False}
         if not self._daemon.get("up"):
-            raise RuntimeError(f"сервис выравнивания недоступен: {self._daemon.get('error')}")
+            return {"unavailable": f"сервис выравнивания недоступен: {self._daemon.get('error')}",
+                    "retry": False}
         payload = env.payload
         mapping = await self._path_map()
         try:
@@ -134,6 +140,10 @@ class ConformModule(BaseModule):
         except (ValueError, DaemonRefused) as exc:
             self.log.warning("conform: задача %s отклонена: %s", payload.get("label") or "", exc)
             return {"rejected": str(exc)}
+        except httpx.HTTPError as exc:
+            reason = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+            self.log.warning("conform: задача %s не поставлена: %s", payload.get("label") or "", reason)
+            return {"unavailable": reason, "retry": True}
         self.log.info("conform: поставлена задача %s (%s), озвучек %d", job.get("id"),
                       payload.get("label") or "", len(body["dubs"]))
         return {"job_id": job["id"]}

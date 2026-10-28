@@ -244,7 +244,6 @@ class Neighbours(BaseModule):
         self.fetches = []
         self.cancels = []
         self.submits = []
-        self.submit_error = None
         self.submit_reply = None
         self.jobs = {}  # job id -> reply of conform.job.get
         self.source_type = "web_video"
@@ -286,8 +285,6 @@ class Neighbours(BaseModule):
 
     async def on_submit(self, env):
         self.submits.append(dict(env.payload))
-        if self.submit_error:
-            raise RuntimeError(self.submit_error)
         return self.submit_reply or {"job_id": f"job-{len(self.submits)}"}
 
     async def on_job_get(self, env):
@@ -659,14 +656,14 @@ async def test_a_failed_job_makes_its_voices_failed_for_the_next_scan(dubs):
 @pytest.mark.asyncio
 async def test_an_unreachable_service_leaves_the_voices_waiting_until_it_is_back(dubs):
     probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, finished=False)
-    neighbours.submit_error = "сервис выравнивания недоступен"
+    neighbours.submit_reply = {"unavailable": "сервис выравнивания недоступен", "retry": False}
     for fetch in neighbours.fetches:
         touch(fetch["path"], b"video")
         finish(probe, fetch["key"])
     await statuses_until(sub, ["ready", "ready"])
     await asyncio.sleep(0.2)
     assert {r["status"] for r in await rows(probe)} == {"ready"}
-    neighbours.submit_error = None
+    neighbours.submit_reply = None
     probe.publish_event("conform.daemon.up", {})
     await statuses_until(sub, ["aligning", "aligning"])
 
@@ -735,3 +732,38 @@ async def test_a_voice_that_arrives_later_makes_a_job_of_its_own(dubs):
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-2"))
     await statuses_until(sub, ["aligned", "placed"])
     assert {r["status"] for r in await rows(probe)} == {"placed"}
+
+
+@pytest.mark.asyncio
+async def test_a_transient_failure_with_the_service_up_is_retried_without_a_new_event(dubs, monkeypatch):
+    monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.05)
+    probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, finished=False)
+    neighbours.submit_reply = {"unavailable": "RemoteProtocolError: Server disconnected", "retry": True}
+    for fetch in neighbours.fetches:
+        touch(fetch["path"], b"video")
+        finish(probe, fetch["key"])
+    await statuses_until(sub, ["ready", "ready"])
+    end = asyncio.get_running_loop().time() + 3
+    while not neighbours.submits:
+        assert asyncio.get_running_loop().time() < end
+        await asyncio.sleep(0.01)
+    neighbours.submit_reply = None  # the service recovers; nothing else announces it
+    await statuses_until(sub, ["aligning", "aligning"])
+    assert len(neighbours.submits) >= 2
+
+
+@pytest.mark.asyncio
+async def test_retries_stop_after_a_few_attempts(dubs, monkeypatch):
+    monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.02)
+    monkeypatch.setattr("modules.voices.module.SUBMIT_RETRIES", 2)
+    probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, finished=False)
+    neighbours.submit_reply = {"unavailable": "blip", "retry": True}
+    for fetch in neighbours.fetches:
+        touch(fetch["path"], b"video")
+        finish(probe, fetch["key"])
+    await statuses_until(sub, ["ready", "ready"])
+    await asyncio.sleep(0.4)
+    tried = len(neighbours.submits)
+    assert 3 <= tried <= 4  # the first try, two retries, maybe one concurrent pass
+    await asyncio.sleep(0.2)
+    assert len(neighbours.submits) == tried

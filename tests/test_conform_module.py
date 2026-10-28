@@ -46,6 +46,8 @@ class FakeClient:
 
     async def enqueue(self, body):
         self.enqueued.append(body)
+        if isinstance(self.refuse, Exception):
+            raise self.refuse
         if self.refuse:
             raise DaemonRefused("демон отклонил задачу (422): bad path")
         return {"id": "j-new", "status": "queued"}
@@ -321,8 +323,8 @@ async def test_submit_fails_when_asking_again_may_help_and_rejects_when_it_canno
     _, probe, runner = await started(client)
     try:
         await until(probe, lambda s: not s["daemon"]["up"])
-        with pytest.raises(BusRequestError, match="недоступен"):
-            await probe.request("conform.submit", SUBMIT, timeout=5)
+        down = await probe.request("conform.submit", SUBMIT, timeout=5)
+        assert "недоступен" in down["unavailable"] and down["retry"] is False
     finally:
         await runner.stop()
     client = FakeClient([("conform.snapshot", {"items": []})])
@@ -334,6 +336,9 @@ async def test_submit_fails_when_asking_again_may_help_and_rejects_when_it_canno
         client.refuse = True
         refused = await probe.request("conform.submit", SUBMIT, timeout=5)
         assert "отклонил" in refused["rejected"]
+        client.refuse = httpx.RemoteProtocolError("Server disconnected")
+        blip = await probe.request("conform.submit", SUBMIT, timeout=5)
+        assert blip["retry"] is True and "Server disconnected" in blip["unavailable"]
     finally:
         await runner.stop()
     bus = Bus()
@@ -341,8 +346,8 @@ async def test_submit_fails_when_asking_again_may_help_and_rejects_when_it_canno
     runner = Runner(bus, [ConformModule(bus, None), Settings(bus), probe])
     await runner.start()
     try:
-        with pytest.raises(BusRequestError, match="не настроен"):
-            await probe.request("conform.submit", SUBMIT, timeout=5)
+        idle = await probe.request("conform.submit", SUBMIT, timeout=5)
+        assert "не настроен" in idle["unavailable"] and idle["retry"] is False
     finally:
         await runner.stop()
 

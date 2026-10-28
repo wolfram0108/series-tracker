@@ -61,6 +61,8 @@ DEFAULT_TEMP_ROOT = "/nas/torrents/series-tracker"
 DUB_MAX_HEIGHT = 720
 PARSE_TIMEOUT_S = 180
 SUBMIT_TIMEOUT_S = 60
+SUBMIT_RETRY_S = 30.0
+SUBMIT_RETRIES = 5
 WORKING = ("pending", "downloading", "aligning")
 FINAL = ("placed", "rejected", "failed")
 
@@ -88,6 +90,8 @@ class VoicesModule(BaseModule):
         self.repo = VoicesRepository(db) if db is not None else None
         self._locks: dict[int, asyncio.Lock] = {}
         self._kicked: set[int] = set()
+        self._retries: dict[int, int] = {}
+        self._retry_pending: set[int] = set()
         super().__init__(bus)
 
     def register(self) -> None:
@@ -342,8 +346,15 @@ class VoicesModule(BaseModule):
                 "out_dir": os.path.join(folder, "_aligned"), "cache_dir": os.path.join(folder, "_cache"),
                 "label": label}, timeout=SUBMIT_TIMEOUT_S)
         except (BusRequestError, asyncio.TimeoutError) as exc:
-            self.log.info("%s: озвучки ждут сервис выравнивания: %s", label, exc)
+            self.log.warning("%s: постановка не удалась: %s", label, exc)
+            self._retry_later(series["id"])
             return
+        if reply.get("unavailable"):
+            self.log.info("%s: озвучки ждут сервис выравнивания: %s", label, reply["unavailable"])
+            if reply.get("retry"):
+                self._retry_later(series["id"])
+            return
+        self._retries.pop(series["id"], None)
         if reply.get("rejected"):
             for row in ready:
                 await self.repo.mark_rejected(row["id"], reply["rejected"])
@@ -353,6 +364,28 @@ class VoicesModule(BaseModule):
         await self.repo.mark_aligning([row["id"] for row in ready], reply["job_id"])
         for row in ready:
             self._changed(row, "aligning")
+
+    def _retry_later(self, series_id: int) -> None:
+        """A transient failure with the service up: ask again after a pause, a few times only."""
+        if series_id in self._retry_pending:
+            return
+        attempt = self._retries.get(series_id, 0) + 1
+        if attempt > SUBMIT_RETRIES:
+            self._retries.pop(series_id, None)
+            self.log.warning("сериал %d: сервис выравнивания не принял серии за %d попыток, "
+                             "дальше — по следующему событию", series_id, SUBMIT_RETRIES)
+            return
+        self._retries[series_id] = attempt
+        self._retry_pending.add(series_id)
+
+        async def later() -> None:
+            await asyncio.sleep(SUBMIT_RETRY_S)
+            self._retry_pending.discard(series_id)
+            self._kick(series_id)
+
+        task = asyncio.create_task(later(), name=f"voices:retry:{series_id}")
+        self._bg.add(task)
+        task.add_done_callback(self._bg.discard)
 
     async def on_job_finished(self, env: Envelope) -> None:
         await self._apply_job(env.payload)
