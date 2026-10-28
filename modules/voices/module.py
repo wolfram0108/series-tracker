@@ -29,7 +29,11 @@ Events in:  downloads.fetch.started and .finished (our keys `dub:<id>`), conform
             jobs of the service), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished,
             conform.daemon.up, series.deleted.
-Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, detail} —
+Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, detail, rev} —
+            rev grows with every event, so the interface keeps the newest of two it receives out of order;
+            every write to a row is announced, including the creation of a planned row and its removal;
+            voices.dubs.snapshot {rev, items: [{series_id, season, episode, voice_key, voice_label, status,
+            state, detail}]} — every row, published when an interface connects (gateway.sse.clients);
             state is what the user sees (states.py: planned, download_queued, downloading, align_queued, running,
             done, error), status the
             step behind it; detail is the reason of a failure, a rejection or a stale track, else null;
@@ -78,6 +82,7 @@ import json
 import os
 import re
 import shutil
+import time
 import uuid
 from collections import OrderedDict, defaultdict
 
@@ -144,6 +149,7 @@ class VoicesModule(BaseModule):
         self._fetching: set[int] = set()
         self._admit_lock = asyncio.Lock()
         self._unclaimed: OrderedDict[str, dict] = OrderedDict()
+        self._rev = 0
         super().__init__(bus)
 
     def register(self) -> None:
@@ -159,6 +165,7 @@ class VoicesModule(BaseModule):
         self.handle("conform.queue.changed", self.on_conform_picture)
         self.handle("conform.daemon.up", self.on_daemon_up)
         self.handle("series.deleted", self.on_series_deleted)
+        self.handle("gateway.sse.clients", self.on_clients)
 
     async def on_start(self) -> None:
         if self.repo is None:
@@ -250,6 +257,7 @@ class VoicesModule(BaseModule):
         episodes = await self._reference_episodes(series_id, reference)
         self.log.info("сериал %d: озвучки — референс %s, дополнительных %d, серий плана на сайте %d",
                       series_id, reference["studio"], len(dubs), len(episodes))
+        before = await self.repo.for_series(series_id)
         planned: set[tuple[int, int, str]] = set()
         for season, episode, site_episode in episodes:
             for voice in dubs:
@@ -263,13 +271,15 @@ class VoicesModule(BaseModule):
         for gone in await self.repo.drop_unplanned(series_id, planned):
             self.log.info("сериал %d: озвучка %s серии %d вышла из плана", series_id,
                           gone["voice_label"], gone["episode"])
+            self._changed(gone, "removed")
+        after = await self.repo.for_series(series_id)
+        self._announce_difference(before, after)
         await self._recheck_ready(series_id)
         await self._admit()
-        for row in await self.repo.for_series(series_id):
+        for row in after:
             if row["status"] == "failed":
                 self.log.warning("сериал %d, s%02de%02d: озвучка %s недоступна: %s", series_id,
                                  row["season"], row["episode"], row["voice_label"], row["error"])
-                self._changed(row, "failed", row["error"])
         self._kick(series_id)
 
     async def _reference_episodes(self, series_id: int, reference: dict) -> list[tuple[int, int, int]]:
@@ -289,13 +299,15 @@ class VoicesModule(BaseModule):
         return found
 
     async def _forget_all(self, series_id: int) -> None:
-        await self.repo.drop_unplanned(series_id, set())
+        for gone in await self.repo.drop_unplanned(series_id, set()):
+            self._changed(gone, "removed")
 
     async def _recheck_ready(self, series_id: int) -> None:
         """A ready dub whose file vanished from the temporary directory is downloaded again."""
         for row in await self.repo.for_series(series_id):
             if row["status"] == "ready" and not await self._io(os.path.exists, row["temp_path"]):
                 await self.repo.mark_pending(row["id"], "файл озвучки пропал")
+                self._changed({**row, "status": "pending"}, "stale", "файл озвучки пропал")
 
 
     async def _temp_cap(self) -> int:
@@ -383,12 +395,42 @@ class VoicesModule(BaseModule):
         self._changed(row, "failed", error)
         self._kick(row["series_id"])
 
+    def _next_rev(self) -> int:
+        """Revisions grow within the process and across restarts: the interface keeps the newest."""
+        self._rev = max(self._rev + 1, time.time_ns() // 1000)
+        return self._rev
+
     def _changed(self, row: dict, status: str, detail: str | None = None, job_id: str | None = None) -> None:
         job_status = self._job_status.get(job_id or row.get("job_id"))
         self.publish_event("voices.dub.changed", {
             "series_id": row["series_id"], "season": row["season"], "episode": row["episode"],
             "voice_key": row["voice_key"], "voice_label": row["voice_label"], "status": status,
-            "state": public_state(status, job_status, row.get("id") in self._fetching), "detail": detail})
+            "state": public_state(status, job_status, row.get("id") in self._fetching), "detail": detail,
+            "rev": self._next_rev()})
+
+    def _announce_difference(self, before: list[dict], after: list[dict]) -> None:
+        """Rows that a write created or turned over are news for the interface like any other change."""
+        known = {(row["season"], row["episode"], row["voice_key"]): (row["status"], row["outcome"] or row["error"])
+                 for row in before}
+        for row in after:
+            seen = (row["status"], row["outcome"] or row["error"])
+            if known.get((row["season"], row["episode"], row["voice_key"])) != seen:
+                self._changed(row, row["status"], seen[1])
+
+    def _item(self, row: dict) -> dict:
+        return {"series_id": row["series_id"], "season": row["season"], "episode": row["episode"],
+                "voice_key": row["voice_key"], "voice_label": row["voice_label"], "status": row["status"],
+                "state": public_state(row["status"], self._job_status.get(row["job_id"]),
+                                      row["id"] in self._fetching),
+                "detail": row["outcome"] or row["error"]}
+
+    async def on_clients(self, env: Envelope) -> None:
+        """A new interface has no history: it gets every voice-over at once, stamped before the read."""
+        if self.repo is None or not env.payload.get("count"):
+            return
+        rev = self._next_rev()
+        self.publish_event("voices.dubs.snapshot",
+                           {"rev": rev, "items": [self._item(row) for row in await self.repo.all_rows()]})
 
     async def on_conform_picture(self, env: Envelope) -> None:
         """A job of the service went from waiting to running (or vanished): its voice-overs follow."""
@@ -876,6 +918,8 @@ class VoicesModule(BaseModule):
         rows = await self.repo.for_series(series_id)
         folders = {os.path.dirname(folder) for folder in self._folders_of(rows, "")} - {""}
         await self.repo.delete_for_series(series_id)
+        for row in rows:
+            self._changed(row, "removed")
         for folder in folders or {os.path.join(await self._temp_root(), str(series_id))}:
             await self._discard(folder, tree=True)
         await self._admit()

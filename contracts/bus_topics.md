@@ -22,7 +22,7 @@
 | settings | value.get, value.set, values.by_prefix (Р-22) |
 | trackerauth | fetch, credentials.get/set (Р-22, владелец auth) |
 | voices | layout {sources: [{url, player, studio, kind, episodes, links?}], mode?, reference?} → раскладка озвучек сериала с ключом озвучки (Р-39); приоритет источников — настройка `voices.source_priority`; dispatch {series_id} (скан → озвучки серий во временный каталог, Р-40); dubs.get {series_id} → записи voice_dubs |
-| conform | submit {ref, dubs, out_dir, cache_dir, label?} → {job_id} \| {rejected} (постановка серии, Р-41); job.get {job_id} → итог задачи; status {} → {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks} — зеркало очереди выравнивания демона track-muxer (Р-39); слушает `gateway.sse.clients` |
+| conform | submit {ref, dubs, out_dir, cache_dir, label?, key?} → {job_id} \| {rejected} \| {unavailable, retry} (постановка серии, Р-41; `key` попадает в метку задачи); job.find {key} → {reachable, job_id}; cancel {job_id} → {done}; job.get {job_id} → итог задачи; status {} → {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks} — зеркало очереди выравнивания демона track-muxer (Р-39); слушает `gateway.sse.clients` |
 
 ## События (издатель → подписчики)
 
@@ -45,7 +45,8 @@
 | downloads.fetch.finished {key, ok, error, transient, path, series_id} | downloads | voices (ключи `dub:<id>`) | — |
 | conform.cancel {job_id} (запрос) → {done} | voices | conform | — |
 | conform.job.find {key} (запрос) → {reachable, job_id} | voices | conform | — |
-| voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, detail} | voices | gateway | voice_dub_update (Р-43, Р-44) |
+| voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, detail, rev} | voices | gateway | voice_dub_update (Р-43, Р-44) |
+| voices.dubs.snapshot {rev, items} (при gateway.sse.clients) | voices | gateway | voice_dubs_snapshot |
 | downloads.item.renamed {series_id, unique_id, filename} | downloads | voices | — |
 | downloads.fetch.started {key, series_id, path} | downloads | voices (ключи `dub:<id>`) | — |
 | voices.episode.settled {series_id, season, episode} | voices | — | — |
@@ -53,7 +54,7 @@
 | conform.daemon.up {} | conform | voices | — |
 | slicing.queue.changed {tasks} | slicing | — | slicing_queue_update |
 | conform.queue.changed {daemon, tasks} | conform | voices (состояние задач) | conform_queue_update (Р-39; вся картина на каждое изменение и при подключении клиента SSE) |
-| gateway.sse.clients {count} | gateway | catalog, conform | — |
+| gateway.sse.clients {count} | gateway | catalog, conform, voices | — |
 | renaming.finished {series_id} | renaming | — | renaming_complete |
 | library.relocation.started/finished | library | voices (finished) | relocation_started/finished |
 | settings.changed {key, value} | settings | downloads (max_parallel_downloads), scan (настройки сканера → пересчёт расписания, Р-20) | — |

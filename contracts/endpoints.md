@@ -119,7 +119,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | POST | `/api/series/{series_id}/deep-adoption` | Глубокое усыновление (фон) | `StatusVkComposition.vue` |
 | GET | `/api/series/{series_id}/sliced-files` | Нарезки с именем родителя и сезоном | `StatusVkComposition.vue` |
 | GET | `/api/series/{series_id}/composition` | Состав композиции | `StatusComposition.vue`, `StatusVkComposition.vue` |
-| GET | `/api/series/{series_id}/voices` | Озвучки серий сериала: `{items: [{season, episode, voice_key, voice_label, status, state, detail}]}` (Р-43, Р-44) | `StatusVkComposition.vue` |
+| GET | `/api/series/{series_id}/voices` | Озвучки сериала: `{items: [{season, episode, voice_key, voice_label, status, state, detail}]}` (Р-43, Р-44); интерфейс озвучки получает по SSE (`voice_dubs_snapshot`, `voice_dub_update`), точка нужна для диагностики | — |
 | GET | `/api/series/{series_id}/rename_preview` | Предпросмотр новых имён файлов | `StatusVkComposition.vue` |
 | POST | `/api/series/{series_id}/reprocess` | Переобработка имён файлов (торрент) | `StatusComposition.vue` |
 | POST | `/api/series/{series_id}/reprocess_vk_files` | Переобработка имён файлов (видео) | `StatusVkComposition.vue` |

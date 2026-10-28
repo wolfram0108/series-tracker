@@ -27,6 +27,10 @@ class VoicesRepository:
             "SELECT * FROM voice_dubs WHERE series_id=? ORDER BY season, episode, voice_key", (series_id,))
         return [self._row(row) for row in rows]
 
+    async def all_rows(self) -> list[dict[str, Any]]:
+        rows = await self._db.fetch_all("SELECT * FROM voice_dubs ORDER BY series_id, season, episode, voice_key")
+        return [self._row(row) for row in rows]
+
     async def for_episode(self, series_id: int, season: int, episode: int) -> list[dict[str, Any]]:
         rows = await self._db.fetch_all(
             "SELECT * FROM voice_dubs WHERE series_id=? AND season=? AND episode=? ORDER BY voice_key",

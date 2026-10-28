@@ -559,14 +559,14 @@ def touch(path, content=b"x"):
 async def statuses_until(sub, wanted, seconds=5.0):
     """Wait on the pushed events until `wanted` (a sorted list of statuses seen) is reached.
 
-    The announcements of a sent download are skipped unless `downloading` is wanted."""
+    The announcements of a planned row and of a sent download are skipped unless wanted."""
     seen = []
     end = asyncio.get_running_loop().time() + seconds
     while sorted(seen) != sorted(wanted):
         left = end - asyncio.get_running_loop().time()
         assert left > 0, (seen, wanted)
         status = (await asyncio.wait_for(sub.queue.get(), left)).payload["status"]
-        if status != "downloading" or "downloading" in wanted:
+        if status not in ("downloading", "pending") or status in wanted:
             seen.append(status)
     return seen
 
@@ -1791,3 +1791,106 @@ async def test_a_length_that_cannot_be_read_is_a_refusal_not_a_guess(dubs):
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
     assert by_voice["redheadsound"]["detail"] == "длина дорожки не определена"
     LENGTHS.clear()
+
+
+# what the interface is told must be what the database holds -------------------------------
+
+
+def drained(sub):
+    events = []
+    while not sub.queue.empty():
+        events.append(sub.queue.get_nowait().payload)
+    return events
+
+
+def picture(events, snapshot=None):
+    """The interface's reduction of the pushed packets: the newest revision of a voice-over wins."""
+    shown, revs = {}, {}
+    if snapshot is not None:
+        for item in snapshot["items"]:
+            key = (item["series_id"], item["season"], item["episode"], item["voice_key"])
+            shown[key], revs[key] = item, snapshot["rev"]
+    for event in events:
+        key = (event["series_id"], event["season"], event["episode"], event["voice_key"])
+        if event["rev"] <= revs.get(key, 0):
+            continue
+        revs[key] = event["rev"]
+        if event["status"] == "removed":
+            shown.pop(key, None)
+        else:
+            shown[key] = event
+    return {key: (item["state"], item["detail"]) for key, item in shown.items()}
+
+
+async def held(probe):
+    return {(7, row["season"], row["episode"], row["voice_key"]): (row["state"], row["detail"])
+            for row in await rows(probe)}
+
+
+@pytest.mark.asyncio
+async def test_planned_rows_are_announced_when_created_and_when_they_leave_the_plan(dubs):
+    probe, neighbours, bus, sub = await capped_two_episodes(dubs)
+    events = drained(sub)
+    assert {(e["episode"], e["state"]) for e in events if e["status"] == "pending"} == {(1, "planned"), (2, "planned")}
+    assert picture(events) == await held(probe)
+    neighbours.plan[:] = [(1, 1, 1)]
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await asyncio.sleep(0.6)
+    later = drained(sub)
+    assert {(e["episode"], e["status"]) for e in later} == {(2, "removed")} and len(later) == 2
+    assert picture(events + later) == await held(probe)
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_series_tells_the_interface_every_row_is_gone(dubs):
+    probe, neighbours, voices, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    await asyncio.sleep(0.3)
+    before = drained(sub)
+    assert picture(before) and picture(before) == await held(probe)
+    purged = bus.subscribe("series.purged")
+    probe.publish_event("series.deleted", {"series_id": 7})
+    await asyncio.wait_for(purged.queue.get(), 3)
+    after = drained(sub)
+    assert {e["status"] for e in after} == {"removed"} and picture(before + after) == {}
+
+
+@pytest.mark.asyncio
+async def test_revisions_only_grow(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
+    revs = [e["rev"] for e in drained(sub)]
+    assert revs == sorted(set(revs))
+
+
+@pytest.mark.asyncio
+async def test_a_whole_episode_leaves_the_interface_with_the_picture_the_database_holds(dubs):
+    probe, neighbours, voices, bus = dubs
+    every = bus.subscribe("voices.dub.changed")
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
+    await quiet(voices)
+    assert picture(drained(every)) == await held(probe)
+
+
+@pytest.mark.asyncio
+async def test_a_connecting_interface_gets_every_row_at_once_and_newer_packets_win(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    await quiet(voices)
+    packets = bus.subscribe("voices.dubs.snapshot")
+    probe.publish_event("gateway.sse.clients", {"count": 0})
+    probe.publish_event("gateway.sse.clients", {"count": 1})
+    snapshot = (await asyncio.wait_for(packets.queue.get(), 3)).payload
+    assert packets.queue.empty()
+    assert picture([], snapshot) == await held(probe)
+    assert all(item["rev"] <= snapshot["rev"] for item in drained(sub))
+    older = {"series_id": 7, "season": 1, "episode": 1, "voice_key": "blackcat", "voice_label": "BlackCat",
+             "status": "failed", "state": "error", "detail": "old", "rev": snapshot["rev"] - 1}
+    assert picture([older], snapshot) == await held(probe)

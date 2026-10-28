@@ -138,7 +138,7 @@ async function copyUrl(url?: string) {
     /* ignore */
   }
 }
-// Voice-overs of an episode: pushed by voice_dub_update, loaded once when the tab opens.
+// Voice-overs of an episode: pushed by the core (voice_dubs_snapshot, then voice_dub_update).
 function voicesOf(it: Item): VoiceDub[] {
   if (!isWebVideo.value || it.type !== "compilation") return []
   const season = it.season ?? it.result?.extracted?.season ?? 1
@@ -158,13 +158,6 @@ function voiceHint(v: VoiceDub): string {
 }
 function voiceTrouble(v: VoiceDub): boolean {
   return v.state === "error"
-}
-async function loadVoices() {
-  if (!isWebVideo.value) return
-  const reply = (await request(
-    api.GET("/api/series/{series_id}/voices", { params: { path: { series_id: props.seriesId } } } as never),
-  )) as { items?: VoiceDub[] } | null
-  voices.load(props.seriesId, reply?.items ?? [])
 }
 function episodeStart(it: { type: string; result?: { extracted?: Extracted }; episode_number?: number; episode_start?: number }): number {
   if (it.type === "compilation") return it.result?.extracted?.start ?? it.result?.extracted?.episode ?? 0
@@ -325,7 +318,6 @@ async function loadComposition(forceRefresh: boolean) {
     initQualityPriority(series)
     availability.value = (series?.availability as Availability | undefined) ?? null
     await loadSliced()
-    await loadVoices()
   } finally {
     loading.value = false
     manualRefresh.value = false
