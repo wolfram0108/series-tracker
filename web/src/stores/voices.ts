@@ -7,7 +7,10 @@ export interface VoiceDub {
   episode: number
   voice_key: string
   voice_label: string
+  /** The step behind the state (downloading, aligning, placed, ...). */
   status: string
+  /** What the user sees: planned, queued, running, done or error. */
+  state: string
   detail: string | null
 }
 
@@ -38,14 +41,13 @@ export const useVoicesStore = defineStore("voices", () => {
     const key = slot(event.series_id, event.season, event.episode)
     const list = (bySlot.value[key] ?? []).filter((v) => v.voice_key !== event.voice_key)
     if (event.status !== "removed") {
-      // A stale track starts over; a moved one is still in place.
-      const status = event.status === "stale" ? "pending" : event.status === "moved" ? "placed" : event.status
       list.push({
         season: event.season,
         episode: event.episode,
         voice_key: event.voice_key,
         voice_label: event.voice_label,
-        status,
+        status: event.status === "stale" ? "pending" : event.status === "moved" ? "placed" : event.status,
+        state: event.state,
         detail: event.detail,
       })
       list.sort((a, b) => a.voice_label.localeCompare(b.voice_label))

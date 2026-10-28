@@ -10,17 +10,20 @@ Query:
       layout.DEFAULT_PRIORITY when unset.
   voices.dubs.get {series_id} -> {items: [{season, episode, voice_key, voice_label, status,
       attempt, error, temp_path, job_id, aligned_path, sidecar_path, outcome, ref_uid, ref_path,
-      detail}]}  (detail = outcome or error: what the interface shows next to a status)
+      detail, state}]}  (detail = outcome or error: what the interface shows next to a state)
 Command:
   voices.dispatch {series_id} — sent by scan after an explicit scan: read the catalog of the site,
       lay the voices out around the selected reference, record a voice_dubs row per planned
       reference episode and voice, and download what is not on disk yet into the temporary
       directory (setting `voices.temp_root`, default /nas/torrents/series-tracker).
-Events in:  downloads.fetch.finished (our keys `dub:<id>`), series.downloaded.changed,
+Events in:  downloads.fetch.finished (our keys `dub:<id>`), conform.queue.changed (waiting or running
+            jobs of the service), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished,
             conform.daemon.up, series.deleted.
-Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, detail} —
-            detail is the reason of a failure, a rejection or a stale track, else null; status is one of
+Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, detail} —
+            state is what the user sees (states.py: planned, queued, running, done, error), status the
+            step behind it; detail is the reason of a failure, a rejection or a stale track, else null;
+            status is one of
             ready, aligning, aligned, placed, rejected, failed, moved (the track followed its video),
             stale (its reference was replaced) and removed (the episode and its video are gone);
             series.purged,
@@ -71,6 +74,7 @@ from core.envelope import Envelope
 from .layout import DEFAULT_PRIORITY, download_chain, plan_layout
 from .placement import move, place, sidecar_path
 from .repository import VoicesRepository
+from .states import public_state
 
 PRIORITY_KEY = "voices.source_priority"
 TEMP_ROOT_KEY = "voices.temp_root"
@@ -110,6 +114,7 @@ class VoicesModule(BaseModule):
         self._kicked: set[int] = set()
         self._retries: dict[int, int] = {}
         self._retry_pending: set[int] = set()
+        self._job_status: dict[str, str] = {}
         super().__init__(bus)
 
     def register(self) -> None:
@@ -121,6 +126,7 @@ class VoicesModule(BaseModule):
         self.handle("downloads.item.renamed", self.on_downloaded)
         self.handle("library.relocation.finished", self.on_relocated)
         self.handle("conform.job.finished", self.on_job_finished)
+        self.handle("conform.queue.changed", self.on_conform_picture)
         self.handle("conform.daemon.up", self.on_daemon_up)
         self.handle("series.deleted", self.on_series_deleted)
 
@@ -165,7 +171,8 @@ class VoicesModule(BaseModule):
         rows = await self.repo.for_series(int(env.payload["series_id"]))
         keep = ("season", "episode", "voice_key", "voice_label", "status", "attempt", "error",
                 "temp_path", "job_id", "aligned_path", "sidecar_path", "outcome", "ref_uid", "ref_path")
-        return {"items": [{**{field: row[field] for field in keep}, "detail": row["outcome"] or row["error"]}
+        return {"items": [{**{field: row[field] for field in keep}, "detail": row["outcome"] or row["error"],
+                           "state": public_state(row["status"], self._job_status.get(row["job_id"]))}
                           for row in rows]}
 
     # --- planning ---------------------------------------------------------------------
@@ -291,11 +298,25 @@ class VoicesModule(BaseModule):
                          row["series_id"], row["season"], row["episode"], row["voice_label"], error)
         self._changed(row, "failed", error)
 
-    def _changed(self, row: dict, status: str, detail: str | None = None) -> None:
+    def _changed(self, row: dict, status: str, detail: str | None = None, job_id: str | None = None) -> None:
+        job_status = self._job_status.get(job_id or row.get("job_id"))
         self.publish_event("voices.dub.changed", {
             "series_id": row["series_id"], "season": row["season"], "episode": row["episode"],
             "voice_key": row["voice_key"], "voice_label": row["voice_label"], "status": status,
-            "detail": detail})
+            "state": public_state(status, job_status), "detail": detail})
+
+    async def on_conform_picture(self, env: Envelope) -> None:
+        """A job of the service went from waiting to running (or vanished): its voice-overs follow."""
+        states = {task["id"]: task["status"] for task in env.payload.get("tasks") or []}
+        changed = {job for job in states.keys() | self._job_status.keys()
+                   if states.get(job) != self._job_status.get(job)}
+        self._job_status = states
+        if self.repo is None:
+            return
+        for job_id in changed:
+            for row in await self.repo.by_job(job_id):
+                if row["status"] == "aligning":
+                    self._changed(row, "aligning")
 
     # --- alignment --------------------------------------------------------------------
 
@@ -495,7 +516,7 @@ class VoicesModule(BaseModule):
             return
         await self.repo.mark_aligning([row["id"] for row in ready], reply["job_id"], uid, reference)
         for row in ready:
-            self._changed(row, "aligning")
+            self._changed(row, "aligning", job_id=reply["job_id"])
 
     def _retry_later(self, series_id: int) -> None:
         """A transient failure with the service up: ask again after a pause, a few times only."""

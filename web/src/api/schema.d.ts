@@ -1523,7 +1523,8 @@ export interface components {
         };
         /**
          * VoiceDub
-         * @description Озвучка серии: дополнительная озвучка, её состояние и причина отказа или ошибки.
+         * @description Озвучка серии: дополнительная озвучка, её состояние (state: planned, queued, running, done, error;
+         *     status — шаг за ним) и причина ошибки.
          */
         VoiceDub: {
             /** Season */
@@ -1536,6 +1537,8 @@ export interface components {
             voice_label: string;
             /** Status */
             status: string;
+            /** State */
+            state: string;
             /** Detail */
             detail?: string | null;
         } & {

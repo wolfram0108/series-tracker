@@ -124,7 +124,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return {"items": []}
         return {"items": [
             {k: item[k] for k in ("season", "episode", "voice_key",
-                                  "voice_label", "status", "detail")}
+                                  "voice_label", "status", "state", "detail")}
             for item in reply["items"]]}
 
     @r.get("/api/series/{series_id}", response_model=SeriesObject,

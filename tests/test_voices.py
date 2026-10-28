@@ -14,6 +14,7 @@ from modules.voices import VoicesModule
 from modules.voices.identity import same_voice, tokens, voice_groups
 from modules.voices.layout import (DEFAULT_PRIORITY, choose_reference, download_chain,
                                    plan_layout, rank)
+from modules.voices.states import public_state
 
 
 def src(player, studio, episodes, kind="", url=None):
@@ -995,3 +996,65 @@ async def test_an_event_carries_the_voice_and_the_reason_so_the_interface_asks_n
     assert seen[("redheadsound", "aligned")]["detail"] is None
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
     assert by_voice["blackcat"]["detail"].startswith("подозрительно") and by_voice["redheadsound"]["detail"] is None
+
+
+# --- the five states the user sees ------------------------------------------------------------
+
+
+def test_every_step_of_a_voice_over_shows_as_one_of_five_states():
+    shown = {status: public_state(status) for status in (
+        "pending", "stale", "downloading", "ready", "aligned", "placed", "moved", "rejected", "failed")}
+    assert shown == {"pending": "planned", "stale": "planned", "downloading": "running", "ready": "queued",
+                     "aligned": "running", "placed": "done", "moved": "done", "rejected": "error",
+                     "failed": "error"}
+    assert set(shown.values()) == {"planned", "queued", "running", "done", "error"}
+
+
+def test_a_voice_over_in_the_service_waits_or_runs_by_the_state_of_its_job():
+    for waiting in (None, "queued", "paused"):
+        assert public_state("aligning", waiting) == "queued"
+    for working in ("running", "done", "failed"):
+        assert public_state("aligning", working) == "running"
+
+
+async def states_of(probe):
+    return {r["voice_key"]: r["state"] for r in await rows(probe)}
+
+
+@pytest.mark.asyncio
+async def test_a_voice_over_goes_from_queued_to_running_when_the_service_starts_its_job(dubs):
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    changes = bus.subscribe("voices.dub.changed")
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    seen = []
+    while not changes.queue.empty():
+        event = changes.queue.get_nowait().payload
+        seen.append((event["status"], event["state"]))
+    assert ("ready", "queued") in seen and seen.count(("aligning", "queued")) == 2
+    assert set((await states_of(probe)).values()) == {"queued"}
+    probe.publish_event("conform.queue.changed", {"daemon": {"up": True}, "tasks": [{"id": "job-1", "status": "running"}]})
+    await statuses_until(sub, ["aligning", "aligning"])
+    assert set((await states_of(probe)).values()) == {"running"}
+    # A picture that changes nothing is not an event.
+    probe.publish_event("conform.queue.changed", {"daemon": {"up": True}, "tasks": [{"id": "job-1", "status": "running"}]})
+    await asyncio.sleep(0.2)
+    assert sub.queue.empty()
+    probe.publish_event("conform.queue.changed", {"daemon": {"up": False}, "tasks": []})
+    await statuses_until(sub, ["aligning", "aligning"])
+    assert set((await states_of(probe)).values()) == {"queued"}
+
+
+@pytest.mark.asyncio
+async def test_the_end_of_a_job_shows_done_and_error_without_any_other_word(dubs):
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    changes = bus.subscribe("voices.dub.changed")
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", redheadsound={
+        "critical": ["нет общего звука"]}))
+    await statuses_until(sub, ["aligned", "placed", "rejected"])
+    states = {}
+    while not changes.queue.empty():
+        event = changes.queue.get_nowait().payload
+        states[(event["voice_key"], event["status"])] = event["state"]
+    assert states[("blackcat", "placed")] == "done" and states[("redheadsound", "rejected")] == "error"
+    assert await states_of(probe) == {"blackcat": "done", "redheadsound": "error"}

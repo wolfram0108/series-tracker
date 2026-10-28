@@ -144,12 +144,14 @@ function voicesOf(it: Item): VoiceDub[] {
   const season = it.season ?? it.result?.extracted?.season ?? 1
   return voices.forEpisode(props.seriesId, season, episodeStart(it))
 }
-const VOICE_STATES = new Set(["pending", "downloading", "ready", "aligning", "aligned", "placed", "rejected", "failed"])
-function voiceStatus(v: VoiceDub): string {
-  return t(VOICE_STATES.has(v.status) ? (`voices.status.${v.status}` as MessageKey) : "voices.status.unknown")
+function voiceState(v: VoiceDub): string {
+  return t(`voices.state.${v.state}` as MessageKey)
+}
+function voiceHint(v: VoiceDub): string {
+  return v.detail ?? t(`voices.stage.${v.status}` as MessageKey)
 }
 function voiceTrouble(v: VoiceDub): boolean {
-  return v.status === "failed" || v.status === "rejected"
+  return v.state === "error"
 }
 async function loadVoices() {
   if (!isWebVideo.value) return
@@ -590,8 +592,8 @@ defineExpose({ reload: () => loadComposition(false) })
                 <div class="pill"><i class="pi pi-images" /><span>Нарезка: <strong>{{ it.slicing_status || "—" }}</strong></span></div>
                 <div class="pill"><i class="pi pi-id-card" /><span>ID: <strong>{{ it.unique_id.substring(0, 8) }}</strong></span></div>
                 <div class="pill pill-link" @click="copyUrl(it.source_data?.url)"><i class="pi pi-link" /><span>{{ formatVkUrl(it.source_data?.url) }}</span></div>
-                <div v-for="v in voicesOf(it)" :key="v.voice_key" class="pill" :class="{ 'pill-danger': voiceTrouble(v) }" :title="v.detail ?? ''">
-                  <i class="pi pi-volume-up" /><span>{{ v.voice_label }}: <strong>{{ voiceStatus(v) }}</strong></span>
+                <div v-for="v in voicesOf(it)" :key="v.voice_key" class="pill" :class="{ 'pill-danger': voiceTrouble(v) }" :title="voiceHint(v)">
+                  <i class="pi pi-volume-up" /><span>{{ v.voice_label }}: <strong>{{ voiceState(v) }}</strong></span>
                 </div>
               </div>
               <div class="controls-column">
