@@ -20,8 +20,11 @@ Command:
       lay the voices out around the selected reference, record a voice_dubs row per planned
       reference episode and voice, and download what is not on disk yet into the temporary
       directory (setting `voices.temp_root`, default /nas/torrents/series-tracker).
-Commands out: downloads.fetch, downloads.fetch.cancel, conform.submit, conform.cancel (a job whose
-            reference was replaced or whose series was deleted: its result is no longer wanted).
+Commands out: downloads.fetch, downloads.fetch.cancel. Queries to conform: submit (with a key that finds
+            the job again), job.find, cancel (a job whose reference was replaced or whose series was deleted;
+            what could not be cancelled is retried from the cleanup journal).
+
+A track is placed only when it is as long as its video (LENGTH_TOLERANCE_S).
 Events in:  downloads.fetch.started and .finished (our keys `dub:<id>`), conform.queue.changed (waiting or running
             jobs of the service), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished,
@@ -75,11 +78,13 @@ import json
 import os
 import re
 import shutil
+import uuid
 from collections import OrderedDict, defaultdict
 
 from core import BaseModule, BusRequestError, is_video_source
 from core import storage
 from core.db import Database
+from core.ffprobe import duration_of
 from core.envelope import Envelope
 
 from .identity import Equivalence
@@ -103,6 +108,7 @@ SCRATCH_DIR = "_tmp"
 IO_TIMEOUT_S = 30.0
 REMOVE_TIMEOUT_S = 300.0
 MOVE_TIMEOUT_S = 900.0
+LENGTH_TOLERANCE_S = 1.0
 UNCLAIMED_JOBS = 256
 WORKING = ("pending", "downloading", "aligning")
 FINAL = ("placed", "rejected", "failed")
@@ -127,8 +133,9 @@ def stem(path: str | None) -> str:
 class VoicesModule(BaseModule):
     name = "voices"
 
-    def __init__(self, bus, db: Database | None = None) -> None:
+    def __init__(self, bus, db: Database | None = None, *, duration=duration_of) -> None:
         self.repo = VoicesRepository(db) if db is not None else None
+        self._duration = duration
         self._locks: dict[int, asyncio.Lock] = {}
         self._kicked: set[int] = set()
         self._retries: dict[int, int] = {}
@@ -405,6 +412,8 @@ class VoicesModule(BaseModule):
             self._kick(int(env.payload["series_id"]))
 
     async def on_daemon_up(self, env: Envelope) -> None:
+        await self._recover_submissions()
+        await self._sweep_cleanup()
         for job_id in await self.repo.aligning_jobs():
             await self._reconcile(job_id)
         for series_id in await self.repo.series_waiting():
@@ -434,6 +443,7 @@ class VoicesModule(BaseModule):
         if not rows:
             return
         series = await self.request("catalog.series.get", {"series_id": series_id})
+        await self._recover_submissions()
         in_plan, references = await self._reference_state(series)
         root = await self._temp_root()
         episodes = sorted({(row["season"], row["episode"]) for row in rows})
@@ -508,7 +518,7 @@ class VoicesModule(BaseModule):
         stale = [row for row in group if row["ref_uid"] and row["ref_uid"] != uid]
         if stale:
             for job_id in {row["job_id"] for row in stale if row["status"] == "aligning" and row["job_id"]}:
-                self.send_command("conform.cancel", {"job_id": job_id})
+                await self._cancel_job(job_id)
             for row in group:
                 if row["ref_uid"] and row["ref_uid"] != uid:
                     await self._discard_files(row)
@@ -590,6 +600,14 @@ class VoicesModule(BaseModule):
 
     async def _sweep_cleanup(self) -> None:
         for entry in await self.repo.cleanup_list():
+            if entry["kind"] == "job":
+                try:
+                    reply = await self.request("conform.cancel", {"job_id": entry["path"]}, timeout=30)
+                except (BusRequestError, asyncio.TimeoutError):
+                    continue
+                if reply.get("done"):
+                    await self.repo.cleanup_done(entry["path"])
+                continue
             try:
                 await self._io(self._unlink, entry["path"], entry["kind"] == "tree", timeout=REMOVE_TIMEOUT_S)
             except FileNotFoundError:
@@ -629,16 +647,19 @@ class VoicesModule(BaseModule):
         ready = await self._with_files(ready, label)
         if not ready:
             return
+        key = uuid.uuid4().hex[:12]
+        await self.repo.mark_submitting([row["id"] for row in ready], key, uid, reference)
         try:
             reply = await self.request("conform.submit", {
                 "ref": reference, "dubs": [row["temp_path"] for row in ready],
                 "out_dir": os.path.join(folder, "_aligned"), "cache_dir": os.path.join(folder, "_cache"),
-                "label": label}, timeout=SUBMIT_TIMEOUT_S)
+                "label": label, "key": key}, timeout=SUBMIT_TIMEOUT_S)
         except (BusRequestError, asyncio.TimeoutError) as exc:
-            self.log.warning("%s: постановка не удалась: %s", label, exc)
+            self.log.warning("%s: ответа на постановку нет, спросим сервис, есть ли задача: %s", label, exc)
             self._retry_later(series["id"])
             return
         if reply.get("unavailable"):
+            await self.repo.release_submission(key)
             self.log.info("%s: озвучки ждут сервис выравнивания: %s", label, reply["unavailable"])
             if reply.get("retry"):
                 self._retry_later(series["id"])
@@ -650,12 +671,45 @@ class VoicesModule(BaseModule):
                 self._changed(row, "rejected", reply["rejected"])
             self.log.warning("%s: задача выравнивания отклонена: %s", label, reply["rejected"])
             return
-        await self.repo.mark_aligning([row["id"] for row in ready], reply["job_id"], uid, reference)
-        for row in ready:
-            self._changed(row, "aligning", job_id=reply["job_id"])
-        early = self._unclaimed.pop(reply["job_id"], None)
+        await self._attach(key, reply["job_id"])
+
+    async def _attach(self, key: str, job_id: str) -> None:
+        """The service has the job of this key: its voice-overs get the number, an early ending is applied."""
+        await self.repo.attach_job(key, job_id)
+        for row in await self.repo.by_key(key):
+            if row["job_id"] == job_id:
+                self._changed(row, "aligning", job_id=job_id)
+        early = self._unclaimed.pop(job_id, None)
         if early is not None:
             await self._apply_job(early)
+
+    async def _recover_submissions(self) -> None:
+        """Jobs sent without an answer: the service says whether it has them; if not, they are sent anew."""
+        for key in await self.repo.unsent_submissions():
+            try:
+                reply = await self.request("conform.job.find", {"key": key}, timeout=30)
+            except (BusRequestError, asyncio.TimeoutError):
+                continue
+            if not reply.get("reachable"):
+                continue
+            rows = await self.repo.by_key(key)
+            if reply.get("job_id"):
+                self.log.info("задача %s принята сервисом, ответ потерян: номер восстановлен", reply["job_id"])
+                await self._attach(key, reply["job_id"])
+                continue
+            await self.repo.release_submission(key)
+            self.log.info("задачу %s сервис не получил, озвучки отправятся заново", key)
+            for series_id in {row["series_id"] for row in rows}:
+                self._kick(series_id)
+
+    async def _cancel_job(self, job_id: str) -> None:
+        """Stop a job nobody needs; when the service cannot be reached the job stays on the cleanup list."""
+        try:
+            reply = await self.request("conform.cancel", {"job_id": job_id}, timeout=30)
+        except (BusRequestError, asyncio.TimeoutError):
+            reply = {"done": False}
+        if not reply.get("done"):
+            await self.repo.journal_cleanup(job_id, "job", "сервис недоступен")
 
     async def _with_files(self, ready: list[dict], label: str) -> list[dict]:
         """The ready voice-overs whose files are really on disk; the others are downloaded again."""
@@ -764,11 +818,30 @@ class VoicesModule(BaseModule):
         return {other["sidecar_path"] for other in await self.repo.for_series(row["series_id"])
                 if other["id"] != row["id"] and other["sidecar_path"]}
 
+    async def _length_refusal(self, track: str, reference: str) -> str | None:
+        """A track must be as long as its video; None when it is."""
+        wanted, got = await self._duration(reference), await self._duration(track)
+        if got <= 0:
+            return "длина дорожки не определена"
+        if wanted <= 0:
+            return "длина референса не определена"
+        if abs(got - wanted) > LENGTH_TOLERANCE_S:
+            return f"длина дорожки {got:.1f} с, референса {wanted:.1f} с"
+        return None
+
     async def _place(self, row: dict, reference: str) -> None:
         source = row["aligned_path"]
         if not source or not await self._io(os.path.isfile, source):
             await self.repo.mark_failed(row["id"], "выровненный файл пропал")
             self._changed(row, "failed", "выровненный файл пропал")
+            return
+        refusal = await self._length_refusal(source, reference)
+        if refusal:
+            await self._discard(source)
+            await self.repo.mark_rejected(row["id"], refusal)
+            self.log.warning("сериал %d, s%02de%02d: озвучка %s отклонена: %s", row["series_id"],
+                             row["season"], row["episode"], row["voice_label"], refusal)
+            self._changed(row, "rejected", refusal)
             return
         destination = sidecar_path(reference, row["voice_label"], os.path.splitext(source)[1] or ".flac",
                                    await self._taken_paths(row))
@@ -799,7 +872,7 @@ class VoicesModule(BaseModule):
         self.send_command("downloads.fetch.cancel", {"series_id": series_id})
         for job_id in {row["job_id"] for row in await self.repo.for_series(series_id)
                        if row["status"] == "aligning" and row["job_id"]}:
-            self.send_command("conform.cancel", {"job_id": job_id})
+            await self._cancel_job(job_id)
         rows = await self.repo.for_series(series_id)
         folders = {os.path.dirname(folder) for folder in self._folders_of(rows, "")} - {""}
         await self.repo.delete_for_series(series_id)

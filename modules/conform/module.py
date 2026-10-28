@@ -8,14 +8,17 @@ The daemon owns the state; this module keeps no database. Without a daemon addre
 
 Query:
   conform.status {} -> {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks: [...]}
-  conform.submit {ref, dubs: [path], out_dir, cache_dir, label?}
+  conform.submit {ref, dubs: [path], out_dir, cache_dir, label?, key?}
       -> {job_id} | {rejected: reason} | {unavailable: reason, retry: bool}
-      One episode: a reference video and the voice-over files to align to it, local paths.
+      One episode: a reference video and the voice-over files to align to it, local paths. `key`
+      is written into the job's label so that the job can be found again when the answer is lost.
       `rejected` is final (a path outside the shared storage, a refusal of the daemon).
       `unavailable` is not: with retry=false the daemon is not configured or down and the caller
       waits for conform.daemon.up; with retry=true the daemon is up but the request failed in
       transit and asking again soon may work.
-  conform.cancel {job_id} (command) — stop a job whose result nobody needs any more; best effort.
+  conform.cancel {job_id} -> {done: bool} — stop a job whose result nobody needs any more; `done` is
+      true when it is stopped or the daemon does not know it, false when the daemon could not be reached.
+  conform.job.find {key} -> {reachable: bool, job_id: str | None} — the job sent with this key.
   conform.job.get {job_id} -> {job_id, status, error, results}   status `gone` when the daemon
       no longer knows the job; results as in conform.job.finished.
 Event:
@@ -65,6 +68,11 @@ def compact_job(job: dict[str, Any]) -> dict[str, Any]:
     return view
 
 
+def job_label(label: str | None, key: str | None) -> str | None:
+    """The label the job carries: the human one and, when given, the key that finds the job again."""
+    return f"{label or ''} #{key}".strip() if key else label
+
+
 def finished_view(job: dict[str, Any], to_local: dict[str, str]) -> dict[str, Any]:
     """How a job ended, with the output paths translated back to this server."""
     def local(path: str | None) -> str | None:
@@ -103,6 +111,7 @@ class ConformModule(BaseModule):
         self.handle("conform.submit", self.on_submit)
         self.handle("conform.job.get", self.on_job_get)
         self.handle("conform.cancel", self.on_cancel)
+        self.handle("conform.job.find", self.on_job_find)
         self.handle("gateway.sse.clients", self.on_clients)
 
     def snapshot(self) -> dict[str, Any]:
@@ -137,7 +146,7 @@ class ConformModule(BaseModule):
                     "dubs": [translate(path, mapping) for path in payload["dubs"]],
                     "out_dir": translate(payload["out_dir"], mapping),
                     "cache_dir": translate(payload["cache_dir"], mapping),
-                    "keep_tmp": False, "label": payload.get("label")}
+                    "keep_tmp": False, "label": job_label(payload.get("label"), payload.get("key"))}
             job = await self._client.enqueue(body)
         except (ValueError, DaemonRefused) as exc:
             self.log.warning("conform: задача %s отклонена: %s", payload.get("label") or "", exc)
@@ -150,17 +159,29 @@ class ConformModule(BaseModule):
                       payload.get("label") or "", len(body["dubs"]))
         return {"job_id": job["id"]}
 
-    async def on_cancel(self, env: Envelope) -> None:
+    async def on_cancel(self, env: Envelope) -> dict:
         job_id = env.payload["job_id"]
         if self._client is None or not self._daemon.get("up"):
             self.log.info("conform: задачу %s отменить некому — демон недоступен", job_id)
-            return
+            return {"done": False}
         try:
             known = await self._client.cancel(job_id)
         except httpx.HTTPError as exc:
             self.log.warning("conform: задача %s не отменена: %s", job_id, exc)
-            return
+            return {"done": False}
         self.log.info("conform: задача %s %s", job_id, "отменена" if known else "демону неизвестна")
+        return {"done": True}
+
+    async def on_job_find(self, env: Envelope) -> dict:
+        if self._client is None or not self._daemon.get("up"):
+            return {"reachable": False, "job_id": None}
+        try:
+            jobs = await self._client.jobs()
+        except httpx.HTTPError:
+            return {"reachable": False, "job_id": None}
+        mark = f"#{env.payload['key']}"
+        found = next((job["id"] for job in jobs if str(job.get("label") or "").endswith(mark)), None)
+        return {"reachable": True, "job_id": found}
 
     async def on_job_get(self, env: Envelope) -> dict:
         job_id = env.payload["job_id"]

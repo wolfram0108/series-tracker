@@ -125,12 +125,36 @@ class VoicesRepository:
             "SELECT DISTINCT job_id FROM voice_dubs WHERE status='aligning' AND job_id IS NOT NULL")
         return [row["job_id"] for row in rows]
 
-    async def mark_aligning(self, dub_ids: list[int], job_id: str, ref_uid: str, ref_path: str) -> None:
-        """All voice-overs of a job at once: a reader sees the job with all of them or with none."""
+    async def mark_submitting(self, dub_ids: list[int], key: str, ref_uid: str, ref_path: str) -> None:
+        """Write down that these voice-overs are being sent as one job, before the request goes out."""
         marks = ",".join("?" * len(dub_ids))
         await self._db.execute(
-            "UPDATE voice_dubs SET status='aligning', job_id=?, ref_uid=?, ref_path=?, error=NULL, "
-            f"outcome=NULL, updated_at=? WHERE id IN ({marks})", (job_id, ref_uid, ref_path, _now(), *dub_ids))
+            "UPDATE voice_dubs SET status='aligning', job_id=NULL, submit_key=?, ref_uid=?, ref_path=?, "
+            f"error=NULL, outcome=NULL, updated_at=? WHERE id IN ({marks})",
+            (key, ref_uid, ref_path, _now(), *dub_ids))
+
+    async def attach_job(self, key: str, job_id: str) -> None:
+        """The service has the job: every voice-over sent with the key gets its number at once."""
+        await self._db.execute(
+            "UPDATE voice_dubs SET job_id=?, updated_at=? WHERE submit_key=? AND status='aligning' "
+            "AND job_id IS NULL", (job_id, _now(), key))
+
+    async def release_submission(self, key: str) -> None:
+        """The job was never accepted: its voice-overs go back to waiting for a new one."""
+        await self._db.execute(
+            "UPDATE voice_dubs SET status='ready', submit_key=NULL, ref_uid=NULL, ref_path=NULL, "
+            "updated_at=? WHERE submit_key=? AND status='aligning' AND job_id IS NULL", (_now(), key))
+
+    async def unsent_submissions(self) -> list[str]:
+        """Keys of jobs sent without a known answer."""
+        rows = await self._db.fetch_all(
+            "SELECT DISTINCT submit_key FROM voice_dubs WHERE status='aligning' AND job_id IS NULL "
+            "AND submit_key IS NOT NULL")
+        return [row["submit_key"] for row in rows]
+
+    async def by_key(self, key: str) -> list[dict[str, Any]]:
+        rows = await self._db.fetch_all("SELECT * FROM voice_dubs WHERE submit_key=? ORDER BY id", (key,))
+        return [self._row(row) for row in rows]
 
     async def mark_aligned(self, dub_id: int, aligned_path: str) -> None:
         await self._db.execute(

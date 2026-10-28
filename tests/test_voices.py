@@ -17,6 +17,21 @@ from modules.voices.layout import (DEFAULT_PRIORITY, choose_reference, download_
 from modules.voices.states import public_state
 
 
+LENGTHS: dict[str, float] = {}
+
+
+async def length_of(path):
+    """A stand-in for ffprobe: every file is as long as its video unless a test says otherwise."""
+    return LENGTHS.get(os.path.basename(path), 1000.0)
+
+
+@pytest.fixture(autouse=True)
+def equal_lengths():
+    LENGTHS.clear()
+    yield
+    LENGTHS.clear()
+
+
 def src(player, studio, episodes, kind="", url=None):
     return {"url": url or f"https://site/?player={player}&voice={studio}", "player": player,
             "studio": studio, "kind": kind, "episodes": list(episodes)}
@@ -195,7 +210,7 @@ async def system(db_path):
     bus = Bus()
     db = Database(db_path)
     probe = Probe(bus)
-    runner = Runner(bus, [SettingsModule(bus, db), VoicesModule(bus, db), probe])
+    runner = Runner(bus, [SettingsModule(bus, db), VoicesModule(bus, db, duration=length_of), probe])
     await runner.start()
     yield probe
     await runner.stop()
@@ -262,6 +277,11 @@ class Neighbours(BaseModule):
         self.parses = 0
         self.conform_cancels = []
         self.finish_at_once = False
+        self.lost_before_arrival = 0
+        self.lost_after_arrival = 0
+        self.sent_keys = {}
+        self.cancel_done = True
+        self.service_reachable = True
         super().__init__(bus)
 
     def register(self):
@@ -274,6 +294,7 @@ class Neighbours(BaseModule):
         self.handle("downloads.fetch.cancel", self.on_cancel)
         self.handle("conform.submit", self.on_submit)
         self.handle("conform.cancel", self.on_conform_cancel)
+        self.handle("conform.job.find", self.on_job_find)
         self.handle("conform.job.get", self.on_job_get)
 
     async def on_series(self, env):
@@ -306,14 +327,27 @@ class Neighbours(BaseModule):
         self.cancels.append(env.payload["series_id"])
 
     async def on_submit(self, env):
+        if self.lost_before_arrival:
+            self.lost_before_arrival -= 1
+            raise RuntimeError("the request never arrived")
         self.submits.append(dict(env.payload))
         job_id = f"job-{len(self.submits)}"
+        self.sent_keys[env.payload["key"]] = job_id
         if self.finish_at_once:  # the service ends the job before it has even answered
             self.publish_event("conform.job.finished", job_result(self.submits[-1], job_id))
+        if self.lost_after_arrival:
+            self.lost_after_arrival -= 1
+            raise RuntimeError("the answer was lost")
         return self.submit_reply or {"job_id": job_id}
 
     async def on_conform_cancel(self, env):
         self.conform_cancels.append(env.payload["job_id"])
+        return {"done": self.cancel_done}
+
+    async def on_job_find(self, env):
+        if not self.service_reachable:
+            return {"reachable": False, "job_id": None}
+        return {"reachable": True, "job_id": self.sent_keys.get(env.payload["key"])}
 
     async def on_job_get(self, env):
         return self.jobs.get(env.payload["job_id"], {"job_id": env.payload["job_id"], "status": "gone",
@@ -337,7 +371,7 @@ async def dubs(db_path, tmp_path):
                             library=str(tmp_path / "library"))
     neighbours.settings["voices.temp_root"] = str(tmp_path / "temp")
     probe = Probe(bus)
-    voices = VoicesModule(bus, db)
+    voices = VoicesModule(bus, db, duration=length_of)
     runner = Runner(bus, [neighbours, SettingsModule(bus, db), voices, probe])
     await runner.start()
     yield probe, neighbours, voices, bus
@@ -505,7 +539,7 @@ async def test_after_a_restart_interrupted_downloads_are_sent_again(db_path, dub
     probe, neighbours, voices, bus = dubs
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
-    again = VoicesModule(bus, Database(db_path))
+    again = VoicesModule(bus, Database(db_path), duration=length_of)
     await again.start()
     try:
         await settled(neighbours, 6)
@@ -747,7 +781,7 @@ async def test_after_a_restart_a_job_that_ended_meanwhile_is_applied(db_path, du
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     neighbours.jobs["job-1"] = job_done(neighbours, "job-1")
     await voices.stop()
-    again = VoicesModule(bus, Database(db_path))
+    again = VoicesModule(bus, Database(db_path), duration=length_of)
     await again.start()
     try:
         probe.publish_event("conform.daemon.up", {})
@@ -762,7 +796,7 @@ async def test_a_job_the_service_forgot_is_sent_again(db_path, dubs):
     probe, neighbours, voices, bus, sub, _ = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     await voices.stop()
-    again = VoicesModule(bus, Database(db_path))
+    again = VoicesModule(bus, Database(db_path), duration=length_of)
     await again.start()
     try:
         probe.publish_event("conform.daemon.up", {})
@@ -1460,7 +1494,7 @@ async def test_the_whole_series_still_arrives_when_the_module_restarts_midway(du
     await serve(probe, neighbours, holder, enough, progress)
     await voices.stop()
     progress["fetches"], progress["submits"] = len(neighbours.fetches), len(neighbours.submits)
-    again = VoicesModule(bus, Database(db_path))
+    again = VoicesModule(bus, Database(db_path), duration=length_of)
     holder[0] = again
     await again.start()
     probe.publish_event("conform.daemon.up", {})
@@ -1640,3 +1674,120 @@ async def test_a_removal_that_the_storage_does_not_answer_is_journaled_not_await
     assert await voices._discard("/some/slow/file") is False
     assert time.monotonic() - started < 0.5
     assert [entry["path"] for entry in await voices.repo.cleanup_list()] == ["/some/slow/file"]
+
+
+# a request whose answer is lost, a job that must not be sent twice -------------------------
+
+
+async def ready_to_send(dubs, monkeypatch):
+    monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.05)
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs, finished=False)
+    return probe, neighbours, voices, bus, sub, ref
+
+
+def finish_all(probe, neighbours):
+    for fetch in neighbours.fetches:
+        touch(fetch["path"], b"video")
+        finish(probe, fetch["key"])
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_arrived_but_whose_answer_was_lost_is_found_again_not_sent_twice(dubs, monkeypatch):
+    probe, neighbours, voices, bus, sub, ref = await ready_to_send(dubs, monkeypatch)
+    neighbours.lost_after_arrival = 1
+    settled_sub = bus.subscribe("voices.episode.settled")
+    finish_all(probe, neighbours)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])  # the number is found again
+    assert len(neighbours.submits) == 1
+    assert {r["job_id"] for r in await rows(probe)} == {"job-1"}
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await asyncio.wait_for(settled_sub.queue.get(), 5)
+    assert {r["status"] for r in await rows(probe)} == {"placed"} and len(neighbours.submits) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_never_arrived_is_sent_again_once_the_service_says_it_has_none(dubs, monkeypatch):
+    probe, neighbours, voices, bus, sub, ref = await ready_to_send(dubs, monkeypatch)
+    neighbours.lost_before_arrival = 1
+    finish_all(probe, neighbours)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    assert len(neighbours.submits) == 1 and {r["job_id"] for r in await rows(probe)} == {"job-1"}
+
+
+@pytest.mark.asyncio
+async def test_while_the_service_cannot_say_whether_it_has_the_job_nothing_is_sent_again(dubs, monkeypatch):
+    probe, neighbours, voices, bus, sub, ref = await ready_to_send(dubs, monkeypatch)
+    neighbours.lost_after_arrival = 1
+    neighbours.service_reachable = False
+    finish_all(probe, neighbours)
+    await statuses_until(sub, ["ready", "ready"])
+    await asyncio.sleep(0.5)
+    assert len(neighbours.submits) == 1
+    assert {(r["status"], r["job_id"]) for r in await rows(probe)} == {("aligning", None)}
+    neighbours.service_reachable = True
+    probe.publish_event("conform.daemon.up", {})
+    await statuses_until(sub, ["aligning", "aligning"])
+    assert len(neighbours.submits) == 1 and {r["job_id"] for r in await rows(probe)} == {"job-1"}
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_that_could_not_be_made_is_kept_and_made_when_the_service_is_back(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    await quiet(voices)
+    neighbours.cancel_done = False
+    touch(os.path.join(neighbours.library, "Series s01e01 2160p.mp4"))
+    neighbours.uids[1] = "u1-new"
+    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
+    await statuses_until(sub, ["stale", "stale"])
+    assert [e["path"] for e in await voices.repo.cleanup_list()] == ["job-1"]
+    neighbours.cancel_done = True
+    probe.publish_event("conform.daemon.up", {})
+    end = asyncio.get_running_loop().time() + 3
+    while await voices.repo.cleanup_list():
+        assert asyncio.get_running_loop().time() < end
+        await asyncio.sleep(0.01)
+    assert neighbours.conform_cancels.count("job-1") >= 2
+
+
+# a track must be as long as its video --------------------------------------------------------
+
+
+async def sent_and_finished(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    await quiet(voices)
+    return probe, neighbours, voices, bus, sub, ref
+
+
+@pytest.mark.asyncio
+async def test_a_track_of_another_length_than_its_video_is_not_placed(dubs):
+    probe, neighbours, voices, bus, sub, ref = await sent_and_finished(dubs)
+    LENGTHS["blackcat.flac"] = 1005.0
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await statuses_until(sub, ["aligned", "aligned", "placed", "rejected"])
+    by_voice = {r["voice_key"]: r for r in await rows(probe)}
+    assert by_voice["blackcat"]["status"] == "rejected"
+    assert by_voice["blackcat"]["detail"] == "длина дорожки 1005.0 с, референса 1000.0 с"
+    assert by_voice["redheadsound"]["status"] == "placed"
+    assert not any("BlackCat" in name for name in library_files(neighbours))
+
+
+@pytest.mark.asyncio
+async def test_a_track_within_the_tolerance_is_placed(dubs):
+    probe, neighbours, voices, bus, sub, ref = await sent_and_finished(dubs)
+    LENGTHS["blackcat.flac"] = 1000.8
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
+
+
+@pytest.mark.asyncio
+async def test_a_length_that_cannot_be_read_is_a_refusal_not_a_guess(dubs):
+    probe, neighbours, voices, bus, sub, ref = await sent_and_finished(dubs)
+    LENGTHS["redheadsound.flac"] = 0.0
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await statuses_until(sub, ["aligned", "aligned", "placed", "rejected"])
+    by_voice = {r["voice_key"]: r for r in await rows(probe)}
+    assert by_voice["redheadsound"]["detail"] == "длина дорожки не определена"
+    LENGTHS.clear()

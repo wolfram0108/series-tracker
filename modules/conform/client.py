@@ -47,6 +47,12 @@ class DaemonClient:
         response.raise_for_status()
         return True
 
+    async def jobs(self) -> list[dict[str, Any]]:
+        """Every job the daemon knows."""
+        response = await self._http.get(f"{self.base_url}/conform/jobs", timeout=REQUEST_TIMEOUT_S)
+        response.raise_for_status()
+        return response.json()
+
     async def job(self, job_id: str) -> dict[str, Any] | None:
         """The whole job, or None when the daemon no longer knows it."""
         response = await self._http.get(f"{self.base_url}/conform/jobs/{job_id}",

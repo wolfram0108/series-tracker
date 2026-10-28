@@ -56,6 +56,11 @@ class FakeClient:
     async def job(self, job_id):
         return self.known.get(job_id)
 
+    async def jobs(self):
+        if isinstance(self.refuse, Exception):
+            raise self.refuse
+        return list(self.known.values())
+
     async def cancel(self, job_id):
         self.cancelled.append(job_id)
         if isinstance(self.refuse, Exception):
@@ -447,24 +452,98 @@ async def test_client_job_is_none_for_a_job_the_daemon_forgot():
 
 
 @pytest.mark.asyncio
-async def test_cancel_reaches_the_daemon_and_never_raises():
+async def test_cancel_reaches_the_daemon_and_says_whether_it_was_done():
     client = FakeClient([("conform.snapshot", {"items": []})])
     client.known["j1"] = job("j1")
     _, probe, runner = await started(client)
     try:
         await until(probe, lambda s: s["daemon"]["up"])
-        probe.send_command("conform.cancel", {"job_id": "j1"})
-        probe.send_command("conform.cancel", {"job_id": "nope"})
+        assert await probe.request("conform.cancel", {"job_id": "j1"}, timeout=5) == {"done": True}
+        assert await probe.request("conform.cancel", {"job_id": "nope"}, timeout=5) == {"done": True}
         client.refuse = httpx.ConnectError("lost")
-        probe.send_command("conform.cancel", {"job_id": "j1"})
-        end = asyncio.get_running_loop().time() + 3
-        while len(client.cancelled) < 3:
-            assert asyncio.get_running_loop().time() < end
-            await asyncio.sleep(0.01)
+        assert await probe.request("conform.cancel", {"job_id": "j1"}, timeout=5) == {"done": False}
         assert client.cancelled == ["j1", "nope", "j1"]
         assert (await probe.request("conform.status", {}, timeout=2))["daemon"]["up"] is True
     finally:
         await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_cancel_without_a_reachable_daemon_is_not_done():
+    client = FakeClient([ConnectionError("down")])
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: not s["daemon"]["up"])
+        assert await probe.request("conform.cancel", {"job_id": "j1"}, timeout=5) == {"done": False}
+        assert client.cancelled == []
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_the_key_of_a_submission_rides_in_the_job_label_and_finds_the_job_again():
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: s["daemon"]["up"])
+        await probe.request("conform.submit", {**SUBMIT, "key": "k1"}, timeout=5)
+        assert client.enqueued[0]["label"] == "S s01e01 #k1"
+        client.known["j-new"] = job("j-new", label=client.enqueued[0]["label"])
+        client.known["j-other"] = job("j-other", label="S s01e02 #k2")
+        found = await probe.request("conform.job.find", {"key": "k1"}, timeout=5)
+        assert found == {"reachable": True, "job_id": "j-new"}
+        absent = await probe.request("conform.job.find", {"key": "k3"}, timeout=5)
+        assert absent == {"reachable": True, "job_id": None}
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_key_is_not_confused_with_a_longer_key_that_ends_the_same_way():
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    client.known["j1"] = job("j1", label="S s01e01 #xk1")
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: s["daemon"]["up"])
+        found = await probe.request("conform.job.find", {"key": "k1"}, timeout=5)
+        assert found == {"reachable": True, "job_id": None}
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_submission_without_a_key_keeps_its_label_as_it_was():
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: s["daemon"]["up"])
+        await probe.request("conform.submit", SUBMIT, timeout=5)
+        assert client.enqueued[0]["label"] == "S s01e01"
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_the_search_for_a_job_says_when_the_daemon_cannot_be_asked():
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: s["daemon"]["up"])
+        client.refuse = httpx.ConnectError("lost")
+        found = await probe.request("conform.job.find", {"key": "k1"}, timeout=5)
+        assert found == {"reachable": False, "job_id": None}
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_client_lists_the_jobs_the_daemon_knows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert (request.method, request.url.path) == ("GET", "/conform/jobs")
+        return httpx.Response(200, json=[{"id": "a", "label": "x #k"}])
+
+    client = DaemonClient("http://daemon.test", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    assert await client.jobs() == [{"id": "a", "label": "x #k"}]
 
 
 @pytest.mark.asyncio
