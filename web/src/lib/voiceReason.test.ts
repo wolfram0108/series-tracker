@@ -3,9 +3,7 @@ import { reasonText } from "./voiceReason"
 
 describe("reasonText", () => {
   it("fills the wording of a code with its facts", () => {
-    expect(reasonText({ code: "length_mismatch", params: { track: "1005.0", reference: "1000.0" } })).toBe(
-      "длина дорожки 1005.0 с, референса 1000.0 с",
-    )
+    expect(reasonText({ code: "critical", params: { text: "нет общего звука" } })).toBe("критично: нет общего звука")
   })
 
   it("shows the words of another system as they came", () => {

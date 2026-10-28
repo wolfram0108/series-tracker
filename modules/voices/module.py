@@ -26,7 +26,6 @@ Commands out: downloads.fetch, downloads.fetch.cancel. Queries to conform: submi
             the job again), job.find, cancel (a job whose reference was replaced or whose series was deleted;
             what could not be cancelled is retried from the cleanup journal).
 
-A track is placed only when it is as long as its video (LENGTH_TOLERANCE_S).
 Events in:  downloads.fetch.started and .finished (our keys `dub:<id>`), conform.queue.changed (waiting or running
             jobs of the service), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished,
@@ -96,7 +95,6 @@ from collections import OrderedDict, defaultdict
 from core import BaseModule, BusRequestError, is_video_source
 from core import storage
 from core.db import Database
-from core.ffprobe import duration_of
 from core.envelope import Envelope
 
 from .identity import Equivalence, same_voice
@@ -116,7 +114,6 @@ SCRATCH_DIR = "_tmp"
 IO_TIMEOUT_S = 30.0
 REMOVE_TIMEOUT_S = 300.0
 MOVE_TIMEOUT_S = 900.0
-LENGTH_TOLERANCE_S = 1.0
 UNCLAIMED_JOBS = 256
 WORKING = ("pending", "downloading", "aligning")
 FINAL = ("placed", "rejected", "failed")
@@ -141,9 +138,8 @@ def stem(path: str | None) -> str:
 class VoicesModule(BaseModule):
     name = "voices"
 
-    def __init__(self, bus, db: Database | None = None, *, duration=duration_of) -> None:
+    def __init__(self, bus, db: Database | None = None) -> None:
         self.repo = VoicesRepository(db) if db is not None else None
-        self._duration = duration
         self._locks: dict[int, asyncio.Lock] = {}
         self._kicked: set[int] = set()
         self._retries: dict[int, int] = {}
@@ -879,30 +875,11 @@ class VoicesModule(BaseModule):
         return {other["sidecar_path"] for other in await self.repo.for_series(row["series_id"])
                 if other["id"] != row["id"] and other["sidecar_path"]}
 
-    async def _length_refusal(self, track: str, reference: str) -> str | None:
-        """A track must be as long as its video; None when it is."""
-        wanted, got = await self._duration(reference), await self._duration(track)
-        if got <= 0:
-            return reason("length_unknown_track")
-        if wanted <= 0:
-            return reason("length_unknown_reference")
-        if abs(got - wanted) > LENGTH_TOLERANCE_S:
-            return reason("length_mismatch", track=f"{got:.1f}", reference=f"{wanted:.1f}")
-        return None
-
     async def _place(self, row: dict, reference: str) -> None:
         source = row["aligned_path"]
         if not source or not await self._io(os.path.isfile, source):
             await self.repo.mark_failed(row["id"], reason("aligned_file_vanished"))
             self._changed(row, "failed", reason("aligned_file_vanished"))
-            return
-        refusal = await self._length_refusal(source, reference)
-        if refusal:
-            await self._discard(source)
-            await self.repo.mark_rejected(row["id"], refusal)
-            self.log.warning("сериал %d, s%02de%02d: озвучка %s отклонена: %s", row["series_id"],
-                             row["season"], row["episode"], row["voice_label"], refusal)
-            self._changed(row, "rejected", refusal)
             return
         destination = sidecar_path(reference, row["voice_label"], os.path.splitext(source)[1] or ".flac",
                                    await self._taken_paths(row))

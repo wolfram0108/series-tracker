@@ -17,21 +17,6 @@ from modules.voices.layout import (DEFAULT_PRIORITY, choose_reference, download_
 from modules.voices.states import public_state
 
 
-LENGTHS: dict[str, float] = {}
-
-
-async def length_of(path):
-    """A stand-in for ffprobe: every file is as long as its video unless a test says otherwise."""
-    return LENGTHS.get(os.path.basename(path), 1000.0)
-
-
-@pytest.fixture(autouse=True)
-def equal_lengths():
-    LENGTHS.clear()
-    yield
-    LENGTHS.clear()
-
-
 def code_of(stored):
     """The code of a stored reason or of a pushed detail."""
     from modules.voices.reasons import parse
@@ -217,7 +202,7 @@ async def system(db_path):
     bus = Bus()
     db = Database(db_path)
     probe = Probe(bus)
-    runner = Runner(bus, [SettingsModule(bus, db), VoicesModule(bus, db, duration=length_of), probe])
+    runner = Runner(bus, [SettingsModule(bus, db), VoicesModule(bus, db), probe])
     await runner.start()
     yield probe
     await runner.stop()
@@ -383,7 +368,7 @@ async def dubs(db_path, tmp_path):
                             library=str(tmp_path / "library"))
     neighbours.settings["voices.temp_root"] = str(tmp_path / "temp")
     probe = Probe(bus)
-    voices = VoicesModule(bus, db, duration=length_of)
+    voices = VoicesModule(bus, db)
     runner = Runner(bus, [neighbours, SettingsModule(bus, db), voices, probe])
     await runner.start()
     yield probe, neighbours, voices, bus
@@ -551,7 +536,7 @@ async def test_after_a_restart_interrupted_downloads_are_sent_again(db_path, dub
     probe, neighbours, voices, bus = dubs
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
-    again = VoicesModule(bus, Database(db_path), duration=length_of)
+    again = VoicesModule(bus, Database(db_path))
     await again.start()
     try:
         await settled(neighbours, 6)
@@ -796,7 +781,7 @@ async def test_after_a_restart_a_job_that_ended_meanwhile_is_applied(db_path, du
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     neighbours.jobs["job-1"] = job_done(neighbours, "job-1")
     await voices.stop()
-    again = VoicesModule(bus, Database(db_path), duration=length_of)
+    again = VoicesModule(bus, Database(db_path))
     await again.start()
     try:
         probe.publish_event("conform.daemon.up", {})
@@ -811,7 +796,7 @@ async def test_a_job_the_service_forgot_is_sent_again(db_path, dubs):
     probe, neighbours, voices, bus, sub, _ = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     await voices.stop()
-    again = VoicesModule(bus, Database(db_path), duration=length_of)
+    again = VoicesModule(bus, Database(db_path))
     await again.start()
     try:
         probe.publish_event("conform.daemon.up", {})
@@ -1509,7 +1494,7 @@ async def test_the_whole_series_still_arrives_when_the_module_restarts_midway(du
     await serve(probe, neighbours, holder, enough, progress)
     await voices.stop()
     progress["fetches"], progress["submits"] = len(neighbours.fetches), len(neighbours.submits)
-    again = VoicesModule(bus, Database(db_path), duration=length_of)
+    again = VoicesModule(bus, Database(db_path))
     holder[0] = again
     await again.start()
     probe.publish_event("conform.daemon.up", {})
@@ -1535,7 +1520,11 @@ async def test_a_job_that_ends_before_the_voices_know_its_number_still_ends_them
     for fetch in neighbours.fetches:
         touch(fetch["path"], b"video")
         finish(probe, fetch["key"])
-    await asyncio.wait_for(settled_sub.queue.get(), 5)
+    try:
+        await asyncio.wait_for(settled_sub.queue.get(), 5)
+    except asyncio.TimeoutError:
+        raise AssertionError([(r["status"], r["job_id"], r["detail"]) for r in await rows(probe)],
+                             list(voices._unclaimed), neighbours.submits) from None
     assert {r["status"] for r in await rows(probe)} == {"placed"}
     assert not voices._unclaimed
 
@@ -1764,48 +1753,6 @@ async def test_a_cancel_that_could_not_be_made_is_kept_and_made_when_the_service
         assert asyncio.get_running_loop().time() < end
         await asyncio.sleep(0.01)
     assert neighbours.conform_cancels.count("job-1") >= 2
-
-
-# a track must be as long as its video --------------------------------------------------------
-
-
-async def sent_and_finished(dubs):
-    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
-    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    await quiet(voices)
-    return probe, neighbours, voices, bus, sub, ref
-
-
-@pytest.mark.asyncio
-async def test_a_track_of_another_length_than_its_video_is_not_placed(dubs):
-    probe, neighbours, voices, bus, sub, ref = await sent_and_finished(dubs)
-    LENGTHS["blackcat.flac"] = 1005.0
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
-    await statuses_until(sub, ["aligned", "aligned", "placed", "rejected"])
-    by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["blackcat"]["status"] == "rejected"
-    assert by_voice["blackcat"]["detail"] == {"code": "length_mismatch", "params": {"track": "1005.0", "reference": "1000.0"}}
-    assert by_voice["redheadsound"]["status"] == "placed"
-    assert not any("BlackCat" in name for name in library_files(neighbours))
-
-
-@pytest.mark.asyncio
-async def test_a_track_within_the_tolerance_is_placed(dubs):
-    probe, neighbours, voices, bus, sub, ref = await sent_and_finished(dubs)
-    LENGTHS["blackcat.flac"] = 1000.8
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
-    await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
-
-
-@pytest.mark.asyncio
-async def test_a_length_that_cannot_be_read_is_a_refusal_not_a_guess(dubs):
-    probe, neighbours, voices, bus, sub, ref = await sent_and_finished(dubs)
-    LENGTHS["redheadsound.flac"] = 0.0
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
-    await statuses_until(sub, ["aligned", "aligned", "placed", "rejected"])
-    by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert code_of(by_voice["redheadsound"]["detail"]) == "length_unknown_track"
-    LENGTHS.clear()
 
 
 # what the interface is told must be what the database holds -------------------------------

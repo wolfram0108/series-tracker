@@ -69,9 +69,6 @@ export const ru = {
   "voices.reason.suspect": "подозрительно: {text}",
   "voices.reason.suspect_residual": "подозрительно: остаток вне допуска",
   "voices.reason.output_missing": "выходной файл не найден",
-  "voices.reason.length_unknown_track": "длина дорожки не определена",
-  "voices.reason.length_unknown_reference": "длина референса не определена",
-  "voices.reason.length_mismatch": "длина дорожки {track} с, референса {reference} с",
   "voices.reason.unknown": "причина: {code}",
   "add.error.parse": "Ошибка парсинга URL",
 } as const

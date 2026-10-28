@@ -8,8 +8,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_a_coded_reason_reaches_the_interface_as_code_and_facts():
-    assert parse(reason("length_mismatch", track="1005.0", reference="1000.0")) == {
-        "code": "length_mismatch", "params": {"track": "1005.0", "reference": "1000.0"}}
+    assert parse(reason("job_ended", status="cancelled")) == {
+        "code": "job_ended", "params": {"status": "cancelled"}}
     assert parse(reason("file_vanished")) == {"code": "file_vanished", "params": {}}
 
 
