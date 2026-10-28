@@ -97,6 +97,8 @@ HTTP/SSE-точка; событие шины → SSE по таблице `SSE_MA
 | **Новый (БОЕВОЙ)** | `web/src` (Vite + Vue 3 + TS + PrimeVue) | `web/dist` (сборка) | **`/`** |
 | Старый (архив, rollback) | `legacy_frontend/` | как есть | `/legacy`, ассеты `/static` |
 
+Новые тексты интерфейса — ключами каталога `web/src/i18n/ru.ts` (закон `law-ui`); прежние литералы переводятся отдельной задачей.
+
 **Любая правка интерфейса — в `web/src/...`, затем `cd web && npm run build`**
 (пересобрать `web/dist`; он в `.gitignore`, собирается на месте). Добавил
 эндпоинт — перегенерь типы: `npm run gen:api`. Правки в `legacy_frontend/`

@@ -27,6 +27,7 @@
 | `agent_queue_update` | голый массив задач | подтверждено | `torrents.queue.changed {count, tasks}` | голый массив `tasks` |
 | `download_queue_update` | голый массив задач | подтверждено | `downloads.queue.changed {tasks, count}` | голый массив `tasks` |
 | `slicing_queue_update` | голый массив задач | подтверждено | `slicing.queue.changed {tasks}` | голый массив `tasks` |
+| `conform_queue_update` | — (новое, Р-39) | зеркало очереди выравнивания демона; модуль `conform` шлёт всю картину при каждом изменении и при подключении клиента SSE (по `gateway.sse.clients`), поэтому открытый экран не доспрашивает состояние | `conform.queue.changed {daemon, tasks}` | как есть: `{daemon: {up, error?, version?, device?, gpu_name?}, tasks: [{id, label, status, progress, stage, stage_pct, dub_index, dub_total, cur_dub, elapsed_s, error, results: [{dub, ok, skipped, resid_ms, coverage, cuts, suspect, warnings, critical, error}]}]}` |
 | `scanner_status_update` | `{scanner_enabled, scan_interval, is_scanning, is_awaiting_tasks, next_scan_time}` | подтверждено | `scan.status.changed` | как есть (форма совпадает) |
 | `video_scan_progress` | — (новое) | прогресс опроса серий web-источника | `sources.video.progress {series_id, current, total, rate, phase, active}` | как есть |
 | `agent_heartbeat` | `{name, activity?}` | **удалено по согласованию** (см. ниже) | — | — |

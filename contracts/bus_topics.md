@@ -21,6 +21,8 @@
 | metadata | search, details, map.get/list/set (владелец series_tmdb_mappings, Р-19) |
 | settings | value.get, value.set, values.by_prefix (Р-22) |
 | trackerauth | fetch, credentials.get/set (Р-22, владелец auth) |
+| voices | layout {sources: [{url, player, studio, kind, episodes}], mode?, reference?} → раскладка озвучек сериала (Р-39); приоритет источников — настройка `voices.source_priority` |
+| conform | status {} → {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks} — зеркало очереди выравнивания демона track-muxer (Р-39); слушает `gateway.sse.clients` |
 
 ## События (издатель → подписчики)
 
@@ -41,6 +43,8 @@
 | torrents.progress.changed {tasks} | torrents | gateway | torrent_progress_update (Р-23, замена поллинга) |
 | downloads.queue.changed {tasks, count} | downloads | — | download_queue_update |
 | slicing.queue.changed {tasks} | slicing | — | slicing_queue_update |
+| conform.queue.changed {daemon, tasks} | conform | — | conform_queue_update (Р-39; вся картина на каждое изменение и при подключении клиента SSE) |
+| gateway.sse.clients {count} | gateway | catalog, conform | — |
 | renaming.finished {series_id} | renaming | — | renaming_complete |
 | library.relocation.started/finished | library | — | relocation_started/finished |
 | settings.changed {key, value} | settings | downloads (max_parallel_downloads), scan (настройки сканера → пересчёт расписания, Р-20) | — |

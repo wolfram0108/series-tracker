@@ -143,7 +143,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 |---|---|---|---|
 | GET | `/api/auth` | Креды внешних сервисов без секретов + статус TMDB | `SettingsAuth.vue` |
 | POST | `/api/auth` | Сохранение кредов сервисов | `SettingsAuth.vue` |
-| POST | `/api/parse_url` | Разбор URL серии: заголовок, раздачи, трекер | `AddSeriesModal.vue`, `StatusProperties.vue` |
+| POST | `/api/parse_url` | Разбор URL серии: заголовок, раздачи, трекер; у web-источника — `sources`, `selected_source` и `layout` (раскладка озвучек, Р-39) | `AddSeriesModal.vue`, `StatusProperties.vue` |
 | GET, POST | `/api/settings/force_replace` | Флаг «всегда заменять торренты» | `SettingsDebug.vue` |
 | GET, POST | `/api/settings/less_strict_scan` | Флаг «менее строгий скан» | `SettingsDebug.vue` |
 | GET, POST | `/api/settings/slicing_delete_source` | Флаг «удалять исходник после нарезки» | `SettingsDebug.vue` |
@@ -486,7 +486,7 @@ tmdb?}`; каждый сервис — объект `{username, password?, url?}
 
 **POST `/api/parse_url`** — тело `{url}`; ответ `{success, title, torrents,
 tracker_info, source_type, titles, canonical_url, episodes_count,
-resolution}`. 400 — трекер не распознан; 500 — в теле нет ключа `url`.
+resolution, players, sources, selected_source, layout}`. 400 — трекер не распознан; 500 — в теле нет ключа `url`.
 
 **GET|POST `/api/settings/force_replace`**, **`/less_strict_scan`**,
 **`/slicing_delete_source`** — тело `{enabled}`; ответ GET `{enabled}`,
