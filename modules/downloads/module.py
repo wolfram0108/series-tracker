@@ -19,12 +19,16 @@ Queries / commands:
       (шлёт только scan._run_series по явному скану/автоскану).
   downloads.queue.get {} → {tasks, count} — активные задачи (загрузка UI)
   downloads.episodes.get {series_id} → {items: [{unique_id, season, episode_start,
-      source_url, status, final_filename}]} — референс-серии плана (читает voices)
+      source_url, status, final_filename, superseded_by}]} — референс-серии плана (читает
+      voices); у вытесненной строки superseded_by указывает на победителя слота
   downloads.queue.clear {} → {deleted} — всё, кроме идущих загрузок
   downloads.fs.sync {series_id} → {adopted, lost} — синхронизация с
       диском (вызывается сканом и при открытии модалки статуса)
 
 События (исходящие):
+  downloads.item.renamed {series_id, unique_id, filename} — имя файла серии изменено
+      (renaming сообщает его командой downloads.item.set_filename); модули с файлами рядом
+      с видео (voices) идут следом.
   downloads.queue.changed {tasks, count} — при реальных изменениях
       (троттлинг на прогрессе) — контракт SSE download_queue_update.
   series.status.contribution {source: downloads, ...} — свёртка Р-11
@@ -341,6 +345,11 @@ class DownloadsModule(BaseModule):
         после переобработки (Р-15)."""
         await self.repo.set_item_filename(env.payload["unique_id"],
                                           env.payload["filename"])
+        series_id = await self.repo.series_of_item(env.payload["unique_id"])
+        if series_id is not None:
+            self.publish_event("downloads.item.renamed", {
+                "series_id": series_id, "unique_id": env.payload["unique_id"],
+                "filename": env.payload["filename"]})
 
     async def on_set_status(self, env: Envelope) -> None:
         """status — наша колонка; slicing помечает усыновлённую

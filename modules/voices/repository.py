@@ -116,21 +116,21 @@ class VoicesRepository:
             "SELECT DISTINCT job_id FROM voice_dubs WHERE status='aligning' AND job_id IS NOT NULL")
         return [row["job_id"] for row in rows]
 
-    async def mark_aligning(self, dub_ids: list[int], job_id: str) -> None:
+    async def mark_aligning(self, dub_ids: list[int], job_id: str, ref_uid: str, ref_path: str) -> None:
         for dub_id in dub_ids:
             await self._db.execute(
-                "UPDATE voice_dubs SET status='aligning', job_id=?, error=NULL, outcome=NULL, "
-                "updated_at=? WHERE id=?", (job_id, _now(), dub_id))
+                "UPDATE voice_dubs SET status='aligning', job_id=?, ref_uid=?, ref_path=?, error=NULL, "
+                "outcome=NULL, updated_at=? WHERE id=?", (job_id, ref_uid, ref_path, _now(), dub_id))
 
     async def mark_aligned(self, dub_id: int, aligned_path: str) -> None:
         await self._db.execute(
             "UPDATE voice_dubs SET status='aligned', aligned_path=?, updated_at=? WHERE id=?",
             (aligned_path, _now(), dub_id))
 
-    async def mark_placed(self, dub_id: int, sidecar_path: str) -> None:
+    async def mark_placed(self, dub_id: int, sidecar_path: str, ref_path: str) -> None:
         await self._db.execute(
-            "UPDATE voice_dubs SET status='placed', sidecar_path=?, aligned_path=NULL, temp_path=NULL, "
-            "error=NULL, updated_at=? WHERE id=?", (sidecar_path, _now(), dub_id))
+            "UPDATE voice_dubs SET status='placed', sidecar_path=?, ref_path=?, aligned_path=NULL, "
+            "temp_path=NULL, error=NULL, updated_at=? WHERE id=?", (sidecar_path, ref_path, _now(), dub_id))
 
     async def mark_rejected(self, dub_id: int, outcome: str) -> None:
         await self._db.execute(
@@ -143,6 +143,21 @@ class VoicesRepository:
             await self._db.execute(
                 "UPDATE voice_dubs SET status='ready', job_id=NULL, updated_at=? WHERE id=?",
                 (_now(), dub_id))
+
+    async def reset(self, dub_id: int, reason: str) -> None:
+        """The track belongs to a reference that is gone: back to the start, from the main source."""
+        await self._db.execute(
+            "UPDATE voice_dubs SET status='pending', attempt=0, job_id=NULL, ref_uid=NULL, ref_path=NULL, "
+            "aligned_path=NULL, sidecar_path=NULL, temp_path=NULL, outcome=NULL, error=?, updated_at=? "
+            "WHERE id=?", (reason, _now(), dub_id))
+
+    async def set_sidecar(self, dub_id: int, sidecar_path: str, ref_path: str) -> None:
+        await self._db.execute(
+            "UPDATE voice_dubs SET sidecar_path=?, ref_path=?, updated_at=? WHERE id=?",
+            (sidecar_path, ref_path, _now(), dub_id))
+
+    async def delete(self, dub_id: int) -> None:
+        await self._db.execute("DELETE FROM voice_dubs WHERE id=?", (dub_id,))
 
     async def forget_temp(self, series_id: int, season: int, episode: int) -> None:
         await self._db.execute(

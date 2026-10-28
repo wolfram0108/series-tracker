@@ -9,15 +9,19 @@ Query:
       The source priority is the setting `voices.source_priority` (JSON list of player kinds);
       layout.DEFAULT_PRIORITY when unset.
   voices.dubs.get {series_id} -> {items: [{season, episode, voice_key, voice_label, status,
-      attempt, error, temp_path}]}
+      attempt, error, temp_path, job_id, aligned_path, sidecar_path, outcome, ref_uid, ref_path}]}
 Command:
   voices.dispatch {series_id} — sent by scan after an explicit scan: read the catalog of the site,
       lay the voices out around the selected reference, record a voice_dubs row per planned
       reference episode and voice, and download what is not on disk yet into the temporary
       directory (setting `voices.temp_root`, default /nas/torrents/series-tracker).
 Events in:  downloads.fetch.finished (our keys `dub:<id>`), series.downloaded.changed,
-            conform.job.finished, conform.daemon.up, series.deleted.
-Events out: voices.dub.changed {series_id, season, episode, voice_key, status}, series.purged,
+            downloads.item.renamed, library.relocation.finished, conform.job.finished,
+            conform.daemon.up, series.deleted.
+Events out: voices.dub.changed {series_id, season, episode, voice_key, status} — status is one of
+            ready, aligning, aligned, placed, rejected, failed, moved (the track followed its video),
+            stale (its reference was replaced) and removed (the episode and its video are gone);
+            series.purged,
             voices.episode.settled {series_id, season, episode} — every voice-over of the episode is
             placed, rejected or failed and its temporary files are gone.
 
@@ -36,7 +40,15 @@ track is moved next to the reference video as `<video name>.<voice title>.<lang>
 becomes `placed` with the track's path; the series stays playable at every step. When every
 voice-over of the episode is placed, rejected or failed, the episode's temporary directory is
 removed. Without the service, or while the reference is missing, rows wait and are retried on
-series.downloaded.changed and conform.daemon.up. The service leaves an empty `_tmp` directory
+series.downloaded.changed and conform.daemon.up. Following the reference (stage 8). A track is valid for the reference it was aligned to (`ref_uid`).
+The same reference under another name or in another directory: the track is moved after it. A
+different reference (a higher resolution, another voice or source took the slot): every track
+of the episode is removed from the library at once, since it would play out of step with the new
+video, and the voice-overs start over against the new reference. An episode that left the plan
+and whose video is gone loses its whole set; a track the user deleted is not made again.
+Deleting a series removes only records and temporary files: videos stay, and so do their tracks.
+
+The service leaves an empty `_tmp` directory
 next to every reference video it worked on; it is removed once no job of the series is running.
 The series' own folder in the temporary directory goes when every voice-over of the series is
 settled and the folder is empty.
@@ -55,7 +67,7 @@ from core.db import Database
 from core.envelope import Envelope
 
 from .layout import DEFAULT_PRIORITY, download_chain, plan_layout
-from .placement import place, sidecar_path
+from .placement import move, place, sidecar_path
 from .repository import VoicesRepository
 
 PRIORITY_KEY = "voices.source_priority"
@@ -104,6 +116,8 @@ class VoicesModule(BaseModule):
         self.handle("voices.dispatch", self.on_dispatch, concurrent=True)
         self.handle("downloads.fetch.finished", self.on_fetch_finished)
         self.handle("series.downloaded.changed", self.on_downloaded)
+        self.handle("downloads.item.renamed", self.on_downloaded)
+        self.handle("library.relocation.finished", self.on_relocated)
         self.handle("conform.job.finished", self.on_job_finished)
         self.handle("conform.daemon.up", self.on_daemon_up)
         self.handle("series.deleted", self.on_series_deleted)
@@ -148,7 +162,7 @@ class VoicesModule(BaseModule):
     async def on_dubs_get(self, env: Envelope) -> dict:
         rows = await self.repo.for_series(int(env.payload["series_id"]))
         keep = ("season", "episode", "voice_key", "voice_label", "status", "attempt", "error",
-                "temp_path", "job_id", "aligned_path", "sidecar_path", "outcome")
+                "temp_path", "job_id", "aligned_path", "sidecar_path", "outcome", "ref_uid", "ref_path")
         return {"items": [{field: row[field] for field in keep} for row in rows]}
 
     # --- planning ---------------------------------------------------------------------
@@ -283,6 +297,10 @@ class VoicesModule(BaseModule):
     async def on_downloaded(self, env: Envelope) -> None:
         self._kick(int(env.payload["series_id"]))
 
+    async def on_relocated(self, env: Envelope) -> None:
+        if env.payload.get("success"):
+            self._kick(int(env.payload["series_id"]))
+
     async def on_daemon_up(self, env: Envelope) -> None:
         for job_id in await self.repo.aligning_jobs():
             await self._reconcile(job_id)
@@ -313,21 +331,32 @@ class VoicesModule(BaseModule):
         if not rows:
             return
         series = await self.request("catalog.series.get", {"series_id": series_id})
-        references = await self._reference_paths(series)
+        in_plan, references = await self._reference_state(series)
         root = await self._temp_root()
         episodes = sorted({(row["season"], row["episode"]) for row in rows})
+        restart = False
         for season, episode in episodes:
-            reference = references.get((season, episode))
-            if reference is not None:
-                for row in await self.repo.for_episode(series_id, season, episode):
-                    if row["status"] == "aligned":
-                        await self._place(row, reference)
-                group = await self.repo.for_episode(series_id, season, episode)
-                ready = [row for row in group if row["status"] == "ready"]
-                if ready and not any(row["status"] in WORKING for row in group):
-                    await self._submit(series, season, episode, reference, ready, root)
+            group = await self.repo.for_episode(series_id, season, episode)
+            current = references.get((season, episode))
+            if current is None:
+                if (season, episode) not in in_plan:
+                    await self._drop_orphans(series_id, season, episode, group, root)
+                continue
+            reference, uid = current
+            if await self._follow(series_id, season, episode, group, reference, uid):
+                restart = True
+                continue
+            for row in group:
+                if row["status"] == "aligned":
+                    await self._place(row, reference)
+            group = await self.repo.for_episode(series_id, season, episode)
+            ready = [row for row in group if row["status"] == "ready"]
+            if ready and not any(row["status"] in WORKING for row in group):
+                await self._submit(series, season, episode, reference, uid, ready, root)
             await self._tidy(series_id, season, episode, root)
-        await self._sweep_scratch(series_id, {os.path.dirname(path) for path in references.values()})
+        if restart:
+            self.send_command("voices.dispatch", {"series_id": series_id})
+        await self._sweep_scratch(series_id, {os.path.dirname(path) for path, _ in references.values()})
         if all(row["status"] in FINAL for row in await self.repo.for_series(series_id)):
             await asyncio.to_thread(self._remove_if_empty, os.path.join(root, str(series_id)))
 
@@ -346,19 +375,95 @@ class VoicesModule(BaseModule):
         except OSError:
             pass
 
-    async def _reference_paths(self, series: dict) -> dict[tuple[int, int], str]:
-        """Reference files that are on disk now, by (season, episode)."""
+    async def _reference_state(self, series: dict) -> tuple[set, dict[tuple[int, int], tuple[str, str]]]:
+        """The planned episodes, and (file, media item) of the reference that is on disk, by episode.
+
+        When a slot holds a superseded file and its winner, the winner is the reference."""
         reply = await self.request("downloads.episodes.get", {"series_id": series["id"]}, timeout=30)
-        found = {}
+        in_plan, found = set(), {}
         for item in reply["items"]:
+            slot = (item["season"], item["episode_start"])
+            in_plan.add(slot)
             if not item.get("final_filename"):
                 continue
             path = os.path.join(series["save_path"], item["final_filename"])
-            if await asyncio.to_thread(os.path.isfile, path):
-                found[(item["season"], item["episode_start"])] = path
-        return found
+            if not await asyncio.to_thread(os.path.isfile, path):
+                continue
+            if slot not in found or not item.get("superseded_by"):
+                found[slot] = (path, item["unique_id"])
+        return in_plan, found
 
-    async def _submit(self, series: dict, season: int, episode: int, reference: str,
+    async def _follow(self, series_id: int, season: int, episode: int, group: list[dict],
+                      reference: str, uid: str) -> bool:
+        """Keep the tracks of an episode in step with its reference; True when they went stale."""
+        stale = [row for row in group if row["ref_uid"] and row["ref_uid"] != uid]
+        if stale:
+            for row in group:
+                if row["ref_uid"] and row["ref_uid"] != uid:
+                    await self._discard_files(row)
+                    await self.repo.reset(row["id"], "референс серии заменён")
+                    self._changed(row, "stale")
+            self.log.info("сериал %d, s%02de%02d: референс заменён, дорожки устарели и удалены: %d",
+                          series_id, season, episode, len(stale))
+            return True
+        for row in group:
+            if row["status"] == "placed":
+                await self._follow_name(row, reference)
+        return False
+
+    async def _follow_name(self, row: dict, reference: str) -> None:
+        old = row["sidecar_path"]
+        if not old:
+            return
+        expected = sidecar_path(reference, row["voice_label"], os.path.splitext(old)[1] or ".flac")
+        present = await asyncio.to_thread(os.path.isfile, old)
+        if expected == old and present:
+            if row["ref_path"] != reference:
+                await self.repo.set_sidecar(row["id"], old, reference)
+            return
+        if present:
+            await asyncio.to_thread(move, old, expected)
+        elif expected == old or not await asyncio.to_thread(os.path.isfile, expected):
+            await self.repo.mark_rejected(row["id"], "дорожка удалена")
+            self.log.info("сериал %d, s%02de%02d: дорожка %s удалена пользователем, заново не создаётся",
+                          row["series_id"], row["season"], row["episode"], row["voice_label"])
+            self._changed(row, "rejected")
+            return
+        await self.repo.set_sidecar(row["id"], expected, reference)
+        self.log.info("сериал %d, s%02de%02d: дорожка %s следует за видео: %s", row["series_id"],
+                      row["season"], row["episode"], row["voice_label"], expected)
+        self._changed(row, "moved")
+
+    async def _drop_orphans(self, series_id: int, season: int, episode: int, group: list[dict],
+                            root: str) -> None:
+        """An episode left the plan: with its video gone, its set of tracks goes too."""
+        if any(row["status"] == "downloading" for row in group):
+            return
+        for row in group:
+            if row["ref_path"] and await asyncio.to_thread(os.path.isfile, row["ref_path"]):
+                return
+        for row in group:
+            await self._discard_files(row)
+            await self.repo.delete(row["id"])
+            self._changed(row, "removed")
+        await asyncio.to_thread(shutil.rmtree, episode_dir(root, series_id, season, episode), True)
+        self.log.info("сериал %d, s%02de%02d: серии нет в плане и видео нет — дорожки удалены",
+                      series_id, season, episode)
+
+    @staticmethod
+    async def _discard_files(row: dict) -> None:
+        for path in (row["sidecar_path"], row["aligned_path"], row["temp_path"]):
+            if path:
+                await asyncio.to_thread(VoicesModule._remove_file, path)
+
+    @staticmethod
+    def _remove_file(path: str) -> None:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    async def _submit(self, series: dict, season: int, episode: int, reference: str, uid: str,
                       ready: list[dict], root: str) -> None:
         folder = episode_dir(root, series["id"], season, episode)
         label = f"{series['name']} s{season:02d}e{episode:02d}"
@@ -383,7 +488,7 @@ class VoicesModule(BaseModule):
                 self._changed(row, "rejected")
             self.log.warning("%s: задача выравнивания отклонена: %s", label, reply["rejected"])
             return
-        await self.repo.mark_aligning([row["id"] for row in ready], reply["job_id"])
+        await self.repo.mark_aligning([row["id"] for row in ready], reply["job_id"], uid, reference)
         for row in ready:
             self._changed(row, "aligning")
 
@@ -476,7 +581,7 @@ class VoicesModule(BaseModule):
             return
         destination = sidecar_path(reference, row["voice_label"], os.path.splitext(source)[1] or ".flac")
         await asyncio.to_thread(place, source, destination)
-        await self.repo.mark_placed(row["id"], destination)
+        await self.repo.mark_placed(row["id"], destination, reference)
         self.log.info("сериал %d, s%02de%02d: дорожка %s рядом с видео: %s", row["series_id"],
                       row["season"], row["episode"], row["voice_label"], destination)
         self._changed(row, "placed")

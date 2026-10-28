@@ -240,6 +240,8 @@ class Neighbours(BaseModule):
         self.plan = plan  # [(season, episode, site episode)]
         self.library = library
         self.references = {}  # episode -> file name of the reference video on disk
+        self.uids = {}  # episode -> media item of its reference (default: u<episode>)
+        self.extra_items = []  # more media items of the plan, as downloads.episodes.get shows them
         self.settings = {}
         self.fetches = []
         self.cancels = []
@@ -269,10 +271,11 @@ class Neighbours(BaseModule):
 
     async def on_episodes(self, env):
         reference = next(s for s in self.sources if s["url"] == self.reference_url)
-        return {"items": [{"unique_id": f"u{episode}", "season": season, "episode_start": episode,
-                           "source_url": reference["links"][str(site)], "status": "pending",
-                           "final_filename": self.references.get(episode)}
-                          for season, episode, site in self.plan]}
+        items = [{"unique_id": self.uids.get(episode, f"u{episode}"), "season": season,
+                  "episode_start": episode, "source_url": reference["links"][str(site)],
+                  "status": "pending", "final_filename": self.references.get(episode),
+                  "superseded_by": None} for season, episode, site in self.plan]
+        return {"items": items + self.extra_items}
 
     async def on_setting(self, env):
         return {"key": env.payload["key"], "value": self.settings.get(env.payload["key"])}
@@ -813,3 +816,163 @@ async def test_a_scratch_directory_with_content_is_left_alone(dubs):
     await asyncio.wait_for(settled_sub.queue.get(), 5)
     await asyncio.sleep(0.2)
     assert os.path.isfile(os.path.join(scratch, "run", "buffer.bin"))
+
+
+# --- following the reference ----------------------------------------------------------------
+
+
+async def placed_set(dubs):
+    """One episode, two voices, aligned and placed next to the reference; the episode is settled."""
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    settled_sub = bus.subscribe("voices.episode.settled")
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
+    await asyncio.wait_for(settled_sub.queue.get(), 5)
+    return probe, neighbours, bus, sub, ref
+
+
+def library_files(neighbours):
+    found = []
+    for folder, _, names in os.walk(neighbours.library):
+        found += [os.path.relpath(os.path.join(folder, name), neighbours.library) for name in names]
+    return sorted(found)
+
+
+@pytest.mark.asyncio
+async def test_the_tracks_follow_a_renamed_video(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    renamed = os.path.join(neighbours.library, "Renamed 01.mp4")
+    os.rename(ref, renamed)
+    neighbours.references[1] = "Renamed 01.mp4"
+    probe.publish_event("downloads.item.renamed", {"series_id": 7, "unique_id": "u1", "filename": "Renamed 01.mp4"})
+    await statuses_until(sub, ["moved", "moved"])
+    assert library_files(neighbours) == ["Renamed 01.BlackCat.ru.flac", "Renamed 01.RedHeadSound.ru.flac",
+                                         "Renamed 01.mp4"]
+    done = await rows(probe)
+    assert {r["sidecar_path"] for r in done} == {os.path.join(neighbours.library, "Renamed 01.BlackCat.ru.flac"),
+                                                 os.path.join(neighbours.library, "Renamed 01.RedHeadSound.ru.flac")}
+    assert {r["status"] for r in done} == {"placed"}
+
+
+@pytest.mark.asyncio
+async def test_the_tracks_follow_a_video_moved_to_another_directory(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    target = os.path.join(neighbours.library, "Season 01", os.path.basename(ref))
+    os.makedirs(os.path.dirname(target))
+    os.rename(ref, target)
+    neighbours.references[1] = os.path.join("Season 01", os.path.basename(ref))
+    probe.publish_event("library.relocation.finished", {"series_id": 7, "success": True, "message": "ok"})
+    await statuses_until(sub, ["moved", "moved"])
+    stem = os.path.splitext(os.path.basename(ref))[0]
+    assert library_files(neighbours) == [f"Season 01/{stem}.BlackCat.ru.flac",
+                                         f"Season 01/{stem}.RedHeadSound.ru.flac", f"Season 01/{stem}.mp4"]
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_reference_leaves_the_tracks_alone(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    before = library_files(neighbours)
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
+    probe.publish_event("conform.daemon.up", {})
+    await asyncio.sleep(0.3)
+    assert sub.queue.empty() and library_files(neighbours) == before
+    assert len(neighbours.submits) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_track_the_user_deleted_is_not_made_again(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    os.remove(f"{os.path.splitext(ref)[0]}.BlackCat.ru.flac")
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
+    await statuses_until(sub, ["rejected"])
+    by_voice = {r["voice_key"]: r for r in await rows(probe)}
+    assert by_voice["blackcat"]["status"] == "rejected" and by_voice["blackcat"]["outcome"] == "дорожка удалена"
+    assert by_voice["redheadsound"]["status"] == "placed"
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await asyncio.sleep(0.3)
+    assert len(neighbours.fetches) == 2 and len(neighbours.submits) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_replaced_reference_removes_the_tracks_and_the_voices_start_over(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    new_ref = os.path.join(neighbours.library, "Series s01e01 2160p.mp4")
+    touch(new_ref)
+    neighbours.uids[1] = "u1-new"
+    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    # The old file is still there with the winner beside it: the winner is the reference.
+    neighbours.extra_items.append({"unique_id": "u1", "season": 1, "episode_start": 1,
+                                   "source_url": "x", "status": "completed", "superseded_by": "u1-new",
+                                   "final_filename": os.path.basename(ref)})
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
+    await statuses_until(sub, ["stale", "stale"])
+    assert not any(name.endswith(".flac") for name in library_files(neighbours))
+    reset = await rows(probe)
+    assert {r["sidecar_path"] for r in reset} == {None} and {r["ref_uid"] for r in reset} == {None}
+    await settled(neighbours, 4)  # both voices are fetched again
+    for fetch in neighbours.fetches[2:]:
+        touch(fetch["path"], b"video")
+        finish(probe, fetch["key"])
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    assert neighbours.submits[1]["ref"] == new_ref
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-2"))
+    await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
+    stem = os.path.splitext(new_ref)[0]
+    assert os.path.isfile(f"{stem}.BlackCat.ru.flac") and os.path.isfile(f"{stem}.RedHeadSound.ru.flac")
+    assert {r["ref_uid"] for r in await rows(probe)} == {"u1-new"}
+
+
+@pytest.mark.asyncio
+async def test_the_result_of_a_job_for_a_replaced_reference_is_ignored(dubs):
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    old_job = job_done(neighbours, "job-1")
+    new_ref = os.path.join(neighbours.library, "Series s01e01 2160p.mp4")
+    touch(new_ref)
+    neighbours.uids[1] = "u1-new"
+    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
+    await statuses_until(sub, ["stale", "stale"])
+    probe.publish_event("conform.job.finished", old_job)
+    await asyncio.sleep(0.3)
+    assert not any(name.endswith(".flac") for name in library_files(neighbours))
+    assert {r["status"] for r in await rows(probe)} <= {"pending", "downloading"}
+
+
+@pytest.mark.asyncio
+async def test_an_episode_that_left_the_plan_loses_its_tracks_with_its_video(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    os.remove(ref)
+    neighbours.plan[:] = []
+    neighbours.references.clear()
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 0})
+    await statuses_until(sub, ["removed", "removed"])
+    assert library_files(neighbours) == [] and await rows(probe) == []
+
+
+@pytest.mark.asyncio
+async def test_an_episode_that_left_the_plan_keeps_its_tracks_while_the_video_is_there(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    neighbours.plan[:] = []
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
+    await asyncio.sleep(0.3)
+    assert sub.queue.empty() and len(library_files(neighbours)) == 3 and len(await rows(probe)) == 2
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_series_leaves_the_videos_and_their_tracks(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    report = bus.subscribe("series.purged")
+    probe.publish_event("series.deleted", {"series_id": 7})
+    await asyncio.wait_for(report.queue.get(), 5)
+    assert len(library_files(neighbours)) == 3 and await rows(probe) == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_relocation_is_not_a_reason_to_look_at_the_tracks(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    os.rename(ref, ref + ".moved")
+    probe.publish_event("library.relocation.finished", {"series_id": 7, "success": False, "message": "boom"})
+    await asyncio.sleep(0.3)
+    assert sub.queue.empty() and len(await rows(probe)) == 2

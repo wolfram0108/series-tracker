@@ -1023,3 +1023,18 @@ async def test_fetch_rejects_a_relative_path(system):
     (done,) = await _fetch(probe, bus, 1, jobs=[
         {"key": "dub:7", "url": "https://site/#cvh=7", "path": "rel/x.mp4", "series_id": 3}])
     assert done["ok"] is False and "абсолютным" in done["error"] and dl.started == []
+
+
+@pytest.mark.asyncio
+async def test_a_new_file_name_is_announced_to_the_modules_that_keep_files_next_to_the_video(system):
+    bus, fake, dl, probe, db_path, _ = system
+    _add_item(db_path, "uid-r", 1, status="completed", filename="old.mp4", series_id=2)
+    sub = bus.subscribe("downloads.item.renamed")
+    probe.send_command("downloads.item.set_filename", {"unique_id": "uid-r", "filename": "new.mp4"})
+    event = (await asyncio.wait_for(sub.queue.get(), 3)).payload
+    assert event == {"series_id": 2, "unique_id": "uid-r", "filename": "new.mp4"}
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT final_filename FROM media_items WHERE unique_id='uid-r'").fetchone() == ("new.mp4",)
+    probe.send_command("downloads.item.set_filename", {"unique_id": "nobody", "filename": "x.mp4"})
+    await asyncio.sleep(0.1)
+    assert sub.queue.empty()
