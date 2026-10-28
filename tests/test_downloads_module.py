@@ -549,7 +549,7 @@ async def test_download_allvideo_route(tmp_path):
         assert ok is True
         assert err == ""
         mock_resolve.assert_called_once_with("https://fsst.online/embed/992227/")
-        mock_ffmpeg.assert_called_once_with("https://cdn.example.com/test.mp4", "https://incvideo1.online/", out_file, on_progress)
+        mock_ffmpeg.assert_called_once_with("https://cdn.example.com/test.mp4", {"Referer": "https://incvideo1.online/"}, out_file, on_progress)
 
 
 @pytest.mark.asyncio
@@ -572,7 +572,7 @@ async def test_download_direct_stream_with_headers(tmp_path):
         assert err == ""
         mock_ffmpeg.assert_called_once_with(
             "https://cdn.example.com/video_2160p.mp4",
-            "https://fsst.online/",
+            {"Referer": "https://fsst.online/"},
             out_file,
             on_progress
         )
@@ -604,9 +604,18 @@ def test_transient_download_errors():
 
 
 def test_file_manifest_has_no_http_headers():
-    assert ytdlp._headers_args("file:///tmp/x.m3u8", "https://r/") == []
-    assert ytdlp._headers_args("https://cdn.test/x.mp4", "https://r/") == [
+    referer = {"Referer": "https://r/"}
+    assert ytdlp._headers_args("file:///tmp/x.m3u8", referer) == []
+    assert ytdlp._headers_args("https://cdn.test/x.mp4", referer) == [
         "-headers", "Referer: https://r/\r\n"]
+
+
+def test_stream_headers_reach_ffmpeg_in_full():
+    args = ytdlp._headers_args("https://cdn.test/x.mp4", {
+        "Origin": "https://o/", "User-Agent": "Agent/1", "Referer": "https://r/"})
+    assert args == ["-user_agent", "Agent/1",
+                    "-headers", "Origin: https://o/\r\nReferer: https://r/\r\n"]
+    assert ytdlp._headers_args("https://cdn.test/x.mp4", {}) == []
 
 
 def test_ytdlp_error_prefers_error_line():

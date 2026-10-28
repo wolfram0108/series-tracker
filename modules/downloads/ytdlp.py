@@ -256,20 +256,27 @@ async def _resolve_allvideo_stream(embed_url: str) -> tuple[str, str] | None:
         return None
 
 
-def _headers_args(stream_url: str, referer: str) -> list[str]:
-    """A local decoded manifest rejects HTTP options like -headers."""
-    if referer and not stream_url.startswith("file:"):
-        return ["-headers", f"Referer: {referer}\r\n"]
-    return []
+def _headers_args(stream_url: str, headers: dict) -> list[str]:
+    """A local decoded manifest rejects HTTP options like -headers; the agent has its own option."""
+    if not headers or stream_url.startswith("file:"):
+        return []
+    args: list[str] = []
+    agent = next((v for k, v in headers.items() if k.lower() == "user-agent"), None)
+    if agent:
+        args += ["-user_agent", agent]
+    blob = "".join(f"{k}: {v}\r\n" for k, v in headers.items() if k.lower() != "user-agent")
+    if blob:
+        args += ["-headers", blob]
+    return args
 
 
-async def _probe_duration_ffprobe(stream_url: str, referer: str = "") -> float:
+async def _probe_duration_ffprobe(stream_url: str, headers: dict | None = None) -> float:
     executable = shutil.which("ffprobe")
     if not executable:
         return 0.0
     cmd = [executable, "-v", "error"]
     cmd.extend(PROTOCOL_WHITELIST)
-    cmd.extend(_headers_args(stream_url, referer))
+    cmd.extend(_headers_args(stream_url, headers or {}))
     cmd.extend(["-show_entries", "format=duration", "-of",
                 "default=noprint_wrappers=1:nokey=1", stream_url])
     try:
@@ -283,19 +290,19 @@ async def _probe_duration_ffprobe(stream_url: str, referer: str = "") -> float:
     return 0.0
 
 
-async def _download_direct_ffmpeg(stream_url: str, referer: str,
+async def _download_direct_ffmpeg(stream_url: str, headers: dict,
                                   full_output_path: str,
                                   on_progress: ProgressCb) -> tuple[bool, str]:
     executable = shutil.which("ffmpeg")
     if not executable:
         return False, "ffmpeg не найден в PATH"
-    duration = await _probe_duration_ffprobe(stream_url, referer)
+    duration = await _probe_duration_ffprobe(stream_url, headers)
     tmp_out = full_output_path + ".download.mp4"
     await on_progress({"phase": "download", "progress": 0, "eta": 0, "speed": 0.0})
 
     cmd = [executable, "-y"]
     cmd.extend(PROTOCOL_WHITELIST)
-    cmd.extend(_headers_args(stream_url, referer))
+    cmd.extend(_headers_args(stream_url, headers))
     cmd.extend(["-i", stream_url, "-c", "copy", "-progress", "pipe:1", "-nostats", tmp_out])
 
     proc = await asyncio.create_subprocess_exec(
@@ -358,15 +365,17 @@ async def download(video_url: str, full_output_path: str,
 
     # Direct stream download if headers (e.g. Referer) are provided or URL is already an mp4 stream
     if headers or (video_url.startswith("http") and ".mp4" in video_url and "vk.com" not in video_url and "vkvideo.ru" not in video_url):
-        referer = (headers or {}).get("Referer", "https://incvideo1.online/")
-        return await _download_direct_ffmpeg(video_url, referer, full_output_path, on_progress)
+        stream_headers = {"Referer": "https://incvideo1.online/", **(headers or {})}
+        return await _download_direct_ffmpeg(video_url, stream_headers, full_output_path,
+                                             on_progress)
 
     if is_allvideo_url(video_url):
         resolved = await _resolve_allvideo_stream(video_url)
         if not resolved:
             return False, "не удалось получить ссылку на поток AllVideo"
         stream_url, referer = resolved
-        return await _download_direct_ffmpeg(stream_url, referer, full_output_path, on_progress)
+        return await _download_direct_ffmpeg(stream_url, {"Referer": referer},
+                                             full_output_path, on_progress)
 
     # длительность для процента remux — из yt-dlp (метаданные источника),
     # НЕ из промежуточного TS (находка 52)
