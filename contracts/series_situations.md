@@ -200,6 +200,9 @@
 | VS6 | Несколько качеств эпизода | `_quality_key` (priority.index, затем -resolution); план по всем строкам серии (`test_scan_repairs_stale_double_winner`) | ✓ |
 | VS10 | Появилось более высокое разрешение (другой плеер или та же ссылка) | кандидат принимается, при той же ссылке — отдельная строка (`ids.upgrade_unique_id`), низкий файл вытесняется после скачивания высокого (`test_better_source_supersedes_downloaded_lower_one`, `test_better_file_from_downloaded_url_gets_its_own_row`) | ✓ |
 | VS11 | Плеер объявил поток, который не отдаётся (манифест 400) | кандидат Vibix проверяется по манифесту, откат на читаемый поток ниже; без потока — явная ошибка задачи, yt-dlp по странице не запускается (`test_vibix_dead_manifest_is_not_a_candidate`, `test_provider_stream_error_fails_task_without_ytdlp`) | ✓ |
+| VS12 | Сериал на dunhuatv.ru: у серии есть VK и Kodik | кандидат на плеер; Kodik опрашивается только если VK нет или ниже 720p; побеждает наибольшее разрешение (`test_scan_picks_best_per_player_and_falls_back_to_kodik`). Живьём: скан 4 серий → 100 VK 720p, 287 VK 1440p, 374 и 389 Kodik 720p, все скачаны | ✓ |
+| VS13 | CDN просит тот же User-Agent, что выдал ссылку | `headers` потока несёт `User-Agent`/`Origin`/`Referer`, загрузчик передаёт их в ffmpeg целиком (`test_resolve_vk_gives_best_rung_with_the_agent_that_signed_it`, `test_stream_headers_reach_ffmpeg_in_full`) | ✓ |
+| VS14 | Плеер dunhuatv.ru отвечает 429/5xx | повторы; при непрочитанных сериях скан падает «повторный скан позже», план не усечён (`test_scan_asks_for_a_retry_*`) | ✓ |
 | VS7 | VK вернул пусто / ошибка | пусто → `changed=False`; ошибка `_vk_call`/HTTP не глотается → error-task, статус error | ✓ |
 | VS8 | Истёк токен VK | `VkScanError` (error_code) всплывает → error-task (не молча) | ✓ |
 | VS9 | search vs get_all | ветвление в `on_vk_scan` (video.search по терминам vs video.get + локальный фильтр) | ✓ |
