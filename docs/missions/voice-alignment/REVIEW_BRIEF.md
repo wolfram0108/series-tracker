@@ -21,7 +21,7 @@ CVH и Kodik) отдаёт одну серию в нескольких озву�
 
 ## 2. Область ревью
 
-Диапазон: `git diff ec23a2d^..HEAD` (первый коммит работ — `ec23a2d`). 35 коммитов, 68 файлов, около 7,2 тыс. добавленных и 78 удалённых строк (без учёта самого этого документа). Код вне диапазона не оценивается, кроме мест, где диапазон меняет
+Диапазон: `git diff ec23a2d^..HEAD` (первый коммит работ — `ec23a2d`). 44 коммита, 82 файла, около 8,8 тыс. добавленных и 86 удалённых строк (без учёта самого этого документа). Код вне диапазона не оценивается, кроме мест, где диапазон меняет
 его поведение.
 
 | Этап | Суть | Где смотреть |
@@ -60,10 +60,10 @@ CVH и Kodik) отдаёт одну серию в нескольких озву�
 
 | Что | Команда | Ожидание |
 |---|---|---|
-| Серверные тесты | `.venv/bin/python -m pytest -q -p no:cacheprovider` | 634 прошли, 2 пропущены; 2 ошибки в `tests/test_scan_ids.py` — намеренные (нужны данные прод-системы); файлы `tests/test_sources.py`, `tests/test_rules_format_diff.py`, `tests/verify_planner_diff.py` исключены по той же причине |
-| Тесты озвучек | `.venv/bin/python -m pytest tests/test_voices.py tests/test_conform_module.py -q -p no:cacheprovider` | около 70 секунд |
-| Тесты фронтенда | `cd web && npx vitest run src` | 57 прошли; запуск без `src` подхватывает e2e-спеки Playwright и краснеет |
-| Типы и сборка | `cd web && npm run build` | без ошибок |
+| Сборка фронтенда (до серверных тестов: часть тестов читает `web/dist`) | `cd web && npm run build` | без ошибок |
+| Серверные тесты | `.venv/bin/python -m pytest -q -p no:cacheprovider --ignore=tests/test_sources.py --deselect tests/test_rules_format_diff.py --deselect tests/verify_planner_diff.py` | 687 прошли, 2 пропущены, 5 отобраны; 2 ошибки в `tests/test_scan_ids.py` — намеренные (нужны данные прод-системы); исключённые файлы требуют тех же данных; около 4,5 минут |
+| Тесты озвучек | `.venv/bin/python -m pytest tests/test_voices.py tests/test_voices_settings.py tests/test_voices_reasons.py tests/test_conform_module.py -q -p no:cacheprovider` | около 70 секунд |
+| Тесты фронтенда | `cd web && npx vitest run src` | 64 прошли; запуск без `src` подхватывает e2e-спеки Playwright и краснеет |
 
 ## 4. Нормативные требования
 
