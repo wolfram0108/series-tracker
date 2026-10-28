@@ -12,6 +12,8 @@ from typing import Awaitable, Callable
 
 import httpx
 
+from core.proc import run_capture
+
 from .retry import send_with_retry
 
 API = "https://plapi.cdnvideohub.com/api/v1"
@@ -131,9 +133,7 @@ async def measure_height(url: str) -> int | None:
     cmd = [executable, "-v", "error", "-user_agent", USER_AGENT, "-headers", blob,
            "-select_streams", "v:0", "-show_entries", "stream=height", "-of", "csv=p=0", url]
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-        out, _ = await asyncio.wait_for(proc.communicate(), MEASURE_TIMEOUT)
+        _, out, _ = await run_capture(cmd, timeout=MEASURE_TIMEOUT)
     except (OSError, asyncio.TimeoutError):
         return None
     try:

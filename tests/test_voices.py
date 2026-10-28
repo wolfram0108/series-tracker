@@ -548,6 +548,12 @@ async def change_state(sub, voice_key, state, seconds=3.0):
             return event
 
 
+async def quiet(voices):
+    """Wait until the module has nothing running in the background, so a test may change its data."""
+    while voices._bg:
+        await asyncio.gather(*list(voices._bg))
+
+
 async def change(sub, status, seconds=3.0):
     """The next pushed event with this status (others pass by)."""
     end = asyncio.get_running_loop().time() + seconds
@@ -881,6 +887,7 @@ async def placed_set(dubs):
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
     await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
     await asyncio.wait_for(settled_sub.queue.get(), 5)
+    await quiet(voices)
     return probe, neighbours, bus, sub, ref
 
 
@@ -1489,6 +1496,7 @@ async def test_a_late_ending_of_a_download_does_not_turn_a_waiting_voice_into_a_
     probe, neighbours, voices, bus = dubs
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
+    await quiet(voices)
     row = (await rows(probe))[0]
     stale = (await voices.repo.for_series(7))[0]
     await voices.repo.advance(stale["id"], "x")  # waits for its next source: not downloading now
@@ -1496,3 +1504,139 @@ async def test_a_late_ending_of_a_download_does_not_turn_a_waiting_voice_into_a_
     await asyncio.sleep(0.2)
     after = await voices.repo.get(stale["id"])
     assert after["status"] == "pending" and row["voice_key"] == after["voice_key"]
+
+
+# files and records that must not part: interrupted moves, failed removals --------------------
+
+
+async def aligned_but_not_placed(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    await quiet(voices)
+    view = job_done(neighbours, "job-1")
+    for row in await voices.repo.for_series(7):
+        result = next(r for r in view["results"] if os.path.splitext(r["dub"])[0] == os.path.splitext(
+            os.path.basename(row["temp_path"]))[0])
+        await voices.repo.mark_aligned(row["id"], result["out_path"])
+    return probe, neighbours, voices, bus, ref
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interrupted_at", ["before", "copied", "moved"])
+async def test_an_interrupted_placement_is_finished_after_a_restart(dubs, interrupted_at):
+    import shutil
+
+    probe, neighbours, voices, bus, ref = await aligned_but_not_placed(dubs)
+    row = (await voices.repo.for_series(7))[0]
+    from modules.voices.placement import place as place_file
+    from modules.voices.placement import sidecar_path as path_of
+    source = row["aligned_path"]
+    destination = path_of(ref, row["voice_label"], ".flac")
+    await voices.repo.begin_move(row["id"], destination, source)  # the intent is written first
+    if interrupted_at == "copied":
+        shutil.copyfile(source, destination)  # the destination appeared, the source is still there
+    elif interrupted_at == "moved":
+        place_file(source, destination)  # the file moved, the record was not updated
+    await voices._advance(7)
+    after = await voices.repo.get(row["id"])
+    assert after["status"] == "placed" and after["sidecar_path"] == destination
+    assert after["move_from"] is None and after["aligned_path"] is None
+    assert os.path.isfile(destination) and not os.path.exists(source)
+
+
+@pytest.mark.asyncio
+async def test_a_track_that_is_in_neither_place_after_an_interruption_is_an_error_not_silence(dubs):
+    probe, neighbours, voices, bus, ref = await aligned_but_not_placed(dubs)
+    row = (await voices.repo.for_series(7))[0]
+    await voices.repo.begin_move(row["id"], os.path.join(neighbours.library, "x.flac"), row["aligned_path"])
+    os.remove(row["aligned_path"])
+    await voices._advance(7)
+    after = await voices.repo.get(row["id"])
+    assert after["status"] == "failed" and after["error"] == "дорожка пропала при переносе"
+
+
+@pytest.mark.asyncio
+async def test_an_interrupted_follow_of_the_video_is_finished_too(dubs):
+    from modules.voices.placement import sidecar_path as path_of
+
+    voices = dubs[2]
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    row = (await voices.repo.for_series(7))[0]
+    renamed = os.path.join(neighbours.library, "Renamed 01.mp4")
+    os.rename(ref, renamed)
+    neighbours.references[1] = "Renamed 01.mp4"
+    expected = path_of(renamed, row["voice_label"], ".flac")
+    await voices.repo.begin_move(row["id"], expected, row["sidecar_path"])  # interrupted before the move
+    await voices._advance(7)
+    after = await voices.repo.get(row["id"])
+    assert after["status"] == "placed" and after["sidecar_path"] == expected and after["move_from"] is None
+    assert os.path.isfile(expected) and not os.path.exists(row["sidecar_path"])
+    assert len(library_files(neighbours)) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_failed_removal_hands_the_file_to_the_cleanup_journal_and_is_tried_again(dubs):
+    from unittest.mock import patch
+
+    voices = dubs[2]
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    group = await voices.repo.for_series(7)
+    paths = [row["sidecar_path"] for row in group]
+    with patch("modules.voices.module.os.remove", side_effect=PermissionError("read-only")):
+        assert await voices._follow(7, 1, 1, group, ref, "another-reference")
+    assert all(os.path.exists(path) for path in paths)  # the tracks are still there...
+    assert {entry["path"] for entry in await voices.repo.cleanup_list()} == set(paths)  # ...and not forgotten
+    assert all(row["sidecar_path"] is None for row in await voices.repo.for_series(7))
+    await voices._sweep_cleanup()
+    assert not any(os.path.exists(path) for path in paths) and await voices.repo.cleanup_list() == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_removal_of_the_temporary_folder_is_journaled_and_the_episode_still_settles(dubs):
+    from unittest.mock import patch
+
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    settled_sub = bus.subscribe("voices.episode.settled")
+    with patch("modules.voices.module.shutil.rmtree", side_effect=PermissionError("busy")):
+        probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+        await asyncio.wait_for(settled_sub.queue.get(), 5)
+        journal = await voices.repo.cleanup_list()
+    assert len(journal) == 1 and journal[0]["kind"] == "tree" and os.path.isdir(journal[0]["path"])
+    await voices._sweep_cleanup()
+    assert not os.path.exists(journal[0]["path"]) and await voices.repo.cleanup_list() == []
+
+
+@pytest.mark.asyncio
+async def test_a_file_that_is_already_gone_is_a_success_not_a_journal_entry(dubs):
+    voices = dubs[2]
+    assert await voices._discard(os.path.join(os.sep, "tmp", "nobody-has-this")) is True
+    assert await voices._discard(os.path.join(os.sep, "tmp", "nobody-has-this-dir"), tree=True) is True
+    assert await voices.repo.cleanup_list() == []
+
+
+@pytest.mark.asyncio
+async def test_temporary_files_are_removed_where_they_were_made_not_where_the_settings_now_point(dubs, tmp_path):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    made_in = neighbours.settings["voices.temp_root"]
+    neighbours.settings["voices.temp_root"] = str(tmp_path / "somewhere-else")
+    settled_sub = bus.subscribe("voices.episode.settled")
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await asyncio.wait_for(settled_sub.queue.get(), 5)
+    await quiet(voices)
+    assert not os.path.exists(os.path.join(made_in, "7", "s01e01"))
+    assert not os.path.exists(tmp_path / "somewhere-else")
+
+
+@pytest.mark.asyncio
+async def test_a_removal_that_the_storage_does_not_answer_is_journaled_not_awaited_forever(dubs, monkeypatch):
+    import time
+
+    voices = dubs[2]
+    monkeypatch.setattr("modules.voices.module.REMOVE_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(type(voices), "_unlink", staticmethod(lambda path, tree: time.sleep(0.6)))
+    started = time.monotonic()
+    assert await voices._discard("/some/slow/file") is False
+    assert time.monotonic() - started < 0.5
+    assert [entry["path"] for entry in await voices.repo.cleanup_list()] == ["/some/slow/file"]

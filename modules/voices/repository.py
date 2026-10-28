@@ -85,7 +85,7 @@ class VoicesRepository:
 
     async def mark_failed(self, dub_id: int, error: str) -> None:
         await self._db.execute(
-            "UPDATE voice_dubs SET status='failed', error=?, updated_at=? WHERE id=?",
+            "UPDATE voice_dubs SET status='failed', move_from=NULL, error=?, updated_at=? WHERE id=?",
             (error, _now(), dub_id))
 
     async def requeue_interrupted(self) -> int:
@@ -137,15 +137,22 @@ class VoicesRepository:
             "UPDATE voice_dubs SET status='aligned', aligned_path=?, updated_at=? WHERE id=?",
             (aligned_path, _now(), dub_id))
 
+    async def begin_move(self, dub_id: int, destination: str, source: str) -> None:
+        """Write down where a track is going before it moves; a restart finishes the move from this."""
+        await self._db.execute(
+            "UPDATE voice_dubs SET sidecar_path=?, move_from=?, updated_at=? WHERE id=?",
+            (destination, source, _now(), dub_id))
+
     async def mark_placed(self, dub_id: int, sidecar_path: str, ref_path: str) -> None:
         await self._db.execute(
             "UPDATE voice_dubs SET status='placed', sidecar_path=?, ref_path=?, aligned_path=NULL, "
-            "temp_path=NULL, error=NULL, updated_at=? WHERE id=?", (sidecar_path, ref_path, _now(), dub_id))
+            "move_from=NULL, error=NULL, updated_at=? WHERE id=?",
+            (sidecar_path, ref_path, _now(), dub_id))
 
     async def mark_rejected(self, dub_id: int, outcome: str) -> None:
         await self._db.execute(
-            "UPDATE voice_dubs SET status='rejected', outcome=?, aligned_path=NULL, temp_path=NULL, "
-            "updated_at=? WHERE id=?", (outcome, _now(), dub_id))
+            "UPDATE voice_dubs SET status='rejected', outcome=?, aligned_path=NULL, "
+            "move_from=NULL, updated_at=? WHERE id=?", (outcome, _now(), dub_id))
 
     async def release_to_ready(self, dub_ids: list[int]) -> None:
         """The daemon lost the job: the voice-overs are offered to it again."""
@@ -157,14 +164,27 @@ class VoicesRepository:
     async def reset(self, dub_id: int, reason: str) -> None:
         """The track belongs to a reference that is gone: back to the start, from the main source."""
         await self._db.execute(
-            "UPDATE voice_dubs SET status='pending', attempt=0, job_id=NULL, ref_uid=NULL, ref_path=NULL, "
-            "aligned_path=NULL, sidecar_path=NULL, temp_path=NULL, outcome=NULL, error=?, updated_at=? "
-            "WHERE id=?", (reason, _now(), dub_id))
+            "UPDATE voice_dubs SET status='pending', attempt=0, job_id=NULL, submit_key=NULL, ref_uid=NULL, "
+            "ref_path=NULL, aligned_path=NULL, sidecar_path=NULL, move_from=NULL, temp_path=NULL, outcome=NULL, "
+            "error=?, updated_at=? WHERE id=?", (reason, _now(), dub_id))
 
     async def set_sidecar(self, dub_id: int, sidecar_path: str, ref_path: str) -> None:
         await self._db.execute(
-            "UPDATE voice_dubs SET sidecar_path=?, ref_path=?, updated_at=? WHERE id=?",
+            "UPDATE voice_dubs SET sidecar_path=?, ref_path=?, move_from=NULL, updated_at=? WHERE id=?",
             (sidecar_path, ref_path, _now(), dub_id))
+
+    async def journal_cleanup(self, path: str, kind: str, error: str) -> None:
+        """Something that could not be removed: it stays on this list until it is gone."""
+        await self._db.execute(
+            "INSERT INTO voice_cleanup (path, kind, error, updated_at) VALUES (?,?,?,?) "
+            "ON CONFLICT (path) DO UPDATE SET kind=excluded.kind, error=excluded.error, "
+            "updated_at=excluded.updated_at", (path, kind, error, _now()))
+
+    async def cleanup_list(self) -> list[dict[str, Any]]:
+        return await self._db.fetch_all("SELECT * FROM voice_cleanup ORDER BY updated_at")
+
+    async def cleanup_done(self, path: str) -> None:
+        await self._db.execute("DELETE FROM voice_cleanup WHERE path=?", (path,))
 
     async def delete(self, dub_id: int) -> None:
         await self._db.execute("DELETE FROM voice_dubs WHERE id=?", (dub_id,))

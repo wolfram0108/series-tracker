@@ -26,6 +26,8 @@ from typing import Awaitable, Callable
 
 import httpx
 
+from core.ffprobe import duration_of
+
 ProgressCb = Callable[[dict], Awaitable[None]]
 
 # Decoded manifests live on disk while their segments stay remote (Vibix).
@@ -288,30 +290,12 @@ def _headers_args(stream_url: str, headers: dict) -> list[str]:
 
 
 async def _probe_duration_ffprobe(stream_url: str, headers: dict | None = None) -> float:
-    executable = shutil.which("ffprobe")
-    if not executable:
-        return 0.0
-    cmd = [executable, "-v", "error"]
-    cmd.extend(PROTOCOL_WHITELIST)
-    cmd.extend(_headers_args(stream_url, headers or {}))
-    cmd.extend(["-show_entries", "format=duration", "-of",
-                "default=noprint_wrappers=1:nokey=1", stream_url])
+    """Duration a stream announces; a flaky CDN gets a few looks before the duration is given up."""
+    args = [*PROTOCOL_WHITELIST, *_headers_args(stream_url, headers or {})]
     for attempt in range(PROBE_ATTEMPTS):
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            try:
-                out, _ = await asyncio.wait_for(proc.communicate(), PROBE_TIMEOUT_S)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                raise
-            if proc.returncode == 0 and out:
-                return float(out.decode().strip())
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # noqa: BLE001 - a flaky CDN: look again before giving up on the duration
-            pass
+        duration = await duration_of(stream_url, input_args=args, timeout=PROBE_TIMEOUT_S)
+        if duration > 0:
+            return duration
         if attempt + 1 < PROBE_ATTEMPTS:
             await asyncio.sleep(PROBE_RETRY_S)
     return 0.0
@@ -319,18 +303,7 @@ async def _probe_duration_ffprobe(stream_url: str, headers: dict | None = None) 
 
 async def _local_duration(path: str) -> float:
     """Duration of a file on disk; 0 when it cannot be read."""
-    executable = shutil.which("ffprobe")
-    if not executable:
-        return 0.0
-    proc = await asyncio.create_subprocess_exec(
-        executable, "-v", "error", "-show_entries", "format=duration", "-of",
-        "default=noprint_wrappers=1:nokey=1", path,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    out, _ = await proc.communicate()
-    try:
-        return float(out.decode().strip()) if proc.returncode == 0 and out else 0.0
-    except ValueError:
-        return 0.0
+    return await duration_of(path, timeout=PROBE_TIMEOUT_S)
 
 
 async def _download_direct_ffmpeg(stream_url: str, headers: dict,
