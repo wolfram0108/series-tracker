@@ -59,8 +59,8 @@ const vkQuery = ref("")
 const trackerInfo = ref<TrackerInfo | null>(null)
 type PlayerReport = { present: boolean; available: boolean | null; resolution: number | null; reason?: string }
 const parsePlayers = ref<Record<string, PlayerReport>>({})
-// плеер и озвучка web-источника (список приходит с разбором ссылки)
-interface WebSource { url: string; player: string; studio: string; kind: string; first: number | null; last: number | null; count: number }
+// Player/voice-over choices of a web source, delivered with the link parse.
+interface WebSource { url: string; player: string; studio: string; kind: string; count: number; ranges: string }
 const webSources = ref<WebSource[]>([])
 const selectedSource = ref("")
 const profiles = ref<{ id: number; name: string }[]>([])
@@ -229,15 +229,17 @@ const namingTitles = computed<string[]>(() => {
   return out
 })
 
-// «Плеер 1 — VK, плеер 2 — Kodik»: порядок и названия как у пользователя в голове
+// Player 1 is VK, player 2 is Kodik: the numbering users go by.
 const webKindLabels: Record<string, string> = { voice: "озвучка", subtitles: "субтитры" }
 const webSourceOptions = computed(() => webSources.value.map((s) => {
-  const holes = s.first !== null && s.last !== null && s.count !== s.last - s.first + 1
-  const range = s.first === null ? "нет серий" : `${s.first}–${s.last}, ${s.count} сер.${holes ? ", есть пропуски" : ""}`
   const player = s.player === "vk" ? "Плеер 1 (VK)" : "Плеер 2 (Kodik)"
   const kind = webKindLabels[s.kind] ?? s.kind
+  // `ranges` is the real coverage with holes, e.g. "1-10, 13-20".
+  const range = s.count ? `${s.ranges} (${s.count} сер.)` : "нет серий"
   return { value: s.url, label: `${player} · ${s.studio}${kind ? ` · ${kind}` : ""} · ${range}` }
 }))
+
+const selectedWebSource = computed(() => webSources.value.find((s) => s.url === selectedSource.value) ?? null)
 
 // отчёт о плеерах web-источника (приходит с разбором ссылки)
 const playerReportRows = computed(() => {
@@ -314,7 +316,7 @@ function applyWebParse(res: WebParse) {
   selectedSource.value = res.selected_source ?? ""
 }
 
-// Смена плеера/озвучки: список серий и адрес сериала пересчитываются, поля формы не трогаем.
+// Switching the choice re-parses the link; the form fields stay untouched.
 async function pickSource(address: string) {
   const previous = selectedSource.value
   selectedSource.value = address
@@ -699,6 +701,10 @@ onBeforeUnmount(() => {
                 @update:model-value="pickSource($event as string)"
               />
             </StGroup>
+            <!-- the list row is one line; the full coverage of the chosen voice-over wraps here -->
+            <div v-if="selectedWebSource?.count" class="fieldset-hint mt-2">
+              Серии озвучки: {{ selectedWebSource.ranges }} ({{ selectedWebSource.count }} сер.)
+            </div>
           </div>
           <div class="player-report">
             <span

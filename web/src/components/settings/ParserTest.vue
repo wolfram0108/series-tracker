@@ -16,8 +16,8 @@ import { useVideoScanStore } from "../../stores/videoScan"
 
 // initialTitles: если передан (окно добавления сериала) — предзаполняет поле
 // теста списком файлов раздачи. В Настройках не передаётся → поведение как было.
-// initialUrl: адрес выбранного источника web-видео (окно добавления) — поле ссылки
-// предзаполняется, чтобы «Получить с сайта» опрашивало именно выбранную озвучку.
+// initialUrl prefills the link field with the chosen web source so the site fetch
+// polls exactly that voice-over.
 const props = defineProps<{ profileId: number; initialTitles?: string[]; initialUrl?: string }>()
 
 const { request } = useApi()
