@@ -118,6 +118,14 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                      "link": rel.get("link") or rel.get("magnet"),
                      "date_time": rel.get("date_marker")}
                     for rel in result.get("releases", [])]
+        layout = None
+        if result.get("sources"):
+            try:
+                layout = await gw.request("voices.layout", {
+                    "sources": result["sources"],
+                    "reference": result.get("selected_source")}, timeout=10)
+            except BusRequestError as exc:
+                gw.log.warning("раскладка озвучек не посчитана: %s", exc)
         return {"success": True, "title": result.get("title"),
                 "torrents": torrents, "tracker_info": result.get("tracker"),
                 "source_type": result.get("source_type"),
@@ -127,6 +135,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 "players": result.get("players", {}),
                 "sources": result.get("sources", []),
                 "selected_source": result.get("selected_source"),
+                "layout": layout,
                 "resolution": result.get("resolution")}
 
     # --- настройки -------------------------------------------------------------------

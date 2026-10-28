@@ -34,6 +34,7 @@ from modules.slicing import SlicingModule
 from modules.sources import SourcesModule
 from modules.torrents import TorrentsModule
 from modules.trackerauth import TrackerauthModule
+from modules.voices import VoicesModule
 
 configure()
 log = get_logger("run")
@@ -82,6 +83,7 @@ modules = [
     DownloadsModule(bus, db),
     RenamingModule(bus, db),
     SlicingModule(bus, db),
+    VoicesModule(bus),
 ]
 
 # env имеет приоритет (стенд/тесты); без env torrents возьмёт креды

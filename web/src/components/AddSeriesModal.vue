@@ -10,6 +10,7 @@ import StSelect from "./StSelect.vue"
 import SavedPathDropdown from "./SavedPathDropdown.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
 import { api } from "../api/client"
+import { t } from "../i18n"
 import { useApi } from "../composables/useApi"
 import { useSSE } from "../composables/useSSE"
 
@@ -61,7 +62,10 @@ type PlayerReport = { present: boolean; available: boolean | null; resolution: n
 const parsePlayers = ref<Record<string, PlayerReport>>({})
 // Player/voice-over choices of a web source, delivered with the link parse.
 interface WebSource { url: string; player: string; studio: string; kind: string; count: number; ranges: string }
+interface LayoutRow { label: string; role: "reference" | "dub"; source: WebSource; fallbacks: WebSource[] }
+interface WebLayout { voices: LayoutRow[]; skipped: WebSource[] }
 const webSources = ref<WebSource[]>([])
+const webLayout = ref<WebLayout | null>(null)
 const selectedSource = ref("")
 const profiles = ref<{ id: number; name: string }[]>([])
 const saving = ref(false)
@@ -229,21 +233,27 @@ const namingTitles = computed<string[]>(() => {
   return out
 })
 
-// Player 1 is VK, player 2 is Kodik: the numbering users go by.
-const webKindLabels: Record<string, string> = { voice: "озвучка", subtitles: "субтитры" }
-const webSourceOptions = computed(() => webSources.value.map((s) => {
-  const player = s.player === "vk" ? "Плеер 1 (VK)" : "Плеер 2 (Kodik)"
-  const kind = webKindLabels[s.kind] ?? s.kind
-  // `ranges` is the real coverage with holes, e.g. "1-10, 13-20".
-  const range = s.count ? `${s.ranges} (${s.count} сер.)` : "нет серий"
-  return { value: s.url, label: `${player} · ${s.studio}${kind ? ` · ${kind}` : ""} · ${range}` }
-}))
+// Player 1 is CVH, player 2 is Kodik: the numbering users go by.
+const playerLabel = (player: string) =>
+  player === "cvh" || player === "kodik" ? t(`add.source.player.${player}`) : player
+const kindLabel = (kind: string) =>
+  kind === "voice" || kind === "subtitles" ? t(`add.source.kind.${kind}`) : kind
+// `ranges` is the real coverage with holes, e.g. "1-10, 13-20".
+const coverageText = (s: WebSource) =>
+  s.count ? t("add.source.coverage", { ranges: s.ranges, count: s.count }) : t("add.source.none")
+const webSourceOptions = computed(() => webSources.value.map((s) => ({
+  value: s.url,
+  label: t("add.source.option", {
+    player: playerLabel(s.player), studio: s.studio,
+    kind: kindLabel(s.kind) ? ` · ${kindLabel(s.kind)}` : "", coverage: coverageText(s),
+  }),
+})))
 
 const selectedWebSource = computed(() => webSources.value.find((s) => s.url === selectedSource.value) ?? null)
 
 // отчёт о плеерах web-источника (приходит с разбором ссылки)
 const playerReportRows = computed(() => {
-  const labels: Record<string, string> = { vk: "VK", allvideo: "AllVideo", vibix: "Vibix" }
+  const labels: Record<string, string> = { vk: "VK", allvideo: "AllVideo", vibix: "Vibix", cvh: t("player.cvh") }
   return Object.entries(parsePlayers.value).map(([name, report]) => {
     let text = report.reason || "недоступен"
     if (!report.present) text = "нет на странице"
@@ -279,6 +289,7 @@ function handleUrlInput() {
   parsePlayers.value = {}
   webSources.value = []
   selectedSource.value = ""
+  webLayout.value = null
   newSeries.resolution_override = ""
   if (!newSeries.url) {
     sourceType.value = "torrent"
@@ -307,6 +318,7 @@ interface WebParse {
   players?: Record<string, PlayerReport>
   sources?: WebSource[]
   selected_source?: string
+  layout?: WebLayout | null
 }
 function applyWebParse(res: WebParse) {
   webVideoTitles.value = res.titles ?? []
@@ -314,6 +326,7 @@ function applyWebParse(res: WebParse) {
   parsePlayers.value = res.players ?? {}
   webSources.value = res.sources ?? []
   selectedSource.value = res.selected_source ?? ""
+  webLayout.value = res.layout ?? null
 }
 
 // Switching the choice re-parses the link; the form fields stay untouched.
@@ -692,8 +705,8 @@ onBeforeUnmount(() => {
         <div class="fieldset-content">
           <div v-if="webSourceOptions.length" class="field-group mb-3">
             <StGroup>
-              <div class="constructor-item item-label-icon item-label-text-icon" title="Плеер и озвучка">
-                <i class="pi pi-volume-up" /><span>Плеер и озвучка</span>
+              <div class="constructor-item item-label-icon item-label-text-icon" :title="t('add.source.label')">
+                <i class="pi pi-volume-up" /><span>{{ t("add.source.label") }}</span>
               </div>
               <StSelect
                 :model-value="selectedSource"
@@ -703,7 +716,7 @@ onBeforeUnmount(() => {
             </StGroup>
             <!-- the list row is one line; the full coverage of the chosen voice-over wraps here -->
             <div v-if="selectedWebSource?.count" class="fieldset-hint mt-2">
-              Серии озвучки: {{ selectedWebSource.ranges }} ({{ selectedWebSource.count }} сер.)
+              {{ t("add.source.coverageHint", { ranges: selectedWebSource.ranges, count: selectedWebSource.count }) }}
             </div>
           </div>
           <div class="player-report">
@@ -719,6 +732,27 @@ onBeforeUnmount(() => {
           <div class="fieldset-hint">
             Предварительная проверка по первой серии; точное качество — после скана.
           </div>
+        </div>
+      </div>
+
+      <!-- Layout of voice-overs: what is the reference, what is downloaded and aligned -->
+      <div v-if="sourceType === 'web_video' && webLayout?.voices.length" class="modern-fieldset">
+        <div class="fieldset-header"><span class="fieldset-title">{{ t("add.layout.title") }}</span></div>
+        <div class="fieldset-content">
+          <div v-for="row in webLayout.voices" :key="row.label" class="player-report">
+            <span class="player-report-item" :class="{ 'is-ok': row.role === 'reference' }">
+              <b>{{ row.label }}</b>
+              <span>{{ t("add.layout.row", { role: t(`add.layout.role.${row.role}`), player: playerLabel(row.source.player), coverage: coverageText(row.source) }) }}</span>
+            </span>
+            <span v-for="fallback in row.fallbacks" :key="fallback.url" class="player-report-item">
+              <b>{{ t("add.layout.fallback") }}</b>
+              <span>{{ t("add.layout.fallbackRow", { player: playerLabel(fallback.player), coverage: coverageText(fallback) }) }}</span>
+            </span>
+          </div>
+          <div v-for="skipped in webLayout.skipped" :key="skipped.url" class="fieldset-hint">
+            {{ t("add.layout.skipped", { studio: skipped.studio, player: playerLabel(skipped.player) }) }}
+          </div>
+          <div class="fieldset-hint">{{ t("add.layout.hint") }}</div>
         </div>
       </div>
 

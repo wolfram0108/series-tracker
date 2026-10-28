@@ -19,6 +19,8 @@ from modules.rules import RulesModule
 from modules.settings import SettingsModule
 from modules.sources import SourcesModule
 from modules.trackerauth import TrackerauthModule
+from modules.voices import VoicesModule
+from modules.sources.video_providers import BaseVideoProvider, get_default_registry
 from core import ids
 
 
@@ -86,7 +88,7 @@ async def system(db_path, tmp_path):
     modules = [gateway, neighbours, SettingsModule(bus, db),
                TrackerauthModule(bus, db), RulesModule(bus, db),
                CatalogModule(bus, db), sources,
-               LibraryModule(bus, db, allowed_roots=None)]
+               LibraryModule(bus, db, allowed_roots=None), VoicesModule(bus)]
     runner = Runner(bus, modules)
     await runner.start()
     transport = httpx.ASGITransport(app=gateway.app)
@@ -138,6 +140,57 @@ async def test_parse_url_form(system):
     assert t["torrent_id"] == ids.torrent_id("http://kinozal.tv/dl/1",
                                              "2026-01-01 00:00")
     assert body["tracker_info"]["canonical_name"] == "kinozal"
+
+
+class _TwoVoiceSite(BaseVideoProvider):
+    """A web source with two players and the same voice-over in both."""
+
+    name = "twovoice"
+    domains = ("fake.test",)
+
+    def match_url(self, url):
+        return "fake.test" in url
+
+    def canonical_url(self, url):
+        return url
+
+    async def parse_release(self, url, http):
+        def source(player, studio, episodes):
+            return {"url": f"https://fake.test/t?player={player}&voice={studio}", "player": player,
+                    "studio": studio, "kind": "", "episodes": episodes}
+        return {"canonical_url": url, "title": {"ru": "Т", "en": "T"}, "titles": [], "episodes": [],
+                "resolution": None, "videos": [], "episodes_count": 0, "provider": self.name,
+                "source_type": "web_video", "releases": [], "players": {},
+                "sources": [source("cvh", "Main", [1, 2]), source("kodik", "Main", [1, 2]),
+                            source("kodik", "Extra", [1, 2])],
+                "selected_source": "https://fake.test/t?player=cvh&voice=Main"}
+
+    async def scan_episodes(self, url, http, series, episodes=None, progress=None):
+        return {"videos": []}
+
+
+@pytest.mark.asyncio
+async def test_parse_url_of_a_web_source_carries_the_voice_layout(system):
+    _, _, client = system
+    registry = get_default_registry()
+    site = _TwoVoiceSite()
+    registry.register(site)
+    try:
+        body = (await client.post("/api/parse_url", json={"url": "https://fake.test/t"})).json()
+    finally:
+        registry._providers.remove(site)
+    layout = body["layout"]
+    assert [(row["label"], row["role"]) for row in layout["voices"]] == [
+        ("Main", "reference"), ("Extra", "dub")]
+    assert [s["player"] for s in layout["skipped"]] == ["kodik"]
+    assert body["selected_source"] == layout["reference"]["url"]
+
+
+@pytest.mark.asyncio
+async def test_parse_url_of_a_torrent_has_no_layout(system):
+    _, _, client = system
+    body = (await client.post("/api/parse_url", json={"url": "http://kinozal.tv/details.php?id=1"})).json()
+    assert body["layout"] is None
 
 
 @pytest.mark.asyncio
