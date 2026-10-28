@@ -124,6 +124,16 @@ class Neighbours(BaseModule):
         self.handle("library.relocate", relocate)
         self.handle("torrents.db.add", db_add)
 
+        async def dubs(env):
+            return {"items": [
+                {"season": 1, "episode": 2, "voice_key": "blackcat", "voice_label": "BlackCat",
+                 "status": "rejected", "detail": "подозрительно: остаток вне допуска",
+                 "temp_path": "/secret/x.mp4", "job_id": "j1"},
+                {"season": 1, "episode": 2, "voice_key": "red", "voice_label": "RedHeadSound",
+                 "status": "placed", "detail": None, "temp_path": None, "job_id": "j1"}]}
+
+        self.handle("voices.dubs.get", dubs)
+
 
 @pytest.fixture
 async def system(db_path, tmp_path):
@@ -406,3 +416,15 @@ async def test_create_and_update_store_fs_safe_names(system):
     assert resp.status_code == 200
     details = (await client.get(f"/api/series/{series_id}")).json()
     assert details["name_en"] == "NewName"
+
+
+@pytest.mark.asyncio
+async def test_voices_of_a_series_show_state_and_reason_only(system):
+    _, _, client, _ = system
+    resp = await client.get("/api/series/2/voices")
+    assert resp.status_code == 200
+    assert resp.json() == {"items": [
+        {"season": 1, "episode": 2, "voice_key": "blackcat", "voice_label": "BlackCat",
+         "status": "rejected", "detail": "подозрительно: остаток вне допуска"},
+        {"season": 1, "episode": 2, "voice_key": "red", "voice_label": "RedHeadSound",
+         "status": "placed", "detail": None}]}

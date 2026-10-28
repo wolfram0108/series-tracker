@@ -66,6 +66,20 @@ class TmdbInfo(ApiModel):
     poster_path, last_updated, ...)."""
 
 
+class VoiceDub(ApiModel):
+    """Озвучка серии: дополнительная озвучка, её состояние и причина отказа или ошибки."""
+    season: int
+    episode: int
+    voice_key: str
+    voice_label: str
+    status: str
+    detail: str | None = None
+
+
+class VoiceDubs(ApiModel):
+    items: list[VoiceDub]
+
+
 class SeriesObject(ApiModel):
     """Серия (список и карточка). Объявлены ВСЕГДА присутствующие поля;
     условные (tracker_info — только торренты; downloaded_episodes_count —

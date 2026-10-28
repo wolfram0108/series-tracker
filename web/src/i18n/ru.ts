@@ -39,6 +39,15 @@ export const ru = {
   "agents.conform.result.suspect": "подозрительная",
   "agents.conform.result.critical": "критично: {reasons}",
   "agents.conform.result.warnings": "предупреждения: {reasons}",
+  "voices.status.pending": "ждёт загрузки",
+  "voices.status.downloading": "скачивается",
+  "voices.status.ready": "скачана, ждёт выравнивания",
+  "voices.status.aligning": "выравнивается",
+  "voices.status.aligned": "выровнена",
+  "voices.status.placed": "дорожка на месте",
+  "voices.status.rejected": "отклонена",
+  "voices.status.failed": "ошибка",
+  "voices.status.unknown": "неизвестно",
 } as const
 
 export type MessageKey = keyof typeof ru

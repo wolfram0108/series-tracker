@@ -161,3 +161,14 @@ async def test_docs_disabled_by_default(system):
     _, client, _ = system
     assert (await client.get("/docs")).status_code == 404
     assert (await client.get("/openapi.json")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_voice_dub_events_reach_the_interface_whole(system):
+    """Этап 8б: пакет озвучки самодостаточен, интерфейс ничего не доспрашивает."""
+    bus, _, gateway = system
+    payload = {"series_id": 2, "season": 1, "episode": 3, "voice_key": "blackcat",
+               "voice_label": "BlackCat", "status": "rejected", "detail": "критично: нет общего звука"}
+    events = await _collect_sse_events(gateway, bus, [
+        Envelope(topic="voices.dub.changed", kind="event", payload=payload)], 1)
+    assert events == [("voice_dub_update", payload)]

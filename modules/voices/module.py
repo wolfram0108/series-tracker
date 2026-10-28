@@ -9,7 +9,8 @@ Query:
       The source priority is the setting `voices.source_priority` (JSON list of player kinds);
       layout.DEFAULT_PRIORITY when unset.
   voices.dubs.get {series_id} -> {items: [{season, episode, voice_key, voice_label, status,
-      attempt, error, temp_path, job_id, aligned_path, sidecar_path, outcome, ref_uid, ref_path}]}
+      attempt, error, temp_path, job_id, aligned_path, sidecar_path, outcome, ref_uid, ref_path,
+      detail}]}  (detail = outcome or error: what the interface shows next to a status)
 Command:
   voices.dispatch {series_id} — sent by scan after an explicit scan: read the catalog of the site,
       lay the voices out around the selected reference, record a voice_dubs row per planned
@@ -18,7 +19,8 @@ Command:
 Events in:  downloads.fetch.finished (our keys `dub:<id>`), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished,
             conform.daemon.up, series.deleted.
-Events out: voices.dub.changed {series_id, season, episode, voice_key, status} — status is one of
+Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, detail} —
+            detail is the reason of a failure, a rejection or a stale track, else null; status is one of
             ready, aligning, aligned, placed, rejected, failed, moved (the track followed its video),
             stale (its reference was replaced) and removed (the episode and its video are gone);
             series.purged,
@@ -163,7 +165,8 @@ class VoicesModule(BaseModule):
         rows = await self.repo.for_series(int(env.payload["series_id"]))
         keep = ("season", "episode", "voice_key", "voice_label", "status", "attempt", "error",
                 "temp_path", "job_id", "aligned_path", "sidecar_path", "outcome", "ref_uid", "ref_path")
-        return {"items": [{field: row[field] for field in keep} for row in rows]}
+        return {"items": [{**{field: row[field] for field in keep}, "detail": row["outcome"] or row["error"]}
+                          for row in rows]}
 
     # --- planning ---------------------------------------------------------------------
 
@@ -214,6 +217,7 @@ class VoicesModule(BaseModule):
             if row["status"] == "failed":
                 self.log.warning("сериал %d, s%02de%02d: озвучка %s недоступна: %s", series_id,
                                  row["season"], row["episode"], row["voice_label"], row["error"])
+                self._changed(row, "failed", row["error"])
         self._kick(series_id)
 
     async def _reference_episodes(self, series_id: int, reference: dict) -> list[tuple[int, int, int]]:
@@ -285,12 +289,13 @@ class VoicesModule(BaseModule):
         await self.repo.mark_failed(row["id"], error)
         self.log.warning("сериал %d, s%02de%02d: озвучка %s не скачана ни из одного источника: %s",
                          row["series_id"], row["season"], row["episode"], row["voice_label"], error)
-        self._changed(row, "failed")
+        self._changed(row, "failed", error)
 
-    def _changed(self, row: dict, status: str) -> None:
+    def _changed(self, row: dict, status: str, detail: str | None = None) -> None:
         self.publish_event("voices.dub.changed", {
             "series_id": row["series_id"], "season": row["season"], "episode": row["episode"],
-            "voice_key": row["voice_key"], "status": status})
+            "voice_key": row["voice_key"], "voice_label": row["voice_label"], "status": status,
+            "detail": detail})
 
     # --- alignment --------------------------------------------------------------------
 
@@ -402,7 +407,7 @@ class VoicesModule(BaseModule):
                 if row["ref_uid"] and row["ref_uid"] != uid:
                     await self._discard_files(row)
                     await self.repo.reset(row["id"], "референс серии заменён")
-                    self._changed(row, "stale")
+                    self._changed(row, "stale", "референс серии заменён")
             self.log.info("сериал %d, s%02de%02d: референс заменён, дорожки устарели и удалены: %d",
                           series_id, season, episode, len(stale))
             return True
@@ -427,7 +432,7 @@ class VoicesModule(BaseModule):
             await self.repo.mark_rejected(row["id"], "дорожка удалена")
             self.log.info("сериал %d, s%02de%02d: дорожка %s удалена пользователем, заново не создаётся",
                           row["series_id"], row["season"], row["episode"], row["voice_label"])
-            self._changed(row, "rejected")
+            self._changed(row, "rejected", "дорожка удалена")
             return
         await self.repo.set_sidecar(row["id"], expected, reference)
         self.log.info("сериал %d, s%02de%02d: дорожка %s следует за видео: %s", row["series_id"],
@@ -485,7 +490,7 @@ class VoicesModule(BaseModule):
         if reply.get("rejected"):
             for row in ready:
                 await self.repo.mark_rejected(row["id"], reply["rejected"])
-                self._changed(row, "rejected")
+                self._changed(row, "rejected", reply["rejected"])
             self.log.warning("%s: задача выравнивания отклонена: %s", label, reply["rejected"])
             return
         await self.repo.mark_aligning([row["id"] for row in ready], reply["job_id"], uid, reference)
@@ -543,7 +548,7 @@ class VoicesModule(BaseModule):
                 await self.repo.mark_failed(row["id"], error)
                 self.log.warning("сериал %d, s%02de%02d: озвучка %s не выровнена: %s", row["series_id"],
                                  row["season"], row["episode"], row["voice_label"], error)
-                self._changed(row, "failed")
+                self._changed(row, "failed", error)
                 continue
             result = results.get(stem(row["temp_path"]))
             verdict = await self._verdict(result)
@@ -554,7 +559,7 @@ class VoicesModule(BaseModule):
                 await self.repo.mark_rejected(row["id"], verdict)
                 self.log.warning("сериал %d, s%02de%02d: озвучка %s отклонена: %s", row["series_id"],
                                  row["season"], row["episode"], row["voice_label"], verdict)
-                self._changed(row, "rejected")
+                self._changed(row, "rejected", verdict)
         for series_id in {row["series_id"] for row in rows}:
             self._kick(series_id)
 
@@ -577,7 +582,7 @@ class VoicesModule(BaseModule):
         source = row["aligned_path"]
         if not source or not await asyncio.to_thread(os.path.isfile, source):
             await self.repo.mark_failed(row["id"], "выровненный файл пропал")
-            self._changed(row, "failed")
+            self._changed(row, "failed", "выровненный файл пропал")
             return
         destination = sidecar_path(reference, row["voice_label"], os.path.splitext(source)[1] or ".flac")
         await asyncio.to_thread(place, source, destination)

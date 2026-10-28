@@ -14,7 +14,8 @@ from fastapi.responses import JSONResponse
 from core import BusRequestError, is_video_source
 
 from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, OkResponse,
-                      QueueTask, SeriesObject)
+                      QueueTask, SeriesObject,
+                      VoiceDubs)
 
 # Общая документация веток ошибок (отдаются через JSONResponse, на них
 # response_model не распространяется).
@@ -111,6 +112,20 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError:
             return []
         return reply["tasks"]
+
+    @r.get("/api/series/{series_id}/voices", response_model=VoiceDubs)
+    async def series_voices(series_id: int):
+        """Озвучки серий сериала (этап 8б): состояние каждой дополнительной
+        озвучки по сериям. Дальше состояние приходит событием voice_dub_update."""
+        try:
+            reply = await gw.request("voices.dubs.get",
+                                     {"series_id": series_id}, timeout=10)
+        except BusRequestError:
+            return {"items": []}
+        return {"items": [
+            {k: item[k] for k in ("season", "episode", "voice_key",
+                                  "voice_label", "status", "detail")}
+            for item in reply["items"]]}
 
     @r.get("/api/series/{series_id}", response_model=SeriesObject,
            responses=_ERRORS)

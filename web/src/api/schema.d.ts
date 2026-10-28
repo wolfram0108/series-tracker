@@ -183,6 +183,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/series/{series_id}/voices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Series Voices
+         * @description Озвучки серий сериала (этап 8б): состояние каждой дополнительной
+         *     озвучки по сериям. Дальше состояние приходит событием voice_dub_update.
+         */
+        get: operations["series_voices_api_series__series_id__voices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/series/{series_id}": {
         parameters: {
             query?: never;
@@ -1500,6 +1521,33 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * VoiceDub
+         * @description Озвучка серии: дополнительная озвучка, её состояние и причина отказа или ошибки.
+         */
+        VoiceDub: {
+            /** Season */
+            season: number;
+            /** Episode */
+            episode: number;
+            /** Voice Key */
+            voice_key: string;
+            /** Voice Label */
+            voice_label: string;
+            /** Status */
+            status: string;
+            /** Detail */
+            detail?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** VoiceDubs */
+        VoiceDubs: {
+            /** Items */
+            items: components["schemas"]["VoiceDub"][];
+        } & {
+            [key: string]: unknown;
+        };
     };
     responses: never;
     parameters: never;
@@ -1705,6 +1753,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QueueTask"][];
+                };
+            };
+        };
+    };
+    series_voices_api_series__series_id__voices_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceDubs"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -976,3 +976,22 @@ async def test_a_failed_relocation_is_not_a_reason_to_look_at_the_tracks(dubs):
     probe.publish_event("library.relocation.finished", {"series_id": 7, "success": False, "message": "boom"})
     await asyncio.sleep(0.3)
     assert sub.queue.empty() and len(await rows(probe)) == 2
+
+
+@pytest.mark.asyncio
+async def test_an_event_carries_the_voice_and_the_reason_so_the_interface_asks_nothing(dubs):
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    changes = bus.subscribe("voices.dub.changed")
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", blackcat={
+        "suspect": True, "warnings": ["остаток вне допуска"]}))
+    await statuses_until(sub, ["aligned", "placed", "rejected"])
+    seen = {}
+    while not changes.queue.empty():
+        event = changes.queue.get_nowait().payload
+        seen[(event["voice_key"], event["status"])] = event
+    rejected = seen[("blackcat", "rejected")]
+    assert rejected["voice_label"] == "BlackCat" and rejected["detail"].startswith("подозрительно")
+    assert seen[("redheadsound", "aligned")]["detail"] is None
+    by_voice = {r["voice_key"]: r for r in await rows(probe)}
+    assert by_voice["blackcat"]["detail"].startswith("подозрительно") and by_voice["redheadsound"]["detail"] is None

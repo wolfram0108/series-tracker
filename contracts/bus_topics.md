@@ -43,7 +43,7 @@
 | torrents.progress.changed {tasks} | torrents | gateway | torrent_progress_update (Р-23, замена поллинга) |
 | downloads.queue.changed {tasks, count} | downloads | — | download_queue_update |
 | downloads.fetch.finished {key, ok, error, transient, path, series_id} | downloads | voices (ключи `dub:<id>`) | — |
-| voices.dub.changed {series_id, season, episode, voice_key, status} | voices | — | — |
+| voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, detail} | voices | gateway | voice_dub_update (Р-43) |
 | downloads.item.renamed {series_id, unique_id, filename} | downloads | voices | — |
 | voices.episode.settled {series_id, season, episode} | voices | — | — |
 | conform.job.finished {job_id, status, error, results} | conform | voices | — |

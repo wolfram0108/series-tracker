@@ -9,6 +9,8 @@ import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { useVideoScanStore } from "../../stores/videoScan"
+import { useVoicesStore, type VoiceDub } from "../../stores/voices"
+import { t, type MessageKey } from "../../i18n"
 
 // Вкладка «Композиция» VK — порт seriesCompositionManager. Компиляции +
 // нарезанные файлы + «дыры» (missing), сгруппированы по сезонам; приоритет
@@ -19,6 +21,7 @@ const { request } = useApi()
 const toast = useToast()
 const confirm = useConfirm()
 const videoScan = useVideoScanStore()
+const voices = useVoicesStore()
 
 interface SourceData { resolution?: number; url?: string; title?: string }
 interface Extracted { season?: number; episode?: number; start?: number; end?: number; part?: number; voiceover?: string }
@@ -134,6 +137,26 @@ async function copyUrl(url?: string) {
   } catch {
     /* ignore */
   }
+}
+// Озвучки серии (этап 8б): состояние приходит событием voice_dub_update, при открытии — одним запросом.
+function voicesOf(it: Item): VoiceDub[] {
+  if (!isWebVideo.value || it.type !== "compilation") return []
+  const season = it.season ?? it.result?.extracted?.season ?? 1
+  return voices.forEpisode(props.seriesId, season, episodeStart(it))
+}
+const VOICE_STATES = new Set(["pending", "downloading", "ready", "aligning", "aligned", "placed", "rejected", "failed"])
+function voiceStatus(v: VoiceDub): string {
+  return t(VOICE_STATES.has(v.status) ? (`voices.status.${v.status}` as MessageKey) : "voices.status.unknown")
+}
+function voiceTrouble(v: VoiceDub): boolean {
+  return v.status === "failed" || v.status === "rejected"
+}
+async function loadVoices() {
+  if (!isWebVideo.value) return
+  const reply = (await request(
+    api.GET("/api/series/{series_id}/voices", { params: { path: { series_id: props.seriesId } } } as never),
+  )) as { items?: VoiceDub[] } | null
+  voices.load(props.seriesId, reply?.items ?? [])
 }
 function episodeStart(it: { type: string; result?: { extracted?: Extracted }; episode_number?: number; episode_start?: number }): number {
   if (it.type === "compilation") return it.result?.extracted?.start ?? it.result?.extracted?.episode ?? 0
@@ -294,6 +317,7 @@ async function loadComposition(forceRefresh: boolean) {
     initQualityPriority(series)
     availability.value = (series?.availability as Availability | undefined) ?? null
     await loadSliced()
+    await loadVoices()
   } finally {
     loading.value = false
     manualRefresh.value = false
@@ -566,6 +590,9 @@ defineExpose({ reload: () => loadComposition(false) })
                 <div class="pill"><i class="pi pi-images" /><span>Нарезка: <strong>{{ it.slicing_status || "—" }}</strong></span></div>
                 <div class="pill"><i class="pi pi-id-card" /><span>ID: <strong>{{ it.unique_id.substring(0, 8) }}</strong></span></div>
                 <div class="pill pill-link" @click="copyUrl(it.source_data?.url)"><i class="pi pi-link" /><span>{{ formatVkUrl(it.source_data?.url) }}</span></div>
+                <div v-for="v in voicesOf(it)" :key="v.voice_key" class="pill" :class="{ 'pill-danger': voiceTrouble(v) }" :title="v.detail ?? ''">
+                  <i class="pi pi-volume-up" /><span>{{ v.voice_label }}: <strong>{{ voiceStatus(v) }}</strong></span>
+                </div>
               </div>
               <div class="controls-column">
                 <ToggleSwitch
