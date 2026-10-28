@@ -135,6 +135,8 @@ class VoicesModule(BaseModule):
             await self._forget_all(series_id)
             return
         episodes = await self._reference_episodes(series_id, reference)
+        self.log.info("сериал %d: озвучки — референс %s, дополнительных %d, серий плана на сайте %d",
+                      series_id, reference["studio"], len(dubs), len(episodes))
         root = await self._temp_root()
         planned: set[tuple[int, int, str]] = set()
         for season, episode, site_episode in episodes:
@@ -161,11 +163,16 @@ class VoicesModule(BaseModule):
         """(season, episode, site episode) of every planned reference episode that the site lists."""
         by_link = {link: int(number) for number, link in (reference.get("links") or {}).items()}
         reply = await self.request("downloads.episodes.get", {"series_id": series_id}, timeout=30)
-        found = []
+        found, lost = [], []
         for item in reply["items"]:
             site_episode = by_link.get(item["source_url"])
-            if site_episode is not None:
+            if site_episode is None:
+                lost.append(item["episode_start"])
+            else:
                 found.append((item["season"], item["episode_start"], site_episode))
+        if lost:
+            self.log.warning("сериал %d: серии плана не найдены в каталоге референса, озвучки не "
+                             "скачиваются: %s", series_id, ", ".join(map(str, lost)))
         return found
 
     async def _forget_all(self, series_id: int) -> None:
@@ -201,6 +208,9 @@ class VoicesModule(BaseModule):
             return
         if payload.get("ok"):
             await self.repo.mark_ready(row["id"])
+            self.log.info("сериал %d, s%02de%02d: озвучка %s скачана (%s)", row["series_id"],
+                          row["season"], row["episode"], row["voice_label"],
+                          row["chain"][row["attempt"]]["player"])
             self._changed(row, "ready")
             return
         error = str(payload.get("error") or "загрузка не удалась")
