@@ -1,4 +1,4 @@
-"""HTTP/SSE client of the alignment daemon (track-muxer): reads, never writes."""
+"""HTTP/SSE client of the alignment daemon (track-muxer): the event feed, job reads and enqueue."""
 from __future__ import annotations
 
 import json
@@ -13,6 +13,10 @@ REQUEST_TIMEOUT_S = 10.0
 TOPIC_PREFIX = "conform."
 
 
+class DaemonRefused(RuntimeError):
+    """The daemon understood the request and refused it: asking again will not help."""
+
+
 class DaemonClient:
     def __init__(self, base_url: str, http: httpx.AsyncClient | None = None) -> None:
         self.base_url = base_url.rstrip("/")
@@ -25,6 +29,24 @@ class DaemonClient:
                                        timeout=REQUEST_TIMEOUT_S)).json()
         return {"version": health.get("version"), "device": device.get("device"),
                 "gpu": bool(device.get("gpu")), "gpu_name": device.get("name")}
+
+    async def enqueue(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Queue one episode job; the daemon answers with the job."""
+        response = await self._http.post(f"{self.base_url}/conform/enqueue", json=body,
+                                         timeout=REQUEST_TIMEOUT_S)
+        if 400 <= response.status_code < 500:
+            raise DaemonRefused(f"демон отклонил задачу ({response.status_code}): {response.text[:300]}")
+        response.raise_for_status()
+        return response.json()
+
+    async def job(self, job_id: str) -> dict[str, Any] | None:
+        """The whole job, or None when the daemon no longer knows it."""
+        response = await self._http.get(f"{self.base_url}/conform/jobs/{job_id}",
+                                        timeout=REQUEST_TIMEOUT_S)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
 
     async def events(self) -> AsyncIterator[tuple[str, dict[str, Any]]]:
         """(name, payload) of every conform event of the daemon, in order, until the stream ends."""

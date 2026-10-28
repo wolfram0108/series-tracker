@@ -15,13 +15,28 @@ Command:
       lay the voices out around the selected reference, record a voice_dubs row per planned
       reference episode and voice, and download what is not on disk yet into the temporary
       directory (setting `voices.temp_root`, default /nas/torrents/series-tracker).
-Events in:  downloads.fetch.finished (our keys `dub:<id>`), series.deleted.
-Events out: voices.dub.changed {series_id, season, episode, voice_key, status}, series.purged.
+Events in:  downloads.fetch.finished (our keys `dub:<id>`), series.downloaded.changed,
+            conform.job.finished, conform.daemon.up, series.deleted.
+Events out: voices.dub.changed {series_id, season, episode, voice_key, status}, series.purged,
+            voices.episode.settled {series_id, season, episode} — every voice-over of the episode is
+            placed, rejected or failed and its temporary files are gone.
 
 Downloading is delegated to downloads.fetch. A dub tries its main source first, then the other
 sources of the same voice by priority; when none gives the file the row is `failed`, a warning is
 logged, and the next dispatch offers it again from the main source. A dub is `ready` once its file
 is on disk; rows left `downloading` by a restart are sent again on start.
+
+Alignment (stage 7). An episode goes to the alignment service as one job once its reference video
+is on disk and none of its voice-overs is still being downloaded or aligned: the `ready` ones are
+sent (conform.submit). A voice-over that was not downloaded does not hold the episode back, and one
+that arrives later makes a job of its own. When a job ends, a voice-over that converged and raised
+neither `suspect` nor `critical` becomes `aligned`; any other is `rejected` with the reason and a
+job that failed makes its voice-overs `failed` (the next scan offers them again). An `aligned`
+track is moved next to the reference video as `<video name>.<voice title>.<lang>.<ext>` and the row
+becomes `placed` with the track's path; the series stays playable at every step. When every
+voice-over of the episode is placed, rejected or failed, the episode's temporary directory is
+removed. Without the service, or while the reference is missing, rows wait and are retried on
+series.downloaded.changed and conform.daemon.up.
 """
 from __future__ import annotations
 
@@ -30,12 +45,14 @@ import json
 import os
 import re
 import shutil
+from collections import defaultdict
 
 from core import BaseModule, BusRequestError, is_video_source
 from core.db import Database
 from core.envelope import Envelope
 
 from .layout import DEFAULT_PRIORITY, download_chain, plan_layout
+from .placement import place, sidecar_path
 from .repository import VoicesRepository
 
 PRIORITY_KEY = "voices.source_priority"
@@ -43,14 +60,25 @@ TEMP_ROOT_KEY = "voices.temp_root"
 DEFAULT_TEMP_ROOT = "/nas/torrents/series-tracker"
 DUB_MAX_HEIGHT = 720
 PARSE_TIMEOUT_S = 180
+SUBMIT_TIMEOUT_S = 60
+WORKING = ("pending", "downloading", "aligning")
+FINAL = ("placed", "rejected", "failed")
 
 
 def _safe(name: str) -> str:
     return re.sub(r"[^\w.-]+", "_", name, flags=re.UNICODE).strip("._") or "dub"
 
 
+def episode_dir(root: str, series_id: int, season: int, episode: int) -> str:
+    return os.path.join(root, str(series_id), f"s{season:02d}e{episode:02d}")
+
+
 def temp_path(root: str, series_id: int, season: int, episode: int, voice_key: str) -> str:
-    return os.path.join(root, str(series_id), f"s{season:02d}e{episode:02d}", f"{_safe(voice_key)}.mp4")
+    return os.path.join(episode_dir(root, series_id, season, episode), f"{_safe(voice_key)}.mp4")
+
+
+def stem(path: str | None) -> str:
+    return os.path.splitext(os.path.basename(path or ""))[0]
 
 
 class VoicesModule(BaseModule):
@@ -59,6 +87,7 @@ class VoicesModule(BaseModule):
     def __init__(self, bus, db: Database | None = None) -> None:
         self.repo = VoicesRepository(db) if db is not None else None
         self._locks: dict[int, asyncio.Lock] = {}
+        self._kicked: set[int] = set()
         super().__init__(bus)
 
     def register(self) -> None:
@@ -66,6 +95,9 @@ class VoicesModule(BaseModule):
         self.handle("voices.dubs.get", self.on_dubs_get)
         self.handle("voices.dispatch", self.on_dispatch, concurrent=True)
         self.handle("downloads.fetch.finished", self.on_fetch_finished)
+        self.handle("series.downloaded.changed", self.on_downloaded)
+        self.handle("conform.job.finished", self.on_job_finished)
+        self.handle("conform.daemon.up", self.on_daemon_up)
         self.handle("series.deleted", self.on_series_deleted)
 
     async def on_start(self) -> None:
@@ -77,6 +109,8 @@ class VoicesModule(BaseModule):
             self.log.info("озвучки: к докачке %d (прерванных %d)", len(pending), requeued)
         for row in pending:
             await self._start(row)
+        for series_id in await self.repo.series_waiting():
+            self._kick(series_id)
 
     # --- settings ---------------------------------------------------------------------
 
@@ -106,7 +140,7 @@ class VoicesModule(BaseModule):
     async def on_dubs_get(self, env: Envelope) -> dict:
         rows = await self.repo.for_series(int(env.payload["series_id"]))
         keep = ("season", "episode", "voice_key", "voice_label", "status", "attempt", "error",
-                "temp_path")
+                "temp_path", "job_id", "aligned_path", "sidecar_path", "outcome")
         return {"items": [{field: row[field] for field in keep} for row in rows]}
 
     # --- planning ---------------------------------------------------------------------
@@ -158,6 +192,7 @@ class VoicesModule(BaseModule):
             if row["status"] == "failed":
                 self.log.warning("сериал %d, s%02de%02d: озвучка %s недоступна: %s", series_id,
                                  row["season"], row["episode"], row["voice_label"], row["error"])
+        self._kick(series_id)
 
     async def _reference_episodes(self, series_id: int, reference: dict) -> list[tuple[int, int, int]]:
         """(season, episode, site episode) of every planned reference episode that the site lists."""
@@ -212,6 +247,7 @@ class VoicesModule(BaseModule):
                           row["season"], row["episode"], row["voice_label"],
                           row["chain"][row["attempt"]]["player"])
             self._changed(row, "ready")
+            self._kick(row["series_id"])
             return
         error = str(payload.get("error") or "загрузка не удалась")
         source = row["chain"][row["attempt"]]
@@ -233,6 +269,176 @@ class VoicesModule(BaseModule):
         self.publish_event("voices.dub.changed", {
             "series_id": row["series_id"], "season": row["season"], "episode": row["episode"],
             "voice_key": row["voice_key"], "status": status})
+
+    # --- alignment --------------------------------------------------------------------
+
+    async def on_downloaded(self, env: Envelope) -> None:
+        self._kick(int(env.payload["series_id"]))
+
+    async def on_daemon_up(self, env: Envelope) -> None:
+        for job_id in await self.repo.aligning_jobs():
+            await self._reconcile(job_id)
+        for series_id in await self.repo.series_waiting():
+            self._kick(series_id)
+
+    def _kick(self, series_id: int) -> None:
+        """Look at the series once more; kicks that arrive while it is scheduled merge into one."""
+        if series_id in self._kicked:
+            return
+        self._kicked.add(series_id)
+        task = asyncio.create_task(self._advance_locked(series_id), name=f"voices:advance:{series_id}")
+        self._bg.add(task)
+        task.add_done_callback(self._bg.discard)
+
+    async def _advance_locked(self, series_id: int) -> None:
+        async with self._locks.setdefault(series_id, asyncio.Lock()):
+            self._kicked.discard(series_id)
+            try:
+                await self._advance(series_id)
+            except (BusRequestError, asyncio.TimeoutError, OSError) as exc:
+                self.log.warning("сериал %d: выравнивание озвучек отложено: %s", series_id, exc)
+            except Exception:  # noqa: BLE001 - one series must not stop the others
+                self.log.exception("сериал %d: сбой оркестрации озвучек", series_id)
+
+    async def _advance(self, series_id: int) -> None:
+        rows = await self.repo.for_series(series_id)
+        if not rows:
+            return
+        series = await self.request("catalog.series.get", {"series_id": series_id})
+        references = await self._reference_paths(series)
+        root = await self._temp_root()
+        episodes = sorted({(row["season"], row["episode"]) for row in rows})
+        for season, episode in episodes:
+            reference = references.get((season, episode))
+            if reference is not None:
+                for row in await self.repo.for_episode(series_id, season, episode):
+                    if row["status"] == "aligned":
+                        await self._place(row, reference)
+                group = await self.repo.for_episode(series_id, season, episode)
+                ready = [row for row in group if row["status"] == "ready"]
+                if ready and not any(row["status"] in WORKING for row in group):
+                    await self._submit(series, season, episode, reference, ready, root)
+            await self._tidy(series_id, season, episode, root)
+
+    async def _reference_paths(self, series: dict) -> dict[tuple[int, int], str]:
+        """Reference files that are on disk now, by (season, episode)."""
+        reply = await self.request("downloads.episodes.get", {"series_id": series["id"]}, timeout=30)
+        found = {}
+        for item in reply["items"]:
+            if not item.get("final_filename"):
+                continue
+            path = os.path.join(series["save_path"], item["final_filename"])
+            if await asyncio.to_thread(os.path.isfile, path):
+                found[(item["season"], item["episode_start"])] = path
+        return found
+
+    async def _submit(self, series: dict, season: int, episode: int, reference: str,
+                      ready: list[dict], root: str) -> None:
+        folder = episode_dir(root, series["id"], season, episode)
+        label = f"{series['name']} s{season:02d}e{episode:02d}"
+        try:
+            reply = await self.request("conform.submit", {
+                "ref": reference, "dubs": [row["temp_path"] for row in ready],
+                "out_dir": os.path.join(folder, "_aligned"), "cache_dir": os.path.join(folder, "_cache"),
+                "label": label}, timeout=SUBMIT_TIMEOUT_S)
+        except (BusRequestError, asyncio.TimeoutError) as exc:
+            self.log.info("%s: озвучки ждут сервис выравнивания: %s", label, exc)
+            return
+        if reply.get("rejected"):
+            for row in ready:
+                await self.repo.mark_rejected(row["id"], reply["rejected"])
+                self._changed(row, "rejected")
+            self.log.warning("%s: задача выравнивания отклонена: %s", label, reply["rejected"])
+            return
+        await self.repo.mark_aligning([row["id"] for row in ready], reply["job_id"])
+        for row in ready:
+            self._changed(row, "aligning")
+
+    async def on_job_finished(self, env: Envelope) -> None:
+        await self._apply_job(env.payload)
+
+    async def _reconcile(self, job_id: str) -> None:
+        """A job sent before a restart: learn how it ended, or send its voice-overs again."""
+        try:
+            view = await self.request("conform.job.get", {"job_id": job_id}, timeout=30)
+        except (BusRequestError, asyncio.TimeoutError) as exc:
+            self.log.info("задача выравнивания %s: итог пока неизвестен (%s)", job_id, exc)
+            return
+        if view["status"] == "gone":
+            rows = [row for row in await self.repo.by_job(job_id) if row["status"] == "aligning"]
+            await self.repo.release_to_ready([row["id"] for row in rows])
+            for series_id in {row["series_id"] for row in rows}:
+                self._kick(series_id)
+        elif view["status"] in ("done", "failed", "cancelled"):
+            await self._apply_job(view)
+
+    async def _apply_job(self, view: dict) -> None:
+        rows = [row for row in await self.repo.by_job(view["job_id"]) if row["status"] == "aligning"]
+        if not rows:
+            return
+        results = {stem(result["dub"]): result for result in view.get("results") or []}
+        for row in rows:
+            if view["status"] != "done":
+                error = view.get("error") or f"задача выравнивания: {view['status']}"
+                await self.repo.mark_failed(row["id"], error)
+                self.log.warning("сериал %d, s%02de%02d: озвучка %s не выровнена: %s", row["series_id"],
+                                 row["season"], row["episode"], row["voice_label"], error)
+                self._changed(row, "failed")
+                continue
+            result = results.get(stem(row["temp_path"]))
+            verdict = await self._verdict(result)
+            if verdict is None:
+                await self.repo.mark_aligned(row["id"], result["out_path"])
+                self._changed(row, "aligned")
+            else:
+                await self.repo.mark_rejected(row["id"], verdict)
+                self.log.warning("сериал %d, s%02de%02d: озвучка %s отклонена: %s", row["series_id"],
+                                 row["season"], row["episode"], row["voice_label"], verdict)
+                self._changed(row, "rejected")
+        for series_id in {row["series_id"] for row in rows}:
+            self._kick(series_id)
+
+    @staticmethod
+    async def _verdict(result: dict | None) -> str | None:
+        """Why a result may not be placed next to the video; None when it may."""
+        if result is None:
+            return "в задаче нет результата по этой озвучке"
+        if not result.get("ok"):
+            return result.get("error") or "выравнивание не удалось"
+        if result.get("critical"):
+            return "критично: " + "; ".join(result["critical"])
+        if result.get("suspect"):
+            return "подозрительно: " + "; ".join(result.get("warnings") or ["остаток вне допуска"])
+        if not result.get("out_path") or not await asyncio.to_thread(os.path.isfile, result["out_path"]):
+            return "выходной файл не найден"
+        return None
+
+    async def _place(self, row: dict, reference: str) -> None:
+        source = row["aligned_path"]
+        if not source or not await asyncio.to_thread(os.path.isfile, source):
+            await self.repo.mark_failed(row["id"], "выровненный файл пропал")
+            self._changed(row, "failed")
+            return
+        destination = sidecar_path(reference, row["voice_label"], os.path.splitext(source)[1] or ".flac")
+        await asyncio.to_thread(place, source, destination)
+        await self.repo.mark_placed(row["id"], destination)
+        self.log.info("сериал %d, s%02de%02d: дорожка %s рядом с видео: %s", row["series_id"],
+                      row["season"], row["episode"], row["voice_label"], destination)
+        self._changed(row, "placed")
+
+    async def _tidy(self, series_id: int, season: int, episode: int, root: str) -> None:
+        """The episode is settled: its temporary files are of no use any more."""
+        group = await self.repo.for_episode(series_id, season, episode)
+        if not group or any(row["status"] not in FINAL for row in group):
+            return
+        folder = episode_dir(root, series_id, season, episode)
+        if not (any(row["temp_path"] or row["aligned_path"] for row in group)
+                or await asyncio.to_thread(os.path.isdir, folder)):
+            return
+        await asyncio.to_thread(shutil.rmtree, folder, True)
+        await self.repo.forget_temp(series_id, season, episode)
+        self.publish_event("voices.episode.settled",
+                           {"series_id": series_id, "season": season, "episode": episode})
 
     # --- cascade ----------------------------------------------------------------------
 

@@ -234,13 +234,19 @@ class Neighbours(BaseModule):
 
     name = "neighbours"
 
-    def __init__(self, bus, sources, reference_url, plan):
+    def __init__(self, bus, sources, reference_url, plan, library="/nonexistent"):
         self.sources = sources
         self.reference_url = reference_url
         self.plan = plan  # [(season, episode, site episode)]
+        self.library = library
+        self.references = {}  # episode -> file name of the reference video on disk
         self.settings = {}
         self.fetches = []
         self.cancels = []
+        self.submits = []
+        self.submit_error = None
+        self.submit_reply = None
+        self.jobs = {}  # job id -> reply of conform.job.get
         self.source_type = "web_video"
         super().__init__(bus)
 
@@ -251,10 +257,12 @@ class Neighbours(BaseModule):
         self.handle("settings.value.get", self.on_setting)
         self.handle("downloads.fetch", self.on_fetch)
         self.handle("downloads.fetch.cancel", self.on_cancel)
+        self.handle("conform.submit", self.on_submit)
+        self.handle("conform.job.get", self.on_job_get)
 
     async def on_series(self, env):
-        return {"id": env.payload["series_id"], "url": "https://site/title.html",
-                "source_type": self.source_type}
+        return {"id": env.payload["series_id"], "url": "https://site/title.html", "name": "Series",
+                "save_path": self.library, "source_type": self.source_type}
 
     async def on_parse(self, env):
         assert env.payload.get("with_links") is True
@@ -264,7 +272,8 @@ class Neighbours(BaseModule):
         reference = next(s for s in self.sources if s["url"] == self.reference_url)
         return {"items": [{"unique_id": f"u{episode}", "season": season, "episode_start": episode,
                            "source_url": reference["links"][str(site)], "status": "pending",
-                           "final_filename": None} for season, episode, site in self.plan]}
+                           "final_filename": self.references.get(episode)}
+                          for season, episode, site in self.plan]}
 
     async def on_setting(self, env):
         return {"key": env.payload["key"], "value": self.settings.get(env.payload["key"])}
@@ -274,6 +283,16 @@ class Neighbours(BaseModule):
 
     async def on_cancel(self, env):
         self.cancels.append(env.payload["series_id"])
+
+    async def on_submit(self, env):
+        self.submits.append(dict(env.payload))
+        if self.submit_error:
+            raise RuntimeError(self.submit_error)
+        return self.submit_reply or {"job_id": f"job-{len(self.submits)}"}
+
+    async def on_job_get(self, env):
+        return self.jobs.get(env.payload["job_id"], {"job_id": env.payload["job_id"], "status": "gone",
+                                                     "error": None, "results": []})
 
 
 @pytest.fixture
@@ -289,7 +308,8 @@ async def dubs(db_path, tmp_path):
     sources = [linked("cvh", "FumoDub", range(1, 4), url="https://site/?player=cvh&voice=FumoDub"),
                linked("kodik", "BlackCat", range(1, 4)),
                linked("cvh", "BlackCat", [1, 2])]
-    neighbours = Neighbours(bus, sources, sources[0]["url"], [(1, 1, 1), (1, 2, 2), (1, 3, 3)])
+    neighbours = Neighbours(bus, sources, sources[0]["url"], [(1, 1, 1), (1, 2, 2), (1, 3, 3)],
+                            library=str(tmp_path / "library"))
     neighbours.settings["voices.temp_root"] = str(tmp_path / "temp")
     probe = Probe(bus)
     voices = VoicesModule(bus, db)
@@ -467,3 +487,251 @@ async def test_after_a_restart_interrupted_downloads_are_sent_again(db_path, dub
         assert sorted(f["key"] for f in neighbours.fetches[3:]) == sorted(f["key"] for f in neighbours.fetches[:3])
     finally:
         await again.stop()
+
+
+# --- alignment: from downloaded voice-overs to tracks next to the video -------------------
+
+
+def touch(path, content=b"x"):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(content)
+
+
+async def statuses_until(sub, wanted, seconds=5.0):
+    """Wait on the pushed events until `wanted` (a sorted list of statuses seen) is reached."""
+    seen = []
+    end = asyncio.get_running_loop().time() + seconds
+    while sorted(seen) != sorted(wanted):
+        left = end - asyncio.get_running_loop().time()
+        assert left > 0, (seen, wanted)
+        seen.append((await asyncio.wait_for(sub.queue.get(), left)).payload["status"])
+    return seen
+
+
+def reference_on_disk(neighbours, episode=1):
+    name = f"Series s01e{episode:02d}.mp4"
+    neighbours.references[episode] = name
+    touch(os.path.join(neighbours.library, name))
+    return os.path.join(neighbours.library, name)
+
+
+async def two_voices_ready(dubs, plan=((1, 1, 1),), reference=True, finished=True):
+    """One planned episode with two additional voices, downloaded; the reference may be missing."""
+    probe, neighbours, voices, bus = dubs
+    neighbours.sources.append(linked("kodik", "RedHeadSound", range(1, 4)))
+    neighbours.plan[:] = list(plan)
+    ref = reference_on_disk(neighbours) if reference else None
+    sub = bus.subscribe("voices.dub.changed")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 2)
+    if finished:
+        for fetch in neighbours.fetches:
+            touch(fetch["path"], b"video")
+            finish(probe, fetch["key"])
+    return probe, neighbours, voices, bus, sub, ref
+
+
+def job_done(neighbours, job_id, **per_dub):
+    """A finished job whose aligned tracks exist; per_dub overrides fields of a dub's result."""
+    submit = neighbours.submits[-1]
+    results = []
+    for path in submit["dubs"]:
+        name = os.path.basename(path)
+        out = os.path.join(submit["out_dir"], os.path.splitext(name)[0] + ".flac")
+        touch(out, b"flac")
+        result = {"dub": name, "ok": True, "skipped": False, "out_path": out, "suspect": False,
+                  "critical": [], "warnings": [], "resid_ms": 12.0, "error": None}
+        result.update(per_dub.get(os.path.splitext(name)[0], {}))
+        results.append(result)
+    return {"job_id": job_id, "status": "done", "error": None, "results": results}
+
+
+@pytest.mark.asyncio
+async def test_an_episode_goes_to_alignment_and_its_tracks_land_next_to_the_video(dubs):
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    submit = neighbours.submits[0]
+    assert submit["ref"] == ref and submit["label"] == "Series s01e01"
+    assert sorted(os.path.basename(p) for p in submit["dubs"]) == ["blackcat.mp4", "redheadsound.mp4"]
+    assert submit["out_dir"].endswith("/7/s01e01/_aligned") and submit["cache_dir"].endswith("/7/s01e01/_cache")
+    assert {r["status"] for r in await rows(probe)} == {"aligning"}
+    settled_sub = bus.subscribe("voices.episode.settled")
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
+    assert (await asyncio.wait_for(settled_sub.queue.get(), 5)).payload == {
+        "series_id": 7, "season": 1, "episode": 1}
+    stem = os.path.splitext(ref)[0]
+    assert os.path.isfile(f"{stem}.BlackCat.ru.flac") and os.path.isfile(f"{stem}.RedHeadSound.ru.flac")
+    done = await rows(probe)
+    assert {r["status"] for r in done} == {"placed"}
+    assert {r["sidecar_path"] for r in done} == {f"{stem}.BlackCat.ru.flac", f"{stem}.RedHeadSound.ru.flac"}
+    assert not os.path.exists(os.path.join(neighbours.settings["voices.temp_root"], "7", "s01e01"))
+    assert os.path.isfile(ref)
+
+
+@pytest.mark.asyncio
+async def test_the_episode_waits_for_its_reference_video(dubs):
+    probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, reference=False)
+    await statuses_until(sub, ["ready", "ready"])
+    await asyncio.sleep(0.2)
+    assert neighbours.submits == []
+    reference_on_disk(neighbours)
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
+    await statuses_until(sub, ["aligning", "aligning"])
+    assert len(neighbours.submits) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_episode_waits_for_every_voice_still_being_downloaded(dubs):
+    probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, finished=False)
+    first, second = neighbours.fetches
+    touch(first["path"], b"video")
+    finish(probe, first["key"])
+    await statuses_until(sub, ["ready"])
+    await asyncio.sleep(0.2)
+    assert neighbours.submits == []
+    touch(second["path"], b"video")
+    finish(probe, second["key"])
+    await statuses_until(sub, ["ready", "aligning", "aligning"])
+    assert len(neighbours.submits) == 1 and len(neighbours.submits[0]["dubs"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_voice_that_could_not_be_downloaded_does_not_hold_the_episode_back(dubs):
+    probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, finished=False)
+    lost, kept = neighbours.fetches
+    # RedHeadSound has only the Kodik source for episode 1: its chain ends with one failure.
+    red = next(f for f in neighbours.fetches if "RedHeadSound" in f["url"])
+    black = next(f for f in neighbours.fetches if "BlackCat" in f["url"])
+    finish(probe, red["key"], ok=False, error="gone")
+    touch(black["path"], b"video")
+    finish(probe, black["key"])
+    await statuses_until(sub, ["failed", "ready", "aligning"])
+    assert [os.path.basename(p) for p in neighbours.submits[0]["dubs"]] == ["blackcat.mp4"]
+
+
+@pytest.mark.asyncio
+async def test_a_result_that_is_not_clean_is_rejected_and_never_placed(dubs, caplog):
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    settled_sub = bus.subscribe("voices.episode.settled")
+    caplog.set_level("WARNING")
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", blackcat={
+        "suspect": True, "warnings": ["остаток вне допуска"]}, redheadsound={"critical": ["нет общего звука"]}))
+    await statuses_until(sub, ["rejected", "rejected"])
+    by_voice = {r["voice_key"]: r for r in await rows(probe)}
+    assert by_voice["blackcat"]["status"] == "rejected" and "подозрительно" in by_voice["blackcat"]["outcome"]
+    assert "критично" in by_voice["redheadsound"]["outcome"]
+    stem = os.path.splitext(ref)[0]
+    assert not any(name.startswith(os.path.basename(stem) + ".") and name.endswith(".flac")
+                   for name in os.listdir(neighbours.library))
+    assert any("отклонена" in record.getMessage() for record in caplog.records)
+    await asyncio.wait_for(settled_sub.queue.get(), 5)
+    assert not os.path.exists(os.path.join(neighbours.settings["voices.temp_root"], "7", "s01e01"))
+
+
+@pytest.mark.asyncio
+async def test_a_missing_result_or_a_failed_job_never_places_anything(dubs):
+    probe, neighbours, _, _, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    view = job_done(neighbours, "job-1")
+    view["results"] = view["results"][:1]
+    probe.publish_event("conform.job.finished", view)
+    await statuses_until(sub, ["aligned", "placed", "rejected"])
+    outcomes = {r["voice_key"]: r for r in await rows(probe)}
+    missing = next(r for r in outcomes.values() if r["status"] == "rejected")
+    assert "нет результата" in missing["outcome"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_job_makes_its_voices_failed_for_the_next_scan(dubs):
+    probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    probe.publish_event("conform.job.finished", {"job_id": "job-1", "status": "failed",
+                                                 "error": "нет доступа к референсу", "results": []})
+    await statuses_until(sub, ["failed", "failed"])
+    assert {(r["status"], r["error"]) for r in await rows(probe)} == {("failed", "нет доступа к референсу")}
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 4)  # offered again from the main source
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_service_leaves_the_voices_waiting_until_it_is_back(dubs):
+    probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, finished=False)
+    neighbours.submit_error = "сервис выравнивания недоступен"
+    for fetch in neighbours.fetches:
+        touch(fetch["path"], b"video")
+        finish(probe, fetch["key"])
+    await statuses_until(sub, ["ready", "ready"])
+    await asyncio.sleep(0.2)
+    assert {r["status"] for r in await rows(probe)} == {"ready"}
+    neighbours.submit_error = None
+    probe.publish_event("conform.daemon.up", {})
+    await statuses_until(sub, ["aligning", "aligning"])
+
+
+@pytest.mark.asyncio
+async def test_a_final_refusal_of_the_service_rejects_the_voices(dubs):
+    probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, finished=False)
+    neighbours.submit_reply = {"rejected": "путь вне общего хранилища"}
+    for fetch in neighbours.fetches:
+        touch(fetch["path"], b"video")
+        finish(probe, fetch["key"])
+    await statuses_until(sub, ["ready", "ready", "rejected", "rejected"])
+    assert {r["outcome"] for r in await rows(probe)} == {"путь вне общего хранилища"}
+
+
+@pytest.mark.asyncio
+async def test_after_a_restart_a_job_that_ended_meanwhile_is_applied(db_path, dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    neighbours.jobs["job-1"] = job_done(neighbours, "job-1")
+    await voices.stop()
+    again = VoicesModule(bus, Database(db_path))
+    await again.start()
+    try:
+        probe.publish_event("conform.daemon.up", {})
+        await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
+        assert {r["status"] for r in await rows(probe)} == {"placed"}
+    finally:
+        await again.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_job_the_service_forgot_is_sent_again(db_path, dubs):
+    probe, neighbours, voices, bus, sub, _ = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    await voices.stop()
+    again = VoicesModule(bus, Database(db_path))
+    await again.start()
+    try:
+        probe.publish_event("conform.daemon.up", {})
+        await statuses_until(sub, ["aligning", "aligning"])
+        assert len(neighbours.submits) == 2 and {r["job_id"] for r in await rows(probe)} == {"job-2"}
+    finally:
+        await again.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_voice_that_arrives_later_makes_a_job_of_its_own(dubs):
+    probe, neighbours, _, _, sub, ref = await two_voices_ready(dubs, finished=False)
+    red = next(f for f in neighbours.fetches if "RedHeadSound" in f["url"])
+    black = next(f for f in neighbours.fetches if "BlackCat" in f["url"])
+    finish(probe, red["key"], ok=False, error="gone")
+    touch(black["path"], b"video")
+    finish(probe, black["key"])
+    await statuses_until(sub, ["failed", "ready", "aligning"])
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await statuses_until(sub, ["aligned", "placed"])
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    retry = neighbours.fetches[2]
+    touch(retry["path"], b"video")
+    finish(probe, retry["key"])
+    await statuses_until(sub, ["ready", "aligning"])
+    assert len(neighbours.submits) == 2
+    assert [os.path.basename(p) for p in neighbours.submits[1]["dubs"]] == ["redheadsound.mp4"]
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-2"))
+    await statuses_until(sub, ["aligned", "placed"])
+    assert {r["status"] for r in await rows(probe)} == {"placed"}

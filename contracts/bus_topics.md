@@ -22,7 +22,7 @@
 | settings | value.get, value.set, values.by_prefix (Р-22) |
 | trackerauth | fetch, credentials.get/set (Р-22, владелец auth) |
 | voices | layout {sources: [{url, player, studio, kind, episodes, links?}], mode?, reference?} → раскладка озвучек сериала с ключом озвучки (Р-39); приоритет источников — настройка `voices.source_priority`; dispatch {series_id} (скан → озвучки серий во временный каталог, Р-40); dubs.get {series_id} → записи voice_dubs |
-| conform | status {} → {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks} — зеркало очереди выравнивания демона track-muxer (Р-39); слушает `gateway.sse.clients` |
+| conform | submit {ref, dubs, out_dir, cache_dir, label?} → {job_id} \| {rejected} (постановка серии, Р-41); job.get {job_id} → итог задачи; status {} → {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks} — зеркало очереди выравнивания демона track-muxer (Р-39); слушает `gateway.sse.clients` |
 
 ## События (издатель → подписчики)
 
@@ -43,7 +43,10 @@
 | torrents.progress.changed {tasks} | torrents | gateway | torrent_progress_update (Р-23, замена поллинга) |
 | downloads.queue.changed {tasks, count} | downloads | — | download_queue_update |
 | downloads.fetch.finished {key, ok, error, transient, path, series_id} | downloads | voices (ключи `dub:<id>`) | — |
-| voices.dub.changed {series_id, season, episode, voice_key, status} | voices | — (этап 7: оркестрация серии) | — |
+| voices.dub.changed {series_id, season, episode, voice_key, status} | voices | — | — |
+| voices.episode.settled {series_id, season, episode} | voices | — | — |
+| conform.job.finished {job_id, status, error, results} | conform | voices | — |
+| conform.daemon.up {} | conform | voices | — |
 | slicing.queue.changed {tasks} | slicing | — | slicing_queue_update |
 | conform.queue.changed {daemon, tasks} | conform | — | conform_queue_update (Р-39; вся картина на каждое изменение и при подключении клиента SSE) |
 | gateway.sse.clients {count} | gateway | catalog, conform | — |

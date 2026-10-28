@@ -5,9 +5,10 @@ import json
 import httpx
 import pytest
 
-from core import BaseModule, Bus, Runner
-from modules.conform import ConformModule, DaemonClient
+from core import BaseModule, Bus, BusRequestError, Runner
+from modules.conform import ConformModule, DaemonClient, DaemonRefused
 from modules.conform.module import compact_job
+from modules.conform.paths import translate
 
 
 def job(job_id, seq=1, status="running", **fields):
@@ -25,6 +26,9 @@ class FakeClient:
     def __init__(self, *scripts):
         self.scripts = list(scripts)
         self.connections = 0
+        self.enqueued = []
+        self.refuse = False
+        self.known = {}
 
     async def info(self):
         return {"version": "0.1.0", "device": "cuda", "gpu": True, "gpu_name": "RTX"}
@@ -40,18 +44,44 @@ class FakeClient:
             yield item
         await asyncio.Event().wait()
 
+    async def enqueue(self, body):
+        self.enqueued.append(body)
+        if self.refuse:
+            raise DaemonRefused("демон отклонил задачу (422): bad path")
+        return {"id": "j-new", "status": "queued"}
+
+    async def job(self, job_id):
+        return self.known.get(job_id)
+
     async def close(self):
         pass
+
+
+class Settings(BaseModule):
+    """Answers settings.value.get from a dict."""
+
+    name = "settings"
+
+    def __init__(self, bus, values=None):
+        self.values = values or {}
+        super().__init__(bus)
+
+    def register(self):
+        self.handle("settings.value.get", self.on_get)
+
+    async def on_get(self, env):
+        return {"key": env.payload["key"], "value": self.values.get(env.payload["key"])}
 
 
 class Probe(BaseModule):
     name = "probe"
 
 
-async def started(client, **options):
+async def started(client, settings=None, **options):
     bus = Bus()
     probe = Probe(bus)
-    runner = Runner(bus, [ConformModule(bus, client, backoff_start=0.01, **options), probe])
+    runner = Runner(bus, [ConformModule(bus, client, backoff_start=0.01, **options),
+                          Settings(bus, settings), probe])
     await runner.start()
     return bus, probe, runner
 
@@ -236,3 +266,174 @@ async def test_client_yields_only_the_conform_events_and_skips_noise():
 async def test_client_info_joins_health_and_device():
     assert await stream_of("").info() == {"version": "0.1.0", "device": "cuda", "gpu": True,
                                           "gpu_name": "RTX 3090"}
+
+
+# --- paths, enqueue, how a job ended --------------------------------------------------
+
+
+def test_paths_follow_the_longest_prefix_on_a_boundary():
+    mapping = {"/nas": "/mnt/meganas/media", "/nas/torrents": "/mnt/other"}
+    assert translate("/nas/a/b.mp4", mapping) == "/mnt/meganas/media/a/b.mp4"
+    assert translate("/nas/torrents/x", mapping) == "/mnt/other/x"
+    assert translate("/nas", mapping) == "/mnt/meganas/media"
+    for outside in ("/nasty/file", "/home/x"):
+        with pytest.raises(ValueError):
+            translate(outside, mapping)
+
+
+SUBMIT = {"ref": "/nas/lib/S/ep1.mp4", "dubs": ["/nas/torrents/series-tracker/7/s01e01/a.mp4"],
+          "out_dir": "/nas/torrents/series-tracker/7/s01e01/_aligned",
+          "cache_dir": "/nas/torrents/series-tracker/7/s01e01/_cache", "label": "S s01e01"}
+
+
+@pytest.mark.asyncio
+async def test_submit_sends_the_episode_with_daemon_paths_and_returns_the_job():
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: s["daemon"]["up"])
+        reply = await probe.request("conform.submit", SUBMIT, timeout=5)
+        assert reply == {"job_id": "j-new"}
+        sent = client.enqueued[0]
+        assert sent["ref"] == "/mnt/meganas/media/lib/S/ep1.mp4"
+        assert sent["dubs"] == ["/mnt/meganas/media/torrents/series-tracker/7/s01e01/a.mp4"]
+        assert sent["out_dir"].endswith("/7/s01e01/_aligned") and sent["keep_tmp"] is False
+        assert sent["label"] == "S s01e01"
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_submit_takes_the_path_map_from_settings():
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    _, probe, runner = await started(client, {"conform.path_map": '{"/nas": "/share"}'})
+    try:
+        await until(probe, lambda s: s["daemon"]["up"])
+        await probe.request("conform.submit", SUBMIT, timeout=5)
+        assert client.enqueued[0]["ref"] == "/share/lib/S/ep1.mp4"
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_submit_fails_when_asking_again_may_help_and_rejects_when_it_cannot():
+    client = FakeClient([ConnectionError("down")])
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: not s["daemon"]["up"])
+        with pytest.raises(BusRequestError, match="недоступен"):
+            await probe.request("conform.submit", SUBMIT, timeout=5)
+    finally:
+        await runner.stop()
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: s["daemon"]["up"])
+        outside = await probe.request("conform.submit", {**SUBMIT, "ref": "/home/x/a.mp4"}, timeout=5)
+        assert "вне общего хранилища" in outside["rejected"] and client.enqueued == []
+        client.refuse = True
+        refused = await probe.request("conform.submit", SUBMIT, timeout=5)
+        assert "отклонил" in refused["rejected"]
+    finally:
+        await runner.stop()
+    bus = Bus()
+    probe = Probe(bus)
+    runner = Runner(bus, [ConformModule(bus, None), Settings(bus), probe])
+    await runner.start()
+    try:
+        with pytest.raises(BusRequestError, match="не настроен"):
+            await probe.request("conform.submit", SUBMIT, timeout=5)
+    finally:
+        await runner.stop()
+
+
+def ended(job_id, status="done", **fields):
+    return job(job_id, status=status, results=[
+        {"dub": "a.mp4", "ok": True, "skipped": False,
+         "out_path": "/mnt/meganas/media/torrents/series-tracker/7/s01e01/_aligned/a.flac",
+         "audio_resid_ms": 11.0, "suspect": False, "warnings": [], "critical": []}], **fields)
+
+
+@pytest.mark.asyncio
+async def test_a_finished_job_is_announced_once_with_local_paths():
+    client = FakeClient([("conform.snapshot", {"items": [ended("j1")]}),
+                         ("conform.changed", {"items": [ended("j1"), job("j2")], "removed": []}),
+                         ("conform.changed", {"items": [ended("j2", status="failed", error="boom")],
+                                              "removed": []})])
+    bus = Bus()
+    sub = bus.subscribe("conform.job.finished")
+    probe = Probe(bus)
+    runner = Runner(bus, [ConformModule(bus, client, backoff_start=0.01), Settings(bus), probe])
+    await runner.start()
+    try:
+        first = (await asyncio.wait_for(sub.queue.get(), 3)).payload
+        second = (await asyncio.wait_for(sub.queue.get(), 3)).payload
+        assert (first["job_id"], first["status"]) == ("j1", "done")
+        assert first["results"][0]["out_path"] == "/nas/torrents/series-tracker/7/s01e01/_aligned/a.flac"
+        assert first["results"][0]["resid_ms"] == 11.0 and first["results"][0]["suspect"] is False
+        assert (second["job_id"], second["status"], second["error"]) == ("j2", "failed", "boom")
+        await asyncio.sleep(0.1)
+        assert sub.queue.empty()
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_job_get_answers_from_the_mirror_then_the_daemon_then_says_gone():
+    client = FakeClient([("conform.snapshot", {"items": [ended("j1")]})])
+    client.known["j7"] = ended("j7", status="running")
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: len(s["tasks"]) == 1)
+        got = await probe.request("conform.job.get", {"job_id": "j1"}, timeout=5)
+        assert got["status"] == "done" and got["results"][0]["out_path"].startswith("/nas/")
+        assert (await probe.request("conform.job.get", {"job_id": "j7"}, timeout=5))["status"] == "running"
+        assert await probe.request("conform.job.get", {"job_id": "nope"}, timeout=5) == {
+            "job_id": "nope", "status": "gone", "error": None, "results": []}
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_the_bridge_announces_when_the_daemon_becomes_reachable():
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    bus = Bus()
+    sub = bus.subscribe("conform.daemon.up")
+    runner = Runner(bus, [ConformModule(bus, client, backoff_start=0.01), Settings(bus), Probe(bus)])
+    await runner.start()
+    try:
+        await asyncio.wait_for(sub.queue.get(), 3)
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_client_enqueue_separates_a_final_refusal_from_a_transient_failure():
+    answers = iter([httpx.Response(200, json={"id": "j1", "status": "queued"}),
+                    httpx.Response(422, json={"detail": "bad path"}),
+                    httpx.Response(503, text="busy")])
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, json.loads(request.content)))
+        return next(answers)
+
+    client = DaemonClient("http://daemon.test", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    assert (await client.enqueue({"ref": "/r", "dubs": []}))["id"] == "j1"
+    assert seen[0] == ("POST", "/conform/enqueue", {"ref": "/r", "dubs": []})
+    with pytest.raises(DaemonRefused, match="422"):
+        await client.enqueue({"ref": "/r", "dubs": []})
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.enqueue({"ref": "/r", "dubs": []})
+
+
+@pytest.mark.asyncio
+async def test_client_job_is_none_for_a_job_the_daemon_forgot():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/known"):
+            return httpx.Response(200, json={"id": "known", "status": "done"})
+        return httpx.Response(404)
+
+    client = DaemonClient("http://daemon.test", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    assert (await client.job("known"))["status"] == "done"
+    assert await client.job("lost") is None
