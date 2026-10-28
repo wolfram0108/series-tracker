@@ -58,7 +58,7 @@ from datetime import datetime, timedelta, timezone
 from core import BaseModule, BusRequestError, ids, is_video_source
 from core.db import Database
 from core.envelope import Envelope
-from .planner import build_plan
+from .planner import plan_with_supersession
 from .repository import ScanRepository
 
 # Режим замены раздач по трекерам (ревизия находки 28 — вместо
@@ -209,11 +209,7 @@ class ScanModule(BaseModule):
         if not refresh:
             # пересборка плана из всего известного (семантика старого
             # reset_plan_status + SmartCollector.collect)
-            await self.repo.reset_plan_status(series_id)
-            plan = build_plan(await self.repo.candidates(series_id),
-                              self._quality_priority(series),
-                              self._ignored_seasons(series))
-            await self.repo.set_plan_statuses(plan)
+            await self._rebuild_plan(series)
             self.publish_event("scan.plan.updated",
                                {"series_id": series_id})
         # Построение композиции дало актуальный набор сезонов → пересчёт
@@ -540,10 +536,7 @@ class ScanModule(BaseModule):
                       len(candidates), stats["added"], stats["updated"],
                       stats["deleted"])
 
-        plan_input = await self.repo.candidates(series_id)
-        plan = build_plan(plan_input, self._quality_priority(series),
-                          self._ignored_seasons(series))
-        await self.repo.set_plan_statuses(plan)
+        plan = await self._rebuild_plan(series)
         in_plan = sum(1 for s in plan.values() if s.startswith("in_plan"))
         self.publish_event("scan.plan.updated", {"series_id": series_id})
         changed = bool(stats["added"] or stats["deleted"])
@@ -604,6 +597,14 @@ class ScanModule(BaseModule):
                                  series["id"], exc)
         return result
 
+    async def _rebuild_plan(self, series: dict) -> dict[str, str]:
+        """Plan over every row of the series, not only the rows this scan returned."""
+        statuses, superseded = plan_with_supersession(
+            await self.repo.plan_input(series["id"]),
+            self._quality_priority(series), self._ignored_seasons(series))
+        await self.repo.replace_plan(series["id"], statuses, superseded)
+        return statuses
+
     @staticmethod
     def _quality_priority(series: dict) -> list[int]:
         try:
@@ -623,13 +624,15 @@ class ScanModule(BaseModule):
 
     async def _skip_completed_downgrades(self, series_id: int,
                                          candidates: list[dict]) -> list[dict]:
-        """Never replace a downloaded item with a lower-resolution source."""
+        """Drop candidates that do not beat a downloaded file; give a better file
+        from an already downloaded URL its own row instead of overwriting that row."""
         if not candidates:
             return candidates
         existing = await self.repo.items_for_series(series_id)
+        by_id = {row["unique_id"]: row for row in existing}
         downloaded: dict[tuple, int] = {}
         for row in existing:
-            if row.get("status") != "completed" and not row.get("final_filename"):
+            if not self._is_downloaded(row):
                 continue
             key = (row.get("season"), row["episode_start"], row.get("part"))
             downloaded[key] = max(downloaded.get(key, 0), row.get("resolution") or 0)
@@ -640,15 +643,25 @@ class ScanModule(BaseModule):
         for candidate in candidates:
             key = (candidate.get("season"), candidate["episode_start"],
                    candidate.get("part"))
+            resolution = candidate.get("resolution") or 0
             old = downloaded.get(key)
-            if old is not None and old >= (candidate.get("resolution") or 0):
+            if old is not None and old >= resolution:
                 self.log.info(
                     "сериал %d: кандидат s%s e%s %sp пропущен — уже скачано в %sp",
                     series_id, candidate.get("season"),
                     candidate["episode_start"], candidate.get("resolution"), old)
                 continue
+            row = by_id.get(candidate["unique_id"])
+            if row is not None and self._is_downloaded(row):
+                candidate["unique_id"] = ids.upgrade_unique_id(
+                    candidate["source_url"], candidate["publication_date"],
+                    series_id, resolution)
             kept.append(candidate)
         return kept
+
+    @staticmethod
+    def _is_downloaded(row: dict) -> bool:
+        return row.get("status") == "completed" or bool(row.get("final_filename"))
 
     @staticmethod
     def _vk_candidates(series_id: int, videos: list[dict],

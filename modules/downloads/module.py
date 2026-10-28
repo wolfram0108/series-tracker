@@ -5,9 +5,10 @@ final_filename.
 
 События (входящие):
   scan.plan.updated {series_id} — план пересчитан: ТОЛЬКО усыновление
-      готовых на диске файлов + чистка pending вне плана. Загрузку НЕ
-      запускает (инвариант: усыновление ≠ загрузка; открытие композиции
-      и сохранение свойств не должны качать).
+      готовых на диске файлов + чистка pending вне плана + снос файлов,
+      вытесненных победителем слота. Загрузку НЕ запускает (инвариант:
+      усыновление ≠ загрузка; открытие композиции и сохранение свойств не
+      должны качать).
   settings.changed — подписка на max_parallel_downloads (вместо
       перечитывания каждые 5 с).
 
@@ -26,6 +27,12 @@ Queries / commands:
       (троттлинг на прогрессе) — контракт SSE download_queue_update.
   series.status.contribution {source: downloads, ...} — свёртка Р-11
       (downloading/error/ready/waiting — семантика sync_vk_statuses).
+
+Один файл на слот эпизода: строка с media_items.superseded_by (его пишет
+scan вместе с планом) теряет файл, как только файл победителя скачан и лежит
+на диске. Строка остаётся (final_filename=NULL) — память о скачанном
+разрешении; без победителя на диске не удаляется ничего. Сносит
+_retire_superseded: после загрузки, усыновления, диспетчеризации и сверки.
 
 Диспетчер живёт по событиям (создание задачи, завершение загрузки,
 смена лимита) — никаких тиков. Параллелизм — счётчик активных задач
@@ -53,6 +60,11 @@ _TRANSIENT_MARKERS = ("timed out", "timeout", "connection", "network",
                       "temporarily", "server returned 5", "server returned 429",
                       "server returned 403", "http error 403", "http error 408",
                       "http error 429", "http error 5")
+
+
+def _inside(base: str, path: str) -> bool:
+    root = os.path.realpath(base)
+    return os.path.commonpath([root, os.path.realpath(path)]) == root
 
 
 def _transient_download_error(error: str) -> bool:
@@ -154,8 +166,10 @@ class DownloadsModule(BaseModule):
                                     {"series_id": series_id})
         adopted = await self._adopt_existing_files(series)
         dropped = await self.repo.drop_pending_outside_plan(series_id)
-        self.log.info("план %d: усыновлено %d, вычищено вне плана %d",
-                      series_id, adopted, dropped)
+        retired = await self._retire_superseded(series)
+        self.log.info("план %d: усыновлено %d, вычищено вне плана %d, "
+                      "вытесненных файлов снесено %d",
+                      series_id, adopted, dropped, retired)
         if adopted:
             await self._contribute(series_id)
         if dropped:
@@ -175,6 +189,7 @@ class DownloadsModule(BaseModule):
                            "загрузка не запущена", series_id, base_path)
             return
         adopted = await self._adopt_existing_files(series)
+        await self._retire_superseded(series)
         created = 0
         for item in await self.repo.planned_pending_items(series_id):
             filename = await self._format_filename(series, item)
@@ -216,6 +231,36 @@ class DownloadsModule(BaseModule):
                 adopted += 1
         return adopted
 
+    async def _retire_superseded(self, series: dict) -> int:
+        """Delete files of rows whose episode slot is held by another downloaded
+        row; the winner's file must exist on disk, so a lone copy is never lost."""
+        base = series["save_path"]
+        removed = 0
+        for row in await self.repo.superseded_files(series["id"]):
+            path = os.path.join(base, row["filename"])
+            winner_path = os.path.join(base, row["winner_filename"])
+            if os.path.realpath(path) == os.path.realpath(winner_path):
+                continue
+            if not _inside(base, path):
+                self.log.warning("файл вне каталога серии не тронут: %s", path)
+                continue
+            if not await asyncio.to_thread(os.path.isfile, winner_path):
+                continue
+            try:
+                await asyncio.to_thread(os.remove, path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                self.log.warning("вытесненный файл %s не удалён: %s", path, exc)
+                continue
+            await self.repo.clear_item_filename(row["unique_id"])
+            self.log.info("вытеснен победителем слота, файл удалён: %s",
+                          row["filename"])
+            removed += 1
+        if removed:
+            await self._contribute(series["id"])
+        return removed
+
     async def on_fs_sync(self, env: Envelope) -> dict:
         """Проверка диска по запросу (скан, открытие модалки статуса):
         пропавшие файлы — снова pending, найденные — completed.
@@ -245,6 +290,7 @@ class DownloadsModule(BaseModule):
                 self.log.warning("файл пропал: %s — статус сброшен", path)
                 lost += 1
         adopted = await self._adopt_existing_files(series)
+        await self._retire_superseded(series)
         # Обход диска — авторитетная точка: публикуем готовность всегда,
         # даже если ничего не изменилось (иначе после рестарта вклад не
         # переотправится до первого реального изменения). _pump имеет
@@ -439,6 +485,7 @@ class DownloadsModule(BaseModule):
                                       series["save_path"]).replace("\\", "/")
                 await self.repo.register_downloaded(uid, rel)
                 await self.repo.delete_task(task_id)
+                await self._retire_superseded(series)
                 self.send_command("catalog.series.touch_scan_time",
                                   {"series_id": series_id})
                 self.log.info("загрузка завершена: %s", rel)

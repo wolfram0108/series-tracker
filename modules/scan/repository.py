@@ -195,13 +195,11 @@ class ScanRepository:
         return {"report": json.loads(row["report"] or "{}"),
                 "checked_at": row["checked_at"]}
 
-    async def candidates(self, series_id: int) -> list[dict]:
-        """Вход планировщика — только plan_status='candidate' (семантика
-        SmartCollector: план строится из кандидатов текущего скана;
-        ignored участвуют — фильтр по ignore происходит позже)."""
+    async def plan_input(self, series_id: int) -> list[dict]:
+        """Every known row of the series: files left by earlier scans must stay
+        in the plan, or two generations of one episode both look like winners."""
         return await self._db.fetch_all(
-            "SELECT * FROM media_items WHERE series_id=? "
-            "AND plan_status='candidate'", (series_id,))
+            "SELECT * FROM media_items WHERE series_id=?", (series_id,))
 
     async def set_ignored(self, unique_id: str, ignored: bool) -> None:
         await self._db.execute(
@@ -219,15 +217,15 @@ class ScanRepository:
         return await self._db.fetch_one(
             "SELECT * FROM media_items WHERE unique_id=?", (unique_id,))
 
-    async def reset_plan_status(self, series_id: int) -> None:
-        """Пересборка плана композиции (Р-21): все элементы — снова
-        кандидаты (семантика старого reset_plan_status_for_series)."""
-        await self._db.execute(
-            "UPDATE media_items SET plan_status='candidate' "
-            "WHERE series_id=?", (series_id,))
-
-    async def set_plan_statuses(self, plan: dict[str, str]) -> None:
-        for unique_id, plan_status in plan.items():
-            await self._db.execute(
-                "UPDATE media_items SET plan_status=? WHERE unique_id=?",
-                (plan_status, unique_id))
+    async def replace_plan(self, series_id: int, statuses: dict[str, str],
+                           superseded: dict[str, str]) -> None:
+        """Whole plan in one transaction. Rows the planner skipped (ignored,
+        ignored seasons) fall back to 'candidate' instead of keeping stale statuses."""
+        statements: list[tuple[str, tuple]] = [(
+            "UPDATE media_items SET plan_status='candidate', "
+            "superseded_by=NULL WHERE series_id=?", (series_id,))]
+        statements.extend((
+            "UPDATE media_items SET plan_status=?, superseded_by=? "
+            "WHERE unique_id=?", (plan_status, superseded.get(unique_id), unique_id))
+            for unique_id, plan_status in statuses.items())
+        await self._db.execute_many(statements)

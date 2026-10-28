@@ -105,6 +105,18 @@ def build_plan(candidates: list[dict[str, Any]],
                quality_priority: list[int] | None = None,
                ignored_seasons: set[int] | None = None) -> dict[str, str]:
     """Кандидаты -> {unique_id: plan_status}."""
+    return plan_with_supersession(candidates, quality_priority,
+                                  ignored_seasons)[0]
+
+
+def plan_with_supersession(candidates: list[dict[str, Any]],
+                           quality_priority: list[int] | None = None,
+                           ignored_seasons: set[int] | None = None,
+                           ) -> tuple[dict[str, str], dict[str, str]]:
+    """Кандидаты -> ({unique_id: plan_status}, {проигравший: победитель}).
+
+    Вторая карта — для одиночек, чей слот (сезон, эпизод, часть) занял другой
+    одиночка плана: именно их файлы лишние. Накрытые компиляцией не входят."""
     priority = quality_priority or []
     ignored = {int(s) for s in (ignored_seasons or ())}
     # Игнорированные пользователем кандидаты в плане не участвуют: они не
@@ -128,7 +140,7 @@ def build_plan(candidates: list[dict[str, Any]],
     for item in candidates:
         full_range |= _episodes(item)
     if not full_range:
-        return {}
+        return {}, {}
 
     # Авторазрешение Part 1: если для серии (season, ep) есть элемент
     # с явно указанной частью, то одиночные элементы без части считаются Part 1.
@@ -209,4 +221,12 @@ def build_plan(candidates: list[dict[str, Any]],
             statuses[uid] = ("replaced"
                              if not _episodes(item).isdisjoint(covered)
                              else "redundant")
-    return statuses
+
+    winners = {_single_slot(i): i["unique_id"] for i in final_plan
+               if not _is_compilation(i)}
+    superseded = {i["unique_id"]: winners[_single_slot(i)]
+                  for i in candidates
+                  if statuses[i["unique_id"]] == "replaced"
+                  and not _is_compilation(i)
+                  and _single_slot(i) in winners}
+    return statuses, superseded

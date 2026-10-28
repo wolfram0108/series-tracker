@@ -47,3 +47,11 @@ def test_media_unique_id_accepts_iso_z():
     b = ids.media_unique_id("https://vk.com/video-1_2",
                             "2026-03-17 20:13:16", 5)
     assert a == b
+
+
+def test_upgrade_unique_id_is_stable_and_resolution_specific():
+    url, pub = "https://1.ruchime.org/release/x/episode-1", "2026-10-20 12:00:00"
+    base = ids.media_unique_id(url, pub, 3)
+    hd = ids.upgrade_unique_id(url, pub, 3, 1080)
+    assert hd == ids.upgrade_unique_id(url, pub, 3, 1080)
+    assert len({base, hd, ids.upgrade_unique_id(url, pub, 3, 2160)}) == 3

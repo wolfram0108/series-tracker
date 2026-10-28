@@ -1,7 +1,7 @@
 """Синтетические тесты планировщика (углы, которых нет в живых данных).
 Дифф с оригиналом на реальных данных — tests/verify_planner_diff.py (10/10).
 """
-from modules.scan.planner import build_plan
+from modules.scan.planner import build_plan, plan_with_supersession
 
 
 def _item(uid, start, end=None, season=None, resolution=None):
@@ -154,3 +154,37 @@ def test_part_quality_competition_per_part():
         "p2_lo": "replaced",
     }
 
+
+
+def test_supersession_points_every_loser_at_the_slot_winner():
+    items = [_item("r360", 1, resolution=360), _item("r1080", 1, resolution=1080),
+             _item("r2160", 1, resolution=2160), _item("other", 2, resolution=360)]
+    plan, superseded = plan_with_supersession(items)
+    assert plan["r2160"] == "in_plan_single"
+    assert superseded == {"r360": "r2160", "r1080": "r2160"}
+
+
+def test_supersession_follows_user_quality_priority():
+    items = [_item("hi", 1, resolution=2160), _item("mid", 1, resolution=1080)]
+    _, superseded = plan_with_supersession(items, quality_priority=[1080, 2160])
+    assert superseded == {"hi": "mid"}
+
+
+def test_single_covered_by_compilation_is_not_superseded():
+    items = [_item("s1", 1, resolution=480), _item("s2", 2, resolution=480),
+             _item("comp", 1, end=2, resolution=1080)]
+    plan, superseded = plan_with_supersession(items)
+    assert plan["s1"] == plan["s2"] == "replaced"
+    assert superseded == {}
+
+
+def test_supersession_pairs_unspecified_part_with_part_one():
+    unspecified = _item("auto", 8, season=1, resolution=480)
+    part_one = {**_item("p1", 8, season=1, resolution=1080), "part": 1}
+    part_two = {**_item("p2", 8, season=1, resolution=480), "part": 2}
+    _, superseded = plan_with_supersession([unspecified, part_one, part_two])
+    assert superseded == {"auto": "p1"}
+
+
+def test_empty_input_has_no_supersession():
+    assert plan_with_supersession([]) == ({}, {})

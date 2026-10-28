@@ -62,6 +62,12 @@ class Database:
             conn.commit()
             return cur.rowcount
 
+    def _execute_many_sync(self, statements: list[tuple[str, Iterable[Any]]]) -> None:
+        with self._connect() as conn:
+            for query, params in statements:
+                conn.execute(query, tuple(params))
+            conn.commit()
+
     def _insert_sync(self, query: str, params: Iterable[Any]) -> int:
         with self._connect() as conn:
             cur = conn.execute(query, tuple(params))
@@ -97,6 +103,11 @@ class Database:
                 if col in row and row[col] is not None:
                     row[col] = bool(row[col])
         return rows
+
+    async def execute_many(self,
+                           statements: list[tuple[str, Iterable[Any]]]) -> None:
+        """Statements in one transaction: readers never see a half-applied change."""
+        await asyncio.to_thread(self._execute_many_sync, statements)
 
     async def execute(self, query: str, params: Iterable[Any] = (), *,
                       enforce_fk: bool = True) -> int:

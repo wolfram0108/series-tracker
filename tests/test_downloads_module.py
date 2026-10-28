@@ -182,17 +182,17 @@ def env_paths(tmp_path):
 
 def _add_item(db_path, uid, episode, *, plan="in_plan_single",
               status="pending", filename=None, ignored=0, download_url=None,
-              series_id=2, source_url=None):
+              series_id=2, source_url=None, superseded_by=None):
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             "INSERT INTO media_items (series_id, unique_id, source_title, "
             "episode_start, plan_status, status, is_ignored_by_user, "
             "source_url, publication_date, slicing_status, is_available, "
-            "final_filename, download_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "
-            "'2026-01-01 00:00:00', 'none', 1, ?, ?)",
+            "final_filename, download_url, superseded_by) VALUES (?, ?, ?, ?, ?, "
+            "?, ?, ?, '2026-01-01 00:00:00', 'none', 1, ?, ?, ?)",
             (series_id, uid, f"Серия {episode}", episode, plan, status, ignored,
              source_url or f"https://vk.com/video-1_{episode}", filename,
-             download_url))
+             download_url, superseded_by))
         conn.commit()
 
 
@@ -724,3 +724,149 @@ async def test_vk_series_keeps_ytdlp_fallback_when_stream_request_fails(system):
 
     assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "completed")
     assert dl.started == ["https://vk.com/video-1_1"]
+
+
+def _touch(media_dir, name):
+    path = os.path.join(media_dir, name)
+    with open(path, "wb") as f:
+        f.write(b"video")
+    return path
+
+
+@pytest.mark.asyncio
+async def test_superseded_file_is_removed_once_winner_is_on_disk(system):
+    _, _, dl, probe, db_path, media_dir = system
+    loser = _touch(media_dir, "e01 360p.mp4")
+    winner = _touch(media_dir, "e01 1080p.mp4")
+    _add_item(db_path, "win", 1, status="completed", filename="e01 1080p.mp4")
+    _add_item(db_path, "lose", 1, plan="replaced", status="completed",
+              filename="e01 360p.mp4", superseded_by="win")
+
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+
+    assert await _wait(lambda: not os.path.exists(loser))
+    assert os.path.exists(winner)
+    items = _items(db_path)
+    assert items["lose"]["final_filename"] is None
+    assert items["lose"]["status"] == "completed"   # remembers the fetched resolution
+    assert items["win"]["final_filename"] == "e01 1080p.mp4"
+    assert dl.started == []
+
+
+@pytest.mark.asyncio
+async def test_superseded_file_stays_while_winner_is_not_downloaded(system):
+    _, _, _, probe, db_path, media_dir = system
+    loser = _touch(media_dir, "e01 360p.mp4")
+    _add_item(db_path, "win", 1)                               # still pending
+    _add_item(db_path, "lose", 1, plan="replaced", status="completed",
+              filename="e01 360p.mp4", superseded_by="win")
+
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await asyncio.sleep(0.2)
+
+    assert os.path.exists(loser)
+    assert _items(db_path)["lose"]["final_filename"] == "e01 360p.mp4"
+
+
+@pytest.mark.asyncio
+async def test_superseded_file_stays_when_winner_file_is_missing(system):
+    _, _, _, probe, db_path, media_dir = system
+    loser = _touch(media_dir, "e01 360p.mp4")
+    _add_item(db_path, "win", 1, status="completed", filename="e01 1080p.mp4")
+    _add_item(db_path, "lose", 1, plan="replaced", status="completed",
+              filename="e01 360p.mp4", superseded_by="win")
+
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await asyncio.sleep(0.2)
+
+    assert os.path.exists(loser)
+
+
+@pytest.mark.asyncio
+async def test_winner_download_retires_superseded_file(system):
+    """The lower file survives until the better one is actually downloaded."""
+    _, _, dl, probe, db_path, media_dir = system
+    loser = _touch(media_dir, "Серия 01 old.mp4")
+    _add_item(db_path, "win", 1)
+    _add_item(db_path, "lose", 1, plan="replaced", status="completed",
+              filename="Серия 01 old.mp4", superseded_by="win")
+
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
+
+    assert await _wait(lambda: not os.path.exists(loser))
+    assert os.path.exists(os.path.join(media_dir, "Серия 01.mp4"))
+    assert _items(db_path)["win"]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_retirement_is_idempotent_and_survives_fs_sync(system):
+    _, _, dl, probe, db_path, media_dir = system
+    _touch(media_dir, "e01 360p.mp4")
+    _touch(media_dir, "e01 1080p.mp4")
+    _add_item(db_path, "win", 1, status="completed", filename="e01 1080p.mp4")
+    _add_item(db_path, "lose", 1, plan="replaced", status="completed",
+              filename="e01 360p.mp4", superseded_by="win")
+
+    await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=10)
+    await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=10)
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await asyncio.sleep(0.2)
+
+    items = _items(db_path)
+    assert items["lose"]["status"] == "completed"       # not sent back to pending
+    assert items["lose"]["final_filename"] is None
+    assert dl.started == []
+    assert _tasks(db_path) == []
+
+
+@pytest.mark.asyncio
+async def test_superseded_row_sharing_the_winner_file_is_not_deleted(system):
+    _, _, _, probe, db_path, media_dir = system
+    shared = _touch(media_dir, "e01.mp4")
+    _add_item(db_path, "win", 1, status="completed", filename="e01.mp4")
+    _add_item(db_path, "lose", 1, plan="replaced", status="completed",
+              filename="e01.mp4", superseded_by="win")
+
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await asyncio.sleep(0.2)
+
+    assert os.path.exists(shared)
+    assert _items(db_path)["lose"]["final_filename"] == "e01.mp4"
+
+
+@pytest.mark.asyncio
+async def test_superseded_path_outside_series_dir_is_never_touched(system, tmp_path):
+    _, _, _, probe, db_path, media_dir = system
+    outside = tmp_path / "outside.mp4"
+    outside.write_bytes(b"keep")
+    _touch(media_dir, "e01 1080p.mp4")
+    _add_item(db_path, "win", 1, status="completed", filename="e01 1080p.mp4")
+    _add_item(db_path, "lose", 1, plan="replaced", status="completed",
+              filename="../outside.mp4", superseded_by="win")
+
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await asyncio.sleep(0.2)
+
+    assert outside.exists()
+
+
+@pytest.mark.asyncio
+async def test_retired_file_leaves_downloaded_counter(system):
+    bus, _, _, probe, db_path, media_dir = system
+    _touch(media_dir, "e01 360p.mp4")
+    _touch(media_dir, "e01 1080p.mp4")
+    _add_item(db_path, "win", 1, status="completed", filename="e01 1080p.mp4")
+    _add_item(db_path, "lose", 1, plan="replaced", status="completed",
+              filename="e01 360p.mp4", superseded_by="win")
+    sub = bus.subscribe("series.downloaded.changed")
+
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+
+    count = None
+    for _ in range(100):
+        while not sub.queue.empty():
+            count = sub.queue.get_nowait().payload["count"]
+        if count == 1:
+            break
+        await asyncio.sleep(0.02)
+    assert count == 1

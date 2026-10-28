@@ -168,6 +168,28 @@ class DownloadsRepository:
             "SELECT * FROM media_items WHERE series_id=? AND "
             "status='completed'", (series_id,))
 
+    async def superseded_files(self, series_id: int) -> list[dict]:
+        """Downloaded rows beaten by the plan's winner of their slot, with the
+        winner's file. Only a winner that is itself downloaded qualifies."""
+        return await self._db.fetch_all(
+            "SELECT loser.unique_id AS unique_id, "
+            "loser.final_filename AS filename, "
+            "winner.final_filename AS winner_filename "
+            "FROM media_items loser JOIN media_items winner "
+            "ON winner.unique_id = loser.superseded_by "
+            "WHERE loser.series_id=? AND loser.final_filename IS NOT NULL "
+            "AND loser.slicing_status='none' "
+            f"AND winner.plan_status IN {_IN_PLAN} "
+            "AND winner.status='completed' AND winner.is_ignored_by_user=0 "
+            "AND winner.final_filename IS NOT NULL", (series_id,))
+
+    async def clear_item_filename(self, unique_id: str) -> None:
+        """The file is gone but the row stays: it remembers the resolution that
+        was already fetched, so the next scan does not download it again."""
+        await self._db.execute(
+            "UPDATE media_items SET final_filename=NULL WHERE unique_id=?",
+            (unique_id,))
+
     async def downloaded_count(self, series_id: int) -> int:
         """Счётчик «скачано» VK-серии — как scan.media.downloaded_counts
         (есть final_filename), для реактивного SSE (Д1). Спешелы (сезон 0)

@@ -714,3 +714,92 @@ async def test_composition_refresh_surfaces_scan_error(system):
     with pytest.raises(BusRequestError):
         await probe.request("scan.composition",
                             {"series_id": 3, "refresh": True}, timeout=10)
+
+
+PAGE_P = "https://1.ruchime.org/release/test/episode-1"
+
+
+def _seed_web_row(db_path, url, resolution, *, plan="in_plan_single",
+                  status="completed", filename=None):
+    uid = ids.media_unique_id(url, "2026-10-20 12:00:00", 3)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO media_items (series_id, unique_id, source_title, season, "
+            "episode_start, plan_status, status, is_ignored_by_user, source_url, "
+            "publication_date, slicing_status, is_available, resolution, "
+            "final_filename) VALUES (3, ?, 'Т3 1 серия', 1, 1, ?, ?, 0, ?, "
+            "'2026-10-20 12:00:00', 'none', 1, ?, ?)",
+            (uid, plan, status, url, resolution, filename))
+        conn.commit()
+    return uid
+
+
+def _web_rows(db_path):
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        return {r["unique_id"]: dict(r) for r in conn.execute(
+            "SELECT * FROM media_items WHERE series_id=3")}
+
+
+def _web_scan_result(fake, url, resolution):
+    fake.web_videos = [{"title": "Т3 1 серия", "url": url,
+                        "publication_date": "2026-10-20T12:00:00Z",
+                        "resolution": resolution}]
+    fake.web_players = {"episodes": 1, "sources": {}, "players": {}, "holes": []}
+    fake.rules_results = [{"excluded": False,
+                           "extracted": {"season": 1, "episode": 1}}]
+
+
+@pytest.mark.asyncio
+async def test_better_source_supersedes_downloaded_lower_one(system, db_path):
+    """The earlier row is not in this scan's result, yet it must leave the plan."""
+    _, fake, probe, _ = system
+    old = _seed_web_row(db_path, "https://fsst.online/embed/1/", 360,
+                        filename="e01 360p.mp4")
+    _web_scan_result(fake, PAGE_P, 1080)
+
+    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
+
+    rows = _web_rows(db_path)
+    new = ids.media_unique_id(PAGE_P, "2026-10-20 12:00:00", 3)
+    assert rows[new]["plan_status"] == "in_plan_single"
+    assert rows[new]["superseded_by"] is None
+    assert rows[old]["plan_status"] == "replaced"
+    assert rows[old]["superseded_by"] == new
+    assert [r["plan_status"] for r in rows.values()].count("in_plan_single") == 1
+
+
+@pytest.mark.asyncio
+async def test_better_file_from_downloaded_url_gets_its_own_row(system, db_path):
+    _, fake, probe, _ = system
+    old = _seed_web_row(db_path, PAGE_P, 480, filename="e01 480p.mp4")
+    _web_scan_result(fake, PAGE_P, 1080)
+
+    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
+    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
+
+    rows = _web_rows(db_path)
+    upgrade = ids.upgrade_unique_id(PAGE_P, "2026-10-20 12:00:00", 3, 1080)
+    assert set(rows) == {old, upgrade}
+    assert rows[old]["resolution"] == 480 and rows[old]["status"] == "completed"
+    assert rows[upgrade]["resolution"] == 1080
+    assert rows[upgrade]["plan_status"] == "in_plan_single"
+    assert rows[old]["superseded_by"] == upgrade
+
+
+@pytest.mark.asyncio
+async def test_scan_repairs_stale_double_winner(system, db_path):
+    """Two rows left in the plan by earlier scans collapse to one winner."""
+    _, fake, probe, _ = system
+    low = _seed_web_row(db_path, "https://fsst.online/embed/1/", 360,
+                        filename="e01 360p.mp4")
+    high = _seed_web_row(db_path, PAGE_P, 1080, filename="e01 1080p.mp4")
+    fake.web_videos = []
+    fake.web_players = {}
+
+    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
+
+    rows = _web_rows(db_path)
+    assert rows[high]["plan_status"] == "in_plan_single"
+    assert rows[low]["plan_status"] == "replaced"
+    assert rows[low]["superseded_by"] == high
