@@ -1,5 +1,6 @@
 import { defineStore } from "pinia"
 import { ref } from "vue"
+import type { VoiceReason } from "../lib/voiceReason"
 
 /** One additional voice-over of an episode: its state and the reason of a failure or rejection. */
 export interface VoiceDub {
@@ -11,7 +12,7 @@ export interface VoiceDub {
   status: string
   /** What the user sees: planned, queued, running, done or error. */
   state: string
-  detail: string | null
+  detail: VoiceReason | null
 }
 
 /** Packet of voice_dub_update: the whole voice-over, so nothing is asked back. */

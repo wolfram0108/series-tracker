@@ -66,6 +66,12 @@ class TmdbInfo(ApiModel):
     poster_path, last_updated, ...)."""
 
 
+class VoiceReason(ApiModel):
+    """Причина состояния: код и факты, из которых интерфейс собирает текст (code external — слова чужой системы в params.text)."""
+    code: str
+    params: dict[str, str | int | float] = {}
+
+
 class VoiceDub(ApiModel):
     """Озвучка серии: дополнительная озвучка, её состояние (state: planned, download_queued, downloading, align_queued, running, done, error;
     status — шаг за ним) и причина ошибки."""
@@ -75,7 +81,7 @@ class VoiceDub(ApiModel):
     voice_label: str
     status: str
     state: str
-    detail: str | None = None
+    detail: VoiceReason | None = None
 
 
 class VoiceDubs(ApiModel):

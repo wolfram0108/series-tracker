@@ -32,6 +32,13 @@ def equal_lengths():
     LENGTHS.clear()
 
 
+def code_of(stored):
+    """The code of a stored reason or of a pushed detail."""
+    from modules.voices.reasons import parse
+    detail = stored if isinstance(stored, dict) else parse(stored)
+    return detail and detail["code"]
+
+
 def src(player, studio, episodes, kind="", url=None):
     return {"url": url or f"https://site/?player={player}&voice={studio}", "player": player,
             "studio": studio, "kind": kind, "episodes": list(episodes)}
@@ -478,7 +485,7 @@ async def test_an_episode_nobody_offers_is_a_failure_not_silence(dubs):
     await settled(neighbours, 2)
     missing = [r for r in await rows(probe) if r["status"] == "failed"]
     assert [r["episode"] for r in missing] == [3, 4]
-    assert {r["error"] for r in missing} == {"серии нет ни в одном источнике"}
+    assert {code_of(r["error"]) for r in missing} == {"not_in_any_source"}
     assert len(neighbours.fetches) == 2
 
 
@@ -722,8 +729,8 @@ async def test_a_result_that_is_not_clean_is_rejected_and_never_placed(dubs, cap
         "suspect": True, "warnings": ["остаток вне допуска"]}, redheadsound={"critical": ["нет общего звука"]}))
     await statuses_until(sub, ["rejected", "rejected"])
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["blackcat"]["status"] == "rejected" and "подозрительно" in by_voice["blackcat"]["outcome"]
-    assert "критично" in by_voice["redheadsound"]["outcome"]
+    assert by_voice["blackcat"]["status"] == "rejected" and code_of(by_voice["blackcat"]["outcome"]) == "suspect"
+    assert code_of(by_voice["redheadsound"]["outcome"]) == "critical"
     stem = os.path.splitext(ref)[0]
     assert not any(name.startswith(os.path.basename(stem) + ".") and name.endswith(".flac")
                    for name in os.listdir(neighbours.library))
@@ -742,7 +749,7 @@ async def test_a_missing_result_or_a_failed_job_never_places_anything(dubs):
     await statuses_until(sub, ["aligned", "placed", "rejected"])
     outcomes = {r["voice_key"]: r for r in await rows(probe)}
     missing = next(r for r in outcomes.values() if r["status"] == "rejected")
-    assert "нет результата" in missing["outcome"]
+    assert code_of(missing["outcome"]) == "no_result"
 
 
 @pytest.mark.asyncio
@@ -988,7 +995,7 @@ async def test_a_track_the_user_deleted_is_not_made_again(dubs):
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
     await statuses_until(sub, ["rejected"])
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["blackcat"]["status"] == "rejected" and by_voice["blackcat"]["outcome"] == "дорожка удалена"
+    assert by_voice["blackcat"]["status"] == "rejected" and code_of(by_voice["blackcat"]["outcome"]) == "track_removed"
     assert by_voice["redheadsound"]["status"] == "placed"
     probe.send_command("voices.dispatch", {"series_id": 7})
     await asyncio.sleep(0.3)
@@ -1092,10 +1099,10 @@ async def test_an_event_carries_the_voice_and_the_reason_so_the_interface_asks_n
         event = changes.queue.get_nowait().payload
         seen[(event["voice_key"], event["status"])] = event
     rejected = seen[("blackcat", "rejected")]
-    assert rejected["voice_label"] == "BlackCat" and rejected["detail"].startswith("подозрительно")
+    assert rejected["voice_label"] == "BlackCat" and rejected["detail"]["code"] == "suspect"
     assert seen[("redheadsound", "aligned")]["detail"] is None
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["blackcat"]["detail"].startswith("подозрительно") and by_voice["redheadsound"]["detail"] is None
+    assert by_voice["blackcat"]["detail"]["code"] == "suspect" and by_voice["redheadsound"]["detail"] is None
 
 
 
@@ -1594,7 +1601,7 @@ async def test_a_track_that_is_in_neither_place_after_an_interruption_is_an_erro
     os.remove(row["aligned_path"])
     await voices._advance(7)
     after = await voices.repo.get(row["id"])
-    assert after["status"] == "failed" and after["error"] == "дорожка пропала при переносе"
+    assert after["status"] == "failed" and code_of(after["error"]) == "track_vanished_on_move"
 
 
 @pytest.mark.asyncio
@@ -1777,7 +1784,7 @@ async def test_a_track_of_another_length_than_its_video_is_not_placed(dubs):
     await statuses_until(sub, ["aligned", "aligned", "placed", "rejected"])
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
     assert by_voice["blackcat"]["status"] == "rejected"
-    assert by_voice["blackcat"]["detail"] == "длина дорожки 1005.0 с, референса 1000.0 с"
+    assert by_voice["blackcat"]["detail"] == {"code": "length_mismatch", "params": {"track": "1005.0", "reference": "1000.0"}}
     assert by_voice["redheadsound"]["status"] == "placed"
     assert not any("BlackCat" in name for name in library_files(neighbours))
 
@@ -1797,7 +1804,7 @@ async def test_a_length_that_cannot_be_read_is_a_refusal_not_a_guess(dubs):
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
     await statuses_until(sub, ["aligned", "aligned", "placed", "rejected"])
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["redheadsound"]["detail"] == "длина дорожки не определена"
+    assert code_of(by_voice["redheadsound"]["detail"]) == "length_unknown_track"
     LENGTHS.clear()
 
 

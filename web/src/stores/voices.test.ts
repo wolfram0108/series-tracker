@@ -33,9 +33,9 @@ describe("voices store", () => {
   it("takes a pushed packet as the whole voice-over and changes one entry in place", () => {
     const store = useVoicesStore()
     store.snapshot(snapshot(10, [dub(), dub({ voice_key: "red", voice_label: "RedHeadSound" })]))
-    store.apply(event(11, { status: "rejected", state: "error", detail: "критично: нет общего звука" }))
+    store.apply(event(11, { status: "rejected", state: "error", detail: { code: "critical", params: { text: "нет общего звука" } } }))
     const [black, red] = store.forEpisode(7, 1, 2)
-    expect(black).toMatchObject({ voice_label: "BlackCat", status: "rejected", state: "error", detail: "критично: нет общего звука" })
+    expect(black).toMatchObject({ voice_label: "BlackCat", status: "rejected", state: "error", detail: { code: "critical", params: { text: "нет общего звука" } } })
     expect(red).toMatchObject({ status: "ready", state: "align_queued" })
   })
 
@@ -50,8 +50,8 @@ describe("voices store", () => {
     store.snapshot(snapshot(10, [dub({ status: "placed", state: "done" })]))
     store.apply(event(11, { status: "moved", state: "done" }))
     expect(store.forEpisode(7, 1, 2)[0]).toMatchObject({ status: "placed", state: "done" })
-    store.apply(event(12, { status: "stale", state: "planned", detail: "референс серии заменён" }))
-    expect(store.forEpisode(7, 1, 2)[0]).toMatchObject({ status: "pending", state: "planned", detail: "референс серии заменён" })
+    store.apply(event(12, { status: "stale", state: "planned", detail: { code: "reference_replaced", params: {} } }))
+    expect(store.forEpisode(7, 1, 2)[0]).toMatchObject({ status: "pending", state: "planned", detail: { code: "reference_replaced", params: {} } })
     store.apply(event(13, { status: "removed" }))
     expect(store.forEpisode(7, 1, 2)).toEqual([])
   })

@@ -340,7 +340,7 @@ async function pickSource(address: string) {
     const res = (data ?? null) as WebParse | null
     if (error || !res) {
       const err = (error ?? null) as { error?: string } | null
-      throw new Error(err?.error || "Ошибка парсинга URL")
+      throw new Error(err?.error || t("add.error.parse"))
     }
     applyWebParse(res)
   } catch (e) {
@@ -371,7 +371,7 @@ async function parseTorrentUrl() {
     }) | null
     if (error || !res) {
       const err = (error ?? null) as { error?: string } | null
-      throw new Error(err?.error || "Ошибка парсинга URL")
+      throw new Error(err?.error || t("add.error.parse"))
     }
     if (res.source_type === "web_video") {
       sourceType.value = "web_video"

@@ -1539,8 +1539,7 @@ export interface components {
             status: string;
             /** State */
             state: string;
-            /** Detail */
-            detail?: string | null;
+            detail?: components["schemas"]["VoiceReason"] | null;
         } & {
             [key: string]: unknown;
         };
@@ -1548,6 +1547,20 @@ export interface components {
         VoiceDubs: {
             /** Items */
             items: components["schemas"]["VoiceDub"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * VoiceReason
+         * @description Причина состояния: код и факты, из которых интерфейс собирает текст (code external — слова чужой системы в params.text).
+         */
+        VoiceReason: {
+            /** Code */
+            code: string;
+            /** Params */
+            params?: {
+                [key: string]: string | number;
+            };
         } & {
             [key: string]: unknown;
         };

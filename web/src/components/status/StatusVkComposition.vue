@@ -10,6 +10,7 @@ import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { useVideoScanStore } from "../../stores/videoScan"
 import { useVoicesStore, type VoiceDub } from "../../stores/voices"
+import { reasonText } from "../../lib/voiceReason"
 import { t, type MessageKey } from "../../i18n"
 
 // Вкладка «Композиция» VK — порт seriesCompositionManager. Компиляции +
@@ -149,7 +150,7 @@ function voiceState(v: VoiceDub): string {
 }
 // The step behind a state, where one state has two causes (waiting for alignment, running).
 function voiceHint(v: VoiceDub): string {
-  if (v.detail) return v.detail
+  if (v.detail) return reasonText(v.detail)
   const key =
     v.state === "align_queued" ? (v.status === "ready" ? "ready" : "aligning_wait")
     : v.state === "running" ? (v.status === "aligned" ? "aligned" : "aligning_run")

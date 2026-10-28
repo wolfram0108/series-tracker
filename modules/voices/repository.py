@@ -7,6 +7,8 @@ from typing import Any
 
 from core.db import Database
 
+from .reasons import reason
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -46,7 +48,7 @@ class VoicesRepository:
         main source; a row that is downloading or ready is left alone. An empty chain is a failure.
         True when the row was created or taken over."""
         status = "pending" if chain else "failed"
-        error = None if chain else "серии нет ни в одном источнике"
+        error = None if chain else reason("not_in_any_source")
         return bool(await self._db.execute(
             "INSERT INTO voice_dubs (series_id, season, episode, site_episode, voice_key, "
             "voice_label, chain, status, error, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) "
