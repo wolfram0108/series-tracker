@@ -168,7 +168,7 @@
 | VU6 | Открыл модалку статуса | queries (статус/очередь) | ✓ |
 | VU7 | Сменил имя | `renaming.reprocess` переименовывает диск к новому имени | ✓ |
 | VU8 | Сменил профиль правил | reprocess + рескан перестраивают имена/план (VC2) | ✓ |
-| VU9 | Сменил приоритет качества | `build_plan` пере-выбор по `_quality_key` на след. скане; не выбранное качество → `replaced` (файл остаётся до замены). Верифицировано: `test_vu9_quality_priority_change_reselects` | ✓ |
+| VU9 | Сменил приоритет качества | `build_plan` пере-выбор по `_quality_key` на след. скане; не выбранное качество → `replaced`, его файл удаляется, когда файл выбранного скачан (Р-37). Верифицировано: `test_vu9_quality_priority_change_reselects`, `test_supersession_follows_user_quality_priority` | ✓ |
 | VU10 | Сменил `save_path` | `library.relocate` (`os.rename`, один FS) | ✓ |
 | VU11 | Изменил игнорируемые сезоны | **было: дыра** — `ignored_seasons` только писался в БД, нигде не применялся (фронт лишь визуально гасил), эпизоды игнор-сезона планировались и качались. Теперь `build_plan` исключает кандидатов игнор-сезонов, scan читает `series.ignored_seasons` и передаёт. Тесты: `test_vu11_ignored_seasons_excluded_from_plan` + интеграция `test_sim_VU11_ignored_seasons_excluded_on_scan` | ✓ |
 | VU12 | Сменил режим (search/get_all) | ветвление в `on_vk_scan` (разный охват, VS9) | ✓ |
@@ -187,6 +187,7 @@
 | VF6 | Остался мусор `.download`/`.part`/`.remux` | ytdlp finally (фаза remux) + `_remove_partial` — **дыра шва закрыта**: при обрыве в фазе download `.download.*`/`.remux.mp4` не чистились (паттерны не совпадали); `_remove_partial` теперь знает реальные шаблоны | ✓ |
 | VF7 | Путь/NAS недоступен | гард в `downloads.on_fs_sync` — не сбрасывать ложно (`test_sim_F7`) | ✓ |
 | VF8 | Файл вернулся на место | `fs.sync`/`_adopt_existing_files`: файл с ожидаемым именем → completed без закачки | ✓ |
+| VF9 | В слоте эпизода лежит несколько файлов разных разрешений | `superseded_by` + `_retire_superseded`: лишний файл удаляется, только если файл победителя скачан и есть на диске; строка остаётся (`final_filename=NULL`); общий файл и путь вне каталога серии не трогаются (`test_superseded_*`, `test_retirement_is_idempotent_and_survives_fs_sync`) | ✓ |
 
 ## VS — изменения источника VK (на скане)
 | ID | Ситуация | Реакция / механизм | Статус |
@@ -196,7 +197,9 @@
 | VS3 | Эпизод исчез (фантом) | `upsert_candidates`: девственный удалить, скачанный оставить (`test_vk_phantom_rules`) | ✓ |
 | VS4 | Перезалив: сменился title (voiceover/эпизод переизвлеклись) | reprocess до усыновления → имена сходятся (VP5); без потери файла (completed не перекачивается) | ◐ |
 | VS5 | Компиляция покрывает одиночки | одиночки `replaced` (`test_vk_scan_upserts`) | ✓ |
-| VS6 | Несколько качеств эпизода | `_quality_key` (priority.index, затем -resolution) | ✓ |
+| VS6 | Несколько качеств эпизода | `_quality_key` (priority.index, затем -resolution); план по всем строкам серии (`test_scan_repairs_stale_double_winner`) | ✓ |
+| VS10 | Появилось более высокое разрешение (другой плеер или та же ссылка) | кандидат принимается, при той же ссылке — отдельная строка (`ids.upgrade_unique_id`), низкий файл вытесняется после скачивания высокого (`test_better_source_supersedes_downloaded_lower_one`, `test_better_file_from_downloaded_url_gets_its_own_row`) | ✓ |
+| VS11 | Плеер объявил поток, который не отдаётся (манифест 400) | кандидат Vibix проверяется по манифесту, откат на читаемый поток ниже; без потока — явная ошибка задачи, yt-dlp по странице не запускается (`test_vibix_dead_manifest_is_not_a_candidate`, `test_provider_stream_error_fails_task_without_ytdlp`) | ✓ |
 | VS7 | VK вернул пусто / ошибка | пусто → `changed=False`; ошибка `_vk_call`/HTTP не глотается → error-task, статус error | ✓ |
 | VS8 | Истёк токен VK | `VkScanError` (error_code) всплывает → error-task (не молча) | ✓ |
 | VS9 | search vs get_all | ветвление в `on_vk_scan` (video.search по терминам vs video.get + локальный фильтр) | ✓ |
