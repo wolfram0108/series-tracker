@@ -570,7 +570,10 @@ async def statuses_until(sub, wanted, seconds=5.0):
     while sorted(seen) != sorted(wanted):
         left = end - asyncio.get_running_loop().time()
         assert left > 0, (seen, wanted)
-        status = (await asyncio.wait_for(sub.queue.get(), left)).payload["status"]
+        try:
+            status = (await asyncio.wait_for(sub.queue.get(), left)).payload["status"]
+        except asyncio.TimeoutError:
+            raise AssertionError((seen, wanted)) from None
         if status not in ("downloading", "pending") or status in wanted:
             seen.append(status)
     return seen

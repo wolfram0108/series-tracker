@@ -41,12 +41,13 @@ class VoicesRepository:
         return self._row(await self._db.fetch_one("SELECT * FROM voice_dubs WHERE id=?", (dub_id,)))
 
     async def upsert(self, series_id: int, season: int, episode: int, site_episode: int,
-                     voice_key: str, label: str, chain: list[dict[str, str]]) -> None:
+                     voice_key: str, label: str, chain: list[dict[str, str]]) -> bool:
         """Offer the voice-over again: an untouched row takes the fresh chain and starts from its
-        main source; a row that is downloading or ready is left alone. An empty chain is a failure."""
+        main source; a row that is downloading or ready is left alone. An empty chain is a failure.
+        True when the row was created or taken over."""
         status = "pending" if chain else "failed"
         error = None if chain else "серии нет ни в одном источнике"
-        await self._db.execute(
+        return bool(await self._db.execute(
             "INSERT INTO voice_dubs (series_id, season, episode, site_episode, voice_key, "
             "voice_label, chain, status, error, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT (series_id, season, episode, voice_key) DO UPDATE SET "
@@ -54,7 +55,7 @@ class VoicesRepository:
             "chain=excluded.chain, attempt=0, status=excluded.status, error=excluded.error, "
             "updated_at=excluded.updated_at WHERE voice_dubs.status IN ('pending', 'failed')",
             (series_id, season, episode, site_episode, voice_key, label,
-             json.dumps(chain, ensure_ascii=False), status, error, _now()))
+             json.dumps(chain, ensure_ascii=False), status, error, _now())))
 
     async def pending(self, series_id: int | None = None) -> list[dict[str, Any]]:
         where, args = ("WHERE status='pending'", ())

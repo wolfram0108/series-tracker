@@ -248,6 +248,7 @@ class VoicesModule(BaseModule):
         before = await self.repo.for_series(series_id)
         keys = self._adopted_keys(dubs, before, settings.rules)
         planned: set[tuple[int, int, str]] = set()
+        touched: set[tuple[int, int, str]] = set()
         for season, episode, site_episode in episodes:
             for voice in dubs:
                 chain = [{"player": source["player"], "studio": source["studio"],
@@ -255,14 +256,16 @@ class VoicesModule(BaseModule):
                          for source in download_chain(voice, site_episode)
                          if str(site_episode) in source.get("links", {})]
                 planned.add((season, episode, keys[voice["key"]]))
-                await self.repo.upsert(series_id, season, episode, site_episode,
-                                       keys[voice["key"]], voice["label"], chain)
+                if await self.repo.upsert(series_id, season, episode, site_episode,
+                                          keys[voice["key"]], voice["label"], chain):
+                    touched.add((season, episode, keys[voice["key"]]))
         for gone in await self.repo.drop_unplanned(series_id, planned):
             self.log.info("сериал %d: озвучка %s серии %d вышла из плана", series_id,
                           gone["voice_label"], gone["episode"])
             self._changed(gone, "removed")
         after = await self.repo.for_series(series_id)
-        self._announce_difference(before, after)
+        self._announce_difference(before, [row for row in after
+                                           if (row["season"], row["episode"], row["voice_key"]) in touched])
         await self._recheck_ready(series_id)
         await self._admit()
         for row in after:
@@ -412,7 +415,7 @@ class VoicesModule(BaseModule):
             "rev": self._next_rev()})
 
     def _announce_difference(self, before: list[dict], after: list[dict]) -> None:
-        """Rows that a write created or turned over are news for the interface like any other change."""
+        """Rows that the planner created or took over are news for the interface like any other change."""
         known = {(row["season"], row["episode"], row["voice_key"]): (row["status"], row["outcome"] or row["error"])
                  for row in before}
         for row in after:
