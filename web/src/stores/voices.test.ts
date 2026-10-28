@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from "pinia"
 import { useVoicesStore, type VoiceDub, type VoiceDubEvent } from "./voices"
 
 const dub = (over: Partial<VoiceDub> = {}): VoiceDub => ({
-  season: 1, episode: 2, voice_key: "blackcat", voice_label: "BlackCat", status: "ready", state: "queued", detail: null, ...over,
+  season: 1, episode: 2, voice_key: "blackcat", voice_label: "BlackCat", status: "ready", state: "align_queued", detail: null, ...over,
 })
 const event = (over: Partial<VoiceDubEvent> = {}): VoiceDubEvent => ({ series_id: 7, ...dub(), ...over })
 
@@ -33,7 +33,7 @@ describe("voices store", () => {
     store.apply(event({ status: "rejected", state: "error", detail: "критично: нет общего звука" }))
     const [black, red] = store.forEpisode(7, 1, 2)
     expect(black).toMatchObject({ voice_label: "BlackCat", status: "rejected", state: "error", detail: "критично: нет общего звука" })
-    expect(red).toMatchObject({ status: "ready", state: "queued" })
+    expect(red).toMatchObject({ status: "ready", state: "align_queued" })
   })
 
   it("shows a voice-over that arrives by event on an episode that had none", () => {

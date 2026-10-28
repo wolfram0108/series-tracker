@@ -45,6 +45,7 @@
 | downloads.fetch.finished {key, ok, error, transient, path, series_id} | downloads | voices (ключи `dub:<id>`) | — |
 | voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, detail} | voices | gateway | voice_dub_update (Р-43, Р-44) |
 | downloads.item.renamed {series_id, unique_id, filename} | downloads | voices | — |
+| downloads.fetch.started {key, series_id, path} | downloads | voices (ключи `dub:<id>`) | — |
 | voices.episode.settled {series_id, season, episode} | voices | — | — |
 | conform.job.finished {job_id, status, error, results} | conform | voices | — |
 | conform.daemon.up {} | conform | voices | — |

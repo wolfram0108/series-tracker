@@ -357,7 +357,7 @@ async def test_a_finished_download_makes_the_dub_ready_and_is_announced(dubs):
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
     finish(probe, neighbours.fetches[0]["key"])
-    event = (await asyncio.wait_for(sub.queue.get(), 3)).payload
+    event = await change(sub, "ready")
     assert event["status"] == "ready" and event["voice_key"] == "blackcat" and event["series_id"] == 7
     assert sorted(r["status"] for r in await rows(probe)) == ["downloading", "downloading", "ready"]
 
@@ -384,7 +384,7 @@ async def test_a_dub_without_any_source_left_is_failed_and_logged(dubs, caplog):
     victim = next(f for f in neighbours.fetches if f["url"].endswith("-3"))
     caplog.set_level("WARNING")
     finish(probe, victim["key"], ok=False, error="gone")
-    event = (await asyncio.wait_for(sub.queue.get(), 3)).payload
+    event = await change(sub, "failed")
     assert event["status"] == "failed" and event["episode"] == 3
     failed = next(r for r in await rows(probe) if r["episode"] == 3)
     assert failed["status"] == "failed" and failed["error"] == "gone"
@@ -399,7 +399,7 @@ async def test_a_new_dispatch_offers_failed_voices_again_from_the_main_source(du
     await settled(neighbours, 3)
     victim = next(f for f in neighbours.fetches if f["url"].endswith("-3"))
     finish(probe, victim["key"], ok=False, error="gone")
-    await asyncio.wait_for(sub.queue.get(), 3)
+    await change(sub, "failed")
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 4)
     assert neighbours.fetches[3]["key"] == victim["key"] and neighbours.fetches[3]["url"] == victim["url"]
@@ -429,7 +429,7 @@ async def test_a_ready_dub_is_not_downloaded_again_while_its_file_exists(dubs):
     os.makedirs(os.path.dirname(done["path"]))
     open(done["path"], "wb").close()
     finish(probe, done["key"])
-    await asyncio.wait_for(sub.queue.get(), 3)
+    await change(sub, "ready")
     probe.send_command("voices.dispatch", {"series_id": 7})
     await asyncio.sleep(0.2)
     assert len(neighbours.fetches) == 3
@@ -500,14 +500,40 @@ def touch(path, content=b"x"):
 
 
 async def statuses_until(sub, wanted, seconds=5.0):
-    """Wait on the pushed events until `wanted` (a sorted list of statuses seen) is reached."""
+    """Wait on the pushed events until `wanted` (a sorted list of statuses seen) is reached.
+
+    The announcements of a sent download are skipped unless `downloading` is wanted."""
     seen = []
     end = asyncio.get_running_loop().time() + seconds
     while sorted(seen) != sorted(wanted):
         left = end - asyncio.get_running_loop().time()
         assert left > 0, (seen, wanted)
-        seen.append((await asyncio.wait_for(sub.queue.get(), left)).payload["status"])
+        status = (await asyncio.wait_for(sub.queue.get(), left)).payload["status"]
+        if status != "downloading" or "downloading" in wanted:
+            seen.append(status)
     return seen
+
+
+async def change_state(sub, voice_key, state, seconds=3.0):
+    """The next pushed event that shows this voice-over in this state."""
+    end = asyncio.get_running_loop().time() + seconds
+    while True:
+        left = end - asyncio.get_running_loop().time()
+        assert left > 0, (voice_key, state)
+        event = (await asyncio.wait_for(sub.queue.get(), left)).payload
+        if event["voice_key"] == voice_key and event["state"] == state:
+            return event
+
+
+async def change(sub, status, seconds=3.0):
+    """The next pushed event with this status (others pass by)."""
+    end = asyncio.get_running_loop().time() + seconds
+    while True:
+        left = end - asyncio.get_running_loop().time()
+        assert left > 0, status
+        event = (await asyncio.wait_for(sub.queue.get(), left)).payload
+        if event["status"] == status:
+            return event
 
 
 def reference_on_disk(neighbours, episode=1):
@@ -1001,18 +1027,24 @@ async def test_an_event_carries_the_voice_and_the_reason_so_the_interface_asks_n
 # --- the five states the user sees ------------------------------------------------------------
 
 
-def test_every_step_of_a_voice_over_shows_as_one_of_five_states():
+def test_every_step_of_a_voice_over_shows_as_one_of_seven_states():
     shown = {status: public_state(status) for status in (
         "pending", "stale", "downloading", "ready", "aligned", "placed", "moved", "rejected", "failed")}
-    assert shown == {"pending": "planned", "stale": "planned", "downloading": "running", "ready": "queued",
-                     "aligned": "running", "placed": "done", "moved": "done", "rejected": "error",
-                     "failed": "error"}
-    assert set(shown.values()) == {"planned", "queued", "running", "done", "error"}
+    assert shown == {"pending": "planned", "stale": "planned", "downloading": "downloading",
+                     "ready": "align_queued", "aligned": "running", "placed": "done", "moved": "done",
+                     "rejected": "error", "failed": "error"}
+    seen = set(shown.values()) | {public_state("downloading", fetching=False), public_state("aligning", "running")}
+    assert seen == {"planned", "download_queued", "downloading", "align_queued", "running", "done", "error"}
+
+
+def test_a_download_that_waits_for_a_place_is_queued_not_downloading():
+    assert public_state("downloading", fetching=False) == "download_queued"
+    assert public_state("downloading", fetching=True) == "downloading"
 
 
 def test_a_voice_over_in_the_service_waits_or_runs_by_the_state_of_its_job():
     for waiting in (None, "queued", "paused"):
-        assert public_state("aligning", waiting) == "queued"
+        assert public_state("aligning", waiting) == "align_queued"
     for working in ("running", "done", "failed"):
         assert public_state("aligning", working) == "running"
 
@@ -1030,8 +1062,8 @@ async def test_a_voice_over_goes_from_queued_to_running_when_the_service_starts_
     while not changes.queue.empty():
         event = changes.queue.get_nowait().payload
         seen.append((event["status"], event["state"]))
-    assert ("ready", "queued") in seen and seen.count(("aligning", "queued")) == 2
-    assert set((await states_of(probe)).values()) == {"queued"}
+    assert ("ready", "align_queued") in seen and seen.count(("aligning", "align_queued")) == 2
+    assert set((await states_of(probe)).values()) == {"align_queued"}
     probe.publish_event("conform.queue.changed", {"daemon": {"up": True}, "tasks": [{"id": "job-1", "status": "running"}]})
     await statuses_until(sub, ["aligning", "aligning"])
     assert set((await states_of(probe)).values()) == {"running"}
@@ -1041,7 +1073,7 @@ async def test_a_voice_over_goes_from_queued_to_running_when_the_service_starts_
     assert sub.queue.empty()
     probe.publish_event("conform.queue.changed", {"daemon": {"up": False}, "tasks": []})
     await statuses_until(sub, ["aligning", "aligning"])
-    assert set((await states_of(probe)).values()) == {"queued"}
+    assert set((await states_of(probe)).values()) == {"align_queued"}
 
 
 @pytest.mark.asyncio
@@ -1058,3 +1090,61 @@ async def test_the_end_of_a_job_shows_done_and_error_without_any_other_word(dubs
         states[(event["voice_key"], event["status"])] = event["state"]
     assert states[("blackcat", "placed")] == "done" and states[("redheadsound", "rejected")] == "error"
     assert await states_of(probe) == {"blackcat": "done", "redheadsound": "error"}
+
+
+def start(probe, fetch):
+    probe.publish_event("downloads.fetch.started", {"key": fetch["key"], "series_id": 7, "path": fetch["path"]})
+
+
+@pytest.mark.asyncio
+async def test_a_sent_download_is_queued_until_it_really_starts_and_downloading_after(dubs):
+    probe, neighbours, _, bus, sub, _ = await two_voices_ready(dubs, finished=False)
+    changes = bus.subscribe("voices.dub.changed")
+    assert set((await states_of(probe)).values()) == {"download_queued"}
+    first = next(f for f in neighbours.fetches if "BlackCat" in f["url"])
+    start(probe, first)
+    await change_state(changes, "blackcat", "downloading")
+    assert await states_of(probe) == {"blackcat": "downloading", "redheadsound": "download_queued"}
+    touch(first["path"], b"video")
+    finish(probe, first["key"])
+    ready = await change(changes, "ready")
+    assert ready["state"] == "align_queued"
+    assert (await states_of(probe))["blackcat"] == "align_queued"
+
+
+@pytest.mark.asyncio
+async def test_a_sent_download_is_announced_at_once_as_queued(dubs):
+    probe, neighbours, _, bus = dubs
+    changes = bus.subscribe("voices.dub.changed")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    sent = [await change(changes, "downloading") for _ in range(3)]
+    assert {e["state"] for e in sent} == {"download_queued"} and {e["voice_label"] for e in sent} == {"BlackCat"}
+
+
+@pytest.mark.asyncio
+async def test_the_next_source_of_a_voice_is_queued_again_until_its_own_start(dubs):
+    probe, neighbours, _, bus, sub, _ = await two_voices_ready(dubs, finished=False)
+    await asyncio.sleep(0.2)
+    changes = bus.subscribe("voices.dub.changed")
+    black = next(f for f in neighbours.fetches if "BlackCat" in f["url"])
+    start(probe, black)
+    await change_state(changes, "blackcat", "downloading")
+    finish(probe, black["key"], ok=False, error="timed out")
+    await settled(neighbours, 3)  # the fallback source of BlackCat is sent
+    await change_state(changes, "blackcat", "download_queued")
+    assert (await states_of(probe))["blackcat"] == "download_queued"
+    start(probe, neighbours.fetches[2])
+    await change_state(changes, "blackcat", "downloading")
+    assert (await states_of(probe))["blackcat"] == "downloading"
+
+
+@pytest.mark.asyncio
+async def test_a_start_of_a_foreign_download_is_none_of_our_business(dubs):
+    probe, neighbours, _, bus, sub, _ = await two_voices_ready(dubs, finished=False)
+    await asyncio.sleep(0.2)
+    changes = bus.subscribe("voices.dub.changed")
+    probe.publish_event("downloads.fetch.started", {"key": "other:1", "series_id": 7, "path": "/x"})
+    probe.publish_event("downloads.fetch.started", {"key": "dub:99999", "series_id": 7, "path": "/x"})
+    await asyncio.sleep(0.2)
+    assert changes.queue.empty()

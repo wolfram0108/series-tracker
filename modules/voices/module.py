@@ -16,12 +16,13 @@ Command:
       lay the voices out around the selected reference, record a voice_dubs row per planned
       reference episode and voice, and download what is not on disk yet into the temporary
       directory (setting `voices.temp_root`, default /nas/torrents/series-tracker).
-Events in:  downloads.fetch.finished (our keys `dub:<id>`), conform.queue.changed (waiting or running
+Events in:  downloads.fetch.started and .finished (our keys `dub:<id>`), conform.queue.changed (waiting or running
             jobs of the service), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished,
             conform.daemon.up, series.deleted.
 Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, detail} —
-            state is what the user sees (states.py: planned, queued, running, done, error), status the
+            state is what the user sees (states.py: planned, download_queued, downloading, align_queued, running,
+            done, error), status the
             step behind it; detail is the reason of a failure, a rejection or a stale track, else null;
             status is one of
             ready, aligning, aligned, placed, rejected, failed, moved (the track followed its video),
@@ -115,12 +116,14 @@ class VoicesModule(BaseModule):
         self._retries: dict[int, int] = {}
         self._retry_pending: set[int] = set()
         self._job_status: dict[str, str] = {}
+        self._fetching: set[int] = set()
         super().__init__(bus)
 
     def register(self) -> None:
         self.handle("voices.layout", self.on_layout)
         self.handle("voices.dubs.get", self.on_dubs_get)
         self.handle("voices.dispatch", self.on_dispatch, concurrent=True)
+        self.handle("downloads.fetch.started", self.on_fetch_started)
         self.handle("downloads.fetch.finished", self.on_fetch_finished)
         self.handle("series.downloaded.changed", self.on_downloaded)
         self.handle("downloads.item.renamed", self.on_downloaded)
@@ -172,7 +175,8 @@ class VoicesModule(BaseModule):
         keep = ("season", "episode", "voice_key", "voice_label", "status", "attempt", "error",
                 "temp_path", "job_id", "aligned_path", "sidecar_path", "outcome", "ref_uid", "ref_path")
         return {"items": [{**{field: row[field] for field in keep}, "detail": row["outcome"] or row["error"],
-                           "state": public_state(row["status"], self._job_status.get(row["job_id"]))}
+                           "state": public_state(row["status"], self._job_status.get(row["job_id"]),
+                                                 row["id"] in self._fetching)}
                           for row in rows]}
 
     # --- planning ---------------------------------------------------------------------
@@ -262,15 +266,28 @@ class VoicesModule(BaseModule):
         path = temp_path(root or await self._temp_root(), row["series_id"], row["season"],
                          row["episode"], row["voice_key"])
         await self.repo.mark_downloading(row["id"], path)
+        self._fetching.discard(row["id"])
         self.send_command("downloads.fetch", {
             "key": f"dub:{row['id']}", "url": chain[row["attempt"]]["url"], "path": path,
             "max_height": DUB_MAX_HEIGHT, "series_id": row["series_id"]})
+        self._changed(row, "downloading")
+
+    async def on_fetch_started(self, env: Envelope) -> None:
+        """The download left the queue of downloads and began: only now it is a download."""
+        key = str(env.payload.get("key") or "")
+        if not key.startswith("dub:"):
+            return
+        row = await self.repo.get(int(key[4:]))
+        if row is not None and row["status"] == "downloading":
+            self._fetching.add(row["id"])
+            self._changed(row, "downloading")
 
     async def on_fetch_finished(self, env: Envelope) -> None:
         payload = env.payload
         key = str(payload.get("key") or "")
         if not key.startswith("dub:"):
             return
+        self._fetching.discard(int(key[4:]))
         row = await self.repo.get(int(key[4:]))
         if row is None:
             return
@@ -303,7 +320,7 @@ class VoicesModule(BaseModule):
         self.publish_event("voices.dub.changed", {
             "series_id": row["series_id"], "season": row["season"], "episode": row["episode"],
             "voice_key": row["voice_key"], "voice_label": row["voice_label"], "status": status,
-            "state": public_state(status, job_status), "detail": detail})
+            "state": public_state(status, job_status, row.get("id") in self._fetching), "detail": detail})
 
     async def on_conform_picture(self, env: Envelope) -> None:
         """A job of the service went from waiting to running (or vanished): its voice-overs follow."""

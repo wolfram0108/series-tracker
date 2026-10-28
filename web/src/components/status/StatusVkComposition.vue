@@ -147,8 +147,14 @@ function voicesOf(it: Item): VoiceDub[] {
 function voiceState(v: VoiceDub): string {
   return t(`voices.state.${v.state}` as MessageKey)
 }
+// The step behind a state, where one state has two causes (waiting for alignment, running).
 function voiceHint(v: VoiceDub): string {
-  return v.detail ?? t(`voices.stage.${v.status}` as MessageKey)
+  if (v.detail) return v.detail
+  const key =
+    v.state === "align_queued" ? (v.status === "ready" ? "ready" : "aligning_wait")
+    : v.state === "running" ? (v.status === "aligned" ? "aligned" : "aligning_run")
+    : v.state
+  return t(`voices.hint.${key}` as MessageKey)
 }
 function voiceTrouble(v: VoiceDub): boolean {
   return v.state === "error"

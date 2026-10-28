@@ -1523,7 +1523,7 @@ export interface components {
         };
         /**
          * VoiceDub
-         * @description Озвучка серии: дополнительная озвучка, её состояние (state: planned, queued, running, done, error;
+         * @description Озвучка серии: дополнительная озвучка, её состояние (state: planned, download_queued, downloading, align_queued, running, done, error;
          *     status — шаг за ним) и причина ошибки.
          */
         VoiceDub: {

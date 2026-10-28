@@ -1038,3 +1038,22 @@ async def test_a_new_file_name_is_announced_to_the_modules_that_keep_files_next_
     probe.send_command("downloads.item.set_filename", {"unique_id": "nobody", "filename": "x.mp4"})
     await asyncio.sleep(0.1)
     assert sub.queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_is_announced_when_it_leaves_the_queue_and_starts(system, tmp_path, monkeypatch):
+    bus, fake, dl, probe, db_path, _ = system
+    fake.stream_replies["https://site/#cvh=1"] = {"handled": True, "stream_url": "https://cdn/1.mp4", "headers": {}}
+    fake.stream_replies["https://site/#cvh=2"] = {"handled": True, "stream_url": "https://cdn/2.mp4", "headers": {}}
+    fake.settings["max_parallel_dub_downloads"] = "1"
+    started = bus.subscribe("downloads.fetch.started")
+    finished = bus.subscribe("downloads.fetch.finished")
+    probe.send_command("downloads.fetch", {"key": "dub:1", "url": "https://site/#cvh=1",
+                                           "path": str(tmp_path / "t" / "1.mp4"), "series_id": 3})
+    probe.send_command("downloads.fetch", {"key": "dub:2", "url": "https://site/#cvh=2",
+                                           "path": str(tmp_path / "t" / "2.mp4"), "series_id": 3})
+    first = (await asyncio.wait_for(started.queue.get(), 3)).payload
+    assert first == {"key": "dub:1", "series_id": 3, "path": str(tmp_path / "t" / "1.mp4")}
+    await asyncio.wait_for(finished.queue.get(), 3)
+    second = (await asyncio.wait_for(started.queue.get(), 3)).payload
+    assert second["key"] == "dub:2"

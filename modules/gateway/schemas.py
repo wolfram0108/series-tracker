@@ -67,7 +67,7 @@ class TmdbInfo(ApiModel):
 
 
 class VoiceDub(ApiModel):
-    """Озвучка серии: дополнительная озвучка, её состояние (state: planned, queued, running, done, error;
+    """Озвучка серии: дополнительная озвучка, её состояние (state: planned, download_queued, downloading, align_queued, running, done, error;
     status — шаг за ним) и причина ошибки."""
     season: int
     episode: int

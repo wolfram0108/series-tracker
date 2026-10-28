@@ -50,7 +50,8 @@ _retire_superseded: после загрузки, усыновления, дис�
       (озвучки серии во временный каталог). Исполнитель без состояния:
       владелец очереди (voices) пересылает команду после рестарта.
   downloads.fetch.cancel {series_id} — снять очередь и активные загрузки серии
-событие downloads.fetch.finished {key, ok, error, transient, path, series_id}.
+события downloads.fetch.started {key, series_id, path} (загрузка вышла из очереди и пошла) и
+downloads.fetch.finished {key, ok, error, transient, path, series_id}.
 Свой лимит параллелизма — настройка max_parallel_dub_downloads (по умолчанию 2),
 независимый от очереди медиатеки.
 """
@@ -589,6 +590,8 @@ class DownloadsModule(BaseModule):
             runner = asyncio.create_task(self._fetch_one(job))
             self._fetch_active[job["key"]] = (runner, job["series_id"])
             self._tasks.append(runner)
+            self.publish_event("downloads.fetch.started", {
+                "key": job["key"], "series_id": job["series_id"], "path": job["path"]})
 
     async def _fetch_one(self, job: dict) -> None:
         key, path = job["key"], job["path"]
