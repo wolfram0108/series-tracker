@@ -803,3 +803,32 @@ async def test_scan_repairs_stale_double_winner(system, db_path):
     assert rows[high]["plan_status"] == "in_plan_single"
     assert rows[low]["plan_status"] == "replaced"
     assert rows[low]["superseded_by"] == high
+
+
+@pytest.mark.asyncio
+async def test_stale_unfetched_row_does_not_block_live_source(system, db_path):
+    """An announced-but-dead candidate stays in the table as an error row;
+    once nobody offers it, it must not outrank the live lower source."""
+    _, fake, probe, _ = system
+    stale = _seed_web_row(db_path, PAGE_P, 480, status="error")
+    _web_scan_result(fake, "https://fsst.online/embed/1/", 360)
+
+    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
+
+    rows = _web_rows(db_path)
+    live = ids.media_unique_id("https://fsst.online/embed/1/", "2026-10-20 12:00:00", 3)
+    assert rows[live]["plan_status"] == "in_plan_single"
+    assert rows[stale]["plan_status"] == "candidate"
+    assert rows[live]["superseded_by"] is None
+
+
+@pytest.mark.asyncio
+async def test_offered_error_row_keeps_its_slot(system, db_path):
+    """A candidate the source still offers is retried, not silently dropped."""
+    _, fake, probe, _ = system
+    stale = _seed_web_row(db_path, PAGE_P, 480, status="error")
+    _web_scan_result(fake, PAGE_P, 480)
+
+    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
+
+    assert _web_rows(db_path)[stale]["plan_status"] == "in_plan_single"

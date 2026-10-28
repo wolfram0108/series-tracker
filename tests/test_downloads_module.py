@@ -870,3 +870,18 @@ async def test_retired_file_leaves_downloaded_counter(system):
             break
         await asyncio.sleep(0.02)
     assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_error_task_outside_plan_is_dropped(system):
+    _, _, _, probe, db_path, _ = system
+    _add_item(db_path, "gone", 1, plan="candidate", status="error")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO download_tasks (task_key, series_id, video_url, "
+                     "save_path, status, task_type) VALUES "
+                     "('gone', 2, 'u', '/tmp/x', 'error', 'vk_video')")
+        conn.commit()
+
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+
+    assert await _wait(lambda: _tasks(db_path) == [])

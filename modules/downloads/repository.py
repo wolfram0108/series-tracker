@@ -63,10 +63,11 @@ class DownloadsRepository:
         return True
 
     async def drop_pending_outside_plan(self, series_id: int) -> int:
-        """Чистка pending-задач, выпавших из плана (находка 32)."""
+        """Чистка pending- и error-задач, выпавших из плана (находка 32):
+        ошибка элемента вне плана никем не повторяется и только мусорит."""
         return await self._db.execute(
             "DELETE FROM download_tasks WHERE series_id=? AND "
-            "task_type='vk_video' AND status='pending' AND task_key IN "
+            "task_type='vk_video' AND status IN ('pending', 'error') AND task_key IN "
             "(SELECT unique_id FROM media_items WHERE series_id=? AND "
             f"plan_status NOT IN {_IN_PLAN})", (series_id, series_id))
 

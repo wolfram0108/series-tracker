@@ -536,7 +536,8 @@ class ScanModule(BaseModule):
                       len(candidates), stats["added"], stats["updated"],
                       stats["deleted"])
 
-        plan = await self._rebuild_plan(series)
+        plan = await self._rebuild_plan(
+            series, offered={c["unique_id"] for c in candidates})
         in_plan = sum(1 for s in plan.values() if s.startswith("in_plan"))
         self.publish_event("scan.plan.updated", {"series_id": series_id})
         changed = bool(stats["added"] or stats["deleted"])
@@ -597,11 +598,19 @@ class ScanModule(BaseModule):
                                  series["id"], exc)
         return result
 
-    async def _rebuild_plan(self, series: dict) -> dict[str, str]:
-        """Plan over every row of the series, not only the rows this scan returned."""
+    async def _rebuild_plan(self, series: dict,
+                            offered: set[str] | None = None) -> dict[str, str]:
+        """Plan over every row of the series, not only the rows this scan returned.
+
+        With `offered` (the scan's own candidates) a row nobody offers any more
+        and that was never fetched cannot hold a slot against a live source."""
+        rows = await self.repo.plan_input(series["id"])
+        if offered is not None:
+            rows = [row for row in rows
+                    if row["unique_id"] in offered or self._is_downloaded(row)
+                    or row.get("status") == "downloading"]
         statuses, superseded = plan_with_supersession(
-            await self.repo.plan_input(series["id"]),
-            self._quality_priority(series), self._ignored_seasons(series))
+            rows, self._quality_priority(series), self._ignored_seasons(series))
         await self.repo.replace_plan(series["id"], statuses, superseded)
         return statuses
 
