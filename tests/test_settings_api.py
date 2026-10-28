@@ -157,7 +157,8 @@ class _TwoVoiceSite(BaseVideoProvider):
     async def parse_release(self, url, http):
         def source(player, studio, episodes):
             return {"url": f"https://fake.test/t?player={player}&voice={studio}", "player": player,
-                    "studio": studio, "kind": "", "episodes": episodes}
+                    "studio": studio, "kind": "", "episodes": episodes,
+                    "links": {str(n): f"https://fake.test/t#{player}={n}" for n in episodes}}
         return {"canonical_url": url, "title": {"ru": "Т", "en": "T"}, "titles": [], "episodes": [],
                 "resolution": None, "videos": [], "episodes_count": 0, "provider": self.name,
                 "source_type": "web_video", "releases": [], "players": {},
@@ -184,6 +185,8 @@ async def test_parse_url_of_a_web_source_carries_the_voice_layout(system):
         ("Main", "reference"), ("Extra", "dub")]
     assert [s["player"] for s in layout["skipped"]] == ["kodik"]
     assert body["selected_source"] == layout["reference"]["url"]
+    # Episode links are for the voices module; the form never receives them.
+    assert all("links" not in source for source in body["sources"])
 
 
 @pytest.mark.asyncio
@@ -360,7 +363,7 @@ async def test_saved_paths_are_fs_safe(system):
 
 
 @pytest.mark.asyncio
-async def test_scrape_titles_endpoint(system):
+async def test_scrape_titles_endpoint(system, monkeypatch):
     """Verify scrape-titles validation, VK single-video rejection, and web provider routing."""
     from modules.sources.video_providers import get_default_registry
     from modules.sources.video_providers.base import BaseVideoProvider
@@ -404,10 +407,13 @@ async def test_scrape_titles_endpoint(system):
                  "publication_date": "2026-10-03T12:00:00Z", "resolution": 1080},
             ], "players": {}}
 
-        async def resolve_stream(self, url: str, http: httpx.AsyncClient) -> dict | None:
+        async def resolve_stream(self, url: str, http: httpx.AsyncClient,
+                                 max_height: int | None = None) -> dict | None:
             return None
 
-    get_default_registry().register(FakeVideoProvider())
+    # The default registry is process-wide: the fake must not outlive this test.
+    registry = get_default_registry()
+    monkeypatch.setattr(registry, "_providers", [*registry._providers, FakeVideoProvider()])
     bus, _, client = system
 
     # 1. Empty URL

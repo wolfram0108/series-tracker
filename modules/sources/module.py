@@ -141,6 +141,10 @@ class SourcesModule(BaseModule):
             async with lock:
                 await self._polite(service)
                 parsed = await provider.parse_release(url, self._http)
+            sources = parsed.get("sources", [])
+            if not env.payload.get("with_links"):
+                # Links of every episode are for the voices module; the form does not need them.
+                sources = [{k: v for k, v in source.items() if k != "links"} for source in sources]
             return {
                 "service": service,
                 "source_type": "web_video",
@@ -153,7 +157,7 @@ class SourcesModule(BaseModule):
                 "canonical_url": parsed.get("canonical_url", url),
                 "episodes_count": parsed.get("episodes_count", 0),
                 "players": parsed.get("players", {}),
-                "sources": parsed.get("sources", []),
+                "sources": sources,
                 "selected_source": parsed.get("selected_source"),
                 "ui_features": {},
                 "tracker": None,
@@ -394,13 +398,15 @@ class SourcesModule(BaseModule):
         return {"videos": videos, "players": players}
 
     async def on_video_stream(self, env: Envelope) -> dict:
-        """reply: {handled, stream_url, headers} | {handled, error, transient}.
+        """payload: {url, max_height?}
+        reply: {handled, stream_url, headers} | {handled, error, transient}.
 
         `error` means the URL belongs to a provider that has no stream for it:
         the caller must not hand the page to a generic downloader."""
         url = env.payload["url"]
         try:
-            stream_info = await self.video_registry.resolve_stream(url, self._http)
+            stream_info = await self.video_registry.resolve_stream(
+                url, self._http, env.payload.get("max_height"))
         except StreamUnavailable as exc:
             return {"handled": True, "error": exc.reason,
                     "transient": exc.transient}

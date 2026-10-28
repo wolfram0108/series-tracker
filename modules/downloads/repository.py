@@ -164,6 +164,13 @@ class DownloadsRepository:
             f"plan_status IN {_IN_PLAN} AND status IN ('pending', 'error') "
             "AND is_ignored_by_user=0", (series_id,))
 
+    async def reference_items(self, series_id: int) -> list[dict]:
+        """Single-episode rows of the plan in any download state: the reference episodes."""
+        return await self._db.fetch_all(
+            "SELECT unique_id, season, episode_start, source_url, status, final_filename "
+            "FROM media_items WHERE series_id=? AND plan_status='in_plan_single' "
+            "AND is_ignored_by_user=0 ORDER BY season, episode_start", (series_id,))
+
     async def completed_items(self, series_id: int) -> list[dict]:
         return await self._db.fetch_all(
             "SELECT * FROM media_items WHERE series_id=? AND "

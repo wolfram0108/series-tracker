@@ -675,7 +675,8 @@ class RuchimeProvider(BaseVideoProvider):
             progress(total, total, "done")
         return {"videos": facts, "players": report}
 
-    async def resolve_stream(self, url: str, http: httpx.AsyncClient) -> dict | None:
+    async def resolve_stream(self, url: str, http: httpx.AsyncClient,
+                             max_height: int | None = None) -> dict | None:
         """Resolve VK embeds, AllVideo embeds and Vibix episode references."""
         if "video_ext.php" in url and ("vk.com" in url or "vkvideo.ru" in url):
             return await self._resolve_vk(url, http)

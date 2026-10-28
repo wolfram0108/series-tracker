@@ -54,3 +54,9 @@ def voice_groups(names: list[str]) -> list[list[int]]:
     for index in range(len(names)):
         groups.setdefault(find(index), []).append(index)
     return sorted(groups.values(), key=lambda members: members[0])
+
+
+def group_key(names: list[str]) -> str:
+    """Stable key of a voice: the smallest token of any spelling, so it survives a changed listing order."""
+    found = set().union(*(tokens(name) for name in names)) if names else set()
+    return min(found) if found else ""

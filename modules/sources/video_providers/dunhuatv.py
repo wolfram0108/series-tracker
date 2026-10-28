@@ -140,6 +140,14 @@ def kodik_link(page_url: str, media_id: str, media_hash: str, episode: int) -> s
     return f"{page_url}#kodik={media_id}/{media_hash}/{episode}"
 
 
+def episode_link(page_url: str, source: Source, number: int) -> str:
+    """Candidate link of one episode of a source."""
+    if source.choice.player == "cvh":
+        return cvh_link(page_url, source.episodes[number])
+    assert source.serial is not None
+    return kodik_link(page_url, *source.serial, number)
+
+
 def episode_ranges(numbers) -> str:
     """'1-471, 473-501': the real coverage of a voice-over, holes included."""
     ordered = sorted(set(numbers))
@@ -252,15 +260,16 @@ class DunhuaTvProvider(BaseVideoProvider):
             "holes": holes,
         }}
 
-    async def resolve_stream(self, url: str, http: httpx.AsyncClient) -> dict | None:
+    async def resolve_stream(self, url: str, http: httpx.AsyncClient,
+                             max_height: int | None = None) -> dict | None:
         """Fresh stream of a candidate link; None when the link is not ours."""
         target = self._parse_link(url)
         if target is None:
             return None
         kind, value = target
         if kind in ("cvh", "vk"):
-            return await self._resolve_cvh(value, http)
-        return await self._resolve_kodik(value, http)
+            return await self._resolve_cvh(value, http, max_height)
+        return await self._resolve_kodik(value, http, max_height)
 
     # --- page and catalog ---------------------------------------------------------------
 
@@ -357,6 +366,7 @@ class DunhuaTvProvider(BaseVideoProvider):
             "count": len(numbers),
             "ranges": episode_ranges(numbers),
             "episodes": numbers,
+            "links": {str(number): episode_link(page_url, source, number) for number in numbers},
         }
 
     # --- probes -------------------------------------------------------------------------
@@ -400,15 +410,19 @@ class DunhuaTvProvider(BaseVideoProvider):
 
     # --- stream resolution --------------------------------------------------------------
 
-    async def _resolve_cvh(self, vk_id: str, http: httpx.AsyncClient) -> dict:
+    async def _resolve_cvh(self, vk_id: str, http: httpx.AsyncClient,
+                           max_height: int | None = None) -> dict:
         try:
-            rung = await cdnvideohub.best_rung(await cdnvideohub.fetch_rungs(http, vk_id),
-                                               self._cached_measure(vk_id))
+            rungs = await cdnvideohub.fetch_rungs(http, vk_id)
+            measure = self._cached_measure(vk_id)
+            rung = (await cdnvideohub.rung_within(rungs, max_height, measure) if max_height
+                    else await cdnvideohub.best_rung(rungs, measure))
         except CdnVideoHubError as exc:
             raise StreamUnavailable(f"CVH: {exc.reason}", exc.transient) from exc
         return {"stream_url": rung.url, "headers": dict(cdnvideohub.STREAM_HEADERS)}
 
-    async def _resolve_kodik(self, value: str, http: httpx.AsyncClient) -> dict:
+    async def _resolve_kodik(self, value: str, http: httpx.AsyncClient,
+                             max_height: int | None = None) -> dict:
         parts = value.split("/")
         if len(parts) != 3 or not parts[2].isdigit():
             raise StreamUnavailable(f"Kodik: непонятная ссылка {value!r}")
@@ -419,8 +433,16 @@ class DunhuaTvProvider(BaseVideoProvider):
             qualities = await kodik.episode_qualities(http, session, episode)
         except KodikError as exc:
             raise StreamUnavailable(f"Kodik: {exc.reason}", exc.transient) from exc
-        return {"stream_url": qualities[max(qualities)],
+        return {"stream_url": qualities[self._quality_within(qualities, max_height)],
                 "headers": {"Referer": kodik.ORIGIN + "/"}}
+
+    @staticmethod
+    def _quality_within(qualities: dict[int, str], cap: int | None) -> int:
+        """Best quality not above `cap`; the lowest one above it when none fits."""
+        if not cap:
+            return max(qualities)
+        fitting = [height for height in qualities if height <= cap]
+        return max(fitting) if fitting else min(qualities)
 
     # --- names and reports --------------------------------------------------------------
 

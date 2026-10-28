@@ -94,6 +94,7 @@ class FakeNeighbours(BaseModule):
         self.stream_replies: dict[str, dict] = {}
         self.stream_raises: set[str] = set()
         self.stream_requests: list[str] = []
+        self.stream_payloads: list[dict] = []
         super().__init__(bus)
 
     def register(self):
@@ -104,6 +105,7 @@ class FakeNeighbours(BaseModule):
     async def on_stream(self, env):
         url = env.payload["url"]
         self.stream_requests.append(url)
+        self.stream_payloads.append(dict(env.payload))
         if url in self.stream_raises:
             raise RuntimeError("sources unavailable")
         return self.stream_replies.get(url, {"handled": False})
@@ -122,6 +124,7 @@ class FakeDownloader:
 
     def __init__(self):
         self.fail_urls: set[str] = set()
+        self.timeouts: dict[str, int] = {}   # url -> how many more attempts end in a network timeout
         self.started: list[str] = []
         self.gate: asyncio.Event | None = None
         self.concurrent = 0
@@ -139,6 +142,9 @@ class FakeDownloader:
                 await self.gate.wait()
             if url in self.fail_urls:
                 return False, "видео недоступно или приватно"
+            if self.timeouts.get(url, 0):
+                self.timeouts[url] -= 1
+                return False, "ffmpeg direct download: Connection timed out"
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "wb") as f:
                 f.write(b"video")
@@ -894,3 +900,126 @@ async def test_error_task_outside_plan_is_dropped(system):
     probe.publish_event("scan.plan.updated", {"series_id": 2})
 
     assert await _wait(lambda: _tasks(db_path) == [])
+
+
+# --- общая загрузка «поток → файл» (downloads.fetch) ----------------------------------------
+
+
+async def _fetch(probe, bus, expect, **job):
+    """Sends downloads.fetch jobs and returns the `finished` events of `expect` of them."""
+    sub = bus.subscribe("downloads.fetch.finished")
+    for item in job["jobs"]:
+        probe.send_command("downloads.fetch", item)
+    return [(await asyncio.wait_for(sub.queue.get(), 5)).payload for _ in range(expect)]
+
+
+@pytest.mark.asyncio
+async def test_fetch_downloads_a_stream_without_touching_the_media_tables(system, tmp_path):
+    bus, fake, dl, probe, db_path, _ = system
+    fake.stream_replies["https://site/#cvh=1"] = {
+        "handled": True, "stream_url": "https://cdn/1.mp4", "headers": {"User-Agent": "A/1"}}
+    path = str(tmp_path / "temp" / "s01e01" / "voice.mp4")
+    (done,) = await _fetch(probe, bus, 1, jobs=[
+        {"key": "dub:1", "url": "https://site/#cvh=1", "path": path, "max_height": 720, "series_id": 3}])
+    assert done["ok"] is True and done["key"] == "dub:1" and done["path"] == path
+    assert os.path.isfile(path) and dl.started == ["https://cdn/1.mp4"]
+    assert fake.stream_payloads == [{"url": "https://site/#cvh=1", "max_height": 720}]
+    assert _tasks(db_path) == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_failure_is_reported_and_leaves_no_partial_file(system, tmp_path):
+    bus, fake, dl, probe, _, _ = system
+    path = str(tmp_path / "t" / "x.mp4")
+    dl.fail_urls.add("https://site/#kodik=1")
+    (done,) = await _fetch(probe, bus, 1, jobs=[
+        {"key": "dub:9", "url": "https://site/#kodik=1", "path": path, "series_id": 3}])
+    assert done["ok"] is False and "приватно" in done["error"] and done["transient"] is False
+    assert not os.path.exists(path)
+
+
+@pytest.mark.asyncio
+async def test_fetch_stream_error_of_the_provider_is_the_error_of_the_job(system, tmp_path):
+    bus, fake, _, probe, _, _ = system
+    fake.stream_replies["https://site/#cvh=2"] = {"handled": True, "error": "VK: видео недоступно",
+                                                  "transient": False}
+    (done,) = await _fetch(probe, bus, 1, jobs=[
+        {"key": "dub:2", "url": "https://site/#cvh=2", "path": str(tmp_path / "a.mp4"), "series_id": 3}])
+    assert (done["ok"], done["error"], done["transient"]) == (False, "VK: видео недоступно", False)
+
+
+@pytest.mark.asyncio
+async def test_fetch_unreachable_sources_is_an_error_not_a_blind_download(system, tmp_path, monkeypatch):
+    monkeypatch.setattr("modules.downloads.module.RETRY_DELAY_S", 0.0)
+    bus, fake, dl, probe, _, _ = system
+    fake.stream_raises.add("https://site/#cvh=3")
+    (done,) = await _fetch(probe, bus, 1, jobs=[
+        {"key": "dub:3", "url": "https://site/#cvh=3", "path": str(tmp_path / "b.mp4"), "series_id": 3}])
+    assert done["ok"] is False and "поток не получен" in done["error"] and dl.started == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_retries_transient_errors_then_succeeds(system, tmp_path, monkeypatch):
+    monkeypatch.setattr("modules.downloads.module.RETRY_DELAY_S", 0.0)
+    bus, _, dl, probe, _, _ = system
+    dl.timeouts["https://site/#cvh=4"] = 2
+    (done,) = await _fetch(probe, bus, 1, jobs=[
+        {"key": "dub:4", "url": "https://site/#cvh=4", "path": str(tmp_path / "c.mp4"), "series_id": 3}])
+    assert done["ok"] is True and dl.started.count("https://site/#cvh=4") == 3
+
+
+@pytest.mark.asyncio
+async def test_fetch_gives_up_after_the_attempt_limit(system, tmp_path, monkeypatch):
+    monkeypatch.setattr("modules.downloads.module.RETRY_DELAY_S", 0.0)
+    bus, _, dl, probe, _, _ = system
+    dl.timeouts["https://site/#cvh=5"] = 99
+    (done,) = await _fetch(probe, bus, 1, jobs=[
+        {"key": "dub:5", "url": "https://site/#cvh=5", "path": str(tmp_path / "d.mp4"), "series_id": 3}])
+    assert done["ok"] is False and done["transient"] is True
+    assert dl.started.count("https://site/#cvh=5") == 3 and not os.path.exists(tmp_path / "d.mp4")
+
+
+@pytest.mark.asyncio
+async def test_fetch_has_its_own_limit_and_ignores_repeated_keys(system, tmp_path):
+    bus, fake, dl, probe, _, _ = system
+    dl.gate = asyncio.Event()
+    jobs = [{"key": f"dub:{i}", "url": f"https://site/#cvh={i}", "path": str(tmp_path / f"{i}.mp4"),
+             "series_id": 3} for i in range(4)]
+    jobs.append(dict(jobs[0]))
+    sub = bus.subscribe("downloads.fetch.finished")
+    for job in jobs:
+        probe.send_command("downloads.fetch", job)
+    assert await _wait(lambda: dl.concurrent == 2)
+    await asyncio.sleep(0.1)
+    assert dl.max_concurrent == 2 and dl.concurrent == 2
+    dl.gate.set()
+    got = [(await asyncio.wait_for(sub.queue.get(), 5)).payload["key"] for _ in range(4)]
+    assert sorted(got) == [f"dub:{i}" for i in range(4)]
+    await asyncio.sleep(0.1)
+    assert sub.queue.empty() and len(dl.started) == 4
+
+
+@pytest.mark.asyncio
+async def test_fetch_cancel_drops_the_queue_and_active_jobs_of_a_series(system, tmp_path):
+    bus, fake, dl, probe, _, _ = system
+    dl.gate = asyncio.Event()
+    for i in range(4):
+        probe.send_command("downloads.fetch", {
+            "key": f"dub:{i}", "url": f"https://site/#cvh={i}",
+            "path": str(tmp_path / f"{i}.mp4"), "series_id": 3 if i < 3 else 4})
+    assert await _wait(lambda: dl.started == ["https://site/#cvh=0", "https://site/#cvh=1"])
+    probe.send_command("downloads.fetch.cancel", {"series_id": 3})
+    # The slots of the cancelled jobs go to the next series' job; the queued job of series 3 never runs.
+    assert await _wait(lambda: "https://site/#cvh=3" in dl.started)
+    dl.gate.set()
+    assert await _wait(lambda: os.path.isfile(tmp_path / "3.mp4"))
+    assert "https://site/#cvh=2" not in dl.started
+    assert not any(os.path.exists(tmp_path / f"{i}.mp4") for i in (0, 1, 2))
+
+
+@pytest.mark.asyncio
+async def test_fetch_rejects_a_relative_path(system):
+    bus, _, dl, probe, _, _ = system
+    (done,) = await _fetch(probe, bus, 1, jobs=[
+        {"key": "dub:7", "url": "https://site/#cvh=7", "path": "rel/x.mp4", "series_id": 3}])
+    assert done["ok"] is False and "абсолютным" in done["error"] and dl.started == []

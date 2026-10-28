@@ -157,4 +157,17 @@ async def best_rung(rungs: list[Rung], measure: Measure = measure_rung) -> Rung:
     raise CdnVideoHubError("у VK-видео нет ссылки с известным разрешением")
 
 
+async def rung_within(rungs: list[Rung], cap: int, measure: Measure = measure_rung) -> Rung:
+    """Best rung not above `cap` frame height; the lowest one above it when none fits.
+
+    Rungs of unknown height (above 1080p) are measured only when nothing else is left."""
+    known = [rung for rung in rungs if rung.height]
+    fitting = [rung for rung in known if rung.height <= cap]
+    if fitting:
+        return max(fitting, key=lambda rung: rung.height)
+    if known:
+        return min(known, key=lambda rung: rung.height)
+    return await best_rung(rungs, measure)
+
+
 LADDER_ORDER = {key: index for index, (key, _height) in enumerate(LADDER)}

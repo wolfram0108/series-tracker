@@ -1,4 +1,7 @@
 """Tests of the voices module: voice identity, reference choice, layout of a series."""
+import asyncio
+import os
+import sqlite3
 import subprocess
 import sys
 
@@ -182,7 +185,7 @@ async def system(db_path):
     bus = Bus()
     db = Database(db_path)
     probe = Probe(bus)
-    runner = Runner(bus, [SettingsModule(bus, db), VoicesModule(bus), probe])
+    runner = Runner(bus, [SettingsModule(bus, db), VoicesModule(bus, db), probe])
     await runner.start()
     yield probe
     await runner.stop()
@@ -214,3 +217,253 @@ async def test_a_broken_priority_setting_falls_back_to_the_default(system):
     reply = await system.request("voices.layout", {"sources": WINNER, "reference": FUMODUB_CVH},
                                  timeout=5)
     assert reply["priority"] == list(DEFAULT_PRIORITY)
+
+
+# --- download of the additional voice-overs -------------------------------------------
+
+
+def linked(player, studio, episodes, kind="", url=None):
+    """A source whose episode links are what the site catalog would hand out."""
+    row = src(player, studio, episodes, kind, url)
+    row["links"] = {str(n): f"https://site/title.html#{player}-{studio}-{n}" for n in episodes}
+    return row
+
+
+class Neighbours(BaseModule):
+    """catalog + sources + downloads + settings in one fake; fetch commands are captured."""
+
+    name = "neighbours"
+
+    def __init__(self, bus, sources, reference_url, plan):
+        self.sources = sources
+        self.reference_url = reference_url
+        self.plan = plan  # [(season, episode, site episode)]
+        self.settings = {}
+        self.fetches = []
+        self.cancels = []
+        self.source_type = "web_video"
+        super().__init__(bus)
+
+    def register(self):
+        self.handle("catalog.series.get", self.on_series)
+        self.handle("sources.parse", self.on_parse)
+        self.handle("downloads.episodes.get", self.on_episodes)
+        self.handle("settings.value.get", self.on_setting)
+        self.handle("downloads.fetch", self.on_fetch)
+        self.handle("downloads.fetch.cancel", self.on_cancel)
+
+    async def on_series(self, env):
+        return {"id": env.payload["series_id"], "url": "https://site/title.html",
+                "source_type": self.source_type}
+
+    async def on_parse(self, env):
+        assert env.payload.get("with_links") is True
+        return {"sources": self.sources, "selected_source": self.reference_url}
+
+    async def on_episodes(self, env):
+        reference = next(s for s in self.sources if s["url"] == self.reference_url)
+        return {"items": [{"unique_id": f"u{episode}", "season": season, "episode_start": episode,
+                           "source_url": reference["links"][str(site)], "status": "pending",
+                           "final_filename": None} for season, episode, site in self.plan]}
+
+    async def on_setting(self, env):
+        return {"key": env.payload["key"], "value": self.settings.get(env.payload["key"])}
+
+    async def on_fetch(self, env):
+        self.fetches.append(dict(env.payload))
+
+    async def on_cancel(self, env):
+        self.cancels.append(env.payload["series_id"])
+
+
+@pytest.fixture
+async def dubs(db_path, tmp_path):
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO parser_profiles (id, name) VALUES (1, 'p')")
+        conn.execute("INSERT INTO series (id, url, name, name_en, site, save_path, source_type, "
+                     "parser_profile_id, auto_scan_enabled, vk_search_mode) VALUES (7, "
+                     "'https://site/title.html', 's', 's', 'dunhuatv', '/media/s', 'web_video', 1, 0, 'search')")
+        conn.commit()
+    bus = Bus()
+    db = Database(db_path)
+    sources = [linked("cvh", "FumoDub", range(1, 4), url="https://site/?player=cvh&voice=FumoDub"),
+               linked("kodik", "BlackCat", range(1, 4)),
+               linked("cvh", "BlackCat", [1, 2])]
+    neighbours = Neighbours(bus, sources, sources[0]["url"], [(1, 1, 1), (1, 2, 2), (1, 3, 3)])
+    neighbours.settings["voices.temp_root"] = str(tmp_path / "temp")
+    probe = Probe(bus)
+    voices = VoicesModule(bus, db)
+    runner = Runner(bus, [neighbours, SettingsModule(bus, db), voices, probe])
+    await runner.start()
+    yield probe, neighbours, voices, bus
+    await runner.stop()
+
+
+async def settled(neighbours, count, seconds=3.0):
+    end = asyncio.get_running_loop().time() + seconds
+    while len(neighbours.fetches) < count:
+        assert asyncio.get_running_loop().time() < end, neighbours.fetches
+        await asyncio.sleep(0.01)
+
+
+def finish(probe, key, ok=True, error=None):
+    probe.publish_event("downloads.fetch.finished", {"key": key, "ok": ok, "error": error,
+                                                     "transient": False, "path": "", "series_id": 7})
+
+
+async def rows(probe):
+    return (await probe.request("voices.dubs.get", {"series_id": 7}, timeout=5))["items"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_downloads_every_other_voice_of_every_planned_episode(dubs):
+    probe, neighbours, voices, _ = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    assert {f["url"] for f in neighbours.fetches} == {
+        f"https://site/title.html#kodik-BlackCat-{n}" for n in (1, 2, 3)}
+    first = neighbours.fetches[0]
+    assert first["max_height"] == 720 and first["series_id"] == 7 and first["key"].startswith("dub:")
+    assert first["path"].startswith(neighbours.settings["voices.temp_root"] + "/7/s01e01/")
+    assert {r["status"] for r in await rows(probe)} == {"downloading"}
+    assert {r["voice_key"] for r in await rows(probe)} == {"blackcat"}
+
+
+@pytest.mark.asyncio
+async def test_a_finished_download_makes_the_dub_ready_and_is_announced(dubs):
+    probe, neighbours, _, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    finish(probe, neighbours.fetches[0]["key"])
+    event = (await asyncio.wait_for(sub.queue.get(), 3)).payload
+    assert event["status"] == "ready" and event["voice_key"] == "blackcat" and event["series_id"] == 7
+    assert sorted(r["status"] for r in await rows(probe)) == ["downloading", "downloading", "ready"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_source_hands_over_to_the_next_of_the_chain(dubs):
+    probe, neighbours, _, _ = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    victim = next(f for f in neighbours.fetches if f["url"].endswith("-1"))
+    finish(probe, victim["key"], ok=False, error="timed out")
+    await settled(neighbours, 4)
+    retry = neighbours.fetches[3]
+    assert retry["key"] == victim["key"] and retry["url"] == "https://site/title.html#cvh-BlackCat-1"
+    assert next(r for r in await rows(probe) if r["episode"] == 1)["attempt"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_dub_without_any_source_left_is_failed_and_logged(dubs, caplog):
+    probe, neighbours, _, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    victim = next(f for f in neighbours.fetches if f["url"].endswith("-3"))
+    caplog.set_level("WARNING")
+    finish(probe, victim["key"], ok=False, error="gone")
+    event = (await asyncio.wait_for(sub.queue.get(), 3)).payload
+    assert event["status"] == "failed" and event["episode"] == 3
+    failed = next(r for r in await rows(probe) if r["episode"] == 3)
+    assert failed["status"] == "failed" and failed["error"] == "gone"
+    assert any("BlackCat" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_a_new_dispatch_offers_failed_voices_again_from_the_main_source(dubs):
+    probe, neighbours, _, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    victim = next(f for f in neighbours.fetches if f["url"].endswith("-3"))
+    finish(probe, victim["key"], ok=False, error="gone")
+    await asyncio.wait_for(sub.queue.get(), 3)
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 4)
+    assert neighbours.fetches[3]["key"] == victim["key"] and neighbours.fetches[3]["url"] == victim["url"]
+
+
+@pytest.mark.asyncio
+async def test_an_episode_nobody_offers_is_a_failure_not_silence(dubs):
+    probe, neighbours, _, _ = dubs
+    neighbours.plan.append((1, 4, 3))
+    neighbours.sources[1]["links"].pop("3")
+    neighbours.sources[1]["episodes"].remove(3)
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 2)
+    missing = [r for r in await rows(probe) if r["status"] == "failed"]
+    assert [r["episode"] for r in missing] == [3, 4]
+    assert {r["error"] for r in missing} == {"серии нет ни в одном источнике"}
+    assert len(neighbours.fetches) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_ready_dub_is_not_downloaded_again_while_its_file_exists(dubs):
+    probe, neighbours, _, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    done = neighbours.fetches[0]
+    os.makedirs(os.path.dirname(done["path"]))
+    open(done["path"], "wb").close()
+    finish(probe, done["key"])
+    await asyncio.wait_for(sub.queue.get(), 3)
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await asyncio.sleep(0.2)
+    assert len(neighbours.fetches) == 3
+    os.remove(done["path"])
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 4)
+    assert neighbours.fetches[3]["key"] == done["key"]
+
+
+@pytest.mark.asyncio
+async def test_episodes_that_left_the_plan_lose_their_pending_rows(dubs):
+    probe, neighbours, _, _ = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    finish(probe, neighbours.fetches[2]["key"], ok=False, error="x")
+    await asyncio.sleep(0.1)
+    neighbours.plan[:] = [(1, 1, 1)]
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await asyncio.sleep(0.2)
+    assert [r["episode"] for r in await rows(probe)] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_other_source_types_and_single_voice_series_are_left_alone(dubs):
+    probe, neighbours, _, _ = dubs
+    neighbours.source_type = "vk_video"
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await asyncio.sleep(0.2)
+    assert neighbours.fetches == [] and await rows(probe) == []
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_series_cancels_downloads_and_removes_its_files(dubs):
+    probe, neighbours, _, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    folder = os.path.join(neighbours.settings["voices.temp_root"], "7")
+    os.makedirs(folder)
+    open(os.path.join(folder, "x.mp4"), "wb").close()
+    sub = bus.subscribe("series.purged")
+    probe.publish_event("series.deleted", {"series_id": 7})
+    report = (await asyncio.wait_for(sub.queue.get(), 3)).payload
+    assert report == {"series_id": 7, "owner": "voices"}
+    assert neighbours.cancels == [7] and await rows(probe) == [] and not os.path.exists(folder)
+
+
+@pytest.mark.asyncio
+async def test_after_a_restart_interrupted_downloads_are_sent_again(db_path, dubs):
+    probe, neighbours, voices, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    again = VoicesModule(bus, Database(db_path))
+    await again.start()
+    try:
+        await settled(neighbours, 6)
+        assert sorted(f["key"] for f in neighbours.fetches[3:]) == sorted(f["key"] for f in neighbours.fetches[:3])
+    finally:
+        await again.stop()

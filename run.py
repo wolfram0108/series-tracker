@@ -87,7 +87,7 @@ modules = [
     DownloadsModule(bus, db),
     RenamingModule(bus, db),
     SlicingModule(bus, db),
-    VoicesModule(bus),
+    VoicesModule(bus, db),
     # Alignment daemon (track-muxer): mirrored read-only; no address, no bridge.
     ConformModule(bus, DaemonClient(os.environ["ST_CONFORM_URL"])
                   if os.environ.get("ST_CONFORM_URL") else None),

@@ -18,6 +18,8 @@ Queries / commands:
       диске, + пинок диспетчеру. ЕДИНСТВЕННАЯ точка старта загрузки
       (шлёт только scan._run_series по явному скану/автоскану).
   downloads.queue.get {} → {tasks, count} — активные задачи (загрузка UI)
+  downloads.episodes.get {series_id} → {items: [{unique_id, season, episode_start,
+      source_url, status, final_filename}]} — референс-серии плана (читает voices)
   downloads.queue.clear {} → {deleted} — всё, кроме идущих загрузок
   downloads.fs.sync {series_id} → {adopted, lost} — синхронизация с
       диском (вызывается сканом и при открытии модалки статуса)
@@ -37,6 +39,16 @@ _retire_superseded: после загрузки, усыновления, дис�
 Диспетчер живёт по событиям (создание задачи, завершение загрузки,
 смена лимита) — никаких тиков. Параллелизм — счётчик активных задач
 против лимита из настроек.
+
+Общая загрузка «поток → файл» (миссия voice-alignment, этап 6): команда
+  downloads.fetch {key, url, path, max_height?, series_id?} — скачать поток
+      ссылки в абсолютный путь без записи в media_items и download_tasks
+      (озвучки серии во временный каталог). Исполнитель без состояния:
+      владелец очереди (voices) пересылает команду после рестарта.
+  downloads.fetch.cancel {series_id} — снять очередь и активные загрузки серии
+событие downloads.fetch.finished {key, ok, error, transient, path, series_id}.
+Свой лимит параллелизма — настройка max_parallel_dub_downloads (по умолчанию 2),
+независимый от очереди медиатеки.
 """
 from __future__ import annotations
 
@@ -56,6 +68,7 @@ PROGRESS_EVENT_THROTTLE = 1.0  # секунд между событиями оч
 MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
 STREAM_RESOLVE_TIMEOUT_S = 120  # a Vibix playlist may need a browser capture first
+FETCH_LIMIT_KEY = "max_parallel_dub_downloads"
 _TRANSIENT_MARKERS = ("timed out", "timeout", "connection", "network",
                       "temporarily", "server returned 5", "server returned 429",
                       "server returned 403", "http error 403", "http error 408",
@@ -79,6 +92,9 @@ class DownloadsModule(BaseModule):
         self.repo = DownloadsRepository(db)
         self._download = downloader  # подменяется в тестах
         self._limit = 2               # параллельных файлов (max_parallel_downloads)
+        self._fetch_limit = 2         # параллельных общих загрузок (downloads.fetch)
+        self._fetch_queue: list[dict] = []
+        self._fetch_active: dict[str, tuple[asyncio.Task, int | None]] = {}
         self._threads = 6             # фрагментов на файл (yt-dlp -N)
         self._active: dict[int, asyncio.Task] = {}
         self._last_db_write: dict[int, float] = {}
@@ -92,6 +108,9 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.queue.get", self.on_queue_get)
         self.handle("downloads.queue.clear", self.on_queue_clear)
         self.handle("downloads.cancel", self.on_cancel)
+        self.handle("downloads.episodes.get", self.on_episodes_get)
+        self.handle("downloads.fetch", self.on_fetch)
+        self.handle("downloads.fetch.cancel", self.on_fetch_cancel)
         self.handle("downloads.fs.sync", self.on_fs_sync)
         self.handle("downloads.item.set_filename", self.on_set_filename)
         self.handle("downloads.item.set_status", self.on_set_status)
@@ -100,6 +119,7 @@ class DownloadsModule(BaseModule):
     async def on_start(self) -> None:
         self._limit = await self._read_limit()
         self._threads = await self._read_threads()
+        self._fetch_limit = await self._read_fetch_limit()
         requeued = await self.repo.requeue_interrupted()
         if requeued:
             self.log.info("оборванных загрузок возвращено в очередь: %d",
@@ -120,6 +140,13 @@ class DownloadsModule(BaseModule):
             reply = await self.request("settings.value.get",
                                        {"key": "max_parallel_downloads"},
                                        timeout=10)
+            return max(1, int(reply.get("value") or 2))
+        except (BusRequestError, ValueError, TypeError):
+            return 2
+
+    async def _read_fetch_limit(self) -> int:
+        try:
+            reply = await self.request("settings.value.get", {"key": FETCH_LIMIT_KEY}, timeout=10)
             return max(1, int(reply.get("value") or 2))
         except (BusRequestError, ValueError, TypeError):
             return 2
@@ -146,6 +173,13 @@ class DownloadsModule(BaseModule):
                               self._threads)
             except (ValueError, TypeError):
                 pass
+            return
+        if key == FETCH_LIMIT_KEY:
+            try:
+                self._fetch_limit = max(1, int(env.payload.get("value")))
+            except (ValueError, TypeError):
+                return
+            self._fetch_pump()
             return
         if key != "max_parallel_downloads":
             return
@@ -397,6 +431,10 @@ class DownloadsModule(BaseModule):
         tasks = await self.repo.active_tasks()
         return {"tasks": tasks, "count": len(tasks)}
 
+    async def on_episodes_get(self, env: Envelope) -> dict:
+        """Reference episodes of the series with their download state (for voices)."""
+        return {"items": await self.repo.reference_items(env.payload["series_id"])}
+
     async def on_queue_clear(self, env: Envelope) -> dict:
         deleted = await self.repo.clear_queue()
         await self._broadcast_queue()
@@ -447,26 +485,8 @@ class DownloadsModule(BaseModule):
                     self._last_event = now
                     await self._broadcast_queue()
 
-            stream_url = task["video_url"]
-            stream_headers: dict | None = None
-            stream_error: tuple[str, bool] | None = None
-            try:
-                reply = await self.request("sources.video.stream",
-                                           {"url": task["video_url"]},
-                                           timeout=STREAM_RESOLVE_TIMEOUT_S)
-                if reply.get("error"):
-                    stream_error = (reply["error"],
-                                    bool(reply.get("transient")))
-                elif reply.get("handled"):
-                    stream_url = reply["stream_url"]
-                    stream_headers = reply.get("headers")
-            except Exception as exc:
-                if await self._is_web_series(series_id):
-                    # A web episode page is no stream: yt-dlp would scrape a foreign player.
-                    stream_error = (f"поток не получен: {exc}", True)
-                else:
-                    self.log.debug("sources.video.stream не обработан для %s: %s",
-                                   task["video_url"], exc)
+            stream_url, stream_headers, stream_error = await self._resolve_stream(
+                task["video_url"], is_web=lambda: self._is_web_series(series_id))
 
             if stream_error is not None:
                 ok, (error, transient) = False, stream_error
@@ -511,6 +531,95 @@ class DownloadsModule(BaseModule):
             await self._contribute(series_id)
             await self._broadcast_queue()
             await self._pump()
+
+    async def _resolve_stream(self, url: str, *, max_height: int | None = None,
+                              is_web) -> tuple[str, dict | None, tuple[str, bool] | None]:
+        """(stream url, headers, (error, transient)) of a link, via the provider that owns it.
+
+        `is_web` is True or an async callable: a failed request is an error for a web link, since
+        its page is no stream and yt-dlp would scrape a foreign player."""
+        payload = {"url": url, **({"max_height": max_height} if max_height else {})}
+        try:
+            reply = await self.request("sources.video.stream", payload,
+                                       timeout=STREAM_RESOLVE_TIMEOUT_S)
+            if reply.get("error"):
+                return url, None, (reply["error"], bool(reply.get("transient")))
+            if reply.get("handled"):
+                return reply["stream_url"], reply.get("headers"), None
+        except Exception as exc:
+            if is_web is True or await is_web():
+                return url, None, (f"поток не получен: {exc}", True)
+            self.log.debug("sources.video.stream не обработан для %s: %s", url, exc)
+        return url, None, None
+
+    # --- общая загрузка «поток → файл» (downloads.fetch) ---------------------------
+
+    async def on_fetch(self, env: Envelope) -> None:
+        job = {k: env.payload.get(k) for k in ("key", "url", "path", "max_height", "series_id")}
+        if not os.path.isabs(job["path"] or ""):
+            self.publish_event("downloads.fetch.finished", {
+                **job, "ok": False, "transient": False,
+                "error": "путь сохранения должен быть абсолютным"})
+            return
+        if job["key"] in self._fetch_active or any(
+                queued["key"] == job["key"] for queued in self._fetch_queue):
+            return
+        self._fetch_queue.append(job)
+        self._fetch_pump()
+
+    async def on_fetch_cancel(self, env: Envelope) -> None:
+        series_id = env.payload["series_id"]
+        self._fetch_queue = [job for job in self._fetch_queue if job["series_id"] != series_id]
+        for runner, owner in list(self._fetch_active.values()):
+            if owner == series_id:
+                runner.cancel()
+
+    def _fetch_pump(self) -> None:
+        while self._fetch_queue and len(self._fetch_active) < self._fetch_limit:
+            job = self._fetch_queue.pop(0)
+            runner = asyncio.create_task(self._fetch_one(job))
+            self._fetch_active[job["key"]] = (runner, job["series_id"])
+            self._tasks.append(runner)
+
+    async def _fetch_one(self, job: dict) -> None:
+        key, path = job["key"], job["path"]
+        ok, error, transient = False, "", False
+
+        async def ignore_progress(_data: dict) -> None:
+            return None
+
+        try:
+            for attempt in range(1, MAX_DOWNLOAD_ATTEMPTS + 1):
+                stream_url, headers, stream_error = await self._resolve_stream(
+                    job["url"], max_height=job.get("max_height"), is_web=True)
+                if stream_error is not None:
+                    error, transient = stream_error
+                else:
+                    kw: dict = {"threads": self._threads}
+                    if headers:
+                        kw["headers"] = headers
+                    ok, error = await self._download(stream_url, path, ignore_progress, **kw)
+                    transient = not ok and _transient_download_error(error)
+                if ok or not transient or attempt == MAX_DOWNLOAD_ATTEMPTS:
+                    break
+                self.log.warning("загрузка %s: %s — повтор %d/%d через %.0f с",
+                                 key, error, attempt, MAX_DOWNLOAD_ATTEMPTS, RETRY_DELAY_S)
+                await asyncio.sleep(RETRY_DELAY_S)
+        except asyncio.CancelledError:
+            await asyncio.to_thread(self._remove_partial, path)
+            self._fetch_active.pop(key, None)
+            self._fetch_pump()
+            raise
+        except Exception as exc:  # noqa: BLE001 - one failed fetch must not take the module down
+            self.log.exception("сбой общей загрузки %s", key)
+            ok, error, transient = False, f"внутренняя ошибка: {exc}", False
+        if not ok:
+            await asyncio.to_thread(self._remove_partial, path)
+        self._fetch_active.pop(key, None)
+        self.publish_event("downloads.fetch.finished", {
+            "key": key, "ok": ok, "error": "" if ok else error, "transient": transient,
+            "path": path, "series_id": job.get("series_id")})
+        self._fetch_pump()
 
     async def _is_web_series(self, series_id: int) -> bool:
         try:

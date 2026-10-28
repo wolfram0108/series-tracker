@@ -23,6 +23,8 @@ Commands:
       на него делает ТОЛЬКО усыновление готовых файлов (НЕ загрузку).
       Загрузку запускает лишь явный скан: _run_series после _scan_vk
       шлёт команду downloads.dispatch (открытие композиции — не шлёт).
+  Следом за downloads.dispatch web_video-серия получает voices.dispatch —
+      озвучки тех же серий во временный каталог.
   scan.status.changed {scanner_enabled, scan_interval, is_scanning,
       is_awaiting_tasks, next_scan_time} — состояние планировщика
       (контракт старого scanner_status_update).
@@ -422,6 +424,10 @@ class ScanModule(BaseModule):
                 if download:
                     self.send_command("downloads.dispatch",
                                       {"series_id": series_id})
+                    if series["source_type"] == "web_video":
+                        # Voice-overs of the same episodes follow the reference scan.
+                        self.send_command("voices.dispatch",
+                                          {"series_id": series_id})
             else:
                 result = await self._scan_torrents(series, force)
             self._contribute(series_id, scanning=False, error=False)

@@ -586,3 +586,64 @@ async def test_registry_resolves_dunhuatv_links_and_leaves_ruchime_alone(site):
         assert stream["stream_url"] == "https://okcdn.test/v1/720"
         assert await registry.resolve_stream("https://example.test/none", http) is None
     json.dumps(stream)
+
+
+# --- height cap and episode links ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cvh_stream_takes_the_best_rung_within_the_cap(site, provider):
+    link = f"{PAGE_URL}#cvh=v1s"
+    async with site.client() as http:
+        assert (await provider.resolve_stream(link, http, 720))["stream_url"].endswith("/v1s/720")
+        # Nothing at or below 480: the lowest rung above it is better than losing the episode.
+        assert (await provider.resolve_stream(link, http, 480))["stream_url"].endswith("/v1s/720")
+        assert (await provider.resolve_stream(link, http))["stream_url"].endswith("/v1s/1080")
+        assert (await provider.resolve_stream(link, http, 2160))["stream_url"].endswith("/v1s/1080")
+
+
+@pytest.mark.asyncio
+async def test_unlabelled_rungs_are_measured_only_when_nothing_else_is_left(site):
+    site.sources["only4k"] = {"mpeg4kUrl": "https://okcdn.test/only4k/4k"}
+    calls = []
+
+    async def counting(rung):
+        calls.append(rung.key)
+        return 1440
+    provider = DunhuaTvProvider(measure=counting)
+    async with site.client() as http:
+        await provider.resolve_stream(f"{PAGE_URL}#cvh=v4k", http, 720)
+        assert calls == []
+        stream = await provider.resolve_stream(f"{PAGE_URL}#cvh=only4k", http, 720)
+    assert stream["stream_url"].endswith("/only4k/4k") and calls == ["mpeg4kUrl"]
+
+
+@pytest.mark.asyncio
+async def test_kodik_stream_takes_the_best_quality_within_the_cap(site, provider):
+    link = f"{PAGE_URL}#kodik=50228/7bbb4c6b/3"
+    async with site.client() as http:
+        heights = {cap: (await provider.resolve_stream(link, http, cap))["stream_url"]
+                   for cap in (480, 300, None)}
+    assert heights[480].endswith("/480.mp4:hls:manifest.m3u8")
+    assert heights[300].endswith("/360.mp4:hls:manifest.m3u8")
+    assert heights[None].endswith("/720.mp4:hls:manifest.m3u8")
+
+
+@pytest.mark.asyncio
+async def test_registry_passes_the_cap_to_the_provider(site):
+    async with site.client() as http:
+        stream = await get_default_registry().resolve_stream(f"{PAGE_URL}#cvh=v1s", http, 720)
+    assert stream["stream_url"].endswith("/v1s/720")
+
+
+@pytest.mark.asyncio
+async def test_sources_carry_the_link_of_every_episode(site, provider):
+    async with site.client() as http:
+        release = await provider.parse_release(PAGE_URL, http)
+    first, kodik_animy = release["sources"][0], release["sources"][3]
+    assert first["links"] == {"1": f"{PAGE_URL}#cvh=v1", "2": f"{PAGE_URL}#cvh=v2"}
+    assert kodik_animy["links"]["3"] == f"{PAGE_URL}#kodik=50228/7bbb4c6b/3"
+    # The link is exactly what the scan stores as the candidate address.
+    async with site.client() as http:
+        scan = await provider.scan_episodes(PAGE_URL, http, {})
+    assert {f["url"] for f in scan["videos"]} == set(first["links"].values())

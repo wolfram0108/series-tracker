@@ -74,8 +74,12 @@ class BaseVideoProvider(ABC):
         """
         ...
 
-    async def resolve_stream(self, url: str, http: httpx.AsyncClient) -> dict | None:
+    async def resolve_stream(self, url: str, http: httpx.AsyncClient,
+                             max_height: int | None = None) -> dict | None:
         """Optionally resolve a direct stream URL and required HTTP headers.
+
+        `max_height` asks for the best stream not above that frame height (the
+        lowest one above it when nothing fits); a provider with one stream ignores it.
 
         Returns:
             {"stream_url": str, "headers": dict} or None if not handled.

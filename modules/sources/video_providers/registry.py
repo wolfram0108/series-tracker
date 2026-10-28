@@ -36,10 +36,11 @@ class VideoProviderRegistry:
             if callable(configure):
                 configure(**options)
 
-    async def resolve_stream(self, url: str, http: httpx.AsyncClient) -> dict | None:
+    async def resolve_stream(self, url: str, http: httpx.AsyncClient,
+                             max_height: int | None = None) -> dict | None:
         """Query registered providers to resolve a direct stream descriptor."""
         for p in self._providers:
-            stream_info = await p.resolve_stream(url, http)
+            stream_info = await p.resolve_stream(url, http, max_height)
             if stream_info:
                 return stream_info
         return None

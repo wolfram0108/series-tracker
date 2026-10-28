@@ -14,14 +14,14 @@
 | sources | parse {url} (+torrent_id из core/ids, отчёт `players`), torrent_file.get/drop, trackers.list, tracker.resolve {url}, tracker.set_mirrors (Р-22), vk.scan, video.scan {url, series}, video.stream {url} → {handled, stream_url, headers: Referer/Origin/User-Agent доходят до ffmpeg целиком, Р-38} либо {handled, error, transient} (Р-25; для Vibix — `file://` на расшифрованный манифест; `error` — ссылка страницы серии без потока, загрузчик не отдаёт её yt-dlp) |
 | rules | apply, test (Р-22), profiles.list/create/update/delete, rules.list/add/update/delete/reorder (Р-22), cache.invalidate, format_filename, format_torrent_file |
 | torrents | add, info.get, files.get, pause/resume/recheck/delete, rename_file, set_location, db.active, db.deactivate_all, db.files.list/upsert, db.files.for_series, db.history, db.add, db.downloaded_counts, db.progress.list (Р-23), composition (Р-21), register {…, start_pipeline?} (false — подготовка состава без конвейера), queue.get, fs.verify |
-| downloads | queue.get, queue.clear, fs.sync, item.set_filename, item.set_status |
+| downloads | queue.get, queue.clear, fs.sync, item.set_filename, item.set_status, episodes.get {series_id} → референс-серии плана, fetch {key, url, path, max_height?, series_id?} (поток ссылки в файл вне медиатеки, Р-40), fetch.cancel {series_id} |
 | slicing | chapters.get/filtered/mark, task.create, verify, deep_adoption, files.list, files.drop_for_source (Р-21), file.set_path, queue.get |
 | renaming | reprocess, process_torrent {…, dry_run?} (разбор состава без переименования), tasks.active, preview (Р-21) |
 | library | directories.list, relocate, relocation.active |
 | metadata | search, details, map.get/list/set (владелец series_tmdb_mappings, Р-19) |
 | settings | value.get, value.set, values.by_prefix (Р-22) |
 | trackerauth | fetch, credentials.get/set (Р-22, владелец auth) |
-| voices | layout {sources: [{url, player, studio, kind, episodes}], mode?, reference?} → раскладка озвучек сериала (Р-39); приоритет источников — настройка `voices.source_priority` |
+| voices | layout {sources: [{url, player, studio, kind, episodes, links?}], mode?, reference?} → раскладка озвучек сериала с ключом озвучки (Р-39); приоритет источников — настройка `voices.source_priority`; dispatch {series_id} (скан → озвучки серий во временный каталог, Р-40); dubs.get {series_id} → записи voice_dubs |
 | conform | status {} → {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks} — зеркало очереди выравнивания демона track-muxer (Р-39); слушает `gateway.sse.clients` |
 
 ## События (издатель → подписчики)
@@ -34,14 +34,16 @@
 | series.busy.changed {series_id, is_busy, statuses} | catalog | gateway | series_updated {id, statuses, is_busy} (Р-18) |
 | series.added {…series} | catalog | gateway | series_added (полный объект, Р-19) |
 | series.updated {series_id, …поля, statuses, is_busy} | catalog | gateway, torrents (память исключений → приоритеты файлов) | series_updated (дельта, Р-19) |
-| series.deleted {series_id, delete_from_qb} | catalog | scan, torrents, downloads, slicing, renaming, library, metadata (каскад), gateway | series_deleted {id} (Р-19) |
-| series.purged {series_id, owner} | scan, torrents, downloads, slicing, renaming, library, metadata | catalog (учёт отчётов о чистке) | — |
+| series.deleted {series_id, delete_from_qb} | catalog | scan, torrents, downloads, slicing, renaming, library, metadata, voices (каскад), gateway | series_deleted {id} (Р-19) |
+| series.purged {series_id, owner} | scan, torrents, downloads, slicing, renaming, library, metadata, voices | catalog (учёт отчётов о чистке) | — |
 | scan.plan.updated {series_id} | scan | downloads | — |
 | scan.status.changed | scan | — | scanner_status_update |
 | sources.video.progress {series_id, current, total, rate, phase, active} | sources | gateway | video_scan_progress |
 | torrents.queue.changed {count, tasks} | torrents | scan (count=0 → следующий скан) | agent_queue_update |
 | torrents.progress.changed {tasks} | torrents | gateway | torrent_progress_update (Р-23, замена поллинга) |
 | downloads.queue.changed {tasks, count} | downloads | — | download_queue_update |
+| downloads.fetch.finished {key, ok, error, transient, path, series_id} | downloads | voices (ключи `dub:<id>`) | — |
+| voices.dub.changed {series_id, season, episode, voice_key, status} | voices | — (этап 7: оркестрация серии) | — |
 | slicing.queue.changed {tasks} | slicing | — | slicing_queue_update |
 | conform.queue.changed {daemon, tasks} | conform | — | conform_queue_update (Р-39; вся картина на каждое изменение и при подключении клиента SSE) |
 | gateway.sse.clients {count} | gateway | catalog, conform | — |
