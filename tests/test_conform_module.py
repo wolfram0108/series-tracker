@@ -106,7 +106,6 @@ async def until(probe, condition, seconds=3.0):
         await asyncio.sleep(0.01)
 
 
-# --- compact view ---------------------------------------------------------------------
 
 
 def test_compact_job_keeps_what_the_interface_shows():
@@ -123,7 +122,6 @@ def test_compact_job_keeps_what_the_interface_shows():
     assert view["stage"] == "" and view["dub_total"] == 2
 
 
-# --- mirror of the registry -----------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -182,7 +180,6 @@ async def test_a_new_interface_gets_the_picture_without_asking():
         await runner.stop()
 
 
-# --- the daemon goes away and comes back ----------------------------------------------
 
 
 async def pictures_until(bus, runner_start, condition, seconds=3.0):
@@ -240,7 +237,6 @@ async def test_without_an_address_the_module_is_idle():
         await runner.stop()
 
 
-# --- the HTTP client ------------------------------------------------------------------
 
 
 def stream_of(frames: str) -> DaemonClient:
@@ -277,7 +273,6 @@ async def test_client_info_joins_health_and_device():
                                           "gpu_name": "RTX 3090"}
 
 
-# --- paths, enqueue, how a job ended --------------------------------------------------
 
 
 def test_paths_follow_the_longest_prefix_on_a_boundary():

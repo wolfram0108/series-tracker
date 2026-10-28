@@ -902,7 +902,6 @@ async def test_error_task_outside_plan_is_dropped(system):
     assert await _wait(lambda: _tasks(db_path) == [])
 
 
-# --- общая загрузка «поток → файл» (downloads.fetch) ----------------------------------------
 
 
 async def _fetch(probe, bus, expect, **job):

@@ -562,7 +562,6 @@ class DownloadsModule(BaseModule):
             self.log.debug("sources.video.stream не обработан для %s: %s", url, exc)
         return url, None, None
 
-    # --- общая загрузка «поток → файл» (downloads.fetch) ---------------------------
 
     async def on_fetch(self, env: Envelope) -> None:
         job = {k: env.payload.get(k) for k in ("key", "url", "path", "max_height", "series_id")}

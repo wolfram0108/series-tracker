@@ -272,7 +272,6 @@ class DunhuaTvProvider(BaseVideoProvider):
             return await self._resolve_cvh(value, http, max_height)
         return await self._resolve_kodik(value, http, max_height)
 
-    # --- page and catalog ---------------------------------------------------------------
 
     async def _read_page(self, url: str, http: httpx.AsyncClient) -> str:
         try:
@@ -370,7 +369,6 @@ class DunhuaTvProvider(BaseVideoProvider):
             "links": {str(number): episode_link(page_url, source, number) for number in numbers},
         }
 
-    # --- probes -------------------------------------------------------------------------
 
     async def _probe(self, source: Source, numbers: list[int], page_url: str,
                      http: httpx.AsyncClient, gate: asyncio.Semaphore,
@@ -409,7 +407,6 @@ class DunhuaTvProvider(BaseVideoProvider):
             return self._heights[key]
         return measure
 
-    # --- stream resolution --------------------------------------------------------------
 
     async def _resolve_cvh(self, vk_id: str, http: httpx.AsyncClient,
                            max_height: int | None = None) -> dict:
@@ -445,7 +442,6 @@ class DunhuaTvProvider(BaseVideoProvider):
         fitting = [height for height in qualities if height <= cap]
         return max(fitting) if fitting else min(qualities)
 
-    # --- names and reports --------------------------------------------------------------
 
     def _parse_link(self, url: str) -> tuple[str, str] | None:
         try:

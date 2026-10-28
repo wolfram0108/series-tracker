@@ -34,7 +34,6 @@ WINNER = [
 FUMODUB_CVH = WINNER[2]["url"]
 
 
-# --- identity -------------------------------------------------------------------------
 
 
 def test_names_differing_in_case_and_spaces_are_one_voice():
@@ -72,7 +71,6 @@ def test_rules_that_are_not_names_are_ignored():
     assert Equivalence.of(None, "text").players == {}
 
 
-# --- reference choice -----------------------------------------------------------------
 
 
 def test_reference_is_the_biggest_resolution():
@@ -98,7 +96,6 @@ def test_full_tie_keeps_the_first_listed_and_a_custom_order_wins():
         choose_reference([])
 
 
-# --- layout of a series ---------------------------------------------------------------
 
 
 def test_winner_layout_matches_the_agreed_example():
@@ -178,7 +175,6 @@ def test_ranges_show_holes_in_each_source():
     assert (black_cat_cvh["ranges"], black_cat_cvh["count"]) == ("1-10, 13", 11)
 
 
-# --- the module on the bus ------------------------------------------------------------
 
 
 @pytest.fixture
@@ -233,7 +229,6 @@ async def test_a_broken_priority_setting_falls_back_to_the_default(system):
     assert reply["priority"] == list(DEFAULT_PRIORITY)
 
 
-# --- download of the additional voice-overs -------------------------------------------
 
 
 def linked(player, studio, episodes, kind="", url=None):
@@ -519,7 +514,6 @@ async def test_after_a_restart_interrupted_downloads_are_sent_again(db_path, dub
         await again.stop()
 
 
-# --- alignment: from downloaded voice-overs to tracks next to the video -------------------
 
 
 def touch(path, content=b"x"):
@@ -877,7 +871,6 @@ async def test_a_scratch_directory_with_content_is_left_alone(dubs):
     assert os.path.isfile(os.path.join(scratch, "run", "buffer.bin"))
 
 
-# --- following the reference ----------------------------------------------------------------
 
 
 async def placed_set(dubs):
@@ -1056,7 +1049,6 @@ async def test_an_event_carries_the_voice_and_the_reason_so_the_interface_asks_n
     assert by_voice["blackcat"]["detail"].startswith("подозрительно") and by_voice["redheadsound"]["detail"] is None
 
 
-# --- the five states the user sees ------------------------------------------------------------
 
 
 def test_every_step_of_a_voice_over_shows_as_one_of_seven_states():
@@ -1195,7 +1187,6 @@ async def test_a_series_whose_provider_has_no_voice_catalog_is_not_even_parsed(d
     assert neighbours.parses == 1
 
 
-# --- the limit of episodes that hold temporary files ----------------------------------------
 
 
 async def capped_two_episodes(dubs, cap="1"):
@@ -1301,7 +1292,6 @@ async def test_a_placed_track_costs_no_cancel_when_its_reference_is_replaced(dub
     assert neighbours.conform_cancels == []
 
 
-# --- rules of equivalence as settings ---------------------------------------------------------
 
 
 def test_layout_takes_synonymous_voices_of_different_sites_as_one_voice():
@@ -1340,7 +1330,6 @@ async def test_the_module_reads_the_rules_from_settings_and_survives_garbage(sys
     assert len([r for r in again["voices"] if r["role"] == "dub"]) == 2
 
 
-# --- names of tracks that would collide ------------------------------------------------------
 
 
 def test_two_voices_with_the_same_safe_title_get_two_names():
@@ -1379,7 +1368,6 @@ async def test_a_track_never_overwrites_the_track_of_another_voice(dubs):
     assert {r["sidecar_path"] for r in await rows(probe)} == placed  # a later look moves nothing
 
 
-# --- a whole series at once -------------------------------------------------------------------
 
 
 async def serve(probe, neighbours, holder, finished, progress, seconds=60.0):

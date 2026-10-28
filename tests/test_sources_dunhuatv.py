@@ -169,7 +169,6 @@ def provider() -> DunhuaTvProvider:
     return DunhuaTvProvider(measure=fake_measure)
 
 
-# --- addresses ------------------------------------------------------------------------
 
 
 def test_match_only_title_pages(provider):
@@ -189,7 +188,6 @@ def test_default_registry_routes_by_host():
     assert registry.find_provider("https://1.ruchime.org/release/x").name == "ruchime"
 
 
-# --- title page -----------------------------------------------------------------------
 
 
 def test_title_page_fields():
@@ -208,7 +206,6 @@ def test_title_page_without_players():
     assert parse_title_page("<p>x</p>", "fallback").name_ru == "fallback"
 
 
-# --- CDN VideoHub ---------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -263,7 +260,6 @@ async def test_video_without_links_is_unavailable(site):
             await cdnvideohub.fetch_rungs(http, "missing")
 
 
-# --- Kodik ----------------------------------------------------------------------------
 
 
 def test_kodik_page_parts():
@@ -303,7 +299,6 @@ async def test_kodik_qualities(site):
             await kodik.episode_qualities(http, session, 99)
 
 
-# --- provider: addresses carry the choice ---------------------------------------------
 
 
 def test_address_roundtrip_keeps_the_choice():
@@ -336,7 +331,6 @@ def test_episode_ranges_show_holes():
     assert episode_ranges([]) == ""
 
 
-# --- provider: release (the choice list) ----------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -405,7 +399,6 @@ async def test_parse_release_without_any_player_is_an_error(site, provider):
             await provider.parse_release(PAGE_URL, http)
 
 
-# --- provider: scan takes exactly the chosen voice ------------------------------------
 
 
 def _links(scan):
@@ -532,7 +525,6 @@ async def test_scan_reports_progress(site, provider):
     assert seen[-1] == (2, 2, "done") and seen[0][2] == "players"
 
 
-# --- provider: stream resolution ------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -588,7 +580,6 @@ async def test_registry_resolves_dunhuatv_links_and_leaves_ruchime_alone(site):
     json.dumps(stream)
 
 
-# --- height cap and episode links ------------------------------------------------------
 
 
 @pytest.mark.asyncio

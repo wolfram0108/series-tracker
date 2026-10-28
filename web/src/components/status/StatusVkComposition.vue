@@ -138,7 +138,7 @@ async function copyUrl(url?: string) {
     /* ignore */
   }
 }
-// Озвучки серии (этап 8б): состояние приходит событием voice_dub_update, при открытии — одним запросом.
+// Voice-overs of an episode: pushed by voice_dub_update, loaded once when the tab opens.
 function voicesOf(it: Item): VoiceDub[] {
   if (!isWebVideo.value || it.type !== "compilation") return []
   const season = it.season ?? it.result?.extracted?.season ?? 1

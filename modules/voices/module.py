@@ -160,7 +160,6 @@ class VoicesModule(BaseModule):
         for series_id in await self.repo.series_waiting():
             self._kick(series_id)
 
-    # --- settings ---------------------------------------------------------------------
 
     async def _setting(self, key: str) -> str | None:
         reply = await self.request("settings.value.get", {"key": key}, timeout=10)
@@ -189,7 +188,6 @@ class VoicesModule(BaseModule):
     async def _temp_root(self) -> str:
         return (await self._setting(TEMP_ROOT_KEY)) or DEFAULT_TEMP_ROOT
 
-    # --- queries ----------------------------------------------------------------------
 
     async def on_layout(self, env: Envelope) -> dict:
         payload = env.payload
@@ -205,7 +203,6 @@ class VoicesModule(BaseModule):
                                                  row["id"] in self._fetching)}
                           for row in rows]}
 
-    # --- planning ---------------------------------------------------------------------
 
     async def on_dispatch(self, env: Envelope) -> None:
         series_id = int(env.payload["series_id"])
@@ -284,7 +281,6 @@ class VoicesModule(BaseModule):
             if row["status"] == "ready" and not await asyncio.to_thread(os.path.exists, row["temp_path"]):
                 await self.repo.mark_pending(row["id"], "файл озвучки пропал")
 
-    # --- downloads --------------------------------------------------------------------
 
     async def _temp_cap(self) -> int:
         try:
@@ -391,7 +387,6 @@ class VoicesModule(BaseModule):
                 if row["status"] == "aligning":
                     self._changed(row, "aligning")
 
-    # --- alignment --------------------------------------------------------------------
 
     async def on_downloaded(self, env: Envelope) -> None:
         self._kick(int(env.payload["series_id"]))
@@ -737,7 +732,6 @@ class VoicesModule(BaseModule):
         self.publish_event("voices.episode.settled",
                            {"series_id": series_id, "season": season, "episode": episode})
 
-    # --- cascade ----------------------------------------------------------------------
 
     async def on_series_deleted(self, env: Envelope) -> None:
         series_id = env.payload["series_id"]
