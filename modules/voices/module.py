@@ -36,7 +36,8 @@ track is moved next to the reference video as `<video name>.<voice title>.<lang>
 becomes `placed` with the track's path; the series stays playable at every step. When every
 voice-over of the episode is placed, rejected or failed, the episode's temporary directory is
 removed. Without the service, or while the reference is missing, rows wait and are retried on
-series.downloaded.changed and conform.daemon.up.
+series.downloaded.changed and conform.daemon.up. The service leaves an empty `_tmp` directory
+next to every reference video it worked on; it is removed once no job of the series is running.
 """
 from __future__ import annotations
 
@@ -63,6 +64,7 @@ PARSE_TIMEOUT_S = 180
 SUBMIT_TIMEOUT_S = 60
 SUBMIT_RETRY_S = 30.0
 SUBMIT_RETRIES = 5
+SCRATCH_DIR = "_tmp"
 WORKING = ("pending", "downloading", "aligning")
 FINAL = ("placed", "rejected", "failed")
 
@@ -323,6 +325,22 @@ class VoicesModule(BaseModule):
                 if ready and not any(row["status"] in WORKING for row in group):
                     await self._submit(series, season, episode, reference, ready, root)
             await self._tidy(series_id, season, episode, root)
+        await self._sweep_scratch(series_id, {os.path.dirname(path) for path in references.values()})
+
+    async def _sweep_scratch(self, series_id: int, folders: set[str]) -> None:
+        """The service's scratch directory is made next to the reference when a job starts: while
+        one runs it must stay, and the series lock keeps a new job from starting meanwhile."""
+        if any(row["status"] == "aligning" for row in await self.repo.for_series(series_id)):
+            return
+        for folder in folders:
+            await asyncio.to_thread(self._remove_if_empty, os.path.join(folder, SCRATCH_DIR))
+
+    @staticmethod
+    def _remove_if_empty(path: str) -> None:
+        try:
+            os.rmdir(path)
+        except OSError:
+            pass
 
     async def _reference_paths(self, series: dict) -> dict[tuple[int, int], str]:
         """Reference files that are on disk now, by (season, episode)."""

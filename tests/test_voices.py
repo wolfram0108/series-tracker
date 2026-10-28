@@ -767,3 +767,46 @@ async def test_retries_stop_after_a_few_attempts(dubs, monkeypatch):
     assert 3 <= tried <= 4  # the first try, two retries, maybe one concurrent pass
     await asyncio.sleep(0.2)
     assert len(neighbours.submits) == tried
+
+
+@pytest.mark.asyncio
+async def test_the_scratch_directory_of_the_service_goes_when_no_job_of_the_series_runs(dubs):
+    probe, neighbours, _, bus = dubs
+    neighbours.sources.append(linked("kodik", "RedHeadSound", range(1, 4)))
+    neighbours.plan[:] = [(1, 1, 1), (1, 2, 2)]
+    for episode in (1, 2):
+        reference_on_disk(neighbours, episode)
+    scratch = os.path.join(neighbours.library, "_tmp")
+    sub = bus.subscribe("voices.dub.changed")
+    settled_sub = bus.subscribe("voices.episode.settled")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 4)
+    for fetch in neighbours.fetches:
+        touch(fetch["path"], b"video")
+        finish(probe, fetch["key"])
+    await statuses_until(sub, ["ready"] * 4 + ["aligning"] * 4)
+    first, second = neighbours.submits
+    os.makedirs(scratch)  # what the service leaves while it works
+    neighbours.submits[:] = [first]
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await asyncio.wait_for(settled_sub.queue.get(), 5)
+    await asyncio.sleep(0.2)
+    assert os.path.isdir(scratch)  # the other episode is still being aligned
+    neighbours.submits[:] = [second]
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-2"))
+    await asyncio.wait_for(settled_sub.queue.get(), 5)
+    await asyncio.sleep(0.2)
+    assert not os.path.exists(scratch)
+
+
+@pytest.mark.asyncio
+async def test_a_scratch_directory_with_content_is_left_alone(dubs):
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    scratch = os.path.join(neighbours.library, "_tmp")
+    touch(os.path.join(scratch, "run", "buffer.bin"))
+    settled_sub = bus.subscribe("voices.episode.settled")
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await asyncio.wait_for(settled_sub.queue.get(), 5)
+    await asyncio.sleep(0.2)
+    assert os.path.isfile(os.path.join(scratch, "run", "buffer.bin"))
