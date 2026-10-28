@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from core import BusRequestError
 from core import logging as core_logging
 
-from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse
+from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse, ParsedUrl
 
 # Документация веток ошибок (JSONResponse, response_model не трогает).
 _ERR = {c: {"model": ErrorResponse} for c in (400, 403, 404, 409, 500)}
@@ -105,7 +105,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- разбор URL (форма добавления) ---------------------------------------------
 
-    @r.post("/api/parse_url", response_model=DynamicObject, responses=_ERR1)
+    @r.post("/api/parse_url", response_model=ParsedUrl, response_model_exclude_unset=True, responses=_ERR1)
     async def parse_url(request: Request):
         data = await request.json()
         try:

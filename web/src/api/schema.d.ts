@@ -1377,6 +1377,39 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * DubHint
+         * @description Which sentence explains a state when there is no reason to show (several steps share a state).
+         * @enum {string}
+         */
+        DubHint: "planned" | "download_queued" | "downloading" | "ready" | "aligning_wait" | "aligning_run" | "aligned" | "done";
+        /** DubItem */
+        DubItem: {
+            /** Season */
+            season: number;
+            /** Episode */
+            episode: number;
+            /** Voice Key */
+            voice_key: string;
+            /** Voice Label */
+            voice_label: string;
+            status: components["schemas"]["DubStatus"];
+            state: components["schemas"]["DubState"];
+            hint: components["schemas"]["DubHint"] | null;
+            detail: components["schemas"]["Reason"] | null;
+        };
+        /**
+         * DubState
+         * @description What the user sees of a voice-over.
+         * @enum {string}
+         */
+        DubState: "planned" | "download_queued" | "downloading" | "align_queued" | "running" | "done" | "error";
+        /**
+         * DubStatus
+         * @description The step a voice-over of an episode is at; the row in the database holds exactly one of these.
+         * @enum {string}
+         */
+        DubStatus: "pending" | "downloading" | "ready" | "aligning" | "aligned" | "placed" | "rejected" | "failed";
+        /**
          * DynamicObject
          * @description Динамический ответ (форма зависит от данных/типа серии): главы,
          *     композиция, медиа-элементы, превью. extra='allow' пропускает всё —
@@ -1417,6 +1450,41 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * Layout
+         * @description The reply of `voices.layout`: which source gives the reference and where every other voice comes from.
+         */
+        Layout: {
+            /** Mode */
+            mode: string;
+            reference?: components["schemas"]["ReleaseSource"] | null;
+            /** Voices */
+            voices: components["schemas"]["LayoutVoice"][];
+            /** Skipped */
+            skipped?: components["schemas"]["SkippedSource"][];
+            /** Priority */
+            priority?: string[];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * LayoutRole
+         * @enum {string}
+         */
+        LayoutRole: "reference" | "dub";
+        /** LayoutVoice */
+        LayoutVoice: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            role: components["schemas"]["LayoutRole"];
+            source: components["schemas"]["ReleaseSource"];
+            /** Fallbacks */
+            fallbacks?: components["schemas"]["ReleaseSource"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * OkResponse
          * @description Стандартный успех: {success: true[, message]}.
          */
@@ -1429,11 +1497,81 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * ParsedUrl
+         * @description Разбор адреса для формы добавления: поля источника и раскладки озвучек — модели контрактов, прочее
+         *     проходит насквозь.
+         */
+        ParsedUrl: {
+            /**
+             * Sources
+             * @default []
+             */
+            sources: components["schemas"]["ReleaseSource"][];
+            /** Selected Source */
+            selected_source?: string | null;
+            layout?: components["schemas"]["Layout"] | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * QueueTask
          * @description Задача очереди (агент/загрузки/прогресс). Поля динамические —
          *     extra='allow' пропускает всё; жёстко фиксировать не требуется.
          */
         QueueTask: {
+            [key: string]: unknown;
+        };
+        /**
+         * Reason
+         * @description Why a voice-over is in its state: a code and the facts that fill its text in the interface.
+         */
+        Reason: {
+            /** Code */
+            code: string;
+            /** Params */
+            params?: {
+                [key: string]: string | number;
+            };
+        };
+        /**
+         * ReleaseSource
+         * @description One voice-over of a release at one player, with the episodes it really has.
+         *
+         *     `links` (episode number -> address) is given only to the voices module.
+         */
+        ReleaseSource: {
+            /** Url */
+            url: string;
+            /** Player */
+            player: string;
+            /** Studio */
+            studio: string;
+            /**
+             * Kind
+             * @default
+             */
+            kind: string;
+            /** First */
+            first?: number | null;
+            /** Last */
+            last?: number | null;
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /**
+             * Ranges
+             * @default
+             */
+            ranges: string;
+            /** Episodes */
+            episodes?: number[];
+            /** Links */
+            links?: {
+                [key: string]: string;
+            } | null;
+        } & {
             [key: string]: unknown;
         };
         /** ScannerStatus */
@@ -1505,6 +1643,49 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * SkippedSource
+         * @description A source that is not downloaded, and why (its voice is already in the reference).
+         */
+        SkippedSource: {
+            /** Url */
+            url: string;
+            /** Player */
+            player: string;
+            /** Studio */
+            studio: string;
+            /**
+             * Kind
+             * @default
+             */
+            kind: string;
+            /** First */
+            first?: number | null;
+            /** Last */
+            last?: number | null;
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /**
+             * Ranges
+             * @default
+             */
+            ranges: string;
+            /** Episodes */
+            episodes?: number[];
+            /** Links */
+            links?: {
+                [key: string]: string;
+            } | null;
+            /** Label */
+            label: string;
+            /** Reason */
+            reason: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * TmdbInfo
          * @description TMDB-маппинг серии; поля динамические (tmdb_id, series_name, year,
          *     poster_path, last_updated, ...).
@@ -1522,11 +1703,28 @@ export interface components {
             type: string;
         };
         /**
-         * VoiceDub
-         * @description Озвучка серии: дополнительная озвучка, её состояние (state: planned, download_queued, downloading, align_queued, running, done, error;
-         *     status — шаг за ним) и причина ошибки.
+         * VoiceDubs
+         * @description Озвучки сериала (этап 8б); форма записи — модель контракта core.contracts.DubItem.
          */
-        VoiceDub: {
+        VoiceDubs: {
+            /** Items */
+            items: components["schemas"]["DubItem"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * DubEventStatus
+         * @description The status an event carries: a step, or a change that is not a step of its own.
+         * @enum {string}
+         */
+        DubEventStatus: "pending" | "downloading" | "ready" | "aligning" | "aligned" | "placed" | "rejected" | "failed" | "moved" | "stale" | "removed";
+        /**
+         * DubEvent
+         * @description One voice-over, whole, so the interface asks nothing back; the newest `rev` wins.
+         */
+        DubEvent: {
+            /** Series Id */
+            series_id: number;
             /** Season */
             season: number;
             /** Episode */
@@ -1535,34 +1733,36 @@ export interface components {
             voice_key: string;
             /** Voice Label */
             voice_label: string;
-            /** Status */
-            status: string;
-            /** State */
-            state: string;
-            detail?: components["schemas"]["VoiceReason"] | null;
-        } & {
-            [key: string]: unknown;
+            status: components["schemas"]["DubEventStatus"];
+            state: components["schemas"]["DubState"];
+            hint: components["schemas"]["DubHint"] | null;
+            detail: components["schemas"]["Reason"] | null;
+            /** Rev */
+            rev: number;
         };
-        /** VoiceDubs */
-        VoiceDubs: {
+        /** SnapshotItem */
+        SnapshotItem: {
+            /** Season */
+            season: number;
+            /** Episode */
+            episode: number;
+            /** Voice Key */
+            voice_key: string;
+            /** Voice Label */
+            voice_label: string;
+            status: components["schemas"]["DubStatus"];
+            state: components["schemas"]["DubState"];
+            hint: components["schemas"]["DubHint"] | null;
+            detail: components["schemas"]["Reason"] | null;
+            /** Series Id */
+            series_id: number;
+        };
+        /** DubsSnapshot */
+        DubsSnapshot: {
+            /** Rev */
+            rev: number;
             /** Items */
-            items: components["schemas"]["VoiceDub"][];
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * VoiceReason
-         * @description Причина состояния: код и факты, из которых интерфейс собирает текст (code external — слова чужой системы в params.text).
-         */
-        VoiceReason: {
-            /** Code */
-            code: string;
-            /** Params */
-            params?: {
-                [key: string]: string | number;
-            };
-        } & {
-            [key: string]: unknown;
+            items: components["schemas"]["SnapshotItem"][];
         };
     };
     responses: never;
@@ -3573,7 +3773,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DynamicObject"];
+                    "application/json": components["schemas"]["ParsedUrl"];
                 };
             };
             /** @description Bad Request */
@@ -3614,7 +3814,7 @@ export interface operations {
             };
         };
     };
-    force_replace_api_settings_force_replace_post: {
+    force_replace_api_settings_force_replace_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3634,7 +3834,7 @@ export interface operations {
             };
         };
     };
-    force_replace_api_settings_force_replace_post: {
+    force_replace_api_settings_force_replace_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3654,7 +3854,7 @@ export interface operations {
             };
         };
     };
-    less_strict_scan_api_settings_less_strict_scan_post: {
+    less_strict_scan_api_settings_less_strict_scan_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3674,7 +3874,7 @@ export interface operations {
             };
         };
     };
-    less_strict_scan_api_settings_less_strict_scan_post: {
+    less_strict_scan_api_settings_less_strict_scan_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3694,7 +3894,7 @@ export interface operations {
             };
         };
     };
-    slicing_delete_source_api_settings_slicing_delete_source_post: {
+    slicing_delete_source_api_settings_slicing_delete_source_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3714,7 +3914,7 @@ export interface operations {
             };
         };
     };
-    slicing_delete_source_api_settings_slicing_delete_source_post: {
+    slicing_delete_source_api_settings_slicing_delete_source_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3734,7 +3934,7 @@ export interface operations {
             };
         };
     };
-    parallel_downloads_api_settings_parallel_downloads_post: {
+    parallel_downloads_api_settings_parallel_downloads_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3754,7 +3954,7 @@ export interface operations {
             };
         };
     };
-    parallel_downloads_api_settings_parallel_downloads_post: {
+    parallel_downloads_api_settings_parallel_downloads_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3774,7 +3974,7 @@ export interface operations {
             };
         };
     };
-    concurrent_fragments_api_settings_concurrent_fragments_post: {
+    concurrent_fragments_api_settings_concurrent_fragments_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3794,7 +3994,7 @@ export interface operations {
             };
         };
     };
-    concurrent_fragments_api_settings_concurrent_fragments_post: {
+    concurrent_fragments_api_settings_concurrent_fragments_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3814,7 +4014,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_post: {
+    saved_paths_api_settings_saved_paths_delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -3834,7 +4034,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_post: {
+    saved_paths_api_settings_saved_paths_delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -3854,7 +4054,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_post: {
+    saved_paths_api_settings_saved_paths_delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -3874,7 +4074,7 @@ export interface operations {
             };
         };
     };
-    debug_flags_api_settings_debug_flags_post: {
+    debug_flags_api_settings_debug_flags_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3939,7 +4139,7 @@ export interface operations {
             };
         };
     };
-    debug_flags_api_settings_debug_flags_post: {
+    debug_flags_api_settings_debug_flags_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -4596,6 +4796,42 @@ export interface operations {
                     "application/json": components["schemas"]["OkResponse"];
                 };
             };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -4603,6 +4839,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -4739,6 +4984,42 @@ export interface operations {
                     "application/json": components["schemas"]["OkResponse"];
                 };
             };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -4746,6 +5027,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

@@ -7,6 +7,7 @@ import pytest
 
 from modules.sources.video_providers import (DunhuaTvProvider, StreamUnavailable,
                                               get_default_registry)
+from provider_contract import check_release
 from modules.sources.video_providers import cdnvideohub, kodik
 from modules.sources.video_providers.cdnvideohub import CdnVideoHubError, Rung
 
@@ -337,6 +338,7 @@ def test_episode_ranges_show_holes():
 async def test_parse_release_lists_every_player_and_voice(site, provider):
     async with site.client() as http:
         release = await provider.parse_release(PAGE_URL, http)
+    check_release(provider, release)
     options = [(s["player"], s["studio"], s["kind"], s["ranges"], s["count"])
                for s in release["sources"]]
     assert options == [

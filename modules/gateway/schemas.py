@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from core.contracts import DubItem, Layout, ReleaseSource
+
 
 class ApiModel(BaseModel):
     """База: лишние поля не отрезаются (additive-инвариант)."""
@@ -66,26 +68,17 @@ class TmdbInfo(ApiModel):
     poster_path, last_updated, ...)."""
 
 
-class VoiceReason(ApiModel):
-    """Причина состояния: код и факты, из которых интерфейс собирает текст (code external — слова чужой системы в params.text)."""
-    code: str
-    params: dict[str, str | int | float] = {}
-
-
-class VoiceDub(ApiModel):
-    """Озвучка серии: дополнительная озвучка, её состояние (state: planned, download_queued, downloading, align_queued, running, done, error;
-    status — шаг за ним) и причина ошибки."""
-    season: int
-    episode: int
-    voice_key: str
-    voice_label: str
-    status: str
-    state: str
-    detail: VoiceReason | None = None
-
-
 class VoiceDubs(ApiModel):
-    items: list[VoiceDub]
+    """Озвучки сериала (этап 8б); форма записи — модель контракта core.contracts.DubItem."""
+    items: list[DubItem]
+
+
+class ParsedUrl(ApiModel):
+    """Разбор адреса для формы добавления: поля источника и раскладки озвучек — модели контрактов, прочее
+    проходит насквозь."""
+    sources: list[ReleaseSource] = []
+    selected_source: str | None = None
+    layout: Layout | None = None
 
 
 class SeriesObject(ApiModel):

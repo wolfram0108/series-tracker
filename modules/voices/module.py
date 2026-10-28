@@ -93,7 +93,7 @@ import uuid
 from collections import OrderedDict, defaultdict
 
 from core import BaseModule, BusRequestError, is_video_source
-from core.contracts import (AlignmentJob, JobStatus, DubEvent, DubEventStatus as E, DubItem, DubRecord, DubsSnapshot, DubStatus as S,
+from core.contracts import (AlignmentJob, JobStatus, Layout, DubEvent, DubEventStatus as E, DubItem, DubRecord, DubsSnapshot, DubStatus as S,
                             SnapshotItem)
 from core import storage
 from core.db import Database
@@ -201,8 +201,9 @@ class VoicesModule(BaseModule):
     async def on_layout(self, env: Envelope) -> dict:
         payload = env.payload
         settings = await self._settings()
-        return plan_layout(payload["sources"], payload.get("mode") or "manual",
-                           payload.get("reference"), list(settings.priority), settings.rules)
+        return Layout.model_validate(plan_layout(
+            payload["sources"], payload.get("mode") or "manual", payload.get("reference"),
+            list(settings.priority), settings.rules)).model_dump(mode="json", exclude_unset=True)
 
     async def on_dubs_get(self, env: Envelope) -> dict:
         rows = await self.repo.for_series(int(env.payload["series_id"]))

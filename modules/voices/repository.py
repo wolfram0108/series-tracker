@@ -81,9 +81,9 @@ class VoicesRepository:
             "ON CONFLICT (series_id, season, episode, voice_key) DO UPDATE SET "
             "site_episode=excluded.site_episode, voice_label=excluded.voice_label, "
             "chain=excluded.chain, attempt=0, status=excluded.status, error=excluded.error, "
-            f"updated_at=excluded.updated_at WHERE voice_dubs.status {_in(lifecycle.OFFERABLE)[0]}",
+            f"updated_at=excluded.updated_at WHERE voice_dubs.status {_in(lifecycle.OFFER.sources)[0]}",
             (series_id, season, episode, site_episode, voice_key, label,
-             json.dumps(chain, ensure_ascii=False), status, error, _now(), *_in(lifecycle.OFFERABLE)[1])))
+             json.dumps(chain, ensure_ascii=False), status, error, _now(), *_in(lifecycle.OFFER.sources)[1])))
 
     async def pending(self, series_id: int | None = None) -> list[dict[str, Any]]:
         where, args = ("WHERE status=?", (S.PENDING.value,))
@@ -124,7 +124,7 @@ class VoicesRepository:
         """Rows of voice-overs that left the plan and have no file; returns what was removed."""
         gone = [row for row in await self.for_series(series_id)
                 if (row["season"], row["episode"], row["voice_key"]) not in planned
-                and row["status"] in lifecycle.OFFERABLE]
+                and row["status"] in lifecycle.OFFER.sources]
         for row in gone:
             await self._db.execute("DELETE FROM voice_dubs WHERE id=?", (row["id"],))
         return gone

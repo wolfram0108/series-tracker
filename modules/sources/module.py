@@ -29,8 +29,10 @@ import os
 import time
 
 import httpx
+from pydantic import ValidationError
 
 from core import BaseModule, ids
+from core.contracts import Release
 from core.db import Database
 from core.envelope import Envelope
 
@@ -144,7 +146,12 @@ class SourcesModule(BaseModule):
             async with lock:
                 await self._polite(service)
                 parsed = await provider.parse_release(url, self._http)
-            sources = parsed.get("sources", [])
+            try:
+                release = Release.model_validate(parsed)
+            except ValidationError as exc:
+                self.log.error("провайдер %s вернул разбор не по контракту: %s", service, exc)
+                raise ValueError(f"{service}: разбор страницы не соответствует контракту провайдера") from exc
+            sources = [source.model_dump(mode="json", exclude_unset=True) for source in release.sources]
             if not env.payload.get("with_links"):
                 # Links of every episode are for the voices module; the form does not need them.
                 sources = [{k: v for k, v in source.items() if k != "links"} for source in sources]

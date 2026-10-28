@@ -11,6 +11,7 @@ import SavedPathDropdown from "./SavedPathDropdown.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
 import { api } from "../api/client"
 import { t } from "../i18n"
+import type { components } from "../api/schema"
 import { useApi } from "../composables/useApi"
 import { useSSE } from "../composables/useSSE"
 
@@ -61,9 +62,8 @@ const trackerInfo = ref<TrackerInfo | null>(null)
 type PlayerReport = { present: boolean; available: boolean | null; resolution: number | null; reason?: string }
 const parsePlayers = ref<Record<string, PlayerReport>>({})
 // Player/voice-over choices of a web source, delivered with the link parse.
-interface WebSource { url: string; player: string; studio: string; kind: string; count: number; ranges: string }
-interface LayoutRow { label: string; role: "reference" | "dub"; source: WebSource; fallbacks: WebSource[] }
-interface WebLayout { voices: LayoutRow[]; skipped: WebSource[] }
+type WebSource = components["schemas"]["ReleaseSource"]
+type WebLayout = components["schemas"]["Layout"]
 const webSources = ref<WebSource[]>([])
 const webLayout = ref<WebLayout | null>(null)
 const selectedSource = ref("")

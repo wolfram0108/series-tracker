@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from .release import ReleaseSource
@@ -77,8 +75,8 @@ class DubItem(BaseModel):
     voice_label: str
     status: DubStatus
     state: DubState
-    hint: DubHint | None = None
-    detail: Reason | None = None
+    hint: DubHint | None
+    detail: Reason | None
 
 
 class SnapshotItem(DubItem):
@@ -109,8 +107,8 @@ class DubEvent(BaseModel):
     voice_label: str
     status: DubEventStatus
     state: DubState
-    hint: DubHint | None = None
-    detail: Reason | None = None
+    hint: DubHint | None
+    detail: Reason | None
     rev: int
 
 
@@ -119,14 +117,26 @@ class DubsSnapshot(BaseModel):
     items: list[SnapshotItem]
 
 
+class LayoutRole(StrEnum):
+    REFERENCE = "reference"
+    DUB = "dub"
+
+
 class LayoutVoice(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     key: str
     label: str
-    role: str
+    role: LayoutRole
     source: ReleaseSource
     fallbacks: list[ReleaseSource] = Field(default_factory=list)
+
+
+class SkippedSource(ReleaseSource):
+    """A source that is not downloaded, and why (its voice is already in the reference)."""
+
+    label: str
+    reason: str
 
 
 class Layout(BaseModel):
@@ -137,5 +147,5 @@ class Layout(BaseModel):
     mode: str
     reference: ReleaseSource | None = None
     voices: list[LayoutVoice]
-    skipped: list[dict[str, Any]] = Field(default_factory=list)
+    skipped: list[SkippedSource] = Field(default_factory=list)
     priority: list[str] = Field(default_factory=list)

@@ -46,5 +46,3 @@ FINAL = frozenset({S.PLACED, S.REJECTED, S.FAILED})
 HOLDS_FILES = frozenset({S.DOWNLOADING, S.READY, S.ALIGNING, S.ALIGNED})
 # Steps that wait for the reference video and the other voice-overs of the episode.
 WAITS_FOR_REFERENCE = frozenset({S.READY, S.ALIGNED})
-# Steps in which the planner may give a row a new chain of sources or drop it from the plan.
-OFFERABLE = frozenset({S.PENDING, S.FAILED})

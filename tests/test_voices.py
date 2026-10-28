@@ -1,6 +1,7 @@
 """Tests of the voices module: voice identity, reference choice, layout of a series."""
 import asyncio
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -1899,3 +1900,59 @@ async def test_changed_rules_do_not_make_a_new_voice_of_a_recorded_one(dubs):
     probe.send_command("voices.dispatch", {"series_id": 7})
     await asyncio.sleep(0.6)
     assert {r["voice_key"] for r in await rows(probe)} == before and len(neighbours.fetches) == 2
+
+
+# the form of the output is behind a contract: another form changes no code of the module -------------
+
+
+class FolderOutput:
+    """Another form of output: the tracks of a video in a folder `audio` next to it."""
+
+    def destination(self, reference, label, source, taken):
+        number = 1
+        while True:
+            path = os.path.join(os.path.dirname(reference), "audio", f"{os.path.basename(reference)}.{label}{number}.flac")
+            if path not in taken:
+                return path
+            number += 1
+
+    def exists(self, artifact):
+        return os.path.isfile(artifact)
+
+    def deliver(self, source, destination):
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        shutil.move(source, destination)
+
+    follow = deliver
+
+    def settle(self, source, destination):
+        if os.path.isfile(source):
+            self.deliver(source, destination)
+            return True
+        return os.path.isfile(destination)
+
+    def remove(self, artifact):
+        os.remove(artifact)
+
+
+@pytest.fixture
+def folder_output(monkeypatch):
+    monkeypatch.setattr("modules.voices.module.SidecarOutput", FolderOutput)
+
+
+@pytest.mark.asyncio
+async def test_another_form_of_output_places_follows_and_removes_without_a_change_in_the_module(folder_output, dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    placed = await rows(probe)
+    assert all(os.path.join(os.path.dirname(ref), "audio") in r["output_path"] and os.path.isfile(r["output_path"])
+               for r in placed)
+    new_ref = os.path.join(neighbours.library, "Series s01e01 2160p.mp4")
+    touch(new_ref)
+    neighbours.uids[1] = "u1-new"
+    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    neighbours.extra_items.append({"unique_id": "u1", "season": 1, "episode_start": 1, "source_url": "x",
+                                   "status": "completed", "superseded_by": "u1-new",
+                                   "final_filename": os.path.basename(ref)})
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
+    await statuses_until(sub, ["stale", "stale"])
+    assert not any(os.path.isfile(r["output_path"]) for r in placed)

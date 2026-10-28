@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from "pinia"
 import { useVoicesStore, type VoiceDub, type VoiceDubEvent, type VoiceDubsSnapshot } from "./voices"
 
 const dub = (over: Partial<VoiceDub> = {}): VoiceDub => ({
-  season: 1, episode: 2, voice_key: "blackcat", voice_label: "BlackCat", status: "ready", state: "align_queued", detail: null, ...over,
+  season: 1, episode: 2, voice_key: "blackcat", voice_label: "BlackCat", status: "ready", state: "align_queued", hint: "ready", detail: null, ...over,
 })
 const event = (rev: number, over: Partial<VoiceDubEvent> = {}): VoiceDubEvent => ({ series_id: 7, ...dub(), rev, ...over })
 const snapshot = (rev: number, items: (VoiceDub & { series_id?: number })[]): VoiceDubsSnapshot => ({

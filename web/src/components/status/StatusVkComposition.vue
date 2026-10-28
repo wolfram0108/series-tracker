@@ -11,7 +11,7 @@ import { useConfirm } from "../../composables/useConfirm"
 import { useVideoScanStore } from "../../stores/videoScan"
 import { useVoicesStore, type VoiceDub } from "../../stores/voices"
 import { reasonText } from "../../lib/voiceReason"
-import { t, type MessageKey } from "../../i18n"
+import { t } from "../../i18n"
 
 // Вкладка «Композиция» VK — порт seriesCompositionManager. Компиляции +
 // нарезанные файлы + «дыры» (missing), сгруппированы по сезонам; приоритет
@@ -146,16 +146,12 @@ function voicesOf(it: Item): VoiceDub[] {
   return voices.forEpisode(props.seriesId, season, episodeStart(it))
 }
 function voiceState(v: VoiceDub): string {
-  return t(`voices.state.${v.state}` as MessageKey)
+  return t(`voices.state.${v.state}`)
 }
-// The step behind a state, where one state has two causes (waiting for alignment, running).
+// The reason when there is one, else the sentence the core names for the step behind the state.
 function voiceHint(v: VoiceDub): string {
   if (v.detail) return reasonText(v.detail)
-  const key =
-    v.state === "align_queued" ? (v.status === "ready" ? "ready" : "aligning_wait")
-    : v.state === "running" ? (v.status === "aligned" ? "aligned" : "aligning_run")
-    : v.state
-  return t(`voices.hint.${key}` as MessageKey)
+  return v.hint ? t(`voices.hint.${v.hint}`) : voiceState(v)
 }
 function voiceTrouble(v: VoiceDub): boolean {
   return v.state === "error"

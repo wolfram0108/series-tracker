@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
+from provider_contract import check_release
 from modules.sources.video_providers.base import StreamUnavailable
 from modules.sources.video_providers.ruchime import RuchimeProvider
 from modules.sources.video_providers.vibix import (Episode, Stream, VibixUnavailable,
@@ -304,6 +305,7 @@ async def test_parse_release_reports_preview_players():
     result = await provider.parse_release(
         "https://1.ruchime.org/release/test/episode-1", client)
 
+    check_release(provider, result)
     assert result["episodes_count"] == 2
     assert result["players"]["vk"]["present"] is True
     assert result["players"]["vk"]["available"] is False

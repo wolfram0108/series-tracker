@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from core import BusRequestError, is_video_source
+from core.contracts import DubItem
 
 from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, OkResponse,
                       QueueTask, SeriesObject,
@@ -122,10 +123,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                      {"series_id": series_id}, timeout=10)
         except BusRequestError:
             return {"items": []}
-        return {"items": [
-            {k: item[k] for k in ("season", "episode", "voice_key",
-                                  "voice_label", "status", "state", "detail")}
-            for item in reply["items"]]}
+        return {"items": [DubItem.model_validate(item).model_dump(mode="json")
+                          for item in reply["items"]]}
 
     @r.get("/api/series/{series_id}", response_model=SeriesObject,
            responses=_ERRORS)

@@ -23,6 +23,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import BaseModule, BusRequestError
+from core.contracts import DubEvent, DubsSnapshot
 
 
 class AuthGateMiddleware:
@@ -229,6 +230,24 @@ class GatewayModule(BaseModule):
 
     # --- FastAPI-приложение -------------------------------------------------
 
+    @staticmethod
+    def _describe_events(app: FastAPI) -> None:
+        """The packets of the event stream are contracts too: they go into the schema next to the routes,
+        so that the interface generates its types for them from the same models."""
+        built = app.openapi
+
+        def openapi() -> dict:
+            if app.openapi_schema is None:
+                schema = built()
+                for model in (DubEvent, DubsSnapshot):
+                    described = model.model_json_schema(ref_template="#/components/schemas/{model}")
+                    schema["components"]["schemas"].update(described.pop("$defs", {}))
+                    schema["components"]["schemas"][model.__name__] = described
+                app.openapi_schema = schema
+            return app.openapi_schema
+
+        app.openapi = openapi
+
     def _create_app(self) -> FastAPI:
         # /docs и /openapi.json — выключены в проде (Этап 4: не раскрывать
         # карту API наружу). Включаются флагом docs_enabled (ST_DOCS_ENABLED)
@@ -237,6 +256,8 @@ class GatewayModule(BaseModule):
             title="Series Tracker", redoc_url=None,
             docs_url="/docs" if self._docs_enabled else None,
             openapi_url="/openapi.json" if self._docs_enabled else None)
+
+        self._describe_events(app)
 
         @app.get("/api/stream")
         async def stream() -> StreamingResponse:

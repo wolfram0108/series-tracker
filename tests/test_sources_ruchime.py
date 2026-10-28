@@ -7,6 +7,7 @@ import pytest
 
 from core import BaseModule, Bus, Envelope
 from core.db import Database
+from provider_contract import check_release
 from modules.sources.module import SourcesModule
 from modules.sources.video_providers.base import BaseVideoProvider, StreamUnavailable
 from modules.sources.video_providers.registry import VideoProviderRegistry
@@ -174,6 +175,7 @@ async def test_ruchime_parse_release():
 
     result = await provider.parse_release("https://1.ruchime.org/release/nesravnennyi-boevoi-dux/episode-2", mock_client)
 
+    check_release(provider, result)
     assert result["source_type"] == "web_video"
     assert result["provider"] == "ruchime"
     assert result["canonical_url"] == "https://1.ruchime.org/release/nesravnennyi-boevoi-dux"

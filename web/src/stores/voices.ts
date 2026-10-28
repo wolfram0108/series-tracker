@@ -1,32 +1,15 @@
 import { defineStore } from "pinia"
 import { ref } from "vue"
-import type { VoiceReason } from "../lib/voiceReason"
+import type { components } from "../api/schema"
+
+type Schemas = components["schemas"]
 
 /** One additional voice-over of an episode: its state and the reason of a failure or rejection. */
-export interface VoiceDub {
-  season: number
-  episode: number
-  voice_key: string
-  voice_label: string
-  /** The step behind the state (downloading, aligning, placed, ...). */
-  status: string
-  /** What the user sees: planned, queued, running, done or error. */
-  state: string
-  detail: VoiceReason | null
-}
-
-/** Packet of voice_dub_update: the whole voice-over, so nothing is asked back. */
-export interface VoiceDubEvent extends VoiceDub {
-  series_id: number
-  /** Grows with every packet of the core: the newest one wins whatever the order of arrival. */
-  rev: number
-}
-
+export type VoiceDub = Schemas["DubItem"]
+/** Packet of voice_dub_update: the whole voice-over, so nothing is asked back; the newest `rev` wins. */
+export type VoiceDubEvent = Schemas["DubEvent"]
 /** Packet of voice_dubs_snapshot: every voice-over, sent when this interface connects. */
-export interface VoiceDubsSnapshot {
-  rev: number
-  items: (VoiceDub & { series_id: number })[]
-}
+export type VoiceDubsSnapshot = Schemas["DubsSnapshot"]
 
 const slot = (seriesId: number, season: number, episode: number) => `${seriesId}:${season}:${episode}`
 const identity = (slotKey: string, voiceKey: string) => `${slotKey}:${voiceKey}`
@@ -53,6 +36,7 @@ export const useVoicesStore = defineStore("voices", () => {
         voice_label: event.voice_label,
         status: event.status === "stale" ? "pending" : event.status === "moved" ? "placed" : event.status,
         state: event.state,
+        hint: event.hint,
         detail: event.detail,
       })
       list.sort(byLabel)
@@ -77,6 +61,7 @@ export const useVoicesStore = defineStore("voices", () => {
         voice_label: item.voice_label,
         status: item.status,
         state: item.state,
+        hint: item.hint,
         detail: item.detail,
       })
     }
