@@ -24,15 +24,17 @@ def _fold(name: str) -> str:
     return _NOISE.sub("", name.casefold())
 
 
-def _folded(raw: object) -> dict[str, str]:
-    """{alias: canonical} from user data; anything else than strings is dropped, not trusted."""
+def usable_aliases(raw: object) -> dict[str, str]:
+    """The entries of user data that pair two non-empty names; anything else is not trusted."""
     if not isinstance(raw, dict):
         return {}
-    rules = {}
-    for alias, canonical in raw.items():
-        if isinstance(alias, str) and isinstance(canonical, str) and _fold(alias) and _fold(canonical):
-            rules[_fold(alias)] = _fold(canonical)
-    return rules
+    return {alias: canonical for alias, canonical in raw.items()
+            if isinstance(alias, str) and isinstance(canonical, str) and _fold(alias) and _fold(canonical)}
+
+
+def _folded(raw: object) -> dict[str, str]:
+    """{alias: canonical} in the folded form the matching works with."""
+    return {_fold(alias): _fold(canonical) for alias, canonical in usable_aliases(raw).items()}
 
 
 @dataclass(frozen=True)

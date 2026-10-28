@@ -290,6 +290,7 @@ class Neighbours(BaseModule):
         self.handle("sources.parse", self.on_parse)
         self.handle("downloads.episodes.get", self.on_episodes)
         self.handle("settings.value.get", self.on_setting)
+        self.handle("settings.values.by_prefix", self.on_settings_by_prefix)
         self.handle("downloads.fetch", self.on_fetch)
         self.handle("downloads.fetch.cancel", self.on_cancel)
         self.handle("conform.submit", self.on_submit)
@@ -319,6 +320,10 @@ class Neighbours(BaseModule):
 
     async def on_setting(self, env):
         return {"key": env.payload["key"], "value": self.settings.get(env.payload["key"])}
+
+    async def on_settings_by_prefix(self, env):
+        prefix = env.payload["prefix"]
+        return {"values": {key: value for key, value in self.settings.items() if key.startswith(prefix)}}
 
     async def on_fetch(self, env):
         self.fetches.append(dict(env.payload))
@@ -1894,3 +1899,46 @@ async def test_a_connecting_interface_gets_every_row_at_once_and_newer_packets_w
     older = {"series_id": 7, "season": 1, "episode": 1, "voice_key": "blackcat", "voice_label": "BlackCat",
              "status": "failed", "state": "error", "detail": "old", "rev": snapshot["rev"] - 1}
     assert picture([older], snapshot) == await held(probe)
+
+
+# what the module reads from its settings and from its own rows -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_setting_is_logged_once_and_the_default_is_used(dubs, caplog):
+    probe, neighbours, voices, bus = dubs
+    neighbours.settings["voices.max_temp_episodes"] = "many"
+    with caplog.at_level("WARNING"):
+        probe.send_command("voices.dispatch", {"series_id": 7})
+        await settled(neighbours, 3)
+        probe.send_command("voices.dispatch", {"series_id": 7})
+        await asyncio.sleep(0.5)
+    named = [r for r in caplog.records if "max_temp_episodes" in r.getMessage()]
+    assert len(named) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_aligned_track_is_found_where_the_module_asked_for_it_whatever_the_services_path_map(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    view = job_done(neighbours, "job-1")
+    for result in view["results"]:
+        result["out_path"] = "/mnt/meganas/media/elsewhere/" + os.path.basename(result["out_path"])
+    probe.publish_event("conform.job.finished", view)
+    await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
+    assert all(os.path.isfile(r["sidecar_path"]) for r in await rows(probe))
+
+
+@pytest.mark.asyncio
+async def test_changed_rules_do_not_make_a_new_voice_of_a_recorded_one(dubs):
+    probe, neighbours, voices, bus = dubs
+    neighbours.sources.append(linked("kodik", "RedHeadSound", range(1, 4)))
+    neighbours.plan[:] = [(1, 1, 1)]
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 2)
+    before = {r["voice_key"] for r in await rows(probe)}
+    assert before == {"blackcat", "redheadsound"}
+    neighbours.settings["voices.aliases"] = '{"redheadsound": "zzz"}'
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await asyncio.sleep(0.6)
+    assert {r["voice_key"] for r in await rows(probe)} == before and len(neighbours.fetches) == 2

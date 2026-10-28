@@ -5,7 +5,8 @@ downloaded next to the reference video and later aligned to it.
 
 Settings: voices.source_priority (JSON list of player kinds), voices.aliases and voices.player_aliases
 (JSON objects {alias: canonical}: which voice-over names and which player kinds mean the same),
-voices.temp_root, voices.max_temp_episodes.
+voices.temp_root, voices.max_temp_episodes. They are read together (settings.py): a wrong value is logged
+once and its default is used.
 
 Query:
   voices.layout {sources: [{url, player, studio, kind, episodes, links?}], mode?, reference?}
@@ -43,6 +44,10 @@ Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_lab
             series.purged,
             voices.episode.settled {series_id, season, episode} — every voice-over of the episode is
             placed, rejected or failed and its temporary files are gone.
+
+A voice keeps the key under which its rows were recorded when changed rules would give it another one.
+Paths of the working files are taken from the rows (folder of `temp_path`), never from the settings of the
+moment or from the service's path map.
 
 Downloading is delegated to downloads.fetch. A dub tries its main source first, then the other
 sources of the same voice by priority; when none gives the file the row is `failed`, a warning is
@@ -92,18 +97,13 @@ from core.db import Database
 from core.ffprobe import duration_of
 from core.envelope import Envelope
 
-from .identity import Equivalence
-from .layout import DEFAULT_PRIORITY, download_chain, plan_layout
+from .identity import Equivalence, same_voice
+from .layout import download_chain, plan_layout
 from .placement import move, place, sidecar_path
 from .repository import VoicesRepository
+from .settings import PREFIX, VoiceSettings, parse
 from .states import public_state
 
-PRIORITY_KEY = "voices.source_priority"
-VOICE_ALIASES_KEY = "voices.aliases"
-PLAYER_ALIASES_KEY = "voices.player_aliases"
-TEMP_ROOT_KEY = "voices.temp_root"
-MAX_TEMP_KEY = "voices.max_temp_episodes"
-DEFAULT_TEMP_ROOT = "/nas/torrents/series-tracker"
 DUB_MAX_HEIGHT = 720
 PARSE_TIMEOUT_S = 180
 SUBMIT_TIMEOUT_S = 60
@@ -150,6 +150,7 @@ class VoicesModule(BaseModule):
         self._admit_lock = asyncio.Lock()
         self._unclaimed: OrderedDict[str, dict] = OrderedDict()
         self._rev = 0
+        self._reported: set[str] = set()
         super().__init__(bus)
 
     def register(self) -> None:
@@ -184,38 +185,24 @@ class VoicesModule(BaseModule):
         """A call into the storage that waits for a limited time."""
         return await storage.call(fn, *args, timeout=timeout)
 
-    async def _setting(self, key: str) -> str | None:
-        reply = await self.request("settings.value.get", {"key": key}, timeout=10)
-        return reply.get("value")
-
-    async def _priority(self) -> list[str]:
-        try:
-            value = json.loads(await self._setting(PRIORITY_KEY) or "null")
-        except (json.JSONDecodeError, TypeError):
-            value = None
-        if isinstance(value, list) and value and all(isinstance(item, str) for item in value):
-            return value
-        return list(DEFAULT_PRIORITY)
-
-    async def _rules(self) -> Equivalence:
-        """Which names mean the same voice or player: settings holding JSON objects {alias: canonical}."""
-        def parse(raw: str | None) -> object:
-            try:
-                return json.loads(raw or "null")
-            except json.JSONDecodeError:
-                return None
-
-        return Equivalence.of(parse(await self._setting(VOICE_ALIASES_KEY)),
-                              parse(await self._setting(PLAYER_ALIASES_KEY)))
+    async def _settings(self) -> VoiceSettings:
+        """Every setting of the module in one read; a problem with a value is logged once, then the default is used."""
+        reply = await self.request("settings.values.by_prefix", {"prefix": PREFIX}, timeout=10)
+        settings = parse(reply.get("values") or {})
+        for problem in sorted(set(settings.problems) - self._reported):
+            self.log.warning("озвучки: настройка: %s", problem)
+        self._reported = set(settings.problems)
+        return settings
 
     async def _temp_root(self) -> str:
-        return (await self._setting(TEMP_ROOT_KEY)) or DEFAULT_TEMP_ROOT
+        return (await self._settings()).temp_root
 
 
     async def on_layout(self, env: Envelope) -> dict:
         payload = env.payload
+        settings = await self._settings()
         return plan_layout(payload["sources"], payload.get("mode") or "manual",
-                           payload.get("reference"), await self._priority(), await self._rules())
+                           payload.get("reference"), list(settings.priority), settings.rules)
 
     async def on_dubs_get(self, env: Envelope) -> dict:
         rows = await self.repo.for_series(int(env.payload["series_id"]))
@@ -247,8 +234,9 @@ class VoicesModule(BaseModule):
         sources = parsed.get("sources") or []
         if not sources:
             return
-        layout = plan_layout(sources, "manual", parsed.get("selected_source"), await self._priority(),
-                             await self._rules())
+        settings = await self._settings()
+        layout = plan_layout(sources, "manual", parsed.get("selected_source"), list(settings.priority),
+                             settings.rules)
         dubs = [voice for voice in layout["voices"] if voice["role"] == "dub"]
         reference = layout["reference"]
         if not dubs or reference is None:
@@ -258,6 +246,7 @@ class VoicesModule(BaseModule):
         self.log.info("сериал %d: озвучки — референс %s, дополнительных %d, серий плана на сайте %d",
                       series_id, reference["studio"], len(dubs), len(episodes))
         before = await self.repo.for_series(series_id)
+        keys = self._adopted_keys(dubs, before, settings.rules)
         planned: set[tuple[int, int, str]] = set()
         for season, episode, site_episode in episodes:
             for voice in dubs:
@@ -265,9 +254,9 @@ class VoicesModule(BaseModule):
                           "url": source["links"][str(site_episode)]}
                          for source in download_chain(voice, site_episode)
                          if str(site_episode) in source.get("links", {})]
-                planned.add((season, episode, voice["key"]))
+                planned.add((season, episode, keys[voice["key"]]))
                 await self.repo.upsert(series_id, season, episode, site_episode,
-                                       voice["key"], voice["label"], chain)
+                                       keys[voice["key"]], voice["label"], chain)
         for gone in await self.repo.drop_unplanned(series_id, planned):
             self.log.info("сериал %d: озвучка %s серии %d вышла из плана", series_id,
                           gone["voice_label"], gone["episode"])
@@ -281,6 +270,23 @@ class VoicesModule(BaseModule):
                 self.log.warning("сериал %d, s%02de%02d: озвучка %s недоступна: %s", series_id,
                                  row["season"], row["episode"], row["voice_label"], row["error"])
         self._kick(series_id)
+
+    @staticmethod
+    def _adopted_keys(dubs: list[dict], rows: list[dict], rules: Equivalence) -> dict[str, str]:
+        """A voice keeps the key its rows were recorded under when changed rules gave it another key."""
+        recorded = {row["voice_key"] for row in rows}
+        taken = {voice["key"] for voice in dubs if voice["key"] in recorded}
+        keys: dict[str, str] = {}
+        for voice in dubs:
+            keys[voice["key"]] = voice["key"]
+            if voice["key"] in recorded:
+                continue
+            same = [row for row in rows if same_voice(row["voice_label"], voice["label"], rules)
+                    and row["voice_key"] not in taken]
+            if same:
+                keys[voice["key"]] = min(same, key=lambda row: row["id"])["voice_key"]
+                taken.add(keys[voice["key"]])
+        return keys
 
     async def _reference_episodes(self, series_id: int, reference: dict) -> list[tuple[int, int, int]]:
         """(season, episode, site episode) of every planned reference episode that the site lists."""
@@ -311,10 +317,7 @@ class VoicesModule(BaseModule):
 
 
     async def _temp_cap(self) -> int:
-        try:
-            return max(0, int(await self._setting(MAX_TEMP_KEY) or 0))
-        except ValueError:
-            return 0
+        return (await self._settings()).max_temp_episodes
 
     async def _admit(self) -> None:
         """Start the waiting downloads, as many episodes at a time as the setting allows (0: no limit).
@@ -511,7 +514,7 @@ class VoicesModule(BaseModule):
             group = await self.repo.for_episode(series_id, season, episode)
             ready = [row for row in group if row["status"] == "ready"]
             if ready and not any(row["status"] in WORKING for row in group):
-                await self._submit(series, season, episode, reference, uid, ready, root)
+                await self._submit(series, season, episode, reference, uid, ready)
             await self._tidy(series_id, season, episode, root)
         await self._admit()
         await self._sweep_cleanup()
@@ -683,12 +686,12 @@ class VoicesModule(BaseModule):
             await self.repo.set_sidecar(row["id"], destination, ref_path)
 
     async def _submit(self, series: dict, season: int, episode: int, reference: str, uid: str,
-                      ready: list[dict], root: str) -> None:
-        folder = episode_dir(root, series["id"], season, episode)
+                      ready: list[dict]) -> None:
         label = f"{series['name']} s{season:02d}e{episode:02d}"
         ready = await self._with_files(ready, label)
         if not ready:
             return
+        folder = os.path.dirname(ready[0]["temp_path"])
         key = uuid.uuid4().hex[:12]
         await self.repo.mark_submitting([row["id"] for row in ready], key, uid, reference)
         try:
@@ -828,9 +831,10 @@ class VoicesModule(BaseModule):
                 self._changed(row, "failed", error)
                 continue
             result = results.get(stem(row["temp_path"]))
-            verdict = await self._verdict(result)
+            track = self._aligned_track(row, result)
+            verdict = await self._verdict(result, track)
             if verdict is None:
-                await self.repo.mark_aligned(row["id"], result["out_path"])
+                await self.repo.mark_aligned(row["id"], track)
                 self._changed(row, "aligned")
             else:
                 await self.repo.mark_rejected(row["id"], verdict)
@@ -841,7 +845,14 @@ class VoicesModule(BaseModule):
             self._kick(series_id)
         return True
 
-    async def _verdict(self, result: dict | None) -> str | None:
+    @staticmethod
+    def _aligned_track(row: dict, result: dict | None) -> str | None:
+        """Where this server holds the aligned track: in the folder it asked the service to write to."""
+        if not result or not result.get("out_path"):
+            return None
+        return os.path.join(os.path.dirname(row["temp_path"]), "_aligned", os.path.basename(result["out_path"]))
+
+    async def _verdict(self, result: dict | None, track: str | None) -> str | None:
         """Why a result may not be placed next to the video; None when it may."""
         if result is None:
             return "в задаче нет результата по этой озвучке"
@@ -851,7 +862,7 @@ class VoicesModule(BaseModule):
             return "критично: " + "; ".join(result["critical"])
         if result.get("suspect"):
             return "подозрительно: " + "; ".join(result.get("warnings") or ["остаток вне допуска"])
-        if not result.get("out_path") or not await self._io(os.path.isfile, result["out_path"]):
+        if not track or not await self._io(os.path.isfile, track):
             return "выходной файл не найден"
         return None
 
