@@ -14,8 +14,8 @@ Query:
       The source priority is the setting `voices.source_priority` (JSON list of player kinds);
       layout.DEFAULT_PRIORITY when unset.
   voices.dubs.get {series_id} -> {items: [{season, episode, voice_key, voice_label, status,
-      attempt, error, temp_path, job_id, aligned_path, sidecar_path, outcome, ref_uid, ref_path,
-      detail, state}]}  (detail = {code, params} of the outcome or error, see reasons.py; the
+      attempt, error, temp_path, job_id, aligned_path, output_path, outcome, ref_uid, ref_path,
+      detail, state, hint}]}  (detail = {code, params} of the outcome or error, see reasons.py; the
       fields `error` and `outcome` hold the stored reason as it is)
 Command:
   voices.dispatch {series_id} — sent by scan after an explicit scan: read the catalog of the site,
@@ -30,13 +30,13 @@ Events in:  downloads.fetch.started and .finished (our keys `dub:<id>`), conform
             jobs of the service), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished,
             conform.daemon.up, series.deleted.
-Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, detail, rev} —
+Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, hint, detail, rev} —
             rev grows with every event, so the interface keeps the newest of two it receives out of order;
             every write to a row is announced, including the creation of a planned row and its removal;
             voices.dubs.snapshot {rev, items: [{series_id, season, episode, voice_key, voice_label, status,
-            state, detail}]} — every row, published when an interface connects (gateway.sse.clients);
+            state, hint, detail}]} — every row, published when an interface connects (gateway.sse.clients);
             state is what the user sees (states.py: planned, download_queued, downloading, align_queued, running,
-            done, error), status the
+            done, error), hint names the sentence that tells apart the causes of one state, status the
             step behind it; detail is the reason of a failure, a rejection or a stale track as
             {code, params} (code `external`: the words of another system in params.text), else null;
             status is one of
@@ -45,6 +45,10 @@ Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_lab
             series.purged,
             voices.episode.settled {series_id, season, episode} — every voice-over of the episode is
             placed, rejected or failed and its temporary files are gone.
+
+Where each policy lives: the steps a row may take and the sets of steps (lifecycle.py, enforced by the repository),
+what is known of the alignment service (alignment.py), the form in which a finished voice-over reaches the library
+(outputs.py, injected as `output=`), the shape of every message (core/contracts).
 
 A voice keeps the key under which its rows were recorded when changed rules would give it another one.
 Paths of the working files are taken from the rows (folder of `temp_path`), never from the settings of the
@@ -148,6 +152,8 @@ class VoicesModule(BaseModule):
         self._job_status: dict[str, str] = {}
         self._fetching: set[int] = set()
         self._admit_lock = asyncio.Lock()
+        # The number of a job and its ending arrive in any order; each looks for the other under this lock.
+        self._claim_lock = asyncio.Lock()
         self._unclaimed: OrderedDict[str, AlignmentJob] = OrderedDict()
         self._rev = 0
         self._reported: set[str] = set()
@@ -725,13 +731,14 @@ class VoicesModule(BaseModule):
 
     async def _attach(self, key: str, job_id: str) -> None:
         """The service has the job of this key: its voice-overs get the number, an early ending is applied."""
-        await self.repo.attach_job(key, job_id)
-        for row in await self.repo.by_key(key):
-            if row["job_id"] == job_id:
-                self._changed(row, E.ALIGNING, job_id=job_id)
-        early = self._unclaimed.pop(job_id, None)
-        if early is not None:
-            await self._apply_job(early)
+        async with self._claim_lock:
+            await self.repo.attach_job(key, job_id)
+            for row in await self.repo.by_key(key):
+                if row["job_id"] == job_id:
+                    self._changed(row, E.ALIGNING, job_id=job_id)
+            early = self._unclaimed.pop(job_id, None)
+            if early is not None:
+                await self._apply_job(early)
 
     async def _recover_submissions(self) -> None:
         """Jobs sent without an answer: the service says whether it has them; if not, they are sent anew."""
@@ -800,12 +807,13 @@ class VoicesModule(BaseModule):
 
     async def on_job_finished(self, env: Envelope) -> None:
         job = AlignmentJob.model_validate(env.payload)
-        if not await self._apply_job(job):
-            # The service can end a job before its number is written to the voice-overs: keep the
-            # ending until they claim it.
-            self._unclaimed[job.job_id] = job
-            while len(self._unclaimed) > UNCLAIMED_JOBS:
-                self._unclaimed.popitem(last=False)
+        async with self._claim_lock:
+            if not await self._apply_job(job):
+                # The service can end a job before its number is written to the voice-overs: keep the
+                # ending until they claim it.
+                self._unclaimed[job.job_id] = job
+                while len(self._unclaimed) > UNCLAIMED_JOBS:
+                    self._unclaimed.popitem(last=False)
 
     async def _reconcile(self, job_id: str) -> None:
         """A job sent before a restart: learn how it ended, or send its voice-overs again."""

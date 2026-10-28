@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.contracts import ReleaseSource
+
 from .identity import NO_RULES, Equivalence, group_key, voice_groups
 
 # Source priority, most preferred first; empirical, by bitrate. The first one wins a resolution tie.
@@ -27,8 +29,9 @@ class Source:
 
     @classmethod
     def of(cls, raw: dict[str, Any]) -> "Source":
-        return cls(raw["url"], raw["player"], raw["studio"], raw.get("kind") or "",
-                   tuple(sorted(raw.get("episodes") or ())), dict(raw.get("links") or {}))
+        source = ReleaseSource.model_validate(raw)
+        return cls(source.url, source.player, source.studio, source.kind, tuple(sorted(source.episodes)),
+                   dict(source.links or {}))
 
 
 def rank(player: str, priority: tuple[str, ...] | list[str] = DEFAULT_PRIORITY,

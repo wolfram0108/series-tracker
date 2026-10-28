@@ -10,6 +10,7 @@ import pytest
 
 from core import BaseModule, Bus, Runner
 from core.db import Database
+from core.envelope import Envelope
 from modules.settings import SettingsModule
 from modules.voices import VoicesModule
 from modules.voices.identity import Equivalence, group_key, same_voice, tokens, voice_groups
@@ -583,10 +584,13 @@ async def change_state(sub, voice_key, state, seconds=3.0):
             return event
 
 
-async def quiet(voices):
+async def quiet(voices, seconds=20.0):
     """Wait until the module has nothing running in the background, so a test may change its data."""
+    end = asyncio.get_running_loop().time() + seconds
     while voices._bg:
-        await asyncio.gather(*list(voices._bg))
+        left = end - asyncio.get_running_loop().time()
+        assert left > 0, [task.get_name() for task in voices._bg]
+        await asyncio.wait(list(voices._bg), timeout=left)
 
 
 async def change(sub, status, seconds=3.0):
@@ -1956,3 +1960,36 @@ async def test_another_form_of_output_places_follows_and_removes_without_a_chang
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
     await statuses_until(sub, ["stale", "stale"])
     assert not any(os.path.isfile(r["output_path"]) for r in placed)
+
+
+@pytest.mark.asyncio
+async def test_a_job_and_its_ending_that_meet_in_the_middle_of_each_others_checks_still_end_the_voices(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs, finished=False)
+    for fetch in neighbours.fetches:
+        touch(fetch["path"], b"video")
+        finish(probe, fetch["key"])
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    await quiet(voices)
+    submit = neighbours.submits[-1]
+    ids = [r["id"] for r in await voices.repo.for_series(7)]
+    await voices.repo.release_to_ready(ids)
+    await voices.repo.mark_submitting(ids, "k9", "u1", ref)
+    ending = Envelope(topic="conform.job.finished", kind="event", payload=job_result(submit, "job-9"))
+    real = voices.repo.by_job
+
+    async def slow_after_reading(job_id):
+        found = await real(job_id)
+        await asyncio.sleep(0.15)
+        return found
+
+    voices.repo.by_job = slow_after_reading
+    try:
+        ended = asyncio.create_task(voices.on_job_finished(ending))
+        await asyncio.sleep(0.05)
+        await voices._attach("k9", "job-9")
+        await ended
+    finally:
+        voices.repo.by_job = real
+    await quiet(voices)
+    assert not voices._unclaimed
+    assert {r["status"] for r in await rows(probe)} <= {"aligned", "placed"}
