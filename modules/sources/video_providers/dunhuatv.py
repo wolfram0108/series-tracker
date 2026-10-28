@@ -1,7 +1,7 @@
 """Video provider for dunhuatv.ru: one title page, two players, several voice-overs.
 
 A series takes its episodes from ONE player and ONE voice-over; the choice travels in the
-series address (`?player=vk&voice=<studio>&kind=<type>`). A candidate link is a fragment of
+series address (`?player=cvh&voice=<studio>&kind=<type>`). A candidate link is a fragment of
 the title page, so the identity of an episode stays stable and the stream is resolved right
 before the download.
 """
@@ -33,8 +33,10 @@ MAX_CONCURRENT = 6
 # The site publishes no per-episode dates; a fixed one keeps candidate ids stable across scans.
 DEFAULT_DATE = "1970-01-01T12:00:00Z"
 DEFAULT_PUBLISHER = 1110
-# Player order as the user sees it: player 1 is VK, player 2 is Kodik.
-PLAYERS = ("vk", "kodik")
+# Player order as the user sees it: player 1 is CDN VideoHub (VK videos), player 2 is Kodik.
+PLAYERS = ("cvh", "kodik")
+# Addresses written while the CDN VideoHub player was called "vk" keep working.
+_LEGACY_PLAYER = {"vk": "cvh"}
 
 _TITLE_PATH = re.compile(r"^/(\d+)-[^/]+\.html$")
 _PLAYER_WIDGET = re.compile(r"<video-player\b([^>]*)>", re.IGNORECASE)
@@ -45,7 +47,7 @@ _KODIK_FRAME = re.compile(r"""<iframe\b[^>]*\bdata-src=["']([^"']*kodikplayer\.c
                           re.IGNORECASE)
 _ORIGINAL_NAME = re.compile(r"Как называется в оригинале\?</summary>\s*<div[^>]*>([^<]*)",
                             re.IGNORECASE)
-_LINK = re.compile(r"^(vk|kodik)=(.+)$")
+_LINK = re.compile(r"^(cvh|vk|kodik)=(.+)$")
 
 
 @dataclass(frozen=True)
@@ -116,6 +118,7 @@ def split_address(url: str) -> tuple[str, Choice | None]:
         raise ValueError(f"Не страница тайтла dunhuatv.ru: {url}")
     query = parse_qs(parsed.query)
     player = (query.get("player") or [""])[0]
+    player = _LEGACY_PLAYER.get(player, player)
     studio = (query.get("voice") or [""])[0]
     choice = (Choice(player, studio, (query.get("kind") or [""])[0])
               if player in PLAYERS and studio else None)
@@ -129,8 +132,8 @@ def address_of(page_url: str, choice: Choice) -> str:
     return f"{page_url}?{urlencode(query)}"
 
 
-def vk_link(page_url: str, vk_id: str) -> str:
-    return f"{page_url}#vk={vk_id}"
+def cvh_link(page_url: str, vk_id: str) -> str:
+    return f"{page_url}#cvh={vk_id}"
 
 
 def kodik_link(page_url: str, media_id: str, media_hash: str, episode: int) -> str:
@@ -255,8 +258,8 @@ class DunhuaTvProvider(BaseVideoProvider):
         if target is None:
             return None
         kind, value = target
-        if kind == "vk":
-            return await self._resolve_vk(value, http)
+        if kind in ("cvh", "vk"):
+            return await self._resolve_cvh(value, http)
         return await self._resolve_kodik(value, http)
 
     # --- page and catalog ---------------------------------------------------------------
@@ -276,29 +279,29 @@ class DunhuaTvProvider(BaseVideoProvider):
                        everything: bool) -> _Catalog:
         """The sources worth loading: all of them for the choice list, else just the wanted one."""
         catalog = _Catalog()
-        if everything or wanted is None or wanted.player == "vk":
-            await self._add_vk(catalog, page, http)
+        if everything or wanted is None or wanted.player == "cvh":
+            await self._add_cvh(catalog, page, http)
         needs_kodik = everything or (wanted.player == "kodik" if wanted else not catalog.sources)
         if needs_kodik:
             await self._add_kodik(catalog, page, http, None if everything else wanted)
         return catalog
 
-    async def _add_vk(self, catalog: _Catalog, page: TitlePage, http: httpx.AsyncClient) -> None:
+    async def _add_cvh(self, catalog: _Catalog, page: TitlePage, http: httpx.AsyncClient) -> None:
         if page.aggregator_id is None:
-            catalog.reasons["vk"] = "на странице нет плеера VK"
+            catalog.reasons["cvh"] = "на странице нет плеера CVH"
             return
         try:
             items = await cdnvideohub.fetch_playlist(http, page.aggregator_id, page.publisher_id)
         except CdnVideoHubError as exc:
-            catalog.reasons["vk"], catalog.transient = exc.reason, catalog.transient or exc.transient
+            catalog.reasons["cvh"], catalog.transient = exc.reason, catalog.transient or exc.transient
             return
         grouped: dict[tuple[str, str], dict[int, str]] = {}
         for item in items:
             grouped.setdefault((item.studio, item.voice_type), {})[item.episode] = item.vk_id
-        catalog.sources += [Source(Choice("vk", studio or "без студии", kind), episodes)
+        catalog.sources += [Source(Choice("cvh", studio or "без студии", kind), episodes)
                             for (studio, kind), episodes in grouped.items()]
         if not grouped:
-            catalog.reasons["vk"] = "у тайтла нет VK-видео"
+            catalog.reasons["cvh"] = "у тайтла нет видео CVH"
 
     async def _add_kodik(self, catalog: _Catalog, page: TitlePage, http: httpx.AsyncClient,
                          wanted: Choice | None) -> None:
@@ -353,6 +356,7 @@ class DunhuaTvProvider(BaseVideoProvider):
             "last": numbers[-1] if numbers else None,
             "count": len(numbers),
             "ranges": episode_ranges(numbers),
+            "episodes": numbers,
         }
 
     # --- probes -------------------------------------------------------------------------
@@ -363,11 +367,11 @@ class DunhuaTvProvider(BaseVideoProvider):
         async def one(number: int) -> tuple[int, str] | CdnVideoHubError | KodikError:
             async with gate:
                 try:
-                    if source.choice.player == "vk":
+                    if source.choice.player == "cvh":
                         vk_id = source.episodes[number]
                         rung = await cdnvideohub.best_rung(
                             await cdnvideohub.fetch_rungs(http, vk_id), self._cached_measure(vk_id))
-                        return rung.height, vk_link(page_url, vk_id)
+                        return rung.height, cvh_link(page_url, vk_id)
                     assert source.session is not None and source.serial is not None
                     qualities = await kodik.episode_qualities(http, source.session, number)
                     return max(qualities), kodik_link(page_url, *source.serial, number)
@@ -376,7 +380,7 @@ class DunhuaTvProvider(BaseVideoProvider):
                 finally:
                     tick()
 
-        label = "VK" if source.choice.player == "vk" else "Kodik"
+        label = "CVH" if source.choice.player == "cvh" else "Kodik"
         result = _Probes()
         for number, outcome in zip(numbers, await asyncio.gather(*(one(n) for n in numbers))):
             if isinstance(outcome, (CdnVideoHubError, KodikError)):
@@ -396,12 +400,12 @@ class DunhuaTvProvider(BaseVideoProvider):
 
     # --- stream resolution --------------------------------------------------------------
 
-    async def _resolve_vk(self, vk_id: str, http: httpx.AsyncClient) -> dict:
+    async def _resolve_cvh(self, vk_id: str, http: httpx.AsyncClient) -> dict:
         try:
             rung = await cdnvideohub.best_rung(await cdnvideohub.fetch_rungs(http, vk_id),
                                                self._cached_measure(vk_id))
         except CdnVideoHubError as exc:
-            raise StreamUnavailable(f"VK: {exc.reason}", exc.transient) from exc
+            raise StreamUnavailable(f"CVH: {exc.reason}", exc.transient) from exc
         return {"stream_url": rung.url, "headers": dict(cdnvideohub.STREAM_HEADERS)}
 
     async def _resolve_kodik(self, value: str, http: httpx.AsyncClient) -> dict:

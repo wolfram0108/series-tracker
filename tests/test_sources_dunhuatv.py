@@ -1,4 +1,4 @@
-"""Unit tests for the dunhuatv.ru provider: title page, CDN VideoHub (VK) and Kodik."""
+"""Unit tests for the dunhuatv.ru provider: title page, CDN VideoHub (CVH) and Kodik."""
 import base64
 import json
 
@@ -174,7 +174,7 @@ def provider() -> DunhuaTvProvider:
 
 def test_match_only_title_pages(provider):
     assert provider.match_url(PAGE_URL)
-    assert provider.match_url("https://www.dunhuatv.ru/5-x.html#vk=1")
+    assert provider.match_url("https://www.dunhuatv.ru/5-x.html#cvh=1")
     assert not provider.match_url("https://dunhuatv.ru/page/2/")
     assert not provider.match_url("https://dunhuatv.ru/o-nas.html")
     assert not provider.match_url("https://1.ruchime.org/release/x")
@@ -308,14 +308,26 @@ async def test_kodik_qualities(site):
 
 def test_address_roundtrip_keeps_the_choice():
     from modules.sources.video_providers.dunhuatv import (Choice, address_of, split_address)
-    choice = Choice("vk", "AniMy / RuChiMe", "Многоголосый")
+    choice = Choice("cvh", "AniMy / RuChiMe", "Многоголосый")
     address = address_of(PAGE_URL, choice)
     assert split_address(address) == (PAGE_URL, choice)
     assert split_address(PAGE_URL) == (PAGE_URL, None)
     assert split_address(f"{PAGE_URL}?player=bogus&voice=x") == (PAGE_URL, None)
     assert DunhuaTvProvider().canonical_url(address) == address
-    assert DunhuaTvProvider().canonical_url(PAGE_URL + "#vk=1") == PAGE_URL
+    assert DunhuaTvProvider().canonical_url(PAGE_URL + "#cvh=1") == PAGE_URL
     assert DunhuaTvProvider().match_url(address)
+
+
+def test_legacy_vk_player_name_is_an_alias_of_cvh():
+    from modules.sources.video_providers.dunhuatv import Choice, split_address
+    assert split_address(f"{PAGE_URL}?player=vk&voice=A")[1] == Choice("cvh", "A")
+
+
+@pytest.mark.asyncio
+async def test_legacy_vk_links_still_resolve(site, provider):
+    async with site.client() as http:
+        stream = await provider.resolve_stream(f"{PAGE_URL}#vk=v1s", http)
+    assert stream["stream_url"] == "https://okcdn.test/v1s/1080"
 
 
 def test_episode_ranges_show_holes():
@@ -334,18 +346,19 @@ async def test_parse_release_lists_every_player_and_voice(site, provider):
     options = [(s["player"], s["studio"], s["kind"], s["ranges"], s["count"])
                for s in release["sources"]]
     assert options == [
-        ("vk", "AniMy / RuChiMe", "Многоголосый", "1-2", 2),
-        ("vk", "AniStar", "Многоголосый", "1-2", 2),
-        ("vk", "AniStar", "Неизвестный", "3", 1),
+        ("cvh", "AniMy / RuChiMe", "Многоголосый", "1-2", 2),
+        ("cvh", "AniStar", "Многоголосый", "1-2", 2),
+        ("cvh", "AniStar", "Неизвестный", "3", 1),
         ("kodik", "Animy", "voice", "1-3", 3),
         ("kodik", "AniStar", "voice", "2-3, 9", 3),
     ]
+    assert [s["episodes"] for s in release["sources"]] == [[1, 2], [1, 2], [3], [1, 2, 3], [2, 3, 9]]
     first = release["sources"][0]
     assert release["selected_source"] == first["url"] == release["canonical_url"]
     assert (first["first"], first["last"]) == (1, 2)
     assert release["title"] == {"ru": "Практикуя ци сто тысяч лет", "en": "Lian Qi Shi Wan Nian"}
     assert release["resolution"] is None and release["source_type"] == "web_video"
-    assert release["players"]["vk"]["available"] and release["players"]["kodik"]["available"]
+    assert release["players"]["cvh"]["available"] and release["players"]["kodik"]["available"]
     assert not any("/player/sv/video/" in str(r.url) or r.url.path.endswith("/ftor")
                    for r in site.requests)
 
@@ -355,7 +368,7 @@ async def test_parse_release_titles_follow_the_chosen_voice(site, provider):
     from modules.sources.video_providers.dunhuatv import Choice, address_of
     async with site.client() as http:
         vk = await provider.parse_release(
-            address_of(PAGE_URL, Choice("vk", "AniStar", "Неизвестный")), http)
+            address_of(PAGE_URL, Choice("cvh", "AniStar", "Неизвестный")), http)
         kodik_release = await provider.parse_release(
             address_of(PAGE_URL, Choice("kodik", "AniStar", "voice")), http)
     assert [e["number"] for e in vk["episodes"]] == [3]
@@ -370,18 +383,18 @@ async def test_parse_release_rejects_an_unknown_voice(site, provider):
     from modules.sources.video_providers.dunhuatv import Choice, address_of
     async with site.client() as http:
         with pytest.raises(ValueError, match="не найдена"):
-            await provider.parse_release(address_of(PAGE_URL, Choice("vk", "Nobody")), http)
+            await provider.parse_release(address_of(PAGE_URL, Choice("cvh", "Nobody")), http)
 
 
 @pytest.mark.asyncio
-async def test_parse_release_falls_back_to_kodik_when_vk_is_absent(site, provider):
+async def test_parse_release_falls_back_to_kodik_when_cvh_is_absent(site, provider):
     site.page = PAGE_HTML.replace("<video-player", "<x-player")
     async with site.client() as http:
         release = await provider.parse_release(PAGE_URL, http)
     assert {s["player"] for s in release["sources"]} == {"kodik"}
     assert "player=kodik" in release["selected_source"]
-    assert not release["players"]["vk"]["available"]
-    assert "нет плеера VK" in release["players"]["vk"]["reason"]
+    assert not release["players"]["cvh"]["available"]
+    assert "нет плеера CVH" in release["players"]["cvh"]["reason"]
 
 
 @pytest.mark.asyncio
@@ -401,21 +414,21 @@ def _links(scan):
 
 
 @pytest.mark.asyncio
-async def test_scan_takes_only_the_chosen_vk_voice(site, provider):
+async def test_scan_takes_only_the_chosen_cvh_voice(site, provider):
     from modules.sources.video_providers.dunhuatv import Choice, address_of
-    url = address_of(PAGE_URL, Choice("vk", "AniStar", "Многоголосый"))
+    url = address_of(PAGE_URL, Choice("cvh", "AniStar", "Многоголосый"))
     async with site.client() as http:
         scan = await provider.scan_episodes(url, http, {})
-    assert _links(scan) == {1: ("vk=v1s", 1080), 2: ("vk=v2s", 360)}
+    assert _links(scan) == {1: ("cvh=v1s", 1080), 2: ("cvh=v2s", 360)}
     probed = {str(r.url).rsplit("/", 1)[1] for r in site.requests if "/player/sv/video/" in str(r.url)}
     assert probed == {"v1s", "v2s"}
     assert not any(r.url.path.endswith("/ftor") for r in site.requests)
     assert all(f["download_url"] is None and f["publication_date"] == "1970-01-01T12:00:00Z"
                for f in scan["videos"])
     report = scan["players"]
-    assert report["sources"] == {"vk": 2} and report["holes"] == []
-    assert report["source"] == {"player": "vk", "studio": "AniStar", "kind": "Многоголосый"}
-    assert report["players"]["vk"]["max_resolution"] == 1080
+    assert report["sources"] == {"cvh": 2} and report["holes"] == []
+    assert report["source"] == {"player": "cvh", "studio": "AniStar", "kind": "Многоголосый"}
+    assert report["players"]["cvh"]["max_resolution"] == 1080
 
 
 @pytest.mark.asyncio
@@ -437,7 +450,7 @@ async def test_scan_without_a_choice_uses_the_first_player_and_voice(site, provi
     async with site.client() as http:
         scan = await provider.scan_episodes(PAGE_URL, http, {})
     assert scan["players"]["source"]["studio"] == "AniMy / RuChiMe"
-    assert _links(scan) == {1: ("vk=v1", 720), 2: ("vk=v2", 360)}
+    assert _links(scan) == {1: ("cvh=v1", 720), 2: ("cvh=v2", 360)}
 
 
 @pytest.mark.asyncio
@@ -453,7 +466,7 @@ async def test_scan_measures_an_unlabelled_rung_once(site):
     provider = DunhuaTvProvider(measure=counting)
     async with site.client() as http:
         scan = await provider.scan_episodes(
-            address_of(PAGE_URL, Choice("vk", "A", "x")), http, {})
+            address_of(PAGE_URL, Choice("cvh", "A", "x")), http, {})
         await provider.resolve_stream(scan["videos"][0]["url"], http)
     assert scan["videos"][0]["resolution"] == 1440
     assert calls == ["mpeg4kUrl"]
@@ -475,10 +488,10 @@ async def test_scan_reports_episode_without_a_stream(site, provider):
     site.sources["v2"] = {}
     async with site.client() as http:
         scan = await provider.scan_episodes(
-            address_of(PAGE_URL, Choice("vk", "AniMy / RuChiMe", "Многоголосый")), http, {})
-    assert _links(scan) == {1: ("vk=v1", 720)}
+            address_of(PAGE_URL, Choice("cvh", "AniMy / RuChiMe", "Многоголосый")), http, {})
+    assert _links(scan) == {1: ("cvh=v1", 720)}
     assert scan["players"]["holes"][0]["episode"] == 2
-    assert "VK" in scan["players"]["holes"][0]["reason"]
+    assert "CVH" in scan["players"]["holes"][0]["reason"]
 
 
 @pytest.mark.asyncio
@@ -488,7 +501,7 @@ async def test_scan_asks_for_a_retry_when_a_player_throttles(site, provider):
     async with site.client() as http:
         with pytest.raises(ValueError, match="повторный скан"):
             await provider.scan_episodes(
-                address_of(PAGE_URL, Choice("vk", "AniMy / RuChiMe", "Многоголосый")), http, {})
+                address_of(PAGE_URL, Choice("cvh", "AniMy / RuChiMe", "Многоголосый")), http, {})
 
 
 @pytest.mark.asyncio
@@ -498,7 +511,7 @@ async def test_scan_asks_for_a_retry_when_the_playlist_is_down(site, provider):
     async with site.client() as http:
         with pytest.raises(ValueError, match="повторный скан"):
             await provider.scan_episodes(
-                address_of(PAGE_URL, Choice("vk", "AniMy / RuChiMe", "Многоголосый")), http, {})
+                address_of(PAGE_URL, Choice("cvh", "AniMy / RuChiMe", "Многоголосый")), http, {})
 
 
 @pytest.mark.asyncio
@@ -523,9 +536,9 @@ async def test_scan_reports_progress(site, provider):
 
 
 @pytest.mark.asyncio
-async def test_resolve_vk_gives_best_rung_with_the_agent_that_signed_it(site, provider):
+async def test_resolve_cvh_gives_best_rung_with_the_agent_that_signed_it(site, provider):
     async with site.client() as http:
-        stream = await provider.resolve_stream(f"{PAGE_URL}#vk=v1s", http)
+        stream = await provider.resolve_stream(f"{PAGE_URL}#cvh=v1s", http)
     assert stream["stream_url"] == "https://okcdn.test/v1s/1080"
     assert stream["headers"]["User-Agent"] == cdnvideohub.USER_AGENT
     assert stream["headers"]["Referer"] == cdnvideohub.ORIGIN + "/"
@@ -546,18 +559,18 @@ async def test_resolve_ignores_foreign_links(site, provider):
     async with site.client() as http:
         assert await provider.resolve_stream("https://vk.com/video-1_2", http) is None
         assert await provider.resolve_stream(PAGE_URL, http) is None
-        assert await provider.resolve_stream("https://1.ruchime.org/release/x#vk=1", http) is None
+        assert await provider.resolve_stream("https://1.ruchime.org/release/x#cvh=1", http) is None
 
 
 @pytest.mark.asyncio
 async def test_resolve_failures_are_stream_unavailable(site, provider):
     async with site.client() as http:
         with pytest.raises(StreamUnavailable) as gone:
-            await provider.resolve_stream(f"{PAGE_URL}#vk=missing", http)
-        assert not gone.value.transient and "VK" in gone.value.reason
+            await provider.resolve_stream(f"{PAGE_URL}#cvh=missing", http)
+        assert not gone.value.transient and "CVH" in gone.value.reason
         site.failing_videos["v2"] = 503
         with pytest.raises(StreamUnavailable) as busy:
-            await provider.resolve_stream(f"{PAGE_URL}#vk=v2", http)
+            await provider.resolve_stream(f"{PAGE_URL}#cvh=v2", http)
         assert busy.value.transient
         with pytest.raises(StreamUnavailable):
             await provider.resolve_stream(f"{PAGE_URL}#kodik=50228/7bbb4c6b/99", http)
@@ -569,7 +582,7 @@ async def test_resolve_failures_are_stream_unavailable(site, provider):
 async def test_registry_resolves_dunhuatv_links_and_leaves_ruchime_alone(site):
     registry = get_default_registry()
     async with site.client() as http:
-        stream = await registry.resolve_stream(f"{PAGE_URL}#vk=v1", http)
+        stream = await registry.resolve_stream(f"{PAGE_URL}#cvh=v1", http)
         assert stream["stream_url"] == "https://okcdn.test/v1/720"
         assert await registry.resolve_stream("https://example.test/none", http) is None
     json.dumps(stream)
