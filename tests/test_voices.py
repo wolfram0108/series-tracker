@@ -792,11 +792,14 @@ async def test_the_scratch_directory_of_the_service_goes_when_no_job_of_the_seri
     await asyncio.wait_for(settled_sub.queue.get(), 5)
     await asyncio.sleep(0.2)
     assert os.path.isdir(scratch)  # the other episode is still being aligned
+    series_folder = os.path.join(neighbours.settings["voices.temp_root"], "7")
+    assert os.path.isdir(series_folder)  # the second episode's files are still in it
     neighbours.submits[:] = [second]
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-2"))
     await asyncio.wait_for(settled_sub.queue.get(), 5)
     await asyncio.sleep(0.2)
     assert not os.path.exists(scratch)
+    assert not os.path.exists(series_folder)  # nothing of the series is left in the temporary directory
 
 
 @pytest.mark.asyncio

@@ -38,6 +38,8 @@ voice-over of the episode is placed, rejected or failed, the episode's temporary
 removed. Without the service, or while the reference is missing, rows wait and are retried on
 series.downloaded.changed and conform.daemon.up. The service leaves an empty `_tmp` directory
 next to every reference video it worked on; it is removed once no job of the series is running.
+The series' own folder in the temporary directory goes when every voice-over of the series is
+settled and the folder is empty.
 """
 from __future__ import annotations
 
@@ -326,6 +328,8 @@ class VoicesModule(BaseModule):
                     await self._submit(series, season, episode, reference, ready, root)
             await self._tidy(series_id, season, episode, root)
         await self._sweep_scratch(series_id, {os.path.dirname(path) for path in references.values()})
+        if all(row["status"] in FINAL for row in await self.repo.for_series(series_id)):
+            await asyncio.to_thread(self._remove_if_empty, os.path.join(root, str(series_id)))
 
     async def _sweep_scratch(self, series_id: int, folders: set[str]) -> None:
         """The service's scratch directory is made next to the reference when a job starts: while
