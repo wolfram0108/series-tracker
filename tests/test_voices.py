@@ -658,7 +658,7 @@ async def test_an_episode_goes_to_alignment_and_its_tracks_land_next_to_the_vide
     assert os.path.isfile(f"{stem}.BlackCat.ru.flac") and os.path.isfile(f"{stem}.RedHeadSound.ru.flac")
     done = await rows(probe)
     assert {r["status"] for r in done} == {"placed"}
-    assert {r["sidecar_path"] for r in done} == {f"{stem}.BlackCat.ru.flac", f"{stem}.RedHeadSound.ru.flac"}
+    assert {r["output_path"] for r in done} == {f"{stem}.BlackCat.ru.flac", f"{stem}.RedHeadSound.ru.flac"}
     assert not os.path.exists(os.path.join(neighbours.settings["voices.temp_root"], "7", "s01e01"))
     assert os.path.isfile(ref)
 
@@ -943,7 +943,7 @@ async def test_the_tracks_follow_a_renamed_video(dubs):
     assert library_files(neighbours) == ["Renamed 01.BlackCat.ru.flac", "Renamed 01.RedHeadSound.ru.flac",
                                          "Renamed 01.mp4"]
     done = await rows(probe)
-    assert {r["sidecar_path"] for r in done} == {os.path.join(neighbours.library, "Renamed 01.BlackCat.ru.flac"),
+    assert {r["output_path"] for r in done} == {os.path.join(neighbours.library, "Renamed 01.BlackCat.ru.flac"),
                                                  os.path.join(neighbours.library, "Renamed 01.RedHeadSound.ru.flac")}
     assert {r["status"] for r in done} == {"placed"}
 
@@ -1002,7 +1002,7 @@ async def test_a_replaced_reference_removes_the_tracks_and_the_voices_start_over
     await statuses_until(sub, ["stale", "stale"])
     assert not any(name.endswith(".flac") for name in library_files(neighbours))
     reset = await rows(probe)
-    assert {r["sidecar_path"] for r in reset} == {None} and {r["ref_uid"] for r in reset} == {None}
+    assert {r["output_path"] for r in reset} == {None} and {r["ref_uid"] for r in reset} == {None}
     await settled(neighbours, 4)  # both voices are fetched again
     for fetch in neighbours.fetches[2:]:
         touch(fetch["path"], b"video")
@@ -1401,12 +1401,12 @@ async def test_a_track_never_overwrites_the_track_of_another_voice(dubs):
     await statuses_until(sub, ["ready"] * 3 + ["aligning"] * 3)
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
     await asyncio.wait_for(settled_sub.queue.get(), 5)
-    placed = {r["sidecar_path"] for r in await rows(probe)}
+    placed = {r["output_path"] for r in await rows(probe)}
     assert len(placed) == 3 and all(os.path.isfile(p) for p in placed)
     assert sum(" 2.ru.flac" in p for p in placed) == 1
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
     await asyncio.sleep(0.3)
-    assert {r["sidecar_path"] for r in await rows(probe)} == placed  # a later look moves nothing
+    assert {r["output_path"] for r in await rows(probe)} == placed  # a later look moves nothing
 
 
 
@@ -1577,7 +1577,7 @@ async def test_an_interrupted_placement_is_finished_after_a_restart(dubs, interr
         place_file(source, destination)  # the file moved, the record was not updated
     await voices._advance(7)
     after = await voices.repo.get(row["id"])
-    assert after["status"] == "placed" and after["sidecar_path"] == destination
+    assert after["status"] == "placed" and after["output_path"] == destination
     assert after["move_from"] is None and after["aligned_path"] is None
     assert os.path.isfile(destination) and not os.path.exists(source)
 
@@ -1604,11 +1604,11 @@ async def test_an_interrupted_follow_of_the_video_is_finished_too(dubs):
     os.rename(ref, renamed)
     neighbours.references[1] = "Renamed 01.mp4"
     expected = path_of(renamed, row["voice_label"], ".flac")
-    await voices.repo.begin_move(row["id"], expected, row["sidecar_path"])  # interrupted before the move
+    await voices.repo.begin_move(row["id"], expected, row["output_path"])  # interrupted before the move
     await voices._advance(7)
     after = await voices.repo.get(row["id"])
-    assert after["status"] == "placed" and after["sidecar_path"] == expected and after["move_from"] is None
-    assert os.path.isfile(expected) and not os.path.exists(row["sidecar_path"])
+    assert after["status"] == "placed" and after["output_path"] == expected and after["move_from"] is None
+    assert os.path.isfile(expected) and not os.path.exists(row["output_path"])
     assert len(library_files(neighbours)) == 3
 
 
@@ -1619,12 +1619,12 @@ async def test_a_failed_removal_hands_the_file_to_the_cleanup_journal_and_is_tri
     voices = dubs[2]
     probe, neighbours, bus, sub, ref = await placed_set(dubs)
     group = await voices.repo.for_series(7)
-    paths = [row["sidecar_path"] for row in group]
+    paths = [row["output_path"] for row in group]
     with patch("modules.voices.module.os.remove", side_effect=PermissionError("read-only")):
         assert await voices._follow(7, 1, 1, group, ref, "another-reference")
     assert all(os.path.exists(path) for path in paths)  # the tracks are still there...
     assert {entry["path"] for entry in await voices.repo.cleanup_list()} == set(paths)  # ...and not forgotten
-    assert all(row["sidecar_path"] is None for row in await voices.repo.for_series(7))
+    assert all(row["output_path"] is None for row in await voices.repo.for_series(7))
     await voices._sweep_cleanup()
     assert not any(os.path.exists(path) for path in paths) and await voices.repo.cleanup_list() == []
 
@@ -1649,7 +1649,7 @@ async def test_a_failed_removal_of_the_temporary_folder_is_journaled_and_the_epi
 async def test_a_file_that_is_already_gone_is_a_success_not_a_journal_entry(dubs):
     voices = dubs[2]
     assert await voices._discard(os.path.join(os.sep, "tmp", "nobody-has-this")) is True
-    assert await voices._discard(os.path.join(os.sep, "tmp", "nobody-has-this-dir"), tree=True) is True
+    assert await voices._discard(os.path.join(os.sep, "tmp", "nobody-has-this-dir"), kind="tree") is True
     assert await voices.repo.cleanup_list() == []
 
 
@@ -1883,7 +1883,7 @@ async def test_the_aligned_track_is_found_where_the_module_asked_for_it_whatever
         result["out_path"] = "/mnt/meganas/media/elsewhere/" + os.path.basename(result["out_path"])
     probe.publish_event("conform.job.finished", view)
     await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
-    assert all(os.path.isfile(r["sidecar_path"]) for r in await rows(probe))
+    assert all(os.path.isfile(r["output_path"]) for r in await rows(probe))
 
 
 @pytest.mark.asyncio

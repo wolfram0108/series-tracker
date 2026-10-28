@@ -41,6 +41,7 @@ from typing import Any
 import httpx
 
 from core import BaseModule, BusRequestError
+from core.contracts import AlignmentJob, DubResult, JobStatus
 from core.envelope import Envelope
 
 from .client import DaemonClient, DaemonRefused
@@ -83,14 +84,14 @@ def finished_view(job: dict[str, Any], to_local: dict[str, str]) -> dict[str, An
         except ValueError:
             return path
 
-    return {"job_id": job.get("id"), "status": job.get("status"), "error": job.get("error"),
-            "results": [{
-                "dub": result.get("dub"), "ok": bool(result.get("ok")),
-                "skipped": bool(result.get("skipped")), "out_path": local(result.get("out_path")),
-                "suspect": bool(result.get("suspect")), "critical": list(result.get("critical") or []),
-                "warnings": list(result.get("warnings") or []),
-                "resid_ms": result.get("audio_resid_ms"), "error": result.get("error"),
-            } for result in job.get("results") or []]}
+    return AlignmentJob(
+        job_id=job.get("id"), status=job.get("status"), error=job.get("error"),
+        results=[DubResult(
+            dub=result.get("dub"), ok=bool(result.get("ok")), skipped=bool(result.get("skipped")),
+            out_path=local(result.get("out_path")), suspect=bool(result.get("suspect")),
+            critical=list(result.get("critical") or []), warnings=list(result.get("warnings") or []),
+            resid_ms=result.get("audio_resid_ms"), error=result.get("error"),
+        ) for result in job.get("results") or []]).model_dump(mode="json")
 
 
 class ConformModule(BaseModule):
@@ -189,7 +190,7 @@ class ConformModule(BaseModule):
         if job is None and self._client is not None and self._daemon.get("up"):
             job = await self._client.job(job_id)
         if job is None:
-            return {"job_id": job_id, "status": "gone", "error": None, "results": []}
+            return AlignmentJob(job_id=job_id, status=JobStatus.GONE).model_dump(mode="json")
         return finished_view(job, reverse(await self._path_map()))
 
     async def on_clients(self, env: Envelope) -> None:

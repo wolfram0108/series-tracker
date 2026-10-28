@@ -93,30 +93,34 @@ import uuid
 from collections import OrderedDict, defaultdict
 
 from core import BaseModule, BusRequestError, is_video_source
+from core.contracts import (AlignmentJob, JobStatus, DubEvent, DubEventStatus as E, DubItem, DubRecord, DubsSnapshot, DubStatus as S,
+                            SnapshotItem)
 from core import storage
 from core.db import Database
 from core.envelope import Envelope
 
 from .identity import Equivalence, same_voice
+from .alignment import (ENDED, dub_folder_of_track, job_failure, job_folders, refusal, result_for, scratch_of,
+                        track_of)
 from .layout import download_chain, plan_layout
-from .placement import move, place, sidecar_path
+from .lifecycle import FINAL, WORKING
+from .outputs import Output, SidecarOutput
 from .reasons import parse as parse_reason, reason
 from .repository import VoicesRepository
 from .settings import PREFIX, VoiceSettings, parse
-from .states import public_state
+from .states import public_hint, public_state
 
 DUB_MAX_HEIGHT = 720
 PARSE_TIMEOUT_S = 180
 SUBMIT_TIMEOUT_S = 60
 SUBMIT_RETRY_S = 30.0
 SUBMIT_RETRIES = 5
-SCRATCH_DIR = "_tmp"
 IO_TIMEOUT_S = 30.0
 REMOVE_TIMEOUT_S = 300.0
 MOVE_TIMEOUT_S = 900.0
+# What the cleanup journal can hold: a plain file, a tree, an artifact of the output, a job of the service.
+PATH, TREE, ARTIFACT, JOB = "path", "tree", "artifact", "job"
 UNCLAIMED_JOBS = 256
-WORKING = ("pending", "downloading", "aligning")
-FINAL = ("placed", "rejected", "failed")
 
 
 def _safe(name: str) -> str:
@@ -131,15 +135,12 @@ def temp_path(root: str, series_id: int, season: int, episode: int, voice_key: s
     return os.path.join(episode_dir(root, series_id, season, episode), f"{_safe(voice_key)}.mp4")
 
 
-def stem(path: str | None) -> str:
-    return os.path.splitext(os.path.basename(path or ""))[0]
-
-
 class VoicesModule(BaseModule):
     name = "voices"
 
-    def __init__(self, bus, db: Database | None = None) -> None:
+    def __init__(self, bus, db: Database | None = None, *, output: Output | None = None) -> None:
         self.repo = VoicesRepository(db) if db is not None else None
+        self._output = output or SidecarOutput()
         self._locks: dict[int, asyncio.Lock] = {}
         self._kicked: set[int] = set()
         self._retries: dict[int, int] = {}
@@ -147,7 +148,7 @@ class VoicesModule(BaseModule):
         self._job_status: dict[str, str] = {}
         self._fetching: set[int] = set()
         self._admit_lock = asyncio.Lock()
-        self._unclaimed: OrderedDict[str, dict] = OrderedDict()
+        self._unclaimed: OrderedDict[str, AlignmentJob] = OrderedDict()
         self._rev = 0
         self._reported: set[str] = set()
         super().__init__(bus)
@@ -205,13 +206,7 @@ class VoicesModule(BaseModule):
 
     async def on_dubs_get(self, env: Envelope) -> dict:
         rows = await self.repo.for_series(int(env.payload["series_id"]))
-        keep = ("season", "episode", "voice_key", "voice_label", "status", "attempt", "error",
-                "temp_path", "job_id", "aligned_path", "sidecar_path", "outcome", "ref_uid", "ref_path")
-        return {"items": [{**{field: row[field] for field in keep},
-                           "detail": parse_reason(row["outcome"] or row["error"]),
-                           "state": public_state(row["status"], self._job_status.get(row["job_id"]),
-                                                 row["id"] in self._fetching)}
-                          for row in rows]}
+        return {"items": [self._record(row).model_dump(mode="json") for row in rows]}
 
 
     async def on_dispatch(self, env: Envelope) -> None:
@@ -262,14 +257,14 @@ class VoicesModule(BaseModule):
         for gone in await self.repo.drop_unplanned(series_id, planned):
             self.log.info("сериал %d: озвучка %s серии %d вышла из плана", series_id,
                           gone["voice_label"], gone["episode"])
-            self._changed(gone, "removed")
+            self._changed(gone, E.REMOVED)
         after = await self.repo.for_series(series_id)
         self._announce_difference(before, [row for row in after
                                            if (row["season"], row["episode"], row["voice_key"]) in touched])
         await self._recheck_ready(series_id)
         await self._admit()
         for row in after:
-            if row["status"] == "failed":
+            if row["status"] == S.FAILED:
                 self.log.warning("сериал %d, s%02de%02d: озвучка %s недоступна: %s", series_id,
                                  row["season"], row["episode"], row["voice_label"], row["error"])
         self._kick(series_id)
@@ -309,14 +304,14 @@ class VoicesModule(BaseModule):
 
     async def _forget_all(self, series_id: int) -> None:
         for gone in await self.repo.drop_unplanned(series_id, set()):
-            self._changed(gone, "removed")
+            self._changed(gone, E.REMOVED)
 
     async def _recheck_ready(self, series_id: int) -> None:
         """A ready dub whose file vanished from the temporary directory is downloaded again."""
         for row in await self.repo.for_series(series_id):
-            if row["status"] == "ready" and not await self._io(os.path.exists, row["temp_path"]):
+            if row["status"] == S.READY and not await self._io(os.path.exists, row["temp_path"]):
                 await self.repo.mark_pending(row["id"], reason("file_vanished"))
-                self._changed({**row, "status": "pending"}, "stale", reason("file_vanished"))
+                self._changed({**row, "status": S.PENDING}, E.STALE, reason("file_vanished"))
 
 
     async def _temp_cap(self) -> int:
@@ -355,7 +350,7 @@ class VoicesModule(BaseModule):
         self.send_command("downloads.fetch", {
             "key": f"dub:{row['id']}", "url": chain[row["attempt"]]["url"], "path": path,
             "max_height": DUB_MAX_HEIGHT, "series_id": row["series_id"]})
-        self._changed(row, "downloading")
+        self._changed(row, E.DOWNLOADING)
 
     async def on_fetch_started(self, env: Envelope) -> None:
         """The download left the queue of downloads and began: only now it is a download."""
@@ -363,9 +358,9 @@ class VoicesModule(BaseModule):
         if not key.startswith("dub:"):
             return
         row = await self.repo.get(int(key[4:]))
-        if row is not None and row["status"] == "downloading":
+        if row is not None and row["status"] == S.DOWNLOADING:
             self._fetching.add(row["id"])
-            self._changed(row, "downloading")
+            self._changed(row, E.DOWNLOADING)
 
     async def on_fetch_finished(self, env: Envelope) -> None:
         payload = env.payload
@@ -374,14 +369,14 @@ class VoicesModule(BaseModule):
             return
         self._fetching.discard(int(key[4:]))
         row = await self.repo.get(int(key[4:]))
-        if row is None or row["status"] != "downloading":
+        if row is None or row["status"] != S.DOWNLOADING:
             return  # a late or repeated ending of a download that this voice-over no longer waits for
         if payload.get("ok"):
             await self.repo.mark_ready(row["id"])
             self.log.info("сериал %d, s%02de%02d: озвучка %s скачана (%s)", row["series_id"],
                           row["season"], row["episode"], row["voice_label"],
                           row["chain"][row["attempt"]]["player"])
-            self._changed(row, "ready")
+            self._changed(row, E.READY)
             self._kick(row["series_id"])
             return
         error = str(payload.get("error") or reason("download_failed"))
@@ -398,7 +393,7 @@ class VoicesModule(BaseModule):
         await self.repo.mark_failed(row["id"], error)
         self.log.warning("сериал %d, s%02de%02d: озвучка %s не скачана ни из одного источника: %s",
                          row["series_id"], row["season"], row["episode"], row["voice_label"], error)
-        self._changed(row, "failed", error)
+        self._changed(row, E.FAILED, error)
         self._kick(row["series_id"])
 
     def _next_rev(self) -> int:
@@ -406,13 +401,14 @@ class VoicesModule(BaseModule):
         self._rev = max(self._rev + 1, time.time_ns() // 1000)
         return self._rev
 
-    def _changed(self, row: dict, status: str, detail: str | None = None, job_id: str | None = None) -> None:
-        job_status = self._job_status.get(job_id or row.get("job_id"))
-        self.publish_event("voices.dub.changed", {
-            "series_id": row["series_id"], "season": row["season"], "episode": row["episode"],
-            "voice_key": row["voice_key"], "voice_label": row["voice_label"], "status": status,
-            "state": public_state(status, job_status, row.get("id") in self._fetching),
-            "detail": parse_reason(detail), "rev": self._next_rev()})
+    def _changed(self, row: dict, status: E, detail: str | None = None, job_id: str | None = None) -> None:
+        state = public_state(status, self._job_status.get(job_id or row.get("job_id")),
+                             row.get("id") in self._fetching)
+        self.publish_event("voices.dub.changed", DubEvent(
+            series_id=row["series_id"], season=row["season"], episode=row["episode"],
+            voice_key=row["voice_key"], voice_label=row["voice_label"], status=status, state=state,
+            hint=public_hint(status, state), detail=parse_reason(detail),
+            rev=self._next_rev()).model_dump(mode="json"))
 
     def _announce_difference(self, before: list[dict], after: list[dict]) -> None:
         """Rows that the planner created or took over are news for the interface like any other change."""
@@ -423,20 +419,21 @@ class VoicesModule(BaseModule):
             if known.get((row["season"], row["episode"], row["voice_key"])) != seen:
                 self._changed(row, row["status"], seen[1])
 
-    def _item(self, row: dict) -> dict:
-        return {"series_id": row["series_id"], "season": row["season"], "episode": row["episode"],
-                "voice_key": row["voice_key"], "voice_label": row["voice_label"], "status": row["status"],
-                "state": public_state(row["status"], self._job_status.get(row["job_id"]),
-                                      row["id"] in self._fetching),
-                "detail": parse_reason(row["outcome"] or row["error"])}
+    def _record(self, row: dict) -> DubRecord:
+        state = public_state(row["status"], self._job_status.get(row["job_id"]), row["id"] in self._fetching)
+        return DubRecord(**{field: row[field] for field in DubRecord.model_fields
+                            if field in row and field not in ("state", "hint", "detail")},
+                         state=state, hint=public_hint(row["status"], state),
+                         detail=parse_reason(row["outcome"] or row["error"]))
 
     async def on_clients(self, env: Envelope) -> None:
         """A new interface has no history: it gets every voice-over at once, stamped before the read."""
         if self.repo is None or not env.payload.get("count"):
             return
         rev = self._next_rev()
-        self.publish_event("voices.dubs.snapshot",
-                           {"rev": rev, "items": [self._item(row) for row in await self.repo.all_rows()]})
+        items = [SnapshotItem(series_id=row["series_id"], **self._record(row).model_dump(
+            include=set(DubItem.model_fields))) for row in await self.repo.all_rows()]
+        self.publish_event("voices.dubs.snapshot", DubsSnapshot(rev=rev, items=items).model_dump(mode="json"))
 
     async def on_conform_picture(self, env: Envelope) -> None:
         """A job of the service went from waiting to running (or vanished): its voice-overs follow."""
@@ -448,8 +445,8 @@ class VoicesModule(BaseModule):
             return
         for job_id in changed:
             for row in await self.repo.by_job(job_id):
-                if row["status"] == "aligning":
-                    self._changed(row, "aligning")
+                if row["status"] == S.ALIGNING:
+                    self._changed(row, E.ALIGNING)
 
 
     async def on_downloaded(self, env: Envelope) -> None:
@@ -512,10 +509,10 @@ class VoicesModule(BaseModule):
                 restart = True
                 continue
             for row in group:
-                if row["status"] == "aligned":
+                if row["status"] == S.ALIGNED:
                     await self._place(row, reference)
             group = await self.repo.for_episode(series_id, season, episode)
-            ready = [row for row in group if row["status"] == "ready"]
+            ready = [row for row in group if row["status"] == S.READY]
             if ready and not any(row["status"] in WORKING for row in group):
                 await self._submit(series, season, episode, reference, uid, ready)
             await self._tidy(series_id, season, episode, root)
@@ -530,10 +527,10 @@ class VoicesModule(BaseModule):
     async def _sweep_scratch(self, series_id: int, folders: set[str]) -> None:
         """The service's scratch directory is made next to the reference when a job starts: while
         one runs it must stay, and the series lock keeps a new job from starting meanwhile."""
-        if any(row["status"] == "aligning" for row in await self.repo.for_series(series_id)):
+        if any(row["status"] == S.ALIGNING for row in await self.repo.for_series(series_id)):
             return
         for folder in folders:
-            await self._io(self._remove_if_empty, os.path.join(folder, SCRATCH_DIR))
+            await self._io(self._remove_if_empty, scratch_of(folder))
 
     @staticmethod
     def _remove_if_empty(path: str) -> None:
@@ -565,51 +562,50 @@ class VoicesModule(BaseModule):
         """Keep the tracks of an episode in step with its reference; True when they went stale."""
         stale = [row for row in group if row["ref_uid"] and row["ref_uid"] != uid]
         if stale:
-            for job_id in {row["job_id"] for row in stale if row["status"] == "aligning" and row["job_id"]}:
+            for job_id in {row["job_id"] for row in stale if row["status"] == S.ALIGNING and row["job_id"]}:
                 await self._cancel_job(job_id)
             for row in group:
                 if row["ref_uid"] and row["ref_uid"] != uid:
                     await self._discard_files(row)
                     await self.repo.reset(row["id"], reason("reference_replaced"))
-                    self._changed(row, "stale", reason("reference_replaced"))
+                    self._changed(row, E.STALE, reason("reference_replaced"))
             self.log.info("сериал %d, s%02de%02d: референс заменён, дорожки устарели и удалены: %d",
                           series_id, season, episode, len(stale))
             return True
         for row in group:
-            if row["status"] == "placed":
+            if row["status"] == S.PLACED:
                 await self._follow_name(row, reference)
         return False
 
     async def _follow_name(self, row: dict, reference: str) -> None:
-        old = row["sidecar_path"]
+        old = row["output_path"]
         if not old:
             return
-        expected = sidecar_path(reference, row["voice_label"], os.path.splitext(old)[1] or ".flac",
-                                await self._taken_paths(row))
-        present = await self._io(os.path.isfile, old)
+        expected = self._output.destination(reference, row["voice_label"], old, await self._taken_paths(row))
+        present = await self._io(self._output.exists, old)
         if expected == old and present:
             if row["ref_path"] != reference:
-                await self.repo.set_sidecar(row["id"], old, reference)
+                await self.repo.set_output(row["id"], old, reference)
             return
         if present:
             await self.repo.begin_move(row["id"], expected, old)
             await self._finish_move(await self.repo.get(row["id"]), reference)
-        elif expected == old or not await self._io(os.path.isfile, expected):
+        elif expected == old or not await self._io(self._output.exists, expected):
             await self.repo.mark_rejected(row["id"], reason("track_removed"))
             self.log.info("сериал %d, s%02de%02d: дорожка %s удалена пользователем, заново не создаётся",
                           row["series_id"], row["season"], row["episode"], row["voice_label"])
-            self._changed(row, "rejected", reason("track_removed"))
+            self._changed(row, E.REJECTED, reason("track_removed"))
             return
         else:
-            await self.repo.set_sidecar(row["id"], expected, reference)
+            await self.repo.set_output(row["id"], expected, reference)
         self.log.info("сериал %d, s%02de%02d: дорожка %s следует за видео: %s", row["series_id"],
                       row["season"], row["episode"], row["voice_label"], expected)
-        self._changed(row, "moved")
+        self._changed(row, E.MOVED)
 
     async def _drop_orphans(self, series_id: int, season: int, episode: int, group: list[dict],
                             root: str) -> None:
         """An episode left the plan: with its video gone, its set of tracks goes too."""
-        if any(row["status"] == "downloading" for row in group):
+        if any(row["status"] == S.DOWNLOADING for row in group):
             return
         for row in group:
             if row["ref_path"] and await self._io(os.path.isfile, row["ref_path"]):
@@ -618,37 +614,44 @@ class VoicesModule(BaseModule):
         for row in group:
             await self._discard_files(row)
             await self.repo.delete(row["id"])
-            self._changed(row, "removed")
+            self._changed(row, E.REMOVED)
         for folder in folders:
-            await self._discard(folder, tree=True)
+            await self._discard(folder, kind=TREE)
         self.log.info("сериал %d, s%02de%02d: серии нет в плане и видео нет — дорожки удалены",
                       series_id, season, episode)
 
     async def _discard_files(self, row: dict) -> None:
-        for path in (row["sidecar_path"], row["move_from"], row["aligned_path"], row["temp_path"]):
+        for path in (row["output_path"], row["move_from"]):
+            if path:
+                await self._discard(path, kind=ARTIFACT)
+        for path in (row["aligned_path"], row["temp_path"]):
             if path:
                 await self._discard(path)
 
-    @staticmethod
-    def _unlink(path: str, tree: bool) -> None:
-        shutil.rmtree(path) if tree else os.remove(path)
+    def _unlink(self, path: str, kind: str) -> None:
+        if kind == TREE:
+            shutil.rmtree(path)
+        elif kind == ARTIFACT:
+            self._output.remove(path)
+        else:
+            os.remove(path)
 
-    async def _discard(self, path: str, *, tree: bool = False) -> bool:
-        """Remove a file or a tree. What cannot be removed goes to the cleanup journal and is tried again:
-        a record of the file is never dropped before the file is gone."""
+    async def _discard(self, path: str, *, kind: str = PATH) -> bool:
+        """Remove a file, an artifact or a tree. What cannot be removed goes to the cleanup journal and is
+        tried again: a record of the file is never dropped before the file is gone."""
         try:
-            await self._io(self._unlink, path, tree, timeout=REMOVE_TIMEOUT_S)
+            await self._io(self._unlink, path, kind, timeout=REMOVE_TIMEOUT_S)
         except FileNotFoundError:
             return True
         except OSError as exc:
-            await self.repo.journal_cleanup(path, "tree" if tree else "path", str(exc))
+            await self.repo.journal_cleanup(path, kind, str(exc))
             self.log.error("не удалось удалить %s, повторим: %s", path, exc)
             return False
         return True
 
     async def _sweep_cleanup(self) -> None:
         for entry in await self.repo.cleanup_list():
-            if entry["kind"] == "job":
+            if entry["kind"] == JOB:
                 try:
                     reply = await self.request("conform.cancel", {"job_id": entry["path"]}, timeout=30)
                 except (BusRequestError, asyncio.TimeoutError):
@@ -657,7 +660,7 @@ class VoicesModule(BaseModule):
                     await self.repo.cleanup_done(entry["path"])
                 continue
             try:
-                await self._io(self._unlink, entry["path"], entry["kind"] == "tree", timeout=REMOVE_TIMEOUT_S)
+                await self._io(self._unlink, entry["path"], entry["kind"], timeout=REMOVE_TIMEOUT_S)
             except FileNotFoundError:
                 pass
             except OSError as exc:
@@ -670,23 +673,21 @@ class VoicesModule(BaseModule):
     def _folders_of(group: list[dict], fallback: str) -> list[str]:
         """Episode folders of voice-overs as they were made, not as the settings say now."""
         found = {os.path.dirname(row["temp_path"]) for row in group if row["temp_path"]}
-        found |= {os.path.dirname(os.path.dirname(row["aligned_path"])) for row in group if row["aligned_path"]}
+        found |= {dub_folder_of_track(row["aligned_path"]) for row in group if row["aligned_path"]}
         return sorted(found) or [fallback]
 
     async def _finish_move(self, row: dict, reference: str | None = None) -> None:
         """Complete a track move whose start is written down: safe to repeat after any interruption."""
-        source, destination = row["move_from"], row["sidecar_path"]
-        if await self._io(os.path.isfile, source):
-            await self._io(move, source, destination, timeout=MOVE_TIMEOUT_S)
-        elif not await self._io(os.path.isfile, destination):
+        source, destination = row["move_from"], row["output_path"]
+        if not await self._io(self._output.settle, source, destination, timeout=MOVE_TIMEOUT_S):
             await self.repo.mark_failed(row["id"], reason("track_vanished_on_move"))
-            self._changed(row, "failed", reason("track_vanished_on_move"))
+            self._changed(row, E.FAILED, reason("track_vanished_on_move"))
             return
         ref_path = reference or row["ref_path"]
-        if row["status"] == "aligned":
+        if row["status"] == S.ALIGNED:
             await self.repo.mark_placed(row["id"], destination, ref_path)
         else:
-            await self.repo.set_sidecar(row["id"], destination, ref_path)
+            await self.repo.set_output(row["id"], destination, ref_path)
 
     async def _submit(self, series: dict, season: int, episode: int, reference: str, uid: str,
                       ready: list[dict]) -> None:
@@ -694,13 +695,13 @@ class VoicesModule(BaseModule):
         ready = await self._with_files(ready, label)
         if not ready:
             return
-        folder = os.path.dirname(ready[0]["temp_path"])
+        out_dir, cache_dir = job_folders(os.path.dirname(ready[0]["temp_path"]))
         key = uuid.uuid4().hex[:12]
         await self.repo.mark_submitting([row["id"] for row in ready], key, uid, reference)
         try:
             reply = await self.request("conform.submit", {
                 "ref": reference, "dubs": [row["temp_path"] for row in ready],
-                "out_dir": os.path.join(folder, "_aligned"), "cache_dir": os.path.join(folder, "_cache"),
+                "out_dir": out_dir, "cache_dir": cache_dir,
                 "label": label, "key": key}, timeout=SUBMIT_TIMEOUT_S)
         except (BusRequestError, asyncio.TimeoutError) as exc:
             self.log.warning("%s: ответа на постановку нет, спросим сервис, есть ли задача: %s", label, exc)
@@ -716,7 +717,7 @@ class VoicesModule(BaseModule):
         if reply.get("rejected"):
             for row in ready:
                 await self.repo.mark_rejected(row["id"], reply["rejected"])
-                self._changed(row, "rejected", reply["rejected"])
+                self._changed(row, E.REJECTED, reply["rejected"])
             self.log.warning("%s: задача выравнивания отклонена: %s", label, reply["rejected"])
             return
         await self._attach(key, reply["job_id"])
@@ -726,7 +727,7 @@ class VoicesModule(BaseModule):
         await self.repo.attach_job(key, job_id)
         for row in await self.repo.by_key(key):
             if row["job_id"] == job_id:
-                self._changed(row, "aligning", job_id=job_id)
+                self._changed(row, E.ALIGNING, job_id=job_id)
         early = self._unclaimed.pop(job_id, None)
         if early is not None:
             await self._apply_job(early)
@@ -757,7 +758,7 @@ class VoicesModule(BaseModule):
         except (BusRequestError, asyncio.TimeoutError):
             reply = {"done": False}
         if not reply.get("done"):
-            await self.repo.journal_cleanup(job_id, "job", "сервис недоступен")
+            await self.repo.journal_cleanup(job_id, JOB, "сервис недоступен")
 
     async def _with_files(self, ready: list[dict], label: str) -> list[dict]:
         """The ready voice-overs whose files are really on disk; the others are downloaded again."""
@@ -769,7 +770,7 @@ class VoicesModule(BaseModule):
             self.log.warning("%s: файла озвучки %s нет на месте (%s), скачивается заново", label,
                              row["voice_label"], row["temp_path"])
             await self.repo.mark_pending(row["id"], reason("file_vanished"))
-            self._changed({**row, "status": "pending"}, "stale", reason("file_vanished"))
+            self._changed({**row, "status": S.PENDING}, E.STALE, reason("file_vanished"))
         if len(present) != len(ready):
             self.send_command("voices.dispatch", {"series_id": ready[0]["series_id"]})
         return present
@@ -797,97 +798,76 @@ class VoicesModule(BaseModule):
         task.add_done_callback(self._bg.discard)
 
     async def on_job_finished(self, env: Envelope) -> None:
-        if not await self._apply_job(env.payload):
+        job = AlignmentJob.model_validate(env.payload)
+        if not await self._apply_job(job):
             # The service can end a job before its number is written to the voice-overs: keep the
             # ending until they claim it.
-            self._unclaimed[env.payload["job_id"]] = env.payload
+            self._unclaimed[job.job_id] = job
             while len(self._unclaimed) > UNCLAIMED_JOBS:
                 self._unclaimed.popitem(last=False)
 
     async def _reconcile(self, job_id: str) -> None:
         """A job sent before a restart: learn how it ended, or send its voice-overs again."""
         try:
-            view = await self.request("conform.job.get", {"job_id": job_id}, timeout=30)
+            job = AlignmentJob.model_validate(await self.request("conform.job.get", {"job_id": job_id}, timeout=30))
         except (BusRequestError, asyncio.TimeoutError) as exc:
             self.log.info("задача выравнивания %s: итог пока неизвестен (%s)", job_id, exc)
             return
-        if view["status"] == "gone":
-            rows = [row for row in await self.repo.by_job(job_id) if row["status"] == "aligning"]
+        if job.status is JobStatus.GONE:
+            rows = [row for row in await self.repo.by_job(job_id) if row["status"] == S.ALIGNING]
             await self.repo.release_to_ready([row["id"] for row in rows])
             for series_id in {row["series_id"] for row in rows}:
                 self._kick(series_id)
-        elif view["status"] in ("done", "failed", "cancelled"):
-            await self._apply_job(view)
+        elif job.status in ENDED:
+            await self._apply_job(job)
 
-    async def _apply_job(self, view: dict) -> bool:
+    async def _apply_job(self, job: AlignmentJob) -> bool:
         """Take the end of a job into the voice-overs that wait for it; False when none does."""
-        rows = [row for row in await self.repo.by_job(view["job_id"]) if row["status"] == "aligning"]
+        rows = [row for row in await self.repo.by_job(job.job_id) if row["status"] == S.ALIGNING]
         if not rows:
             return False
-        results = {stem(result["dub"]): result for result in view.get("results") or []}
         for row in rows:
-            if view["status"] != "done":
-                error = view.get("error") or reason("job_ended", status=view["status"])
+            if job.status is not JobStatus.DONE:
+                error = job_failure(job)
                 await self.repo.mark_failed(row["id"], error)
                 self.log.warning("сериал %d, s%02de%02d: озвучка %s не выровнена: %s", row["series_id"],
                                  row["season"], row["episode"], row["voice_label"], error)
-                self._changed(row, "failed", error)
+                self._changed(row, E.FAILED, error)
                 continue
-            result = results.get(stem(row["temp_path"]))
-            track = self._aligned_track(row, result)
-            verdict = await self._verdict(result, track)
+            result = result_for(job, row["temp_path"])
+            track = track_of(row["temp_path"], result)
+            verdict = refusal(result)
+            if verdict is None and not await self._io(os.path.isfile, track):
+                verdict = reason("output_missing")
             if verdict is None:
                 await self.repo.mark_aligned(row["id"], track)
-                self._changed(row, "aligned")
+                self._changed(row, E.ALIGNED)
             else:
                 await self.repo.mark_rejected(row["id"], verdict)
                 self.log.warning("сериал %d, s%02de%02d: озвучка %s отклонена: %s", row["series_id"],
                                  row["season"], row["episode"], row["voice_label"], verdict)
-                self._changed(row, "rejected", verdict)
+                self._changed(row, E.REJECTED, verdict)
         for series_id in {row["series_id"] for row in rows}:
             self._kick(series_id)
         return True
 
-    @staticmethod
-    def _aligned_track(row: dict, result: dict | None) -> str | None:
-        """Where this server holds the aligned track: in the folder it asked the service to write to."""
-        if not result or not result.get("out_path"):
-            return None
-        return os.path.join(os.path.dirname(row["temp_path"]), "_aligned", os.path.basename(result["out_path"]))
-
-    async def _verdict(self, result: dict | None, track: str | None) -> str | None:
-        """Why a result may not be placed next to the video; None when it may."""
-        if result is None:
-            return reason("no_result")
-        if not result.get("ok"):
-            return result.get("error") or reason("align_failed")
-        if result.get("critical"):
-            return reason("critical", text="; ".join(result["critical"]))
-        if result.get("suspect"):
-            warnings = result.get("warnings")
-            return reason("suspect", text="; ".join(warnings)) if warnings else reason("suspect_residual")
-        if not track or not await self._io(os.path.isfile, track):
-            return reason("output_missing")
-        return None
-
     async def _taken_paths(self, row: dict) -> set[str]:
         """Tracks that other voice-overs of the series already have next to their videos."""
-        return {other["sidecar_path"] for other in await self.repo.for_series(row["series_id"])
-                if other["id"] != row["id"] and other["sidecar_path"]}
+        return {other["output_path"] for other in await self.repo.for_series(row["series_id"])
+                if other["id"] != row["id"] and other["output_path"]}
 
     async def _place(self, row: dict, reference: str) -> None:
         source = row["aligned_path"]
         if not source or not await self._io(os.path.isfile, source):
             await self.repo.mark_failed(row["id"], reason("aligned_file_vanished"))
-            self._changed(row, "failed", reason("aligned_file_vanished"))
+            self._changed(row, E.FAILED, reason("aligned_file_vanished"))
             return
-        destination = sidecar_path(reference, row["voice_label"], os.path.splitext(source)[1] or ".flac",
-                                   await self._taken_paths(row))
+        destination = self._output.destination(reference, row["voice_label"], source, await self._taken_paths(row))
         await self.repo.begin_move(row["id"], destination, source)
         await self._finish_move(await self.repo.get(row["id"]), reference)
         self.log.info("сериал %d, s%02de%02d: дорожка %s рядом с видео: %s", row["series_id"],
                       row["season"], row["episode"], row["voice_label"], destination)
-        self._changed(row, "placed")
+        self._changed(row, E.PLACED)
 
     async def _tidy(self, series_id: int, season: int, episode: int, root: str) -> None:
         """The episode is settled: its temporary files are of no use any more."""
@@ -899,7 +879,7 @@ class VoicesModule(BaseModule):
                 or any([await self._io(os.path.isdir, folder) for folder in folders])):
             return
         for folder in folders:
-            await self._discard(folder, tree=True)
+            await self._discard(folder, kind=TREE)
         await self.repo.forget_temp(series_id, season, episode)
         self.publish_event("voices.episode.settled",
                            {"series_id": series_id, "season": season, "episode": episode})
@@ -909,14 +889,14 @@ class VoicesModule(BaseModule):
         series_id = env.payload["series_id"]
         self.send_command("downloads.fetch.cancel", {"series_id": series_id})
         for job_id in {row["job_id"] for row in await self.repo.for_series(series_id)
-                       if row["status"] == "aligning" and row["job_id"]}:
+                       if row["status"] == S.ALIGNING and row["job_id"]}:
             await self._cancel_job(job_id)
         rows = await self.repo.for_series(series_id)
         folders = {os.path.dirname(folder) for folder in self._folders_of(rows, "")} - {""}
         await self.repo.delete_for_series(series_id)
         for row in rows:
-            self._changed(row, "removed")
+            self._changed(row, E.REMOVED)
         for folder in folders or {os.path.join(await self._temp_root(), str(series_id))}:
-            await self._discard(folder, tree=True)
+            await self._discard(folder, kind=TREE)
         await self._admit()
         self.publish_event("series.purged", {"series_id": series_id, "owner": self.name})

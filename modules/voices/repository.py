@@ -2,21 +2,47 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable
 
+from core.contracts import DubStatus as S
 from core.db import Database
 
+from . import lifecycle
+from .lifecycle import Transition
 from .reasons import reason
+
+log = logging.getLogger("voices")
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
+def _in(steps: Iterable[S]) -> tuple[str, tuple[str, ...]]:
+    """`IN (...)` for a set of steps and its parameters."""
+    values = tuple(sorted(step.value for step in steps))
+    return f"IN ({','.join('?' * len(values))})", values
+
+
 class VoicesRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
+
+    async def _move(self, transition: Transition, assignments: str, args: tuple, where: str,
+                    where_args: tuple, expected: int | None = 1) -> bool:
+        """Change the step of rows by a transition of the lifecycle: rows in a step the transition does not
+        start from are left as they are. True when something changed."""
+        marks, steps = _in(transition.sources)
+        changed = await self._db.execute(
+            f"UPDATE voice_dubs SET status=?, {assignments + ', ' if assignments else ''}updated_at=? "
+            f"WHERE ({where}) AND status {marks}",
+            (transition.target.value, *args, _now(), *where_args, *steps))
+        if not transition.contested and expected is not None and changed != expected:
+            log.warning("озвучки: переход %s выполнен для %s строк из %s: остальные не в тех состояниях %s",
+                        transition.name, changed, expected, "/".join(steps))
+        return bool(changed)
 
     @staticmethod
     def _row(row: dict | None) -> dict | None:
@@ -47,7 +73,7 @@ class VoicesRepository:
         """Offer the voice-over again: an untouched row takes the fresh chain and starts from its
         main source; a row that is downloading or ready is left alone. An empty chain is a failure.
         True when the row was created or taken over."""
-        status = "pending" if chain else "failed"
+        status = S.PENDING.value if chain else S.FAILED.value
         error = None if chain else reason("not_in_any_source")
         return bool(await self._db.execute(
             "INSERT INTO voice_dubs (series_id, season, episode, site_episode, voice_key, "
@@ -55,72 +81,64 @@ class VoicesRepository:
             "ON CONFLICT (series_id, season, episode, voice_key) DO UPDATE SET "
             "site_episode=excluded.site_episode, voice_label=excluded.voice_label, "
             "chain=excluded.chain, attempt=0, status=excluded.status, error=excluded.error, "
-            "updated_at=excluded.updated_at WHERE voice_dubs.status IN ('pending', 'failed')",
+            f"updated_at=excluded.updated_at WHERE voice_dubs.status {_in(lifecycle.OFFERABLE)[0]}",
             (series_id, season, episode, site_episode, voice_key, label,
-             json.dumps(chain, ensure_ascii=False), status, error, _now())))
+             json.dumps(chain, ensure_ascii=False), status, error, _now(), *_in(lifecycle.OFFERABLE)[1])))
 
     async def pending(self, series_id: int | None = None) -> list[dict[str, Any]]:
-        where, args = ("WHERE status='pending'", ())
+        where, args = ("WHERE status=?", (S.PENDING.value,))
         if series_id is not None:
-            where, args = ("WHERE status='pending' AND series_id=?", (series_id,))
+            where, args = ("WHERE status=? AND series_id=?", (S.PENDING.value, series_id))
         rows = await self._db.fetch_all(f"SELECT * FROM voice_dubs {where} ORDER BY id", args)
         return [self._row(row) for row in rows]
 
     async def claim_download(self, dub_id: int, temp_path: str) -> bool:
         """Take a waiting voice-over for download; False when someone else has already taken it."""
-        taken = await self._db.execute(
-            "UPDATE voice_dubs SET status='downloading', temp_path=?, error=NULL, updated_at=? "
-            "WHERE id=? AND status='pending'", (temp_path, _now(), dub_id))
-        return bool(taken)
+        return await self._move(lifecycle.CLAIM, "temp_path=?, error=NULL", (temp_path,), "id=?", (dub_id,))
 
     async def active_episodes(self) -> set[tuple[int, int, int]]:
         """Episodes that hold temporary files or are on their way to them: (series, season, episode)."""
+        marks, steps = _in(lifecycle.HOLDS_FILES)
         rows = await self._db.fetch_all(
             "SELECT DISTINCT series_id, season, episode FROM voice_dubs WHERE "
-            "status IN ('downloading', 'ready', 'aligning', 'aligned') OR (status='pending' AND attempt>0)")
+            f"status {marks} OR (status=? AND attempt>0)", (*steps, S.PENDING.value))
         return {(row["series_id"], row["season"], row["episode"]) for row in rows}
 
-    async def mark_ready(self, dub_id: int) -> None:
-        await self._db.execute(
-            "UPDATE voice_dubs SET status='ready', error=NULL, updated_at=? WHERE id=?", (_now(), dub_id))
+    async def mark_ready(self, dub_id: int) -> bool:
+        return await self._move(lifecycle.DOWNLOADED, "error=NULL", (), "id=?", (dub_id,))
 
-    async def advance(self, dub_id: int, error: str) -> None:
+    async def advance(self, dub_id: int, error: str) -> bool:
         """The current source failed: the next one of the chain is tried."""
-        await self._db.execute(
-            "UPDATE voice_dubs SET attempt=attempt+1, status='pending', error=?, updated_at=? WHERE id=?",
-            (error, _now(), dub_id))
+        return await self._move(lifecycle.RETRY, "attempt=attempt+1, error=?", (error,), "id=?", (dub_id,))
 
-    async def mark_failed(self, dub_id: int, error: str) -> None:
-        await self._db.execute(
-            "UPDATE voice_dubs SET status='failed', move_from=NULL, error=?, updated_at=? WHERE id=?",
-            (error, _now(), dub_id))
+    async def mark_failed(self, dub_id: int, error: str) -> bool:
+        return await self._move(lifecycle.FAIL, "move_from=NULL, error=?", (error,), "id=?", (dub_id,))
 
     async def requeue_interrupted(self) -> int:
+        marks, steps = _in(lifecycle.RETRY.sources)
         return await self._db.execute(
-            "UPDATE voice_dubs SET status='pending' WHERE status='downloading'")
+            f"UPDATE voice_dubs SET status=? WHERE status {marks}", (lifecycle.RETRY.target.value, *steps))
 
     async def drop_unplanned(self, series_id: int,
                              planned: set[tuple[int, int, str]]) -> list[dict[str, Any]]:
         """Rows of voice-overs that left the plan and have no file; returns what was removed."""
         gone = [row for row in await self.for_series(series_id)
                 if (row["season"], row["episode"], row["voice_key"]) not in planned
-                and row["status"] in ("pending", "failed")]
+                and row["status"] in lifecycle.OFFERABLE]
         for row in gone:
             await self._db.execute("DELETE FROM voice_dubs WHERE id=?", (row["id"],))
         return gone
 
-    async def mark_pending(self, dub_id: int, error: str) -> None:
-        await self._db.execute(
-            "UPDATE voice_dubs SET status='pending', attempt=0, error=?, updated_at=? WHERE id=?",
-            (error, _now(), dub_id))
+    async def mark_pending(self, dub_id: int, error: str) -> bool:
+        return await self._move(lifecycle.FILE_LOST, "attempt=0, error=?", (error,), "id=?", (dub_id,))
 
     async def delete_for_series(self, series_id: int) -> None:
         await self._db.execute("DELETE FROM voice_dubs WHERE series_id=?", (series_id,))
 
     async def series_waiting(self) -> list[int]:
         """Series with a voice-over that is on disk or aligned and still has to move on."""
-        rows = await self._db.fetch_all(
-            "SELECT DISTINCT series_id FROM voice_dubs WHERE status IN ('ready', 'aligned')")
+        marks, steps = _in(lifecycle.WAITS_FOR_REFERENCE)
+        rows = await self._db.fetch_all(f"SELECT DISTINCT series_id FROM voice_dubs WHERE status {marks}", steps)
         return [row["series_id"] for row in rows]
 
     async def by_job(self, job_id: str) -> list[dict[str, Any]]:
@@ -129,80 +147,71 @@ class VoicesRepository:
 
     async def aligning_jobs(self) -> list[str]:
         rows = await self._db.fetch_all(
-            "SELECT DISTINCT job_id FROM voice_dubs WHERE status='aligning' AND job_id IS NOT NULL")
+            "SELECT DISTINCT job_id FROM voice_dubs WHERE status=? AND job_id IS NOT NULL", (S.ALIGNING.value,))
         return [row["job_id"] for row in rows]
 
-    async def mark_submitting(self, dub_ids: list[int], key: str, ref_uid: str, ref_path: str) -> None:
+    async def mark_submitting(self, dub_ids: list[int], key: str, ref_uid: str, ref_path: str) -> bool:
         """Write down that these voice-overs are being sent as one job, before the request goes out."""
         marks = ",".join("?" * len(dub_ids))
-        await self._db.execute(
-            "UPDATE voice_dubs SET status='aligning', job_id=NULL, submit_key=?, ref_uid=?, ref_path=?, "
-            f"error=NULL, outcome=NULL, updated_at=? WHERE id IN ({marks})",
-            (key, ref_uid, ref_path, _now(), *dub_ids))
+        return await self._move(
+            lifecycle.SEND, "job_id=NULL, submit_key=?, ref_uid=?, ref_path=?, error=NULL, outcome=NULL",
+            (key, ref_uid, ref_path), f"id IN ({marks})", tuple(dub_ids), expected=len(dub_ids))
 
     async def attach_job(self, key: str, job_id: str) -> None:
         """The service has the job: every voice-over sent with the key gets its number at once."""
         await self._db.execute(
-            "UPDATE voice_dubs SET job_id=?, updated_at=? WHERE submit_key=? AND status='aligning' "
-            "AND job_id IS NULL", (job_id, _now(), key))
+            "UPDATE voice_dubs SET job_id=?, updated_at=? WHERE submit_key=? AND status=? "
+            "AND job_id IS NULL", (job_id, _now(), key, S.ALIGNING.value))
 
-    async def release_submission(self, key: str) -> None:
+    async def release_submission(self, key: str) -> bool:
         """The job was never accepted: its voice-overs go back to waiting for a new one."""
-        await self._db.execute(
-            "UPDATE voice_dubs SET status='ready', submit_key=NULL, ref_uid=NULL, ref_path=NULL, "
-            "updated_at=? WHERE submit_key=? AND status='aligning' AND job_id IS NULL", (_now(), key))
+        return await self._move(lifecycle.UNSEND, "submit_key=NULL, ref_uid=NULL, ref_path=NULL",
+                                (), "submit_key=? AND job_id IS NULL", (key,), expected=None)
 
     async def unsent_submissions(self) -> list[str]:
         """Keys of jobs sent without a known answer."""
         rows = await self._db.fetch_all(
-            "SELECT DISTINCT submit_key FROM voice_dubs WHERE status='aligning' AND job_id IS NULL "
-            "AND submit_key IS NOT NULL")
+            "SELECT DISTINCT submit_key FROM voice_dubs WHERE status=? AND job_id IS NULL "
+            "AND submit_key IS NOT NULL", (S.ALIGNING.value,))
         return [row["submit_key"] for row in rows]
 
     async def by_key(self, key: str) -> list[dict[str, Any]]:
         rows = await self._db.fetch_all("SELECT * FROM voice_dubs WHERE submit_key=? ORDER BY id", (key,))
         return [self._row(row) for row in rows]
 
-    async def mark_aligned(self, dub_id: int, aligned_path: str) -> None:
-        await self._db.execute(
-            "UPDATE voice_dubs SET status='aligned', aligned_path=?, updated_at=? WHERE id=?",
-            (aligned_path, _now(), dub_id))
+    async def mark_aligned(self, dub_id: int, aligned_path: str) -> bool:
+        return await self._move(lifecycle.ALIGNED, "aligned_path=?", (aligned_path,), "id=?", (dub_id,))
 
     async def begin_move(self, dub_id: int, destination: str, source: str) -> None:
         """Write down where a track is going before it moves; a restart finishes the move from this."""
         await self._db.execute(
-            "UPDATE voice_dubs SET sidecar_path=?, move_from=?, updated_at=? WHERE id=?",
+            "UPDATE voice_dubs SET output_path=?, move_from=?, updated_at=? WHERE id=?",
             (destination, source, _now(), dub_id))
 
-    async def mark_placed(self, dub_id: int, sidecar_path: str, ref_path: str) -> None:
-        await self._db.execute(
-            "UPDATE voice_dubs SET status='placed', sidecar_path=?, ref_path=?, aligned_path=NULL, "
-            "move_from=NULL, error=NULL, updated_at=? WHERE id=?",
-            (sidecar_path, ref_path, _now(), dub_id))
+    async def mark_placed(self, dub_id: int, output_path: str, ref_path: str) -> bool:
+        return await self._move(lifecycle.PLACE, "output_path=?, ref_path=?, aligned_path=NULL, move_from=NULL, "
+                                "error=NULL", (output_path, ref_path), "id=?", (dub_id,))
 
-    async def mark_rejected(self, dub_id: int, outcome: str) -> None:
-        await self._db.execute(
-            "UPDATE voice_dubs SET status='rejected', outcome=?, aligned_path=NULL, "
-            "move_from=NULL, updated_at=? WHERE id=?", (outcome, _now(), dub_id))
+    async def mark_rejected(self, dub_id: int, outcome: str) -> bool:
+        return await self._move(lifecycle.REFUSE, "outcome=?, aligned_path=NULL, move_from=NULL",
+                                (outcome,), "id=?", (dub_id,))
 
     async def release_to_ready(self, dub_ids: list[int]) -> None:
         """The daemon lost the job: the voice-overs are offered to it again."""
         for dub_id in dub_ids:
-            await self._db.execute(
-                "UPDATE voice_dubs SET status='ready', job_id=NULL, updated_at=? WHERE id=?",
-                (_now(), dub_id))
+            await self._move(lifecycle.UNSEND, "job_id=NULL", (), "id=?", (dub_id,))
 
-    async def reset(self, dub_id: int, reason: str) -> None:
+    async def reset(self, dub_id: int, reason: str) -> bool:
         """The track belongs to a reference that is gone: back to the start, from the main source."""
-        await self._db.execute(
-            "UPDATE voice_dubs SET status='pending', attempt=0, job_id=NULL, submit_key=NULL, ref_uid=NULL, "
-            "ref_path=NULL, aligned_path=NULL, sidecar_path=NULL, move_from=NULL, temp_path=NULL, outcome=NULL, "
-            "error=?, updated_at=? WHERE id=?", (reason, _now(), dub_id))
+        return await self._move(
+            lifecycle.RESTART, "attempt=0, job_id=NULL, submit_key=NULL, ref_uid=NULL, ref_path=NULL, "
+            "aligned_path=NULL, output_path=NULL, move_from=NULL, temp_path=NULL, outcome=NULL, error=?",
+            (reason,), "id=?", (dub_id,))
 
-    async def set_sidecar(self, dub_id: int, sidecar_path: str, ref_path: str) -> None:
+    async def set_output(self, dub_id: int, output_path: str, ref_path: str) -> None:
         await self._db.execute(
-            "UPDATE voice_dubs SET sidecar_path=?, ref_path=?, move_from=NULL, updated_at=? WHERE id=?",
-            (sidecar_path, ref_path, _now(), dub_id))
+            "UPDATE voice_dubs SET output_path=?, ref_path=?, move_from=NULL, updated_at=? WHERE id=?",
+            (output_path, ref_path, _now(), dub_id))
 
     async def journal_cleanup(self, path: str, kind: str, error: str) -> None:
         """Something that could not be removed: it stays on this list until it is gone."""
