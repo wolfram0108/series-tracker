@@ -8,7 +8,7 @@ import pytest
 from core import BaseModule, Bus, Envelope
 from core.db import Database
 from modules.sources.module import SourcesModule
-from modules.sources.video_providers.base import BaseVideoProvider
+from modules.sources.video_providers.base import BaseVideoProvider, StreamUnavailable
 from modules.sources.video_providers.registry import VideoProviderRegistry
 from modules.sources.video_providers.ruchime import RuchimeProvider
 
@@ -356,6 +356,17 @@ async def test_sources_module_bus_parse_and_scan():
             assert stream_reply["handled"] is True
             assert stream_reply["stream_url"] == "https://cdn.example.com/stream.mp4"
             assert stream_reply["headers"]["Referer"] == "https://fsst.online/"
+
+        with patch.object(RuchimeProvider, "resolve_stream") as mock_stream:
+            mock_stream.side_effect = StreamUnavailable("Vibix 480p: манифест ответил 400")
+
+            # 4. a provider-owned page without a stream is an explicit error
+            stream_reply = await client.request("sources.video.stream", {
+                "url": "https://1.ruchime.org/release/x/episode-1"
+            })
+            assert stream_reply == {"handled": True,
+                                    "error": "Vibix 480p: манифест ответил 400",
+                                    "transient": False}
     finally:
         await client.stop()
         await sources.stop()

@@ -6,8 +6,10 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
+from modules.sources.video_providers.base import StreamUnavailable
 from modules.sources.video_providers.ruchime import RuchimeProvider
-from modules.sources.video_providers.vibix import Episode, Stream, encode_envelope
+from modules.sources.video_providers.vibix import (Episode, Stream, VibixUnavailable,
+                                                    encode_envelope)
 
 VK_URL = "https://vkvideo.ru/video_ext.php?oid=-1&amp;id=100&amp;hash=abc"
 ALLVIDEO_URL = "https://fsst.online/embed/77/"
@@ -21,6 +23,10 @@ VK_EMBED_STREAMS = ('<script>{"mp4_1080":"https:\\/\\/cdn.test\\/1080.mp4",'
 AV_EMBED_1080 = '<script>file:"[360p]https://cdn.test/360.mp4/,[1080p]https://cdn.test/1080.mp4/"</script>'
 AV_EMBED_4K = '<script>file:"[1080p]https://cdn.test/1080.mp4/,[4k]https://cdn.test/2160.mp4/"</script>'
 AV_EMBED_EMPTY = "<html><body>no player</body></html>"
+AV_EMBED_360 = '<script>file:"[360p]https://cdn.test/360.mp4/"</script>'
+VIBIX_KEY = b"k" * 32
+VIBIX_MANIFEST = (b"#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.000,\n"
+                  b"https://cdn.test/seg-1.ts\n#EXT-X-ENDLIST\n")
 
 
 def release_html(numbers: list[int], players: str = "") -> str:
@@ -154,7 +160,7 @@ async def test_vibix_fallback_maps_episode_numbers(monkeypatch):
                          (Stream(480, "https://cdn/2.m3u8"),))], b"k" * 32)
 
     monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
-    client = make_client({
+    client = manifest_client({"cdn/": 200}, {
         "episode-1": page_html(vibix=True),
         "episode-2": page_html(vibix=True),
         "release/test": release_html([1, 2]),
@@ -178,7 +184,7 @@ async def test_vibix_skips_episode_missing_from_playlist(monkeypatch):
                 b"k" * 32)
 
     monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
-    client = make_client({
+    client = manifest_client({"cdn/": 200}, {
         "episode-1": page_html(vibix=True),
         "episode-2": page_html(vibix=True),
         "release/test": release_html([1, 2]),
@@ -379,3 +385,128 @@ async def test_resolve_vk_returns_best_fresh_mp4():
 
     assert resolved["stream_url"] == "https://cdn.test/2160.mp4"
     assert resolved["headers"]["Referer"] == "https://vk.com/"
+
+
+def manifest_client(routes: dict[str, int], page_routes: dict[str, str] | None = None,
+                    hits: list[str] | None = None):
+    """Client whose manifest URLs answer with the given status (200 = valid manifest)."""
+    pages = make_client(page_routes or {})
+
+    async def side_effect(url, headers=None, follow_redirects=True, **kwargs):
+        for key, status in routes.items():
+            if key in url:
+                if hits is not None:
+                    hits.append(url)
+                response = AsyncMock(spec=httpx.Response)
+                response.status_code = status
+                response.content = (encode_envelope(VIBIX_MANIFEST, VIBIX_KEY)
+                                    if status == 200 else b"<html>error</html>")
+                return response
+        return await pages.get(url, headers=headers, follow_redirects=follow_redirects,
+                               **kwargs)
+
+    client = AsyncMock(spec=httpx.AsyncClient)
+    client.get.side_effect = side_effect
+    return client
+
+
+def fake_vibix(provider: RuchimeProvider, monkeypatch, streams: tuple[Stream, ...]):
+    async def fake_playlist(page_url: str):
+        return [Episode(1, "Серия 1", "Сезон 1", streams)], VIBIX_KEY
+
+    monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
+
+
+@pytest.mark.asyncio
+async def test_vibix_dead_manifest_is_not_a_candidate(monkeypatch):
+    provider = RuchimeProvider()
+    fake_vibix(provider, monkeypatch, (Stream(480, "https://cdn.test/dead.m3u8"),))
+    client = manifest_client({"dead.m3u8": 400}, {
+        "episode-1": page_html(allvideo=True, vibix=True),
+        "fsst.online/embed/77": AV_EMBED_360,
+        "release/test": release_html([1]),
+    })
+
+    result = await provider.scan_episodes(
+        "https://1.ruchime.org/release/test", client, {"name": "Тест"})
+
+    assert result["videos"][0]["url"] == ALLVIDEO_URL
+    assert result["videos"][0]["resolution"] == 360
+    vibix = result["players"]["players"]["vibix"]
+    assert vibix["available"] == 0 and vibix["selected"] == 0
+    assert "400" in vibix["reason"]
+
+
+@pytest.mark.asyncio
+async def test_vibix_falls_back_to_lower_live_stream(monkeypatch):
+    provider = RuchimeProvider()
+    fake_vibix(provider, monkeypatch, (Stream(1080, "https://cdn.test/dead.m3u8"),
+                                       Stream(720, "https://cdn.test/live.m3u8")))
+    client = manifest_client({"dead.m3u8": 400, "live.m3u8": 200}, {
+        "episode-1": page_html(vibix=True),
+        "release/test": release_html([1]),
+    })
+
+    facts = await scan(provider, client)
+
+    assert facts[0]["url"] == "https://1.ruchime.org/release/test/episode-1"
+    assert facts[0]["resolution"] == 720
+
+
+@pytest.mark.asyncio
+async def test_vibix_is_not_probed_when_it_cannot_outrank(monkeypatch):
+    provider = RuchimeProvider()
+    fake_vibix(provider, monkeypatch, (Stream(720, "https://cdn.test/live.m3u8"),))
+    hits: list[str] = []
+    client = manifest_client({"live.m3u8": 200}, {
+        "episode-1": page_html(allvideo=True, vibix=True),
+        "fsst.online/embed/77": AV_EMBED_1080,
+        "release/test": release_html([1]),
+    }, hits)
+
+    facts = await scan(provider, client)
+
+    assert facts[0]["url"] == ALLVIDEO_URL
+    assert hits == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_vibix_dead_manifest_is_explicit_error(monkeypatch, tmp_path: Path):
+    provider = RuchimeProvider(manifest_dir=tmp_path)
+    fake_vibix(provider, monkeypatch, (Stream(480, "https://cdn.test/dead.m3u8"),))
+    client = manifest_client({"dead.m3u8": 400})
+
+    with pytest.raises(StreamUnavailable) as caught:
+        await provider.resolve_stream("https://1.ruchime.org/release/test/episode-1", client)
+
+    assert "400" in caught.value.reason
+    assert caught.value.transient is False
+
+
+@pytest.mark.asyncio
+async def test_resolve_vibix_takes_best_live_stream(monkeypatch, tmp_path: Path):
+    provider = RuchimeProvider(manifest_dir=tmp_path)
+    fake_vibix(provider, monkeypatch, (Stream(1080, "https://cdn.test/dead.m3u8"),
+                                       Stream(720, "https://cdn.test/live.m3u8")))
+    client = manifest_client({"dead.m3u8": 503, "live.m3u8": 200})
+
+    resolved = await provider.resolve_stream(
+        "https://1.ruchime.org/release/test/episode-1", client)
+
+    assert resolved["stream_url"].endswith("test-0001-720.m3u8")
+
+
+@pytest.mark.asyncio
+async def test_resolve_vibix_playlist_failure_is_explicit_and_transient(monkeypatch):
+    provider = RuchimeProvider()
+
+    async def broken_playlist(page_url: str):
+        raise VibixUnavailable("Vibix API не ответил")
+
+    monkeypatch.setattr(provider, "_vibix_playlist", broken_playlist)
+
+    with pytest.raises(StreamUnavailable) as caught:
+        await provider.resolve_stream(
+            "https://1.ruchime.org/release/test/episode-1", AsyncMock(spec=httpx.AsyncClient))
+
+    assert caught.value.transient is True

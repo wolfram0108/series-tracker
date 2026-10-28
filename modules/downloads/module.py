@@ -48,6 +48,7 @@ PROGRESS_DB_THROTTLE = 2.0   # секунд между записями прог
 PROGRESS_EVENT_THROTTLE = 1.0  # секунд между событиями очереди при прогрессе
 MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
+STREAM_RESOLVE_TIMEOUT_S = 120  # a Vibix playlist may need a browser capture first
 _TRANSIENT_MARKERS = ("timed out", "timeout", "connection", "network",
                       "temporarily", "server returned 5", "server returned 429",
                       "server returned 403", "http error 403", "http error 408",
@@ -402,23 +403,35 @@ class DownloadsModule(BaseModule):
 
             stream_url = task["video_url"]
             stream_headers: dict | None = None
+            stream_error: tuple[str, bool] | None = None
             try:
                 reply = await self.request("sources.video.stream",
                                            {"url": task["video_url"]},
-                                           timeout=15)
-                if reply.get("handled"):
+                                           timeout=STREAM_RESOLVE_TIMEOUT_S)
+                if reply.get("error"):
+                    stream_error = (reply["error"],
+                                    bool(reply.get("transient")))
+                elif reply.get("handled"):
                     stream_url = reply["stream_url"]
                     stream_headers = reply.get("headers")
             except Exception as exc:
-                self.log.debug("sources.video.stream не обработан для %s: %s",
-                               task["video_url"], exc)
+                if await self._is_web_series(series_id):
+                    # A web episode page is no stream: yt-dlp would scrape a foreign player.
+                    stream_error = (f"поток не получен: {exc}", True)
+                else:
+                    self.log.debug("sources.video.stream не обработан для %s: %s",
+                                   task["video_url"], exc)
 
-            kw = {"threads": self._threads}
-            if stream_headers:
-                kw["headers"] = stream_headers
-            ok, error = await self._download(stream_url,
-                                             task["save_path"], on_progress,
-                                             **kw)
+            if stream_error is not None:
+                ok, (error, transient) = False, stream_error
+            else:
+                kw = {"threads": self._threads}
+                if stream_headers:
+                    kw["headers"] = stream_headers
+                ok, error = await self._download(stream_url,
+                                                 task["save_path"], on_progress,
+                                                 **kw)
+                transient = not ok and _transient_download_error(error)
             if ok:
                 series = await self.request("catalog.series.get",
                                             {"series_id": series_id})
@@ -431,7 +444,7 @@ class DownloadsModule(BaseModule):
                 self.log.info("загрузка завершена: %s", rel)
             else:
                 attempt = int(task.get("attempts") or 0) + 1
-                if attempt < MAX_DOWNLOAD_ATTEMPTS and _transient_download_error(error):
+                if attempt < MAX_DOWNLOAD_ATTEMPTS and transient:
                     self.log.warning(
                         "загрузка %s: %s — повтор %d/%d через %.0f с",
                         uid, error, attempt, MAX_DOWNLOAD_ATTEMPTS, RETRY_DELAY_S)
@@ -451,6 +464,14 @@ class DownloadsModule(BaseModule):
             await self._contribute(series_id)
             await self._broadcast_queue()
             await self._pump()
+
+    async def _is_web_series(self, series_id: int) -> bool:
+        try:
+            series = await self.request("catalog.series.get",
+                                        {"series_id": series_id}, timeout=10)
+        except BusRequestError:
+            return False
+        return series.get("source_type") == "web_video"
 
     # --- свёртка статусов (Р-11) -----------------------------------------------------
 

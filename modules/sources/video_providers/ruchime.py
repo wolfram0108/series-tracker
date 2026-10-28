@@ -20,11 +20,11 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
-from .base import BaseVideoProvider
+from .base import BaseVideoProvider, StreamUnavailable
 from .players import (PLAYER_ORDER, AllVideoPlayer, PlayerAdapter, PlayerRef)
-from .vibix import (Episode, KeyStore, VibixProtocolError, VibixUnavailable,
-                    capture_with_browser, decode_playlist, parse_manifest,
-                    stream_expires)
+from .vibix import (Episode, KeyStore, Stream, VibixProtocolError,
+                    VibixUnavailable, capture_with_browser, decode_playlist,
+                    parse_manifest, stream_expires)
 
 logger = logging.getLogger("sources.video.ruchime")
 
@@ -51,6 +51,14 @@ _MONTHS = {
 
 _EPISODE_IN_URL = re.compile(r"/episode-(\d+)")
 _ABSOLUTE_URL = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
+
+
+class _ManifestUnavailable(VibixUnavailable):
+    """A Vibix stream manifest cannot be read; `transient` marks retryable causes."""
+
+    def __init__(self, message: str, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
 
 
 async def _get_with_retry(http: httpx.AsyncClient, url: str, headers: dict | None = None,
@@ -319,7 +327,7 @@ class RuchimeProvider(BaseVideoProvider):
         if not targets:
             return
         try:
-            playlist, _key = await self._vibix_playlist(targets[0].page_url)
+            playlist, key = await self._vibix_playlist(targets[0].page_url)
         except (VibixUnavailable, VibixProtocolError) as exc:
             logger.warning("Vibix playlist unavailable for %s: %s",
                            targets[0].page_url, exc)
@@ -329,6 +337,7 @@ class RuchimeProvider(BaseVideoProvider):
             return
 
         by_number = {episode.number: episode for episode in playlist}
+        to_probe: list[tuple[_Episode, Episode, int]] = []
         for item in targets:
             episode = by_number.get(item.number)
             if episode is None or not episode.streams:
@@ -336,8 +345,68 @@ class RuchimeProvider(BaseVideoProvider):
                 if not item.candidates:
                     item.reason = "серии нет в плейлисте Vibix"
                 continue
-            resolution = max(stream.quality for stream in episode.streams)
-            item.candidates.append((resolution, "vibix", item.page_url))
+            declared = max(stream.quality for stream in episode.streams)
+            floor = item.best_resolution
+            if declared <= floor:
+                # Cannot outrank a better source, so a manifest request is wasted.
+                item.candidates.append((declared, "vibix", item.page_url))
+                continue
+            to_probe.append((item, episode, floor))
+
+        async def probe_one(episode: Episode, floor: int):
+            await self._wait_probe_slot()
+            return await self._live_vibix_stream(episode, key, http, floor)
+
+        results = await asyncio.gather(
+            *(probe_one(episode, floor) for _item, episode, floor in to_probe),
+            return_exceptions=True)
+        for (item, _episode, _floor), outcome in zip(to_probe, results):
+            if isinstance(outcome, _ManifestUnavailable):
+                item.player_reasons["vibix"] = str(outcome)
+                if not item.candidates:
+                    item.reason = str(outcome)
+                if outcome.transient:
+                    item.unverified = True
+                continue
+            if isinstance(outcome, BaseException):
+                raise outcome
+            stream, _manifest = outcome
+            item.candidates.append((stream.quality, "vibix", item.page_url))
+
+    async def _read_vibix_manifest(self, stream: Stream, key: bytes,
+                                   http: httpx.AsyncClient) -> str:
+        """Fetch and decode one stream manifest; the CDN may announce streams it cannot serve."""
+        label = f"Vibix {stream.quality}p"
+        try:
+            response = await http.get(stream.url, follow_redirects=True, timeout=15.0)
+        except httpx.HTTPError as exc:
+            raise _ManifestUnavailable(f"{label}: {type(exc).__name__}",
+                                       transient=True) from exc
+        status = response.status_code
+        if status != 200:
+            logger.warning("Vibix manifest HTTP %s for %s", status, stream.url)
+            raise _ManifestUnavailable(
+                f"{label}: манифест ответил {status}",
+                transient=status in (408, 425, 429) or status >= 500)
+        try:
+            return parse_manifest(response.content, key)
+        except VibixProtocolError as exc:
+            raise _ManifestUnavailable(f"{label}: манифест не расшифрован ({exc})") from exc
+
+    async def _live_vibix_stream(self, episode: Episode, key: bytes,
+                                 http: httpx.AsyncClient,
+                                 floor: int) -> tuple[Stream, str]:
+        """Best stream above `floor` whose manifest is readable, with the manifest text."""
+        failure: _ManifestUnavailable | None = None
+        for stream in sorted(episode.streams, key=lambda item: item.quality,
+                             reverse=True):
+            if stream.quality <= floor:
+                break
+            try:
+                return stream, await self._read_vibix_manifest(stream, key, http)
+            except _ManifestUnavailable as exc:
+                failure = exc
+        raise failure or _ManifestUnavailable("Vibix: у серии нет потоков")
 
     @staticmethod
     def _availability_report(episodes: list[_Episode]) -> dict:
@@ -678,31 +747,28 @@ class RuchimeProvider(BaseVideoProvider):
             logger.warning("Failed resolving AllVideo stream for %s: %s", url, exc)
             return None
 
-    async def _resolve_vibix(self, url: str, http: httpx.AsyncClient) -> dict | None:
+    async def _resolve_vibix(self, url: str, http: httpx.AsyncClient) -> dict:
+        """Episode page URL -> local manifest; a page is no stream, so failure is explicit."""
         match = _EPISODE_IN_URL.search(url)
         if not match:
-            return None
+            raise StreamUnavailable("Vibix: в ссылке нет номера серии")
         number = int(match.group(1))
         try:
             playlist, key = await self._vibix_playlist(url)
-        except (VibixUnavailable, VibixProtocolError) as exc:
+        except VibixUnavailable as exc:
             logger.warning("Vibix playlist unavailable for %s: %s", url, exc)
-            return None
+            raise StreamUnavailable(f"Vibix: {exc}", transient=True) from exc
+        except VibixProtocolError as exc:
+            logger.warning("Vibix playlist unavailable for %s: %s", url, exc)
+            raise StreamUnavailable(f"Vibix: {exc}") from exc
         episode = next((item for item in playlist if item.number == number), None)
         if episode is None or not episode.streams:
             logger.warning("Episode %s is missing from the Vibix playlist", number)
-            return None
-        stream = max(episode.streams, key=lambda item: item.quality)
+            raise StreamUnavailable("Vibix: серии нет в плейлисте")
         try:
-            response = await http.get(stream.url, follow_redirects=True, timeout=15.0)
-            if response.status_code != 200:
-                logger.warning("Vibix manifest HTTP %s for %s",
-                               response.status_code, stream.url)
-                return None
-            text = parse_manifest(response.content, key)
-        except (httpx.HTTPError, VibixProtocolError) as exc:
-            logger.warning("Failed resolving Vibix manifest for %s: %s", url, exc)
-            return None
+            stream, text = await self._live_vibix_stream(episode, key, http, floor=0)
+        except _ManifestUnavailable as exc:
+            raise StreamUnavailable(str(exc), transient=exc.transient) from exc
         manifest = self._write_manifest(text, stream.url, self._extract_slug(url),
                                         number, stream.quality).resolve()
         return {"stream_url": f"file://{manifest}",

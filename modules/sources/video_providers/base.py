@@ -8,6 +8,15 @@ if TYPE_CHECKING:
     import httpx
 
 
+class StreamUnavailable(RuntimeError):
+    """The provider owns the URL but cannot produce a stream for it now."""
+
+    def __init__(self, reason: str, transient: bool = False) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.transient = transient
+
+
 class BaseVideoProvider(ABC):
     """Interface for web video providers (Ruchime, etc.)."""
 
@@ -70,5 +79,9 @@ class BaseVideoProvider(ABC):
 
         Returns:
             {"stream_url": str, "headers": dict} or None if not handled.
+
+        Raises:
+            StreamUnavailable: the URL is the provider's own page reference
+                and no stream could be produced for it.
         """
         return None

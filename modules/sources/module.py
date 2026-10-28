@@ -36,7 +36,8 @@ from . import anilibria, delivery, parsers, vk
 from .delivery import Delivery
 from .parsers import SourceParseError
 from .repository import SourcesRepository
-from .video_providers import VideoProviderRegistry, get_default_registry
+from .video_providers import (StreamUnavailable, VideoProviderRegistry,
+                              get_default_registry)
 
 REQUEST_MIN_INTERVAL = 3.0  # секунд между запросами к одному трекеру
 
@@ -391,8 +392,16 @@ class SourcesModule(BaseModule):
         return {"videos": videos, "players": players}
 
     async def on_video_stream(self, env: Envelope) -> dict:
+        """reply: {handled, stream_url, headers} | {handled, error, transient}.
+
+        `error` means the URL belongs to a provider that has no stream for it:
+        the caller must not hand the page to a generic downloader."""
         url = env.payload["url"]
-        stream_info = await self.video_registry.resolve_stream(url, self._http)
+        try:
+            stream_info = await self.video_registry.resolve_stream(url, self._http)
+        except StreamUnavailable as exc:
+            return {"handled": True, "error": exc.reason,
+                    "transient": exc.transient}
         if stream_info:
             return {
                 "handled": True,

@@ -91,11 +91,22 @@ class FakeNeighbours(BaseModule):
 
     def __init__(self, bus):
         self.settings = {"max_parallel_downloads": "2"}
+        self.stream_replies: dict[str, dict] = {}
+        self.stream_raises: set[str] = set()
+        self.stream_requests: list[str] = []
         super().__init__(bus)
 
     def register(self):
         self.handle("rules.format_filename", self.on_format)
         self.handle("settings.value.get", self.on_get)
+        self.handle("sources.video.stream", self.on_stream)
+
+    async def on_stream(self, env):
+        url = env.payload["url"]
+        self.stream_requests.append(url)
+        if url in self.stream_raises:
+            raise RuntimeError("sources unavailable")
+        return self.stream_replies.get(url, {"handled": False})
 
     async def on_format(self, env):
         item = env.payload["media_item"]
@@ -159,21 +170,29 @@ def env_paths(tmp_path):
             "parser_profile_id) VALUES (2, 'https://vkvideo.ru/@c|т', 'Т2', "
             "'T2', 'vk', ?, 'waiting', 'vk_video', 0, 'get_all', 1)",
             (str(media_dir),))
+        conn.execute(
+            "INSERT INTO series (id, url, name, name_en, site, save_path, "
+            "state, source_type, auto_scan_enabled, vk_search_mode, "
+            "parser_profile_id) VALUES (3, 'https://1.ruchime.org/release/x', "
+            "'Т3', 'T3', '1.ruchime.org', ?, 'waiting', 'web_video', 0, "
+            "'get_all', 1)", (str(media_dir),))
         conn.commit()
     return str(db_path), str(media_dir)
 
 
 def _add_item(db_path, uid, episode, *, plan="in_plan_single",
-              status="pending", filename=None, ignored=0, download_url=None):
+              status="pending", filename=None, ignored=0, download_url=None,
+              series_id=2, source_url=None):
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             "INSERT INTO media_items (series_id, unique_id, source_title, "
             "episode_start, plan_status, status, is_ignored_by_user, "
             "source_url, publication_date, slicing_status, is_available, "
-            "final_filename, download_url) VALUES (2, ?, ?, ?, ?, ?, ?, ?, "
+            "final_filename, download_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "
             "'2026-01-01 00:00:00', 'none', 1, ?, ?)",
-            (uid, f"Серия {episode}", episode, plan, status, ignored,
-             f"https://vk.com/video-1_{episode}", filename, download_url))
+            (series_id, uid, f"Серия {episode}", episode, plan, status, ignored,
+             source_url or f"https://vk.com/video-1_{episode}", filename,
+             download_url))
         conn.commit()
 
 
@@ -644,3 +663,64 @@ async def test_download_does_not_fall_back_for_private_video(tmp_path):
     assert ok is False
     assert "приватно" in err
     assert phase.call_count == 1
+
+
+PAGE_URL = "https://1.ruchime.org/release/x/episode-1"
+
+
+@pytest.mark.asyncio
+async def test_provider_stream_error_fails_task_without_ytdlp(system):
+    """A web episode page that has no stream must not be handed to the downloader."""
+    _, fake, dl, probe, db_path, _ = system
+    fake.stream_replies[PAGE_URL] = {
+        "handled": True, "error": "Vibix 480p: манифест ответил 400",
+        "transient": False}
+    _add_item(db_path, "web1", 1, series_id=3, source_url=PAGE_URL)
+
+    probe.publish_event("downloads.dispatch", {"series_id": 3})
+
+    assert await _wait(lambda: _items(db_path)["web1"]["status"] == "error")
+    assert dl.started == []
+    assert "400" in _tasks(db_path)[0]["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_transient_stream_error_is_retried(system, monkeypatch):
+    from modules.downloads import module as downloads_module
+    monkeypatch.setattr(downloads_module, "RETRY_DELAY_S", 0.01)
+    _, fake, dl, probe, db_path, _ = system
+    fake.stream_replies[PAGE_URL] = {
+        "handled": True, "error": "Vibix: API не ответил", "transient": True}
+    _add_item(db_path, "web1", 1, series_id=3, source_url=PAGE_URL)
+
+    probe.publish_event("downloads.dispatch", {"series_id": 3})
+
+    assert await _wait(lambda: _items(db_path)["web1"]["status"] == "error")
+    assert fake.stream_requests.count(PAGE_URL) == downloads_module.MAX_DOWNLOAD_ATTEMPTS
+    assert dl.started == []
+
+
+@pytest.mark.asyncio
+async def test_web_series_stream_request_failure_never_reaches_ytdlp(system, monkeypatch):
+    from modules.downloads import module as downloads_module
+    monkeypatch.setattr(downloads_module, "RETRY_DELAY_S", 0.01)
+    _, fake, dl, probe, db_path, _ = system
+    fake.stream_raises.add(PAGE_URL)
+    _add_item(db_path, "web1", 1, series_id=3, source_url=PAGE_URL)
+
+    probe.publish_event("downloads.dispatch", {"series_id": 3})
+
+    assert await _wait(lambda: _items(db_path)["web1"]["status"] == "error")
+    assert dl.started == []
+
+
+@pytest.mark.asyncio
+async def test_vk_series_keeps_ytdlp_fallback_when_stream_request_fails(system):
+    _, fake, dl, probe, db_path, _ = system
+    fake.stream_raises.add("https://vk.com/video-1_1")
+    _add_item(db_path, "uid1", 1)
+
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
+
+    assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "completed")
+    assert dl.started == ["https://vk.com/video-1_1"]

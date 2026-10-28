@@ -1,4 +1,4 @@
-from .base import BaseVideoProvider
+from .base import BaseVideoProvider, StreamUnavailable
 from .registry import VideoProviderRegistry
 from .ruchime import RuchimeProvider
 
@@ -15,4 +15,5 @@ def get_default_registry() -> VideoProviderRegistry:
 
 
 
-__all__ = ["BaseVideoProvider", "VideoProviderRegistry", "RuchimeProvider", "get_default_registry"]
+__all__ = ["BaseVideoProvider", "StreamUnavailable", "VideoProviderRegistry", "RuchimeProvider",
+           "get_default_registry"]
