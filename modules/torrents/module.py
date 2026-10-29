@@ -65,6 +65,7 @@ import os
 import time
 
 from core import BaseModule, BusRequestError
+from core import storage
 from core.db import Database
 from core.envelope import Envelope
 
@@ -777,7 +778,7 @@ class TorrentsModule(BaseModule):
         has_profile = bool(series.get("parser_profile_id"))
         for f in files:
             current = f.get("renamed_path") or f["original_path"]
-            present = await asyncio.to_thread(
+            present = await storage.call(
                 os.path.exists,
                 os.path.join(series["save_path"], current))
             excluded = {"is_excluded": bool(f.get("is_excluded")),
@@ -908,7 +909,7 @@ class TorrentsModule(BaseModule):
                                     {"series_id": series_id})
         # F7: путь/NAS недоступен → НЕ помечать всё ложно missing и не
         # запускать массовый recheck. Пропускаем сверку до восстановления.
-        if not await asyncio.to_thread(os.path.exists, series["save_path"]):
+        if not await storage.call(os.path.exists, series["save_path"]):
             self.log.warning("серия %d: путь %s недоступен — сверка файлов "
                              "пропущена", series_id, series["save_path"])
             return {"missing": 0, "recheck_started": 0}
@@ -922,7 +923,7 @@ class TorrentsModule(BaseModule):
             if f.get("progress", 0) < 100 or not f.get("renamed_path"):
                 continue
             path = os.path.join(series["save_path"], f["renamed_path"])
-            exists = await asyncio.to_thread(os.path.exists, path)
+            exists = await storage.call(os.path.exists, path)
             if f["status"] == "renamed" and not exists:
                 await self.repo.set_file_status(f["id"], "missing")
                 self.log.warning("файл торрента пропал: %s", path)

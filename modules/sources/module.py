@@ -32,6 +32,7 @@ import httpx
 from pydantic import ValidationError
 
 from core import BaseModule, ids
+from core import storage
 from core.contracts import Release
 from core.db import Database
 from core.envelope import Envelope
@@ -134,7 +135,7 @@ class SourcesModule(BaseModule):
         (команда от torrents — torrent_id знает только он)."""
         import os
         path = self._cache_path(env.payload["torrent_id"])
-        await asyncio.to_thread(
+        await storage.call(
             lambda: os.path.isfile(path) and os.remove(path))
 
     async def on_parse(self, env: Envelope) -> dict:
@@ -439,7 +440,7 @@ class SourcesModule(BaseModule):
 
     async def on_torrent_file(self, env: Envelope) -> dict:
         url, torrent_id = env.payload["url"], env.payload["torrent_id"]
-        cached = await asyncio.to_thread(self._cache_read, torrent_id)
+        cached = await storage.call(self._cache_read, torrent_id)
         if cached is not None:
             return {"content_b64": base64.b64encode(cached).decode(),
                     "from_cache": True}
@@ -453,7 +454,7 @@ class SourcesModule(BaseModule):
             timeout=delivery.TORRENT_TIMEOUT)
         content = delivered.value
 
-        await asyncio.to_thread(self._cache_write, torrent_id, content)
+        await storage.call(self._cache_write, torrent_id, content)
         return {"content_b64": base64.b64encode(content).decode(),
                 "from_cache": False}
 

@@ -36,6 +36,7 @@ import shutil
 from datetime import datetime
 
 from core import BaseModule
+from core import storage
 from core.db import Database
 from core.envelope import Envelope
 
@@ -83,13 +84,13 @@ async def run_ffmpeg(source: str, start: str, duration: str | None,
             raise
         if proc.returncode != 0:
             return False, stderr.decode("utf-8", "replace").strip()[-500:]
-        await asyncio.to_thread(os.replace, tmp, output)  # атомарная публикация
+        await storage.call(os.replace, tmp, output)  # атомарная публикация
         success = True
         return True, ""
     finally:
         if not success:  # таймаут / ошибка / отмена — не оставляем tmp
             try:
-                await asyncio.to_thread(os.remove, tmp)
+                await storage.call(os.remove, tmp)
             except OSError:
                 pass
 
@@ -283,7 +284,7 @@ class SlicingModule(BaseModule):
                                   item["final_filename"])
             chapters = json.loads(item.get("chapters_filtered")
                                   or item["chapters"])
-            if not await asyncio.to_thread(os.path.exists, source):
+            if not await storage.call(os.path.exists, source):
                 raise FileNotFoundError(f"исходник не найден: {source}")
 
             progress = task["progress_chapters"]
@@ -316,7 +317,7 @@ class SlicingModule(BaseModule):
                 except asyncio.CancelledError:
                     # серию удалили во время ffmpeg → снести недоделанный
                     # полуфайл (законченные ранее главы остаются)
-                    await asyncio.to_thread(self._remove_file, out_abs)
+                    await storage.call(self._remove_file, out_abs)
                     self.log.info("нарезка %s прервана — недоделанный %s "
                                   "снесён", uid, out_rel)
                     return
@@ -364,7 +365,7 @@ class SlicingModule(BaseModule):
             episode = item["episode_start"] + i
             progress[str(episode)] = "pending"
             rel = await self._child_name(series, item, episode)
-            if await asyncio.to_thread(
+            if await storage.call(
                     os.path.exists, os.path.join(series["save_path"], rel)):
                 self.log.info("эпизод %d уже на диске — усыновлён", episode)
                 progress[str(episode)] = "completed"
@@ -407,7 +408,7 @@ class SlicingModule(BaseModule):
     async def _delete_source_file(self, uid: str, source: str) -> None:
         """Удаление файла-исходника + очистка ссылки на него. Общий код
         для авто-удаления по настройке и ручного удаления кнопкой."""
-        await asyncio.to_thread(os.remove, source)
+        await storage.call(os.remove, source)
         self.log.info("исходник удалён: %s", source)
         # final_filename — колонка downloads; чистим через её владельца
         self.send_command("downloads.item.set_filename",
@@ -418,7 +419,7 @@ class SlicingModule(BaseModule):
         rel = item.get("final_filename")
         if not rel:
             return False
-        return await asyncio.to_thread(
+        return await storage.call(
             os.path.exists, os.path.join(series["save_path"], rel))
 
     async def _return_source_to_download(self, item: dict) -> None:
@@ -448,7 +449,7 @@ class SlicingModule(BaseModule):
         series = await self.request("catalog.series.get",
                                     {"series_id": item["series_id"]})
         source = os.path.join(series["save_path"], item["final_filename"])
-        if not await asyncio.to_thread(os.path.exists, source):
+        if not await storage.call(os.path.exists, source):
             # файла уже нет — просто снимаем ссылку
             self.send_command("downloads.item.set_filename",
                               {"unique_id": item["unique_id"],
@@ -471,7 +472,7 @@ class SlicingModule(BaseModule):
         # возвращать исходник в дозагрузку (иначе скан при отвале NAS массово
         # портит статусы нарезки). Сверка откладывается до восстановления —
         # симметрично downloads.on_fs_sync.
-        if not await asyncio.to_thread(os.path.exists, series["save_path"]):
+        if not await storage.call(os.path.exists, series["save_path"]):
             self.log.warning("серия %d: путь %s недоступен — сверка нарезки "
                              "пропущена", item["series_id"],
                              series["save_path"])
@@ -485,7 +486,7 @@ class SlicingModule(BaseModule):
         present_episodes: set[int] = set()
         for child in children:
             path = os.path.join(series["save_path"], child["file_path"])
-            exists = await asyncio.to_thread(os.path.exists, path)
+            exists = await storage.call(os.path.exists, path)
             if exists:
                 present_episodes.add(child["episode_number"])
                 if child["status"] == "missing":
@@ -547,7 +548,7 @@ class SlicingModule(BaseModule):
             for i in range(len(chapters)):
                 episode = item["episode_start"] + i
                 rel = await self._child_name(series, item, episode)
-                if await asyncio.to_thread(
+                if await storage.call(
                         os.path.exists,
                         os.path.join(series["save_path"], rel)):
                     await self.repo.add_sliced_file(series_id,

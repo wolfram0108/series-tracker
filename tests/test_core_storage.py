@@ -1,5 +1,6 @@
 """Storage calls from async code wait for a limited time and never take the process's default pool."""
 import asyncio
+import os
 import time
 
 import pytest
@@ -29,3 +30,10 @@ async def test_the_errors_of_the_call_reach_the_caller_as_they_are():
 
     with pytest.raises(PermissionError):
         await storage.call(refuse, timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_keyword_arguments_reach_the_call(tmp_path):
+    target = tmp_path / "a" / "b"
+    await storage.call(os.makedirs, str(target), exist_ok=True)
+    assert target.is_dir()

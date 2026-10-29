@@ -26,6 +26,7 @@ import asyncio
 import os
 
 from core import BaseModule, BusRequestError, is_video_source, sanitize_path
+from core import storage
 from core.db import Database
 from core.envelope import Envelope
 
@@ -87,10 +88,10 @@ class LibraryModule(BaseModule):
         raw = (env.payload or {}).get("path") or "/"
         path = os.path.normpath(raw)
         self._check_allowed(path)
-        if not os.path.isdir(path):
+        if not await storage.call(os.path.isdir, path):
             raise LibraryError(f"не каталог или не существует: {path}")
         try:
-            items = await asyncio.to_thread(self._list_dirs_sync, path)
+            items = await storage.call(self._list_dirs_sync, path)
         except PermissionError as exc:
             raise LibraryError(f"нет доступа к каталогу: {path}") from exc
         return {"path": path, "items": items}
@@ -112,7 +113,7 @@ class LibraryModule(BaseModule):
         if new_path == old_path:
             raise LibraryError("путь не изменился")
         self._check_allowed(os.path.normpath(new_path))
-        await asyncio.to_thread(self._check_same_device, old_path, new_path)
+        await storage.call(self._check_same_device, old_path, new_path)
         task_id = await self.repo.create(series_id, new_path)
         if task_id is None:
             raise LibraryError("активная задача на перемещение уже "
@@ -176,7 +177,7 @@ class LibraryModule(BaseModule):
         for child in await self._sliced_files(series_id):
             paths.append(child["file_path"])
         for rel in paths:
-            await asyncio.to_thread(self._move_one, old_base, new_base, rel)
+            await storage.call(self._move_one, old_base, new_base, rel, timeout=storage.MOVE_TIMEOUT_S)
 
     async def _sliced_files(self, series_id: int) -> list[dict]:
         try:

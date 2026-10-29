@@ -31,6 +31,7 @@ import os
 import re
 
 from core import BaseModule, BusRequestError, is_video_source
+from core import storage
 from core.db import Database
 from core.envelope import Envelope
 
@@ -254,11 +255,11 @@ class RenamingModule(BaseModule):
                               new_rel: str) -> bool:
         old_abs = os.path.join(base, old_rel)
         new_abs = os.path.join(base, new_rel)
-        if await asyncio.to_thread(os.path.exists, new_abs):
+        if await storage.call(os.path.exists, new_abs):
             self.log.warning("файл с новым именем уже существует: %s",
                              new_abs)
             return False
-        if not await asyncio.to_thread(os.path.exists, old_abs):
+        if not await storage.call(os.path.exists, old_abs):
             self.log.error("исходный файл не найден: %s", old_abs)
             return False
 
@@ -266,7 +267,7 @@ class RenamingModule(BaseModule):
             os.makedirs(os.path.dirname(new_abs), exist_ok=True)
             os.rename(old_abs, new_abs)
 
-        await asyncio.to_thread(_do)
+        await storage.call(_do)
         self.log.info("переименован: %s -> %s", old_rel, new_rel)
         return True
 

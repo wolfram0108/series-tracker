@@ -62,6 +62,7 @@ import os
 import time
 
 from core import BaseModule, BusRequestError, is_video_source
+from core import storage
 from core.db import Database
 from core.envelope import Envelope
 
@@ -263,7 +264,7 @@ class DownloadsModule(BaseModule):
         for item in await self.repo.planned_pending_items(series["id"]):
             filename = await self._format_filename(series, item)
             path = os.path.join(series["save_path"], filename)
-            if await asyncio.to_thread(os.path.exists, path):
+            if await storage.call(os.path.exists, path):
                 await self.repo.register_downloaded(item["unique_id"],
                                                     filename)
                 self.log.info("усыновлён существующий файл: %s", filename)
@@ -283,10 +284,10 @@ class DownloadsModule(BaseModule):
             if not _inside(base, path):
                 self.log.warning("файл вне каталога серии не тронут: %s", path)
                 continue
-            if not await asyncio.to_thread(os.path.isfile, winner_path):
+            if not await storage.call(os.path.isfile, winner_path):
                 continue
             try:
-                await asyncio.to_thread(os.remove, path)
+                await storage.call(os.remove, path)
             except FileNotFoundError:
                 pass
             except OSError as exc:
@@ -308,7 +309,7 @@ class DownloadsModule(BaseModule):
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
         # F7/VF7: путь/NAS недоступен → НЕ сбрасывать всё ложно в pending.
-        if not await asyncio.to_thread(os.path.exists, series["save_path"]):
+        if not await storage.call(os.path.exists, series["save_path"]):
             self.log.warning("серия %d: путь %s недоступен — сверка диска "
                              "пропущена", series_id, series["save_path"])
             await self._contribute(series_id)
@@ -324,7 +325,7 @@ class DownloadsModule(BaseModule):
             if not rel:
                 continue
             path = os.path.join(series["save_path"], rel)
-            if not await asyncio.to_thread(os.path.exists, path):
+            if not await storage.call(os.path.exists, path):
                 await self.repo.reset_download_state(item["unique_id"])
                 self.log.warning("файл пропал: %s — статус сброшен", path)
                 lost += 1
@@ -374,8 +375,8 @@ class DownloadsModule(BaseModule):
             sp = task.get("save_path")
             # final отсутствует → загрузка не закончена → снести полуфайлы;
             # если final на месте — это законченный файл, не трогаем.
-            if sp and not await asyncio.to_thread(os.path.exists, sp):
-                await asyncio.to_thread(self._remove_partial, sp)
+            if sp and not await storage.call(os.path.exists, sp):
+                await storage.call(self._remove_partial, sp, timeout=storage.REMOVE_TIMEOUT_S)
         await self.repo.delete_for_series(series_id)
         await self._broadcast_queue()
         self.publish_event("series.purged",
@@ -404,7 +405,7 @@ class DownloadsModule(BaseModule):
 
         # 2) удалить недокачанный файл и временные артефакты yt-dlp
         if task.get("save_path"):
-            await asyncio.to_thread(self._remove_partial, task["save_path"])
+            await storage.call(self._remove_partial, task["save_path"], timeout=storage.REMOVE_TIMEOUT_S)
 
         # 3) снять задачу, вернуть элемент в pending (был downloading)
         await self.repo.delete_task(task_id)
@@ -617,7 +618,7 @@ class DownloadsModule(BaseModule):
                                  key, error, attempt, MAX_DOWNLOAD_ATTEMPTS, RETRY_DELAY_S)
                 await asyncio.sleep(RETRY_DELAY_S)
         except asyncio.CancelledError:
-            await asyncio.to_thread(self._remove_partial, path)
+            await storage.call(self._remove_partial, path, timeout=storage.REMOVE_TIMEOUT_S)
             self._fetch_active.pop(key, None)
             self._fetch_pump()
             raise
@@ -625,7 +626,7 @@ class DownloadsModule(BaseModule):
             self.log.exception("сбой общей загрузки %s", key)
             ok, error, transient = False, f"внутренняя ошибка: {exc}", False
         if not ok:
-            await asyncio.to_thread(self._remove_partial, path)
+            await storage.call(self._remove_partial, path, timeout=storage.REMOVE_TIMEOUT_S)
         self._fetch_active.pop(key, None)
         self.publish_event("downloads.fetch.finished", {
             "key": key, "ok": ok, "error": "" if ok else error, "transient": transient,

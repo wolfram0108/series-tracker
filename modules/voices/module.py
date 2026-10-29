@@ -100,6 +100,7 @@ from core import BaseModule, BusRequestError, is_video_source
 from core.contracts import (AlignmentJob, JobStatus, Layout, DubEvent, DubEventStatus as E, DubItem, DubRecord, DubsSnapshot, DubStatus as S,
                             SnapshotItem)
 from core import storage
+from core.storage import DEFAULT_TIMEOUT_S as IO_TIMEOUT_S, MOVE_TIMEOUT_S, REMOVE_TIMEOUT_S
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import parse as parse_reason, reason
@@ -119,9 +120,6 @@ PARSE_TIMEOUT_S = 180
 SUBMIT_TIMEOUT_S = 60
 SUBMIT_RETRY_S = 30.0
 SUBMIT_RETRIES = 5
-IO_TIMEOUT_S = 30.0
-REMOVE_TIMEOUT_S = 300.0
-MOVE_TIMEOUT_S = 900.0
 # What the cleanup journal can hold: a plain file, a tree, an artifact of the output, a job of the service.
 PATH, TREE, ARTIFACT, JOB = "path", "tree", "artifact", "job"
 UNCLAIMED_JOBS = 256

@@ -26,6 +26,7 @@ from typing import Awaitable, Callable
 
 import httpx
 
+from core import storage
 from core.ffprobe import duration_of
 from core.proc import run_capture
 
@@ -377,15 +378,15 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
     tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
 
     if stopped:
-        _remove_file(tmp_out)
+        await storage.call(_remove_file, tmp_out)
         return False, stopped
     if proc.returncode == 0:
         got = await _local_duration(tmp_out)
         if got <= 0 or (duration > 0 and got < duration * MIN_COMPLETE_FRACTION):
-            _remove_file(tmp_out)
+            await storage.call(_remove_file, tmp_out)
             return False, (f"обрыв: скачано {got:.0f} с из ожидаемых ~{duration:.0f} с — "
                            "неполная загрузка")
-        os.replace(tmp_out, full_output_path)
+        await storage.call(os.replace, tmp_out, full_output_path)
         await on_progress({"phase": "download", "progress": 100, "eta": 0, "speed": 0.0})
         return True, ""
     last = tail.strip().splitlines()[-1] if tail.strip() else ""
@@ -412,8 +413,8 @@ async def download(video_url: str, full_output_path: str,
     """Two-phase video download. Supports direct ffmpeg copy and yt-dlp."""
     if not os.path.isabs(full_output_path):
         return False, "путь сохранения должен быть абсолютным"
-    os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
-    if os.path.exists(full_output_path):
+    await storage.call(os.makedirs, os.path.dirname(full_output_path), exist_ok=True)
+    if await storage.call(os.path.exists, full_output_path):
         return True, "файл уже существует"
 
     # Direct stream download if headers (e.g. Referer) are provided or URL is already an mp4 stream
@@ -437,18 +438,18 @@ async def download(video_url: str, full_output_path: str,
                                 threads, HLS_FORMAT)
     if not isinstance(raw, str) and not _unavailable_error(raw[1]):
         # VK HLS fragments are fragile; progressive/DASH retry is reliable.
-        _cleanup_artifacts(full_output_path)
+        await storage.call(_cleanup_artifacts, full_output_path)
         raw = await _phase_download(video_url, full_output_path, on_progress,
                                     threads, DASH_FALLBACK_FORMAT)
     if not isinstance(raw, str):
-        _cleanup_artifacts(full_output_path)
+        await storage.call(_cleanup_artifacts, full_output_path)
         return raw  # (False, error)
     try:
         return await _phase_remux(raw, full_output_path, on_progress,
                                   duration)
     finally:
         # A partial final must never be accepted as ready (finding 50).
-        _cleanup_artifacts(full_output_path)
+        await storage.call(_cleanup_artifacts, full_output_path)
 
 
 async def _phase_download(video_url: str, full_output_path: str,
@@ -500,7 +501,7 @@ async def _phase_download(video_url: str, full_output_path: str,
             error = "видео недоступно или приватно"
         return False, error
 
-    raw = _download_artifact(full_output_path)
+    raw = await storage.call(_download_artifact, full_output_path)
     if raw is None:
         return False, "yt-dlp не оставил файл после загрузки"
     return raw
@@ -563,10 +564,10 @@ async def _phase_remux(raw: str, full_output_path: str,
     tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
 
     if stopped:
-        _remove_file(tmp_out)
+        await storage.call(_remove_file, tmp_out)
         return False, stopped
     if proc.returncode == 0:
-        os.replace(tmp_out, full_output_path)  # атомарная публикация
+        await storage.call(os.replace, tmp_out, full_output_path)  # атомарная публикация
         await on_progress({"phase": "remux", "progress": 100, "eta": 0,
                            "speed": 0.0})
         return True, ""
