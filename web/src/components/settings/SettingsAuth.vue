@@ -3,6 +3,7 @@ import { ref, onMounted } from "vue"
 import StGroup from "../StGroup.vue"
 import StIcon from "../StIcon.vue"
 import StInput from "../StInput.vue"
+import SettingsConformServer from "./SettingsConformServer.vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 
@@ -59,11 +60,14 @@ async function load() {
   if (d.tmdb) configured.value.tmdb = !!d.tmdb.configured
 }
 
+const conform = ref<{ save: () => Promise<boolean> } | null>(null)
+
 async function save(): Promise<boolean> {
   const ok = await request(api.POST("/api/auth", { body: creds.value } as never), {
     errorMessage: "Ошибка сохранения настроек авторизации",
   })
-  return ok !== null
+  const conformSaved = (await conform.value?.save()) ?? true
+  return ok !== null && conformSaved
 }
 
 onMounted(load)
@@ -85,6 +89,8 @@ defineExpose({ save })
         </StGroup>
       </div>
     </div>
+
+    <SettingsConformServer ref="conform" />
 
     <div class="modern-fieldset">
       <div class="fieldset-header"><i class="pi pi-download"></i> Kinozal.me</div>

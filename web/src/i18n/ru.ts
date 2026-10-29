@@ -144,7 +144,6 @@ export const ru = {
   "conform.settings.pathsHint": "Папки хранилища на этом сервере и те же папки на демоне:",
   "conform.settings.local": "Папка здесь",
   "conform.settings.daemon": "Папка на демоне",
-  "conform.settings.save": "Сохранить",
   "conform.settings.addRow": "Добавить пару",
   "conform.settings.defaultMap": "Карта по умолчанию",
   "conform.settings.removeRow": "Убрать пару",

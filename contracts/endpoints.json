@@ -42,7 +42,7 @@
   "conditional": null,
   "summary": "Креды внешних сервисов без секретов",
   "panel_sites": [
-   "components/settings/SettingsAuth.vue:39"
+   "components/settings/SettingsAuth.vue:40"
   ]
  },
  {
@@ -55,7 +55,7 @@
   "conditional": null,
   "summary": "Сохранение кредов сервисов",
   "panel_sites": [
-   "components/settings/SettingsAuth.vue:63"
+   "components/settings/SettingsAuth.vue:66"
   ]
  },
  {
@@ -94,7 +94,7 @@
   "conditional": null,
   "summary": "Адрес демона выравнивания и карта путей: как действуют сейчас",
   "panel_sites": [
-   "components/settings/SettingsConformServer.vue:38"
+   "components/settings/SettingsConformServer.vue:39"
   ]
  },
  {
@@ -107,7 +107,7 @@
   "conditional": null,
   "summary": "Записать адрес и карту путей целиком (адрес применяется сразу) или получить коды причин отказа",
   "panel_sites": [
-   "components/settings/SettingsConformServer.vue:46"
+   "components/settings/SettingsConformServer.vue:52"
   ]
  },
  {
@@ -1174,7 +1174,7 @@
   "conditional": null,
   "summary": "Группы озвучек и порядок источников: как действуют, порядок по умолчанию",
   "panel_sites": [
-   "components/settings/SettingsVoices.vue:27"
+   "components/settings/SettingsVoices.vue:26"
   ]
  },
  {
@@ -1187,7 +1187,7 @@
   "conditional": null,
   "summary": "Записать группы и порядок источников целиком или получить коды причин отказа",
   "panel_sites": [
-   "components/settings/SettingsVoices.vue:36"
+   "components/settings/SettingsVoices.vue:35"
   ]
  },
  {

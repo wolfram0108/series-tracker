@@ -13,7 +13,8 @@ import { useConformStore } from "../../stores/conform"
 import { useQueuesStore } from "../../stores/queues"
 
 // The alignment server: the daemon's address and the map between the folders of this server and the daemon's.
-// A save writes both and the core takes the address at once; a refused draft stays on screen with its reasons.
+// The save button of the tab calls save(): it writes both when the draft differs from what the core holds and the core
+// takes the address at once; a refused draft stays on screen with its reasons.
 type View = components["schemas"]["ConformSettingsView"]
 type Pair = components["schemas"]["PathPair"]
 type Problem = components["schemas"]["SettingProblem"]
@@ -39,16 +40,22 @@ async function load() {
   if (view) adopt(view)
 }
 
-async function save() {
+const dirty = computed(() => !!core.value && (url.value !== core.value.url
+  || JSON.stringify(rows.value) !== JSON.stringify(core.value.path_map)))
+
+/** True when there was nothing to write or the core took it. */
+async function save(): Promise<boolean> {
+  if (!dirty.value) return true
   busy.value = true
   try {
     const reply = await request(
       api.PUT("/api/conform/settings", { body: { url: url.value, path_map: rows.value } }),
       { errorMessage: t("conform.settings.saveFailed") },
     )
-    if (!reply) return
+    if (!reply) return false
     problems.value = reply.problems
     if (reply.saved) adopt(reply.settings)
+    return reply.saved
   } finally {
     busy.value = false
   }
@@ -66,11 +73,12 @@ const resetMap = () => {
 }
 
 onMounted(load)
+defineExpose({ save })
 </script>
 
 <template>
   <div class="modern-fieldset">
-    <div class="fieldset-header"><i class="pi pi-server"></i> {{ t("conform.settings.title") }}</div>
+    <div class="fieldset-header"><i class="pi pi-sliders-h"></i> {{ t("conform.settings.title") }}</div>
     <div class="fieldset-content conform-server">
       <p class="muted-hint">{{ t("conform.settings.hint") }}</p>
 
@@ -105,7 +113,6 @@ onMounted(load)
 
       <p v-for="(problem, index) in problems" :key="index" class="problem">{{ reasonText(problem.detail) }}</p>
       <div class="actions-row">
-        <Button :label="t('conform.settings.save')" icon="pi pi-check" size="small" :disabled="busy" @click="save" />
         <Button :label="t('conform.settings.addRow')" icon="pi pi-plus" severity="secondary" size="small" text :disabled="busy" @click="addRow" />
         <Button :label="t('conform.settings.defaultMap')" icon="pi pi-undo" severity="secondary" size="small" text :disabled="busy" @click="resetMap" />
       </div>
