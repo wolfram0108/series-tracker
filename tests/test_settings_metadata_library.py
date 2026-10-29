@@ -63,6 +63,20 @@ async def test_settings_set_get_and_event(system):
 
 
 @pytest.mark.asyncio
+async def test_settings_set_many_writes_all_keys_and_announces_each(system):
+    bus, _, modules = system
+    probe = _probe(modules)
+    sub = bus.subscribe("settings.changed")
+
+    await probe.request("settings.values.set_many", {"values": {"voices.temp_root": "/data/tmp",
+                                                                "voices.max_temp_episodes": 3}}, timeout=5)
+    stored = (await probe.request("settings.values.by_prefix", {"prefix": "voices."}, timeout=5))["values"]
+    assert stored == {"voices.temp_root": "/data/tmp", "voices.max_temp_episodes": "3"}
+    announced = {sub.queue.get_nowait().payload["key"] for _ in range(2)}
+    assert announced == {"voices.temp_root", "voices.max_temp_episodes"}
+
+
+@pytest.mark.asyncio
 async def test_settings_get_missing_returns_none(system):
     _, _, modules = system
     reply = await _probe(modules).request("settings.value.get",

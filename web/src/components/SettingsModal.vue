@@ -8,12 +8,14 @@ import SettingsAccount from "./settings/SettingsAccount.vue"
 import SettingsTrackers from "./settings/SettingsTrackers.vue"
 import SettingsDebug from "./settings/SettingsDebug.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
+import SettingsVoices from "./settings/SettingsVoices.vue"
+import { t } from "../i18n"
 
 // Окно настроек (порт settingsModal): шапка с вкладками-сегментом + тело
 // активной вкладки + футер. Вкладка parser — конфигуратор «Фильтры VK».
 const emit = defineEmits<{ (e: "close"): void }>()
 
-const tab = ref<"auth" | "account" | "trackers" | "parser" | "agents" | "debug">("auth")
+const tab = ref<"auth" | "account" | "trackers" | "parser" | "voices" | "agents" | "debug">("auth")
 
 // ссылка на активную вкладку с методом save() (для кнопки в футере)
 const tabRef = ref<{ save?: () => Promise<boolean> } | null>(null)
@@ -33,6 +35,7 @@ const tabs = [
   { label: "Аккаунт", value: "account", icon: "pi-user" },
   { label: "Трекеры", value: "trackers", icon: "pi-wifi" },
   { label: "Фильтры VK", value: "parser", icon: "pi-filter" },
+  { label: t("settings.tab.voices"), value: "voices", icon: "pi-volume-up" },
   { label: "Агенты", value: "agents", icon: "pi-server" },
   { label: "Отладка", value: "debug", icon: "pi-wrench" },
 ] as const
@@ -64,6 +67,7 @@ const tabs = [
     <SettingsAgents v-else-if="tab === 'agents'" />
     <SettingsDebug v-else-if="tab === 'debug'" />
     <SettingsParser v-else-if="tab === 'parser'" />
+    <SettingsVoices v-else-if="tab === 'voices'" />
 
     <template #footer>
       <Button

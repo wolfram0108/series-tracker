@@ -26,6 +26,14 @@ class SettingsRepository:
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, stored))
 
+    async def set_many(self, values: dict[str, str]) -> None:
+        """All keys in one transaction: a form is saved whole or not at all."""
+        await self._db.execute_many([
+            ("INSERT INTO settings (key, value) VALUES (?, ?) "
+             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+             (key, crypto.encrypt(value) if key in _SECRET_KEYS else value))
+            for key, value in values.items()])
+
     async def encrypt_legacy_secrets(self) -> int:
         """Одноразовая миграция секретных ключей в шифр (Этап 3Б).
         Идемпотентна. Возвращает число перешифрованных значений."""

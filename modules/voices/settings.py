@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping
 
 from .identity import Equivalence, usable_aliases
@@ -25,24 +25,30 @@ class VoiceSettings:
     temp_root: str = DEFAULT_TEMP_ROOT
     max_temp_episodes: int = 0
     problems: tuple[str, ...] = ()
+    # The pairs as spelled by the user (the rules hold them folded) and the keys whose stored value was refused.
+    voice_aliases: Mapping[str, str] = field(default_factory=dict)
+    player_aliases: Mapping[str, str] = field(default_factory=dict)
+    rejected: tuple[str, ...] = ()
 
 
-def _json(raw: str | None, key: str, problems: list[str]) -> object:
+def _json(raw: str | None, key: str, problems: list[str], rejected: list[str]) -> object:
     if raw is None or not raw.strip():
         return None
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
         problems.append(f"{key}: значение не является JSON, настройка не применена")
+        rejected.append(key)
         return None
 
 
-def _aliases(raw: str | None, key: str, problems: list[str]) -> Mapping[str, str] | None:
-    value = _json(raw, key, problems)
+def _aliases(raw: str | None, key: str, problems: list[str], rejected: list[str]) -> Mapping[str, str] | None:
+    value = _json(raw, key, problems, rejected)
     if value is None:
         return None
     if not isinstance(value, dict):
         problems.append(f"{key}: ожидается объект {{псевдоним: имя}}, настройка не применена")
+        rejected.append(key)
         return None
     usable = usable_aliases(value)
     if len(usable) != len(value):
@@ -53,14 +59,17 @@ def _aliases(raw: str | None, key: str, problems: list[str]) -> Mapping[str, str
 def parse(values: Mapping[str, str | None]) -> VoiceSettings:
     """Typed settings from the raw values; a wrong value falls back to the default and is named."""
     problems: list[str] = []
-    priority = _json(values.get(PRIORITY_KEY), PRIORITY_KEY, problems)
+    rejected: list[str] = []
+    priority = _json(values.get(PRIORITY_KEY), PRIORITY_KEY, problems, rejected)
     if priority is not None and not (isinstance(priority, list) and priority
                                      and all(isinstance(item, str) for item in priority)):
         problems.append(f"{PRIORITY_KEY}: ожидается непустой список строк, применён порядок по умолчанию")
+        rejected.append(PRIORITY_KEY)
         priority = None
     root = (values.get(TEMP_ROOT_KEY) or "").strip()
     if root and not os.path.isabs(root):
         problems.append(f"{TEMP_ROOT_KEY}: ожидается абсолютный путь, применён {DEFAULT_TEMP_ROOT}")
+        rejected.append(TEMP_ROOT_KEY)
         root = ""
     cap_raw = (values.get(MAX_TEMP_KEY) or "").strip()
     cap = 0
@@ -71,9 +80,12 @@ def parse(values: Mapping[str, str | None]) -> VoiceSettings:
             cap = -1
         if cap < 0:
             problems.append(f"{MAX_TEMP_KEY}: ожидается целое число не меньше 0, лимита нет")
+            rejected.append(MAX_TEMP_KEY)
             cap = 0
+    voices = _aliases(values.get(VOICE_ALIASES_KEY), VOICE_ALIASES_KEY, problems, rejected)
+    players = _aliases(values.get(PLAYER_ALIASES_KEY), PLAYER_ALIASES_KEY, problems, rejected)
     return VoiceSettings(
         priority=tuple(priority) if priority else tuple(DEFAULT_PRIORITY),
-        rules=Equivalence.of(_aliases(values.get(VOICE_ALIASES_KEY), VOICE_ALIASES_KEY, problems),
-                             _aliases(values.get(PLAYER_ALIASES_KEY), PLAYER_ALIASES_KEY, problems)),
-        temp_root=root or DEFAULT_TEMP_ROOT, max_temp_episodes=cap, problems=tuple(problems))
+        rules=Equivalence.of(voices, players),
+        temp_root=root or DEFAULT_TEMP_ROOT, max_temp_episodes=cap, problems=tuple(problems),
+        voice_aliases=dict(voices or {}), player_aliases=dict(players or {}), rejected=tuple(rejected))

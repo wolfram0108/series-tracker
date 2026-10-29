@@ -152,3 +152,62 @@ class Layout(BaseModel):
     voices: list[LayoutVoice]
     skipped: list[SkippedSource] = Field(default_factory=list)
     priority: list[str] = Field(default_factory=list)
+
+
+class VoiceSettingsDraft(BaseModel):
+    """The settings of the voices as the editor sends them: the whole form, so a save replaces all five values."""
+
+    priority: list[str]
+    voice_aliases: dict[str, str]
+    player_aliases: dict[str, str]
+    temp_root: str
+    max_temp_episodes: int
+
+
+class SettingProblem(BaseModel):
+    """What is wrong with one field of the settings; the interface words the reason."""
+
+    field: str
+    detail: Reason
+
+
+class SettingDefaults(BaseModel):
+    priority: list[str]
+    temp_root: str
+    max_temp_episodes: int
+
+
+class VoiceSettingsView(VoiceSettingsDraft):
+    """The reply of `voices.settings.get`: what applies now, what the defaults are, which stored values were refused."""
+
+    defaults: SettingDefaults
+    rejected: list[str]
+    known_voices: list[str]
+
+
+class VoiceSettingsSaved(BaseModel):
+    """The reply of `voices.settings.set`: saved, or the problems that kept it from being saved."""
+
+    saved: bool
+    problems: list[SettingProblem]
+    settings: VoiceSettingsView
+
+
+class GroupsDraft(BaseModel):
+    """Names of voice-overs to be grouped by the rules of a draft (not yet saved)."""
+
+    names: list[str]
+    voice_aliases: dict[str, str]
+    player_aliases: dict[str, str]
+
+
+class VoiceGroup(BaseModel):
+    key: str
+    members: list[str]
+
+
+class VoiceGroups(BaseModel):
+    """The reply of `voices.groups.preview`: which of the names mean the same voice under the draft rules."""
+
+    groups: list[VoiceGroup]
+    problems: list[SettingProblem]

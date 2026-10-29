@@ -13,11 +13,18 @@ Query:
       -> {mode, reference, voices: [{key, label, role, source, fallbacks}], skipped, priority}
       The source priority is the setting `voices.source_priority` (JSON list of player kinds);
       layout.DEFAULT_PRIORITY when unset.
+  voices.settings.get {} -> VoiceSettingsView: the five settings as they apply, the defaults, the fields whose stored
+      value was refused (`rejected`) and the voice names met so far (`known_voices`)
+  voices.groups.preview {names, voice_aliases, player_aliases} -> VoiceGroups: which names mean one voice under the
+      rules of a draft that is not saved (editor.py)
   voices.dubs.get {series_id} -> {items: [{season, episode, voice_key, voice_label, status,
       attempt, error, temp_path, job_id, aligned_path, output_path, outcome, ref_uid, ref_path,
       detail, state, hint}]}  (detail = {code, params} of the outcome or error, see reasons.py; the
       fields `error` and `outcome` hold the stored reason as it is)
 Command:
+  voices.settings.set VoiceSettingsDraft -> VoiceSettingsSaved: the whole form is checked (editor.check) and written
+      in one step through settings.values.set_many, or refused with coded problems and nothing written; the next
+      read of the settings uses the new values, no restart. Rows keep the key they were recorded under.
   voices.dispatch {series_id} — sent by scan after an explicit scan: read the catalog of the site,
       lay the voices out around the selected reference, record a voice_dubs row per planned
       reference episode and voice, and download what is not on disk yet into the temporary
@@ -135,13 +142,15 @@ from core import BaseModule, BusRequestError, is_video_source
 from pydantic import ValidationError
 
 from core.contracts import (AlignmentJob, JobStatus, Layout, DubEvent, DubEventStatus as E, DubItem, DubRecord, DubsSnapshot, DubStatus as S,
-                            SnapshotItem, SubmitOutcome, SubmitReply)
+                            GroupsDraft, SnapshotItem, SubmitOutcome, SubmitReply, VoiceSettingsDraft,
+                            VoiceSettingsSaved, VoiceSettingsView)
 from core import storage
 from core.storage import DEFAULT_TIMEOUT_S as IO_TIMEOUT_S, MOVE_TIMEOUT_S, REMOVE_TIMEOUT_S
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import describe, parse as parse_reason, reason
 
+from . import editor
 from .identity import Equivalence, same_voice
 from .alignment import ENDED, job_failure, refusal, result_for, track_of
 from .layout import download_chain, plan_layout
@@ -211,6 +220,9 @@ class VoicesModule(BaseModule):
     def register(self) -> None:
         self.handle("voices.layout", self.on_layout)
         self.handle("voices.dubs.get", self.on_dubs_get)
+        self.handle("voices.settings.get", self.on_settings_get)
+        self.handle("voices.settings.set", self.on_settings_set)
+        self.handle("voices.groups.preview", self.on_groups_preview)
         self.handle("voices.dispatch", self.on_dispatch, concurrent=True)
         self.handle("downloads.fetch.started", self.on_fetch_started)
         self.handle("downloads.fetch.finished", self.on_fetch_finished)
@@ -312,6 +324,25 @@ class VoicesModule(BaseModule):
     async def on_dubs_get(self, env: Envelope) -> dict:
         rows = await self.repo.for_series(int(env.payload["series_id"]))
         return {"items": [self._record(row).model_dump(mode="json") for row in rows]}
+
+    async def _settings_view(self) -> VoiceSettingsView:
+        known = await self.repo.voice_labels() if self.repo is not None else []
+        return editor.view(await self._settings(), known)
+
+    async def on_settings_get(self, env: Envelope) -> dict:
+        return (await self._settings_view()).model_dump(mode="json")
+
+    async def on_settings_set(self, env: Envelope) -> dict:
+        draft = VoiceSettingsDraft.model_validate(env.payload)
+        problems = editor.check(draft)
+        if not problems:
+            await self.request("settings.values.set_many", {"values": editor.stored(editor.clean(draft))}, timeout=10)
+            self.log.info("озвучки: настройки сохранены")
+        return VoiceSettingsSaved(saved=not problems, problems=problems,
+                                  settings=await self._settings_view()).model_dump(mode="json")
+
+    async def on_groups_preview(self, env: Envelope) -> dict:
+        return editor.preview(GroupsDraft.model_validate(env.payload)).model_dump(mode="json")
 
 
     async def on_dispatch(self, env: Envelope) -> None:

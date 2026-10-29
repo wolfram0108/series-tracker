@@ -6,8 +6,12 @@ so the two cannot drift apart unnoticed. Modules import their contracts from her
 from .alignment import AlignmentJob, DubResult, JobStatus, SubmitOutcome, SubmitReply
 from .release import Release, ReleaseSource, ReleaseTitle
 from .voices import (DubEvent, DubEventStatus, DubHint, DubItem, DubRecord, DubsSnapshot, DubState, DubStatus,
-                     Layout, LayoutRole, LayoutVoice, Reason, SkippedSource, SnapshotItem)
+                     GroupsDraft, Layout, LayoutRole, LayoutVoice, Reason, SettingDefaults, SettingProblem,
+                     SkippedSource, SnapshotItem, VoiceGroup, VoiceGroups, VoiceSettingsDraft, VoiceSettingsSaved,
+                     VoiceSettingsView)
 
 __all__ = ["AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitReply", "Release", "ReleaseSource", "ReleaseTitle", "DubEvent",
            "DubEventStatus", "DubHint", "DubItem", "DubRecord", "DubsSnapshot", "DubState", "DubStatus", "Layout", "LayoutRole",
-           "LayoutVoice", "Reason", "SnapshotItem"]
+           "LayoutVoice", "Reason", "SnapshotItem", "GroupsDraft", "SettingDefaults", "SettingProblem",
+           "SkippedSource", "VoiceGroup", "VoiceGroups", "VoiceSettingsDraft", "VoiceSettingsSaved",
+           "VoiceSettingsView"]

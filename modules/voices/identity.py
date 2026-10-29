@@ -24,6 +24,11 @@ def _fold(name: str) -> str:
     return _NOISE.sub("", name.casefold())
 
 
+def folded_name(name: str) -> str:
+    """The form in which two spellings of a name are compared."""
+    return _fold(name)
+
+
 def usable_aliases(raw: object) -> dict[str, str]:
     """The entries of user data that pair two non-empty names; anything else is not trusted."""
     if not isinstance(raw, dict):

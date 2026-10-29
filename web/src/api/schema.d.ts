@@ -962,6 +962,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/voices/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Voices Settings
+         * @description Настройки озвучек: как действуют сейчас, значения по умолчанию, отвергнутые сохранённые значения.
+         */
+        get: operations["voices_settings_api_voices_settings_get"];
+        /**
+         * Save Voices Settings
+         * @description Форма целиком: либо записана, либо отказ с кодами причин (`saved: false`) и ничего не записано.
+         */
+        put: operations["save_voices_settings_api_voices_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/voices/groups/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Voices Groups Preview
+         * @description Какие из имён озвучек считаются одной озвучкой по правилам черновика (несохранённым).
+         */
+        post: operations["voices_groups_preview_api_voices_groups_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/debug_flags": {
         parameters: {
             query?: never;
@@ -1444,6 +1488,22 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /**
+         * GroupsDraft
+         * @description Names of voice-overs to be grouped by the rules of a draft (not yet saved).
+         */
+        GroupsDraft: {
+            /** Names */
+            names: string[];
+            /** Voice Aliases */
+            voice_aliases: {
+                [key: string]: string;
+            };
+            /** Player Aliases */
+            player_aliases: {
+                [key: string]: string;
+            };
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1642,6 +1702,24 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** SettingDefaults */
+        SettingDefaults: {
+            /** Priority */
+            priority: string[];
+            /** Temp Root */
+            temp_root: string;
+            /** Max Temp Episodes */
+            max_temp_episodes: number;
+        };
+        /**
+         * SettingProblem
+         * @description What is wrong with one field of the settings; the interface words the reason.
+         */
+        SettingProblem: {
+            /** Field */
+            field: string;
+            detail: components["schemas"]["Reason"];
+        };
         /**
          * SkippedSource
          * @description A source that is not downloaded, and why (its voice is already in the reference).
@@ -1711,6 +1789,79 @@ export interface components {
             items: components["schemas"]["DubItem"][];
         } & {
             [key: string]: unknown;
+        };
+        /** VoiceGroup */
+        VoiceGroup: {
+            /** Key */
+            key: string;
+            /** Members */
+            members: string[];
+        };
+        /**
+         * VoiceGroups
+         * @description The reply of `voices.groups.preview`: which of the names mean the same voice under the draft rules.
+         */
+        VoiceGroups: {
+            /** Groups */
+            groups: components["schemas"]["VoiceGroup"][];
+            /** Problems */
+            problems: components["schemas"]["SettingProblem"][];
+        };
+        /**
+         * VoiceSettingsDraft
+         * @description The settings of the voices as the editor sends them: the whole form, so a save replaces all five values.
+         */
+        VoiceSettingsDraft: {
+            /** Priority */
+            priority: string[];
+            /** Voice Aliases */
+            voice_aliases: {
+                [key: string]: string;
+            };
+            /** Player Aliases */
+            player_aliases: {
+                [key: string]: string;
+            };
+            /** Temp Root */
+            temp_root: string;
+            /** Max Temp Episodes */
+            max_temp_episodes: number;
+        };
+        /**
+         * VoiceSettingsSaved
+         * @description The reply of `voices.settings.set`: saved, or the problems that kept it from being saved.
+         */
+        VoiceSettingsSaved: {
+            /** Saved */
+            saved: boolean;
+            /** Problems */
+            problems: components["schemas"]["SettingProblem"][];
+            settings: components["schemas"]["VoiceSettingsView"];
+        };
+        /**
+         * VoiceSettingsView
+         * @description The reply of `voices.settings.get`: what applies now, what the defaults are, which stored values were refused.
+         */
+        VoiceSettingsView: {
+            /** Priority */
+            priority: string[];
+            /** Voice Aliases */
+            voice_aliases: {
+                [key: string]: string;
+            };
+            /** Player Aliases */
+            player_aliases: {
+                [key: string]: string;
+            };
+            /** Temp Root */
+            temp_root: string;
+            /** Max Temp Episodes */
+            max_temp_episodes: number;
+            defaults: components["schemas"]["SettingDefaults"];
+            /** Rejected */
+            rejected: string[];
+            /** Known Voices */
+            known_voices: string[];
         };
         /**
          * DubEventStatus
@@ -4074,6 +4225,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DynamicObject"];
+                };
+            };
+        };
+    };
+    voices_settings_api_voices_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceSettingsView"];
+                };
+            };
+        };
+    };
+    save_voices_settings_api_voices_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoiceSettingsDraft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceSettingsSaved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    voices_groups_preview_api_voices_groups_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupsDraft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceGroups"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

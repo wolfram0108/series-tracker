@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 
 from core import BusRequestError
 from core import logging as core_logging
+from core.contracts import GroupsDraft, VoiceGroups, VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView
 
 from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse, ParsedUrl
 
@@ -217,6 +218,23 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return {"paths": reply["paths"]}
         reply = await gw.request("settings.paths.list", {}, timeout=10)
         return {"paths": reply["paths"]}
+
+    # --- озвучки: настройки и группы (проверка и запись — в модуле voices) ----------
+
+    @r.get("/api/voices/settings", response_model=VoiceSettingsView)
+    async def voices_settings():
+        """Настройки озвучек: как действуют сейчас, значения по умолчанию, отвергнутые сохранённые значения."""
+        return await gw.request("voices.settings.get", {}, timeout=10)
+
+    @r.put("/api/voices/settings", response_model=VoiceSettingsSaved)
+    async def save_voices_settings(draft: VoiceSettingsDraft):
+        """Форма целиком: либо записана, либо отказ с кодами причин (`saved: false`) и ничего не записано."""
+        return await gw.request("voices.settings.set", draft.model_dump(mode="json"), timeout=10)
+
+    @r.post("/api/voices/groups/preview", response_model=VoiceGroups)
+    async def voices_groups_preview(draft: GroupsDraft):
+        """Какие из имён озвучек считаются одной озвучкой по правилам черновика (несохранённым)."""
+        return await gw.request("voices.groups.preview", draft.model_dump(mode="json"), timeout=10)
 
     async def _refresh_debug_groups():
         reply = await gw.request("settings.values.by_prefix",

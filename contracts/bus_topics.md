@@ -19,9 +19,9 @@
 | renaming | reprocess, process_torrent {…, dry_run?} (разбор состава без переименования), tasks.active, preview (Р-21) |
 | library | directories.list, relocate, relocation.active |
 | metadata | search, details, map.get/list/set (владелец series_tmdb_mappings, Р-19) |
-| settings | value.get, value.set, values.by_prefix (Р-22) |
+| settings | value.get, value.set, values.by_prefix (Р-22), values.set_many {values: {ключ: значение}} → запись пачкой в одной транзакции, `settings.changed` на каждый ключ (Р-54) |
 | trackerauth | fetch, credentials.get/set (Р-22, владелец auth) |
-| voices | layout {sources: [{url, player, studio, kind, episodes, links?}], mode?, reference?} → раскладка озвучек сериала с ключом озвучки (Р-39); приоритет источников — настройка `voices.source_priority`; dispatch {series_id} (скан → озвучки серий во временный каталог, Р-40); dubs.get {series_id} → записи voice_dubs |
+| voices | layout {sources: [{url, player, studio, kind, episodes, links?}], mode?, reference?} → раскладка озвучек сериала с ключом озвучки (Р-39); приоритет источников — настройка `voices.source_priority`; dispatch {series_id} (скан → озвучки серий во временный каталог, Р-40); dubs.get {series_id} → записи voice_dubs; settings.get {} → `VoiceSettingsView` (настройки как действуют, умолчания, отвергнутые поля, известные имена озвучек); settings.set `VoiceSettingsDraft` → `VoiceSettingsSaved` (форма проверяется целиком и пишется через settings.values.set_many либо отклоняется с кодами причин, Р-54); groups.preview {names, voice_aliases, player_aliases} → `VoiceGroups` (группы имён по правилам несохранённого черновика) |
 | conform | submit {ref, dubs, out_dir, cache_dir, label?, key?} → {job_id} \| {rejected} \| {unavailable, retry} (постановка серии, Р-41; `key` попадает в метку задачи); job.find {key} → {reachable, job_id}; cancel {job_id} → {done}; job.get {job_id} → итог задачи; status {} → {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks} — зеркало очереди выравнивания демона track-muxer (Р-39); слушает `gateway.sse.clients` |
 
 ## События (издатель → подписчики)

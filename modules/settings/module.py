@@ -23,6 +23,7 @@ class SettingsModule(BaseModule):
         self.handle("settings.value.get", self.on_get)
         self.handle("settings.value.set", self.on_set)
         self.handle("settings.values.by_prefix", self.on_by_prefix)
+        self.handle("settings.values.set_many", self.on_set_many)
         self.handle("settings.paths.list", self.on_paths_list)
         self.handle("settings.paths.add", self.on_paths_add)
         self.handle("settings.paths.remove", self.on_paths_remove)
@@ -42,6 +43,14 @@ class SettingsModule(BaseModule):
         await self.repo.set(key, value)
         self.publish_event("settings.changed", {"key": key, "value": value})
         return {"key": key, "value": value}
+
+    async def on_set_many(self, env: Envelope) -> dict:
+        """{values: {key: value}} written in one transaction; settings.changed follows for every key."""
+        values = {str(key): str(value) for key, value in env.payload["values"].items()}
+        await self.repo.set_many(values)
+        for key, value in values.items():
+            self.publish_event("settings.changed", {"key": key, "value": value})
+        return {"values": values}
 
     async def on_by_prefix(self, env: Envelope) -> dict:
         """{values: {key: value}} — например, debug_enabled_* (Р-22)."""
