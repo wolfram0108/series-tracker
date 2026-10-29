@@ -89,7 +89,7 @@ const resultClass = (r: ConformResult) =>
           : t("agents.conform.daemon.idle") }}
       </div>
       <template v-else>
-        <div class="queue-row conform-daemon">
+        <div class="queue-row">
           <div class="pill pill-success">
             {{ t("agents.conform.daemon.up", { version: str(q.conform.daemon.version), device: str(q.conform.daemon.gpu_name || q.conform.daemon.device) }) }}
           </div>
