@@ -22,9 +22,12 @@ class EchoModule(BaseModule):
 
 @pytest.fixture
 async def system(tmp_path):
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><title>test</title>")
     bus = Bus()
     gateway = GatewayModule(bus, static_dir=str(tmp_path), auth_required=False,
-                            templates_dir=str(tmp_path), diag=True)
+                            templates_dir=str(tmp_path), web_dist_dir=str(dist), diag=True)
     runner = Runner(bus, [gateway, EchoModule(bus)])
     await runner.start()
     transport = httpx.ASGITransport(app=gateway.app)
