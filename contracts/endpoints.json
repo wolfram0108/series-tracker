@@ -94,7 +94,7 @@
   "conditional": null,
   "summary": "Адрес демона выравнивания и карта путей: как действуют сейчас",
   "panel_sites": [
-   "components/settings/SettingsConformServer.vue:39"
+   "components/settings/SettingsConformServer.vue:37"
   ]
  },
  {
@@ -107,7 +107,7 @@
   "conditional": null,
   "summary": "Записать адрес и карту путей целиком (адрес применяется сразу) или получить коды причин отказа",
   "panel_sites": [
-   "components/settings/SettingsConformServer.vue:52"
+   "components/settings/SettingsConformServer.vue:48"
   ]
  },
  {

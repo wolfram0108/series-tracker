@@ -21,9 +21,7 @@ class ConformSettingsDraft(BaseModel):
 
 
 class ConformSettingsView(ConformSettingsDraft):
-    """The reply of `conform.settings.get`: what applies now and the map to return to."""
-
-    default_path_map: list[PathPair]
+    """The reply of `conform.settings.get`: what applies now."""
 
 
 class ConformSettingsSaved(BaseModel):

@@ -1438,15 +1438,13 @@ export interface components {
         };
         /**
          * ConformSettingsView
-         * @description The reply of `conform.settings.get`: what applies now and the map to return to.
+         * @description The reply of `conform.settings.get`: what applies now.
          */
         ConformSettingsView: {
             /** Url */
             url: string;
             /** Path Map */
             path_map: components["schemas"]["PathPair"][];
-            /** Default Path Map */
-            default_path_map: components["schemas"]["PathPair"][];
         };
         /** CreatedSeries */
         CreatedSeries: {

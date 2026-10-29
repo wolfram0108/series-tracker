@@ -79,4 +79,4 @@ def stored(draft: ConformSettingsDraft) -> dict[str, str]:
 
 
 def view(url: str, path_map: Mapping[str, str]) -> ConformSettingsView:
-    return ConformSettingsView(url=url, path_map=pairs(path_map), default_path_map=pairs(DEFAULT_PATH_MAP))
+    return ConformSettingsView(url=url, path_map=pairs(path_map))

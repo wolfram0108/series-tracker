@@ -153,7 +153,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | GET, POST, DELETE | `/api/settings/saved_paths` | Сохранённые пути загрузки | `SettingsDebug.vue`, `SavedPathDropdown.vue` |
 | GET, POST | `/api/settings/debug_flags` | Флаги отладочного логирования | `LogsLoggingTab.vue` |
 | GET | `/api/voices/settings` | Группы озвучек и порядок источников (`VoiceSettingsView`): как действуют сейчас, порядок по умолчанию, отвергнутые сохранённые значения (Р-54) | `SettingsVoices.vue` |
-| GET | `/api/conform/settings` | Адрес демона выравнивания и карта путей (`ConformSettingsView`): как действуют сейчас, карта по умолчанию (Р-57) | `SettingsConformServer.vue` |
+| GET | `/api/conform/settings` | Адрес демона выравнивания и карта путей (`ConformSettingsView`): как действуют сейчас (Р-57) | `SettingsConformServer.vue` |
 | PUT | `/api/conform/settings` | Адрес и карта целиком (`ConformSettingsDraft` {url, path_map}); ответ `ConformSettingsSaved`: `saved: true`, новый адрес применён сразу, либо `saved: false` и коды причин, ничего не записано (Р-57) | `SettingsConformServer.vue` |
 | PUT | `/api/voices/settings` | Группы и порядок целиком (`VoiceSettingsDraft` {priority, voice_groups}); ответ `VoiceSettingsSaved`: `saved: true` и действующие значения либо `saved: false` и коды причин, ничего не записано. Экран шлёт каждое действие сразу (Р-54) | `SettingsVoices.vue` |
 | POST | `/api/tmdb/search` | Поиск сериала в TMDB | `AddSeriesModal.vue`, `StatusProperties.vue` |

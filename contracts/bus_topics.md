@@ -48,7 +48,7 @@
 | conform.cancel {job_id} (запрос) → {done} | voices | conform | — |
 | conform.job.find {key} (запрос) → {reachable, job_id} | voices | conform | — |
 | conform.workspace {dub_folder?, reference_folder?} (запрос) → {out_dir, cache_dir, scratch} — раскладка папок демона; чистая, демон не опрашивается | voices | conform | — |
-| conform.settings.get {} (запрос) → `ConformSettingsView` {url, path_map: [{local, daemon}], default_path_map}: адрес демона и карта путей, как действуют сейчас (Р-57) | gateway | conform | — |
+| conform.settings.get {} (запрос) → `ConformSettingsView` {url, path_map: [{local, daemon}]}: адрес демона и карта путей, как действуют сейчас (Р-57) | gateway | conform | — |
 | conform.settings.set `ConformSettingsDraft` {url, path_map} (запрос) → `ConformSettingsSaved` {saved, problems, settings}: проверка целиком, запись через settings.values.set_many, новый адрес применяется сразу; отказ — коды причин, ничего не записано (Р-57) | gateway | conform | — |
 | voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, hint, detail, epoch, rev, job_id, file} — `DubEvent` (job_id и file — как очередь выравнивания называет озвучку) | voices | gateway | voice_dub_update (Р-43, Р-44) |
 | voices.dubs.snapshot {epoch, rev, items} — `DubsSnapshot` (при gateway.sse.clients) | voices | gateway | voice_dubs_snapshot |

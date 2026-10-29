@@ -20,7 +20,7 @@ Query:
       sent (or the daemon asked to come back later) and asking again soon may work. `uncertain`: the request
       was sent and nothing well-formed came back, so the daemon may have the job; the caller keeps the key
       and asks conform.job.find, it does not send again.
-  conform.settings.get {} -> ConformSettingsView {url, path_map: [{local, daemon}], default_path_map}: what applies now.
+  conform.settings.get {} -> ConformSettingsView {url, path_map: [{local, daemon}]}: what applies now.
   conform.settings.set {url, path_map} -> ConformSettingsSaved {saved, problems, settings}: checked as a whole, written
       through settings.values.set_many and taken at once, or refused with coded problems and nothing written.
   conform.workspace {dub_folder?, reference_folder?} -> {out_dir, cache_dir, scratch}   only what is asked for:

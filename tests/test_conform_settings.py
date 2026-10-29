@@ -72,7 +72,7 @@ async def test_nothing_stored_the_address_of_the_environment_and_the_default_map
     try:
         view = await probe.request("conform.settings.get", {}, timeout=3)
         assert view["url"] == "http://env:8787" and [c.base_url for c in made] == ["http://env:8787"]
-        assert view["path_map"] == view["default_path_map"] == [{"local": "/nas", "daemon": "/mnt/meganas/media"}]
+        assert view["path_map"] == [{"local": "/nas", "daemon": "/mnt/meganas/media"}]
     finally:
         await runner.stop()
 
