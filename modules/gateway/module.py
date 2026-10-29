@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import secrets
+import signal
 
 from fastapi import FastAPI, Request  # Request нужен diag-роуту
 from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse,
@@ -156,12 +157,15 @@ SSE_MAP: dict[str, tuple[str, object]] = {
     "voices.dub.changed": ("voice_dub_update", None),
     "voices.dubs.snapshot": ("voice_dubs_snapshot", None),
     "voices.settings.changed": ("voice_settings_update", None),
+    "conform.settings.changed": ("conform_settings_update", None),
     "renaming.finished": ("renaming_complete", None),
     "library.relocation.started": ("relocation_started", None),
     "library.relocation.finished": ("relocation_finished", None),
 }
 
 _KEEPALIVE_SECONDS = 15.0
+# Put into a stream's queue to end it: uvicorn waits for open responses before it stops the app.
+_STREAM_END = object()
 
 
 class GatewayModule(BaseModule):
@@ -179,6 +183,8 @@ class GatewayModule(BaseModule):
         self._web_dist_dir = web_dist_dir
         self._diag = diag
         self._sse_clients = 0
+        self._sse_subs: dict = {}
+        self._restore_signals: list = []
         # путь к SQLite — только для админ-вкладки БД (Р-22: сознательный
         # обход Р-7, отладочный инструмент пользователя)
         self.db_path = db_path
@@ -208,6 +214,34 @@ class GatewayModule(BaseModule):
         # Начальная загрузка debug-групп логирования (Р-22): settings
         # может стартовать позже gateway — добираем с повторами.
         self._tasks.append(asyncio.create_task(self._load_debug_groups()))
+        self._end_streams_on_stop_signal()
+
+    async def on_stop(self) -> None:
+        for number, previous in self._restore_signals:
+            signal.signal(number, previous)
+        self._restore_signals.clear()
+
+    def _end_streams_on_stop_signal(self) -> None:
+        # The signal is the only notice before uvicorn starts waiting; the graceful-shutdown limit is the fuse.
+        loop = asyncio.get_running_loop()
+        for number in (signal.SIGINT, signal.SIGTERM):
+            previous = signal.getsignal(number)
+
+            def handler(signum, frame, previous=previous):
+                loop.call_soon_threadsafe(self._end_streams)
+                if callable(previous):
+                    previous(signum, frame)
+
+            try:
+                signal.signal(number, handler)
+            except ValueError:  # not the main thread: only the limit ends the streams
+                return
+            if previous is not None:
+                self._restore_signals.append((number, previous))
+
+    def _end_streams(self) -> None:
+        for sub in list(self._sse_subs.values()):
+            sub.queue.put_nowait(_STREAM_END)
 
     async def _load_debug_groups(self) -> None:
         from core import logging as core_logging
@@ -357,6 +391,7 @@ class GatewayModule(BaseModule):
         # Разрыв соединения обнаруживает Starlette: он закрывает генератор
         # (GeneratorExit), и finally снимает подписку.
         sub = self.bus.subscribe("#")
+        self._sse_subs[sub.sub_id] = sub
         self._sse_clients += 1
         # Счётчик подключений — страховка эфемерных состояний (Р-11):
         # при count=0 catalog сбрасывает все viewing.
@@ -371,6 +406,8 @@ class GatewayModule(BaseModule):
                     # Комментарий держит соединение живым через прокси.
                     yield ": keepalive\n\n"
                     continue
+                if env is _STREAM_END:
+                    return
                 if env.kind != "event":
                     continue
                 mapping = SSE_MAP.get(env.topic)
@@ -381,6 +418,7 @@ class GatewayModule(BaseModule):
                 data = json.dumps(payload, ensure_ascii=False)
                 yield f"event: {sse_name}\ndata: {data}\n\n"
         finally:
+            self._sse_subs.pop(sub.sub_id, None)
             self.bus.unsubscribe(sub)
             self._sse_clients -= 1
             self.publish_event("gateway.sse.clients",
