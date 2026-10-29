@@ -219,16 +219,16 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         reply = await gw.request("settings.paths.list", {}, timeout=10)
         return {"paths": reply["paths"]}
 
-    # --- озвучки: настройки и группы (проверка и запись — в модуле voices) ----------
+    # Checking and storing belong to the voices module; the gateway only forwards.
 
     @r.get("/api/voices/settings", response_model=VoiceSettingsView)
     async def voices_settings():
-        """Группы озвучек и порядок источников: как действуют сейчас, порядок по умолчанию."""
+        """What applies now; the screen shows exactly this."""
         return await gw.request("voices.settings.get", {}, timeout=10)
 
     @r.put("/api/voices/settings", response_model=VoiceSettingsSaved)
     async def save_voices_settings(draft: VoiceSettingsDraft):
-        """Группы и порядок целиком: либо записаны, либо отказ с кодами причин (`saved: false`) и ничего не записано."""
+        """Written whole or refused with coded reasons (`saved: false`); a refusal writes nothing."""
         return await gw.request("voices.settings.set", draft.model_dump(mode="json"), timeout=10)
 
     async def _refresh_debug_groups():

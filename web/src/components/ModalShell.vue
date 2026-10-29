@@ -37,8 +37,8 @@ onUnmounted(() => document.removeEventListener("keydown", onKey))
 // фон не прокручивается, пока окно открыто (scroll chaining)
 useBodyScrollLock()
 
-// Вкладки шапки сами выбирают вид по тому, что помещается, а не по ширине экрана: сначала
-// отступы плотнее, потом подписи в иконки, а если не помещаются и иконки, полоса прокручивается.
+// A screen-width breakpoint broke with the seventh tab, so the tabs fit the room they get:
+// tighter padding, then icons, then scrolling.
 const header = ref<HTMLElement | null>(null)
 let observer: ResizeObserver | null = null
 let shownTab: Element | null = null

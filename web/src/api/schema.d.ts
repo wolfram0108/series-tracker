@@ -971,12 +971,12 @@ export interface paths {
         };
         /**
          * Voices Settings
-         * @description Группы озвучек и порядок источников: как действуют сейчас, порядок по умолчанию.
+         * @description What applies now; the screen shows exactly this.
          */
         get: operations["voices_settings_api_voices_settings_get"];
         /**
          * Save Voices Settings
-         * @description Группы и порядок целиком: либо записаны, либо отказ с кодами причин (`saved: false`) и ничего не записано.
+         * @description Written whole or refused with coded reasons (`saved: false`); a refusal writes nothing.
          */
         put: operations["save_voices_settings_api_voices_settings_put"];
         post?: never;

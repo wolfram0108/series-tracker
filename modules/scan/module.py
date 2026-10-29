@@ -626,8 +626,8 @@ class ScanModule(BaseModule):
 
     @staticmethod
     def _ignored_episodes(series: dict) -> dict[int, set[int]]:
-        """Серии, отключённые пользователем заранее (series.ignored_episodes, как у торрентов): новая
-        строка такой серии создаётся отключённой и не попадает ни в загрузку, ни в озвучки."""
+        """Episodes the user switched off in advance, as for torrents: their rows are created switched off,
+        so neither the download nor the voice-overs take them."""
         try:
             return parse_memory(json.loads(series.get("ignored_episodes") or "{}"))
         except (json.JSONDecodeError, TypeError):

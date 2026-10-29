@@ -105,13 +105,13 @@
   content: attr(data-text); grid-area: 1 / 1;
   font-weight: 600; height: 0; visibility: hidden; white-space: nowrap;
 }
-/* подписи суммарно не влезают (меряет ModalShell): невыбранные → иконка, выбранная
-   остаётся развёрнутой. Порога по ширине экрана нет: вид зависит от места в шапке. */
+/* Labels collapse only when the tabs do not fit (ModalShell measures it): a screen-width breakpoint
+   suits one fixed number of tabs only. */
 .modern-header.tabs-compact .st-tab:not(.active) .tab-label { max-width: 0; opacity: 0; margin-left: -8px; }
 .modern-header.tabs-tight .st-tab { padding-inline: 10px; gap: 6px; }
 .modern-header.tabs-icons .st-tab .tab-label { max-width: 0; opacity: 0; margin-left: -8px; }
 .modern-header.tabs-measuring .st-tab .tab-label { transition: none; }
-/* не помещаются и иконки: остров прокручивается и не выталкивает крестик */
+/* Even icons may not fit: the strip scrolls so that it never pushes the close button out. */
 .modern-header .st-tabs { overflow-x: auto; scrollbar-width: none; min-width: 5rem; }
 .modern-header .st-tabs::-webkit-scrollbar { display: none; }
 
