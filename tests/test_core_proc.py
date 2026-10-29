@@ -10,29 +10,9 @@ import pytest
 
 from core import proc
 from core.ffprobe import duration_of
+from proc_helpers import Spy, alive, stalled_downloader
 
 SLEEP = [sys.executable, "-c", "import time; time.sleep(60)"]
-
-
-def alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
-
-
-class Spy:
-    """Remembers the processes that core.proc starts."""
-
-    def __init__(self):
-        self.started = []
-        self._real = asyncio.create_subprocess_exec
-
-    async def __call__(self, *args, **kwargs):
-        process = await self._real(*args, **kwargs)
-        self.started.append(process)
-        return process
 
 
 @pytest.mark.asyncio
@@ -78,13 +58,6 @@ async def test_duration_of_a_real_file_and_of_what_cannot_be_read(tmp_path):
 async def test_without_ffprobe_the_duration_is_unknown_not_an_error():
     with patch("core.ffprobe.shutil.which", return_value=None):
         assert await duration_of("/any/file.mp4") == 0.0
-
-
-def stalled_downloader(tmp_path) -> str:
-    script = tmp_path / "yt-dlp"
-    script.write_text("#!/bin/sh\nexec sleep 60\n")
-    script.chmod(0o755)
-    return str(script)
 
 
 @pytest.mark.asyncio

@@ -163,6 +163,21 @@ async def _drain_stderr(stream) -> list[bytes]:
     return tail
 
 
+class _Silent(Exception):
+    """A running program printed nothing for too long, or ran past its total time."""
+
+
+async def _next_line(proc, program: str, started: float, total: float | None = None) -> bytes:
+    """The next line of a program's output; the program is declared silent after STALL_TIMEOUT_S."""
+    try:
+        line = await asyncio.wait_for(proc.stdout.readline(), STALL_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        raise _Silent(f"{program}: нет прогресса {STALL_TIMEOUT_S:.0f} с (timeout)") from None
+    if total is not None and time.monotonic() - started > total:
+        raise _Silent(f"{program}: загрузка дольше {total:.0f} с (timeout)")
+    return line
+
+
 async def _probe_duration(video_url: str) -> float:
     """Длительность видео из yt-dlp (метаданные источника — НАДЁЖНО).
     ffprobe промежуточного MPEG-TS даёт заниженную длительность (находка
@@ -333,14 +348,11 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
         assert proc.stdout is not None
         while True:
             try:
-                line = await asyncio.wait_for(proc.stdout.readline(), STALL_TIMEOUT_S)
-            except asyncio.TimeoutError:
-                stopped = f"ffmpeg: нет прогресса {STALL_TIMEOUT_S:.0f} с (timeout)"
+                line = await _next_line(proc, "ffmpeg", started, DOWNLOAD_TIMEOUT_S)
+            except _Silent as exc:
+                stopped = str(exc)
                 break
             if not line:
-                break
-            if time.monotonic() - started > DOWNLOAD_TIMEOUT_S:
-                stopped = f"ffmpeg: загрузка дольше {DOWNLOAD_TIMEOUT_S:.0f} с (timeout)"
                 break
             text = line.decode("utf-8", errors="replace").strip()
             if "=" not in text:
@@ -456,22 +468,31 @@ async def _phase_download(video_url: str, full_output_path: str,
         "-o", out_template, video_url,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr))
+    stopped = ""
+    started = time.monotonic()
     try:
         assert proc.stdout is not None
         while True:
-            line = await proc.stdout.readline()
+            try:
+                line = await _next_line(proc, "yt-dlp", started)
+            except _Silent as exc:
+                stopped = str(exc)
+                break
             if not line:
                 break
             data = parse_progress_line(line.decode("utf-8", errors="replace"))
             if data:
                 await on_progress(data)
-        await proc.wait()
+        if not stopped:
+            await proc.wait()
     finally:
         if proc.returncode is None:  # отмена/сбой — убить процесс (находка 45)
             proc.kill()
             await proc.wait()
     tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
 
+    if stopped:
+        return False, stopped
     if proc.returncode != 0:
         error = _ytdlp_error(
             tail, f"yt-dlp завершился с кодом {proc.returncode}")
@@ -515,10 +536,16 @@ async def _phase_remux(raw: str, full_output_path: str,
     # ffmpeg намертво виснет на записи в него (deadlock — находка 48).
     stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr))
     fields: dict[str, str] = {}
+    stopped = ""
+    started = time.monotonic()
     try:
         assert proc.stdout is not None
         while True:
-            line = await proc.stdout.readline()
+            try:
+                line = await _next_line(proc, "ffmpeg remux", started)
+            except _Silent as exc:
+                stopped = str(exc)
+                break
             if not line:
                 break
             text = line.decode("utf-8", errors="replace").strip()
@@ -535,6 +562,9 @@ async def _phase_remux(raw: str, full_output_path: str,
             await proc.wait()
     tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
 
+    if stopped:
+        _remove_file(tmp_out)
+        return False, stopped
     if proc.returncode == 0:
         os.replace(tmp_out, full_output_path)  # атомарная публикация
         await on_progress({"phase": "remux", "progress": 100, "eta": 0,

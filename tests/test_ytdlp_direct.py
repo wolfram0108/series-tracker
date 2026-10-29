@@ -1,11 +1,14 @@
 """Direct ffmpeg download of a web player's stream: reconnects, completeness, stalls."""
+import asyncio
 import os
 import stat
+from unittest.mock import patch
 
 import pytest
 
 from modules.downloads import ytdlp
 from modules.downloads.module import _transient_download_error
+from proc_helpers import Spy, alive, stalled_downloader
 
 FFMPEG = """#!/bin/bash
 echo "$@" > "$FAKE_DIR/ffmpeg_args"
@@ -142,3 +145,27 @@ async def test_the_stream_length_is_probed_again_after_a_failed_look(fake, tmp_p
     ok, error = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"},
                                                     str(tmp_path / "e.mp4"), noop)
     assert len(calls) == 2 and not ok and "обрыв" in error  # the third look saw the real length
+
+
+@pytest.mark.asyncio
+async def test_a_silent_downloader_is_stopped_and_counted_as_a_transient_failure(tmp_path, monkeypatch):
+    spy = Spy()
+    monkeypatch.setattr(ytdlp, "STALL_TIMEOUT_S", 0.3)
+    with patch("modules.downloads.ytdlp.asyncio.create_subprocess_exec", spy), \
+            patch.object(ytdlp.shutil, "which", return_value=stalled_downloader(tmp_path)):
+        result = await asyncio.wait_for(
+            ytdlp._phase_download("https://vk.test/v", str(tmp_path / "e.mp4"), noop, 1, ytdlp.HLS_FORMAT), 10)
+    assert result[0] is False and "нет прогресса" in result[1] and _transient_download_error(result[1])
+    assert not alive(spy.started[0].pid)
+
+
+@pytest.mark.asyncio
+async def test_a_silent_remux_is_stopped_and_leaves_no_partial_file(tmp_path, monkeypatch):
+    spy = Spy()
+    monkeypatch.setattr(ytdlp, "STALL_TIMEOUT_S", 0.3)
+    target = str(tmp_path / "e.mp4")
+    with patch("modules.downloads.ytdlp.asyncio.create_subprocess_exec", spy), \
+            patch.object(ytdlp.shutil, "which", return_value=stalled_downloader(tmp_path, "ffmpeg")):
+        ok, error = await asyncio.wait_for(ytdlp._phase_remux(str(tmp_path / "raw.ts"), target, noop, 10.0), 10)
+    assert not ok and "нет прогресса" in error and _transient_download_error(error)
+    assert not alive(spy.started[0].pid) and not os.path.exists(target + ".remux.mp4")
