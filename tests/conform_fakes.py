@@ -4,7 +4,7 @@ import asyncio
 import httpx
 
 from core.reasons import reason
-from modules.conform import DaemonRefused
+from modules.conform import DaemonRefused, Unconfirmed
 
 
 class FakeClient:
@@ -45,7 +45,7 @@ class FakeClient:
             self.lose_answers -= 1
             job_id = f"j-{len(self.enqueued)}"
             self.known[job_id] = {"id": job_id, "label": body.get("label"), "status": "queued"}
-            raise httpx.ReadTimeout("no answer")
+            raise Unconfirmed("ReadTimeout: no answer")
         return {"id": "j-new", "status": "queued"}
 
     async def job(self, job_id):

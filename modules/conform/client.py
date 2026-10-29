@@ -19,6 +19,32 @@ class DaemonRefused(RuntimeError):
     """The daemon understood the request and refused it: asking again will not help."""
 
 
+class NotDelivered(RuntimeError):
+    """The request certainly did not take effect at the daemon: nothing was queued, sending it again is safe."""
+
+
+class Unconfirmed(RuntimeError):
+    """The request may have taken effect and the daemon's answer cannot be relied on: only a look at the daemon
+    tells what became of it."""
+
+
+# Failures before the request left this machine, and answers that say the daemon did not take it up.
+NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+TRY_AGAIN_STATUSES = (408, 425, 429)
+
+
+def _json(response: httpx.Response) -> Any:
+    """The body as JSON; a body that is not one is a failed answer like any other."""
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise httpx.DecodingError(str(exc), request=response.request) from exc
+
+
+def _problem(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+
+
 class DaemonClient:
     def __init__(self, base_url: str, http: httpx.AsyncClient | None = None) -> None:
         self.base_url = base_url.rstrip("/")
@@ -33,13 +59,28 @@ class DaemonClient:
                 "gpu": bool(device.get("gpu")), "gpu_name": device.get("name")}
 
     async def enqueue(self, body: dict[str, Any]) -> dict[str, Any]:
-        """Queue one episode job; the daemon answers with the job."""
-        response = await self._http.post(f"{self.base_url}/conform/enqueue", json=body,
-                                         timeout=REQUEST_TIMEOUT_S)
+        """Queue one episode job; the daemon answers with the job. The outcome is told by what was proved:
+        a refusal and a failure before sending are certain, and everything after the sending that is not a
+        well-formed acceptance is unconfirmed."""
+        try:
+            response = await self._http.post(f"{self.base_url}/conform/enqueue", json=body,
+                                             timeout=REQUEST_TIMEOUT_S)
+        except NOT_SENT as exc:
+            raise NotDelivered(_problem(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise Unconfirmed(_problem(exc)) from exc
+        if response.status_code in TRY_AGAIN_STATUSES:
+            raise NotDelivered(reason("daemon_busy", status=response.status_code))
         if 400 <= response.status_code < 500:
             raise DaemonRefused(reason("daemon_refused", status=response.status_code, text=response.text[:300]))
-        response.raise_for_status()
-        return response.json()
+        try:
+            response.raise_for_status()
+            job = response.json()
+            if not isinstance(job, dict) or not job.get("id"):
+                raise ValueError("the answer names no job")
+        except (httpx.HTTPError, ValueError) as exc:
+            raise Unconfirmed(_problem(exc)) from exc
+        return job
 
     async def cancel(self, job_id: str) -> bool:
         """Stop a job and let the daemon drop its temporary files; False when it knows no such job."""
@@ -53,7 +94,10 @@ class DaemonClient:
         """Every job the daemon knows."""
         response = await self._http.get(f"{self.base_url}/conform/jobs", timeout=REQUEST_TIMEOUT_S)
         response.raise_for_status()
-        return response.json()
+        jobs = _json(response)
+        if not isinstance(jobs, list):
+            raise httpx.DecodingError("the list of jobs is not a list", request=response.request)
+        return jobs
 
     async def job(self, job_id: str) -> dict[str, Any] | None:
         """The whole job, or None when the daemon no longer knows it."""
@@ -62,7 +106,7 @@ class DaemonClient:
         if response.status_code == 404:
             return None
         response.raise_for_status()
-        return response.json()
+        return _json(response)
 
     async def events(self) -> AsyncIterator[tuple[str, dict[str, Any]]]:
         """(name, payload) of every conform event of the daemon, in order, until the stream ends."""

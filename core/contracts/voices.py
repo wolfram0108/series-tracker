@@ -55,6 +55,7 @@ class DubHint(StrEnum):
     DOWNLOAD_QUEUED = "download_queued"
     DOWNLOADING = "downloading"
     READY = "ready"
+    AWAITING_ANSWER = "awaiting_answer"
     ALIGNING_WAIT = "aligning_wait"
     ALIGNING_RUN = "aligning_run"
     ALIGNED = "aligned"

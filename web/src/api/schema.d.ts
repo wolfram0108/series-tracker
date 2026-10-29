@@ -192,8 +192,8 @@ export interface paths {
         };
         /**
          * Series Voices
-         * @description Озвучки серий сериала (этап 8б): состояние каждой дополнительной
-         *     озвучки по сериям. Дальше состояние приходит событием voice_dub_update.
+         * @description The voice-overs of a series by episode, each with its state; later changes come as the
+         *     voice_dub_update event.
          */
         get: operations["series_voices_api_series__series_id__voices_get"];
         put?: never;
@@ -1381,7 +1381,7 @@ export interface components {
          * @description Which sentence explains a state when there is no reason to show (several steps share a state).
          * @enum {string}
          */
-        DubHint: "planned" | "download_queued" | "downloading" | "ready" | "aligning_wait" | "aligning_run" | "aligned" | "done";
+        DubHint: "planned" | "download_queued" | "downloading" | "ready" | "awaiting_answer" | "aligning_wait" | "aligning_run" | "aligned" | "done";
         /** DubItem */
         DubItem: {
             /** Season */
@@ -1498,8 +1498,8 @@ export interface components {
         };
         /**
          * ParsedUrl
-         * @description Разбор адреса для формы добавления: поля источника и раскладки озвучек — модели контрактов, прочее
-         *     проходит насквозь.
+         * @description A parsed address for the add form: the source and layout fields are contract models, the rest
+         *     passes through.
          */
         ParsedUrl: {
             /**
@@ -1704,7 +1704,7 @@ export interface components {
         };
         /**
          * VoiceDubs
-         * @description Озвучки сериала (этап 8б); форма записи — модель контракта core.contracts.DubItem.
+         * @description The voice-overs of a series; the shape of a record is the contract model core.contracts.DubItem.
          */
         VoiceDubs: {
             /** Items */

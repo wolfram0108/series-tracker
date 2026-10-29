@@ -8,7 +8,7 @@ import pytest
 
 from core import Bus
 from core.contracts import (AlignmentJob, DubEvent, DubEventStatus, DubHint, DubState, DubStatus, DubsSnapshot,
-                            JobStatus, LayoutRole)
+                            JobStatus, LayoutRole, SubmitOutcome, SubmitReply)
 from modules.conform.module import finished_view
 from modules.gateway import GatewayModule
 from modules.sources.video_providers import get_default_registry
@@ -85,6 +85,25 @@ def test_the_repository_changes_a_step_only_by_a_declared_transition_and_names_n
     assert named <= declared | groups, "the repository names a transition that the lifecycle does not declare"
     assert declared <= named, "a transition is declared that no write uses"
     assert not re.search(r"status\s*=\s*'", source) and not re.search(r"status\s+IN\s*\(\s*'", source)
+
+
+def test_a_reply_to_a_submission_is_one_of_four_outcomes_and_anything_else_is_not_a_reply():
+    from pydantic import ValidationError
+    assert SubmitReply.accepted("j1").outcome is SubmitOutcome.ACCEPTED
+    assert SubmitReply.unavailable("down", retry=True).retry is True
+    for built in (SubmitReply.rejected("no"), SubmitReply.uncertain("lost")):
+        assert SubmitReply.model_validate(built.model_dump()) == built
+    for unclear in ({"job_id": "j1"}, {"rejected": "no"}, {"outcome": "accepted"}, {"outcome": "uncertain"},
+                    {"outcome": "maybe", "reason": "x"}, {}):
+        with pytest.raises(ValidationError):
+            SubmitReply.model_validate(unclear)
+
+
+def test_a_voice_over_that_was_sent_and_has_no_job_number_says_that_its_answer_is_not_known():
+    state = public_state("aligning", None)
+    assert public_hint("aligning", state, None) is DubHint.AWAITING_ANSWER
+    assert public_hint("aligning", state, "j1") is DubHint.ALIGNING_WAIT
+    assert public_hint("ready", public_state("ready")) is DubHint.READY
 
 
 def test_the_end_of_a_job_is_built_and_read_with_one_model():

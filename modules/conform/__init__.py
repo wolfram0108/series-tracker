@@ -1,4 +1,4 @@
-from .client import DaemonClient, DaemonRefused
+from .client import DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
 from .module import ConformModule
 
-__all__ = ["ConformModule", "DaemonClient", "DaemonRefused"]
+__all__ = ["ConformModule", "DaemonClient", "DaemonRefused", "NotDelivered", "Unconfirmed"]

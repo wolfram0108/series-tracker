@@ -8,24 +8,26 @@ The daemon owns the state; this module keeps no database. Without a daemon addre
 
 Query:
   conform.status {} -> {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks: [...]}
-  conform.submit {ref, dubs: [path], out_dir, cache_dir, label?, key?}
-      -> {job_id} | {rejected: reason} | {unavailable: reason, retry: bool} | {uncertain: reason}
+  conform.submit {ref, dubs: [path], out_dir, cache_dir, label?, key?} -> SubmitReply (core/contracts):
+      {outcome, job_id?, reason?, retry}
       One episode: a reference video and the voice-over files to align to it, local paths. `key`
       is written into the job's label so that the job can be found again when the answer is lost.
-      `rejected` is final (a path outside the shared storage, a refusal of the daemon). `uncertain`:
-      the request may have reached the daemon (the answer was lost): the caller keeps the key and asks
-      conform.job.find, it does not send again.
-      `unavailable` is not final and the request certainly did not leave: with retry=false the daemon is
-      not configured or down and the caller waits for conform.daemon.up; with retry=true the connection
-      failed before the request was sent and asking again soon may work.
+      The outcome is what was proved. `accepted`: the daemon named the job. `rejected` is final: a path
+      outside the shared storage, found before anything is sent, or a refusal of the daemon. `unavailable`:
+      the request certainly did not take effect: with retry=false the daemon is not configured or down and
+      the caller waits for conform.daemon.up; with retry=true the connection failed before the request was
+      sent (or the daemon asked to come back later) and asking again soon may work. `uncertain`: the request
+      was sent and nothing well-formed came back, so the daemon may have the job; the caller keeps the key
+      and asks conform.job.find, it does not send again.
   conform.workspace {dub_folder?, reference_folder?} -> {out_dir, cache_dir, scratch}   only what is asked for:
       the folders the daemon is asked to write the aligned tracks and its cache to for the voice-overs in
       dub_folder, and the scratch folder it leaves next to a reference video. Pure: no daemon is asked.
   conform.cancel {job_id} -> {done: bool} — stop a job whose result nobody needs any more; `done` is
       true when it is stopped or the daemon does not know it, false when the daemon could not be reached.
   conform.job.find {key} -> {reachable: bool, job_id: str | None} — the job sent with this key.
-  conform.job.get {job_id} -> {job_id, status, error, results}   status `gone` when the daemon
-      no longer knows the job; results as in conform.job.finished.
+  conform.job.get {job_id} -> {job_id, status, error, results}   status `gone` only when the daemon was
+      asked and does not know the job; when it cannot be asked the query fails; results as in
+      conform.job.finished.
 Event:
   conform.queue.changed {daemon, tasks}   the whole picture on every change and whenever an
                                           interface connects (gateway.sse.clients)
@@ -46,19 +48,17 @@ from typing import Any
 import httpx
 
 from core import BaseModule, BusRequestError
-from core.contracts import AlignmentJob, DubResult, JobStatus
+from core.contracts import AlignmentJob, DubResult, JobStatus, SubmitReply
 from core.envelope import Envelope
 from core.reasons import describe, reason
 
-from .client import DaemonClient, DaemonRefused
+from .client import DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
 from .paths import DEFAULT_PATH_MAP, reverse, translate, workspace
 
 BACKOFF_START_S = 2.0
 BACKOFF_MAX_S = 30.0
 PATH_MAP_KEY = "conform.path_map"
 ENDED = ("done", "failed", "cancelled")
-# Failures before the request left this machine: the daemon has certainly not seen it.
-NOT_DELIVERED = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 _JOB_FIELDS = ("id", "label", "status", "progress", "stage", "stage_pct", "detail", "dub_index",
                "dub_total", "cur_dub", "elapsed_s", "error", "created_at", "updated_at")
@@ -145,32 +145,39 @@ class ConformModule(BaseModule):
 
     async def on_submit(self, env: Envelope) -> dict:
         if self._client is None:
-            return {"unavailable": reason("conform_not_configured"), "retry": False}
+            return SubmitReply.unavailable(reason("conform_not_configured"), retry=False).model_dump()
         if not self._daemon.get("up"):
-            return {"unavailable": reason("conform_down", error=self._daemon.get("error") or ""), "retry": False}
+            return SubmitReply.unavailable(reason("conform_down", error=self._daemon.get("error") or ""),
+                                           retry=False).model_dump()
         payload = env.payload
-        mapping = await self._path_map()
+        label = payload.get("label") or ""
+        try:  # before anything is sent: a problem here is a certain refusal
+            body = self._request_body(payload, await self._path_map())
+        except ValueError as exc:
+            self.log.warning("conform: задача %s отклонена: %s", label, describe(str(exc)))
+            return SubmitReply.rejected(str(exc)).model_dump()
         try:
-            body = {"ref": translate(payload["ref"], mapping),
-                    "dubs": [translate(path, mapping) for path in payload["dubs"]],
-                    "out_dir": translate(payload["out_dir"], mapping),
-                    "cache_dir": translate(payload["cache_dir"], mapping),
-                    "keep_tmp": False, "label": job_label(payload.get("label"), payload.get("key"))}
             job = await self._client.enqueue(body)
-        except (ValueError, DaemonRefused) as exc:
-            self.log.warning("conform: задача %s отклонена: %s", payload.get("label") or "", describe(str(exc)))
-            return {"rejected": str(exc)}
-        except httpx.HTTPError as exc:
-            problem = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
-            if isinstance(exc, NOT_DELIVERED):
-                self.log.warning("conform: задача %s не поставлена: %s", payload.get("label") or "", problem)
-                return {"unavailable": reason("conform_unreachable", error=problem), "retry": True}
+        except DaemonRefused as exc:
+            self.log.warning("conform: задача %s отклонена: %s", label, describe(str(exc)))
+            return SubmitReply.rejected(str(exc)).model_dump()
+        except NotDelivered as exc:
+            self.log.warning("conform: задача %s не поставлена: %s", label, exc)
+            return SubmitReply.unavailable(reason("conform_unreachable", error=str(exc)), retry=True).model_dump()
+        except Unconfirmed as exc:
             # The request may have reached the daemon: the caller must ask by the key, not send again.
-            self.log.warning("conform: ответа на постановку %s нет: %s", payload.get("label") or "", problem)
-            return {"uncertain": reason("conform_no_answer", error=problem)}
-        self.log.info("conform: поставлена задача %s (%s), озвучек %d", job.get("id"),
-                      payload.get("label") or "", len(body["dubs"]))
-        return {"job_id": job["id"]}
+            self.log.warning("conform: ответа на постановку %s нет: %s", label, exc)
+            return SubmitReply.uncertain(reason("conform_no_answer", error=str(exc))).model_dump()
+        self.log.info("conform: поставлена задача %s (%s), озвучек %d", job["id"], label, len(body["dubs"]))
+        return SubmitReply.accepted(str(job["id"])).model_dump()
+
+    @staticmethod
+    def _request_body(payload: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any]:
+        return {"ref": translate(payload["ref"], mapping),
+                "dubs": [translate(path, mapping) for path in payload["dubs"]],
+                "out_dir": translate(payload["out_dir"], mapping),
+                "cache_dir": translate(payload["cache_dir"], mapping),
+                "keep_tmp": False, "label": job_label(payload.get("label"), payload.get("key"))}
 
     async def on_workspace(self, env: Envelope) -> dict:
         return workspace(env.payload.get("dub_folder"), env.payload.get("reference_folder"))
@@ -202,7 +209,9 @@ class ConformModule(BaseModule):
     async def on_job_get(self, env: Envelope) -> dict:
         job_id = env.payload["job_id"]
         job = self._jobs.get(job_id)
-        if job is None and self._client is not None and self._daemon.get("up"):
+        if job is None:
+            if self._client is None or not self._daemon.get("up"):
+                raise RuntimeError(reason("conform_down", error=self._daemon.get("error") or ""))  # not asked is not "gone"
             job = await self._client.job(job_id)
         if job is None:
             return AlignmentJob(job_id=job_id, status=JobStatus.GONE).model_dump(mode="json")

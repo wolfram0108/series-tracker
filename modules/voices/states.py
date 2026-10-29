@@ -38,13 +38,16 @@ def public_state(status: str, job_status: str | None = None, fetching: bool = Tr
     return _STATE_OF.get(step, DubState.PLANNED)
 
 
-def public_hint(status: str, state: DubState) -> DubHint | None:
-    """The sentence behind a state; None for an error, whose reason is shown instead."""
+def public_hint(status: str, state: DubState, job_id: str | None = None) -> DubHint | None:
+    """The sentence behind a state; None for an error, whose reason is shown instead. A voice-over that is
+    being aligned and has no job number was sent and the service's answer is not known."""
     step = DubEventStatus(status)
     if state is DubState.ERROR:
         return None
     if state is DubState.ALIGN_QUEUED:
-        return DubHint.READY if step is DubEventStatus.READY else DubHint.ALIGNING_WAIT
+        if step is DubEventStatus.READY:
+            return DubHint.READY
+        return DubHint.ALIGNING_WAIT if job_id else DubHint.AWAITING_ANSWER
     if state is DubState.RUNNING:
         return DubHint.ALIGNED if step is DubEventStatus.ALIGNED else DubHint.ALIGNING_RUN
     return DubHint(state.value)

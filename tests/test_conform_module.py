@@ -6,7 +6,8 @@ import httpx
 import pytest
 
 from core import BaseModule, Bus, BusRequestError, Runner
-from modules.conform import ConformModule, DaemonClient, DaemonRefused
+from core.envelope import Envelope
+from modules.conform import ConformModule, DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
 from modules.conform.module import compact_job
 from modules.conform.paths import translate
 from conform_fakes import FakeClient
@@ -251,7 +252,7 @@ async def test_submit_sends_the_episode_with_daemon_paths_and_returns_the_job():
     try:
         await until(probe, lambda s: s["daemon"]["up"])
         reply = await probe.request("conform.submit", SUBMIT, timeout=5)
-        assert reply == {"job_id": "j-new"}
+        assert reply == {"outcome": "accepted", "job_id": "j-new", "reason": None, "retry": False}
         sent = client.enqueued[0]
         assert sent["ref"] == "/mnt/meganas/media/lib/S/ep1.mp4"
         assert sent["dubs"] == ["/mnt/meganas/media/torrents/series-tracker/7/s01e01/a.mp4"]
@@ -280,7 +281,8 @@ async def test_submit_fails_when_asking_again_may_help_and_rejects_when_it_canno
     try:
         await until(probe, lambda s: not s["daemon"]["up"])
         down = await probe.request("conform.submit", SUBMIT, timeout=5)
-        assert parse(down["unavailable"])["code"] == "conform_down" and down["retry"] is False
+        assert down["outcome"] == "unavailable" and parse(down["reason"])["code"] == "conform_down"
+        assert down["retry"] is False
     finally:
         await runner.stop()
     client = FakeClient([("conform.snapshot", {"items": []})])
@@ -288,19 +290,18 @@ async def test_submit_fails_when_asking_again_may_help_and_rejects_when_it_canno
     try:
         await until(probe, lambda s: s["daemon"]["up"])
         outside = await probe.request("conform.submit", {**SUBMIT, "ref": "/home/x/a.mp4"}, timeout=5)
-        assert parse(outside["rejected"])["code"] == "path_outside_share" and client.enqueued == []
+        assert outside["outcome"] == "rejected" and parse(outside["reason"])["code"] == "path_outside_share"
+        assert client.enqueued == []
         client.refuse = True
         refused = await probe.request("conform.submit", SUBMIT, timeout=5)
-        assert parse(refused["rejected"])["code"] == "daemon_refused"
-        client.refuse = httpx.ConnectError("refused")
+        assert refused["outcome"] == "rejected" and parse(refused["reason"])["code"] == "daemon_refused"
+        client.refuse = NotDelivered("ConnectError: refused")
         not_sent = await probe.request("conform.submit", SUBMIT, timeout=5)
-        assert not_sent["retry"] is True and parse(not_sent["unavailable"])["code"] == "conform_unreachable"
-        for lost in (httpx.RemoteProtocolError("Server disconnected"), httpx.ReadTimeout("no answer"),
-                     httpx.HTTPStatusError("boom", request=httpx.Request("POST", "http://d"),
-                                           response=httpx.Response(502))):
-            client.refuse = lost
-            unknown = await probe.request("conform.submit", SUBMIT, timeout=5)
-            assert "unavailable" not in unknown and parse(unknown["uncertain"])["code"] == "conform_no_answer"
+        assert not_sent["outcome"] == "unavailable" and not_sent["retry"] is True
+        assert parse(not_sent["reason"])["code"] == "conform_unreachable"
+        client.refuse = Unconfirmed("ReadTimeout: no answer")
+        unknown = await probe.request("conform.submit", SUBMIT, timeout=5)
+        assert unknown["outcome"] == "uncertain" and parse(unknown["reason"])["code"] == "conform_no_answer"
     finally:
         await runner.stop()
     bus = Bus()
@@ -309,7 +310,8 @@ async def test_submit_fails_when_asking_again_may_help_and_rejects_when_it_canno
     await runner.start()
     try:
         idle = await probe.request("conform.submit", SUBMIT, timeout=5)
-        assert parse(idle["unavailable"])["code"] == "conform_not_configured" and idle["retry"] is False
+        assert idle["outcome"] == "unavailable" and parse(idle["reason"])["code"] == "conform_not_configured"
+        assert idle["retry"] is False
     finally:
         await runner.stop()
 
@@ -375,7 +377,7 @@ async def test_the_bridge_announces_when_the_daemon_becomes_reachable():
 
 
 @pytest.mark.asyncio
-async def test_client_enqueue_separates_a_final_refusal_from_a_transient_failure():
+async def test_client_enqueue_separates_a_final_refusal_from_a_failure_that_proves_nothing():
     answers = iter([httpx.Response(200, json={"id": "j1", "status": "queued"}),
                     httpx.Response(422, json={"detail": "bad path"}),
                     httpx.Response(503, text="busy")])
@@ -390,7 +392,7 @@ async def test_client_enqueue_separates_a_final_refusal_from_a_transient_failure
     assert seen[0] == ("POST", "/conform/enqueue", {"ref": "/r", "dubs": []})
     with pytest.raises(DaemonRefused, match="422"):
         await client.enqueue({"ref": "/r", "dubs": []})
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(Unconfirmed, match="503"):
         await client.enqueue({"ref": "/r", "dubs": []})
 
 
@@ -526,3 +528,61 @@ async def test_the_layout_of_the_daemon_is_known_only_here_and_needs_no_daemon()
         assert await probe.request("conform.workspace", {"reference_folder": "/lib"}, timeout=5) == {"scratch": "/lib/_tmp"}
     finally:
         await runner.stop()
+
+
+async def submit_through_the_wire(respond):
+    """The real client over a scripted transport, the real bridge on top: what the wire does, the outcome says."""
+    http = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    bridge = ConformModule(Bus(), DaemonClient("http://daemon", http))
+    bridge._daemon["up"] = True
+    try:
+        return await bridge.on_submit(Envelope("conform.submit", "query", SUBMIT | {"key": "k1"}))
+    finally:
+        await http.aclose()
+
+
+def refuses_to_answer(kind):
+    def respond(request):
+        raise kind("scripted", request=request)
+    return respond
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer, outcome", [
+    (lambda request: httpx.Response(200, json={"id": "j-9"}), "accepted"),
+    (lambda request: httpx.Response(422, text="bad"), "rejected"),
+    (lambda request: httpx.Response(429), "unavailable"),
+    (lambda request: httpx.Response(503), "uncertain"),
+    (lambda request: httpx.Response(200, text="{broken"), "uncertain"),
+    (lambda request: httpx.Response(200, json={"status": "queued"}), "uncertain"),
+    (lambda request: httpx.Response(200, json=["not", "a", "job"]), "uncertain"),
+    (refuses_to_answer(httpx.ConnectError), "unavailable"),
+    (refuses_to_answer(httpx.ConnectTimeout), "unavailable"),
+    (refuses_to_answer(httpx.ReadTimeout), "uncertain"),
+    (refuses_to_answer(httpx.RemoteProtocolError), "uncertain"),
+    (refuses_to_answer(httpx.WriteError), "uncertain"),
+], ids=["accepted", "refused", "try-later", "server-error", "broken-json", "no-job-id", "not-a-job", "no-connection",
+        "connect-timeout", "read-timeout", "dropped", "write-error"])
+async def test_the_outcome_of_a_submission_is_what_was_proved_not_the_kind_of_error(answer, outcome):
+    reply = await submit_through_the_wire(answer)
+    assert reply["outcome"] == outcome, reply
+
+
+@pytest.mark.asyncio
+async def test_a_failure_to_read_the_list_of_jobs_is_no_answer_not_no_job():
+    for body in ("{broken", '{"not": "a list"}'):
+        http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request, body=body: httpx.Response(200, text=body)))
+        bridge = ConformModule(Bus(), DaemonClient("http://daemon", http))
+        bridge._daemon["up"] = True
+        try:
+            assert await bridge.on_job_find(Envelope("conform.job.find", "query", {"key": "k1"})) == {
+                "reachable": False, "job_id": None}
+        finally:
+            await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_daemon_that_cannot_be_asked_does_not_make_a_job_gone():
+    bridge = ConformModule(Bus(), FakeClient())  # never connected: nothing can be asked
+    with pytest.raises(RuntimeError):
+        await bridge.on_job_get(Envelope("conform.job.get", "query", {"job_id": "j1"}))
