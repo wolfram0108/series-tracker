@@ -181,7 +181,7 @@ class VoicesModule(BaseModule):
             self.log.info("озвучки: к докачке %d (прерванных %d)", len(pending), requeued)
         await self._admit()
         await self._sweep_cleanup()
-        for series_id in await self.repo.series_waiting():
+        for series_id in await self.repo.series_with_open_work():
             self._kick(series_id)
 
 
@@ -478,7 +478,7 @@ class VoicesModule(BaseModule):
         await self._sweep_cleanup()
         for job_id in await self.repo.aligning_jobs():
             await self._reconcile(job_id)
-        for series_id in await self.repo.series_waiting():
+        for series_id in await self.repo.series_with_open_work():
             self._kick(series_id)
 
     def _kick(self, series_id: int) -> None:

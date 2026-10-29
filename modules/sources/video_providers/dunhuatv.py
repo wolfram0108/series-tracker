@@ -62,11 +62,12 @@ class TitlePage:
     kodik_frame: str | None
 
 
-def _seasons_of(items: list) -> dict[tuple[str, str, int], set[int]]:
-    """Seasons in which each voice-over of the playlist has each episode number."""
-    found: dict[tuple[str, str, int], set[int]] = {}
+def _seasons_of(items: list) -> dict[int, set[int]]:
+    """Seasons in which each episode number occurs anywhere in the playlist: the season is dropped for the
+    whole catalog, so a number that two seasons share is ambiguous even between different voice-overs."""
+    found: dict[int, set[int]] = {}
     for item in items:
-        found.setdefault((item.studio, item.voice_type, item.episode), set()).add(item.season)
+        found.setdefault(item.episode, set()).add(item.season)
     return found
 
 
@@ -316,7 +317,7 @@ class DunhuaTvProvider(BaseVideoProvider):
         except CdnVideoHubError as exc:
             catalog.reasons["cvh"], catalog.transient = exc.reason, catalog.transient or exc.transient
             return
-        clashing = sorted({episode for (_, _, episode), found in _seasons_of(items).items() if len(found) > 1})
+        clashing = sorted(episode for episode, found in _seasons_of(items).items() if len(found) > 1)
         if clashing:
             catalog.reasons["cvh"] = reason("season_clash", player="CVH", episodes=", ".join(map(str, clashing)))
             return

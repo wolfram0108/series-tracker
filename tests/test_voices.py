@@ -43,8 +43,6 @@ WINNER = [
 FUMODUB_CVH = WINNER[2]["url"]
 
 
-
-
 def test_names_differing_in_case_and_spaces_are_one_voice():
     assert same_voice("RedHeadSound", "Red Head Sound")
     assert same_voice("BLACKCAT", "blackcat")
@@ -80,8 +78,6 @@ def test_rules_that_are_not_names_are_ignored():
     assert Equivalence.of(None, "text").players == {}
 
 
-
-
 def test_reference_is_the_biggest_resolution():
     chosen = choose_reference([
         {"player": "alloha", "resolution": 720}, {"player": "kodik", "resolution": 1080}])
@@ -103,8 +99,6 @@ def test_full_tie_keeps_the_first_listed_and_a_custom_order_wins():
     assert choose_reference(candidates, ["kodik", "cvh"])["player"] == "kodik"
     with pytest.raises(ValueError):
         choose_reference([])
-
-
 
 
 def test_winner_layout_matches_the_agreed_example():
@@ -184,8 +178,6 @@ def test_ranges_show_holes_in_each_source():
     assert (black_cat_cvh["ranges"], black_cat_cvh["count"]) == ("1-10, 13", 11)
 
 
-
-
 @pytest.fixture
 def db_path(tmp_path):
     path = tmp_path / "test.db"
@@ -236,8 +228,6 @@ async def test_a_broken_priority_setting_falls_back_to_the_default(system):
     reply = await system.request("voices.layout", {"sources": WINNER, "reference": FUMODUB_CVH},
                                  timeout=5)
     assert reply["priority"] == list(DEFAULT_PRIORITY)
-
-
 
 
 def linked(player, studio, episodes, kind="", url=None):
@@ -545,8 +535,6 @@ async def test_after_a_restart_interrupted_downloads_are_sent_again(db_path, dub
         assert sorted(f["key"] for f in neighbours.fetches[3:]) == sorted(f["key"] for f in neighbours.fetches[:3])
     finally:
         await again.stop()
-
-
 
 
 def touch(path, content=b"x"):
@@ -959,8 +947,6 @@ async def test_a_scratch_directory_with_content_is_left_alone(dubs):
     assert os.path.isfile(os.path.join(scratch, "run", "buffer.bin"))
 
 
-
-
 async def placed_set(dubs):
     """One episode, two voices, aligned and placed next to the reference; the episode is settled."""
     probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
@@ -1138,8 +1124,6 @@ async def test_an_event_carries_the_voice_and_the_reason_so_the_interface_asks_n
     assert by_voice["blackcat"]["detail"]["code"] == "suspect" and by_voice["redheadsound"]["detail"] is None
 
 
-
-
 def test_every_step_of_a_voice_over_shows_as_one_of_seven_states():
     shown = {status: public_state(status) for status in (
         "pending", "stale", "downloading", "ready", "aligned", "placed", "moved", "rejected", "failed")}
@@ -1276,8 +1260,6 @@ async def test_a_series_whose_provider_has_no_voice_catalog_is_not_even_parsed(d
     assert neighbours.parses == 1
 
 
-
-
 async def capped_two_episodes(dubs, cap="1"):
     probe, neighbours, voices, bus = dubs
     neighbours.sources.append(linked("kodik", "RedHeadSound", range(1, 4)))
@@ -1381,8 +1363,6 @@ async def test_a_placed_track_costs_no_cancel_when_its_reference_is_replaced(dub
     assert neighbours.conform_cancels == []
 
 
-
-
 def test_layout_takes_synonymous_voices_of_different_sites_as_one_voice():
     sources = [src("cvh", "FumoDub", [1, 2], url="https://site/?player=cvh&voice=FumoDub"),
                src("kodik", "AniLibria", [1, 2, 3]), src("cvh", "AniLiberty", [1, 2])]
@@ -1419,8 +1399,6 @@ async def test_the_module_reads_the_rules_from_settings_and_survives_garbage(sys
     assert len([r for r in again["voices"] if r["role"] == "dub"]) == 2
 
 
-
-
 def test_two_voices_with_the_same_safe_title_get_two_names():
     from modules.voices.placement import sidecar_path as path_of
     first = path_of("/lib/Show s01e01.mp4", "AniMy / RuChiMe", ".flac")
@@ -1455,8 +1433,6 @@ async def test_a_track_never_overwrites_the_track_of_another_voice(dubs):
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
     await asyncio.sleep(0.3)
     assert {r["output_path"] for r in await rows(probe)} == placed  # a later look moves nothing
-
-
 
 
 async def serve(probe, neighbours, holder, finished, progress, seconds=60.0):
@@ -1592,9 +1568,6 @@ async def test_a_late_ending_of_a_download_does_not_turn_a_waiting_voice_into_a_
     assert after["status"] == "pending" and row["voice_key"] == after["voice_key"]
 
 
-# files and records that must not part: interrupted moves, failed removals --------------------
-
-
 async def aligned_but_not_placed(dubs):
     probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
@@ -1658,6 +1631,34 @@ async def test_an_interrupted_follow_of_the_video_is_finished_too(dubs):
     assert after["status"] == "placed" and after["output_path"] == expected and after["move_from"] is None
     assert os.path.isfile(expected) and not os.path.exists(row["output_path"])
     assert len(library_files(neighbours)) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_move_begun_for_a_placed_track_is_finished_by_the_next_start(db_path, dubs):
+    from modules.voices.placement import sidecar_path as path_of
+
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
+    await quiet(voices)
+    row = (await voices.repo.for_series(7))[0]
+    renamed = os.path.join(neighbours.library, "Renamed 01.mp4")
+    os.rename(ref, renamed)
+    neighbours.references[1] = "Renamed 01.mp4"
+    expected = path_of(renamed, row["voice_label"], ".flac")
+    await voices.repo.begin_move(row["id"], expected, row["output_path"])  # the module stops right here
+    await voices.stop()
+    again = VoicesModule(bus, Database(db_path))
+    await again.start()
+    try:
+        deadline = asyncio.get_running_loop().time() + 5
+        while (await again.repo.get(row["id"]))["move_from"] is not None:
+            assert asyncio.get_running_loop().time() < deadline, "the begun move was not taken up at the start"
+            await asyncio.sleep(0.02)
+        assert os.path.isfile(expected) and not os.path.exists(row["output_path"])
+    finally:
+        await again.stop()
 
 
 @pytest.mark.asyncio
@@ -1744,9 +1745,6 @@ async def test_a_removal_that_the_storage_does_not_answer_is_journaled_not_await
     assert [entry["path"] for entry in await voices.repo.cleanup_list()] == ["/some/slow/file"]
 
 
-# a request whose answer is lost, a job that must not be sent twice -------------------------
-
-
 async def ready_to_send(dubs, monkeypatch):
     monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.05)
     probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs, finished=False)
@@ -1817,9 +1815,6 @@ async def test_a_cancel_that_could_not_be_made_is_kept_and_made_when_the_service
         assert asyncio.get_running_loop().time() < end
         await asyncio.sleep(0.01)
     assert neighbours.conform_cancels.count("job-1") >= 2
-
-
-# what the interface is told must be what the database holds -------------------------------
 
 
 def drained(sub):
@@ -1922,9 +1917,6 @@ async def test_a_connecting_interface_gets_every_row_at_once_and_newer_packets_w
     assert picture([older], snapshot) == await held(probe)
 
 
-# what the module reads from its settings and from its own rows -----------------------------
-
-
 @pytest.mark.asyncio
 async def test_a_wrong_setting_is_logged_once_and_the_default_is_used(dubs, caplog):
     probe, neighbours, voices, bus = dubs
@@ -1963,9 +1955,6 @@ async def test_changed_rules_do_not_make_a_new_voice_of_a_recorded_one(dubs):
     probe.send_command("voices.dispatch", {"series_id": 7})
     await asyncio.sleep(0.6)
     assert {r["voice_key"] for r in await rows(probe)} == before and len(neighbours.fetches) == 2
-
-
-# the form of the output is behind a contract: another form changes no code of the module -------------
 
 
 class FolderOutput:

@@ -135,10 +135,12 @@ class VoicesRepository:
     async def delete_for_series(self, series_id: int) -> None:
         await self._db.execute("DELETE FROM voice_dubs WHERE series_id=?", (series_id,))
 
-    async def series_waiting(self) -> list[int]:
-        """Series with a voice-over that is on disk or aligned and still has to move on."""
+    async def series_with_open_work(self) -> list[int]:
+        """Series that have something to carry on after a stop: a voice-over that waits for its reference, or
+        an operation that was begun and not finished, whatever step the voice-over is at."""
         marks, steps = _in(lifecycle.WAITS_FOR_REFERENCE)
-        rows = await self._db.fetch_all(f"SELECT DISTINCT series_id FROM voice_dubs WHERE status {marks}", steps)
+        rows = await self._db.fetch_all(
+            f"SELECT DISTINCT series_id FROM voice_dubs WHERE status {marks} OR move_from IS NOT NULL", steps)
         return [row["series_id"] for row in rows]
 
     async def by_job(self, job_id: str) -> list[dict[str, Any]]:

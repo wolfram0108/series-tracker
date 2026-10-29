@@ -25,9 +25,6 @@ def ts_block(name: str) -> str:
     return SCHEMA_TS[start:SCHEMA_TS.index("\n        };", start)]
 
 
-# --- the interface sees the same names as the core ---------------------------------------------
-
-
 @pytest.mark.parametrize("enum", [DubStatus, DubEventStatus, DubState, DubHint, LayoutRole])
 def test_every_value_of_a_public_enum_is_in_the_generated_types(enum):
     block = ts_block(enum.__name__)
@@ -53,9 +50,6 @@ def test_every_state_and_hint_has_its_wording_and_every_wording_has_a_state_or_h
         assert wordings == {member.value for member in enum}, prefix
 
 
-# --- the state shown to the user is total -------------------------------------------------------
-
-
 @pytest.mark.parametrize("status", list(DubEventStatus))
 @pytest.mark.parametrize("job", [None, "queued", "running"])
 @pytest.mark.parametrize("fetching", [True, False])
@@ -63,9 +57,6 @@ def test_every_step_has_a_state_and_every_state_but_an_error_has_a_hint(status, 
     state = public_state(status, job, fetching)
     hint = public_hint(status, state)
     assert isinstance(state, DubState) and (hint is None) == (state is DubState.ERROR)
-
-
-# --- the life of a row is one table -------------------------------------------------------------
 
 
 def test_every_step_can_be_reached_from_the_start_by_the_transitions():
@@ -96,9 +87,6 @@ def test_the_repository_changes_a_step_only_by_a_declared_transition_and_names_n
     assert not re.search(r"status\s*=\s*'", source) and not re.search(r"status\s+IN\s*\(\s*'", source)
 
 
-# --- the alignment service is read in one place -------------------------------------------------
-
-
 def test_the_end_of_a_job_is_built_and_read_with_one_model():
     view = finished_view({"id": "j1", "status": "done", "error": None, "results": [
         {"dub": "a__rus__x__720p.mp4", "ok": True, "out_path": "/mnt/meganas/media/x/a.flac",
@@ -126,7 +114,8 @@ def test_the_aligned_track_is_where_the_module_asked_for_it():
     ({"ok": True, "critical": ["no common sound"]}, "critical"),
     ({"ok": True, "suspect": True, "warnings": ["drift"]}, "suspect"),
     ({"ok": True, "suspect": True}, "suspect_residual"),
-    ({"ok": True}, "clean"),
+    ({"ok": True}, "output_missing"),
+    ({"ok": True, "out_path": "/data/7/s01e01/_aligned/a.flac"}, "clean"),
 ])
 def test_a_result_is_admitted_by_the_services_own_verdict_alone(result, code):
     from core.contracts import DubResult
@@ -138,9 +127,6 @@ def test_a_result_is_admitted_by_the_services_own_verdict_alone(result, code):
         assert parse(refusal)["params"]["text"] == "no match"
     else:
         assert parse(refusal)["code"] == code
-
-
-# --- a provider is checked against the same contract --------------------------------------------
 
 
 def test_every_registered_provider_declares_what_the_contract_asks():

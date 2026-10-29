@@ -395,8 +395,8 @@ async def test_parse_release_falls_back_to_kodik_when_cvh_is_absent(site, provid
     assert parse(release["players"]["cvh"]["reason"]) == {"code": "page_no_player", "params": {"player": "CVH"}}
 
 
-def _second_season(*episodes):
-    items = [{"cvhId": f"s2-{n}", "vkId": f"s2v{n}", "voiceStudio": "AniStar", "voiceType": "Многоголосый",
+def _second_season(*episodes, studio="AniStar"):
+    items = [{"cvhId": f"s2-{n}", "vkId": f"s2v{n}", "voiceStudio": studio, "voiceType": "Многоголосый",
               "season": 2, "episode": n} for n in episodes]
     return {"isSerial": True, "items": PLAYLIST["items"] + items}
 
@@ -421,6 +421,15 @@ async def test_a_cvh_catalog_without_other_players_names_the_season_clash(site, 
             await provider.parse_release(PAGE_URL, http)
     causes = parse(str(refused.value))["params"]["causes"]
     assert parse(causes[0])["code"] == "season_clash" and parse(causes[0])["params"]["episodes"] == "1, 2"
+
+
+@pytest.mark.asyncio
+async def test_a_number_that_two_seasons_share_is_refused_even_between_different_voice_overs(site, provider):
+    site.playlist = _second_season(1, studio="Some Other Studio")
+    async with site.client() as http:
+        release = await provider.parse_release(PAGE_URL, http)
+    assert {s["player"] for s in release["sources"]} == {"kodik"}
+    assert parse(release["players"]["cvh"]["reason"])["code"] == "season_clash"
 
 
 @pytest.mark.asyncio
