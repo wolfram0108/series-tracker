@@ -107,4 +107,36 @@ describe("voices store", () => {
     store.snapshot(snapshot(950, [], 1))
     expect(store.forEpisode(7, 1, 2)[0]).toMatchObject({ status: "ready" })
   })
+  it("does not bring a removed voice-over back after an empty snapshot", () => {
+    const store = useVoicesStore()
+    store.apply(event(2, { status: "removed" }))
+    store.snapshot(snapshot(3, []))
+    store.apply(event(1, { status: "downloading", state: "downloading", hint: "downloading" }))
+    expect(store.forEpisode(7, 1, 2)).toEqual([])
+  })
+
+  it("holds an empty snapshot of a later run against every packet of an earlier one", () => {
+    const store = useVoicesStore()
+    store.snapshot(snapshot(1, [], 2))
+    store.apply(event(500, { epoch: 1 }))
+    expect(store.forEpisode(7, 1, 2)).toEqual([])
+    store.apply(event(2, { epoch: 2 }))
+    expect(store.forEpisode(7, 1, 2)).toHaveLength(1)
+  })
+
+  it("ignores a snapshot that is older than the one it already took in", () => {
+    const store = useVoicesStore()
+    store.snapshot(snapshot(10, [dub()]))
+    store.snapshot(snapshot(5, []))
+    expect(store.forEpisode(7, 1, 2)).toHaveLength(1)
+  })
+
+  it("lets a packet newer than the last snapshot through and keeps that order after forgetting old marks", () => {
+    const store = useVoicesStore()
+    store.apply(event(4, { status: "removed" }))
+    store.snapshot(snapshot(5, []))
+    store.apply(event(7, { status: "ready" }))
+    store.apply(event(6, { status: "aligning", state: "running" }))
+    expect(store.forEpisode(7, 1, 2)[0]).toMatchObject({ status: "ready" })
+  })
 })

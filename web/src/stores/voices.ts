@@ -24,6 +24,10 @@ export const useVoicesStore = defineStore("voices", () => {
   const bySlot = ref<Record<string, VoiceDub[]>>({})
   // The newest stamp seen per voice-over; a removed one stays here so that a late packet cannot revive it.
   const stamps = new Map<string, Stamp>()
+  // The newest full picture taken in: it also says what did not exist, so a packet not newer than it is dropped.
+  let whole: Stamp = NEVER
+  // The latest start of the core heard from; whatever an earlier start sent is history.
+  let epoch = 0
 
   const byLabel = (a: VoiceDub, b: VoiceDub) => a.voice_label.localeCompare(b.voice_label)
 
@@ -31,7 +35,8 @@ export const useVoicesStore = defineStore("voices", () => {
     const key = slot(event.series_id, event.season, event.episode)
     const id = identity(key, event.voice_key)
     const stamp = { epoch: event.epoch, rev: event.rev }
-    if (!newer(stamp, stamps.get(id) ?? NEVER)) return
+    if (stamp.epoch < epoch || !newer(stamp, whole) || !newer(stamp, stamps.get(id) ?? NEVER)) return
+    epoch = stamp.epoch
     stamps.set(id, stamp)
     const list = (bySlot.value[key] ?? []).filter((v) => v.voice_key !== event.voice_key)
     if (event.status !== "removed") {
@@ -53,12 +58,13 @@ export const useVoicesStore = defineStore("voices", () => {
   /** Replaces what is known by the snapshot, except what a newer packet has already changed. */
   function snapshot(packet: VoiceDubsSnapshot): void {
     const stamp = { epoch: packet.epoch, rev: packet.rev }
+    if (stamp.epoch < epoch || !newer(stamp, whole)) return
+    whole = stamp
+    epoch = stamp.epoch
     const next: Record<string, VoiceDub[]> = {}
-    const shown = new Set<string>()
     for (const item of packet.items) {
       const key = slot(item.series_id, item.season, item.episode)
       const id = identity(key, item.voice_key)
-      shown.add(id)
       if (newer(stamps.get(id) ?? NEVER, stamp)) continue
       stamps.set(id, stamp)
       ;(next[key] ??= []).push({
@@ -77,8 +83,9 @@ export const useVoicesStore = defineStore("voices", () => {
         if (newer(stamps.get(identity(key, dub.voice_key)) ?? NEVER, stamp)) (next[key] ??= []).push(dub)
       }
     }
+    // What the picture covers needs no mark of its own: `whole` rejects anything that is not newer than it.
     for (const [id, seen] of [...stamps]) {
-      if (!newer(seen, stamp) && !shown.has(id)) stamps.delete(id)
+      if (!newer(seen, stamp)) stamps.delete(id)
     }
     for (const list of Object.values(next)) list.sort(byLabel)
     bySlot.value = next
