@@ -12,7 +12,6 @@ from urllib.parse import urlsplit
 from core.contracts import (ConformSettingsDraft, ConformSettingsView, PathPair, Reason, SettingProblem)
 from core.reasons import parse as parse_reason, reason
 
-from .paths import DEFAULT_PATH_MAP
 
 URL_KEY = "conform.url"
 PATH_MAP_KEY = "conform.path_map"
@@ -31,14 +30,14 @@ def pairs(mapping: Mapping[str, str]) -> list[PathPair]:
 
 
 def path_map_of(raw: str | None) -> dict[str, str]:
-    """The stored map, or the default one when nothing usable is stored."""
+    """The stored map; empty when nothing usable is stored: there is no default, the owner names the folders."""
     try:
         value = json.loads(raw or "null")
     except (TypeError, ValueError):
         value = None
     if isinstance(value, dict) and value and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
         return value
-    return dict(DEFAULT_PATH_MAP)
+    return {}
 
 
 def clean(draft: ConformSettingsDraft) -> ConformSettingsDraft:
@@ -56,7 +55,7 @@ def check(draft: ConformSettingsDraft) -> list[SettingProblem]:
         found = urlsplit(draft.url)
         if found.scheme not in ("http", "https") or not found.hostname or " " in draft.url:
             problems.append(_problem("url", reason("conform_url_invalid", url=draft.url)))
-    if not draft.path_map:
+    if draft.url and not draft.path_map:
         problems.append(_problem("path_map", reason("path_map_empty")))
     seen: set[str] = set()
     for row in draft.path_map:

@@ -21,13 +21,17 @@ def job(job_id, seq=1, status="running", **fields):
             "trace": [{"big": "x" * 50}], "ops": [{"op": "decode"}], "results": [], **fields}
 
 
+# The code names no folder: the settings the tests stand in for carry the storage as both servers see it.
+PATH_MAP = {"conform.path_map": json.dumps({"/nas": "/mnt/meganas/media"})}
+
+
 class Settings(BaseModule):
     """Answers settings.value.get from a dict."""
 
     name = "settings"
 
     def __init__(self, bus, values=None):
-        self.values = values or {}
+        self.values = dict(PATH_MAP) if values is None else values
         super().__init__(bus)
 
     def register(self):
@@ -265,6 +269,19 @@ async def test_submit_sends_the_episode_with_daemon_paths_and_returns_the_job():
         assert sent["dubs"] == ["/mnt/meganas/media/torrents/series-tracker/7/s01e01/a.mp4"]
         assert sent["out_dir"].endswith("/7/s01e01/_aligned") and sent["keep_tmp"] is False
         assert sent["label"] == "S s01e01"
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_without_a_path_map_nothing_is_sent_and_the_reason_says_so():
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    _, probe, runner = await started(client, {})
+    try:
+        await until(probe, lambda status: status["daemon"]["up"])
+        reply = await probe.request("conform.submit", SUBMIT, timeout=5)
+        assert reply["outcome"] == "unavailable" and reply["retry"] is False
+        assert parse(reply["reason"])["code"] == "conform_no_path_map" and client.enqueued == []
     finally:
         await runner.stop()
 
@@ -542,6 +559,11 @@ async def submit_through_the_wire(respond):
     http = httpx.AsyncClient(transport=httpx.MockTransport(respond))
     bridge = ConformModule(Bus(), DaemonClient("http://daemon", http))
     bridge._daemon["up"] = True
+
+    async def named():  # no settings module here: the storage as the owner would have named it
+        return json.loads(PATH_MAP["conform.path_map"])
+
+    bridge._path_map = named
     try:
         return await bridge.on_submit(Envelope("conform.submit", "query", SUBMIT | {"key": "k1"}))
     finally:

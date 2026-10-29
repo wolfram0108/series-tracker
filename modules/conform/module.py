@@ -5,7 +5,7 @@ pushes it to the interface, queues episode jobs for the voices module and report
 The daemon owns the state; this module keeps no database. The daemon address is the setting `conform.url`
 (`ST_CONFORM_URL` while none is stored; without an address the module is idle) and a saved address is taken at once,
 without a restart. Paths cross the boundary through the setting `conform.path_map` (JSON {local prefix: daemon
-prefix}, default {"/nas": "/mnt/meganas/media"}).
+prefix}; no default, the owner names the storage as both servers see it).
 
 Query:
   conform.status {} -> {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks: [...]}
@@ -15,8 +15,8 @@ Query:
       is written into the job's label so that the job can be found again when the answer is lost.
       The outcome is what was proved. `accepted`: the daemon named the job. `rejected` is final: a path
       outside the shared storage, found before anything is sent, or a refusal of the daemon. `unavailable`:
-      the request certainly did not take effect: with retry=false the daemon is not configured or down and
-      the caller waits for conform.daemon.up; with retry=true the connection failed before the request was
+      the request certainly did not take effect: with retry=false the daemon is not configured, has no path map or is down
+      and the caller waits for conform.daemon.up; with retry=true the connection failed before the request was
       sent (or the daemon asked to come back later) and asking again soon may work. `uncertain`: the request
       was sent and nothing well-formed came back, so the daemon may have the job; the caller keeps the key
       and asks conform.job.find, it does not send again.
@@ -207,8 +207,11 @@ class ConformModule(BaseModule):
                                            retry=False).model_dump()
         payload = env.payload
         label = payload.get("label") or ""
+        mapping = await self._path_map()
+        if not mapping:
+            return SubmitReply.unavailable(reason("conform_no_path_map"), retry=False).model_dump()
         try:  # before anything is sent: a problem here is a certain refusal
-            body = self._request_body(payload, await self._path_map())
+            body = self._request_body(payload, mapping)
         except ValueError as exc:
             self.log.warning("conform: задача %s отклонена: %s", label, describe(str(exc)))
             return SubmitReply.rejected(str(exc)).model_dump()

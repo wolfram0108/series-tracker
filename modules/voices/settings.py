@@ -15,14 +15,13 @@ VOICE_GROUPS_KEY = "voices.groups"
 PLAYER_GROUPS_KEY = "voices.player_groups"
 TEMP_ROOT_KEY = "voices.temp_root"
 MAX_TEMP_KEY = "voices.max_temp_episodes"
-DEFAULT_TEMP_ROOT = "/nas/torrents/series-tracker"
 
 
 @dataclass(frozen=True)
 class VoiceSettings:
     priority: tuple[str, ...] = tuple(DEFAULT_PRIORITY)
     rules: Equivalence = Equivalence()
-    temp_root: str = DEFAULT_TEMP_ROOT
+    temp_root: str = ""  # empty: the owner has not named the work folder, no voice-over is started
     max_temp_episodes: int = 0
     problems: tuple[str, ...] = ()
     # The groups as spelled by the user ({group: [names that put a voice-over or a player into it]}; the rules
@@ -71,7 +70,7 @@ def parse(values: Mapping[str, str | None]) -> VoiceSettings:
         priority = None
     root = (values.get(TEMP_ROOT_KEY) or "").strip()
     if root and not os.path.isabs(root):
-        problems.append(f"{TEMP_ROOT_KEY}: ожидается абсолютный путь, применён {DEFAULT_TEMP_ROOT}")
+        problems.append(f"{TEMP_ROOT_KEY}: ожидается абсолютный путь, рабочая папка не задана")
         rejected.append(TEMP_ROOT_KEY)
         root = ""
     cap_raw = (values.get(MAX_TEMP_KEY) or "").strip()
@@ -90,5 +89,5 @@ def parse(values: Mapping[str, str | None]) -> VoiceSettings:
     return VoiceSettings(
         priority=tuple(priority) if priority else tuple(DEFAULT_PRIORITY),
         rules=Equivalence.of(aliases_of(voices), aliases_of(players)),
-        temp_root=root or DEFAULT_TEMP_ROOT, max_temp_episodes=cap, problems=tuple(problems),
+        temp_root=root, max_temp_episodes=cap, problems=tuple(problems),
         voice_groups=voices, player_groups=players, rejected=tuple(rejected))

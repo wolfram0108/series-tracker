@@ -30,8 +30,10 @@ const problems = ref<Problem[]>([])
 function adopt(view: View) {
   core.value = view
   url.value = view.url
-  rows.value = view.path_map.map((row) => ({ ...row }))
+  rows.value = view.path_map.length ? view.path_map.map((row) => ({ ...row })) : [{ local: "", daemon: "" }]
 }
+
+const filled = (list: Pair[]) => list.filter((row) => row.local.trim() || row.daemon.trim())
 
 async function load() {
   const view = await request(api.GET("/api/conform/settings"), { errorMessage: t("conform.settings.loadFailed") })
@@ -39,7 +41,7 @@ async function load() {
 }
 
 const dirty = computed(() => !!core.value && (url.value !== core.value.url
-  || JSON.stringify(rows.value) !== JSON.stringify(core.value.path_map)))
+  || JSON.stringify(filled(rows.value)) !== JSON.stringify(core.value.path_map)))
 
 /** True when there was nothing to write or the core took it. */
 async function save(): Promise<boolean> {

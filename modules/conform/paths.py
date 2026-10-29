@@ -5,8 +5,6 @@ import os
 
 from core.reasons import reason
 
-DEFAULT_PATH_MAP = {"/nas": "/mnt/meganas/media"}
-
 # The folders the daemon is asked to write to and the one it leaves next to a reference video.
 OUT_DIR = "_aligned"
 CACHE_DIR = "_cache"

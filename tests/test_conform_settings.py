@@ -72,7 +72,7 @@ async def test_nothing_stored_the_address_of_the_environment_and_the_default_map
     try:
         view = await probe.request("conform.settings.get", {}, timeout=3)
         assert view["url"] == "http://env:8787" and [c.base_url for c in made] == ["http://env:8787"]
-        assert view["path_map"] == [{"local": "/nas", "daemon": "/mnt/meganas/media"}]
+        assert view["path_map"] == []
     finally:
         await runner.stop()
 
@@ -148,3 +148,15 @@ def test_a_saved_address_reaches_every_open_screen_by_the_stream_and_the_screen_
     assert f"`{name}`" in (root / "contracts" / "sse_contract.md").read_text(encoding="utf-8")
     for front in ("useRealtime.ts", "useSSE.ts"):
         assert f'"{name}"' in (root / "web" / "src" / "composables" / front).read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_an_address_needs_its_path_map_and_a_missing_address_does_not():
+    _, settings, probe, made, runner = await bridge()
+    try:
+        refused = await probe.request("conform.settings.set", draft(rows=()).model_dump(), timeout=5)
+        assert refused["saved"] is False and codes(refused) == [("path_map", "path_map_empty")] and settings.values == {}
+        saved = await probe.request("conform.settings.set", draft(url="", rows=()).model_dump(), timeout=5)
+        assert saved["saved"] is True and saved["settings"]["path_map"] == []
+    finally:
+        await runner.stop()

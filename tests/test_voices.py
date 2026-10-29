@@ -2805,3 +2805,11 @@ async def test_a_voice_over_in_alignment_tells_the_queue_its_job_and_the_file_it
 
 def test_the_file_a_voice_over_is_sent_as_is_named_in_one_place():
     assert os.path.basename(temp_path("/tmp", 7, 1, 1, "blackcat")) == dub_file("blackcat") == "blackcat.mp4"
+
+
+@pytest.mark.asyncio
+async def test_without_a_work_folder_no_voice_over_is_recorded_or_downloaded(dubs):
+    probe, neighbours, voices, _ = dubs
+    neighbours.settings["voices.temp_root"] = ""
+    await voices._dispatch(7)
+    assert await rows(probe) == [] and neighbours.fetches == []

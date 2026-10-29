@@ -99,3 +99,17 @@ def test_the_settings_reach_every_open_screen_by_the_stream_and_the_screen_liste
     assert name == "voice_settings_update"
     assert f"`{name}`" in (root / "contracts" / "sse_contract.md").read_text(encoding="utf-8")
     assert f'"{name}"' in (root / "web" / "src" / "composables" / "useRealtime.ts").read_text(encoding="utf-8")
+
+
+def test_the_work_folder_may_be_unnamed_must_be_absolute_and_must_not_be_the_top_of_a_storage(monkeypatch):
+    monkeypatch.setattr("modules.voices.editor.os.path.ismount", lambda path: path == "/storage")
+    codes = lambda folder: [p.detail.code for p in editor.check(draft(temp_root=folder), {})]
+    assert codes(None) == [] and codes("") == [] and codes("/storage/work/") == []
+    assert codes("work") == ["work_folder_not_absolute"]
+    assert codes("/storage/") == ["work_folder_is_root"] and codes("/") == ["work_folder_is_root"]
+
+
+def test_the_work_folder_is_written_when_the_draft_carries_it_and_left_alone_when_it_does_not():
+    assert editor.stored(editor.clean(draft(temp_root=" /storage/work/ ")))["voices.temp_root"] == "/storage/work"
+    assert "voices.temp_root" not in editor.stored(editor.clean(draft()))
+    assert editor.view(parse({"voices.temp_root": "/storage/work"})).temp_root == "/storage/work"

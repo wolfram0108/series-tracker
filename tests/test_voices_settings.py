@@ -1,11 +1,11 @@
 """Tests of the typed reading of the voices settings."""
 from modules.voices.layout import DEFAULT_PRIORITY
-from modules.voices.settings import DEFAULT_TEMP_ROOT, parse
+from modules.voices.settings import parse
 
 
 def test_nothing_set_means_the_defaults_and_no_problems():
     settings = parse({})
-    assert settings.priority == tuple(DEFAULT_PRIORITY) and settings.temp_root == DEFAULT_TEMP_ROOT
+    assert settings.priority == tuple(DEFAULT_PRIORITY) and settings.temp_root == ""
     assert settings.max_temp_episodes == 0 and settings.problems == ()
 
 
@@ -21,7 +21,7 @@ def test_each_wrong_value_falls_back_to_its_default_and_is_named():
     settings = parse({"voices.source_priority": '{"a": 1}', "voices.temp_root": "relative/path",
                       "voices.max_temp_episodes": "-2", "voices.groups": "{broken",
                       "voices.player_groups": '["a"]'})
-    assert settings.priority == tuple(DEFAULT_PRIORITY) and settings.temp_root == DEFAULT_TEMP_ROOT
+    assert settings.priority == tuple(DEFAULT_PRIORITY) and settings.temp_root == ""
     assert settings.max_temp_episodes == 0 and settings.rules.voices == {} and settings.rules.players == {}
     named = " ".join(settings.problems)
     for key in ("source_priority", "temp_root", "max_temp_episodes", "voices.groups", "player_groups"):

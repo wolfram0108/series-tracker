@@ -5,8 +5,9 @@ downloaded next to the reference video and later aligned to it.
 
 Settings: voices.source_priority (JSON list of player kinds), voices.groups and voices.player_groups
 (JSON objects {group: [names]}: a voice-over, or a player, called by one of the names belongs to the group),
-voices.temp_root, voices.max_temp_episodes. They are read together (settings.py): a wrong value is logged
-once and its default is used.
+voices.temp_root (the work folder, named by the owner; no default: without it no voice-over is started),
+voices.max_temp_episodes. They are read together (settings.py): a wrong value is logged once and its default
+is used.
 
 Query:
   voices.layout {sources: [{url, player, studio, kind, episodes, links?}], mode?, reference?}
@@ -26,7 +27,7 @@ Command:
   voices.dispatch {series_id} — sent by scan after an explicit scan: read the catalog of the site,
       lay the voices out around the selected reference, record a voice_dubs row per planned
       reference episode and voice, and download what is not on disk yet into the temporary
-      directory (setting `voices.temp_root`, default /nas/torrents/series-tracker).
+      work folder (setting `voices.temp_root`; not set: nothing is recorded or downloaded and the log says so).
 Commands out: downloads.fetch, downloads.fetch.cancel. Queries to conform: workspace (the folders of the service
             for a place, asked of the bridge: this module does not know its layout), submit (with a key that
             finds the job again; the reply is a SubmitReply: accepted, rejected, unavailable (not sent) or
@@ -355,6 +356,9 @@ class VoicesModule(BaseModule):
         series = await self.request("catalog.series.get", {"series_id": series_id})
         if not is_video_source(series["source_type"]) or series["source_type"] == "vk_video":
             return
+        if not await self._temp_root():
+            self.log.warning("сериал %d: озвучки не начаты: рабочая папка не задана в настройках", series_id)
+            return
         info = await self.request("sources.provider.info", {"url": series["url"]}, timeout=10)
         if not info.get("voices"):
             return
@@ -464,6 +468,8 @@ class VoicesModule(BaseModule):
                 return
             cap = await self._temp_cap()
             root = await self._temp_root()
+            if not root:
+                return
             active = await self.repo.active_episodes() if cap else set()
             for row in sorted(waiting, key=lambda r: (r["series_id"], r["season"], r["episode"], r["id"])):
                 episode = (row["series_id"], row["season"], row["episode"])
@@ -478,8 +484,10 @@ class VoicesModule(BaseModule):
         if row["attempt"] >= len(chain):
             await self._fail(row, row["error"] or reason("no_source"))
             return
-        path = temp_path(root or await self._temp_root(), row["series_id"], row["season"],
-                         row["episode"], row["voice_key"])
+        root = root or await self._temp_root()
+        if not root:
+            return
+        path = temp_path(root, row["series_id"], row["season"], row["episode"], row["voice_key"])
         if storage.busy(path):  # an earlier removal of this name has not ended: a file written now could be lost
             self._when_free(path, row["series_id"])
             return
@@ -658,6 +666,8 @@ class VoicesModule(BaseModule):
         series = await self.request("catalog.series.get", {"series_id": series_id})
         in_plan, references = await self._reference_state(series)
         root = await self._temp_root()
+        if not root:  # a folder made of nothing would be a path relative to wherever the service runs
+            return False
         episodes = sorted({(row["season"], row["episode"]) for row in rows})
         restart = False
         owed = False
@@ -1178,8 +1188,8 @@ class VoicesModule(BaseModule):
         rows = await self.repo.for_series(series_id)
         folders = {os.path.dirname(folder) for folder in self._folders_of(rows, "")} - {""}
         # The rows go with their jobs and the folders to remove written to the journal in one transaction.
-        await self.repo.delete_for_series(
-            series_id, folders or {os.path.join(await self._temp_root(), str(series_id))})
+        root = await self._temp_root()
+        await self.repo.delete_for_series(series_id, folders or ({os.path.join(root, str(series_id))} if root else set()))
         for row in rows:
             await self._announce(row, E.REMOVED)
         await self._work_off()

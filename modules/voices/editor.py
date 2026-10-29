@@ -7,6 +7,7 @@ with coded problems; a refused value is never written and never quietly replaced
 from __future__ import annotations
 
 import json
+import os
 from typing import Mapping
 
 from core.contracts import Reason, SettingProblem, VoiceSettingsDraft, VoiceSettingsView
@@ -14,10 +15,10 @@ from core.reasons import parse as parse_reason, reason
 
 from .identity import folded_name
 from .layout import DEFAULT_PRIORITY
-from .settings import PRIORITY_KEY, VOICE_GROUPS_KEY, VoiceSettings
+from .settings import PRIORITY_KEY, TEMP_ROOT_KEY, VOICE_GROUPS_KEY, VoiceSettings
 
 # The field of the screen behind each stored key, for naming the stored value that was refused.
-_FIELD_OF_KEY = {PRIORITY_KEY: "priority", VOICE_GROUPS_KEY: "voice_groups"}
+_FIELD_OF_KEY = {PRIORITY_KEY: "priority", VOICE_GROUPS_KEY: "voice_groups", TEMP_ROOT_KEY: "temp_root"}
 
 
 def _problem(field: str, stored: str) -> SettingProblem:
@@ -73,6 +74,23 @@ def player_names(player_groups: Mapping[str, list[str]]) -> list[str]:
     return list(named.values())
 
 
+def _folder(path: str) -> str:
+    return path.strip().rstrip("/") or ("/" if path.strip().startswith("/") else "")
+
+
+def _folder_problems(path: str | None) -> list[SettingProblem]:
+    """The work folder may be empty (not named), must be absolute and must not be the top of a storage: results
+    would be written beside everything else that lives there."""
+    folder = _folder(path or "")
+    if not folder:
+        return []
+    if not os.path.isabs(folder):
+        return [_problem("temp_root", reason("work_folder_not_absolute", path=folder))]
+    if folder == "/" or os.path.ismount(folder):
+        return [_problem("temp_root", reason("work_folder_is_root", path=folder))]
+    return []
+
+
 def check(draft: VoiceSettingsDraft, player_groups: Mapping[str, list[str]]) -> list[SettingProblem]:
     """Every reason this form cannot be saved; empty when it can."""
     problems = []
@@ -87,20 +105,24 @@ def check(draft: VoiceSettingsDraft, player_groups: Mapping[str, list[str]]) -> 
         elif folded_name(name) not in known:
             problems.append(_problem("priority", reason("priority_unknown_player", player=name)))
         seen.add(folded_name(name))
-    return problems + _group_problems(draft.voice_groups)
+    return problems + _group_problems(draft.voice_groups) + _folder_problems(draft.temp_root)
 
 
 def clean(draft: VoiceSettingsDraft) -> VoiceSettingsDraft:
     """The draft as it is stored: trimmed, without blank rows or repeated names."""
     priority = list(dict.fromkeys(name.strip() for name in draft.priority if name.strip()))
-    return VoiceSettingsDraft(priority=priority, voice_groups=_cleaned(draft.voice_groups))
+    return VoiceSettingsDraft(priority=priority, voice_groups=_cleaned(draft.voice_groups),
+                              temp_root=None if draft.temp_root is None else _folder(draft.temp_root))
 
 
 def stored(draft: VoiceSettingsDraft) -> dict[str, str]:
     """The values to write, keyed as the settings table holds them."""
     def dump(value: object) -> str:
         return json.dumps(value, ensure_ascii=False)
-    return {PRIORITY_KEY: dump(draft.priority), VOICE_GROUPS_KEY: dump(draft.voice_groups)}
+    values = {PRIORITY_KEY: dump(draft.priority), VOICE_GROUPS_KEY: dump(draft.voice_groups)}
+    if draft.temp_root is not None:
+        values[TEMP_ROOT_KEY] = draft.temp_root
+    return values
 
 
 def view(settings: VoiceSettings) -> VoiceSettingsView:
@@ -108,5 +130,6 @@ def view(settings: VoiceSettings) -> VoiceSettingsView:
     return VoiceSettingsView(
         priority=list(settings.priority),
         voice_groups={name: list(triggers) for name, triggers in settings.voice_groups.items()},
+        temp_root=settings.temp_root,
         default_priority=list(DEFAULT_PRIORITY),
         rejected=[_FIELD_OF_KEY[key] for key in settings.rejected if key in _FIELD_OF_KEY])

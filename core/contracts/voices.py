@@ -161,10 +161,12 @@ class Layout(BaseModel):
 
 class VoiceSettingsDraft(BaseModel):
     """What the settings screen of the voices sends: the order of the sources and the groups of voice-overs.
-    A group is a name with the list of names that put a voice-over into it; a save replaces both values."""
+    A group is a name with the list of names that put a voice-over into it; a save replaces these values. The work
+    folder (empty: not named) is left as it is when the draft does not carry it."""
 
     priority: list[str]
     voice_groups: dict[str, list[str]]
+    temp_root: str | None = None
 
 
 class SettingProblem(BaseModel):
@@ -178,6 +180,7 @@ class VoiceSettingsView(VoiceSettingsDraft):
     """The reply of `voices.settings.get`: what applies now, the order to return to, and the fields whose stored
     value was refused."""
 
+    temp_root: str
     default_priority: list[str]
     rejected: list[str]
 

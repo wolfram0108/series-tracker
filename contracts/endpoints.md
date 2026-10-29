@@ -152,10 +152,10 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | GET, POST | `/api/settings/concurrent_fragments` | Число параллельных фрагментов yt-dlp (`-N`) | `SettingsDebug.vue` |
 | GET, POST, DELETE | `/api/settings/saved_paths` | Сохранённые пути загрузки | `SettingsDebug.vue`, `SavedPathDropdown.vue` |
 | GET, POST | `/api/settings/debug_flags` | Флаги отладочного логирования | `LogsLoggingTab.vue` |
-| GET | `/api/voices/settings` | Группы озвучек и порядок источников (`VoiceSettingsView`): как действуют сейчас, порядок по умолчанию, отвергнутые сохранённые значения (Р-54) | `SettingsVoices.vue` |
+| GET | `/api/voices/settings` | Группы озвучек и порядок источников (`VoiceSettingsView`): как действуют сейчас, рабочая папка, порядок по умолчанию, отвергнутые сохранённые значения (Р-54, Р-58) | `SettingsVoices.vue` |
 | GET | `/api/conform/settings` | Адрес демона выравнивания и карта путей (`ConformSettingsView`): как действуют сейчас (Р-57) | `SettingsConformServer.vue` |
-| PUT | `/api/conform/settings` | Адрес и карта целиком (`ConformSettingsDraft` {url, path_map}); ответ `ConformSettingsSaved`: `saved: true`, новый адрес применён сразу, либо `saved: false` и коды причин, ничего не записано (Р-57) | `SettingsConformServer.vue` |
-| PUT | `/api/voices/settings` | Группы и порядок целиком (`VoiceSettingsDraft` {priority, voice_groups}); ответ `VoiceSettingsSaved`: `saved: true` и действующие значения либо `saved: false` и коды причин, ничего не записано. Экран шлёт каждое действие сразу (Р-54) | `SettingsVoices.vue` |
+| PUT | `/api/conform/settings` | Адрес и карта целиком (`ConformSettingsDraft` {url, path_map}); при заданном адресе карта обязательна; ответ `ConformSettingsSaved`: `saved: true`, новый адрес применён сразу, либо `saved: false` и коды причин, ничего не записано (Р-57, Р-58) | `SettingsConformServer.vue` |
+| PUT | `/api/voices/settings` | Группы и порядок целиком (`VoiceSettingsDraft` {priority, voice_groups, temp_root?}: рабочая папка не меняется, если поля нет); ответ `VoiceSettingsSaved`: `saved: true` и действующие значения либо `saved: false` и коды причин, ничего не записано. Экран шлёт каждое действие сразу (Р-54) | `SettingsVoices.vue` |
 | POST | `/api/tmdb/search` | Поиск сериала в TMDB | `AddSeriesModal.vue`, `StatusProperties.vue` |
 | GET | `/api/tmdb/details/{tmdb_id}` | Детали сериала TMDB | `AddSeriesModal.vue`, `StatusProperties.vue` |
 | GET | `/api/trackers` | Список трекеров с зеркалами | `SettingsTrackers.vue` |

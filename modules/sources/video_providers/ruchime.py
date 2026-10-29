@@ -11,6 +11,7 @@ import html
 import json
 import logging
 import re
+import tempfile
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -778,7 +779,7 @@ class RuchimeProvider(BaseVideoProvider):
     def _write_manifest(self, text: str, base_url: str, slug: str, number: int,
                         quality: int) -> Path:
         """Decode segment references to absolute URLs so ffmpeg reads a local file."""
-        directory = (self._manifest_dir or Path("/tmp")) / "vibix"
+        directory = (self._manifest_dir or Path(tempfile.gettempdir())) / "vibix"
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{slug}-{number:04d}-{quality}.m3u8"
         lines: list[str] = []
