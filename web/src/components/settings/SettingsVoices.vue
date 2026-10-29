@@ -1,293 +1,129 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue"
 import Button from "primevue/button"
-import InputText from "primevue/inputtext"
-import { useToast } from "primevue/usetoast"
 import { api } from "../../api/client"
 import type { components } from "../../api/schema"
 import { useApi } from "../../composables/useApi"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
 import { useVoicesStore } from "../../stores/voices"
+import VoiceGroupsEditor from "./VoiceGroupsEditor.vue"
 
-// Settings of the voices: groups of names that mean one voice-over, player names, source order, temporary files.
-// Checking and saving belong to the voices module; this screen shows what applies and what a save was refused for.
-type Draft = components["schemas"]["VoiceSettingsDraft"]
+// Settings of the voices: groups of voice-overs and the order of the sources. Every action goes to the core at once and
+// the screen shows what the core holds, so an action the core refuses is shown with its reason and snaps back.
 type View = components["schemas"]["VoiceSettingsView"]
 type Problem = components["schemas"]["SettingProblem"]
-type Groups = components["schemas"]["VoiceGroups"]
-type Field = "priority" | "voice_aliases" | "player_aliases" | "temp_root" | "max_temp_episodes"
-interface Row { id: number; from: string; to: string }
+type Groups = Record<string, string[]>
 
 const { request } = useApi()
-const toast = useToast()
 const voicesStore = useVoicesStore()
 
-let nextId = 0
-const rowsOf = (pairs: Record<string, string>): Row[] =>
-  Object.entries(pairs).map(([from, to]) => ({ id: nextId++, from, to }))
-
-const loaded = ref(false)
 const view = ref<View | null>(null)
-const priority = ref<string[]>([])
-const voices = ref<Row[]>([])
-const players = ref<Row[]>([])
-const tempRoot = ref("")
-const maxTemp = ref<number | "">(0)
-const pickedPlayer = ref("")
-const elsewhere = ref<View | null>(null)
 const problems = ref<Problem[]>([])
-
-const namesText = ref("")
-const groups = ref<Groups | null>(null)
-
-/** The rows as the wire holds them. A name written twice is told apart here: a record would keep only one of them. */
-function recordOf(rows: Row[], field: Field): { pairs: Record<string, string>; clashes: Problem[] } {
-  const pairs: Record<string, string> = {}
-  const clashes: Problem[] = []
-  for (const row of rows) {
-    if (!row.from.trim() && !row.to.trim()) continue
-    const name = row.from.trim()
-    if (name in pairs && pairs[name] !== row.to.trim()) {
-      clashes.push({ field, detail: { code: "alias_conflict", params: { name, first: pairs[name], second: row.to.trim() } } })
-    }
-    pairs[name] = row.to.trim()
-  }
-  return { pairs, clashes }
-}
-
-const voicePairs = computed(() => recordOf(voices.value, "voice_aliases"))
-const playerPairs = computed(() => recordOf(players.value, "player_aliases"))
-
-const draft = computed<Draft>(() => ({
-  priority: priority.value,
-  voice_aliases: voicePairs.value.pairs,
-  player_aliases: playerPairs.value.pairs,
-  temp_root: tempRoot.value,
-  max_temp_episodes: typeof maxTemp.value === "number" ? Math.trunc(maxTemp.value) : 0,
-}))
-
-const snapshot = ref("")
-const dirty = computed(() => loaded.value && JSON.stringify(draft.value) !== snapshot.value)
-const clientProblems = computed(() => [...voicePairs.value.clashes, ...playerPairs.value.clashes])
-
-function apply(next: View) {
-  view.value = next
-  priority.value = [...next.priority]
-  voices.value = rowsOf(next.voice_aliases)
-  players.value = rowsOf(next.player_aliases)
-  tempRoot.value = next.temp_root
-  maxTemp.value = next.max_temp_episodes
-  snapshot.value = JSON.stringify(draft.value)
-  problems.value = []
-  elsewhere.value = null
-  loaded.value = true
-}
+const busy = ref(false)
+const pickedPlayer = ref("")
 
 async function load() {
   const next = await request(api.GET("/api/voices/settings"), { errorMessage: t("voices.settings.loadFailed") })
-  if (next) apply(next)
+  if (next) view.value = next
 }
 
-/** Called by the footer of the settings window; true when the form was saved. */
-async function save(): Promise<boolean> {
-  if (clientProblems.value.length) {
-    problems.value = clientProblems.value
-    return false
+async function commit(change: { priority?: string[]; voice_groups?: Groups }): Promise<boolean> {
+  if (!view.value) return false
+  busy.value = true
+  try {
+    const reply = await request(
+      api.PUT("/api/voices/settings", {
+        body: { priority: view.value.priority, voice_groups: view.value.voice_groups, ...change },
+      }),
+      { errorMessage: t("voices.settings.saveFailed") },
+    )
+    if (!reply) return false
+    view.value = reply.settings
+    problems.value = reply.problems
+    return reply.saved
+  } finally {
+    busy.value = false
   }
-  const reply = await request(api.PUT("/api/voices/settings", { body: draft.value }), {
-    errorMessage: t("voices.settings.saveFailed"),
-  })
-  if (!reply) return false
-  if (reply.saved) {
-    apply(reply.settings)
-    toast.add({ severity: "success", summary: t("voices.settings.saved"), life: 2500 })
-    return true
-  }
-  problems.value = reply.problems
-  toast.add({ severity: "warn", summary: t("voices.settings.notSaved"), life: 4000 })
-  return false
 }
 
-function discard() {
-  const latest = elsewhere.value ?? view.value
-  if (latest) apply(latest)
-}
-
-// The core announces every save; an untouched form follows it, a form being edited only says so.
+// The core announces every save, also one made in another window.
 watch(() => voicesStore.settings, (next) => {
-  if (!next || !loaded.value || JSON.stringify(next) === JSON.stringify(view.value)) return
-  if (dirty.value) elsewhere.value = next
-  else apply(next)
+  if (next) view.value = next
 })
 
-// A problem belongs to the form as it was sent; once the form changes the marks are stale.
-watch(draft, () => { problems.value = [] })
+const problemsOf = (field: string) => problems.value.filter((problem) => problem.field === field)
+const rejected = (field: string) => !!view.value?.rejected.includes(field)
 
-const problemsOf = (field: Field) => problems.value.filter((problem) => problem.field === field)
-const rejected = (field: Field) => !!view.value?.rejected.includes(field)
-
-function addRow(rows: Row[]) { rows.push({ id: nextId++, from: "", to: "" }) }
-function removeRow(rows: Row[], id: number) { rows.splice(rows.findIndex((row) => row.id === id), 1) }
+const order = computed(() => view.value?.priority ?? [])
+const available = computed(() => {
+  const taken = new Set(order.value.map((name) => name.toLowerCase()))
+  return (view.value?.players ?? []).filter((name) => !taken.has(name.toLowerCase()))
+})
 
 function move(index: number, by: -1 | 1) {
-  const list = priority.value
+  const list = [...order.value]
   const target = index + by
   if (target < 0 || target >= list.length) return
   ;[list[index], list[target]] = [list[target], list[index]]
+  void commit({ priority: list })
 }
-/** Players that can still be put into the order: the built-in kinds and every name the player rules mention. */
-const availablePlayers = computed(() => {
-  const named = [
-    ...(view.value?.defaults.priority ?? []),
-    ...players.value.flatMap((row) => [row.from.trim(), row.to.trim()]),
-  ].filter(Boolean)
-  const taken = new Set(priority.value.map((name) => name.toLowerCase()))
-  return [...new Map(named.map((name) => [name.toLowerCase(), name])).values()].filter((name) => !taken.has(name.toLowerCase()))
-})
-function addPlayer() {
-  if (pickedPlayer.value) priority.value.push(pickedPlayer.value)
-  pickedPlayer.value = ""
+function removePlayer(index: number) {
+  void commit({ priority: order.value.filter((_, at) => at !== index) })
 }
-function resetPriority() {
-  if (view.value) priority.value = [...view.value.defaults.priority]
+async function addPlayer() {
+  if (!pickedPlayer.value) return
+  if (await commit({ priority: [...order.value, pickedPlayer.value] })) pickedPlayer.value = ""
 }
-
-async function showGroups() {
-  const names = namesText.value.split("\n").map((line) => line.trim()).filter(Boolean)
-  groups.value = await request(
-    api.POST("/api/voices/groups/preview", {
-      body: { names, voice_aliases: voicePairs.value.pairs, player_aliases: playerPairs.value.pairs },
-    }),
-    { errorMessage: t("voices.settings.loadFailed") },
-  )
-}
-/** Names met by now are asked for at the click: the list grows with every downloaded voice-over. */
-async function fillKnown() {
-  const fresh = await request(api.GET("/api/voices/settings"), { errorMessage: t("voices.settings.loadFailed") })
-  if (!fresh) return
-  if (view.value) view.value = { ...view.value, known_voices: fresh.known_voices }
-  namesText.value = fresh.known_voices.join("\n")
+function resetOrder() {
+  if (view.value) void commit({ priority: [...view.value.default_priority] })
 }
 
 onMounted(load)
-defineExpose({ save, discard, dirty, elsewhere })
 </script>
 
 <template>
   <div class="settings-voices">
-    <div v-if="dirty || elsewhere" class="status-line">
-      <span v-if="elsewhere" class="problem">{{ t("voices.settings.elsewhere") }}</span>
-      <span v-else class="muted-hint">{{ t("voices.settings.dirty") }}</span>
-    </div>
-    <!-- Voice names that mean one voice-over -->
     <div class="modern-fieldset">
       <div class="fieldset-header"><i class="pi pi-users"></i> {{ t("voices.settings.voices.title") }}</div>
       <div class="fieldset-content">
         <p class="muted-hint">{{ t("voices.settings.voices.hint") }}</p>
-        <p v-if="rejected('voice_aliases')" class="problem">{{ t("voices.settings.rejected") }}</p>
-        <div v-if="!voices.length" class="muted-hint">{{ t("voices.settings.alias.empty") }}</div>
-        <div v-for="row in voices" :key="row.id" class="pair-row">
-          <InputText v-model="row.from" class="pair-input" :placeholder="t('voices.settings.alias.from')" :aria-label="t('voices.settings.alias.from')" />
-          <i class="pi pi-arrow-right pair-arrow" aria-hidden="true"></i>
-          <InputText v-model="row.to" class="pair-input" :placeholder="t('voices.settings.alias.to')" :aria-label="t('voices.settings.alias.to')" />
-          <Button icon="pi pi-times" severity="danger" text rounded :title="t('voices.settings.alias.remove')" :aria-label="t('voices.settings.alias.remove')" @click="removeRow(voices, row.id)" />
-        </div>
-        <p v-for="(problem, index) in problemsOf('voice_aliases')" :key="index" class="problem">{{ reasonText(problem.detail) }}</p>
-        <Button :label="t('voices.settings.alias.add')" icon="pi pi-plus" severity="secondary" size="small" @click="addRow(voices)" />
+        <VoiceGroupsEditor
+          v-if="view"
+          :groups="view.voice_groups"
+          :busy="busy"
+          :commit="(next: Groups) => commit({ voice_groups: next })"
+          :problems="problemsOf('voice_groups')"
+          :rejected="rejected('voice_groups')"
+        />
       </div>
     </div>
 
-    <!-- Trying the rules on names, before they are saved -->
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-sitemap"></i> {{ t("voices.settings.preview.title") }}</div>
-      <div class="fieldset-content">
-        <p class="muted-hint">{{ t("voices.settings.preview.hint") }}</p>
-        <textarea v-model="namesText" class="names-input" rows="5" :placeholder="t('voices.settings.preview.placeholder')" :aria-label="t('voices.settings.preview.title')"></textarea>
-        <div class="actions-row">
-          <Button :label="t('voices.settings.preview.run')" icon="pi pi-search" @click="showGroups" />
-          <Button :label="t('voices.settings.preview.known')" icon="pi pi-download" severity="secondary" :disabled="!view?.known_voices.length" @click="fillKnown" />
-          <span v-if="loaded && !view?.known_voices.length" class="muted-hint">{{ t("voices.settings.preview.noKnown") }}</span>
-        </div>
-        <template v-if="groups">
-          <p v-if="!groups.groups.length" class="muted-hint">{{ t("voices.settings.preview.empty") }}</p>
-          <div v-for="group in groups.groups" :key="group.key" class="group-row">
-            <b>{{ t("voices.settings.preview.group", { key: group.key }) }}</b>
-            <span class="group-members">
-              <span v-for="member in group.members" :key="member" class="group-member">{{ member }}</span>
-            </span>
-          </div>
-          <p v-for="(problem, index) in groups.problems" :key="index" class="problem">{{ reasonText(problem.detail) }}</p>
-        </template>
-      </div>
-    </div>
-
-    <!-- Player kinds under different names -->
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-play"></i> {{ t("voices.settings.players.title") }}</div>
-      <div class="fieldset-content">
-        <p class="muted-hint">{{ t("voices.settings.players.hint") }}</p>
-        <p v-if="rejected('player_aliases')" class="problem">{{ t("voices.settings.rejected") }}</p>
-        <div v-if="!players.length" class="muted-hint">{{ t("voices.settings.alias.empty") }}</div>
-        <div v-for="row in players" :key="row.id" class="pair-row">
-          <InputText v-model="row.from" class="pair-input" :placeholder="t('voices.settings.alias.from')" :aria-label="t('voices.settings.alias.from')" />
-          <i class="pi pi-arrow-right pair-arrow" aria-hidden="true"></i>
-          <InputText v-model="row.to" class="pair-input" :placeholder="t('voices.settings.alias.to')" :aria-label="t('voices.settings.alias.to')" />
-          <Button icon="pi pi-times" severity="danger" text rounded :title="t('voices.settings.alias.remove')" :aria-label="t('voices.settings.alias.remove')" @click="removeRow(players, row.id)" />
-        </div>
-        <p v-for="(problem, index) in problemsOf('player_aliases')" :key="index" class="problem">{{ reasonText(problem.detail) }}</p>
-        <Button :label="t('voices.settings.alias.add')" icon="pi pi-plus" severity="secondary" size="small" @click="addRow(players)" />
-      </div>
-    </div>
-
-    <!-- Order of the sources -->
     <div class="modern-fieldset">
       <div class="fieldset-header"><i class="pi pi-sort-amount-down"></i> {{ t("voices.settings.priority.title") }}</div>
       <div class="fieldset-content">
         <p class="muted-hint">{{ t("voices.settings.priority.hint") }}</p>
         <p v-if="rejected('priority')" class="problem">{{ t("voices.settings.rejected") }}</p>
         <ol class="priority-list">
-          <li v-for="(name, index) in priority" :key="`${index}:${name}`" class="priority-row">
+          <li v-for="(name, index) in order" :key="`${index}:${name}`" class="priority-row">
             <span class="priority-place">{{ index + 1 }}</span>
             <span class="priority-name">{{ name }}</span>
-            <Button icon="pi pi-arrow-up" text rounded :disabled="index === 0" :title="t('voices.settings.priority.up')" :aria-label="t('voices.settings.priority.up')" @click="move(index, -1)" />
-            <Button icon="pi pi-arrow-down" text rounded :disabled="index === priority.length - 1" :title="t('voices.settings.priority.down')" :aria-label="t('voices.settings.priority.down')" @click="move(index, 1)" />
-            <Button icon="pi pi-times" severity="danger" text rounded :title="t('voices.settings.priority.remove')" :aria-label="t('voices.settings.priority.remove')" @click="priority.splice(index, 1)" />
+            <Button icon="pi pi-arrow-up" text rounded :disabled="busy || index === 0" :title="t('voices.settings.priority.up')" :aria-label="t('voices.settings.priority.up')" @click="move(index, -1)" />
+            <Button icon="pi pi-arrow-down" text rounded :disabled="busy || index === order.length - 1" :title="t('voices.settings.priority.down')" :aria-label="t('voices.settings.priority.down')" @click="move(index, 1)" />
+            <Button icon="pi pi-times" severity="danger" text rounded :disabled="busy" :title="t('voices.settings.priority.remove')" :aria-label="t('voices.settings.priority.remove')" @click="removePlayer(index)" />
           </li>
         </ol>
         <p v-for="(problem, index) in problemsOf('priority')" :key="index" class="problem">{{ reasonText(problem.detail) }}</p>
         <div class="actions-row">
-          <select v-model="pickedPlayer" class="p-inputtext pair-input" :aria-label="t('voices.settings.priority.add')">
+          <select v-model="pickedPlayer" class="p-inputtext player-pick" :aria-label="t('voices.settings.priority.add')">
             <option value="" disabled>{{ t("voices.settings.priority.pick") }}</option>
-            <option v-for="name in availablePlayers" :key="name" :value="name">{{ name }}</option>
+            <option v-for="name in available" :key="name" :value="name">{{ name }}</option>
           </select>
-          <Button :label="t('voices.settings.priority.add')" icon="pi pi-plus" severity="secondary" size="small" :disabled="!pickedPlayer" @click="addPlayer" />
-          <Button :label="t('voices.settings.priority.reset')" icon="pi pi-undo" severity="secondary" size="small" text @click="resetPriority" />
+          <Button :label="t('voices.settings.priority.add')" icon="pi pi-plus" severity="secondary" size="small" :disabled="busy || !pickedPlayer" @click="addPlayer" />
+          <Button :label="t('voices.settings.priority.reset')" icon="pi pi-undo" severity="secondary" size="small" text :disabled="busy" @click="resetOrder" />
         </div>
       </div>
     </div>
-
-    <!-- Temporary files -->
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-folder"></i> {{ t("voices.settings.temp.title") }}</div>
-      <div class="fieldset-content temp-grid">
-        <label class="temp-field">
-          <span>{{ t("voices.settings.temp.root") }}</span>
-          <InputText v-model="tempRoot" :placeholder="view?.defaults.temp_root" />
-          <span class="muted-hint">{{ t("voices.settings.temp.rootHint") }}</span>
-          <span v-if="rejected('temp_root')" class="problem">{{ t("voices.settings.rejected") }}</span>
-          <span v-for="(problem, index) in problemsOf('temp_root')" :key="index" class="problem">{{ reasonText(problem.detail) }}</span>
-        </label>
-        <label class="temp-field">
-          <span>{{ t("voices.settings.temp.max") }}</span>
-          <input v-model.number="maxTemp" class="p-inputtext num-input" type="number" min="0" step="1" />
-          <span class="muted-hint">{{ t("voices.settings.temp.maxHint") }}</span>
-          <span v-if="rejected('max_temp_episodes')" class="problem">{{ t("voices.settings.rejected") }}</span>
-          <span v-for="(problem, index) in problemsOf('max_temp_episodes')" :key="index" class="problem">{{ reasonText(problem.detail) }}</span>
-        </label>
-      </div>
-    </div>
-
   </div>
 </template>
 
@@ -295,24 +131,10 @@ defineExpose({ save, discard, dirty, elsewhere })
 .settings-voices { display: flex; flex-direction: column; gap: 1.2rem; }
 .muted-hint { color: var(--text-muted); margin: 0 0 0.75rem; }
 .problem { color: var(--color-red-1); margin: 0.4rem 0; }
-.pair-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
-.pair-input { flex: 1 1 12rem; min-width: 0; }
-.pair-arrow { color: var(--text-muted); }
-.names-input {
-  width: 100%; box-sizing: border-box; font-family: var(--font-mono); padding: 0.6rem 0.8rem;
-  border: 1px solid var(--border-color); border-radius: var(--border-radius); background: var(--bg-white); color: inherit;
-}
-.actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin: 0.75rem 0; }
-.group-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 1rem; padding: 0.5rem 0; border-top: 1px solid var(--border-color); }
-.group-members { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; }
-.group-member { padding: 0.15rem 0.6rem; background: var(--bg-light); border-radius: var(--border-radius); }
+.actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin: 0.75rem 0 0; }
+.player-pick { flex: 1 1 12rem; min-width: 0; }
 .priority-list { list-style: none; margin: 0 0 0.5rem; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
 .priority-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0.4rem 0.15rem 0.8rem; background: var(--bg-light); border-radius: var(--border-radius); }
 .priority-place { color: var(--text-muted); min-width: 1.5rem; }
 .priority-name { flex: 1 1 auto; font-weight: 600; }
-.temp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 1rem 1.5rem; }
-.temp-field { display: flex; flex-direction: column; gap: 0.35rem; }
-.num-input { max-width: 10rem; }
-.status-line { margin: 0; }
-.status-line .muted-hint, .status-line .problem { margin: 0; }
 </style>

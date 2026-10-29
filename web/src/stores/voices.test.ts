@@ -148,13 +148,12 @@ describe("voices store", () => {
 
   it("keeps the newest settings the core announced", () => {
     const store = useVoicesStore()
-    const view = (max: number): VoiceSettingsView => ({
-      priority: ["kodik"], voice_aliases: {}, player_aliases: {}, temp_root: "/data/tmp", max_temp_episodes: max,
-      defaults: { priority: ["kodik"], temp_root: "/data/tmp", max_temp_episodes: 0 }, rejected: [], known_voices: [],
+    const view = (first: string): VoiceSettingsView => ({
+      priority: ["kodik"], voice_groups: { [first]: [] }, default_priority: ["kodik"], players: ["kodik"], rejected: [],
     })
     expect(store.settings).toBeNull()
-    store.applySettings(view(1))
-    store.applySettings(view(3))
-    expect(store.settings?.max_temp_episodes).toBe(3)
+    store.applySettings(view("first"))
+    store.applySettings(view("second"))
+    expect(Object.keys(store.settings?.voice_groups ?? {})).toEqual(["second"])
   })
 })

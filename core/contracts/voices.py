@@ -155,13 +155,11 @@ class Layout(BaseModel):
 
 
 class VoiceSettingsDraft(BaseModel):
-    """The settings of the voices as the editor sends them: the whole form, so a save replaces all five values."""
+    """What the settings screen of the voices sends: the order of the sources and the groups of voice-overs.
+    A group is a name with the list of names that put a voice-over into it; a save replaces both values."""
 
     priority: list[str]
-    voice_aliases: dict[str, str]
-    player_aliases: dict[str, str]
-    temp_root: str
-    max_temp_episodes: int
+    voice_groups: dict[str, list[str]]
 
 
 class SettingProblem(BaseModel):
@@ -171,18 +169,13 @@ class SettingProblem(BaseModel):
     detail: Reason
 
 
-class SettingDefaults(BaseModel):
-    priority: list[str]
-    temp_root: str
-    max_temp_episodes: int
-
-
 class VoiceSettingsView(VoiceSettingsDraft):
-    """The reply of `voices.settings.get`: what applies now, what the defaults are, which stored values were refused."""
+    """The reply of `voices.settings.get`: what applies now, the order to return to, the players that may stand
+    in the order, and the fields whose stored value was refused."""
 
-    defaults: SettingDefaults
+    default_priority: list[str]
+    players: list[str]
     rejected: list[str]
-    known_voices: list[str]
 
 
 class VoiceSettingsSaved(BaseModel):
@@ -191,23 +184,3 @@ class VoiceSettingsSaved(BaseModel):
     saved: bool
     problems: list[SettingProblem]
     settings: VoiceSettingsView
-
-
-class GroupsDraft(BaseModel):
-    """Names of voice-overs to be grouped by the rules of a draft (not yet saved)."""
-
-    names: list[str]
-    voice_aliases: dict[str, str]
-    player_aliases: dict[str, str]
-
-
-class VoiceGroup(BaseModel):
-    key: str
-    members: list[str]
-
-
-class VoiceGroups(BaseModel):
-    """The reply of `voices.groups.preview`: which of the names mean the same voice under the draft rules."""
-
-    groups: list[VoiceGroup]
-    problems: list[SettingProblem]

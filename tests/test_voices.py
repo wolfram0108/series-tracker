@@ -1460,17 +1460,16 @@ async def test_the_module_reads_the_rules_from_settings_and_survives_garbage(sys
     query = {"sources": sources, "reference": sources[0]["url"]}
     plain = await system.request("voices.layout", query, timeout=5)
     assert len([r for r in plain["voices"] if r["role"] == "dub"]) == 2
-    await system.request("settings.value.set", {"key": "voices.aliases",
-                                                "value": '{"aniliberty": "anilibria"}'}, timeout=5)
+    await system.request("settings.value.set", {"key": "voices.groups",
+                                                "value": '{"anilibria": ["aniliberty"]}'}, timeout=5)
     merged = await system.request("voices.layout", query, timeout=5)
     assert len([r for r in merged["voices"] if r["role"] == "dub"]) == 1
-    await system.request("settings.value.set", {"key": "voices.aliases", "value": "{broken"}, timeout=5)
+    await system.request("settings.value.set", {"key": "voices.groups", "value": "{broken"}, timeout=5)
     again = await system.request("voices.layout", query, timeout=5)
     assert len([r for r in again["voices"] if r["role"] == "dub"]) == 2
 
 
-FORM = {"priority": ["kodik", "cvh"], "voice_aliases": {"aniliberty": "anilibria"}, "player_aliases": {},
-        "temp_root": "/data/tmp", "max_temp_episodes": 2}
+FORM = {"priority": ["kodik", "cvh"], "voice_groups": {"anilibria": ["aniliberty"]}}
 
 
 @pytest.mark.asyncio
@@ -1478,7 +1477,7 @@ async def test_a_saved_form_applies_at_once_and_is_announced_to_every_open_scree
     announced = system.bus.subscribe("voices.settings.changed")
     saved = await system.request("voices.settings.set", FORM, timeout=5)
     assert saved["saved"] is True and saved["problems"] == []
-    assert saved["settings"]["priority"] == ["kodik", "cvh"] and saved["settings"]["max_temp_episodes"] == 2
+    assert saved["settings"]["priority"] == ["kodik", "cvh"] and saved["settings"]["voice_groups"] == FORM["voice_groups"]
     assert (await system.request("voices.settings.get", {}, timeout=5)) == saved["settings"]
     assert (await asyncio.wait_for(announced.queue.get(), 5)).payload == saved["settings"]
     sources = [src("cvh", "Ref", [1], url="https://site/?player=cvh&voice=Ref"),
@@ -1492,11 +1491,10 @@ async def test_a_saved_form_applies_at_once_and_is_announced_to_every_open_scree
 async def test_a_refused_form_writes_nothing_says_why_and_announces_nothing(system):
     announced = system.bus.subscribe("voices.settings.changed")
     refused = await system.request("voices.settings.set", {
-        **FORM, "temp_root": "relative", "priority": ["kodik", "nowhere"],
-        "voice_aliases": {"a": "b", "b": "c"}}, timeout=5)
+        "priority": ["kodik", "nowhere"], "voice_groups": {"a": ["x"], "b": ["x"]}}, timeout=5)
     assert refused["saved"] is False
     assert sorted((problem["field"], problem["detail"]["code"]) for problem in refused["problems"]) == [
-        ("priority", "priority_unknown_player"), ("temp_root", "temp_root_not_absolute"), ("voice_aliases", "alias_chain")]
+        ("priority", "priority_unknown_player"), ("voice_groups", "trigger_in_two_groups")]
     stored = await system.request("settings.values.by_prefix", {"prefix": "voices."}, timeout=5)
     assert stored["values"] == {} and announced.queue.empty()
     assert refused["settings"]["priority"] == list(DEFAULT_PRIORITY)
@@ -1504,9 +1502,16 @@ async def test_a_refused_form_writes_nothing_says_why_and_announces_nothing(syst
 
 @pytest.mark.asyncio
 async def test_a_stored_value_the_module_cannot_use_is_shown_as_refused_not_as_a_default(system):
-    await system.request("settings.value.set", {"key": "voices.aliases", "value": "{broken"}, timeout=5)
+    await system.request("settings.value.set", {"key": "voices.groups", "value": "{broken"}, timeout=5)
     view = await system.request("voices.settings.get", {}, timeout=5)
-    assert view["rejected"] == ["voice_aliases"] and view["voice_aliases"] == {}
+    assert view["rejected"] == ["voice_groups"] and view["voice_groups"] == {}
+
+
+@pytest.mark.asyncio
+async def test_a_player_named_in_the_stored_player_groups_may_stand_in_a_saved_order(system):
+    await system.request("settings.value.set", {"key": "voices.player_groups", "value": '{"anilibria": ["aniliberty"]}'}, timeout=5)
+    saved = await system.request("voices.settings.set", {"priority": ["anilibria", "kodik"], "voice_groups": {}}, timeout=5)
+    assert saved["saved"] is True and "aniliberty" in saved["settings"]["players"]
 
 
 def test_two_voices_with_the_same_safe_title_get_two_names():
@@ -2228,7 +2233,7 @@ async def test_changed_rules_do_not_make_a_new_voice_of_a_recorded_one(dubs):
     await settled(neighbours, 2)
     before = {r["voice_key"] for r in await rows(probe)}
     assert before == {"blackcat", "redheadsound"}
-    neighbours.settings["voices.aliases"] = '{"redheadsound": "zzz"}'
+    neighbours.settings["voices.groups"] = '{"zzz": ["redheadsound"]}'
     probe.send_command("voices.dispatch", {"series_id": 7})
     await asyncio.sleep(0.6)
     assert {r["voice_key"] for r in await rows(probe)} == before and len(neighbours.fetches) == 2

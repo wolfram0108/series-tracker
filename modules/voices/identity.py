@@ -29,6 +29,22 @@ def folded_name(name: str) -> str:
     return _fold(name)
 
 
+def usable_groups(raw: object) -> dict[str, list[str]]:
+    """The groups of user data that have a name and lists of names; anything else is not trusted."""
+    if not isinstance(raw, dict):
+        return {}
+    groups = {}
+    for name, triggers in raw.items():
+        if isinstance(name, str) and _fold(name) and isinstance(triggers, list):
+            groups[name] = [trigger for trigger in triggers if isinstance(trigger, str) and _fold(trigger)]
+    return groups
+
+
+def aliases_of(groups: Mapping[str, list[str]]) -> dict[str, str]:
+    """{trigger: group}: the form in which the rules match a name; a group's own name needs no entry."""
+    return {trigger: group for group, triggers in groups.items() for trigger in triggers}
+
+
 def usable_aliases(raw: object) -> dict[str, str]:
     """The entries of user data that pair two non-empty names; anything else is not trusted."""
     if not isinstance(raw, dict):

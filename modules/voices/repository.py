@@ -94,12 +94,6 @@ class VoicesRepository:
         rows = await self._db.fetch_all("SELECT * FROM voice_dubs ORDER BY series_id, season, episode, voice_key")
         return [self._row(row) for row in rows]
 
-    async def voice_labels(self) -> list[str]:
-        """The names under which voice-overs were met, for trying the grouping rules on real names."""
-        rows = await self._db.fetch_all(
-            "SELECT DISTINCT voice_label FROM voice_dubs WHERE voice_label<>'' ORDER BY voice_label")
-        return [row["voice_label"] for row in rows]
-
     async def for_episode(self, series_id: int, season: int, episode: int) -> list[dict[str, Any]]:
         rows = await self._db.fetch_all(
             "SELECT * FROM voice_dubs WHERE series_id=? AND season=? AND episode=? ORDER BY voice_key",

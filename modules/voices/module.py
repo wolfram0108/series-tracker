@@ -3,8 +3,8 @@
 Owns voice_dubs: one row per (series, episode, voice) — the additional voice-overs that are
 downloaded next to the reference video and later aligned to it.
 
-Settings: voices.source_priority (JSON list of player kinds), voices.aliases and voices.player_aliases
-(JSON objects {alias: canonical}: which voice-over names and which player kinds mean the same),
+Settings: voices.source_priority (JSON list of player kinds), voices.groups and voices.player_groups
+(JSON objects {group: [names]}: a voice-over, or a player, called by one of the names belongs to the group),
 voices.temp_root, voices.max_temp_episodes. They are read together (settings.py): a wrong value is logged
 once and its default is used.
 
@@ -13,16 +13,14 @@ Query:
       -> {mode, reference, voices: [{key, label, role, source, fallbacks}], skipped, priority}
       The source priority is the setting `voices.source_priority` (JSON list of player kinds);
       layout.DEFAULT_PRIORITY when unset.
-  voices.settings.get {} -> VoiceSettingsView: the five settings as they apply, the defaults, the fields whose stored
-      value was refused (`rejected`) and the voice names met so far (`known_voices`)
-  voices.groups.preview {names, voice_aliases, player_aliases} -> VoiceGroups: which names mean one voice under the
-      rules of a draft that is not saved (editor.py)
+  voices.settings.get {} -> VoiceSettingsView: the groups of voice-overs and the order of sources as they apply, the
+      order to return to, the players that may stand in it and the fields whose stored value was refused
   voices.dubs.get {series_id} -> {items: [{season, episode, voice_key, voice_label, status,
       attempt, error, temp_path, job_id, aligned_path, output_path, outcome, ref_uid, ref_path,
       detail, state, hint}]}  (detail = {code, params} of the outcome or error, see reasons.py; the
       fields `error` and `outcome` hold the stored reason as it is)
 Command:
-  voices.settings.set VoiceSettingsDraft -> VoiceSettingsSaved: the whole form is checked (editor.check) and written
+  voices.settings.set VoiceSettingsDraft -> VoiceSettingsSaved: groups and order are checked (editor.check) and written
       in one step through settings.values.set_many, or refused with coded problems and nothing written; the next
       read of the settings uses the new values, no restart. Rows keep the key they were recorded under.
   voices.dispatch {series_id} — sent by scan after an explicit scan: read the catalog of the site,
@@ -144,8 +142,7 @@ from core import BaseModule, BusRequestError, is_video_source
 from pydantic import ValidationError
 
 from core.contracts import (AlignmentJob, JobStatus, Layout, DubEvent, DubEventStatus as E, DubItem, DubRecord, DubsSnapshot, DubStatus as S,
-                            GroupsDraft, SnapshotItem, SubmitOutcome, SubmitReply, VoiceSettingsDraft,
-                            VoiceSettingsSaved, VoiceSettingsView)
+                            SnapshotItem, SubmitOutcome, SubmitReply, VoiceSettingsDraft, VoiceSettingsSaved)
 from core import storage
 from core.storage import DEFAULT_TIMEOUT_S as IO_TIMEOUT_S, MOVE_TIMEOUT_S, REMOVE_TIMEOUT_S
 from core.db import Database
@@ -224,7 +221,6 @@ class VoicesModule(BaseModule):
         self.handle("voices.dubs.get", self.on_dubs_get)
         self.handle("voices.settings.get", self.on_settings_get)
         self.handle("voices.settings.set", self.on_settings_set)
-        self.handle("voices.groups.preview", self.on_groups_preview)
         self.handle("voices.dispatch", self.on_dispatch, concurrent=True)
         self.handle("downloads.fetch.started", self.on_fetch_started)
         self.handle("downloads.fetch.finished", self.on_fetch_finished)
@@ -327,26 +323,19 @@ class VoicesModule(BaseModule):
         rows = await self.repo.for_series(int(env.payload["series_id"]))
         return {"items": [self._record(row).model_dump(mode="json") for row in rows]}
 
-    async def _settings_view(self) -> VoiceSettingsView:
-        known = await self.repo.voice_labels() if self.repo is not None else []
-        return editor.view(await self._settings(), known)
-
     async def on_settings_get(self, env: Envelope) -> dict:
-        return (await self._settings_view()).model_dump(mode="json")
+        return editor.view(await self._settings()).model_dump(mode="json")
 
     async def on_settings_set(self, env: Envelope) -> dict:
         draft = VoiceSettingsDraft.model_validate(env.payload)
-        problems = editor.check(draft)
+        problems = editor.check(draft, (await self._settings()).player_groups)
         if not problems:
             await self.request("settings.values.set_many", {"values": editor.stored(editor.clean(draft))}, timeout=10)
-        view = await self._settings_view()
+        view = editor.view(await self._settings())
         if not problems:
             self.log.info("озвучки: настройки сохранены")
             self.publish_event("voices.settings.changed", view.model_dump(mode="json"))
         return VoiceSettingsSaved(saved=not problems, problems=problems, settings=view).model_dump(mode="json")
-
-    async def on_groups_preview(self, env: Envelope) -> dict:
-        return editor.preview(GroupsDraft.model_validate(env.payload)).model_dump(mode="json")
 
 
     async def on_dispatch(self, env: Envelope) -> None:

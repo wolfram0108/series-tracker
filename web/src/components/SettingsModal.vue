@@ -18,8 +18,8 @@ const emit = defineEmits<{ (e: "close"): void }>()
 const tab = ref<"auth" | "account" | "trackers" | "parser" | "voices" | "agents" | "debug">("auth")
 
 // ссылка на активную вкладку с методом save() (для кнопки в футере)
-const tabRef = ref<{ save?: () => Promise<boolean>; discard?: () => void; dirty?: boolean; elsewhere?: boolean } | null>(null)
-const savable = computed(() => tab.value === "auth" || tab.value === "voices")
+const tabRef = ref<{ save?: () => Promise<boolean> } | null>(null)
+const savable = computed(() => tab.value === "auth")
 const saving = ref(false)
 async function onSave() {
   if (!tabRef.value?.save) return
@@ -67,7 +67,7 @@ const tabs = [
     <SettingsAgents v-else-if="tab === 'agents'" />
     <SettingsDebug v-else-if="tab === 'debug'" />
     <SettingsParser v-else-if="tab === 'parser'" />
-    <SettingsVoices v-else-if="tab === 'voices'" ref="tabRef" />
+    <SettingsVoices v-else-if="tab === 'voices'" />
 
     <template #footer>
       <Button
@@ -75,16 +75,7 @@ const tabs = [
         label="Сохранить"
         icon="pi pi-check"
         :loading="saving"
-        :disabled="tab === 'voices' && !tabRef?.dirty"
         @click="onSave"
-      />
-      <Button
-        v-if="tab === 'voices'"
-        :label="t('voices.settings.discard')"
-        icon="pi pi-undo"
-        severity="secondary"
-        :disabled="!tabRef?.dirty && !tabRef?.elsewhere"
-        @click="tabRef?.discard?.()"
       />
       <Button label="Закрыть" icon="pi pi-times" severity="secondary" @click="emit('close')" />
     </template>
