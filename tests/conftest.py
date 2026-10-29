@@ -19,5 +19,5 @@ def storage_without_leftovers():
     """What a test's stalled storage call still owns must not reach the next test."""
     from core import storage
     yield
-    storage._running.clear()
+    storage._holds.clear()
     storage._waiting.clear()

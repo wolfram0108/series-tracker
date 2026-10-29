@@ -183,3 +183,66 @@ async def test_a_download_does_not_start_on_a_name_an_unfinished_removal_still_o
     ok, error = await ytdlp.download("https://cdn.test/v.m3u8", target, noop, headers={"Referer": "x"})
     assert not ok and "занят" in error and _transient_download_error(error)
     release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_download_owns_its_name_from_its_first_step_to_the_publication(fake, tmp_path, monkeypatch):
+    from core import storage
+    state, _ = fake
+    target = str(tmp_path / "out" / "episode.mp4")
+    entered, proceed = asyncio.Event(), asyncio.Event()
+
+    async def probe(*args):
+        entered.set()
+        await proceed.wait()
+        return 1200
+
+    monkeypatch.setattr(ytdlp, "_probe_duration_ffprobe", probe)
+    download = asyncio.create_task(ytdlp.download("https://cdn.test/e.mp4", target, noop))
+    await asyncio.wait_for(entered.wait(), 3)
+    assert storage.busy(target) and storage.busy(target + ".download.mp4")
+    with pytest.raises(storage.StorageBusy):
+        await storage.call(lambda: None, owns=os.path.dirname(target))
+    proceed.set()
+    assert await asyncio.wait_for(download, 10) == (True, "")
+    assert os.path.isfile(target) and not storage.busy(target)
+
+
+@pytest.mark.asyncio
+async def test_a_download_does_not_start_a_program_where_an_operation_has_not_ended(fake, tmp_path):
+    import threading
+    from core import storage
+    state, _ = fake
+    release = threading.Event()
+    target = str(tmp_path / "out" / "episode.mp4")
+    with pytest.raises(storage.StorageTimeout):
+        await storage.call(lambda: release.wait(5), owns=os.path.dirname(target), timeout=0.02)
+    try:
+        ok, error = await ytdlp.download("https://cdn.test/e.mp4", target, noop)
+        assert not ok and _transient_download_error(error)
+        assert not (state / "ffmpeg_args").exists(), "no program was started"
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_download_keeps_its_name_until_the_program_is_dead(fake, tmp_path):
+    from core import storage
+    state, _ = fake
+    (state / "stall").write_text("1")
+    spy = Spy()
+    target = str(tmp_path / "out" / "episode.mp4")
+    with patch("modules.downloads.ytdlp.asyncio.create_subprocess_exec", spy):
+        download = asyncio.create_task(ytdlp.download("https://cdn.test/e.mp4", target, noop))
+        end = asyncio.get_running_loop().time() + 5
+        while not (state / "ffmpeg_args").exists():
+            assert asyncio.get_running_loop().time() < end, "the writer did not start"
+            await asyncio.sleep(0.02)
+        writer = spy.started[-1]
+        assert alive(writer.pid) and storage.busy(target)
+        download.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await download
+    assert not alive(writer.pid)
+    await asyncio.sleep(0.05)
+    assert not storage.busy(target)

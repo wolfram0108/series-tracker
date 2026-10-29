@@ -81,3 +81,27 @@ async def test_the_chapters_query_of_a_stalled_downloader_fails_and_stops_it(tmp
         with pytest.raises(RuntimeError):
             await chapters.fetch_chapters("https://example.test/v")
     assert not alive(spy.started[0].pid)
+
+
+@pytest.mark.asyncio
+async def test_a_program_started_inside_a_hold_keeps_the_hold_until_it_has_ended(tmp_path):
+    from core import storage
+    path = str(tmp_path / "e.mp4")
+    with storage.hold(path):
+        process = await proc.spawn(*SLEEP)
+    try:
+        assert storage.busy(path), "the owner left; the program may still write"
+    finally:
+        process.kill()
+        await process.wait()
+    await asyncio.sleep(0.1)
+    assert not storage.busy(path)
+
+
+def test_programs_are_started_only_through_core_proc():
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    offenders = [str(path.relative_to(root)) for folder in ("core", "modules") for path in (root / folder).rglob("*.py")
+                 if path.name != "proc.py" and any(call in path.read_text(encoding="utf-8") for call in (
+                     "create_subprocess_exec", "create_subprocess_shell", "subprocess.Popen", "subprocess.run"))]
+    assert offenders == [], "a program that starts elsewhere escapes the holds of its task"

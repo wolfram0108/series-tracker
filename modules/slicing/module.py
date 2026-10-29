@@ -37,6 +37,7 @@ from datetime import datetime
 
 from core import BaseModule
 from core import storage
+from core.proc import spawn
 from core.db import Database
 from core.envelope import Envelope
 
@@ -62,13 +63,22 @@ async def run_ffmpeg(source: str, start: str, duration: str | None,
         return False, "ffmpeg не найден в PATH"
     _, ext = os.path.splitext(output)
     tmp = f"{output}.slicing{ext or '.mp4'}"
+    try:
+        with storage.hold(tmp, output):  # the cut writes until ffmpeg has really ended
+            return await _cut(executable, source, start, duration, tmp, output)
+    except storage.StorageBusy:
+        return False, "путь занят незавершённой файловой операцией"
+
+
+async def _cut(executable: str, source: str, start: str, duration: str | None, tmp: str,
+               output: str) -> tuple[bool, str]:
     command = [executable, "-y", "-ss", start, "-i", source]
     if duration:
         command += ["-t", duration]
     command += ["-c", "copy", tmp]
     success = False
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await spawn(
             *command, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE)
         try:

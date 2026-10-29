@@ -111,6 +111,28 @@ async def test_run_ffmpeg_publishes_final_on_success(tmp_path, monkeypatch):
     assert not os.path.exists(out + ".slicing.mp4")   # tmp ушёл в replace
 
 
+@pytest.mark.asyncio
+async def test_run_ffmpeg_owns_the_output_while_ffmpeg_writes(tmp_path, monkeypatch):
+    """The cut writes beside its target for as long as ffmpeg lives: no other change may take that name then."""
+    from core import storage
+    binp = tmp_path / "bin"
+    binp.mkdir()
+    gate = tmp_path / "gate"
+    stub = binp / "ffmpeg"
+    stub.write_text("#!/bin/bash\nwhile [ ! -e \"%s\" ]; do sleep 0.02; done\necho cut > \"${@: -1}\"\n" % gate)
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{binp}:/usr/bin:/bin")
+    out = str(tmp_path / "Show s01e03.mp4")
+    cut = asyncio.create_task(run_ffmpeg("src.mp4", "00:00:00", None, out))
+    await asyncio.sleep(0.3)
+    assert storage.busy(out) and storage.busy(out + ".slicing.mp4")
+    with pytest.raises(storage.StorageBusy):
+        await storage.call(lambda: None, owns=out)
+    gate.write_text("go")
+    assert await asyncio.wait_for(cut, 10) == (True, "")
+    assert not storage.busy(out)
+
+
 # --- сквозные сценарии ----------------------------------------------------------------
 
 class FakeNeighbours(BaseModule):

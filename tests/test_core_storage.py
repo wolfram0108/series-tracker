@@ -103,3 +103,52 @@ async def test_a_cancelled_wait_does_not_free_what_the_call_owns(tmp_path):
     release.set()
     await asyncio.sleep(0.1)
     assert not storage.busy(path)
+
+
+@pytest.mark.asyncio
+async def test_a_hold_is_taken_whole_or_refused_and_is_the_holders_own(tmp_path):
+    path = str(tmp_path / "e.mp4")
+    seen = {}
+    go = asyncio.Event()
+
+    async def another_task():
+        await go.wait()
+        seen["busy"] = storage.busy(path)
+        with pytest.raises(storage.StorageBusy):
+            storage.acquire(str(tmp_path / "free.mp4"), path)
+        seen["partial"] = storage.busy(str(tmp_path / "free.mp4"))
+        with pytest.raises(storage.StorageBusy):
+            await storage.call(lambda: None, owns=str(tmp_path))
+
+    other = asyncio.create_task(another_task())  # made before the hold: its context has none
+    with storage.hold(path):
+        assert not storage.busy(path), "the holder is not refused by its own hold"
+        await storage.call(lambda: None, owns=(path + ".part", path))
+        go.set()
+        await other
+    assert seen == {"busy": True, "partial": False}, "a refused claim takes none of its paths"
+    assert not storage.busy(path)
+
+
+@pytest.mark.asyncio
+async def test_a_hold_lasts_until_what_was_attached_to_it_has_ended(tmp_path):
+    path = str(tmp_path / "e.mp4")
+    told = []
+    ending = asyncio.get_running_loop().create_future()
+    with storage.hold(path) as taken:
+        taken.attach(ending)
+    assert storage.busy(path), "the owner left, the writing did not"
+    storage.when_free(path, lambda: told.append("free"))
+    assert told == []
+    ending.set_result(None)
+    await asyncio.sleep(0.05)
+    assert not storage.busy(path) and told == ["free"]
+
+
+@pytest.mark.asyncio
+async def test_a_hold_is_released_when_its_block_fails(tmp_path):
+    path = str(tmp_path / "e.mp4")
+    with pytest.raises(RuntimeError):
+        with storage.hold(path):
+            raise RuntimeError("boom")
+    assert not storage.busy(path)

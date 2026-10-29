@@ -28,7 +28,7 @@ import httpx
 
 from core import storage
 from core.ffprobe import duration_of
-from core.proc import run_capture
+from core.proc import run_capture, spawn
 
 ProgressCb = Callable[[dict], Awaitable[None]]
 
@@ -337,8 +337,7 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
     cmd.extend(_headers_args(stream_url, headers))
     cmd.extend(["-i", stream_url, "-c", "copy", "-progress", "pipe:1", "-nostats", tmp_out])
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    proc = await spawn(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr))
     fields: dict[str, str] = {}
     last_size = 0
@@ -410,11 +409,20 @@ async def download(video_url: str, full_output_path: str,
                    on_progress: ProgressCb, *,
                    headers: dict | None = None,
                    threads: int = 6) -> tuple[bool, str]:
-    """Two-phase video download. Supports direct ffmpeg copy and yt-dlp."""
+    """Two-phase video download. Supports direct ffmpeg copy and yt-dlp.
+
+    The name is owned from the first step to the last: the programs, their leftovers and the publication."""
     if not os.path.isabs(full_output_path):
         return False, "путь сохранения должен быть абсолютным"
-    if storage.busy(full_output_path):  # a removal of this name has not ended: a file written now could be lost
+    try:
+        with storage.hold(full_output_path):
+            return await _download_owned(video_url, full_output_path, on_progress, headers, threads)
+    except storage.StorageBusy:  # an operation on this name has not ended: a file written now could be lost
         return False, "путь занят незавершённой файловой операцией (timeout)"
+
+
+async def _download_owned(video_url: str, full_output_path: str, on_progress: ProgressCb,
+                          headers: dict | None, threads: int) -> tuple[bool, str]:
     await storage.call(os.makedirs, os.path.dirname(full_output_path), exist_ok=True)
     if await storage.call(os.path.exists, full_output_path):
         return True, "файл уже существует"
@@ -465,7 +473,7 @@ async def _phase_download(video_url: str, full_output_path: str,
         return False, "yt-dlp не найден в PATH"
     out_template = full_output_path + ".download.%(ext)s"
 
-    proc = await asyncio.create_subprocess_exec(
+    proc = await spawn(
         executable, "--progress", "--newline", "--fixup", "never",
         "-f", format_selector, "-N", str(threads),
         "-o", out_template, video_url,
@@ -530,7 +538,7 @@ async def _phase_remux(raw: str, full_output_path: str,
     # (переписать весь файл ради moov в начале) — минуты после
     # progress=100 без метрик, «вечное зависание на 100%» (находка 51).
     # Для медиатеки faststart не нужен (легаси его не использовал).
-    proc = await asyncio.create_subprocess_exec(
+    proc = await spawn(
         executable, "-y", "-i", raw, "-c", "copy",
         "-progress", "pipe:1", "-nostats", tmp_out,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
