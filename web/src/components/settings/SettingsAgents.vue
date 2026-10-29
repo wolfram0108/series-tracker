@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useQueuesStore, type ConformResult } from "../../stores/queues"
 import { t } from "../../i18n"
+import { reasonText } from "../../lib/reason"
 
 // Вкладка «Агенты»: 4 очереди карточками (вместо таблиц). Данные — из
 // queuesStore (наполняются SSE-событиями очередей). Пустые очереди — empty.
@@ -18,7 +19,7 @@ const statusClass = (status: string) =>
   ({ done: "pill-success", failed: "pill-danger", running: "pill-primary", cancelled: "pill-secondary" })[status] ?? "pill-info"
 
 function resultText(r: ConformResult): string {
-  if (r.error) return t("agents.conform.result.failed", { error: r.error })
+  if (r.error) return t("agents.conform.result.failed", { error: reasonText(r.error) })
   if (r.skipped) return t("agents.conform.result.skipped")
   return t("agents.conform.result.ok", {
     resid: r.resid_ms == null ? "—" : r.resid_ms.toFixed(1),
@@ -85,7 +86,7 @@ const resultClass = (r: ConformResult) =>
       <h6 class="queue-title-bar"><i class="pi pi-sliders-h"></i> {{ t("agents.conform.title") }}</h6>
       <div v-if="!q.conform || !q.conform.daemon.up" class="queue-empty">
         {{ q.conform && q.conform.daemon.error
-          ? t("agents.conform.daemon.down", { error: q.conform.daemon.error })
+          ? t("agents.conform.daemon.down", { error: reasonText(q.conform.daemon.error) })
           : t("agents.conform.daemon.idle") }}
       </div>
       <template v-else>
@@ -110,7 +111,7 @@ const resultClass = (r: ConformResult) =>
                 <div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: Math.round(task.progress * 100) + '%' }">{{ Math.round(task.progress * 100) }}%</div>
               </div>
             </div>
-            <div v-if="task.error" class="queue-row"><div class="pill pill-danger">{{ task.error }}</div></div>
+            <div v-if="task.error" class="queue-row"><div class="pill pill-danger">{{ reasonText(task.error) }}</div></div>
             <div v-for="r in task.results" :key="r.dub" class="queue-row">
               <span class="queue-title">{{ r.dub }}</span>
               <div class="pill" :class="resultClass(r)">{{ resultText(r) }}</div>

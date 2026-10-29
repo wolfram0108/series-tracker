@@ -152,12 +152,14 @@ class VoicesRepository:
             "SELECT DISTINCT job_id FROM voice_dubs WHERE status=? AND job_id IS NOT NULL", (S.ALIGNING.value,))
         return [row["job_id"] for row in rows]
 
-    async def mark_submitting(self, dub_ids: list[int], key: str, ref_uid: str, ref_path: str) -> bool:
-        """Write down that these voice-overs are being sent as one job, before the request goes out."""
+    async def mark_submitting(self, dub_ids: list[int], key: str, ref_uid: str, ref_path: str,
+                              out_dir: str) -> bool:
+        """Write down that these voice-overs are being sent as one job, with where its tracks are asked
+        for, before the request goes out."""
         marks = ",".join("?" * len(dub_ids))
         return await self._move(
-            lifecycle.SEND, "job_id=NULL, submit_key=?, ref_uid=?, ref_path=?, error=NULL, outcome=NULL",
-            (key, ref_uid, ref_path), f"id IN ({marks})", tuple(dub_ids), expected=len(dub_ids))
+            lifecycle.SEND, "job_id=NULL, submit_key=?, ref_uid=?, ref_path=?, out_dir=?, error=NULL, outcome=NULL",
+            (key, ref_uid, ref_path, out_dir), f"id IN ({marks})", tuple(dub_ids), expected=len(dub_ids))
 
     async def attach_job(self, key: str, job_id: str) -> None:
         """The service has the job: every voice-over sent with the key gets its number at once."""
@@ -167,7 +169,7 @@ class VoicesRepository:
 
     async def release_submission(self, key: str) -> bool:
         """The job was never accepted: its voice-overs go back to waiting for a new one."""
-        return await self._move(lifecycle.UNSEND, "submit_key=NULL, ref_uid=NULL, ref_path=NULL",
+        return await self._move(lifecycle.UNSEND, "submit_key=NULL, ref_uid=NULL, ref_path=NULL, out_dir=NULL",
                                 (), "submit_key=? AND job_id IS NULL", (key,), expected=None)
 
     async def unsent_submissions(self) -> list[str]:
@@ -206,7 +208,7 @@ class VoicesRepository:
     async def reset(self, dub_id: int, reason: str) -> bool:
         """The track belongs to a reference that is gone: back to the start, from the main source."""
         return await self._move(
-            lifecycle.RESTART, "attempt=0, job_id=NULL, submit_key=NULL, ref_uid=NULL, ref_path=NULL, "
+            lifecycle.RESTART, "attempt=0, job_id=NULL, submit_key=NULL, out_dir=NULL, ref_uid=NULL, ref_path=NULL, "
             "aligned_path=NULL, output_path=NULL, move_from=NULL, temp_path=NULL, outcome=NULL, error=?",
             (reason,), "id=?", (dub_id,))
 

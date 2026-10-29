@@ -102,9 +102,9 @@ def test_the_aligned_track_is_where_the_module_asked_for_it():
     job = AlignmentJob.model_validate({"job_id": "j", "status": "done", "results": [
         {"dub": "a.mp4", "ok": True, "out_path": "/mnt/daemon/anything/a.flac"}]})
     result = alignment.result_for(job, "/data/7/s01e01/a.mp4")
-    assert alignment.track_of("/data/7/s01e01/a.mp4", result) == "/data/7/s01e01/_aligned/a.flac"
+    assert alignment.track_of("/data/7/s01e01/_aligned", result) == "/data/7/s01e01/_aligned/a.flac"
     assert alignment.dub_folder_of_track("/data/7/s01e01/_aligned/a.flac") == "/data/7/s01e01"
-    assert alignment.track_of("/data/7/s01e01/a.mp4", None) is None
+    assert alignment.track_of("/data/7/s01e01/_aligned", None) is None
 
 
 @pytest.mark.parametrize("result,code", [

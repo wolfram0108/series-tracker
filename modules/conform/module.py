@@ -43,6 +43,7 @@ import httpx
 from core import BaseModule, BusRequestError
 from core.contracts import AlignmentJob, DubResult, JobStatus
 from core.envelope import Envelope
+from core.reasons import describe, reason
 
 from .client import DaemonClient, DaemonRefused
 from .paths import DEFAULT_PATH_MAP, reverse, translate
@@ -51,6 +52,8 @@ BACKOFF_START_S = 2.0
 BACKOFF_MAX_S = 30.0
 PATH_MAP_KEY = "conform.path_map"
 ENDED = ("done", "failed", "cancelled")
+# Failures before the request left this machine: the daemon has certainly not seen it.
+NOT_DELIVERED = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 _JOB_FIELDS = ("id", "label", "status", "progress", "stage", "stage_pct", "detail", "dub_index",
                "dub_total", "cur_dub", "elapsed_s", "error", "created_at", "updated_at")
@@ -136,10 +139,9 @@ class ConformModule(BaseModule):
 
     async def on_submit(self, env: Envelope) -> dict:
         if self._client is None:
-            return {"unavailable": "сервис выравнивания не настроен (ST_CONFORM_URL)", "retry": False}
+            return {"unavailable": reason("conform_not_configured"), "retry": False}
         if not self._daemon.get("up"):
-            return {"unavailable": f"сервис выравнивания недоступен: {self._daemon.get('error')}",
-                    "retry": False}
+            return {"unavailable": reason("conform_down", error=self._daemon.get("error") or ""), "retry": False}
         payload = env.payload
         mapping = await self._path_map()
         try:
@@ -150,12 +152,16 @@ class ConformModule(BaseModule):
                     "keep_tmp": False, "label": job_label(payload.get("label"), payload.get("key"))}
             job = await self._client.enqueue(body)
         except (ValueError, DaemonRefused) as exc:
-            self.log.warning("conform: задача %s отклонена: %s", payload.get("label") or "", exc)
+            self.log.warning("conform: задача %s отклонена: %s", payload.get("label") or "", describe(str(exc)))
             return {"rejected": str(exc)}
         except httpx.HTTPError as exc:
-            reason = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
-            self.log.warning("conform: задача %s не поставлена: %s", payload.get("label") or "", reason)
-            return {"unavailable": reason, "retry": True}
+            problem = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+            if isinstance(exc, NOT_DELIVERED):
+                self.log.warning("conform: задача %s не поставлена: %s", payload.get("label") or "", problem)
+                return {"unavailable": reason("conform_unreachable", error=problem), "retry": True}
+            # The request may have reached the daemon: the caller must ask by the key, not send again.
+            self.log.warning("conform: ответа на постановку %s нет: %s", payload.get("label") or "", problem)
+            return {"uncertain": reason("conform_no_answer", error=problem)}
         self.log.info("conform: поставлена задача %s (%s), озвучек %d", job.get("id"),
                       payload.get("label") or "", len(body["dubs"]))
         return {"job_id": job["id"]}
@@ -228,15 +234,15 @@ class ConformModule(BaseModule):
                     self._apply(name, payload)
                     self._publish()
                     await self._announce()
-                reason = "поток событий закрыт демоном"
+                problem = reason("stream_closed")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - any transport failure means "daemon unreachable"
-                reason = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
-            self._daemon = {"up": False, "error": reason}
+                problem = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+            self._daemon = {"up": False, "error": problem}
             self._jobs.clear()
             self._publish()
-            self.log.warning("conform: демон недоступен (%s), повтор через %.0f с", reason, delay)
+            self.log.warning("conform: демон недоступен (%s), повтор через %.0f с", describe(problem), delay)
             await asyncio.sleep(delay)
             delay = min(delay * 2, BACKOFF_MAX_S)
 

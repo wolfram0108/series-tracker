@@ -6,6 +6,8 @@ from typing import Any, AsyncIterator
 
 import httpx
 
+from core.reasons import reason
+
 # The daemon sends a keep-alive comment every 15 s; silence for longer means a dead connection.
 STREAM_READ_TIMEOUT_S = 45.0
 REQUEST_TIMEOUT_S = 10.0
@@ -35,7 +37,7 @@ class DaemonClient:
         response = await self._http.post(f"{self.base_url}/conform/enqueue", json=body,
                                          timeout=REQUEST_TIMEOUT_S)
         if 400 <= response.status_code < 500:
-            raise DaemonRefused(f"демон отклонил задачу ({response.status_code}): {response.text[:300]}")
+            raise DaemonRefused(reason("daemon_refused", status=response.status_code, text=response.text[:300]))
         response.raise_for_status()
         return response.json()
 

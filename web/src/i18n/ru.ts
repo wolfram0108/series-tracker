@@ -121,6 +121,13 @@ export const ru = {
   "reason.manifest_status": "{label}: манифест ответил {status}",
   "reason.manifest_undecoded": "{label}: манифест не расшифрован ({error})",
   "reason.link_no_episode": "в ссылке нет номера серии",
+  "reason.conform_not_configured": "сервис выравнивания не настроен (ST_CONFORM_URL)",
+  "reason.conform_down": "сервис выравнивания недоступен: {error}",
+  "reason.conform_unreachable": "сервис выравнивания не принял запрос: {error}",
+  "reason.conform_no_answer": "нет ответа сервиса выравнивания: {error}",
+  "reason.daemon_refused": "демон отклонил задачу ({status}): {text}",
+  "reason.path_outside_share": "путь {path} вне общего хранилища демона",
+  "reason.stream_closed": "поток событий закрыт демоном",
   "reason.unknown": "причина: {code}",
   "add.error.parse": "Ошибка парсинга URL",
 } as const

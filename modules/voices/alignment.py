@@ -41,11 +41,11 @@ def result_for(job: AlignmentJob, dub_path: str) -> DubResult | None:
     return next((result for result in job.results if stem(result.dub) == wanted), None)
 
 
-def track_of(dub_path: str, result: DubResult | None) -> str | None:
-    """Where this server holds the aligned track: in the folder it asked the service to write to."""
+def track_of(out_dir: str, result: DubResult | None) -> str | None:
+    """Where this server holds the aligned track: in the folder the job asked the service to write to."""
     if result is None or not result.out_path:
         return None
-    return os.path.join(job_folders(os.path.dirname(dub_path))[0], os.path.basename(result.out_path))
+    return os.path.join(out_dir, os.path.basename(result.out_path))
 
 
 def refusal(result: DubResult | None) -> str | None:

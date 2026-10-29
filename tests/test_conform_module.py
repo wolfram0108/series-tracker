@@ -9,6 +9,8 @@ from core import BaseModule, Bus, BusRequestError, Runner
 from modules.conform import ConformModule, DaemonClient, DaemonRefused
 from modules.conform.module import compact_job
 from modules.conform.paths import translate
+from conform_fakes import FakeClient
+from core.reasons import parse
 
 
 def job(job_id, seq=1, status="running", **fields):
@@ -16,59 +18,6 @@ def job(job_id, seq=1, status="running", **fields):
             "stage": "", "stage_pct": 0.0, "detail": "", "dub_index": 0, "dub_total": 2,
             "cur_dub": "", "elapsed_s": 0.0, "error": None, "created_at": "t0", "updated_at": "t0",
             "trace": [{"big": "x" * 50}], "ops": [{"op": "decode"}], "results": [], **fields}
-
-
-class FakeClient:
-    """A daemon that plays scripted connections: a list of events, or an exception to raise."""
-
-    base_url = "http://daemon.test"
-
-    def __init__(self, *scripts):
-        self.scripts = list(scripts)
-        self.connections = 0
-        self.enqueued = []
-        self.cancelled = []
-        self.refuse = False
-        self.known = {}
-
-    async def info(self):
-        return {"version": "0.1.0", "device": "cuda", "gpu": True, "gpu_name": "RTX"}
-
-    async def events(self):
-        self.connections += 1
-        if not self.scripts:
-            await asyncio.Event().wait()
-        for item in self.scripts.pop(0):
-            if isinstance(item, Exception):
-                raise item
-            await asyncio.sleep(0)
-            yield item
-        await asyncio.Event().wait()
-
-    async def enqueue(self, body):
-        self.enqueued.append(body)
-        if isinstance(self.refuse, Exception):
-            raise self.refuse
-        if self.refuse:
-            raise DaemonRefused("демон отклонил задачу (422): bad path")
-        return {"id": "j-new", "status": "queued"}
-
-    async def job(self, job_id):
-        return self.known.get(job_id)
-
-    async def jobs(self):
-        if isinstance(self.refuse, Exception):
-            raise self.refuse
-        return list(self.known.values())
-
-    async def cancel(self, job_id):
-        self.cancelled.append(job_id)
-        if isinstance(self.refuse, Exception):
-            raise self.refuse
-        return job_id in self.known
-
-    async def close(self):
-        pass
 
 
 class Settings(BaseModule):
@@ -331,7 +280,7 @@ async def test_submit_fails_when_asking_again_may_help_and_rejects_when_it_canno
     try:
         await until(probe, lambda s: not s["daemon"]["up"])
         down = await probe.request("conform.submit", SUBMIT, timeout=5)
-        assert "недоступен" in down["unavailable"] and down["retry"] is False
+        assert parse(down["unavailable"])["code"] == "conform_down" and down["retry"] is False
     finally:
         await runner.stop()
     client = FakeClient([("conform.snapshot", {"items": []})])
@@ -339,13 +288,19 @@ async def test_submit_fails_when_asking_again_may_help_and_rejects_when_it_canno
     try:
         await until(probe, lambda s: s["daemon"]["up"])
         outside = await probe.request("conform.submit", {**SUBMIT, "ref": "/home/x/a.mp4"}, timeout=5)
-        assert "вне общего хранилища" in outside["rejected"] and client.enqueued == []
+        assert parse(outside["rejected"])["code"] == "path_outside_share" and client.enqueued == []
         client.refuse = True
         refused = await probe.request("conform.submit", SUBMIT, timeout=5)
-        assert "отклонил" in refused["rejected"]
-        client.refuse = httpx.RemoteProtocolError("Server disconnected")
-        blip = await probe.request("conform.submit", SUBMIT, timeout=5)
-        assert blip["retry"] is True and "Server disconnected" in blip["unavailable"]
+        assert parse(refused["rejected"])["code"] == "daemon_refused"
+        client.refuse = httpx.ConnectError("refused")
+        not_sent = await probe.request("conform.submit", SUBMIT, timeout=5)
+        assert not_sent["retry"] is True and parse(not_sent["unavailable"])["code"] == "conform_unreachable"
+        for lost in (httpx.RemoteProtocolError("Server disconnected"), httpx.ReadTimeout("no answer"),
+                     httpx.HTTPStatusError("boom", request=httpx.Request("POST", "http://d"),
+                                           response=httpx.Response(502))):
+            client.refuse = lost
+            unknown = await probe.request("conform.submit", SUBMIT, timeout=5)
+            assert "unavailable" not in unknown and parse(unknown["uncertain"])["code"] == "conform_no_answer"
     finally:
         await runner.stop()
     bus = Bus()
@@ -354,7 +309,7 @@ async def test_submit_fails_when_asking_again_may_help_and_rejects_when_it_canno
     await runner.start()
     try:
         idle = await probe.request("conform.submit", SUBMIT, timeout=5)
-        assert "не настроен" in idle["unavailable"] and idle["retry"] is False
+        assert parse(idle["unavailable"])["code"] == "conform_not_configured" and idle["retry"] is False
     finally:
         await runner.stop()
 

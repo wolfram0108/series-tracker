@@ -8,9 +8,11 @@ import sys
 
 import pytest
 
+from conform_fakes import FakeClient
 from core import BaseModule, Bus, Runner
 from core.db import Database
 from core.envelope import Envelope
+from modules.conform import ConformModule
 from modules.settings import SettingsModule
 from modules.voices import VoicesModule
 from modules.voices.identity import Equivalence, group_key, same_voice, tokens, voice_groups
@@ -242,7 +244,8 @@ class Neighbours(BaseModule):
 
     name = "neighbours"
 
-    def __init__(self, bus, sources, reference_url, plan, library="/nonexistent"):
+    def __init__(self, bus, sources, reference_url, plan, library="/nonexistent", conform=True):
+        self.serves_conform = conform
         self.sources = sources
         self.reference_url = reference_url
         self.plan = plan  # [(season, episode, site episode)]
@@ -277,10 +280,11 @@ class Neighbours(BaseModule):
         self.handle("settings.values.by_prefix", self.on_settings_by_prefix)
         self.handle("downloads.fetch", self.on_fetch)
         self.handle("downloads.fetch.cancel", self.on_cancel)
-        self.handle("conform.submit", self.on_submit)
-        self.handle("conform.cancel", self.on_conform_cancel)
-        self.handle("conform.job.find", self.on_job_find)
-        self.handle("conform.job.get", self.on_job_get)
+        if self.serves_conform:
+            self.handle("conform.submit", self.on_submit)
+            self.handle("conform.cancel", self.on_conform_cancel)
+            self.handle("conform.job.find", self.on_job_find)
+            self.handle("conform.job.get", self.on_job_get)
 
     async def on_series(self, env):
         return {"id": env.payload["series_id"], "url": "https://site/title.html", "name": "Series",
@@ -343,8 +347,8 @@ class Neighbours(BaseModule):
                                                      "error": None, "results": []})
 
 
-@pytest.fixture
-async def dubs(db_path, tmp_path):
+async def system(db_path, tmp_path, daemon=None):
+    """The module with fake neighbours; with a `daemon` the real conform bridge talks to it instead of a fake."""
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO parser_profiles (id, name) VALUES (1, 'p')")
         conn.execute("INSERT INTO series (id, url, name, name_en, site, save_path, source_type, "
@@ -357,13 +361,33 @@ async def dubs(db_path, tmp_path):
                linked("kodik", "BlackCat", range(1, 4)),
                linked("cvh", "BlackCat", [1, 2])]
     neighbours = Neighbours(bus, sources, sources[0]["url"], [(1, 1, 1), (1, 2, 2), (1, 3, 3)],
-                            library=str(tmp_path / "library"))
+                            library=str(tmp_path / "library"), conform=daemon is None)
     neighbours.settings["voices.temp_root"] = str(tmp_path / "temp")
     probe = Probe(bus)
     voices = VoicesModule(bus, db)
-    runner = Runner(bus, [neighbours, SettingsModule(bus, db), voices, probe])
+    modules = [neighbours, SettingsModule(bus, db), voices, probe]
+    if daemon is not None:
+        modules.append(ConformModule(bus, daemon, backoff_start=0.05))
+    runner = Runner(bus, modules)
     await runner.start()
-    yield probe, neighbours, voices, bus
+    return (probe, neighbours, voices, bus), runner
+
+
+@pytest.fixture
+async def dubs(db_path, tmp_path):
+    system_, runner = await system(db_path, tmp_path)
+    yield system_
+    await runner.stop()
+
+
+@pytest.fixture
+async def dubs_with_conform(db_path, tmp_path):
+    """The same system, but the alignment bridge is the real module over a scripted daemon."""
+    daemon = FakeClient([("conform.snapshot", {"items": []})])
+    system_, runner = await system(db_path, tmp_path, daemon)
+    system_[1].daemon = daemon
+    system_[1].settings["conform.path_map"] = '{"/tmp": "/share"}'
+    yield system_
     await runner.stop()
 
 
@@ -1769,6 +1793,38 @@ async def test_a_job_that_arrived_but_whose_answer_was_lost_is_found_again_not_s
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
     await asyncio.wait_for(settled_sub.queue.get(), 5)
     assert {r["status"] for r in await rows(probe)} == {"placed"} and len(neighbours.submits) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_http_answer_that_never_came_back_is_asked_for_by_the_key_not_sent_twice(dubs_with_conform, monkeypatch):
+    monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.05)
+    daemon = dubs_with_conform[1].daemon
+    daemon.lose_answers = 1  # the daemon takes the job, the read times out
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs_with_conform, finished=False)
+    finish_all(probe, neighbours)
+    deadline = asyncio.get_running_loop().time() + 8
+    while not all(r["status"] == "aligning" and r["job_id"] for r in await rows(probe)):
+        assert asyncio.get_running_loop().time() < deadline, (await rows(probe), daemon.enqueued)
+        await asyncio.sleep(0.05)
+    assert len(daemon.enqueued) == 1
+    assert {r["job_id"] for r in await rows(probe)} == {"j-1"}
+
+
+@pytest.mark.asyncio
+async def test_tracks_of_one_job_are_found_where_the_job_asked_for_them_whatever_roots_the_voices_came_from(dubs, tmp_path):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs, finished=False)
+    first, second = sorted(await voices.repo.for_series(7), key=lambda row: row["id"])
+    fetches = {fetch["key"]: fetch for fetch in neighbours.fetches}
+    touch(fetches[f"dub:{first['id']}"]["path"], b"video")
+    finish(probe, f"dub:{first['id']}")
+    moved = str(tmp_path / "another-root" / "7" / "s01e01" / os.path.basename(fetches[f"dub:{second['id']}"]["path"]))
+    touch(moved, b"video")  # the setting of the temporary root changed between the two downloads
+    await voices.repo._db.execute("UPDATE voice_dubs SET temp_path=? WHERE id=?", (moved, second["id"]))
+    finish(probe, f"dub:{second['id']}")
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
+    assert {r["status"] for r in await rows(probe)} == {"placed"}
 
 
 @pytest.mark.asyncio

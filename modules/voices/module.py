@@ -731,7 +731,7 @@ class VoicesModule(BaseModule):
             return
         out_dir, cache_dir = job_folders(os.path.dirname(ready[0]["temp_path"]))
         key = uuid.uuid4().hex[:12]
-        await self.repo.mark_submitting([row["id"] for row in ready], key, uid, reference)
+        await self.repo.mark_submitting([row["id"] for row in ready], key, uid, reference, out_dir)
         try:
             reply = await self.request("conform.submit", {
                 "ref": reference, "dubs": [row["temp_path"] for row in ready],
@@ -741,9 +741,13 @@ class VoicesModule(BaseModule):
             self.log.warning("%s: ответа на постановку нет, спросим сервис, есть ли задача: %s", label, exc)
             self._retry_later(series["id"])
             return
+        if reply.get("uncertain"):  # the service may have taken the job: the key stays, the service is asked
+            self.log.warning("%s: исход постановки неизвестен, спросим сервис: %s", label, describe(reply["uncertain"]))
+            self._retry_later(series["id"])
+            return
         if reply.get("unavailable"):
             await self.repo.release_submission(key)
-            self.log.info("%s: озвучки ждут сервис выравнивания: %s", label, reply["unavailable"])
+            self.log.info("%s: озвучки ждут сервис выравнивания: %s", label, describe(reply["unavailable"]))
             if reply.get("retry"):
                 self._retry_later(series["id"])
             return
@@ -752,7 +756,7 @@ class VoicesModule(BaseModule):
             for row in ready:
                 await self.repo.mark_rejected(row["id"], reply["rejected"])
                 await self._announce(row)
-            self.log.warning("%s: задача выравнивания отклонена: %s", label, reply["rejected"])
+            self.log.warning("%s: задача выравнивания отклонена: %s", label, describe(reply["rejected"]))
             return
         await self._attach(key, reply["job_id"])
 
@@ -884,7 +888,8 @@ class VoicesModule(BaseModule):
             return
         result = result_for(job, row["temp_path"])
         verdict = refusal(result)
-        track = track_of(row["temp_path"], result) if verdict is None else None
+        out_dir = row["out_dir"] or job_folders(os.path.dirname(row["temp_path"]))[0]
+        track = track_of(out_dir, result) if verdict is None else None
         if verdict is None and not await self._io(os.path.isfile, track):
             verdict = reason("output_missing")
         if verdict is None:
