@@ -656,8 +656,22 @@ class VoicesModule(BaseModule):
             return False
         return True
 
+    @staticmethod
+    def _held(path: str, rows: list[dict]) -> bool:
+        """True when a voice-over holds the path or something inside it."""
+        inside = path.rstrip(os.sep) + os.sep
+        return any(held == path or held.startswith(inside)
+                   for row in rows
+                   for held in (row["output_path"], row["move_from"], row["aligned_path"], row["temp_path"])
+                   if held)
+
     async def _sweep_cleanup(self) -> None:
+        rows = await self.repo.all_rows()
         for entry in await self.repo.cleanup_list():
+            if entry["kind"] != JOB and self._held(entry["path"], rows):
+                # The name belongs to a live voice-over again: removing it now would destroy new work.
+                await self.repo.cleanup_done(entry["path"])
+                continue
             if entry["kind"] == JOB:
                 try:
                     reply = await self.request("conform.cancel", {"job_id": entry["path"]}, timeout=30)

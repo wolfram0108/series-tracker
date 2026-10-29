@@ -1635,6 +1635,22 @@ async def test_a_failed_removal_hands_the_file_to_the_cleanup_journal_and_is_tri
 
 
 @pytest.mark.asyncio
+async def test_a_journaled_path_that_a_voice_over_holds_again_is_not_removed(dubs):
+    from unittest.mock import patch
+
+    voices = dubs[2]
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    group = await voices.repo.for_series(7)
+    paths = [row["output_path"] for row in group]
+    with patch("modules.voices.module.os.remove", side_effect=PermissionError("read-only")):
+        assert await voices._follow(7, 1, 1, group, ref, "another-reference")
+    for row in group:  # the new reference got its tracks under the same names
+        await voices.repo.set_output(row["id"], row["output_path"], ref)
+    await voices._sweep_cleanup()
+    assert all(os.path.exists(path) for path in paths) and await voices.repo.cleanup_list() == []
+
+
+@pytest.mark.asyncio
 async def test_a_failed_removal_of_the_temporary_folder_is_journaled_and_the_episode_still_settles(dubs):
     from unittest.mock import patch
 
