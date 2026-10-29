@@ -84,7 +84,7 @@ async def run_ffmpeg(source: str, start: str, duration: str | None,
             raise
         if proc.returncode != 0:
             return False, stderr.decode("utf-8", "replace").strip()[-500:]
-        await storage.call(os.replace, tmp, output, owns=(tmp, output))  # атомарная публикация
+        await storage.call(os.replace, tmp, output, owns=(tmp, output))  # atomic publication
         success = True
         return True, ""
     finally:

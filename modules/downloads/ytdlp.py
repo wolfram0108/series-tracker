@@ -569,7 +569,7 @@ async def _phase_remux(raw: str, full_output_path: str,
         await storage.call(_remove_file, tmp_out, owns=tmp_out)
         return False, stopped
     if proc.returncode == 0:
-        await storage.call(os.replace, tmp_out, full_output_path, owns=(tmp_out, full_output_path))  # атомарная публикация
+        await storage.call(os.replace, tmp_out, full_output_path, owns=(tmp_out, full_output_path))  # atomic publication
         await on_progress({"phase": "remux", "progress": 100, "eta": 0,
                            "speed": 0.0})
         return True, ""

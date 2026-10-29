@@ -98,7 +98,7 @@ class DownloadsModule(BaseModule):
         self.repo = DownloadsRepository(db)
         self._download = downloader  # подменяется в тестах
         self._limit = 2               # параллельных файлов (max_parallel_downloads)
-        self._fetch_limit = 2         # параллельных общих загрузок (downloads.fetch)
+        self._fetch_limit = 2         # parallel general downloads (downloads.fetch)
         self._fetch_queue: list[dict] = []
         self._fetch_active: dict[str, tuple[asyncio.Task, int | None]] = {}
         self._threads = 6             # фрагментов на файл (yt-dlp -N)
