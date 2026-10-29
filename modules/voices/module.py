@@ -30,10 +30,12 @@ Events in:  downloads.fetch.started and .finished (our keys `dub:<id>`), conform
             jobs of the service), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished,
             conform.daemon.up, series.deleted.
-Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, hint, detail, rev} —
-            rev grows with every event, so the interface keeps the newest of two it receives out of order;
+Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, hint, detail,
+            epoch, rev} — epoch is the number of this start of the module, kept in the database and raised at every
+            start; rev grows with every event of a run: the interface keeps the newest (epoch, rev) of two it
+            receives out of order, and no clock takes part;
             every write to a row is announced, including the creation of a planned row and its removal;
-            voices.dubs.snapshot {rev, items: [{series_id, season, episode, voice_key, voice_label, status,
+            voices.dubs.snapshot {epoch, rev, items: [{series_id, season, episode, voice_key, voice_label, status,
             state, hint, detail}]} — every row, published when an interface connects (gateway.sse.clients);
             state is what the user sees (states.py: planned, download_queued, downloading, align_queued, running,
             done, error), hint names the sentence that tells apart the causes of one state, status the
@@ -92,7 +94,6 @@ import json
 import os
 import re
 import shutil
-import time
 import uuid
 from collections import OrderedDict, defaultdict
 
@@ -153,6 +154,8 @@ class VoicesModule(BaseModule):
         # The number of a job and its ending arrive in any order; each looks for the other under this lock.
         self._claim_lock = asyncio.Lock()
         self._unclaimed: OrderedDict[str, AlignmentJob] = OrderedDict()
+        self._epoch = 0
+        self._epoch_lock = asyncio.Lock()
         self._rev = 0
         self._reported: set[str] = set()
         super().__init__(bus)
@@ -175,6 +178,7 @@ class VoicesModule(BaseModule):
     async def on_start(self) -> None:
         if self.repo is None:
             return
+        await self._generation()
         requeued = await self.repo.requeue_interrupted()
         pending = await self.repo.pending()
         if requeued or pending:
@@ -401,31 +405,40 @@ class VoicesModule(BaseModule):
         await self._announce(row)
         self._kick(row["series_id"])
 
+    async def _generation(self) -> int:
+        """The epoch of this run: kept in the database and raised at every start, so that the packets of a later
+        run outrank those of an earlier one whatever the clock says; `rev` only orders packets within a run."""
+        if not self._epoch:
+            async with self._epoch_lock:
+                if not self._epoch:
+                    self._epoch = await self.repo.next_epoch()
+        return self._epoch
+
     def _next_rev(self) -> int:
-        """Revisions grow within the process and across restarts: the interface keeps the newest."""
-        self._rev = max(self._rev + 1, time.time_ns() // 1000)
+        self._rev += 1
         return self._rev
 
     async def _announce(self, row: dict, event: E | None = None) -> None:
         """Tell the interface what the row is now. The event is built from the stored row, never from what
         the caller meant to write; `event` names a kind of news (stale, moved, removed) the stored row must confirm."""
+        epoch = await self._generation()
         rev = self._next_rev()  # taken before the read, like the snapshot's: a later event is never older
         current = await self.repo.get(row["id"])
         if current is None:
             if event is E.REMOVED:
-                self._publish_event(row, E.REMOVED, None, rev)
+                self._publish_event(row, E.REMOVED, None, epoch, rev)
             return
         status = E(current["status"])
         if (event is E.STALE and status == S.PENDING) or (event is E.MOVED and status == S.PLACED):
             status = event
-        self._publish_event(current, status, current["outcome"] or current["error"], rev)
+        self._publish_event(current, status, current["outcome"] or current["error"], epoch, rev)
 
-    def _publish_event(self, row: dict, status: E, detail: str | None, rev: int) -> None:
+    def _publish_event(self, row: dict, status: E, detail: str | None, epoch: int, rev: int) -> None:
         state = public_state(status, self._job_status.get(row.get("job_id")), row.get("id") in self._fetching)
         self.publish_event("voices.dub.changed", DubEvent(
             series_id=row["series_id"], season=row["season"], episode=row["episode"],
             voice_key=row["voice_key"], voice_label=row["voice_label"], status=status, state=state,
-            hint=public_hint(status, state), detail=parse_reason(detail), rev=rev).model_dump(mode="json"))
+            hint=public_hint(status, state), detail=parse_reason(detail), epoch=epoch, rev=rev).model_dump(mode="json"))
 
     async def _announce_difference(self, before: list[dict], after: list[dict]) -> None:
         """Rows that the planner created or took over are news for the interface like any other change."""
@@ -447,10 +460,11 @@ class VoicesModule(BaseModule):
         """A new interface has no history: it gets every voice-over at once, stamped before the read."""
         if self.repo is None or not env.payload.get("count"):
             return
+        epoch = await self._generation()
         rev = self._next_rev()
         items = [SnapshotItem(series_id=row["series_id"], **self._record(row).model_dump(
             include=set(DubItem.model_fields))) for row in await self.repo.all_rows()]
-        self.publish_event("voices.dubs.snapshot", DubsSnapshot(rev=rev, items=items).model_dump(mode="json"))
+        self.publish_event("voices.dubs.snapshot", DubsSnapshot(epoch=epoch, rev=rev, items=items).model_dump(mode="json"))
 
     async def on_conform_picture(self, env: Envelope) -> None:
         """A job of the service went from waiting to running (or vanished): its voice-overs follow."""

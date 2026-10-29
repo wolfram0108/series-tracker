@@ -45,8 +45,8 @@
 | downloads.fetch.finished {key, ok, error, transient, path, series_id} | downloads | voices (ключи `dub:<id>`) | — |
 | conform.cancel {job_id} (запрос) → {done} | voices | conform | — |
 | conform.job.find {key} (запрос) → {reachable, job_id} | voices | conform | — |
-| voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, hint, detail, rev} — `DubEvent` | voices | gateway | voice_dub_update (Р-43, Р-44) |
-| voices.dubs.snapshot {rev, items} — `DubsSnapshot` (при gateway.sse.clients) | voices | gateway | voice_dubs_snapshot |
+| voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, hint, detail, epoch, rev} — `DubEvent` | voices | gateway | voice_dub_update (Р-43, Р-44) |
+| voices.dubs.snapshot {epoch, rev, items} — `DubsSnapshot` (при gateway.sse.clients) | voices | gateway | voice_dubs_snapshot |
 | downloads.item.renamed {series_id, unique_id, filename} | downloads | voices | — |
 | downloads.fetch.started {key, series_id, path} | downloads | voices (ключи `dub:<id>`) | — |
 | voices.episode.settled {series_id, season, episode} | voices | — | — |

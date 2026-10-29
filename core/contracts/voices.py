@@ -98,7 +98,7 @@ class DubRecord(DubItem):
 
 
 class DubEvent(BaseModel):
-    """One voice-over, whole, so the interface asks nothing back; the newest `rev` wins."""
+    """One voice-over, whole, so the interface asks nothing back; the newest (`epoch`, `rev`) wins."""
 
     series_id: int
     season: int
@@ -109,10 +109,12 @@ class DubEvent(BaseModel):
     state: DubState
     hint: DubHint | None
     detail: Reason | None
+    epoch: int
     rev: int
 
 
 class DubsSnapshot(BaseModel):
+    epoch: int
     rev: int
     items: list[SnapshotItem]
 

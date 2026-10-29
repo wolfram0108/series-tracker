@@ -135,6 +135,12 @@ class VoicesRepository:
     async def delete_for_series(self, series_id: int) -> None:
         await self._db.execute("DELETE FROM voice_dubs WHERE series_id=?", (series_id,))
 
+    async def next_epoch(self) -> int:
+        """The number of this run of the module: kept in the database and raised at every start."""
+        await self._db.execute("INSERT INTO voice_epoch (id, value) VALUES (1, 1) "
+                               "ON CONFLICT (id) DO UPDATE SET value = value + 1")
+        return (await self._db.fetch_all("SELECT value FROM voice_epoch WHERE id=1"))[0]["value"]
+
     async def series_with_open_work(self) -> list[int]:
         """Series that have something to carry on after a stop: a voice-over that waits for its reference, or
         an operation that was begun and not finished, whatever step the voice-over is at."""

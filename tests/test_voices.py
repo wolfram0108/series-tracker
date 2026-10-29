@@ -347,7 +347,7 @@ class Neighbours(BaseModule):
                                                      "error": None, "results": []})
 
 
-async def system(db_path, tmp_path, daemon=None):
+async def build_system(db_path, tmp_path, daemon=None):
     """The module with fake neighbours; with a `daemon` the real conform bridge talks to it instead of a fake."""
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO parser_profiles (id, name) VALUES (1, 'p')")
@@ -375,7 +375,7 @@ async def system(db_path, tmp_path, daemon=None):
 
 @pytest.fixture
 async def dubs(db_path, tmp_path):
-    system_, runner = await system(db_path, tmp_path)
+    system_, runner = await build_system(db_path, tmp_path)
     yield system_
     await runner.stop()
 
@@ -384,7 +384,7 @@ async def dubs(db_path, tmp_path):
 async def dubs_with_conform(db_path, tmp_path):
     """The same system, but the alignment bridge is the real module over a scripted daemon."""
     daemon = FakeClient([("conform.snapshot", {"items": []})])
-    system_, runner = await system(db_path, tmp_path, daemon)
+    system_, runner = await build_system(db_path, tmp_path, daemon)
     system_[1].daemon = daemon
     system_[1].settings["conform.path_map"] = '{"/tmp": "/share"}'
     yield system_
@@ -567,13 +567,35 @@ def touch(path, content=b"x"):
         handle.write(content)
 
 
+# An event shows the row as it is when it is announced, so steps that follow each other at once may be shown
+# as the last of them.
+COALESCED_INTO = {"ready": {"aligning", "aligned", "placed"}, "aligning": {"aligned", "placed"},
+                  "aligned": {"placed"}}
+
+
+def reached(seen, wanted):
+    """Whether the events seen are the wanted statuses, a coalesced step standing in for the step it swallowed."""
+    pool, unmatched = list(seen), []
+    for status in wanted:
+        if status in pool:
+            pool.remove(status)
+        else:
+            unmatched.append(status)
+    for status in unmatched:
+        stand_in = next((event for event in pool if event in COALESCED_INTO.get(status, ())), None)
+        if stand_in is None:
+            return False
+        pool.remove(stand_in)
+    return not pool
+
+
 async def statuses_until(sub, wanted, seconds=5.0):
-    """Wait on the pushed events until `wanted` (a sorted list of statuses seen) is reached.
+    """Wait on the pushed events until `wanted` (statuses seen) is reached, a coalesced step counting as seen.
 
     The announcements of a planned row and of a sent download are skipped unless wanted."""
     seen = []
     end = asyncio.get_running_loop().time() + seconds
-    while sorted(seen) != sorted(wanted):
+    while not reached(seen, wanted):
         left = end - asyncio.get_running_loop().time()
         assert left > 0, (seen, wanted)
         try:
@@ -1886,12 +1908,12 @@ def picture(events, snapshot=None):
     if snapshot is not None:
         for item in snapshot["items"]:
             key = (item["series_id"], item["season"], item["episode"], item["voice_key"])
-            shown[key], revs[key] = item, snapshot["rev"]
+            shown[key], revs[key] = item, (snapshot["epoch"], snapshot["rev"])
     for event in events:
         key = (event["series_id"], event["season"], event["episode"], event["voice_key"])
-        if event["rev"] <= revs.get(key, 0):
+        if (event["epoch"], event["rev"]) <= revs.get(key, (0, 0)):
             continue
-        revs[key] = event["rev"]
+        revs[key] = (event["epoch"], event["rev"])
         if event["status"] == "removed":
             shown.pop(key, None)
         else:
@@ -1940,8 +1962,30 @@ async def test_revisions_only_grow(dubs):
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
     await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
-    revs = [e["rev"] for e in drained(sub)]
-    assert revs == sorted(set(revs))
+    stamps = [(e["epoch"], e["rev"]) for e in drained(sub)]
+    assert stamps == sorted(set(stamps))
+
+
+@pytest.mark.asyncio
+async def test_a_later_start_of_the_module_outranks_an_earlier_one_whatever_the_clock_says(db_path, dubs, monkeypatch):
+    import time
+    probe, neighbours, voices, bus = dubs
+    every = bus.subscribe("voices.dub.changed")
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    first = drained(every)
+    await voices.stop()
+    monkeypatch.setattr(time, "time_ns", lambda: 1)  # the clock is set far back between the two runs
+    again = VoicesModule(bus, Database(db_path))
+    await again.start()
+    try:
+        packets = bus.subscribe("voices.dubs.snapshot")
+        probe.publish_event("gateway.sse.clients", {"count": 1})
+        snapshot = (await asyncio.wait_for(packets.queue.get(), 3)).payload
+        assert snapshot["epoch"] > max(event["epoch"] for event in first)
+        assert (snapshot["epoch"], snapshot["rev"]) > max((event["epoch"], event["rev"]) for event in first)
+    finally:
+        await again.stop()
 
 
 @pytest.mark.asyncio
@@ -1969,7 +2013,8 @@ async def test_a_connecting_interface_gets_every_row_at_once_and_newer_packets_w
     assert picture([], snapshot) == await held(probe)
     assert all(item["rev"] <= snapshot["rev"] for item in drained(sub))
     older = {"series_id": 7, "season": 1, "episode": 1, "voice_key": "blackcat", "voice_label": "BlackCat",
-             "status": "failed", "state": "error", "detail": "old", "rev": snapshot["rev"] - 1}
+             "status": "failed", "state": "error", "detail": "old", "epoch": snapshot["epoch"],
+             "rev": snapshot["rev"] - 1}
     assert picture([older], snapshot) == await held(probe)
 
 
@@ -2077,7 +2122,7 @@ async def test_a_job_and_its_ending_that_meet_in_the_middle_of_each_others_check
     submit = neighbours.submits[-1]
     ids = [r["id"] for r in await voices.repo.for_series(7)]
     await voices.repo.release_to_ready(ids)
-    await voices.repo.mark_submitting(ids, "k9", "u1", ref)
+    await voices.repo.mark_submitting(ids, "k9", "u1", ref, submit["out_dir"])
     ending = Envelope(topic="conform.job.finished", kind="event", payload=job_result(submit, "job-9"))
     real = voices.repo.by_job
 

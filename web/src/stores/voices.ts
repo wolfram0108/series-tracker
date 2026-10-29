@@ -6,10 +6,15 @@ type Schemas = components["schemas"]
 
 /** One additional voice-over of an episode: its state and the reason of a failure or rejection. */
 export type VoiceDub = Schemas["DubItem"]
-/** Packet of voice_dub_update: the whole voice-over, so nothing is asked back; the newest `rev` wins. */
+/** Packet of voice_dub_update: the whole voice-over, so nothing is asked back; the newest (epoch, rev) wins. */
 export type VoiceDubEvent = Schemas["DubEvent"]
 /** Packet of voice_dubs_snapshot: every voice-over, sent when this interface connects. */
 export type VoiceDubsSnapshot = Schemas["DubsSnapshot"]
+
+/** The place of a packet in the order of the core: a later start of the module (epoch) outranks any earlier one. */
+type Stamp = { epoch: number; rev: number }
+const NEVER: Stamp = { epoch: 0, rev: 0 }
+const newer = (a: Stamp, b: Stamp) => a.epoch > b.epoch || (a.epoch === b.epoch && a.rev > b.rev)
 
 const slot = (seriesId: number, season: number, episode: number) => `${seriesId}:${season}:${episode}`
 const identity = (slotKey: string, voiceKey: string) => `${slotKey}:${voiceKey}`
@@ -17,16 +22,17 @@ const identity = (slotKey: string, voiceKey: string) => `${slotKey}:${voiceKey}`
 /** Voice-overs per episode of every series, fed only by the core's pushes (snapshot, then updates). */
 export const useVoicesStore = defineStore("voices", () => {
   const bySlot = ref<Record<string, VoiceDub[]>>({})
-  // The newest revision seen per voice-over; a removed one stays here so that a late packet cannot revive it.
-  const revs = new Map<string, number>()
+  // The newest stamp seen per voice-over; a removed one stays here so that a late packet cannot revive it.
+  const stamps = new Map<string, Stamp>()
 
   const byLabel = (a: VoiceDub, b: VoiceDub) => a.voice_label.localeCompare(b.voice_label)
 
   function apply(event: VoiceDubEvent): void {
     const key = slot(event.series_id, event.season, event.episode)
     const id = identity(key, event.voice_key)
-    if (event.rev <= (revs.get(id) ?? 0)) return
-    revs.set(id, event.rev)
+    const stamp = { epoch: event.epoch, rev: event.rev }
+    if (!newer(stamp, stamps.get(id) ?? NEVER)) return
+    stamps.set(id, stamp)
     const list = (bySlot.value[key] ?? []).filter((v) => v.voice_key !== event.voice_key)
     if (event.status !== "removed") {
       list.push({
@@ -46,14 +52,15 @@ export const useVoicesStore = defineStore("voices", () => {
 
   /** Replaces what is known by the snapshot, except what a newer packet has already changed. */
   function snapshot(packet: VoiceDubsSnapshot): void {
+    const stamp = { epoch: packet.epoch, rev: packet.rev }
     const next: Record<string, VoiceDub[]> = {}
     const shown = new Set<string>()
     for (const item of packet.items) {
       const key = slot(item.series_id, item.season, item.episode)
       const id = identity(key, item.voice_key)
       shown.add(id)
-      if ((revs.get(id) ?? 0) > packet.rev) continue
-      revs.set(id, packet.rev)
+      if (newer(stamps.get(id) ?? NEVER, stamp)) continue
+      stamps.set(id, stamp)
       ;(next[key] ??= []).push({
         season: item.season,
         episode: item.episode,
@@ -67,11 +74,11 @@ export const useVoicesStore = defineStore("voices", () => {
     }
     for (const [key, list] of Object.entries(bySlot.value)) {
       for (const dub of list) {
-        if ((revs.get(identity(key, dub.voice_key)) ?? 0) > packet.rev) (next[key] ??= []).push(dub)
+        if (newer(stamps.get(identity(key, dub.voice_key)) ?? NEVER, stamp)) (next[key] ??= []).push(dub)
       }
     }
-    for (const [id, rev] of [...revs]) {
-      if (rev <= packet.rev && !shown.has(id)) revs.delete(id)
+    for (const [id, seen] of [...stamps]) {
+      if (!newer(seen, stamp) && !shown.has(id)) stamps.delete(id)
     }
     for (const list of Object.values(next)) list.sort(byLabel)
     bySlot.value = next

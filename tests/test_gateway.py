@@ -172,7 +172,7 @@ async def test_voice_dub_events_reach_the_interface_whole(system):
     bus, _, gateway = system
     payload = {"series_id": 2, "season": 1, "episode": 3, "voice_key": "blackcat",
                "voice_label": "BlackCat", "status": "rejected", "state": "error",
-               "detail": "критично: нет общего звука", "rev": 1_700_000_000_000_001}
+               "detail": "критично: нет общего звука", "epoch": 3, "rev": 1}
     events = await _collect_sse_events(gateway, bus, [
         Envelope(topic="voices.dub.changed", kind="event", payload=payload)], 1)
     assert events == [("voice_dub_update", payload)]
@@ -183,7 +183,7 @@ async def test_voice_dubs_snapshot_reaches_the_interface_whole(system):
     bus, _, gateway = system
     item = {"series_id": 2, "season": 1, "episode": 3, "voice_key": "blackcat", "voice_label": "BlackCat",
             "status": "placed", "state": "done", "detail": None}
-    payload = {"rev": 1_700_000_000_000_002, "items": [item]}
+    payload = {"epoch": 3, "rev": 2, "items": [item]}
     events = await _collect_sse_events(gateway, bus, [
         Envelope(topic="voices.dubs.snapshot", kind="event", payload=payload)], 1)
     assert events == [("voice_dubs_snapshot", payload)]

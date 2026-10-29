@@ -1720,7 +1720,7 @@ export interface components {
         DubEventStatus: "pending" | "downloading" | "ready" | "aligning" | "aligned" | "placed" | "rejected" | "failed" | "moved" | "stale" | "removed";
         /**
          * DubEvent
-         * @description One voice-over, whole, so the interface asks nothing back; the newest `rev` wins.
+         * @description One voice-over, whole, so the interface asks nothing back; the newest (`epoch`, `rev`) wins.
          */
         DubEvent: {
             /** Series Id */
@@ -1737,6 +1737,8 @@ export interface components {
             state: components["schemas"]["DubState"];
             hint: components["schemas"]["DubHint"] | null;
             detail: components["schemas"]["Reason"] | null;
+            /** Epoch */
+            epoch: number;
             /** Rev */
             rev: number;
         };
@@ -1759,6 +1761,8 @@ export interface components {
         };
         /** DubsSnapshot */
         DubsSnapshot: {
+            /** Epoch */
+            epoch: number;
             /** Rev */
             rev: number;
             /** Items */
@@ -3814,7 +3818,7 @@ export interface operations {
             };
         };
     };
-    force_replace_api_settings_force_replace_get: {
+    force_replace_api_settings_force_replace_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3834,7 +3838,7 @@ export interface operations {
             };
         };
     };
-    force_replace_api_settings_force_replace_get: {
+    force_replace_api_settings_force_replace_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3854,7 +3858,7 @@ export interface operations {
             };
         };
     };
-    less_strict_scan_api_settings_less_strict_scan_get: {
+    less_strict_scan_api_settings_less_strict_scan_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3874,7 +3878,7 @@ export interface operations {
             };
         };
     };
-    less_strict_scan_api_settings_less_strict_scan_get: {
+    less_strict_scan_api_settings_less_strict_scan_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3894,7 +3898,7 @@ export interface operations {
             };
         };
     };
-    slicing_delete_source_api_settings_slicing_delete_source_get: {
+    slicing_delete_source_api_settings_slicing_delete_source_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3914,7 +3918,7 @@ export interface operations {
             };
         };
     };
-    slicing_delete_source_api_settings_slicing_delete_source_get: {
+    slicing_delete_source_api_settings_slicing_delete_source_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3934,7 +3938,7 @@ export interface operations {
             };
         };
     };
-    parallel_downloads_api_settings_parallel_downloads_get: {
+    parallel_downloads_api_settings_parallel_downloads_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3954,7 +3958,7 @@ export interface operations {
             };
         };
     };
-    parallel_downloads_api_settings_parallel_downloads_get: {
+    parallel_downloads_api_settings_parallel_downloads_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3974,7 +3978,7 @@ export interface operations {
             };
         };
     };
-    concurrent_fragments_api_settings_concurrent_fragments_get: {
+    concurrent_fragments_api_settings_concurrent_fragments_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3994,7 +3998,7 @@ export interface operations {
             };
         };
     };
-    concurrent_fragments_api_settings_concurrent_fragments_get: {
+    concurrent_fragments_api_settings_concurrent_fragments_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4014,7 +4018,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_delete: {
+    saved_paths_api_settings_saved_paths_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4034,7 +4038,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_delete: {
+    saved_paths_api_settings_saved_paths_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4054,7 +4058,7 @@ export interface operations {
             };
         };
     };
-    saved_paths_api_settings_saved_paths_delete: {
+    saved_paths_api_settings_saved_paths_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4074,7 +4078,7 @@ export interface operations {
             };
         };
     };
-    debug_flags_api_settings_debug_flags_get: {
+    debug_flags_api_settings_debug_flags_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4139,7 +4143,7 @@ export interface operations {
             };
         };
     };
-    debug_flags_api_settings_debug_flags_get: {
+    debug_flags_api_settings_debug_flags_post: {
         parameters: {
             query?: never;
             header?: never;

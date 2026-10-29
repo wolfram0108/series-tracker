@@ -5,8 +5,9 @@ import { useVoicesStore, type VoiceDub, type VoiceDubEvent, type VoiceDubsSnapsh
 const dub = (over: Partial<VoiceDub> = {}): VoiceDub => ({
   season: 1, episode: 2, voice_key: "blackcat", voice_label: "BlackCat", status: "ready", state: "align_queued", hint: "ready", detail: null, ...over,
 })
-const event = (rev: number, over: Partial<VoiceDubEvent> = {}): VoiceDubEvent => ({ series_id: 7, ...dub(), rev, ...over })
-const snapshot = (rev: number, items: (VoiceDub & { series_id?: number })[]): VoiceDubsSnapshot => ({
+const event = (rev: number, over: Partial<VoiceDubEvent> = {}): VoiceDubEvent => ({ series_id: 7, ...dub(), epoch: 1, rev, ...over })
+const snapshot = (rev: number, items: (VoiceDub & { series_id?: number })[], epoch = 1): VoiceDubsSnapshot => ({
+  epoch,
   rev,
   items: items.map((item) => ({ series_id: 7, ...item })),
 })
@@ -88,5 +89,22 @@ describe("voices store", () => {
     store.apply(event(30, { status: "removed" }))
     store.snapshot(snapshot(25, [dub()]))
     expect(store.forEpisode(7, 1, 2)).toEqual([])
+  })
+
+  it("takes the packets of a later start of the core even when their numbers are lower", () => {
+    const store = useVoicesStore()
+    store.apply(event(900, { status: "placed", state: "done" }))
+    store.snapshot(snapshot(3, [dub({ status: "pending", state: "planned" })], 2))
+    expect(store.forEpisode(7, 1, 2)[0]).toMatchObject({ status: "pending", state: "planned" })
+    store.apply(event(4, { epoch: 2, status: "downloading", state: "downloading" }))
+    expect(store.forEpisode(7, 1, 2)[0]).toMatchObject({ status: "downloading" })
+  })
+
+  it("ignores what an earlier start of the core says after a later one has spoken", () => {
+    const store = useVoicesStore()
+    store.apply(event(1, { epoch: 2, status: "ready" }))
+    store.apply(event(900, { epoch: 1, status: "failed", state: "error" }))
+    store.snapshot(snapshot(950, [], 1))
+    expect(store.forEpisode(7, 1, 2)[0]).toMatchObject({ status: "ready" })
   })
 })
