@@ -68,12 +68,12 @@ async def test_settings_set_many_writes_all_keys_and_announces_each(system):
     probe = _probe(modules)
     sub = bus.subscribe("settings.changed")
 
-    await probe.request("settings.values.set_many", {"values": {"voices.temp_root": "/data/tmp",
+    await probe.request("settings.values.set_many", {"values": {"voices.source_priority": '["kodik"]',
                                                                 "voices.max_temp_episodes": 3}}, timeout=5)
     stored = (await probe.request("settings.values.by_prefix", {"prefix": "voices."}, timeout=5))["values"]
-    assert stored == {"voices.temp_root": "/data/tmp", "voices.max_temp_episodes": "3"}
+    assert stored == {"voices.source_priority": '["kodik"]', "voices.max_temp_episodes": "3"}
     announced = {sub.queue.get_nowait().payload["key"] for _ in range(2)}
-    assert announced == {"voices.temp_root", "voices.max_temp_episodes"}
+    assert announced == {"voices.source_priority", "voices.max_temp_episodes"}
 
 
 @pytest.mark.asyncio

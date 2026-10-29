@@ -1,19 +1,21 @@
-"""The address and the path map of the alignment server: checked, stored, and taken at once without a restart."""
+"""The address and the work folder of the alignment server: checked, stored, and taken at once without a restart."""
 import json
 from pathlib import Path
 
 import pytest
 
 from core import BaseModule, Bus, Runner
-from core.contracts import ConformSettingsDraft, PathPair
+from core.contracts import ConformSettingsDraft
 from modules.conform import ConformModule
 from modules.conform import settings as conform_settings
 from modules.gateway import SSE_MAP
 from conform_fakes import FakeClient
 
+HERE, THERE = "/storage/work", "/mnt/share/work"
 
-def draft(url="http://daemon:8787", rows=(("/nas", "/mnt/media"),)):
-    return ConformSettingsDraft(url=url, path_map=[PathPair(local=local, daemon=daemon) for local, daemon in rows])
+
+def draft(url="http://daemon:8787", here=HERE, there=THERE):
+    return ConformSettingsDraft(url=url, work_dir=here, work_dir_remote=there)
 
 
 class Settings(BaseModule):
@@ -67,12 +69,13 @@ def codes(saved):
 
 
 @pytest.mark.asyncio
-async def test_nothing_stored_the_address_of_the_environment_and_the_default_map_apply():
+async def test_nothing_stored_the_address_of_the_environment_applies_and_no_folder_is_assumed():
     _, _, probe, made, runner = await bridge(default_url="http://env:8787")
     try:
         view = await probe.request("conform.settings.get", {}, timeout=3)
-        assert view["url"] == "http://env:8787" and [c.base_url for c in made] == ["http://env:8787"]
-        assert view["path_map"] == []
+        assert view == {"url": "http://env:8787", "work_dir": "", "work_dir_remote": ""}
+        assert [c.base_url for c in made] == ["http://env:8787"]
+        assert await probe.request("conform.workspace", {}, timeout=3) == {"downloads": "", "conform": ""}
     finally:
         await runner.stop()
 
@@ -96,15 +99,17 @@ async def test_a_saved_address_is_written_announced_and_taken_at_once():
     bus, settings, probe, made, runner = await bridge(default_url="http://env:8787")
     changed = bus.subscribe("conform.settings.changed")
     try:
-        saved = await probe.request("conform.settings.set", draft("http://new:9000/").model_dump(), timeout=5)
-        assert saved["saved"] is True and saved["problems"] == [] and saved["settings"]["url"] == "http://new:9000"
-        assert settings.values["conform.url"] == "http://new:9000"
-        assert json.loads(settings.values["conform.path_map"]) == {"/nas": "/mnt/media"}
+        saved = await probe.request("conform.settings.set", draft("http://new:9000/", HERE + "/").model_dump(), timeout=5)
+        assert saved["saved"] is True and saved["problems"] == [] and saved["settings"] == {
+            "url": "http://new:9000", "work_dir": HERE, "work_dir_remote": THERE}
+        assert settings.values == {"conform.url": "http://new:9000", "conform.work_dir": HERE,
+                                   "conform.work_dir_remote": THERE}
         assert [c.base_url for c in made] == ["http://env:8787", "http://new:9000"]
         assert made[0].closed is True and made[1].closed is False
         assert (await changed.queue.get()).payload["url"] == "http://new:9000"
-        status = await probe.request("conform.status", {}, timeout=3)
-        assert status["configured"] is True
+        assert (await probe.request("conform.status", {}, timeout=3))["configured"] is True
+        assert await probe.request("conform.workspace", {}, timeout=3) == {
+            "downloads": f"{HERE}/downloads", "conform": f"{HERE}/conform"}
     finally:
         await runner.stop()
 
@@ -124,21 +129,39 @@ async def test_saving_an_empty_address_puts_the_bridge_to_rest():
 async def test_a_refused_save_writes_nothing_and_changes_nothing():
     _, settings, probe, made, runner = await bridge(default_url="http://env:8787")
     try:
-        bad = draft(url="ftp://x", rows=(("nas", "/m"), ("/a", "/b"), ("/a", "/c"), ("/only", "")))
-        saved = await probe.request("conform.settings.set", bad.model_dump(), timeout=5)
+        saved = await probe.request("conform.settings.set", draft(url="ftp://x", here="storage", there="").model_dump(), timeout=5)
         assert saved["saved"] is False and settings.values == {}
-        assert codes(saved) == [("path_map", "path_duplicate"), ("path_map", "path_not_absolute"),
-                                ("path_map", "path_row_incomplete"), ("url", "conform_url_invalid")]
+        assert codes(saved) == [("url", "conform_url_invalid"), ("work_dir", "work_dir_not_absolute"),
+                                ("work_dir_remote", "work_dir_daemon_missing")]
         assert [c.base_url for c in made] == ["http://env:8787"] and saved["settings"]["url"] == "http://env:8787"
     finally:
         await runner.stop()
 
 
+@pytest.mark.asyncio
+async def test_an_address_needs_both_names_of_the_folder_and_a_missing_address_needs_none():
+    _, settings, probe, _, runner = await bridge()
+    try:
+        refused = await probe.request("conform.settings.set", draft(here="").model_dump(), timeout=5)
+        assert codes(refused) == [("work_dir", "work_dir_here_missing")] and settings.values == {}
+        saved = await probe.request("conform.settings.set", draft(url="", here="", there="").model_dump(), timeout=5)
+        assert saved["saved"] is True
+    finally:
+        await runner.stop()
+
+
+def test_the_work_folder_here_is_never_the_top_of_a_storage(monkeypatch):
+    monkeypatch.setattr("modules.conform.settings.os.path.ismount", lambda path: path == "/storage")
+    found = lambda **changes: [p.detail.code for p in conform_settings.check(draft(**changes))]
+    assert found() == [] and found(here="/storage") == ["work_dir_is_root"] and found(there="/") == ["work_dir_is_root"]
+    assert found(here="/") == ["work_dir_is_root"]
+
+
 def test_a_draft_is_cleaned_before_it_is_checked_and_written():
-    cleaned = conform_settings.clean(draft(url=" http://d:1// ", rows=(("/nas/", " /mnt/m/"), ("", ""), ("/", "/"))))
-    assert cleaned.url == "http://d:1" and [(r.local, r.daemon) for r in cleaned.path_map] == [
-        ("/nas", "/mnt/m"), ("/", "/")]
-    assert conform_settings.check(draft(rows=())) and conform_settings.check(draft(url=" ")) == []
+    cleaned = conform_settings.clean(draft(url=" http://d:1// ", here=" /storage/w/ ", there="/m/w/"))
+    assert (cleaned.url, cleaned.work_dir, cleaned.work_dir_remote) == ("http://d:1", "/storage/w", "/m/w")
+    assert conform_settings.mapping_of("/storage/w", "/m/w") == {"/storage/w": "/m/w"}
+    assert conform_settings.mapping_of("/storage/w", "") == {} and conform_settings.mapping_of(None, None) == {}
 
 
 def test_a_saved_address_reaches_every_open_screen_by_the_stream_and_the_screen_listens_for_it():
@@ -148,15 +171,3 @@ def test_a_saved_address_reaches_every_open_screen_by_the_stream_and_the_screen_
     assert f"`{name}`" in (root / "contracts" / "sse_contract.md").read_text(encoding="utf-8")
     for front in ("useRealtime.ts", "useSSE.ts"):
         assert f'"{name}"' in (root / "web" / "src" / "composables" / front).read_text(encoding="utf-8")
-
-
-@pytest.mark.asyncio
-async def test_an_address_needs_its_path_map_and_a_missing_address_does_not():
-    _, settings, probe, made, runner = await bridge()
-    try:
-        refused = await probe.request("conform.settings.set", draft(rows=()).model_dump(), timeout=5)
-        assert refused["saved"] is False and codes(refused) == [("path_map", "path_map_empty")] and settings.values == {}
-        saved = await probe.request("conform.settings.set", draft(url="", rows=()).model_dump(), timeout=5)
-        assert saved["saved"] is True and saved["settings"]["path_map"] == []
-    finally:
-        await runner.stop()

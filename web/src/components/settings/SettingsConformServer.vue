@@ -11,11 +11,10 @@ import { reasonText } from "../../lib/reason"
 import { useConformStore } from "../../stores/conform"
 import { useQueuesStore } from "../../stores/queues"
 
-// The alignment server: the daemon's address and the map between the folders of this server and the daemon's.
+// The alignment server: the daemon's address and the work folder as this server and as the daemon name it.
 // The save button of the tab calls save(): it writes both when the draft differs from what the core holds and the core
 // takes the address at once; a refused draft stays on screen with its reasons.
 type View = components["schemas"]["ConformSettingsView"]
-type Pair = components["schemas"]["PathPair"]
 type Problem = components["schemas"]["SettingProblem"]
 
 const { request } = useApi()
@@ -24,30 +23,30 @@ const queues = useQueuesStore()
 
 const core = ref<View | null>(null)
 const url = ref("")
-const rows = ref<Pair[]>([])
+const here = ref("")
+const there = ref("")
 const problems = ref<Problem[]>([])
 
 function adopt(view: View) {
   core.value = view
   url.value = view.url
-  rows.value = view.path_map.length ? view.path_map.map((row) => ({ ...row })) : [{ local: "", daemon: "" }]
+  here.value = view.work_dir
+  there.value = view.work_dir_remote
 }
-
-const filled = (list: Pair[]) => list.filter((row) => row.local.trim() || row.daemon.trim())
 
 async function load() {
   const view = await request(api.GET("/api/conform/settings"), { errorMessage: t("conform.settings.loadFailed") })
   if (view) adopt(view)
 }
 
-const dirty = computed(() => !!core.value && (url.value !== core.value.url
-  || JSON.stringify(filled(rows.value)) !== JSON.stringify(core.value.path_map)))
+const dirty = computed(() => !!core.value && (url.value !== core.value.url || here.value !== core.value.work_dir
+  || there.value !== core.value.work_dir_remote))
 
 /** True when there was nothing to write or the core took it. */
 async function save(): Promise<boolean> {
   if (!dirty.value) return true
   const reply = await request(
-    api.PUT("/api/conform/settings", { body: { url: url.value, path_map: rows.value } }),
+    api.PUT("/api/conform/settings", { body: { url: url.value, work_dir: here.value, work_dir_remote: there.value } }),
     { errorMessage: t("conform.settings.saveFailed") },
   )
   if (!reply) return false
@@ -87,11 +86,11 @@ defineExpose({ save })
         <StInput v-model="url" :label="t('conform.settings.url')" />
       </StGroup>
 
-      <StGroup v-for="(row, index) in rows" :key="index">
+      <StGroup>
         <StIcon icon="pi pi-folder" />
-        <StInput v-model="row.local" :label="t('conform.settings.local')" />
+        <StInput v-model="here" :label="t('conform.settings.local')" />
         <StIcon icon="pi pi-arrow-right" />
-        <StInput v-model="row.daemon" :label="t('conform.settings.daemon')" />
+        <StInput v-model="there" :label="t('conform.settings.daemon')" />
       </StGroup>
 
       <p v-for="(problem, index) in problems" :key="index" class="problem">{{ reasonText(problem.detail) }}</p>

@@ -1,81 +1,65 @@
-"""What the settings screen of the alignment server shows and what a save may write: the address and the path map.
+"""What the settings screen of the alignment server shows and what a save may write: the address and the work folder.
 
-Pure functions over stored values: the module only carries their results across the bus. A save is checked as a
-whole and refused with coded problems; a refused value is never written.
+Pure functions over stored values: the module only carries their results across the bus. A save is checked as a whole and
+refused with coded problems; a refused value is never written. The folders are named by the owner: nothing is assumed.
 """
 from __future__ import annotations
 
-import json
-from typing import Mapping
+import os
 from urllib.parse import urlsplit
 
-from core.contracts import (ConformSettingsDraft, ConformSettingsView, PathPair, Reason, SettingProblem)
+from core.contracts import ConformSettingsDraft, ConformSettingsView, Reason, SettingProblem
 from core.reasons import parse as parse_reason, reason
 
-
 URL_KEY = "conform.url"
-PATH_MAP_KEY = "conform.path_map"
+WORK_DIR_KEY = "conform.work_dir"
+REMOTE_DIR_KEY = "conform.work_dir_remote"
 
 
 def _problem(field: str, stored: str) -> SettingProblem:
     return SettingProblem(field=field, detail=Reason.model_validate(parse_reason(stored)))
 
 
-def _prefix(path: str) -> str:
+def _folder(path: str) -> str:
     return path.strip().rstrip("/") or ("/" if path.strip().startswith("/") else "")
 
 
-def pairs(mapping: Mapping[str, str]) -> list[PathPair]:
-    return [PathPair(local=local, daemon=daemon) for local, daemon in mapping.items()]
-
-
-def path_map_of(raw: str | None) -> dict[str, str]:
-    """The stored map; empty when nothing usable is stored: there is no default, the owner names the folders."""
-    try:
-        value = json.loads(raw or "null")
-    except (TypeError, ValueError):
-        value = None
-    if isinstance(value, dict) and value and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
-        return value
-    return {}
+def mapping_of(work_dir: str | None, work_dir_remote: str | None) -> dict[str, str]:
+    """{folder here: the same folder at the daemon}; empty until the owner names both."""
+    return {work_dir: work_dir_remote} if work_dir and work_dir_remote else {}
 
 
 def clean(draft: ConformSettingsDraft) -> ConformSettingsDraft:
-    """Address and prefixes trimmed, a row left blank dropped."""
-    rows = [PathPair(local=_prefix(row.local), daemon=_prefix(row.daemon)) for row in draft.path_map
-            if row.local.strip() or row.daemon.strip()]
-    return ConformSettingsDraft(url=draft.url.strip().rstrip("/"), path_map=rows)
+    """Address and folders trimmed."""
+    return ConformSettingsDraft(url=draft.url.strip().rstrip("/"), work_dir=_folder(draft.work_dir),
+                                work_dir_remote=_folder(draft.work_dir_remote))
 
 
 def check(draft: ConformSettingsDraft) -> list[SettingProblem]:
-    """What is wrong with the draft once it is cleaned; a draft that passes needs no further repair."""
+    """What is wrong with the draft once it is cleaned: an address needs both folders, a folder is absolute and is
+    not the top of a storage (results would be written beside everything else that lives there)."""
     draft = clean(draft)
     problems = []
     if draft.url:
         found = urlsplit(draft.url)
         if found.scheme not in ("http", "https") or not found.hostname or " " in draft.url:
             problems.append(_problem("url", reason("conform_url_invalid", url=draft.url)))
-    if draft.url and not draft.path_map:
-        problems.append(_problem("path_map", reason("path_map_empty")))
-    seen: set[str] = set()
-    for row in draft.path_map:
-        if not row.local or not row.daemon:
-            problems.append(_problem("path_map", reason("path_row_incomplete")))
-            continue
-        for path in (row.local, row.daemon):
-            if not path.startswith("/"):
-                problems.append(_problem("path_map", reason("path_not_absolute", path=path)))
-        if row.local in seen:
-            problems.append(_problem("path_map", reason("path_duplicate", path=row.local)))
-        seen.add(row.local)
+        if not draft.work_dir:
+            problems.append(_problem("work_dir", reason("work_dir_here_missing")))
+        if not draft.work_dir_remote:
+            problems.append(_problem("work_dir_remote", reason("work_dir_daemon_missing")))
+    for field, path in (("work_dir", draft.work_dir), ("work_dir_remote", draft.work_dir_remote)):
+        if path and not os.path.isabs(path):
+            problems.append(_problem(field, reason("work_dir_not_absolute", path=path)))
+        elif path == "/" or (field == "work_dir" and path and os.path.ismount(path)):
+            problems.append(_problem(field, reason("work_dir_is_root", path=path)))
     return problems
 
 
 def stored(draft: ConformSettingsDraft) -> dict[str, str]:
     """The settings to write for a cleaned draft."""
-    return {URL_KEY: draft.url,
-            PATH_MAP_KEY: json.dumps({row.local: row.daemon for row in draft.path_map}, ensure_ascii=False)}
+    return {URL_KEY: draft.url, WORK_DIR_KEY: draft.work_dir, REMOTE_DIR_KEY: draft.work_dir_remote}
 
 
-def view(url: str, path_map: Mapping[str, str]) -> ConformSettingsView:
-    return ConformSettingsView(url=url, path_map=pairs(path_map))
+def view(url: str, work_dir: str, work_dir_remote: str) -> ConformSettingsView:
+    return ConformSettingsView(url=url, work_dir=work_dir, work_dir_remote=work_dir_remote)

@@ -5,22 +5,24 @@ import os
 
 from core.reasons import reason
 
-# The folders the daemon is asked to write to and the one it leaves next to a reference video.
+# The two folders inside the work folder: voice-overs wait for alignment in the first, the service works in the second.
+DOWNLOADS_DIR = "downloads"
+CONFORM_DIR = "conform"
+# The folders the daemon is asked to write to.
 OUT_DIR = "_aligned"
 CACHE_DIR = "_cache"
-SCRATCH_DIR = "_tmp"
 
 
-def workspace(dub_folder: str | None = None, reference_folder: str | None = None) -> dict[str, str]:
-    """Where the daemon writes the tracks and keeps its cache for the voice-overs in `dub_folder`, and the
-    scratch folder it leaves next to `reference_folder`; only what is asked for is answered."""
-    found: dict[str, str] = {}
-    if dub_folder:
-        found["out_dir"] = os.path.join(dub_folder, OUT_DIR)
-        found["cache_dir"] = os.path.join(dub_folder, CACHE_DIR)
-    if reference_folder:
-        found["scratch"] = os.path.join(reference_folder, SCRATCH_DIR)
-    return found
+def roots(work_dir: str | None) -> dict[str, str]:
+    """The two folders inside the work folder; both empty while the owner has not named it."""
+    if not work_dir:
+        return {"downloads": "", "conform": ""}
+    return {"downloads": os.path.join(work_dir, DOWNLOADS_DIR), "conform": os.path.join(work_dir, CONFORM_DIR)}
+
+
+def workspace(dub_folder: str) -> dict[str, str]:
+    """Where the daemon writes the tracks and keeps its cache for the episode folder `dub_folder`."""
+    return {"out_dir": os.path.join(dub_folder, OUT_DIR), "cache_dir": os.path.join(dub_folder, CACHE_DIR)}
 
 
 def translate(path: str, mapping: dict[str, str]) -> str:

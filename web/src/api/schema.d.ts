@@ -1417,13 +1417,16 @@ export interface components {
     schemas: {
         /**
          * ConformSettingsDraft
-         * @description The address of the daemon (empty: none) and the map of paths between the two servers; a save replaces both.
+         * @description The address of the daemon (empty: none) and the work folder as this server names it and as the daemon names
+         *     the same folder; a save replaces all three.
          */
         ConformSettingsDraft: {
             /** Url */
             url: string;
-            /** Path Map */
-            path_map: components["schemas"]["PathPair"][];
+            /** Work Dir */
+            work_dir: string;
+            /** Work Dir Remote */
+            work_dir_remote: string;
         };
         /**
          * ConformSettingsSaved
@@ -1443,8 +1446,10 @@ export interface components {
         ConformSettingsView: {
             /** Url */
             url: string;
-            /** Path Map */
-            path_map: components["schemas"]["PathPair"][];
+            /** Work Dir */
+            work_dir: string;
+            /** Work Dir Remote */
+            work_dir_remote: string;
         };
         /** CreatedSeries */
         CreatedSeries: {
@@ -1591,16 +1596,6 @@ export interface components {
             layout?: components["schemas"]["Layout"] | null;
         } & {
             [key: string]: unknown;
-        };
-        /**
-         * PathPair
-         * @description A folder of the storage on this server and the same folder as the daemon mounts it.
-         */
-        PathPair: {
-            /** Local */
-            local: string;
-            /** Daemon */
-            daemon: string;
         };
         /**
          * QueueTask
@@ -1813,8 +1808,7 @@ export interface components {
         /**
          * VoiceSettingsDraft
          * @description What the settings screen of the voices sends: the order of the sources and the groups of voice-overs.
-         *     A group is a name with the list of names that put a voice-over into it; a save replaces these values. The work
-         *     folder (empty: not named) is left as it is when the draft does not carry it.
+         *     A group is a name with the list of names that put a voice-over into it; a save replaces both values.
          */
         VoiceSettingsDraft: {
             /** Priority */
@@ -1823,8 +1817,6 @@ export interface components {
             voice_groups: {
                 [key: string]: string[];
             };
-            /** Temp Root */
-            temp_root?: string | null;
         };
         /**
          * VoiceSettingsSaved
@@ -1849,8 +1841,6 @@ export interface components {
             voice_groups: {
                 [key: string]: string[];
             };
-            /** Temp Root */
-            temp_root: string;
             /** Default Priority */
             default_priority: string[];
             /** Rejected */

@@ -4,7 +4,7 @@ A producer builds its payload with one of these models and a consumer reads it w
 so the two cannot drift apart unnoticed. Modules import their contracts from here, never from each other.
 """
 from .alignment import AlignmentJob, DubResult, JobStatus, SubmitOutcome, SubmitReply
-from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView, PathPair
+from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
 from .release import Release, ReleaseSource, ReleaseTitle
 from .voices import (DubEvent, DubEventStatus, DubHint, DubItem, DubRecord, DubsSnapshot, DubState, DubStatus,
                      Layout, LayoutRole, LayoutVoice, Reason, SettingProblem, SkippedSource, SnapshotItem,
@@ -14,4 +14,4 @@ __all__ = ["AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitRep
            "DubEventStatus", "DubHint", "DubItem", "DubRecord", "DubsSnapshot", "DubState", "DubStatus", "Layout", "LayoutRole",
            "LayoutVoice", "Reason", "SnapshotItem", "SettingProblem", "SkippedSource", "VoiceSettingsDraft",
            "VoiceSettingsSaved", "VoiceSettingsView", "ConformSettingsDraft", "ConformSettingsSaved",
-           "ConformSettingsView", "PathPair"]
+           "ConformSettingsView"]

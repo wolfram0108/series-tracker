@@ -22,7 +22,7 @@ def job(job_id, seq=1, status="running", **fields):
 
 
 # The code names no folder: the settings the tests stand in for carry the storage as both servers see it.
-PATH_MAP = {"conform.path_map": json.dumps({"/nas": "/mnt/meganas/media"})}
+PATH_MAP = {"conform.work_dir": "/nas", "conform.work_dir_remote": "/mnt/meganas/media"}
 
 
 class Settings(BaseModule):
@@ -274,22 +274,22 @@ async def test_submit_sends_the_episode_with_daemon_paths_and_returns_the_job():
 
 
 @pytest.mark.asyncio
-async def test_without_a_path_map_nothing_is_sent_and_the_reason_says_so():
+async def test_without_a_work_folder_nothing_is_sent_and_the_reason_says_so():
     client = FakeClient([("conform.snapshot", {"items": []})])
     _, probe, runner = await started(client, {})
     try:
         await until(probe, lambda status: status["daemon"]["up"])
         reply = await probe.request("conform.submit", SUBMIT, timeout=5)
         assert reply["outcome"] == "unavailable" and reply["retry"] is False
-        assert parse(reply["reason"])["code"] == "conform_no_path_map" and client.enqueued == []
+        assert parse(reply["reason"])["code"] == "conform_no_work_dir" and client.enqueued == []
     finally:
         await runner.stop()
 
 
 @pytest.mark.asyncio
-async def test_submit_takes_the_path_map_from_settings():
+async def test_submit_takes_the_work_folder_names_from_settings():
     client = FakeClient([("conform.snapshot", {"items": []})])
-    _, probe, runner = await started(client, {"conform.path_map": '{"/nas": "/share"}'})
+    _, probe, runner = await started(client, {"conform.work_dir": "/nas", "conform.work_dir_remote": "/share"})
     try:
         await until(probe, lambda s: s["daemon"]["up"])
         await probe.request("conform.submit", SUBMIT, timeout=5)
@@ -547,9 +547,10 @@ async def test_the_layout_of_the_daemon_is_known_only_here_and_needs_no_daemon()
     client = FakeClient()
     _, probe, runner = await started(client)
     try:
-        both = await probe.request("conform.workspace", {"dub_folder": "/t/7/s01e01", "reference_folder": "/lib"}, timeout=5)
-        assert both == {"out_dir": "/t/7/s01e01/_aligned", "cache_dir": "/t/7/s01e01/_cache", "scratch": "/lib/_tmp"}
-        assert await probe.request("conform.workspace", {"reference_folder": "/lib"}, timeout=5) == {"scratch": "/lib/_tmp"}
+        assert await probe.request("conform.workspace", {"dub_folder": "/t/7/s01e01"}, timeout=5) == {
+            "out_dir": "/t/7/s01e01/_aligned", "cache_dir": "/t/7/s01e01/_cache"}
+        assert await probe.request("conform.workspace", {}, timeout=5) == {
+            "downloads": "/nas/downloads", "conform": "/nas/conform"}
     finally:
         await runner.stop()
 
@@ -561,7 +562,7 @@ async def submit_through_the_wire(respond):
     bridge._daemon["up"] = True
 
     async def named():  # no settings module here: the storage as the owner would have named it
-        return json.loads(PATH_MAP["conform.path_map"])
+        return {PATH_MAP["conform.work_dir"]: PATH_MAP["conform.work_dir_remote"]}
 
     bridge._path_map = named
     try:

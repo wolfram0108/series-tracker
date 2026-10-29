@@ -14,7 +14,7 @@ from core.contracts import SubmitReply
 from core.db import Database
 from core.envelope import Envelope
 from modules.conform import ConformModule
-from modules.conform.paths import workspace
+from modules.conform.paths import roots, workspace
 from modules.settings import SettingsModule
 from modules.voices import VoicesModule
 from modules.voices.identity import Equivalence, group_key, same_voice, tokens, voice_groups
@@ -341,7 +341,9 @@ class Neighbours(BaseModule):
         return self.submit_reply or SubmitReply.accepted(job_id).model_dump()
 
     async def on_workspace(self, env):
-        return workspace(env.payload.get("dub_folder"), env.payload.get("reference_folder"))
+        if not env.payload.get("dub_folder"):
+            return roots(self.settings.get("conform.work_dir"))
+        return workspace(env.payload["dub_folder"])
 
     async def on_conform_cancel(self, env):
         self.conform_cancels.append(env.payload["job_id"])
@@ -377,7 +379,7 @@ async def build_system(db_path, tmp_path, daemon=None):
                linked("cvh", "BlackCat", [1, 2])]
     neighbours = Neighbours(bus, sources, sources[0]["url"], [(1, 1, 1), (1, 2, 2), (1, 3, 3)],
                             library=str(tmp_path / "library"), conform=daemon is None)
-    neighbours.settings["voices.temp_root"] = str(tmp_path / "temp")
+    neighbours.settings["conform.work_dir"] = str(tmp_path / "work")
     probe = Probe(bus)
     voices = VoicesModule(bus, db)
     modules = [neighbours, SettingsModule(bus, db), voices, probe]
@@ -401,7 +403,7 @@ async def dubs_with_conform(db_path, tmp_path):
     daemon = FakeClient([("conform.snapshot", {"items": []})])
     system_, runner = await build_system(db_path, tmp_path, daemon)
     system_[1].daemon = daemon
-    system_[1].settings["conform.path_map"] = '{"/tmp": "/share"}'
+    system_[1].settings["conform.work_dir_remote"] = "/share/work"
     yield system_
     await runner.stop()
 
@@ -431,7 +433,7 @@ async def test_dispatch_downloads_every_other_voice_of_every_planned_episode(dub
         f"https://site/title.html#kodik-BlackCat-{n}" for n in (1, 2, 3)}
     first = neighbours.fetches[0]
     assert first["max_height"] == 720 and first["series_id"] == 7 and first["key"].startswith("dub:")
-    assert first["path"].startswith(neighbours.settings["voices.temp_root"] + "/7/s01e01/")
+    assert first["path"].startswith(downloads(neighbours) + "/7/s01e01/")
     assert {r["status"] for r in await rows(probe)} == {"downloading"}
     assert {r["voice_key"] for r in await rows(probe)} == {"blackcat"}
 
@@ -552,7 +554,7 @@ async def test_deleting_the_series_cancels_downloads_and_removes_its_files(dubs)
     probe, neighbours, _, bus = dubs
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
-    folder = os.path.join(neighbours.settings["voices.temp_root"], "7")
+    folder = os.path.join(downloads(neighbours), "7")
     os.makedirs(folder)
     open(os.path.join(folder, "x.mp4"), "wb").close()
     sub = bus.subscribe("series.purged")
@@ -660,6 +662,16 @@ def reference_on_disk(neighbours, episode=1):
     return os.path.join(neighbours.library, name)
 
 
+def downloads(neighbours):
+    """The folder where voice-overs wait for alignment, inside the work folder the owner named."""
+    return os.path.join(neighbours.settings["conform.work_dir"], "downloads")
+
+
+def conform_dir(neighbours):
+    """The folder where the service works, inside the work folder the owner named."""
+    return os.path.join(neighbours.settings["conform.work_dir"], "conform")
+
+
 async def two_voices_ready(dubs, plan=((1, 1, 1),), reference=True, finished=True):
     """One planned episode with two additional voices, downloaded; the reference may be missing."""
     probe, neighbours, voices, bus = dubs
@@ -689,7 +701,7 @@ def job_result(submit, job_id, **per_dub):
         touch(out, b"flac")
         result = {"dub": name, "ok": True, "skipped": False, "out_path": out, "suspect": False,
                   "critical": [], "warnings": [], "resid_ms": 12.0, "error": None}
-        result.update(per_dub.get(os.path.splitext(name)[0], {}))
+        result.update(per_dub.get(os.path.splitext(name)[0].split("_", 2)[-1], {}))  # the voice key ends the name
         results.append(result)
     return {"job_id": job_id, "status": "done", "error": None, "results": results}
 
@@ -699,8 +711,11 @@ async def test_an_episode_goes_to_alignment_and_its_tracks_land_next_to_the_vide
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     submit = neighbours.submits[0]
-    assert submit["ref"] == ref and submit["label"] == "Series s01e01"
-    assert sorted(os.path.basename(p) for p in submit["dubs"]) == ["blackcat.mp4", "redheadsound.mp4"]
+    assert submit["label"] == "Series s01e01"
+    assert submit["ref"] != ref and os.path.basename(submit["ref"]) == "7_s01e01_ref.mp4"
+    assert submit["ref"].startswith(conform_dir(neighbours) + "/7/s01e01/_ref/")
+    assert open(submit["ref"], "rb").read() == open(ref, "rb").read() and os.path.isfile(ref)
+    assert sorted(os.path.basename(p) for p in submit["dubs"]) == ["7_s01e01_blackcat.mp4", "7_s01e01_redheadsound.mp4"]
     key = os.path.basename(submit["out_dir"])
     assert os.path.dirname(submit["out_dir"]).endswith("/7/s01e01/_aligned")
     assert os.path.dirname(submit["cache_dir"]).endswith("/7/s01e01/_cache") and os.path.basename(submit["cache_dir"]) == key
@@ -715,7 +730,7 @@ async def test_an_episode_goes_to_alignment_and_its_tracks_land_next_to_the_vide
     done = await rows(probe)
     assert {r["status"] for r in done} == {"placed"}
     assert {r["output_path"] for r in done} == {f"{stem}.BlackCat.ru.flac", f"{stem}.RedHeadSound.ru.flac"}
-    assert not os.path.exists(os.path.join(neighbours.settings["voices.temp_root"], "7", "s01e01"))
+    assert not os.path.exists(os.path.join(downloads(neighbours), "7", "s01e01"))
     assert os.path.isfile(ref)
 
 
@@ -757,7 +772,7 @@ async def test_a_voice_that_could_not_be_downloaded_does_not_hold_the_episode_ba
     touch(black["path"], b"video")
     finish(probe, black["key"])
     await statuses_until(sub, ["failed", "ready", "aligning"])
-    assert [os.path.basename(p) for p in neighbours.submits[0]["dubs"]] == ["blackcat.mp4"]
+    assert [os.path.basename(p) for p in neighbours.submits[0]["dubs"]] == ["7_s01e01_blackcat.mp4"]
 
 
 @pytest.mark.asyncio
@@ -777,7 +792,7 @@ async def test_a_result_that_is_not_clean_is_rejected_and_never_placed(dubs, cap
                    for name in os.listdir(neighbours.library))
     assert any("отклонена" in record.getMessage() for record in caplog.records)
     await asyncio.wait_for(settled_sub.queue.get(), 5)
-    assert not os.path.exists(os.path.join(neighbours.settings["voices.temp_root"], "7", "s01e01"))
+    assert not os.path.exists(os.path.join(downloads(neighbours), "7", "s01e01"))
 
 
 @pytest.mark.asyncio
@@ -923,7 +938,7 @@ async def test_a_voice_that_arrives_later_makes_a_job_of_its_own(dubs):
     finish(probe, retry["key"])
     await statuses_until(sub, ["ready", "aligning"])
     assert len(neighbours.submits) == 2
-    assert [os.path.basename(p) for p in neighbours.submits[1]["dubs"]] == ["redheadsound.mp4"]
+    assert [os.path.basename(p) for p in neighbours.submits[1]["dubs"]] == ["7_s01e01_redheadsound.mp4"]
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-2"))
     await statuses_until(sub, ["aligned", "placed"])
     assert {r["status"] for r in await rows(probe)} == {"placed"}
@@ -973,13 +988,12 @@ async def test_an_obligation_that_keeps_failing_is_reported_and_still_carried(du
 
 
 @pytest.mark.asyncio
-async def test_the_scratch_directory_of_the_service_goes_when_no_job_of_the_series_runs(dubs):
+async def test_the_folders_of_the_series_go_when_every_episode_of_the_series_is_settled(dubs):
     probe, neighbours, _, bus = dubs
     neighbours.sources.append(linked("kodik", "RedHeadSound", range(1, 4)))
     neighbours.plan[:] = [(1, 1, 1), (1, 2, 2)]
     for episode in (1, 2):
         reference_on_disk(neighbours, episode)
-    scratch = os.path.join(neighbours.library, "_tmp")
     sub = bus.subscribe("voices.dub.changed")
     settled_sub = bus.subscribe("voices.episode.settled")
     probe.send_command("voices.dispatch", {"series_id": 7})
@@ -989,33 +1003,18 @@ async def test_the_scratch_directory_of_the_service_goes_when_no_job_of_the_seri
         finish(probe, fetch["key"])
     await statuses_until(sub, ["ready"] * 4 + ["aligning"] * 4)
     first, second = neighbours.submits
-    os.makedirs(scratch)  # what the service leaves while it works
     neighbours.submits[:] = [first]
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
     await asyncio.wait_for(settled_sub.queue.get(), 5)
     await asyncio.sleep(0.2)
-    assert os.path.isdir(scratch)  # the other episode is still being aligned
-    series_folder = os.path.join(neighbours.settings["voices.temp_root"], "7")
-    assert os.path.isdir(series_folder)  # the second episode's files are still in it
+    folders = [os.path.join(base, "7") for base in (downloads(neighbours), conform_dir(neighbours))]
+    assert all(os.path.isdir(folder) for folder in folders)  # the second episode's files are still in them
+    assert not os.path.exists(os.path.join(conform_dir(neighbours), "7", "s01e01"))
     neighbours.submits[:] = [second]
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-2"))
     await asyncio.wait_for(settled_sub.queue.get(), 5)
     await asyncio.sleep(0.2)
-    assert not os.path.exists(scratch)
-    assert not os.path.exists(series_folder)  # nothing of the series is left in the temporary directory
-
-
-@pytest.mark.asyncio
-async def test_a_scratch_directory_with_content_is_left_alone(dubs):
-    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
-    scratch = os.path.join(neighbours.library, "_tmp")
-    touch(os.path.join(scratch, "run", "buffer.bin"))
-    settled_sub = bus.subscribe("voices.episode.settled")
-    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
-    await asyncio.wait_for(settled_sub.queue.get(), 5)
-    await asyncio.sleep(0.2)
-    assert os.path.isfile(os.path.join(scratch, "run", "buffer.bin"))
+    assert not any(os.path.exists(folder) for folder in folders)  # nothing of the series is left in the work folder
 
 
 async def placed_set(dubs):
@@ -1113,7 +1112,8 @@ async def test_a_replaced_reference_removes_the_tracks_and_the_voices_start_over
         touch(fetch["path"], b"video")
         finish(probe, fetch["key"])
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    assert neighbours.submits[1]["ref"] == new_ref
+    assert os.path.basename(neighbours.submits[1]["ref"]) == "7_s01e01_ref.mp4"
+    assert neighbours.submits[1]["ref"] != neighbours.submits[0]["ref"]
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-2"))
     await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
     stem = os.path.splitext(new_ref)[0]
@@ -1611,8 +1611,8 @@ async def test_twelve_episodes_of_four_voices_flow_through_under_a_limit_of_thre
     await asyncio.sleep(0.3)
     flacs = [name for name in library_files(neighbours) if name.endswith(".flac")]
     assert len(flacs) == 48 and neighbours.conform_cancels == []
-    temp_root = neighbours.settings["voices.temp_root"]
-    assert not os.path.exists(temp_root) or os.listdir(temp_root) == []
+    for folder in (downloads(neighbours), conform_dir(neighbours)):
+        assert not os.path.exists(folder) or os.listdir(folder) == []
     assert not any("нет на месте" in record.getMessage() for record in caplog.records)
 
 
@@ -1821,10 +1821,11 @@ async def test_a_failed_removal_of_the_temporary_folder_is_journaled_and_the_epi
         probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
         await asyncio.wait_for(settled_sub.queue.get(), 5)
         journal = await voices.repo.cleanup_list()
-    assert len(journal) == 1 and journal[0]["kind"] == "tree" and os.path.isdir(journal[0]["path"])
+    assert len(journal) == 2 and {entry["kind"] for entry in journal} == {"tree"}  # the voice-overs' folder and the service's
+    assert all(os.path.isdir(entry["path"]) for entry in journal)
     await quiet(voices)  # a pass of the module that runs its own sweep owns the path while it removes it
     await voices._sweep_cleanup()
-    assert not os.path.exists(journal[0]["path"]) and await voices.repo.cleanup_list() == []
+    assert not any(os.path.exists(entry["path"]) for entry in journal) and await voices.repo.cleanup_list() == []
 
 
 @pytest.mark.asyncio
@@ -1839,13 +1840,14 @@ async def test_a_file_that_is_already_gone_is_a_success_not_a_journal_entry(dubs
 async def test_temporary_files_are_removed_where_they_were_made_not_where_the_settings_now_point(dubs, tmp_path):
     probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    made_in = neighbours.settings["voices.temp_root"]
-    neighbours.settings["voices.temp_root"] = str(tmp_path / "somewhere-else")
+    made_in, worked_in = downloads(neighbours), conform_dir(neighbours)
+    neighbours.settings["conform.work_dir"] = str(tmp_path / "somewhere-else")
     settled_sub = bus.subscribe("voices.episode.settled")
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
     await asyncio.wait_for(settled_sub.queue.get(), 5)
     await quiet(voices)
     assert not os.path.exists(os.path.join(made_in, "7", "s01e01"))
+    assert not os.path.exists(os.path.join(worked_in, "7", "s01e01"))
     assert not os.path.exists(tmp_path / "somewhere-else")
 
 
@@ -2011,6 +2013,24 @@ async def test_an_http_answer_that_never_came_back_is_asked_for_by_the_key_not_s
         await asyncio.sleep(0.05)
     assert len(daemon.enqueued) == 1
     assert {r["job_id"] for r in await rows(probe)} == {"j-1"}
+
+
+@pytest.mark.asyncio
+async def test_the_service_is_given_and_asked_to_write_only_inside_the_work_folder(dubs_with_conform):
+    daemon = dubs_with_conform[1].daemon
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs_with_conform, finished=False)
+    finish_all(probe, neighbours)
+    deadline = asyncio.get_running_loop().time() + 8
+    while not daemon.enqueued:
+        assert asyncio.get_running_loop().time() < deadline, await rows(probe)
+        await asyncio.sleep(0.05)
+    body = daemon.enqueued[0]
+    paths = [body["ref"], *body["dubs"], body["out_dir"], body["cache_dir"]]
+    assert all(path.startswith("/share/work/") for path in paths), paths  # not one path of the library
+    assert body["ref"].startswith("/share/work/conform/7/s01e01/_ref/")
+    assert os.path.basename(body["ref"]) == "7_s01e01_ref.mp4"
+    assert all(path.startswith("/share/work/downloads/7/s01e01/7_s01e01_") for path in body["dubs"])
+    assert body["out_dir"].startswith("/share/work/conform/7/s01e01/_aligned/")
 
 
 @pytest.mark.asyncio
@@ -2800,16 +2820,17 @@ async def test_a_voice_over_in_alignment_tells_the_queue_its_job_and_the_file_it
         payload = (await asyncio.wait_for(sub.queue.get(), end - asyncio.get_running_loop().time())).payload
         if payload["job_id"]:
             named[payload["voice_key"]] = (payload["job_id"], payload["file"])
-    assert named == {"blackcat": ("job-1", "blackcat.mp4"), "redheadsound": ("job-1", "redheadsound.mp4")}
+    assert named == {"blackcat": ("job-1", "7_s01e01_blackcat.mp4"), "redheadsound": ("job-1", "7_s01e01_redheadsound.mp4")}
 
 
 def test_the_file_a_voice_over_is_sent_as_is_named_in_one_place():
-    assert os.path.basename(temp_path("/tmp", 7, 1, 1, "blackcat")) == dub_file("blackcat") == "blackcat.mp4"
+    assert os.path.basename(temp_path("/w", 7, 1, 1, "blackcat")) == dub_file(7, 1, 1, "blackcat") == "7_s01e01_blackcat.mp4"
+    assert dub_file(7, 1, 2, "blackcat") != dub_file(8, 1, 1, "blackcat") != dub_file(7, 1, 1, "blackcat")
 
 
 @pytest.mark.asyncio
 async def test_without_a_work_folder_no_voice_over_is_recorded_or_downloaded(dubs):
     probe, neighbours, voices, _ = dubs
-    neighbours.settings["voices.temp_root"] = ""
+    neighbours.settings["conform.work_dir"] = ""
     await voices._dispatch(7)
     assert await rows(probe) == [] and neighbours.fetches == []

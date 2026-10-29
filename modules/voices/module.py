@@ -5,7 +5,6 @@ downloaded next to the reference video and later aligned to it.
 
 Settings: voices.source_priority (JSON list of player kinds), voices.groups and voices.player_groups
 (JSON objects {group: [names]}: a voice-over, or a player, called by one of the names belongs to the group),
-voices.temp_root (the work folder, named by the owner; no default: without it no voice-over is started),
 voices.max_temp_episodes. They are read together (settings.py): a wrong value is logged once and its default
 is used.
 
@@ -27,7 +26,10 @@ Command:
   voices.dispatch {series_id} — sent by scan after an explicit scan: read the catalog of the site,
       lay the voices out around the selected reference, record a voice_dubs row per planned
       reference episode and voice, and download what is not on disk yet into the temporary
-      work folder (setting `voices.temp_root`; not set: nothing is recorded or downloaded and the log says so).
+      downloads folder of the work folder (named by the owner in the settings of the alignment server and asked of
+      its bridge; not named: nothing is recorded or downloaded and the log says so). Before a job is sent the
+      reference video is copied into the service's folder of the episode, so that the service reads and writes
+      only inside the work folder; the copy goes with the other temporary files of the episode.
 Commands out: downloads.fetch, downloads.fetch.cancel. Queries to conform: workspace (the folders of the service
             for a place, asked of the bridge: this module does not know its layout), submit (with a key that
             finds the job again; the reply is a SubmitReply: accepted, rejected, unavailable (not sent) or
@@ -123,10 +125,9 @@ An operation carries out the entries it has just handed over; older ones belong 
 Setting `voices.max_temp_episodes` (integer; 0 or unset: no limit) caps how many episodes may hold
 temporary files at once: further voice-overs stay planned until an episode settles.
 
-The service leaves an empty scratch directory
-next to every reference video it worked on; it is removed once no job of the series is running.
-The series' own folder in the temporary directory goes when every voice-over of the series is
-settled and the folder is empty.
+The service's scratch directory lies next to the copy of the reference, so it goes with the episode's folder of the
+service. The series' own folders in the work folder go when every voice-over of the series is settled and the
+folders are empty.
 """
 from __future__ import annotations
 
@@ -164,6 +165,10 @@ from .states import public_hint, public_state
 DUB_MAX_HEIGHT = 720
 PARSE_TIMEOUT_S = 180
 SUBMIT_TIMEOUT_S = 60
+# A reference video is some gigabytes: this is only the fuse of its copy.
+COPY_TIMEOUT_S = 1800.0
+# The folder of an episode where each job keeps the copy of the reference it reads.
+REF_DIR = "_ref"
 # The first pause before an obligation is tried again, the number of failures after which the owner is told,
 # and the longest pause; the pauses double in between.
 SUBMIT_RETRY_S = 30.0
@@ -185,9 +190,14 @@ def _safe(name: str) -> str:
     return re.sub(r"[^\w.-]+", "_", name, flags=re.UNICODE).strip("._") or "dub"
 
 
-def dub_file(voice_key: str) -> str:
-    """The name a voice-over is downloaded and sent to the service under; the queue names it by this."""
-    return f"{_safe(voice_key)}.mp4"
+def dub_file(series_id: int, season: int, episode: int, voice_key: str) -> str:
+    """The name a voice-over is downloaded and sent to the service under: unique by series, episode and voice."""
+    return f"{series_id}_s{season:02d}e{episode:02d}_{_safe(voice_key)}.mp4"
+
+
+def reference_file(series_id: int, season: int, episode: int, reference: str) -> str:
+    """The name the copy of a reference video is given for the service."""
+    return f"{series_id}_s{season:02d}e{episode:02d}_ref{os.path.splitext(reference)[1]}"
 
 
 def episode_dir(root: str, series_id: int, season: int, episode: int) -> str:
@@ -195,7 +205,7 @@ def episode_dir(root: str, series_id: int, season: int, episode: int) -> str:
 
 
 def temp_path(root: str, series_id: int, season: int, episode: int, voice_key: str) -> str:
-    return os.path.join(episode_dir(root, series_id, season, episode), dub_file(voice_key))
+    return os.path.join(episode_dir(root, series_id, season, episode), dub_file(series_id, season, episode, voice_key))
 
 
 class VoicesModule(BaseModule):
@@ -289,10 +299,9 @@ class VoicesModule(BaseModule):
         """A call into the storage that waits for a limited time; `owns` is what a changing call changes."""
         return await storage.call(fn, *args, timeout=timeout, owns=owns)
 
-    async def _workspace(self, *, dub_folder: str | None = None, reference_folder: str | None = None) -> dict:
-        """The folders of the alignment service for these places: only the service's bridge knows its layout."""
-        return await self.request("conform.workspace", {"dub_folder": dub_folder, "reference_folder": reference_folder},
-                                  timeout=10)
+    async def _workspace(self, *, dub_folder: str) -> dict:
+        """The folders the service writes to for an episode's folder: only the service's bridge knows its layout."""
+        return await self.request("conform.workspace", {"dub_folder": dub_folder}, timeout=10)
 
     def _when_free(self, path: str, series_id: int) -> None:
         """A step that needs a path an unfinished storage call still owns waits for that call to end."""
@@ -314,8 +323,17 @@ class VoicesModule(BaseModule):
         self._reported = set(settings.problems)
         return settings
 
-    async def _temp_root(self) -> str:
-        return (await self._settings()).temp_root
+    async def _folders(self) -> dict:
+        """The two folders inside the work folder, asked of the bridge: both empty while the owner has not named it."""
+        return await self.request("conform.workspace", {}, timeout=10)
+
+    async def _downloads_root(self) -> str:
+        return (await self._folders())["downloads"]
+
+    async def _conform_episode(self, series_id: int, season: int, episode: int) -> str:
+        """Where the service works for this episode; empty while the work folder is not named."""
+        root = (await self._folders())["conform"]
+        return episode_dir(root, series_id, season, episode) if root else ""
 
 
     async def on_layout(self, env: Envelope) -> dict:
@@ -356,8 +374,8 @@ class VoicesModule(BaseModule):
         series = await self.request("catalog.series.get", {"series_id": series_id})
         if not is_video_source(series["source_type"]) or series["source_type"] == "vk_video":
             return
-        if not await self._temp_root():
-            self.log.warning("сериал %d: озвучки не начаты: рабочая папка не задана в настройках", series_id)
+        if not await self._downloads_root():
+            self.log.warning("сериал %d: озвучки не начаты: рабочая папка не задана в настройках сервера выравнивания", series_id)
             return
         info = await self.request("sources.provider.info", {"url": series["url"]}, timeout=10)
         if not info.get("voices"):
@@ -467,7 +485,7 @@ class VoicesModule(BaseModule):
             if not waiting:
                 return
             cap = await self._temp_cap()
-            root = await self._temp_root()
+            root = await self._downloads_root()
             if not root:
                 return
             active = await self.repo.active_episodes() if cap else set()
@@ -484,7 +502,7 @@ class VoicesModule(BaseModule):
         if row["attempt"] >= len(chain):
             await self._fail(row, row["error"] or reason("no_source"))
             return
-        root = root or await self._temp_root()
+        root = root or await self._downloads_root()
         if not root:
             return
         path = temp_path(root, row["series_id"], row["season"], row["episode"], row["voice_key"])
@@ -578,7 +596,8 @@ class VoicesModule(BaseModule):
             series_id=row["series_id"], season=row["season"], episode=row["episode"],
             voice_key=row["voice_key"], voice_label=row["voice_label"], status=status, state=state,
             hint=public_hint(status, state, row.get("job_id")), detail=parse_reason(detail), epoch=epoch,
-            rev=rev, job_id=row.get("job_id"), file=dub_file(row["voice_key"])).model_dump(mode="json"))
+            rev=rev, job_id=row.get("job_id"),
+            file=dub_file(row["series_id"], row["season"], row["episode"], row["voice_key"])).model_dump(mode="json"))
 
     async def _announce_difference(self, before: list[dict], after: list[dict]) -> None:
         """Rows that the planner created or took over are news for the interface like any other change."""
@@ -602,7 +621,8 @@ class VoicesModule(BaseModule):
             return
         epoch = await self._generation()
         rev = self._next_rev()
-        items = [SnapshotItem(series_id=row["series_id"], job_id=row.get("job_id"), file=dub_file(row["voice_key"]),
+        items = [SnapshotItem(series_id=row["series_id"], job_id=row.get("job_id"),
+                              file=dub_file(row["series_id"], row["season"], row["episode"], row["voice_key"]),
                               **self._record(row).model_dump(include=set(DubItem.model_fields)))
                  for row in await self.repo.all_rows()]
         self.publish_event("voices.dubs.snapshot", DubsSnapshot(epoch=epoch, rev=rev, items=items).model_dump(mode="json"))
@@ -665,7 +685,7 @@ class VoicesModule(BaseModule):
             return False
         series = await self.request("catalog.series.get", {"series_id": series_id})
         in_plan, references = await self._reference_state(series)
-        root = await self._temp_root()
+        root = await self._downloads_root()
         if not root:  # a folder made of nothing would be a path relative to wherever the service runs
             return False
         episodes = sorted({(row["season"], row["episode"]) for row in rows})
@@ -698,20 +718,11 @@ class VoicesModule(BaseModule):
         await self._work_off()
         if restart:
             self.send_command("voices.dispatch", {"series_id": series_id})
-        await self._sweep_scratch(series_id, {os.path.dirname(path) for path, _ in references.values()})
         if all(row["status"] in FINAL for row in await self.repo.for_series(series_id)):
-            await self._io(self._remove_if_empty, os.path.join(root, str(series_id)))
+            for base in (root, (await self._folders())["conform"]):
+                if base:
+                    await self._io(self._remove_if_empty, os.path.join(base, str(series_id)))
         return owed
-
-    async def _sweep_scratch(self, series_id: int, folders: set[str]) -> None:
-        """The service's scratch directory is made next to the reference when a job starts: while
-        one runs it must stay, and the series lock keeps a new job from starting meanwhile."""
-        if any(row["status"] == S.ALIGNING for row in await self.repo.for_series(series_id)):
-            return
-        for folder in folders:
-            scratch = (await self._workspace(reference_folder=folder)).get("scratch")
-            if scratch:
-                await self._io(self._remove_if_empty, scratch)
 
     @staticmethod
     def _remove_if_empty(path: str) -> None:
@@ -791,7 +802,7 @@ class VoicesModule(BaseModule):
         for row in group:
             if row["ref_path"] and await self._io(os.path.isfile, row["ref_path"]):
                 return
-        folders = self._folders_of(group, episode_dir(root, series_id, season, episode))
+        folders = await self._episode_folders(group, root, series_id, season, episode)
         await self.repo.drop_episode(series_id, season, episode, folders)
         await self._work_off()
         for row in group:
@@ -927,6 +938,13 @@ class VoicesModule(BaseModule):
             self._await_cleanup(scope)
         return True
 
+    async def _episode_folders(self, group: list[dict], root: str, series_id: int, season: int, episode: int) -> list[str]:
+        """Everything of an episode that lies in the work folder: its voice-overs and the folder of the service."""
+        folders = self._folders_of(group, episode_dir(root, series_id, season, episode))
+        # Where the service worked is read from the rows (<episode folder>/_aligned/<key>), not from the settings now.
+        made = {os.path.dirname(os.path.dirname(row["out_dir"])) for row in group if row["out_dir"]}
+        return sorted({*folders, *made, await self._conform_episode(series_id, season, episode)} - {""})
+
     @staticmethod
     def _folders_of(group: list[dict], fallback: str) -> list[str]:
         """Episode folders of voice-overs as they were made, not as the settings say now."""
@@ -957,20 +975,31 @@ class VoicesModule(BaseModule):
         ready = await self._with_files(ready, label)
         if not ready:
             return False
-        folders = await self._workspace(dub_folder=os.path.dirname(ready[0]["temp_path"]))
+        conform_dir = await self._conform_episode(series["id"], season, episode)
+        if not conform_dir:
+            self.log.warning("%s: выравнивание не начато: рабочая папка не задана в настройках сервера выравнивания", label)
+            return False
+        folders = await self._workspace(dub_folder=conform_dir)
         key = uuid.uuid4().hex[:12]
-        # A job writes in folders of its own: an earlier job that is not confirmed stopped can not reach its files.
+        # A job works in folders of its own: an earlier job that is not confirmed stopped can not reach its files.
         out_dir, cache_dir = os.path.join(folders["out_dir"], key), os.path.join(folders["cache_dir"], key)
-        for guarded in (out_dir, cache_dir, *[row["temp_path"] for row in ready]):
-            if storage.busy(guarded):  # the service would write where an unfinished removal may still act
+        ref_dir = os.path.join(conform_dir, REF_DIR, key)
+        copy = os.path.join(ref_dir, reference_file(series["id"], season, episode, reference))
+        for guarded in (out_dir, cache_dir, ref_dir, *[row["temp_path"] for row in ready]):
+            if storage.busy(guarded):  # the service would work where an unfinished removal may still act
                 self._when_free(guarded, series["id"])
                 return False
-        await self._io(lambda: [os.makedirs(folder, exist_ok=True) for folder in (out_dir, cache_dir)],
-                       owns=(out_dir, cache_dir))
+        await self._io(lambda: [os.makedirs(folder, exist_ok=True) for folder in (out_dir, cache_dir, ref_dir)],
+                       owns=(out_dir, cache_dir, ref_dir))
+        try:  # the service reads only inside the work folder, so the reference is copied there first
+            await self._io(shutil.copyfile, reference, copy, timeout=COPY_TIMEOUT_S, owns=(ref_dir,))
+        except Exception:
+            await self._io(shutil.rmtree, ref_dir, True, owns=(ref_dir,))
+            raise
         await self.repo.mark_submitting([row["id"] for row in ready], key, uid, reference, out_dir)
         self._sending.add(key)
         try:
-            return await self._send(label, key, ready, reference, out_dir, cache_dir)
+            return await self._send(label, key, ready, copy, out_dir, cache_dir)
         finally:
             self._sending.discard(key)
             self._recovery.poke("cleanup:")  # what waited for the answer to this submission may go on now
@@ -994,6 +1023,7 @@ class VoicesModule(BaseModule):
             return False
         if reply.outcome is SubmitOutcome.UNAVAILABLE:
             await self.repo.release_submission(key)
+            await self._io(shutil.rmtree, os.path.dirname(reference), True, owns=(os.path.dirname(reference),))
             self.log.info("%s: озвучки ждут сервис выравнивания: %s", label, describe(reply.reason))
             return reply.retry
         if reply.outcome is SubmitOutcome.REJECTED:
@@ -1132,7 +1162,8 @@ class VoicesModule(BaseModule):
             return
         result = result_for(job, row["temp_path"])
         verdict = refusal(result)
-        out_dir = row["out_dir"] or (await self._workspace(dub_folder=os.path.dirname(row["temp_path"])))["out_dir"]
+        conform_dir = await self._conform_episode(row["series_id"], row["season"], row["episode"])
+        out_dir = row["out_dir"] or (await self._workspace(dub_folder=conform_dir))["out_dir"]
         track = track_of(out_dir, result) if verdict is None else None
         if verdict is None and not await self._io(os.path.isfile, track):
             verdict = reason("output_missing")
@@ -1172,7 +1203,7 @@ class VoicesModule(BaseModule):
         group = await self.repo.for_episode(series_id, season, episode)
         if not group or any(row["status"] not in FINAL for row in group):
             return
-        folders = self._folders_of(group, episode_dir(root, series_id, season, episode))
+        folders = await self._episode_folders(group, root, series_id, season, episode)
         if not (any(row["temp_path"] or row["aligned_path"] for row in group)
                 or any([await self._io(os.path.isdir, folder) for folder in folders])):
             return
@@ -1188,8 +1219,11 @@ class VoicesModule(BaseModule):
         rows = await self.repo.for_series(series_id)
         folders = {os.path.dirname(folder) for folder in self._folders_of(rows, "")} - {""}
         # The rows go with their jobs and the folders to remove written to the journal in one transaction.
-        root = await self._temp_root()
-        await self.repo.delete_for_series(series_id, folders or ({os.path.join(root, str(series_id))} if root else set()))
+        found = await self._folders()
+        made = {os.path.dirname(os.path.dirname(os.path.dirname(row["out_dir"]))) for row in rows if row["out_dir"]}
+        folders = (folders or ({os.path.join(found["downloads"], str(series_id))} if found["downloads"] else set())) | made | (
+            {os.path.join(found["conform"], str(series_id))} if found["conform"] else set())
+        await self.repo.delete_for_series(series_id, folders)
         for row in rows:
             await self._announce(row, E.REMOVED)
         await self._work_off()

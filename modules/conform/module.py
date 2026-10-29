@@ -4,8 +4,9 @@ Mirrors the daemon's `conform` registry from its event stream (snapshot, changed
 pushes it to the interface, queues episode jobs for the voices module and reports how a job ended.
 The daemon owns the state; this module keeps no database. The daemon address is the setting `conform.url`
 (`ST_CONFORM_URL` while none is stored; without an address the module is idle) and a saved address is taken at once,
-without a restart. Paths cross the boundary through the setting `conform.path_map` (JSON {local prefix: daemon
-prefix}; no default, the owner names the storage as both servers see it).
+without a restart. The work folder is two settings, `conform.work_dir` (as this server names it) and
+`conform.work_dir_remote` (the same folder as the daemon names it); no default, the owner names both. Everything the
+daemon is given or writes lies inside it, and the paths cross the boundary through these two names.
 
 Query:
   conform.status {} -> {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks: [...]}
@@ -20,12 +21,13 @@ Query:
       sent (or the daemon asked to come back later) and asking again soon may work. `uncertain`: the request
       was sent and nothing well-formed came back, so the daemon may have the job; the caller keeps the key
       and asks conform.job.find, it does not send again.
-  conform.settings.get {} -> ConformSettingsView {url, path_map: [{local, daemon}]}: what applies now.
-  conform.settings.set {url, path_map} -> ConformSettingsSaved {saved, problems, settings}: checked as a whole, written
+  conform.settings.get {} -> ConformSettingsView {url, work_dir, work_dir_remote}: what applies now.
+  conform.settings.set {url, work_dir, work_dir_remote} -> ConformSettingsSaved {saved, problems, settings}: checked as a whole, written
       through settings.values.set_many and taken at once, or refused with coded problems and nothing written.
-  conform.workspace {dub_folder?, reference_folder?} -> {out_dir, cache_dir, scratch}   only what is asked for:
-      the folders the daemon is asked to write the aligned tracks and its cache to for the voice-overs in
-      dub_folder, and the scratch folder it leaves next to a reference video. Pure: no daemon is asked.
+  conform.workspace {} -> {downloads, conform}: the two folders inside the work folder, where voice-overs wait for
+      alignment and where the service works; both empty while no work folder is named.
+  conform.workspace {dub_folder} -> {out_dir, cache_dir}: the folders the daemon is asked to write the aligned
+      tracks and its cache to for an episode folder of the service. Pure: no daemon is asked.
   conform.cancel {job_id} -> {done: bool} — stop a job whose result nobody needs any more; `done` is
       true when it is stopped or the daemon does not know it, false when the daemon could not be reached.
   conform.job.find {key} -> {reachable: bool, job_id: str | None} — the job sent with this key.
@@ -62,8 +64,8 @@ from core.reasons import describe, reason
 
 from .client import DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
 from . import settings as conform_settings
-from .paths import reverse, translate, workspace
-from .settings import PATH_MAP_KEY, URL_KEY, path_map_of
+from .paths import reverse, roots, translate, workspace
+from .settings import REMOTE_DIR_KEY, URL_KEY, WORK_DIR_KEY, mapping_of
 
 BACKOFF_START_S = 2.0
 BACKOFF_MAX_S = 30.0
@@ -165,7 +167,7 @@ class ConformModule(BaseModule):
         return reply.get("value")
 
     async def _path_map(self) -> dict[str, str]:
-        return path_map_of(await self._stored(PATH_MAP_KEY))
+        return mapping_of(await self._stored(WORK_DIR_KEY), await self._stored(REMOTE_DIR_KEY))
 
     async def on_settings_get(self, env: Envelope) -> dict:
         return (await self._settings_view()).model_dump(mode="json")
@@ -185,7 +187,7 @@ class ConformModule(BaseModule):
 
     async def _settings_view(self):
         url = self._client.base_url if self._client is not None else ""
-        return conform_settings.view(url, await self._path_map())
+        return conform_settings.view(url, await self._stored(WORK_DIR_KEY) or "", await self._stored(REMOTE_DIR_KEY) or "")
 
     async def _use_address(self, url: str) -> None:
         """Point the bridge at another daemon, or at none: the feed of the old one ends, the picture starts over."""
@@ -209,7 +211,7 @@ class ConformModule(BaseModule):
         label = payload.get("label") or ""
         mapping = await self._path_map()
         if not mapping:
-            return SubmitReply.unavailable(reason("conform_no_path_map"), retry=False).model_dump()
+            return SubmitReply.unavailable(reason("conform_no_work_dir"), retry=False).model_dump()
         try:  # before anything is sent: a problem here is a certain refusal
             body = self._request_body(payload, mapping)
         except ValueError as exc:
@@ -239,7 +241,9 @@ class ConformModule(BaseModule):
                 "keep_tmp": False, "label": job_label(payload.get("label"), payload.get("key"))}
 
     async def on_workspace(self, env: Envelope) -> dict:
-        return workspace(env.payload.get("dub_folder"), env.payload.get("reference_folder"))
+        if not env.payload.get("dub_folder"):
+            return roots(await self._stored(WORK_DIR_KEY))
+        return workspace(env.payload["dub_folder"])
 
     async def on_cancel(self, env: Envelope) -> dict:
         job_id = env.payload["job_id"]

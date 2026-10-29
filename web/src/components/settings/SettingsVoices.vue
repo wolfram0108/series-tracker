@@ -7,9 +7,6 @@ import { useApi } from "../../composables/useApi"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
 import { useVoicesStore } from "../../stores/voices"
-import StGroup from "../StGroup.vue"
-import StIcon from "../StIcon.vue"
-import StInput from "../StInput.vue"
 import VoiceGroupsEditor from "./VoiceGroupsEditor.vue"
 
 // Settings of the voices: groups of voice-overs and the order of the sources. Every action goes to the core at once and
@@ -24,19 +21,13 @@ const voicesStore = useVoicesStore()
 const view = ref<View | null>(null)
 const problems = ref<Problem[]>([])
 const busy = ref(false)
-const folder = ref("")
-
-function show(next: View) {
-  view.value = next
-  folder.value = next.temp_root
-}
 
 async function load() {
   const next = await request(api.GET("/api/voices/settings"), { errorMessage: t("voices.settings.loadFailed") })
-  if (next) show(next)
+  if (next) view.value = next
 }
 
-async function commit(change: { priority?: string[]; voice_groups?: Groups; temp_root?: string }): Promise<boolean> {
+async function commit(change: { priority?: string[]; voice_groups?: Groups }): Promise<boolean> {
   if (!view.value) return false
   busy.value = true
   try {
@@ -47,7 +38,7 @@ async function commit(change: { priority?: string[]; voice_groups?: Groups; temp
       { errorMessage: t("voices.settings.saveFailed") },
     )
     if (!reply) return false
-    show(reply.settings)
+    view.value = reply.settings
     problems.value = reply.problems
     return reply.saved
   } finally {
@@ -57,7 +48,7 @@ async function commit(change: { priority?: string[]; voice_groups?: Groups; temp
 
 // The core announces every save, also one made in another window.
 watch(() => voicesStore.settings, (next) => {
-  if (next) show(next)
+  if (next) view.value = next
 })
 
 const problemsOf = (field: string) => problems.value.filter((problem) => problem.field === field)
@@ -72,7 +63,6 @@ function move(index: number, by: -1 | 1) {
   ;[list[index], list[target]] = [list[target], list[index]]
   void commit({ priority: list })
 }
-const saveFolder = () => void commit({ temp_root: folder.value })
 function resetOrder() {
   if (view.value) void commit({ priority: [...view.value.default_priority] })
 }
@@ -114,18 +104,6 @@ onMounted(load)
         <div class="actions-row">
           <Button :label="t('voices.settings.priority.reset')" icon="pi pi-undo" severity="secondary" size="small" text :disabled="busy" @click="resetOrder" />
         </div>
-      </div>
-    </div>
-
-    <div class="modern-fieldset">
-      <div class="fieldset-header"><i class="pi pi-folder"></i> {{ t("voices.settings.folder.title") }}</div>
-      <div class="fieldset-content">
-        <p v-if="rejected('temp_root')" class="problem">{{ t("voices.settings.rejected") }}</p>
-        <StGroup>
-          <StIcon icon="pi pi-folder" />
-          <StInput v-model="folder" :label="t('voices.settings.folder.label')" @change="saveFolder" />
-        </StGroup>
-        <p v-for="(problem, index) in problemsOf('temp_root')" :key="index" class="problem">{{ reasonText(problem.detail) }}</p>
       </div>
     </div>
   </div>

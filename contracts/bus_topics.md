@@ -47,14 +47,14 @@
 | conform.job.get {job_id} (запрос) → {job_id, status, error, results}; `gone` только когда демон спрошен и не знает задачу, недоступный демон — ошибка запроса | voices | conform | — |
 | conform.cancel {job_id} (запрос) → {done} | voices | conform | — |
 | conform.job.find {key} (запрос) → {reachable, job_id} | voices | conform | — |
-| conform.workspace {dub_folder?, reference_folder?} (запрос) → {out_dir, cache_dir, scratch} — раскладка папок демона; чистая, демон не опрашивается | voices | conform | — |
-| conform.settings.get {} (запрос) → `ConformSettingsView` {url, path_map: [{local, daemon}]}: адрес демона и карта путей, как действуют сейчас (Р-57) | gateway | conform | — |
-| conform.settings.set `ConformSettingsDraft` {url, path_map} (запрос) → `ConformSettingsSaved` {saved, problems, settings}: проверка целиком, запись через settings.values.set_many, новый адрес применяется сразу; отказ — коды причин, ничего не записано (Р-57) | gateway | conform | — |
+| conform.workspace {} (запрос) → {downloads, conform} — две папки внутри рабочей папки (пусто, пока владелец её не назвал); {dub_folder} → {out_dir, cache_dir} — раскладка папок сервиса для папки серии; чистые, демон не опрашивается (Р-58) | voices | conform | — |
+| conform.settings.get {} (запрос) → `ConformSettingsView` {url, work_dir, work_dir_remote}: адрес демона и рабочая папка здесь и на демоне, как действуют сейчас (Р-57, Р-58) | gateway | conform | — |
+| conform.settings.set `ConformSettingsDraft` {url, work_dir, work_dir_remote} (запрос) → `ConformSettingsSaved` {saved, problems, settings}: проверка целиком, запись через settings.values.set_many, новый адрес применяется сразу; отказ — коды причин, ничего не записано (Р-57) | gateway | conform | — |
 | voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, hint, detail, epoch, rev, job_id, file} — `DubEvent` (job_id и file — как очередь выравнивания называет озвучку) | voices | gateway | voice_dub_update (Р-43, Р-44) |
 | voices.dubs.snapshot {epoch, rev, items} — `DubsSnapshot` (при gateway.sse.clients) | voices | gateway | voice_dubs_snapshot |
 | downloads.item.renamed {series_id, unique_id, filename} | downloads | voices | — |
 | downloads.fetch.started {key, series_id, path} | downloads | voices (ключи `dub:<id>`) | — |
-| voices.settings.changed `VoiceSettingsView` {…, temp_root} (после сохранения настроек озвучек) | voices | gateway | voice_settings_update (Р-54) |
+| voices.settings.changed `VoiceSettingsView` (после сохранения настроек озвучек) | voices | gateway | voice_settings_update (Р-54) |
 | voices.episode.settled {series_id, season, episode} | voices | — | — |
 | conform.job.finished {job_id, status, error, results} | conform | voices | — |
 | conform.daemon.up {} | conform | voices | — |
