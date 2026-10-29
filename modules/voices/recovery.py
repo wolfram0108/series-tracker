@@ -13,6 +13,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
+# The pause used when the pause function itself fails.
+FALLBACK_PAUSE_S = 60.0
+
 Attempt = Callable[[], Awaitable[bool]]  # True: the obligation is over (also when nothing is left to do)
 Report = Callable[[], Awaitable[bool]]  # True: stop trying
 
@@ -59,7 +62,7 @@ class Recovery:
     async def _carry(self, key: str, item: _Item, now: bool) -> None:
         try:
             if not now:
-                await self._sleep(item)
+                await self._rest(item)
             while True:
                 try:
                     if await item.attempt():
@@ -69,12 +72,12 @@ class Recovery:
                 except Exception:  # noqa: BLE001 - an obligation survives the failure of one attempt
                     self._log.exception("восстановление %s: попытка не удалась", key)
                 item.failures += 1
-                if item.failures == self._report_after():
+                if item.failures == self._limit():
                     self._log.error("восстановление %s: %d попыток без результата, продолжаем с паузой %.0f с", key,
-                                    item.failures, self._pause(item.failures))
+                                    item.failures, self._delay(item))
                     if item.report is not None and await self._ended_by_owner(key, item):
                         return
-                await self._sleep(item)
+                await self._rest(item)
         finally:
             if self._items.get(key) is item:
                 del self._items[key]
@@ -88,9 +91,24 @@ class Recovery:
             self._log.exception("восстановление %s: сообщить владельцу не удалось", key)
             return False
 
-    async def _sleep(self, item: _Item) -> None:
+    def _limit(self) -> int:
+        try:
+            return self._report_after()
+        except Exception:  # noqa: BLE001 - a broken setting must not end an obligation
+            self._log.exception("восстановление: число попыток до сообщения не определено")
+            return -1
+
+    def _delay(self, item: _Item) -> float:
+        """The pause before the next attempt; a pause that cannot be computed is the fallback, never the end of the work."""
+        try:
+            return float(self._pause(item.failures))
+        except Exception:  # noqa: BLE001
+            self._log.exception("восстановление: пауза не вычислена, берём запасную")
+            return FALLBACK_PAUSE_S
+
+    async def _rest(self, item: _Item) -> None:
         item.wake.clear()
         try:
-            await asyncio.wait_for(item.wake.wait(), self._pause(item.failures))
+            await asyncio.wait_for(item.wake.wait(), self._delay(item))
         except asyncio.TimeoutError:
             pass

@@ -128,3 +128,47 @@ async def test_stopping_cancels_what_is_being_carried():
     await until(lambda: carried.failures() == {"k": 1})
     await carried.stop()
     assert carried.failures() == {}
+
+
+@pytest.mark.asyncio
+async def test_a_pause_that_cannot_be_computed_does_not_end_the_obligation():
+    def broken(failures):
+        raise OverflowError("int too large to convert to float")
+
+    carried = Recovery(LOG, pause=broken, report_after=lambda: 3)
+    tries = []
+
+    async def attempt():
+        tries.append(1)
+        return False
+
+    carried.want("cleanup:needed", attempt, now=True)
+    await until(lambda: tries)
+    await asyncio.sleep(0.05)
+    assert "cleanup:needed" in carried.failures()
+    await carried.stop()
+
+
+def test_the_pause_has_a_ceiling_whatever_the_number_of_failures():
+    from modules.voices import module
+    assert module._pause(0) == module.SUBMIT_RETRY_S
+    assert module._pause(1024) == module._pause(10**9) == module.RETRY_CEILING_S
+
+
+@pytest.mark.asyncio
+async def test_the_real_pause_keeps_an_obligation_after_a_thousand_failures():
+    from modules.voices import module
+    carried = Recovery(LOG, pause=module._pause, report_after=lambda: 6)
+    gate = asyncio.Event()
+
+    async def attempt():
+        await gate.wait()
+        return False
+
+    carried.want("cleanup:needed", attempt, now=True)
+    await until(lambda: "cleanup:needed" in carried.failures())
+    carried._items["cleanup:needed"].failures = 1023
+    gate.set()
+    await asyncio.sleep(0.05)
+    assert "cleanup:needed" in carried.failures()
+    await carried.stop()

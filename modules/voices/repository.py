@@ -26,19 +26,53 @@ def _in(steps: Iterable[S]) -> tuple[str, tuple[str, ...]]:
     return f"IN ({','.join('?' * len(values))})", values
 
 
+# What a row points at and how each kind of pointer is removed.
+POINTERS = (("output_path", "artifact"), ("move_from", "artifact"), ("aligned_path", "path"), ("temp_path", "path"))
+HANDED_OVER = "handed over"
+_UPSERT = ("ON CONFLICT (path) DO UPDATE SET kind=excluded.kind, error=excluded.error, "
+           "scope=COALESCE(excluded.scope, voice_cleanup.scope), updated_at=excluded.updated_at")
+
+
+def _hand_over(where: str, args: tuple, *, files: bool = True) -> list[tuple[str, tuple]]:
+    """Journal entries for what the rows matching `where` own: their files, and the job or the unanswered
+    submission of those being aligned. They run in the transaction that lets the rows go, so a name is never
+    left without a record or without an owner."""
+    now = _now()
+    found: list[tuple[str, tuple]] = []
+    if files:
+        for column, kind in POINTERS:
+            found.append((f"INSERT INTO voice_cleanup (path, kind, error, updated_at) SELECT {column}, ?, ?, ? "
+                          f"FROM voice_dubs WHERE ({where}) AND {column} IS NOT NULL {_UPSERT}",
+                          (kind, HANDED_OVER, now, *args)))
+    for column, kind, condition in (("job_id", "job", "job_id IS NOT NULL"),
+                                    ("submit_key", "submission", "job_id IS NULL AND submit_key IS NOT NULL")):
+        found.append((f"INSERT INTO voice_cleanup (path, kind, error, scope, updated_at) SELECT {column}, ?, ?, out_dir, ? "
+                      f"FROM voice_dubs WHERE ({where}) AND status=? AND {condition} {_UPSERT}",
+                      (kind, HANDED_OVER, now, *args, S.ALIGNING.value)))
+    return found
+
+
+def _folders(folders: Iterable[str]) -> list[tuple[str, tuple]]:
+    return [("INSERT INTO voice_cleanup (path, kind, error, updated_at) VALUES (?,?,?,?) " + _UPSERT,
+             (folder, "tree", HANDED_OVER, _now())) for folder in folders]
+
+
 class VoicesRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
     async def _move(self, transition: Transition, assignments: str, args: tuple, where: str,
-                    where_args: tuple, expected: int | None = 1) -> bool:
+                    where_args: tuple, expected: int | None = 1, before: list | None = None) -> bool:
         """Change the step of rows by a transition of the lifecycle: rows in a step the transition does not
-        start from are left as they are. True when something changed."""
+        start from are left as they are. True when something changed. `before` runs in the same transaction."""
         marks, steps = _in(transition.sources)
-        changed = await self._db.execute(
-            f"UPDATE voice_dubs SET status=?, {assignments + ', ' if assignments else ''}updated_at=? "
-            f"WHERE ({where}) AND status {marks}",
-            (transition.target.value, *args, _now(), *where_args, *steps))
+        query = (f"UPDATE voice_dubs SET status=?, {assignments + ', ' if assignments else ''}updated_at=? "
+                 f"WHERE ({where}) AND status {marks}")
+        params = (transition.target.value, *args, _now(), *where_args, *steps)
+        if before:
+            changed = await self._db.execute_many([*before, (query, params)])
+        else:
+            changed = await self._db.execute(query, params)
         if not transition.contested and expected is not None and changed != expected:
             log.warning("озвучки: переход %s выполнен для %s строк из %s: остальные не в тех состояниях %s",
                         transition.name, changed, expected, "/".join(steps))
@@ -121,19 +155,23 @@ class VoicesRepository:
 
     async def drop_unplanned(self, series_id: int,
                              planned: set[tuple[int, int, str]]) -> list[dict[str, Any]]:
-        """Rows of voice-overs that left the plan and have no file; returns what was removed."""
+        """Rows of voice-overs that left the plan before any work was done on them, or after it failed; returns
+        what was removed. Whatever such a row still points at goes to the cleanup journal with it."""
         gone = [row for row in await self.for_series(series_id)
                 if (row["season"], row["episode"], row["voice_key"]) not in planned
                 and row["status"] in lifecycle.OFFER.sources]
         for row in gone:
-            await self._db.execute("DELETE FROM voice_dubs WHERE id=?", (row["id"],))
+            await self._db.execute_many([*_hand_over("id=?", (row["id"],)),
+                                         ("DELETE FROM voice_dubs WHERE id=?", (row["id"],))])
         return gone
 
     async def mark_pending(self, dub_id: int, error: str) -> bool:
         return await self._move(lifecycle.FILE_LOST, "attempt=0, error=?", (error,), "id=?", (dub_id,))
 
-    async def delete_for_series(self, series_id: int) -> None:
-        await self._db.execute("DELETE FROM voice_dubs WHERE series_id=?", (series_id,))
+    async def delete_for_series(self, series_id: int, folders: Iterable[str] = ()) -> None:
+        """The series is gone: its rows, with the jobs they wait for and the `folders` to remove, go to the journal."""
+        await self._db.execute_many([*_hand_over("series_id=?", (series_id,), files=False), *_folders(folders),
+                                     ("DELETE FROM voice_dubs WHERE series_id=?", (series_id,))])
 
     async def next_epoch(self) -> int:
         """The number of this run of the module: kept in the database and raised at every start."""
@@ -212,23 +250,24 @@ class VoicesRepository:
             await self._move(lifecycle.UNSEND, "job_id=NULL", (), "id=?", (dub_id,))
 
     async def reset(self, dub_id: int, reason: str) -> bool:
-        """The track belongs to a reference that is gone: back to the start, from the main source."""
+        """The track belongs to a reference that is gone: back to the start, from the main source. What the row
+        owned goes to the cleanup journal in the same transaction."""
+        marks, steps = _in(lifecycle.RESTART.sources)
         return await self._move(
             lifecycle.RESTART, "attempt=0, job_id=NULL, submit_key=NULL, out_dir=NULL, ref_uid=NULL, ref_path=NULL, "
             "aligned_path=NULL, output_path=NULL, move_from=NULL, temp_path=NULL, outcome=NULL, error=?",
-            (reason,), "id=?", (dub_id,))
+            (reason,), "id=?", (dub_id,), before=_hand_over(f"id=? AND status {marks}", (dub_id, *steps)))
 
     async def set_output(self, dub_id: int, output_path: str, ref_path: str) -> None:
         await self._db.execute(
             "UPDATE voice_dubs SET output_path=?, ref_path=?, move_from=NULL, updated_at=? WHERE id=?",
             (output_path, ref_path, _now(), dub_id))
 
-    async def journal_cleanup(self, path: str, kind: str, error: str) -> None:
-        """Something that could not be removed: it stays on this list until it is gone."""
+    async def journal_cleanup(self, path: str, kind: str, error: str, scope: str | None = None) -> None:
+        """Something to remove, or a job to stop (with the folder it writes in): it stays on this list until done."""
         await self._db.execute(
-            "INSERT INTO voice_cleanup (path, kind, error, updated_at) VALUES (?,?,?,?) "
-            "ON CONFLICT (path) DO UPDATE SET kind=excluded.kind, error=excluded.error, "
-            "updated_at=excluded.updated_at", (path, kind, error, _now()))
+            "INSERT INTO voice_cleanup (path, kind, error, scope, updated_at) VALUES (?,?,?,?,?) " + _UPSERT,
+            (path, kind, error, scope, _now()))
 
     async def cleanup_list(self) -> list[dict[str, Any]]:
         return await self._db.fetch_all("SELECT * FROM voice_cleanup ORDER BY updated_at")
@@ -236,10 +275,14 @@ class VoicesRepository:
     async def cleanup_done(self, path: str) -> None:
         await self._db.execute("DELETE FROM voice_cleanup WHERE path=?", (path,))
 
-    async def delete(self, dub_id: int) -> None:
-        await self._db.execute("DELETE FROM voice_dubs WHERE id=?", (dub_id,))
+    async def drop_episode(self, series_id: int, season: int, episode: int, folders: Iterable[str]) -> None:
+        """An episode left the plan: its rows go, and everything they owned, with the `folders`, to the journal."""
+        where, args = "series_id=? AND season=? AND episode=?", (series_id, season, episode)
+        await self._db.execute_many([*_hand_over(where, args), *_folders(folders),
+                                     (f"DELETE FROM voice_dubs WHERE {where}", args)])
 
-    async def forget_temp(self, series_id: int, season: int, episode: int) -> None:
-        await self._db.execute(
+    async def settle_episode(self, series_id: int, season: int, episode: int, folders: Iterable[str]) -> None:
+        """The episode is done: its temporary `folders` go to the journal as its rows let go of their files."""
+        await self._db.execute_many([*_folders(folders), (
             "UPDATE voice_dubs SET temp_path=NULL, aligned_path=NULL "
-            "WHERE series_id=? AND season=? AND episode=?", (series_id, season, episode))
+            "WHERE series_id=? AND season=? AND episode=?", (series_id, season, episode))])

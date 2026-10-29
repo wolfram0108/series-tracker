@@ -272,6 +272,7 @@ class Neighbours(BaseModule):
         self.cancel_done = True
         self.service_reachable = True
         self.job_get_failures = 0
+        self.running_jobs = set()  # jobs the service has although the answer to their submission was lost
         super().__init__(bus)
 
     def register(self):
@@ -334,6 +335,7 @@ class Neighbours(BaseModule):
             self.publish_event("conform.job.finished", job_result(self.submits[-1], job_id))
         if self.lost_after_arrival:
             self.lost_after_arrival -= 1
+            self.running_jobs.add(job_id)
             raise RuntimeError("the answer was lost")
         return self.submit_reply or SubmitReply.accepted(job_id).model_dump()
 
@@ -353,8 +355,10 @@ class Neighbours(BaseModule):
         if self.job_get_failures:
             self.job_get_failures -= 1
             raise RuntimeError("the service does not answer")
-        return self.jobs.get(env.payload["job_id"], {"job_id": env.payload["job_id"], "status": "gone",
-                                                     "error": None, "results": []})
+        job_id = env.payload["job_id"]
+        if job_id not in self.jobs and job_id in self.running_jobs:
+            return {"job_id": job_id, "status": "running", "error": None, "results": []}
+        return self.jobs.get(job_id, {"job_id": job_id, "status": "gone", "error": None, "results": []})
 
 
 async def build_system(db_path, tmp_path, daemon=None):
@@ -696,7 +700,9 @@ async def test_an_episode_goes_to_alignment_and_its_tracks_land_next_to_the_vide
     submit = neighbours.submits[0]
     assert submit["ref"] == ref and submit["label"] == "Series s01e01"
     assert sorted(os.path.basename(p) for p in submit["dubs"]) == ["blackcat.mp4", "redheadsound.mp4"]
-    assert submit["out_dir"].endswith("/7/s01e01/_aligned") and submit["cache_dir"].endswith("/7/s01e01/_cache")
+    key = os.path.basename(submit["out_dir"])
+    assert os.path.dirname(submit["out_dir"]).endswith("/7/s01e01/_aligned")
+    assert os.path.dirname(submit["cache_dir"]).endswith("/7/s01e01/_cache") and os.path.basename(submit["cache_dir"]) == key
     assert {r["status"] for r in await rows(probe)} == {"aligning"}
     settled_sub = bus.subscribe("voices.episode.settled")
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
@@ -2014,6 +2020,7 @@ async def test_a_cancel_that_could_not_be_made_is_kept_and_made_when_the_service
     neighbours.references[1] = "Series s01e01 2160p.mp4"
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
     await statuses_until(sub, ["stale", "stale"])
+
     assert [e["path"] for e in await voices.repo.cleanup_list()] == ["job-1"]
     neighbours.cancel_done = True
     probe.publish_event("conform.daemon.up", {})
@@ -2293,6 +2300,7 @@ async def test_an_unknown_submission_is_asked_for_again_with_no_outside_event(du
 async def test_a_reply_that_is_not_a_clear_answer_is_no_answer_and_the_interface_is_told(dubs, monkeypatch):
     probe, neighbours, voices, bus, sub, ref = await ready_to_send(dubs, monkeypatch)
     neighbours.submit_reply = {"job_id": "job-1"}  # the old shape: not an outcome, so not an answer
+    neighbours.running_jobs.add("job-1")  # the service took the job; only its answer was unreadable
     finish_all(probe, neighbours)
     await statuses_until(sub, ["ready", "ready"])
     waiting = await change(sub, "aligning")
@@ -2354,3 +2362,223 @@ async def test_a_sent_download_is_announced_before_its_command_goes_out(dubs, mo
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
     assert announced_at_send == [1, 2, 3], "each command finds its announcement already published"
+
+
+async def reference_replaced(neighbours, probe):
+    """The video of the episode is replaced by another one: the tracks made for the old one are stale."""
+    touch(os.path.join(neighbours.library, "Series s01e01 2160p.mp4"))
+    neighbours.uids[1] = "u1-new"
+    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
+
+
+async def until_true(condition, what, seconds=5.0):
+    end = asyncio.get_running_loop().time() + seconds
+    while not await condition():
+        assert asyncio.get_running_loop().time() < end, what
+        await asyncio.sleep(0.02)
+
+
+@pytest.mark.asyncio
+async def test_an_old_job_that_is_not_confirmed_stopped_cannot_put_its_bytes_into_the_new_result(dubs):
+    from pathlib import Path
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    await quiet(voices)
+    old_submit = dict(neighbours.submits[0])
+    neighbours.cancel_done = False
+    await reference_replaced(neighbours, probe)
+    await statuses_until(sub, ["stale", "stale"])
+    await settled(neighbours, 4)
+    for fetch in neighbours.fetches[2:]:
+        touch(fetch["path"], b"new-video")
+        finish(probe, fetch["key"])
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    await quiet(voices)
+    journal = {(e["path"], e["kind"]): e for e in await voices.repo.cleanup_list()}
+    assert journal[("job-1", "job")]["scope"] == old_submit["out_dir"], "the job is remembered with its folder"
+    new_submit = neighbours.submits[1]
+    assert old_submit["out_dir"] != new_submit["out_dir"] and old_submit["cache_dir"] != new_submit["cache_dir"]
+    new_result = job_done(neighbours, "job-2")
+    for result in new_result["results"]:
+        Path(result["out_path"]).write_bytes(b"new-reference-audio")
+    for result in job_result(old_submit, "job-1")["results"]:  # the old job is still alive and writes
+        Path(result["out_path"]).write_bytes(b"old-reference-audio")
+    probe.publish_event("conform.job.finished", new_result)
+    await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
+    await quiet(voices)
+    actual = await voices.repo.for_series(7)
+    assert all(r["ref_uid"] == "u1-new" for r in actual)
+    assert all(Path(r["output_path"]).read_bytes() == b"new-reference-audio" for r in actual)
+
+
+@pytest.mark.asyncio
+async def test_the_folder_of_a_job_goes_when_its_stop_is_confirmed_and_not_before(dubs, monkeypatch):
+    monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.05)
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    await quiet(voices)
+    folder = neighbours.submits[0]["out_dir"]
+    neighbours.cancel_done = False
+    await reference_replaced(neighbours, probe)
+    await statuses_until(sub, ["stale", "stale"])
+    touch(os.path.join(folder, "written-by-the-old-job.flac"), b"late")
+    await asyncio.sleep(0.3)
+    assert os.path.isdir(folder), "while the job may still write, its folder stays"
+    neighbours.cancel_done = True
+
+    async def journal_empty():
+        return await voices.repo.cleanup_list() == []
+
+    await until_true(journal_empty, await voices.repo.cleanup_list())
+    assert not os.path.exists(folder)
+
+
+@pytest.mark.asyncio
+async def test_a_submission_without_an_answer_whose_voices_are_reset_is_cancelled_by_its_key(dubs, monkeypatch):
+    probe, neighbours, voices, bus, sub, ref = await ready_to_send(dubs, monkeypatch)
+    neighbours.lost_after_arrival = 1
+    neighbours.service_reachable = False
+    finish_all(probe, neighbours)
+    await statuses_until(sub, ["ready", "ready"])
+    await quiet(voices)
+    key = next(iter(neighbours.sent_keys))
+    await reference_replaced(neighbours, probe)
+
+    async def handed_over():
+        return (key, "submission") in {(e["path"], e["kind"]) for e in await voices.repo.cleanup_list()}
+
+    await until_true(handed_over, await voices.repo.cleanup_list())
+    assert neighbours.conform_cancels == []
+    neighbours.service_reachable = True
+
+    async def cancelled_and_cleared():
+        return set(neighbours.conform_cancels) == {"job-1"} and await voices.repo.cleanup_list() == []
+
+    await until_true(cancelled_and_cleared, (neighbours.conform_cancels, await voices.repo.cleanup_list()))
+
+
+@pytest.mark.asyncio
+async def test_an_episode_that_left_the_plan_stops_its_running_job(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    await quiet(voices)
+    os.remove(ref)
+    neighbours.references.clear()
+    neighbours.plan[:] = []
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 0})
+
+    async def stopped_and_gone():
+        return set(neighbours.conform_cancels) == {"job-1"} and await rows(probe) == []
+
+    await until_true(stopped_and_gone, (neighbours.conform_cancels, await rows(probe)))
+
+
+@pytest.mark.asyncio
+async def test_a_row_lets_go_of_its_files_in_the_same_step_that_the_journal_takes_them(dubs, monkeypatch):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    voices = dubs[2]
+    row = (await voices.repo.for_series(7))[0]
+    track = row["output_path"]
+    steps = []
+    real = voices.repo._db.execute_many
+
+    async def watching(statements):
+        steps.append(len(statements))
+        return await real(statements)
+
+    monkeypatch.setattr(voices.repo._db, "execute_many", watching)
+    await voices.repo.reset(row["id"], "test")
+    assert steps and steps[-1] > 1, "the journal and the row change in one transaction"
+    assert (await voices.repo.get(row["id"]))["output_path"] is None
+    assert track in {entry["path"] for entry in await voices.repo.cleanup_list()}
+
+
+@pytest.mark.asyncio
+async def test_cleanup_does_not_forget_a_file_while_its_row_is_being_reset(dubs, monkeypatch):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    voices = dubs[2]
+    group = await voices.repo.for_series(7)
+    old = group[0]["output_path"]
+    real_unlink = voices._unlink
+
+    def refuse_old(path, kind):
+        if path == old:
+            raise PermissionError("the share refuses for a while")
+        return real_unlink(path, kind)
+
+    monkeypatch.setattr(voices, "_unlink", refuse_old)
+    monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.005)
+    real_reset = voices.repo.reset
+
+    async def slow_reset(*args, **kwargs):
+        await asyncio.sleep(0.1)  # the recovery gets its turns before the row lets go
+        return await real_reset(*args, **kwargs)
+
+    monkeypatch.setattr(voices.repo, "reset", slow_reset)
+    await voices._follow(7, 1, 1, group, ref, "new-reference")
+    await asyncio.sleep(0.2)
+    assert os.path.exists(old) and old in {e["path"] for e in await voices.repo.cleanup_list()}
+
+
+@pytest.mark.asyncio
+async def test_an_episode_that_left_the_plan_hands_its_tracks_to_the_journal_with_its_rows(dubs):
+    from unittest.mock import patch
+
+    voices = dubs[2]
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    tracks = [row["output_path"] for row in await voices.repo.for_series(7)]
+    os.remove(ref)
+    neighbours.references.clear()
+    neighbours.plan[:] = []
+    with patch("modules.voices.module.os.remove", side_effect=PermissionError("read-only")):
+        probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 0})
+        await until_true(lambda: _empty(probe), "the rows of the episode are gone")
+        await quiet(voices)  # every pass of the module ends while the removal is still refused
+        assert {e["path"] for e in await voices.repo.cleanup_list()} >= set(tracks)
+    assert all(os.path.exists(track) for track in tracks)
+    await voices._sweep_cleanup()
+    assert not any(os.path.exists(track) for track in tracks) and await voices.repo.cleanup_list() == []
+
+
+async def _empty(probe):
+    return await rows(probe) == []
+
+
+@pytest.mark.asyncio
+async def test_a_recovered_job_number_hands_its_job_to_the_duty_of_learning_its_end(dubs, db_path, monkeypatch):
+    probe, neighbours, voices, bus, sub, ref = await ready_to_send(dubs, monkeypatch)
+    neighbours.lost_after_arrival = 1
+    neighbours.service_reachable = False
+    finish_all(probe, neighbours)
+    await statuses_until(sub, ["ready", "ready"])
+    await quiet(voices)
+    await voices.stop()
+    neighbours.jobs["job-1"] = job_done(neighbours, "job-1")  # the job ended while the module was stopped
+    neighbours.service_reachable = True
+    again = VoicesModule(bus, Database(db_path))
+    await again.start()
+    try:
+        async def placed():
+            return {r["status"] for r in await rows(probe)} == {"placed"}
+
+        await until_true(placed, (await rows(probe), again._recovery.failures()))
+    finally:
+        await again.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_voice_over_that_leaves_the_plan_hands_its_file_to_the_journal_with_its_row(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs, finished=False)
+    red = next(f for f in neighbours.fetches if "RedHeadSound" in f["url"])
+    touch(red["path"], b"half a video")
+    row = next(r for r in await voices.repo.for_series(7) if r["temp_path"] == red["path"])
+    await voices.repo.mark_failed(row["id"], "download broke")
+    neighbours.sources[:] = [s for s in neighbours.sources if s["studio"] != "RedHeadSound"]
+    probe.send_command("voices.dispatch", {"series_id": 7})
+
+    async def file_gone():
+        return not os.path.exists(red["path"]) and await voices.repo.cleanup_list() == []
+
+    await until_true(file_gone, (os.path.exists(red["path"]), await voices.repo.cleanup_list()))
+    assert {r["voice_key"] for r in await voices.repo.for_series(7)} == {"blackcat"}

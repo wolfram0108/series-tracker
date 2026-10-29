@@ -586,3 +586,29 @@ async def test_a_daemon_that_cannot_be_asked_does_not_make_a_job_gone():
     bridge = ConformModule(Bus(), FakeClient())  # never connected: nothing can be asked
     with pytest.raises(RuntimeError):
         await bridge.on_job_get(Envelope("conform.job.get", "query", {"job_id": "j1"}))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", ["null", "[]", '"x"', "{}", '{"id": "another"}', "{broken"],
+                         ids=["null", "list", "string", "no-id", "other-job", "not-json"])
+async def test_an_answer_that_is_not_the_job_asked_for_is_no_answer_and_never_gone(body):
+    http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, text=body)))
+    bridge = ConformModule(Bus(), DaemonClient("http://daemon", http))
+    bridge._daemon["up"] = True
+    try:
+        with pytest.raises(httpx.HTTPError):
+            await bridge.on_job_get(Envelope("conform.job.get", "query", {"job_id": "accepted-job"}))
+    finally:
+        await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_only_the_not_found_of_the_contract_says_that_a_job_is_gone():
+    http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(404)))
+    bridge = ConformModule(Bus(), DaemonClient("http://daemon", http))
+    bridge._daemon["up"] = True
+    try:
+        reply = await bridge.on_job_get(Envelope("conform.job.get", "query", {"job_id": "lost"}))
+        assert reply["status"] == "gone"
+    finally:
+        await http.aclose()

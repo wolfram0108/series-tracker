@@ -95,8 +95,8 @@ class DaemonClient:
         response = await self._http.get(f"{self.base_url}/conform/jobs", timeout=REQUEST_TIMEOUT_S)
         response.raise_for_status()
         jobs = _json(response)
-        if not isinstance(jobs, list):
-            raise httpx.DecodingError("the list of jobs is not a list", request=response.request)
+        if not isinstance(jobs, list) or not all(isinstance(each, dict) and each.get("id") for each in jobs):
+            raise httpx.DecodingError("the list of jobs is not a list of jobs", request=response.request)
         return jobs
 
     async def job(self, job_id: str) -> dict[str, Any] | None:
@@ -106,7 +106,10 @@ class DaemonClient:
         if response.status_code == 404:
             return None
         response.raise_for_status()
-        return _json(response)
+        found = _json(response)
+        if not isinstance(found, dict) or str(found.get("id")) != job_id:
+            raise httpx.DecodingError("the answer is not the job asked for", request=response.request)
+        return found
 
     async def events(self) -> AsyncIterator[tuple[str, dict[str, Any]]]:
         """(name, payload) of every conform event of the daemon, in order, until the stream ends."""
