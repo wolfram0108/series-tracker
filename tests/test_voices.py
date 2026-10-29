@@ -1757,6 +1757,7 @@ async def test_a_failed_removal_of_the_temporary_folder_is_journaled_and_the_epi
         await asyncio.wait_for(settled_sub.queue.get(), 5)
         journal = await voices.repo.cleanup_list()
     assert len(journal) == 1 and journal[0]["kind"] == "tree" and os.path.isdir(journal[0]["path"])
+    await quiet(voices)  # a pass of the module that runs its own sweep owns the path while it removes it
     await voices._sweep_cleanup()
     assert not os.path.exists(journal[0]["path"]) and await voices.repo.cleanup_list() == []
 
