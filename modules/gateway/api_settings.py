@@ -17,7 +17,8 @@ from fastapi.responses import JSONResponse
 
 from core import BusRequestError
 from core import logging as core_logging
-from core.contracts import VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView
+from core.contracts import (ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView, VoiceSettingsDraft,
+                            VoiceSettingsSaved, VoiceSettingsView)
 
 from .routing import route_per_method
 from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse, ParsedUrl
@@ -231,6 +232,16 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def save_voices_settings(draft: VoiceSettingsDraft):
         """Written whole or refused with coded reasons (`saved: false`); a refusal writes nothing."""
         return await gw.request("voices.settings.set", draft.model_dump(mode="json"), timeout=10)
+
+    @r.get("/api/conform/settings", response_model=ConformSettingsView)
+    async def conform_settings():
+        """The address of the alignment server and the path map as they apply now."""
+        return await gw.request("conform.settings.get", {}, timeout=10)
+
+    @r.put("/api/conform/settings", response_model=ConformSettingsSaved)
+    async def save_conform_settings(draft: ConformSettingsDraft):
+        """Written whole and taken at once, or refused with coded reasons (`saved: false`) and nothing written."""
+        return await gw.request("conform.settings.set", draft.model_dump(mode="json"), timeout=10)
 
     async def _refresh_debug_groups():
         reply = await gw.request("settings.values.by_prefix",

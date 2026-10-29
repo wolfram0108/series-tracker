@@ -2,9 +2,10 @@
 
 Mirrors the daemon's `conform` registry from its event stream (snapshot, changed, progress) and
 pushes it to the interface, queues episode jobs for the voices module and reports how a job ended.
-The daemon owns the state; this module keeps no database. Without a daemon address
-(`ST_CONFORM_URL`) the module is idle. Paths cross the boundary through the setting
-`conform.path_map` (JSON {local prefix: daemon prefix}, default {"/nas": "/mnt/meganas/media"}).
+The daemon owns the state; this module keeps no database. The daemon address is the setting `conform.url`
+(`ST_CONFORM_URL` while none is stored; without an address the module is idle) and a saved address is taken at once,
+without a restart. Paths cross the boundary through the setting `conform.path_map` (JSON {local prefix: daemon
+prefix}, default {"/nas": "/mnt/meganas/media"}).
 
 Query:
   conform.status {} -> {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks: [...]}
@@ -19,6 +20,9 @@ Query:
       sent (or the daemon asked to come back later) and asking again soon may work. `uncertain`: the request
       was sent and nothing well-formed came back, so the daemon may have the job; the caller keeps the key
       and asks conform.job.find, it does not send again.
+  conform.settings.get {} -> ConformSettingsView {url, path_map: [{local, daemon}], default_path_map}: what applies now.
+  conform.settings.set {url, path_map} -> ConformSettingsSaved {saved, problems, settings}: checked as a whole, written
+      through settings.values.set_many and taken at once, or refused with coded problems and nothing written.
   conform.workspace {dub_folder?, reference_folder?} -> {out_dir, cache_dir, scratch}   only what is asked for:
       the folders the daemon is asked to write the aligned tracks and its cache to for the voice-overs in
       dub_folder, and the scratch folder it leaves next to a reference video. Pure: no daemon is asked.
@@ -35,29 +39,34 @@ Event:
       critical, warnings, resid_ms, error}]}   once per job that ended (done, failed, cancelled);
       out_path is a local path
   conform.daemon.up {}                    the daemon became reachable: waiting work may be sent
-A task is the compact view of one daemon job: id, label, status, progress, stage, stage_pct,
+  conform.settings.changed ConformSettingsView   after every save, so that every open interface shows it
+A task is the compact view of one daemon job: id, label (the human part), key (the one the label carries,
+if any), status, progress, stage, stage_pct,
 detail, dub_index, dub_total, cur_dub, elapsed_s, error and results[{dub, ok, skipped, resid_ms,
 coverage, cuts, suspect, warnings, critical, error}].
 """
 from __future__ import annotations
 
 import asyncio
-import json
+import re
+from collections.abc import Callable
 from typing import Any
 
 import httpx
 
 from core import BaseModule, BusRequestError
-from core.contracts import AlignmentJob, DubResult, JobStatus, SubmitReply
+from core.contracts import (AlignmentJob, ConformSettingsDraft, ConformSettingsSaved, DubResult, JobStatus,
+                            SubmitReply)
 from core.envelope import Envelope
 from core.reasons import describe, reason
 
 from .client import DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
-from .paths import DEFAULT_PATH_MAP, reverse, translate, workspace
+from . import settings as conform_settings
+from .paths import reverse, translate, workspace
+from .settings import PATH_MAP_KEY, URL_KEY, path_map_of
 
 BACKOFF_START_S = 2.0
 BACKOFF_MAX_S = 30.0
-PATH_MAP_KEY = "conform.path_map"
 ENDED = ("done", "failed", "cancelled")
 
 _JOB_FIELDS = ("id", "label", "status", "progress", "stage", "stage_pct", "detail", "dub_index",
@@ -67,6 +76,7 @@ _JOB_FIELDS = ("id", "label", "status", "progress", "stage", "stage_pct", "detai
 def compact_job(job: dict[str, Any]) -> dict[str, Any]:
     """The part of a daemon job the interface shows; traces, plots and operation logs stay behind."""
     view = {field: job.get(field) for field in _JOB_FIELDS}
+    view["label"], view["key"] = split_label(job.get("label"))
     view["results"] = [{
         "dub": result.get("dub"), "ok": bool(result.get("ok")), "skipped": bool(result.get("skipped")),
         "resid_ms": result.get("audio_resid_ms"), "coverage": result.get("audio_coverage"),
@@ -80,6 +90,15 @@ def compact_job(job: dict[str, Any]) -> dict[str, Any]:
 def job_label(label: str | None, key: str | None) -> str | None:
     """The label the job carries: the human one and, when given, the key that finds the job again."""
     return f"{label or ''} #{key}".strip() if key else label
+
+
+_KEY_SUFFIX = re.compile(r"(?:^|\s+)#(\S+)$")
+
+
+def split_label(label: str | None) -> tuple[str | None, str | None]:
+    """The inverse of job_label: the human part of a job's label and the key it carries, if any."""
+    found = _KEY_SUFFIX.search(label or "")
+    return ((label or "")[:found.start()], found.group(1)) if found else (label, None)
 
 
 def finished_view(job: dict[str, Any], to_local: dict[str, str]) -> dict[str, Any]:
@@ -105,9 +124,13 @@ def finished_view(job: dict[str, Any], to_local: dict[str, str]) -> dict[str, An
 class ConformModule(BaseModule):
     name = "conform"
 
-    def __init__(self, bus, client: DaemonClient | None = None,
-                 backoff_start: float = BACKOFF_START_S) -> None:
+    def __init__(self, bus, client: DaemonClient | None = None, backoff_start: float = BACKOFF_START_S, *,
+                 default_url: str = "", client_factory: Callable[[str], DaemonClient] = DaemonClient) -> None:
+        # A ready client is the address in force from the start; without one the address is read at the start.
         self._client = client
+        self._client_factory = client_factory
+        self._default_url = default_url
+        self._address_lock = asyncio.Lock()
         self._backoff_start = backoff_start
         self._jobs: dict[str, dict[str, Any]] = {}
         self._announced: set[str] = set()
@@ -121,6 +144,8 @@ class ConformModule(BaseModule):
         self.handle("conform.job.get", self.on_job_get)
         self.handle("conform.workspace", self.on_workspace)
         self.handle("conform.cancel", self.on_cancel)
+        self.handle("conform.settings.get", self.on_settings_get)
+        self.handle("conform.settings.set", self.on_settings_set)
         self.handle("conform.job.find", self.on_job_find)
         self.handle("gateway.sse.clients", self.on_clients)
 
@@ -132,16 +157,47 @@ class ConformModule(BaseModule):
     async def on_status(self, env: Envelope) -> dict:
         return self.snapshot()
 
-    async def _path_map(self) -> dict[str, str]:
+    async def _stored(self, key: str) -> str | None:
         try:
-            reply = await self.request("settings.value.get", {"key": PATH_MAP_KEY}, timeout=10)
-            value = json.loads(reply.get("value") or "null")
-        except (BusRequestError, asyncio.TimeoutError, json.JSONDecodeError, TypeError):
-            value = None
-        if isinstance(value, dict) and value and all(
-                isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
-            return value
-        return dict(DEFAULT_PATH_MAP)
+            reply = await self.request("settings.value.get", {"key": key}, timeout=10)
+        except (BusRequestError, asyncio.TimeoutError):
+            return None
+        return reply.get("value")
+
+    async def _path_map(self) -> dict[str, str]:
+        return path_map_of(await self._stored(PATH_MAP_KEY))
+
+    async def on_settings_get(self, env: Envelope) -> dict:
+        return (await self._settings_view()).model_dump(mode="json")
+
+    async def on_settings_set(self, env: Envelope) -> dict:
+        draft = ConformSettingsDraft.model_validate(env.payload)
+        problems = conform_settings.check(draft)
+        if not problems:
+            draft = conform_settings.clean(draft)
+            await self.request("settings.values.set_many", {"values": conform_settings.stored(draft)}, timeout=10)
+            await self._use_address(draft.url)
+        view = await self._settings_view()
+        if not problems:
+            self.log.info("conform: настройки сервера сохранены, адрес %s", draft.url or "не задан")
+            self.publish_event("conform.settings.changed", view.model_dump(mode="json"))
+        return ConformSettingsSaved(saved=not problems, problems=problems, settings=view).model_dump(mode="json")
+
+    async def _settings_view(self):
+        url = self._client.base_url if self._client is not None else ""
+        return conform_settings.view(url, await self._path_map())
+
+    async def _use_address(self, url: str) -> None:
+        """Point the bridge at another daemon, or at none: the feed of the old one ends, the picture starts over."""
+        async with self._address_lock:
+            if url == (self._client.base_url if self._client is not None else ""):
+                return
+            await self._stop_feed()
+            self._client = self._client_factory(url) if url else None
+            self._jobs.clear()
+            self._daemon = {"up": False, "error": None}
+            self._publish()
+            self._start_feed()
 
     async def on_submit(self, env: Envelope) -> dict:
         if self._client is None:
@@ -223,13 +279,24 @@ class ConformModule(BaseModule):
             self._publish()
 
     async def on_start(self) -> None:
+        if self._client is None:
+            stored = await self._stored(URL_KEY)
+            url = self._default_url if stored is None else stored
+            self._client = self._client_factory(url) if url else None
+        self._start_feed()
+
+    async def on_stop(self) -> None:
+        await self._stop_feed()
+
+    def _start_feed(self) -> None:
         if self._client is not None:
             self._runner = asyncio.create_task(self._run(), name="conform:feed")
 
-    async def on_stop(self) -> None:
+    async def _stop_feed(self) -> None:
         if self._runner is not None:
             self._runner.cancel()
             await asyncio.gather(self._runner, return_exceptions=True)
+            self._runner = None
         if self._client is not None:
             await self._client.close()
 

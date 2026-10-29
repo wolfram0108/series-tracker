@@ -7,6 +7,7 @@ import { useApi } from "../../composables/useApi"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
 import { useVoicesStore } from "../../stores/voices"
+import SettingsConformServer from "./SettingsConformServer.vue"
 import VoiceGroupsEditor from "./VoiceGroupsEditor.vue"
 
 // Settings of the voices: groups of voice-overs and the order of the sources. Every action goes to the core at once and
@@ -106,6 +107,8 @@ onMounted(load)
         </div>
       </div>
     </div>
+
+    <SettingsConformServer />
   </div>
 </template>
 

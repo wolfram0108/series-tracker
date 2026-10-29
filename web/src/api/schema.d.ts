@@ -986,6 +986,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conform/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Conform Settings
+         * @description The address of the alignment server and the path map as they apply now.
+         */
+        get: operations["conform_settings_api_conform_settings_get"];
+        /**
+         * Save Conform Settings
+         * @description Written whole and taken at once, or refused with coded reasons (`saved: false`) and nothing written.
+         */
+        put: operations["save_conform_settings_api_conform_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/debug_flags": {
         parameters: {
             query?: never;
@@ -1391,6 +1415,39 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * ConformSettingsDraft
+         * @description The address of the daemon (empty: none) and the map of paths between the two servers; a save replaces both.
+         */
+        ConformSettingsDraft: {
+            /** Url */
+            url: string;
+            /** Path Map */
+            path_map: components["schemas"]["PathPair"][];
+        };
+        /**
+         * ConformSettingsSaved
+         * @description The reply of `conform.settings.set`: saved, or the problems that kept it from being saved.
+         */
+        ConformSettingsSaved: {
+            /** Saved */
+            saved: boolean;
+            /** Problems */
+            problems: components["schemas"]["SettingProblem"][];
+            settings: components["schemas"]["ConformSettingsView"];
+        };
+        /**
+         * ConformSettingsView
+         * @description The reply of `conform.settings.get`: what applies now and the map to return to.
+         */
+        ConformSettingsView: {
+            /** Url */
+            url: string;
+            /** Path Map */
+            path_map: components["schemas"]["PathPair"][];
+            /** Default Path Map */
+            default_path_map: components["schemas"]["PathPair"][];
+        };
         /** CreatedSeries */
         CreatedSeries: {
             /** Success */
@@ -1536,6 +1593,16 @@ export interface components {
             layout?: components["schemas"]["Layout"] | null;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * PathPair
+         * @description A folder of the storage on this server and the same folder as the daemon mounts it.
+         */
+        PathPair: {
+            /** Local */
+            local: string;
+            /** Daemon */
+            daemon: string;
         };
         /**
          * QueueTask
@@ -1815,6 +1882,16 @@ export interface components {
             epoch: number;
             /** Rev */
             rev: number;
+            /**
+             * Job Id
+             * @default null
+             */
+            job_id: string | null;
+            /**
+             * File
+             * @default null
+             */
+            file: string | null;
         };
         /** SnapshotItem */
         SnapshotItem: {
@@ -1832,6 +1909,16 @@ export interface components {
             detail: components["schemas"]["Reason"] | null;
             /** Series Id */
             series_id: number;
+            /**
+             * Job Id
+             * @default null
+             */
+            job_id: string | null;
+            /**
+             * File
+             * @default null
+             */
+            file: string | null;
         };
         /** DubsSnapshot */
         DubsSnapshot: {
@@ -4192,6 +4279,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VoiceSettingsSaved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    conform_settings_api_conform_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConformSettingsView"];
+                };
+            };
+        };
+    };
+    save_conform_settings_api_conform_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConformSettingsDraft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConformSettingsSaved"];
                 };
             };
             /** @description Validation Error */

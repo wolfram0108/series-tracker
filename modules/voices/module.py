@@ -184,12 +184,17 @@ def _safe(name: str) -> str:
     return re.sub(r"[^\w.-]+", "_", name, flags=re.UNICODE).strip("._") or "dub"
 
 
+def dub_file(voice_key: str) -> str:
+    """The name a voice-over is downloaded and sent to the service under; the queue names it by this."""
+    return f"{_safe(voice_key)}.mp4"
+
+
 def episode_dir(root: str, series_id: int, season: int, episode: int) -> str:
     return os.path.join(root, str(series_id), f"s{season:02d}e{episode:02d}")
 
 
 def temp_path(root: str, series_id: int, season: int, episode: int, voice_key: str) -> str:
-    return os.path.join(episode_dir(root, series_id, season, episode), f"{_safe(voice_key)}.mp4")
+    return os.path.join(episode_dir(root, series_id, season, episode), dub_file(voice_key))
 
 
 class VoicesModule(BaseModule):
@@ -565,7 +570,7 @@ class VoicesModule(BaseModule):
             series_id=row["series_id"], season=row["season"], episode=row["episode"],
             voice_key=row["voice_key"], voice_label=row["voice_label"], status=status, state=state,
             hint=public_hint(status, state, row.get("job_id")), detail=parse_reason(detail), epoch=epoch,
-            rev=rev).model_dump(mode="json"))
+            rev=rev, job_id=row.get("job_id"), file=dub_file(row["voice_key"])).model_dump(mode="json"))
 
     async def _announce_difference(self, before: list[dict], after: list[dict]) -> None:
         """Rows that the planner created or took over are news for the interface like any other change."""
@@ -589,8 +594,9 @@ class VoicesModule(BaseModule):
             return
         epoch = await self._generation()
         rev = self._next_rev()
-        items = [SnapshotItem(series_id=row["series_id"], **self._record(row).model_dump(
-            include=set(DubItem.model_fields))) for row in await self.repo.all_rows()]
+        items = [SnapshotItem(series_id=row["series_id"], job_id=row.get("job_id"), file=dub_file(row["voice_key"]),
+                              **self._record(row).model_dump(include=set(DubItem.model_fields)))
+                 for row in await self.repo.all_rows()]
         self.publish_event("voices.dubs.snapshot", DubsSnapshot(epoch=epoch, rev=rev, items=items).model_dump(mode="json"))
 
     async def on_conform_picture(self, env: Envelope) -> None:

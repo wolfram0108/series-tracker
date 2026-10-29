@@ -25,7 +25,7 @@ from core.db import Database
 from core.logging import configure, get_logger
 from modules.auth import AuthModule
 from modules.catalog import CatalogModule
-from modules.conform import ConformModule, DaemonClient
+from modules.conform import ConformModule
 from modules.downloads import DownloadsModule
 from modules.gateway import GatewayModule
 from modules.library import LibraryModule
@@ -89,8 +89,7 @@ modules = [
     SlicingModule(bus, db),
     VoicesModule(bus, db),
     # Alignment daemon (track-muxer): mirrored read-only; no address, no bridge.
-    ConformModule(bus, DaemonClient(os.environ["ST_CONFORM_URL"])
-                  if os.environ.get("ST_CONFORM_URL") else None),
+    ConformModule(bus, default_url=os.environ.get("ST_CONFORM_URL", "")),
 ]
 
 # env имеет приоритет (стенд/тесты); без env torrents возьмёт креды

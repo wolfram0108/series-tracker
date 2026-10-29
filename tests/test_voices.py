@@ -20,6 +20,7 @@ from modules.voices import VoicesModule
 from modules.voices.identity import Equivalence, group_key, same_voice, tokens, voice_groups
 from modules.voices.layout import (DEFAULT_PRIORITY, choose_reference, download_chain,
                                    plan_layout, rank)
+from modules.voices.module import dub_file, temp_path
 from modules.voices.states import public_state
 
 
@@ -2788,3 +2789,19 @@ async def test_a_job_found_by_its_key_that_nothing_owns_is_cancelled(dubs):
     neighbours.sent_keys["a-key-nobody-owns"] = "job-88"
     assert await voices._recover_one("a-key-nobody-owns") is True
     assert neighbours.conform_cancels == ["job-88"] and await voices.repo.cleanup_list() == []
+
+
+@pytest.mark.asyncio
+async def test_a_voice_over_in_alignment_tells_the_queue_its_job_and_the_file_it_was_sent_as(dubs):
+    _, _, _, _, sub, _ = await two_voices_ready(dubs)
+    named = {}
+    end = asyncio.get_running_loop().time() + 5
+    while len(named) < 2:
+        payload = (await asyncio.wait_for(sub.queue.get(), end - asyncio.get_running_loop().time())).payload
+        if payload["job_id"]:
+            named[payload["voice_key"]] = (payload["job_id"], payload["file"])
+    assert named == {"blackcat": ("job-1", "blackcat.mp4"), "redheadsound": ("job-1", "redheadsound.mp4")}
+
+
+def test_the_file_a_voice_over_is_sent_as_is_named_in_one_place():
+    assert os.path.basename(temp_path("/tmp", 7, 1, 1, "blackcat")) == dub_file("blackcat") == "blackcat.mp4"

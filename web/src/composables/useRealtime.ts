@@ -3,6 +3,7 @@ import { useSeriesStore, type Series, type SeriesDelta } from "../stores/series"
 import { useQueuesStore, type ConformPicture, type QueueTask } from "../stores/queues"
 import { useScannerStore, type ScannerStatus } from "../stores/scanner"
 import { useVideoScanStore, type VideoScanProgress } from "../stores/videoScan"
+import { useConformStore, type ConformSettingsView } from "../stores/conform"
 import { useVoicesStore, type VoiceDubEvent, type VoiceDubsSnapshot, type VoiceSettingsView } from "../stores/voices"
 
 /** Связывает SSE-события со сторами и открывает соединение. Вызывается один
@@ -15,6 +16,7 @@ export function setupRealtime(): void {
   const scanner = useScannerStore()
   const videoScan = useVideoScanStore()
   const voices = useVoicesStore()
+  const conform = useConformStore()
 
   sse.on("series_updated", (d) => series.applyDelta(d as SeriesDelta))
   sse.on("series_added", (d) => series.upsert(d as Series))
@@ -28,6 +30,7 @@ export function setupRealtime(): void {
   sse.on("voice_dub_update", (d) => voices.apply(d as VoiceDubEvent))
   sse.on("voice_dubs_snapshot", (d) => voices.snapshot(d as VoiceDubsSnapshot))
   sse.on("voice_settings_update", (d) => voices.applySettings(d as VoiceSettingsView))
+  sse.on("conform_settings_update", (d) => conform.applySettings(d as ConformSettingsView))
 
   sse.on("scanner_status_update", (d) => scanner.set(d as ScannerStatus))
   sse.on("video_scan_progress", (d) => videoScan.set(d as VideoScanProgress))

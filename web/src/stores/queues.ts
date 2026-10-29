@@ -11,7 +11,7 @@ export interface ConformResult {
   cuts: number | null; suspect: boolean; warnings: string[]; critical: string[]; error: string | null
 }
 export interface ConformTask {
-  id: string; label: string; status: string; progress: number; stage: string; stage_pct: number
+  id: string; label: string; key: string | null; status: string; progress: number; stage: string; stage_pct: number
   detail: string; dub_index: number; dub_total: number; cur_dub: string; elapsed_s: number
   error: string | null; results: ConformResult[]
 }

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { useQueuesStore, type ConformResult } from "../../stores/queues"
+import { useVoicesStore } from "../../stores/voices"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
 
 // Вкладка «Агенты»: 4 очереди карточками (вместо таблиц). Данные — из
 // queuesStore (наполняются SSE-событиями очередей). Пустые очереди — empty.
 const q = useQueuesStore()
+const voices = useVoicesStore()
 
 function str(v: unknown): string {
   return v == null ? "" : String(v)
@@ -90,10 +92,10 @@ const resultClass = (r: ConformResult) =>
           : t("agents.conform.daemon.idle") }}
       </div>
       <template v-else>
-        <div class="queue-row">
-          <div class="pill pill-success">
-            {{ t("agents.conform.daemon.up", { version: str(q.conform.daemon.version), device: str(q.conform.daemon.gpu_name || q.conform.daemon.device) }) }}
-          </div>
+        <div class="queue-row queue-status">
+          <div class="pill pill-success"><i class="pi pi-check-circle"></i> {{ t("agents.conform.daemon.up") }}</div>
+          <div v-if="q.conform.daemon.version" class="pill">{{ t("agents.conform.daemon.version", { version: str(q.conform.daemon.version) }) }}</div>
+          <div v-if="q.conform.daemon.gpu_name || q.conform.daemon.device" class="pill">{{ str(q.conform.daemon.gpu_name || q.conform.daemon.device) }}</div>
         </div>
         <div v-if="!q.conform.tasks.length" class="queue-empty">{{ t("agents.conform.empty") }}</div>
         <div v-else class="composition-cards-container">
@@ -103,7 +105,7 @@ const resultClass = (r: ConformResult) =>
               <div class="pill" :class="statusClass(task.status)">{{ statusText(task.status) }}</div>
               <div v-if="task.stage" class="pill pill-info">{{ t("agents.conform.stage", { stage: task.stage, pct: Math.round(task.stage_pct * 100) }) }}</div>
               <div v-if="task.dub_total && task.status === 'running'" class="pill">
-                {{ t("agents.conform.dub", { index: task.dub_index, total: task.dub_total, name: task.cur_dub }) }}
+                {{ t("agents.conform.dub", { index: task.dub_index, total: task.dub_total, name: voices.dubName(task.id, task.cur_dub) }) }}
               </div>
             </div>
             <div v-if="task.status === 'running'" class="queue-row">
@@ -113,7 +115,7 @@ const resultClass = (r: ConformResult) =>
             </div>
             <div v-if="task.error" class="queue-row"><div class="pill pill-danger">{{ reasonText(task.error) }}</div></div>
             <div v-for="r in task.results" :key="r.dub" class="queue-row">
-              <span class="queue-title">{{ r.dub }}</span>
+              <span class="queue-title">{{ voices.dubName(task.id, r.dub) }}</span>
               <div class="pill" :class="resultClass(r)">{{ resultText(r) }}</div>
               <div v-if="r.suspect" class="pill pill-info">{{ t("agents.conform.result.suspect") }}</div>
               <div v-if="r.critical.length" class="pill pill-danger">{{ t("agents.conform.result.critical", { reasons: r.critical.join("; ") }) }}</div>
@@ -155,6 +157,8 @@ const resultClass = (r: ConformResult) =>
   margin: 0 0 10px; padding-bottom: 8px;
   border-bottom: 1px solid var(--border-color);
 }
+.queue-status { flex-wrap: wrap; margin-bottom: 8px; }
+.queue-status .pill { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .queue-empty {
   padding: 16px; text-align: center; color: var(--text-muted);
   background: var(--bg-light); border-radius: var(--border-radius);

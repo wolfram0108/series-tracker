@@ -82,6 +82,9 @@ class DubItem(BaseModel):
 
 class SnapshotItem(DubItem):
     series_id: int
+    # With `file`, how the alignment queue names the voice-over: the job that aligns it and the file it was sent as.
+    job_id: str | None = None
+    file: str | None = None
 
 
 class DubRecord(DubItem):
@@ -112,6 +115,8 @@ class DubEvent(BaseModel):
     detail: Reason | None
     epoch: int
     rev: int
+    job_id: str | None = None
+    file: str | None = None
 
 
 class DubsSnapshot(BaseModel):

@@ -68,23 +68,7 @@
   background-color: rgba(255, 255, 255, 0.3); color: inherit;
 }
 
-/* ── Пилюли карточки (Статус / Тег / Качество / ID …) ────────────────── */
-.card-final .pill {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px; font-size: 12px; font-weight: 500;
-  border-radius: 20px; border: 1px solid rgba(0, 0, 0, 0.1);
-  background-color: rgba(255, 255, 255, 0.2); white-space: nowrap;
-}
-.card-final .pill i { font-size: 14px; }
 .card-final .pill.pill-link { cursor: pointer; }
-
-/* Тонированные пилюли статуса: форма как .pill, фон слегка подкрашен в цвет
-   статуса (мягко, не как яркий bootstrap-бейдж) — для карточек очередей. */
-.card-final .pill.pill-primary   { background-color: rgba(13, 110, 253, 0.18); border-color: rgba(13, 110, 253, 0.4); color: #0a58ca; }
-.card-final .pill.pill-info      { background-color: rgba(13, 202, 240, 0.22); border-color: rgba(13, 202, 240, 0.45); color: #0a7c8f; }
-.card-final .pill.pill-success   { background-color: rgba(25, 135, 84, 0.18); border-color: rgba(25, 135, 84, 0.4); color: #146c43; }
-.card-final .pill.pill-danger    { background-color: rgba(220, 53, 69, 0.18); border-color: rgba(220, 53, 69, 0.4); color: #b02a37; }
-.card-final .pill.pill-secondary { background-color: rgba(108, 117, 125, 0.18); border-color: rgba(108, 117, 125, 0.4); color: #565e64; }
 
 /* ── Единая статусная палитра (пастель 135° + бордер в тон) ───────────── */
 .card-final.status-success  { background: linear-gradient(135deg, #e7f4e8, #d1e7dd); border-color: #a3cfbb; }
@@ -148,7 +132,7 @@
   background: linear-gradient(135deg, #f8f9fa, #e9ecef);
   border-color: #dee2e6;
 }
-.card-queue .queue-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.queue-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .card-queue .queue-title {
   font-weight: 600; flex: 1; min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

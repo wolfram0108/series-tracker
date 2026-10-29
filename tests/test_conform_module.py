@@ -8,7 +8,7 @@ import pytest
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.envelope import Envelope
 from modules.conform import ConformModule, DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
-from modules.conform.module import compact_job
+from modules.conform.module import compact_job, job_label, split_label
 from modules.conform.paths import translate
 from conform_fakes import FakeClient
 from core.reasons import parse
@@ -61,6 +61,13 @@ async def until(probe, condition, seconds=3.0):
         await asyncio.sleep(0.01)
 
 
+
+
+def test_the_key_a_label_carries_is_not_part_of_the_label_the_interface_shows():
+    assert split_label(job_label("S s01e01", "aa99")) == ("S s01e01", "aa99")
+    assert split_label("S s01e01") == ("S s01e01", None) and split_label(None) == (None, None)
+    view = compact_job(job("j1", label="Show s01e02 #aa99"))
+    assert (view["label"], view["key"]) == ("Show s01e02", "aa99")
 
 
 def test_compact_job_keeps_what_the_interface_shows():
@@ -183,7 +190,7 @@ async def test_lost_jobs_are_not_shown_as_current_while_the_daemon_is_down():
 async def test_without_an_address_the_module_is_idle():
     bus = Bus()
     probe = Probe(bus)
-    runner = Runner(bus, [ConformModule(bus, None), probe])
+    runner = Runner(bus, [Settings(bus), ConformModule(bus, None), probe])
     await runner.start()
     try:
         status = await probe.request("conform.status", {}, timeout=2)
@@ -306,7 +313,7 @@ async def test_submit_fails_when_asking_again_may_help_and_rejects_when_it_canno
         await runner.stop()
     bus = Bus()
     probe = Probe(bus)
-    runner = Runner(bus, [ConformModule(bus, None), Settings(bus), probe])
+    runner = Runner(bus, [Settings(bus), ConformModule(bus, None), probe])
     await runner.start()
     try:
         idle = await probe.request("conform.submit", SUBMIT, timeout=5)

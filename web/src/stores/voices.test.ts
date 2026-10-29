@@ -5,15 +5,23 @@ import { useVoicesStore, type VoiceDub, type VoiceDubEvent, type VoiceDubsSnapsh
 const dub = (over: Partial<VoiceDub> = {}): VoiceDub => ({
   season: 1, episode: 2, voice_key: "blackcat", voice_label: "BlackCat", status: "ready", state: "align_queued", hint: "ready", detail: null, ...over,
 })
-const event = (rev: number, over: Partial<VoiceDubEvent> = {}): VoiceDubEvent => ({ series_id: 7, ...dub(), epoch: 1, rev, ...over })
+const event = (rev: number, over: Partial<VoiceDubEvent> = {}): VoiceDubEvent => ({ series_id: 7, job_id: null, file: null, ...dub(), epoch: 1, rev, ...over })
 const snapshot = (rev: number, items: (VoiceDub & { series_id?: number })[], epoch = 1): VoiceDubsSnapshot => ({
   epoch,
   rev,
-  items: items.map((item) => ({ series_id: 7, ...item })),
+  items: items.map((item) => ({ series_id: 7, job_id: null, file: null, ...item })),
 })
 
 describe("voices store", () => {
   beforeEach(() => setActivePinia(createPinia()))
+
+  it("names a voice-over of the alignment queue by its job and file, and by the bare file when the core holds none", () => {
+    const store = useVoicesStore()
+    store.apply(event(1, { job_id: "cf1", file: "blackcat.mp4" }))
+    expect(store.dubName("cf1", "blackcat.mp4")).toBe("BlackCat")
+    expect(store.dubName("cf2", "blackcat.mp4")).toBe("blackcat")
+    expect(store.dubName("cf1", "other.mp4")).toBe("other")
+  })
 
   it("takes a snapshot as every voice-over of every series, grouped by episode", () => {
     const store = useVoicesStore()
