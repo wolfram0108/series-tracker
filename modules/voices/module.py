@@ -24,9 +24,10 @@ Command:
       directory (setting `voices.temp_root`, default /nas/torrents/series-tracker).
 Commands out: downloads.fetch, downloads.fetch.cancel. Queries to conform: workspace (the folders of the service
             for a place, asked of the bridge: this module does not know its layout), submit (with a key that
-            finds the job again; its answer is accepted, rejected, not sent or of unknown outcome, and only
-            "not sent" releases the key), job.find, cancel (a job whose reference was replaced or whose series
-            was deleted; what could not be cancelled is retried from the cleanup journal).
+            finds the job again; the reply is a SubmitReply: accepted, rejected, unavailable (not sent) or
+            uncertain, anything that is not a clear reply counts as uncertain, and only "unavailable" releases the
+            key), job.find, job.get, cancel (a job whose reference was replaced or whose series was deleted; what
+            could not be cancelled is retried from the cleanup journal).
 
 Events in:  downloads.fetch.started and .finished (our keys `dub:<id>`), conform.queue.changed (waiting or running
             jobs of the service), series.downloaded.changed,
@@ -43,12 +44,13 @@ Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_lab
             done, error), hint names the sentence that tells apart the causes of one state, status the
             step behind it; detail is the reason of a failure, a rejection or a stale track as
             {code, params} (code `external`: the words of another system in params.text), else null;
+            a voice-over that was sent to the service and has no job number yet says so in its hint (`awaiting_answer`);
             status is one of
             ready, aligning, aligned, placed, rejected, failed, moved (the track followed its video),
             stale (its reference was replaced) and removed (the episode and its video are gone);
             series.purged,
             voices.episode.settled {series_id, season, episode} — every voice-over of the episode is
-            placed, rejected or failed and its temporary files are gone.
+            placed, rejected or failed and its temporary files are gone or on the cleanup journal.
 
 Where each policy lives: the steps a row may take and the sets of steps (lifecycle.py, enforced by the repository),
 what is known of the alignment service (alignment.py), the form in which a finished voice-over reaches the library
@@ -81,6 +83,20 @@ video, and the voice-overs start over against the new reference. An episode that
 and whose video is gone loses its whole set; a track the user deleted is not made again.
 Deleting a series removes only records and temporary files: videos stay, and so do their tracks.
 
+Obligations (recovery.py). What the database says is unfinished and may be blocked by something that passes — a
+job sent without an answer (`submission:<key>`), a job whose ending is not known (`job:<id>`), an entry of the
+cleanup journal (`cleanup:<path>`), a pass over a series that the service or the storage stopped
+(`series:<id>`) — has its own account of attempts: it is tried again after a pause that doubles up to a
+ceiling, it is told to try at once by conform.daemon.up, and after SUBMIT_RETRIES failures the owner is told
+once (an error in the log) while the attempts go on at the longest pause. Every such obligation is registered
+when it is written down and again at the start of the module, so no outside event is needed to carry it on.
+
+Removal. A file, an artifact or a tree is removed with the ownership of its name; the removal is confirmed by the
+name being free. It ends in exactly one of two ways: the name is free, or the journal holds it and the recovery
+carries it on. What is written to the name by the application itself is kept away by that ownership while the
+removal lives; a name that a live voice-over holds again, or that lies in the folder a running job writes to, is
+not removed by a deferred attempt. No clock takes part.
+
 Setting `voices.max_temp_episodes` (integer; 0 or unset: no limit) caps how many episodes may hold
 temporary files at once: further voice-overs stay planned until an episode settles.
 
@@ -92,17 +108,19 @@ settled and the folder is empty.
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import os
 import re
 import shutil
-import time
 import uuid
 from collections import OrderedDict, defaultdict
 
 from core import BaseModule, BusRequestError, is_video_source
+from pydantic import ValidationError
+
 from core.contracts import (AlignmentJob, JobStatus, Layout, DubEvent, DubEventStatus as E, DubItem, DubRecord, DubsSnapshot, DubStatus as S,
-                            SnapshotItem)
+                            SnapshotItem, SubmitOutcome, SubmitReply)
 from core import storage
 from core.storage import DEFAULT_TIMEOUT_S as IO_TIMEOUT_S, MOVE_TIMEOUT_S, REMOVE_TIMEOUT_S
 from core.db import Database
@@ -114,6 +132,7 @@ from .alignment import ENDED, job_failure, refusal, result_for, track_of
 from .layout import download_chain, plan_layout
 from .lifecycle import FINAL, WORKING
 from .outputs import Output, SidecarOutput
+from .recovery import Recovery
 from .repository import VoicesRepository
 from .settings import PREFIX, VoiceSettings, parse
 from .states import public_hint, public_state
@@ -121,11 +140,18 @@ from .states import public_hint, public_state
 DUB_MAX_HEIGHT = 720
 PARSE_TIMEOUT_S = 180
 SUBMIT_TIMEOUT_S = 60
+# The first pause before an obligation is tried again, the number of failures after which the owner is told,
+# and the longest pause; the pauses double in between.
 SUBMIT_RETRY_S = 30.0
-SUBMIT_RETRIES = 5
+SUBMIT_RETRIES = 6
+RETRY_CEILING_S = 600.0
 # What the cleanup journal can hold: a plain file, a tree, an artifact of the output, a job of the service.
 PATH, TREE, ARTIFACT, JOB = "path", "tree", "artifact", "job"
 UNCLAIMED_JOBS = 256
+
+
+def _pause(failures: int) -> float:
+    return min(SUBMIT_RETRY_S * 2 ** failures, max(RETRY_CEILING_S, SUBMIT_RETRY_S))
 
 
 def _safe(name: str) -> str:
@@ -148,8 +174,6 @@ class VoicesModule(BaseModule):
         self._output = output or SidecarOutput()
         self._locks: dict[int, asyncio.Lock] = {}
         self._kicked: set[int] = set()
-        self._retries: dict[int, int] = {}
-        self._retry_pending: set[int] = set()
         self._job_status: dict[str, str] = {}
         self._fetching: set[int] = set()
         self._admit_lock = asyncio.Lock()
@@ -162,6 +186,7 @@ class VoicesModule(BaseModule):
         self._rev = 0
         self._reported: set[str] = set()
         super().__init__(bus)
+        self._recovery = Recovery(self.log, pause=_pause, report_after=lambda: SUBMIT_RETRIES)
 
     def register(self) -> None:
         self.handle("voices.layout", self.on_layout)
@@ -188,9 +213,41 @@ class VoicesModule(BaseModule):
             self.log.info("озвучки: к докачке %d (прерванных %d)", len(pending), requeued)
         await self._admit()
         await self._sweep_cleanup()
+        await self._resume_obligations()
         for series_id in await self.repo.series_with_open_work():
             self._kick(series_id)
 
+    async def on_stop(self) -> None:
+        await self._recovery.stop()
+
+    def _spawn(self, work, name: str) -> None:
+        task = asyncio.create_task(work, name=name)
+        self._bg.add(task)
+        task.add_done_callback(self._bg.discard)
+
+    async def _resume_obligations(self) -> None:
+        """Whatever the database says is unfinished gets its own account of attempts, whatever event comes or not."""
+        for key in await self.repo.unsent_submissions():
+            self._await_submission(key, now=True)
+        for job_id in await self.repo.aligning_jobs():
+            self._await_job(job_id, now=True)
+        for entry in await self.repo.cleanup_list():
+            self._await_cleanup(entry["path"], now=True)
+
+    def _await_submission(self, key: str, *, now: bool = False) -> None:
+        self._recovery.want(f"submission:{key}", lambda: self._recover_one(key), now=now)
+
+    def _await_job(self, job_id: str, *, now: bool = False) -> None:
+        self._recovery.want(f"job:{job_id}", lambda: self._reconcile(job_id), now=now)
+
+    def _await_cleanup(self, path: str, *, now: bool = False) -> None:
+        self._recovery.want(f"cleanup:{path}", lambda: self._clear(path), now=now)
+
+    def _await_series(self, series_id: int) -> None:
+        self._recovery.want(f"series:{series_id}", lambda: self._retry_series(series_id))
+
+    async def _retry_series(self, series_id: int) -> bool:
+        return not await self._advance_locked(series_id)
 
     async def _io(self, fn, *args, timeout: float = IO_TIMEOUT_S, owns=()):
         """A call into the storage that waits for a limited time; `owns` is what a changing call changes."""
@@ -378,10 +435,11 @@ class VoicesModule(BaseModule):
         if not await self.repo.claim_download(row["id"], path):
             return
         self._fetching.discard(row["id"])
+        # Announced before the command goes out: a quick download could end first and this event would repeat its end.
+        await self._announce(row)
         self.send_command("downloads.fetch", {
             "key": f"dub:{row['id']}", "url": chain[row["attempt"]]["url"], "path": path,
             "max_height": DUB_MAX_HEIGHT, "series_id": row["series_id"]})
-        await self._announce(row)
 
     async def on_fetch_started(self, env: Envelope) -> None:
         """The download left the queue of downloads and began: only now it is a download."""
@@ -460,7 +518,8 @@ class VoicesModule(BaseModule):
         self.publish_event("voices.dub.changed", DubEvent(
             series_id=row["series_id"], season=row["season"], episode=row["episode"],
             voice_key=row["voice_key"], voice_label=row["voice_label"], status=status, state=state,
-            hint=public_hint(status, state), detail=parse_reason(detail), epoch=epoch, rev=rev).model_dump(mode="json"))
+            hint=public_hint(status, state, row.get("job_id")), detail=parse_reason(detail), epoch=epoch,
+            rev=rev).model_dump(mode="json"))
 
     async def _announce_difference(self, before: list[dict], after: list[dict]) -> None:
         """Rows that the planner created or took over are news for the interface like any other change."""
@@ -475,7 +534,7 @@ class VoicesModule(BaseModule):
         state = public_state(row["status"], self._job_status.get(row["job_id"]), row["id"] in self._fetching)
         return DubRecord(**{field: row[field] for field in DubRecord.model_fields
                             if field in row and field not in ("state", "hint", "detail")},
-                         state=state, hint=public_hint(row["status"], state),
+                         state=state, hint=public_hint(row["status"], state, row["job_id"]),
                          detail=parse_reason(row["outcome"] or row["error"]))
 
     async def on_clients(self, env: Envelope) -> None:
@@ -510,10 +569,9 @@ class VoicesModule(BaseModule):
             self._kick(int(env.payload["series_id"]))
 
     async def on_daemon_up(self, env: Envelope) -> None:
-        await self._recover_submissions()
-        await self._sweep_cleanup()
-        for job_id in await self.repo.aligning_jobs():
-            await self._reconcile(job_id)
+        """The service is back: whatever waited for it tries again now instead of at its next pause."""
+        await self._resume_obligations()
+        self._recovery.poke()
         for series_id in await self.repo.series_with_open_work():
             self._kick(series_id)
 
@@ -522,32 +580,35 @@ class VoicesModule(BaseModule):
         if series_id in self._kicked:
             return
         self._kicked.add(series_id)
-        task = asyncio.create_task(self._advance_locked(series_id), name=f"voices:advance:{series_id}")
-        self._bg.add(task)
-        task.add_done_callback(self._bg.discard)
+        self._spawn(self._advance_or_await(series_id), f"voices:advance:{series_id}")
 
-    async def _advance_locked(self, series_id: int) -> None:
+    async def _advance_or_await(self, series_id: int) -> None:
+        if await self._advance_locked(series_id):
+            self._await_series(series_id)
+
+    async def _advance_locked(self, series_id: int) -> bool:
+        """One pass over the series; True when something that may pass stopped it and a new pass is owed."""
         async with self._locks.setdefault(series_id, asyncio.Lock()):
             self._kicked.discard(series_id)
             try:
-                await self._advance(series_id)
+                return await self._advance(series_id)
             except (BusRequestError, asyncio.TimeoutError, OSError) as exc:
                 self.log.warning("сериал %d: выравнивание озвучек отложено: %s", series_id, exc)
-                if isinstance(exc, (TimeoutError, OSError)):
-                    self._retry_later(series_id)
+                return True
             except Exception:  # noqa: BLE001 - one series must not stop the others
                 self.log.exception("сериал %d: сбой оркестрации озвучек", series_id)
+                return False
 
-    async def _advance(self, series_id: int) -> None:
+    async def _advance(self, series_id: int) -> bool:
         rows = await self.repo.for_series(series_id)
         if not rows:
-            return
+            return False
         series = await self.request("catalog.series.get", {"series_id": series_id})
-        await self._recover_submissions()
         in_plan, references = await self._reference_state(series)
         root = await self._temp_root()
         episodes = sorted({(row["season"], row["episode"]) for row in rows})
         restart = False
+        owed = False
         for season, episode in episodes:
             group = await self.repo.for_episode(series_id, season, episode)
             for row in group:
@@ -569,7 +630,7 @@ class VoicesModule(BaseModule):
             group = await self.repo.for_episode(series_id, season, episode)
             ready = [row for row in group if row["status"] == S.READY]
             if ready and not any(row["status"] in WORKING for row in group):
-                await self._submit(series, season, episode, reference, uid, ready)
+                owed = await self._submit(series, season, episode, reference, uid, ready) or owed
             await self._tidy(series_id, season, episode, root)
         await self._admit()
         await self._sweep_cleanup()
@@ -578,6 +639,7 @@ class VoicesModule(BaseModule):
         await self._sweep_scratch(series_id, {os.path.dirname(path) for path, _ in references.values()})
         if all(row["status"] in FINAL for row in await self.repo.for_series(series_id)):
             await self._io(self._remove_if_empty, os.path.join(root, str(series_id)))
+        return owed
 
     async def _sweep_scratch(self, series_id: int, folders: set[str]) -> None:
         """The service's scratch directory is made next to the reference when a job starts: while
@@ -686,27 +748,27 @@ class VoicesModule(BaseModule):
             if path:
                 await self._discard(path)
 
-    def _unlink(self, path: str, kind: str, requested_ns: int) -> None:
-        # Whatever was written at this name after the removal was asked for is not what was meant to go;
-        # a difference between the clocks only weakens this check, the ownership of the path does not depend on it.
-        if os.stat(path).st_mtime_ns > requested_ns:
-            return
+    def _unlink(self, path: str, kind: str) -> None:
+        """Remove what the kind says and confirm it: success is the name being free, not the absence of an error."""
         if kind == TREE:
             shutil.rmtree(path)
         elif kind == ARTIFACT:
             self._output.remove(path)
         else:
             os.remove(path)
+        if self._output.exists(path) if kind == ARTIFACT else os.path.lexists(path):
+            raise OSError(errno.EEXIST, "the name is still taken after its removal", path)
 
     async def _discard(self, path: str, *, kind: str = PATH) -> bool:
-        """Remove a file, an artifact or a tree. What cannot be removed goes to the cleanup journal and is
-        tried again: a record of the file is never dropped before the file is gone."""
+        """Remove a file, an artifact or a tree. True means it is gone; anything else is on the cleanup journal
+        and carried to the end by the recovery, so a record of the file is never dropped while the file is there."""
         try:
-            await self._io(self._unlink, path, kind, time.time_ns(), timeout=REMOVE_TIMEOUT_S, owns=path)
+            await self._io(self._unlink, path, kind, timeout=REMOVE_TIMEOUT_S, owns=path)
         except FileNotFoundError:
             return True
         except OSError as exc:
             await self.repo.journal_cleanup(path, kind, str(exc))
+            self._await_cleanup(path)
             self.log.error("не удалось удалить %s, повторим: %s", path, exc)
             return False
         return True
@@ -720,33 +782,49 @@ class VoicesModule(BaseModule):
                    for held in (row["output_path"], row["move_from"], row["aligned_path"], row["temp_path"])
                    if held)
 
+    @staticmethod
+    def _written_to(path: str, rows: list[dict]) -> bool:
+        """True when a job of the service is writing in a folder the path lies in: what is there may be its."""
+        return any(path.startswith(row["out_dir"].rstrip(os.sep) + os.sep) for row in rows
+                   if row["status"] == S.ALIGNING and row["out_dir"])
+
     async def _sweep_cleanup(self) -> None:
-        rows = await self.repo.all_rows()
+        """A pass over the journal now; what does not end here stays with the recovery."""
         for entry in await self.repo.cleanup_list():
-            if entry["kind"] != JOB and storage.busy(entry["path"]):
-                continue  # the removal that timed out has not ended: it may still act on this name
-            if entry["kind"] != JOB and self._held(entry["path"], rows):
-                # The name belongs to a live voice-over again: removing it now would destroy new work.
-                await self.repo.cleanup_done(entry["path"])
-                continue
-            if entry["kind"] == JOB:
-                try:
-                    reply = await self.request("conform.cancel", {"job_id": entry["path"]}, timeout=30)
-                except (BusRequestError, asyncio.TimeoutError):
-                    continue
-                if reply.get("done"):
-                    await self.repo.cleanup_done(entry["path"])
-                continue
+            if not await self._clear(entry["path"]):
+                self._await_cleanup(entry["path"])
+
+    async def _clear(self, path: str) -> bool:
+        """One attempt to finish a journal entry; True when it is over."""
+        entry = next((entry for entry in await self.repo.cleanup_list() if entry["path"] == path), None)
+        if entry is None:
+            return True
+        if entry["kind"] == JOB:
             try:
-                await self._io(self._unlink, entry["path"], entry["kind"], time.time_ns(), timeout=REMOVE_TIMEOUT_S,
-                               owns=entry["path"])
-            except FileNotFoundError:
-                pass
-            except OSError as exc:
-                await self.repo.journal_cleanup(entry["path"], entry["kind"], str(exc))
-                continue
-            await self.repo.cleanup_done(entry["path"])
-            self.log.info("отложенная очистка выполнена: %s", entry["path"])
+                reply = await self.request("conform.cancel", {"job_id": path}, timeout=30)
+            except (BusRequestError, asyncio.TimeoutError):
+                return False
+            if reply.get("done"):
+                await self.repo.cleanup_done(path)
+            return bool(reply.get("done"))
+        if storage.busy(path):
+            return False  # the removal that timed out has not ended: it may still act on this name
+        rows = await self.repo.all_rows()
+        if self._held(path, rows):
+            await self.repo.cleanup_done(path)  # the name belongs to a live voice-over again: removing it destroys new work
+            return True
+        if self._written_to(path, rows):
+            return False  # the job that writes there ends first; the folder goes with its episode in any case
+        try:
+            await self._io(self._unlink, path, entry["kind"], timeout=REMOVE_TIMEOUT_S, owns=path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            await self.repo.journal_cleanup(path, entry["kind"], str(exc))
+            return False
+        await self.repo.cleanup_done(path)
+        self.log.info("отложенная очистка выполнена: %s", path)
+        return True
 
     @staticmethod
     def _folders_of(group: list[dict], fallback: str) -> list[str]:
@@ -771,46 +849,52 @@ class VoicesModule(BaseModule):
         return True
 
     async def _submit(self, series: dict, season: int, episode: int, reference: str, uid: str,
-                      ready: list[dict]) -> None:
+                      ready: list[dict]) -> bool:
+        """Send the ready voice-overs of an episode as one job; True when the service was certainly not reached
+        and another try is owed. What may have reached it is carried by the recovery from the key."""
         label = f"{series['name']} s{season:02d}e{episode:02d}"
         ready = await self._with_files(ready, label)
         if not ready:
-            return
+            return False
         folders = await self._workspace(dub_folder=os.path.dirname(ready[0]["temp_path"]))
         out_dir, cache_dir = folders["out_dir"], folders["cache_dir"]
         key = uuid.uuid4().hex[:12]
         for guarded in (out_dir, cache_dir, *[row["temp_path"] for row in ready]):
             if storage.busy(guarded):  # the service would write where an unfinished removal may still act
                 self._when_free(guarded, series["id"])
-                return
+                return False
         await self.repo.mark_submitting([row["id"] for row in ready], key, uid, reference, out_dir)
         try:
-            reply = await self.request("conform.submit", {
+            reply = SubmitReply.model_validate(await self.request("conform.submit", {
                 "ref": reference, "dubs": [row["temp_path"] for row in ready],
                 "out_dir": out_dir, "cache_dir": cache_dir,
-                "label": label, "key": key}, timeout=SUBMIT_TIMEOUT_S)
-        except (BusRequestError, asyncio.TimeoutError) as exc:
+                "label": label, "key": key}, timeout=SUBMIT_TIMEOUT_S))
+        except (BusRequestError, asyncio.TimeoutError, ValidationError) as exc:
             self.log.warning("%s: ответа на постановку нет, спросим сервис, есть ли задача: %s", label, exc)
-            self._retry_later(series["id"])
-            return
-        if reply.get("uncertain"):  # the service may have taken the job: the key stays, the service is asked
-            self.log.warning("%s: исход постановки неизвестен, спросим сервис: %s", label, describe(reply["uncertain"]))
-            self._retry_later(series["id"])
-            return
-        if reply.get("unavailable"):
+            await self._ask_service(key, ready)
+            return False
+        if reply.outcome is SubmitOutcome.UNCERTAIN:  # the service may have taken the job: the key stays, the service is asked
+            self.log.warning("%s: исход постановки неизвестен, спросим сервис: %s", label, describe(reply.reason))
+            await self._ask_service(key, ready)
+            return False
+        if reply.outcome is SubmitOutcome.UNAVAILABLE:
             await self.repo.release_submission(key)
-            self.log.info("%s: озвучки ждут сервис выравнивания: %s", label, describe(reply["unavailable"]))
-            if reply.get("retry"):
-                self._retry_later(series["id"])
-            return
-        self._retries.pop(series["id"], None)
-        if reply.get("rejected"):
+            self.log.info("%s: озвучки ждут сервис выравнивания: %s", label, describe(reply.reason))
+            return reply.retry
+        if reply.outcome is SubmitOutcome.REJECTED:
             for row in ready:
-                await self.repo.mark_rejected(row["id"], reply["rejected"])
+                await self.repo.mark_rejected(row["id"], reply.reason)
                 await self._announce(row)
-            self.log.warning("%s: задача выравнивания отклонена: %s", label, describe(reply["rejected"]))
-            return
-        await self._attach(key, reply["job_id"])
+            self.log.warning("%s: задача выравнивания отклонена: %s", label, describe(reply.reason))
+            return False
+        await self._attach(key, reply.job_id)
+        return False
+
+    async def _ask_service(self, key: str, rows: list[dict]) -> None:
+        """The answer to a sent job is not known: the interface is told so, and the key finds the job again."""
+        for row in rows:
+            await self._announce(row)
+        self._await_submission(key)
 
     async def _attach(self, key: str, job_id: str) -> None:
         """The service has the job of this key: its voice-overs get the number, an early ending is applied."""
@@ -823,24 +907,25 @@ class VoicesModule(BaseModule):
             if early is not None:
                 await self._apply_job(early)
 
-    async def _recover_submissions(self) -> None:
-        """Jobs sent without an answer: the service says whether it has them; if not, they are sent anew."""
-        for key in await self.repo.unsent_submissions():
-            try:
-                reply = await self.request("conform.job.find", {"key": key}, timeout=30)
-            except (BusRequestError, asyncio.TimeoutError):
-                continue
-            if not reply.get("reachable"):
-                continue
-            rows = await self.repo.by_key(key)
-            if reply.get("job_id"):
-                self.log.info("задача %s принята сервисом, ответ потерян: номер восстановлен", reply["job_id"])
-                await self._attach(key, reply["job_id"])
-                continue
-            await self.repo.release_submission(key)
-            self.log.info("задачу %s сервис не получил, озвучки отправятся заново", key)
-            for series_id in {row["series_id"] for row in rows}:
-                self._kick(series_id)
+    async def _recover_one(self, key: str) -> bool:
+        """Ask the service about a job sent without an answer: it names the job, or it never got it and the
+        voice-overs are sent anew. False when the service cannot say."""
+        try:
+            reply = await self.request("conform.job.find", {"key": key}, timeout=30)
+        except (BusRequestError, asyncio.TimeoutError):
+            return False
+        if not reply.get("reachable"):
+            return False
+        rows = await self.repo.by_key(key)
+        if reply.get("job_id"):
+            self.log.info("задача %s принята сервисом, ответ потерян: номер восстановлен", reply["job_id"])
+            await self._attach(key, reply["job_id"])
+            return True
+        await self.repo.release_submission(key)
+        self.log.info("задачу %s сервис не получил, озвучки отправятся заново", key)
+        for series_id in {row["series_id"] for row in rows}:
+            self._kick(series_id)
+        return True
 
     async def _cancel_job(self, job_id: str) -> None:
         """Stop a job nobody needs; when the service cannot be reached the job stays on the cleanup list."""
@@ -850,6 +935,7 @@ class VoicesModule(BaseModule):
             reply = {"done": False}
         if not reply.get("done"):
             await self.repo.journal_cleanup(job_id, JOB, "сервис недоступен")
+            self._await_cleanup(job_id)
 
     async def _with_files(self, ready: list[dict], label: str) -> list[dict]:
         """The ready voice-overs whose files are really on disk; the others are downloaded again."""
@@ -866,28 +952,6 @@ class VoicesModule(BaseModule):
             self.send_command("voices.dispatch", {"series_id": ready[0]["series_id"]})
         return present
 
-    def _retry_later(self, series_id: int) -> None:
-        """A transient failure with the service up: ask again after a pause, a few times only."""
-        if series_id in self._retry_pending:
-            return
-        attempt = self._retries.get(series_id, 0) + 1
-        if attempt > SUBMIT_RETRIES:
-            self._retries.pop(series_id, None)
-            self.log.warning("сериал %d: сервис выравнивания не принял серии за %d попыток, "
-                             "дальше — по следующему событию", series_id, SUBMIT_RETRIES)
-            return
-        self._retries[series_id] = attempt
-        self._retry_pending.add(series_id)
-
-        async def later() -> None:
-            await asyncio.sleep(SUBMIT_RETRY_S)
-            self._retry_pending.discard(series_id)
-            self._kick(series_id)
-
-        task = asyncio.create_task(later(), name=f"voices:retry:{series_id}")
-        self._bg.add(task)
-        task.add_done_callback(self._bg.discard)
-
     async def on_job_finished(self, env: Envelope) -> None:
         job = AlignmentJob.model_validate(env.payload)
         async with self._claim_lock:
@@ -898,13 +962,14 @@ class VoicesModule(BaseModule):
                 while len(self._unclaimed) > UNCLAIMED_JOBS:
                     self._unclaimed.popitem(last=False)
 
-    async def _reconcile(self, job_id: str) -> None:
-        """A job sent before a restart: learn how it ended, or send its voice-overs again."""
+    async def _reconcile(self, job_id: str) -> bool:
+        """A job sent before a restart: learn how it ended, or send its voice-overs again. False when the
+        service could not say."""
         try:
             job = AlignmentJob.model_validate(await self.request("conform.job.get", {"job_id": job_id}, timeout=30))
-        except (BusRequestError, asyncio.TimeoutError) as exc:
+        except (BusRequestError, asyncio.TimeoutError, ValidationError) as exc:
             self.log.info("задача выравнивания %s: итог пока неизвестен (%s)", job_id, exc)
-            return
+            return False
         if job.status is JobStatus.GONE:
             rows = [row for row in await self.repo.by_job(job_id) if row["status"] == S.ALIGNING]
             await self.repo.release_to_ready([row["id"] for row in rows])
@@ -912,6 +977,7 @@ class VoicesModule(BaseModule):
                 self._kick(series_id)
         elif job.status in ENDED:
             await self._apply_job(job)
+        return True
 
     async def _apply_job(self, job: AlignmentJob) -> bool:
         """Take the end of a job into the voice-overs that wait for it; False when none does."""

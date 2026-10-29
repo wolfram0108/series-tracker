@@ -43,6 +43,8 @@
 | torrents.progress.changed {tasks} | torrents | gateway | torrent_progress_update (Р-23, замена поллинга) |
 | downloads.queue.changed {tasks, count} | downloads | — | download_queue_update |
 | downloads.fetch.finished {key, ok, error, transient, path, series_id} | downloads | voices (ключи `dub:<id>`) | — |
+| conform.submit {ref, dubs, out_dir, cache_dir, label, key} (запрос) → `SubmitReply` {outcome: accepted/rejected/unavailable/uncertain, job_id?, reason?, retry} | voices | conform | — |
+| conform.job.get {job_id} (запрос) → {job_id, status, error, results}; `gone` только когда демон спрошен и не знает задачу, недоступный демон — ошибка запроса | voices | conform | — |
 | conform.cancel {job_id} (запрос) → {done} | voices | conform | — |
 | conform.job.find {key} (запрос) → {reachable, job_id} | voices | conform | — |
 | conform.workspace {dub_folder?, reference_folder?} (запрос) → {out_dir, cache_dir, scratch} — раскладка папок демона; чистая, демон не опрашивается | voices | conform | — |

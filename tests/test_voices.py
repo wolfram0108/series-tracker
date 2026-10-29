@@ -10,6 +10,7 @@ import pytest
 
 from conform_fakes import FakeClient
 from core import BaseModule, Bus, Runner
+from core.contracts import SubmitReply
 from core.db import Database
 from core.envelope import Envelope
 from modules.conform import ConformModule
@@ -270,6 +271,7 @@ class Neighbours(BaseModule):
         self.sent_keys = {}
         self.cancel_done = True
         self.service_reachable = True
+        self.job_get_failures = 0
         super().__init__(bus)
 
     def register(self):
@@ -333,7 +335,7 @@ class Neighbours(BaseModule):
         if self.lost_after_arrival:
             self.lost_after_arrival -= 1
             raise RuntimeError("the answer was lost")
-        return self.submit_reply or {"job_id": job_id}
+        return self.submit_reply or SubmitReply.accepted(job_id).model_dump()
 
     async def on_workspace(self, env):
         return workspace(env.payload.get("dub_folder"), env.payload.get("reference_folder"))
@@ -348,6 +350,9 @@ class Neighbours(BaseModule):
         return {"reachable": True, "job_id": self.sent_keys.get(env.payload["key"])}
 
     async def on_job_get(self, env):
+        if self.job_get_failures:
+            self.job_get_failures -= 1
+            raise RuntimeError("the service does not answer")
         return self.jobs.get(env.payload["job_id"], {"job_id": env.payload["job_id"], "status": "gone",
                                                      "error": None, "results": []})
 
@@ -839,7 +844,7 @@ async def test_a_failed_job_makes_its_voices_failed_for_the_next_scan(dubs):
 @pytest.mark.asyncio
 async def test_an_unreachable_service_leaves_the_voices_waiting_until_it_is_back(dubs):
     probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, finished=False)
-    neighbours.submit_reply = {"unavailable": "сервис выравнивания недоступен", "retry": False}
+    neighbours.submit_reply = SubmitReply.unavailable("сервис выравнивания недоступен", retry=False).model_dump()
     for fetch in neighbours.fetches:
         touch(fetch["path"], b"video")
         finish(probe, fetch["key"])
@@ -854,7 +859,7 @@ async def test_an_unreachable_service_leaves_the_voices_waiting_until_it_is_back
 @pytest.mark.asyncio
 async def test_a_final_refusal_of_the_service_rejects_the_voices(dubs):
     probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, finished=False)
-    neighbours.submit_reply = {"rejected": "путь вне общего хранилища"}
+    neighbours.submit_reply = SubmitReply.rejected("путь вне общего хранилища").model_dump()
     for fetch in neighbours.fetches:
         touch(fetch["path"], b"video")
         finish(probe, fetch["key"])
@@ -921,7 +926,7 @@ async def test_a_voice_that_arrives_later_makes_a_job_of_its_own(dubs):
 async def test_a_transient_failure_with_the_service_up_is_retried_without_a_new_event(dubs, monkeypatch):
     monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.05)
     probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, finished=False)
-    neighbours.submit_reply = {"unavailable": "RemoteProtocolError: Server disconnected", "retry": True}
+    neighbours.submit_reply = SubmitReply.unavailable("RemoteProtocolError: Server disconnected", retry=True).model_dump()
     for fetch in neighbours.fetches:
         touch(fetch["path"], b"video")
         finish(probe, fetch["key"])
@@ -936,20 +941,28 @@ async def test_a_transient_failure_with_the_service_up_is_retried_without_a_new_
 
 
 @pytest.mark.asyncio
-async def test_retries_stop_after_a_few_attempts(dubs, monkeypatch):
+async def test_an_obligation_that_keeps_failing_is_reported_and_still_carried(dubs, monkeypatch):
     monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.02)
+    monkeypatch.setattr("modules.voices.module.RETRY_CEILING_S", 0.04)
     monkeypatch.setattr("modules.voices.module.SUBMIT_RETRIES", 2)
-    probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, finished=False)
-    neighbours.submit_reply = {"unavailable": "blip", "retry": True}
+    probe, neighbours, voices, _, sub, _ = await two_voices_ready(dubs, finished=False)
+    told = []
+    monkeypatch.setattr(voices.log, "error", lambda message, *args, **kwargs: told.append(message % args))
+    neighbours.submit_reply = SubmitReply.unavailable("blip", retry=True).model_dump()
     for fetch in neighbours.fetches:
         touch(fetch["path"], b"video")
         finish(probe, fetch["key"])
     await statuses_until(sub, ["ready", "ready"])
     await asyncio.sleep(0.4)
-    tried = len(neighbours.submits)
-    assert 3 <= tried <= 4  # the first try, two retries, maybe one concurrent pass
-    await asyncio.sleep(0.2)
-    assert len(neighbours.submits) == tried
+    assert len(neighbours.submits) >= 6, "the account of attempts goes on without any outside event"
+    assert len(told) == 1 and "series:7" in told[0], "the owner is told once"
+    assert list(voices._recovery.failures()) == ["series:7"]
+    neighbours.submit_reply = None
+    await statuses_until(sub, ["aligning", "aligning"])
+    deadline = asyncio.get_running_loop().time() + 3
+    while voices._recovery.failures():
+        assert asyncio.get_running_loop().time() < deadline, voices._recovery.failures()
+        await asyncio.sleep(0.01)
 
 
 @pytest.mark.asyncio
@@ -1790,7 +1803,7 @@ async def test_a_removal_that_the_storage_does_not_answer_is_journaled_not_await
 
     voices = dubs[2]
     monkeypatch.setattr("modules.voices.module.REMOVE_TIMEOUT_S", 0.1)
-    monkeypatch.setattr(type(voices), "_unlink", staticmethod(lambda path, kind, requested: time.sleep(0.6)))
+    monkeypatch.setattr(type(voices), "_unlink", staticmethod(lambda path, kind: time.sleep(0.6)))
     started = time.monotonic()
     assert await voices._discard("/some/slow/file") is False
     assert time.monotonic() - started < 0.5
@@ -1818,6 +1831,7 @@ async def test_a_name_whose_removal_has_not_ended_is_not_given_to_a_new_download
     neighbours.fetches.clear()
     await voices.repo.requeue_interrupted()  # every download is waiting to be started again
     await voices._admit()
+    await settled(neighbours, 2)
     assert taken not in [fetch["path"] for fetch in neighbours.fetches]  # the other names go on
     assert len(neighbours.fetches) == 2
     release.set()
@@ -1844,22 +1858,73 @@ async def test_the_cleanup_sweep_leaves_an_entry_alone_while_its_removal_still_r
 
 
 @pytest.mark.asyncio
-async def test_a_file_written_after_a_removal_was_asked_for_is_not_the_one_meant(dubs, tmp_path):
+async def test_tracks_are_removed_with_their_reference_whatever_the_clock_of_the_storage_says(dubs):
     import time
 
     voices = dubs[2]
-    path = str(tmp_path / "later.flac")
-    touch(path, b"written after the request")
-    voices._unlink(path, "path", time.time_ns() - 10**10)
-    assert os.path.exists(path)
-    voices._unlink(path, "path", time.time_ns() + 10**9)
-    assert not os.path.exists(path)
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    group = await voices.repo.for_series(7)
+    paths = [row["output_path"] for row in group]
+    ahead = time.time_ns() + 3600 * 10**9  # the share and this server disagree about the time
+    for path in paths:
+        os.utime(path, ns=(ahead, ahead))
+    assert await voices._follow(7, 1, 1, group, ref, "another-reference")
+    assert not any(os.path.exists(path) for path in paths) and await voices.repo.cleanup_list() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["none", "refused", "stays", "owned"])
+async def test_a_removal_ends_with_the_file_gone_or_on_the_journal_and_never_neither(dubs, tmp_path, fault):
+    import threading
+    from unittest.mock import patch
+
+    voices = dubs[2]
+    path = str(tmp_path / "track.flac")
+    touch(path, b"flac")
+    release = threading.Event()
+    try:
+        if fault == "refused":
+            with patch("modules.voices.module.os.remove", side_effect=PermissionError("read-only")):
+                gone = await voices._discard(path)
+        elif fault == "stays":  # the call returns without error and the name is still taken
+            with patch("modules.voices.module.os.remove"):
+                gone = await voices._discard(path)
+        elif fault == "owned":
+            await stalled_removal(path, release)
+            gone = await voices._discard(path)
+        else:
+            gone = await voices._discard(path)
+        journaled = path in {entry["path"] for entry in await voices.repo.cleanup_list()}
+        assert gone is not journaled and gone is (not os.path.exists(path))
+        assert gone is (fault == "none")
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_journaled_name_inside_the_folder_a_running_job_writes_to_is_left_for_later(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    out_dir = (await voices.repo.for_series(7))[0]["out_dir"]
+    stale = os.path.join(out_dir, "left-over.flac")
+    touch(stale, b"flac")
+    await voices.repo.journal_cleanup(stale, "path", "was busy")
+    assert await voices._clear(stale) is False
+    assert os.path.exists(stale) and [e["path"] for e in await voices.repo.cleanup_list()] == [stale]
 
 
 async def ready_to_send(dubs, monkeypatch):
     monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.05)
     probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs, finished=False)
     return probe, neighbours, voices, bus, sub, ref
+
+
+async def job_numbers_known(probe, expected, seconds=5.0):
+    """Wait until every voice-over has its job number: the interface is told of a lost answer before it is found."""
+    end = asyncio.get_running_loop().time() + seconds
+    while {r["job_id"] for r in await rows(probe)} != expected:
+        assert asyncio.get_running_loop().time() < end, await rows(probe)
+        await asyncio.sleep(0.02)
 
 
 def finish_all(probe, neighbours):
@@ -1874,9 +1939,8 @@ async def test_a_job_that_arrived_but_whose_answer_was_lost_is_found_again_not_s
     neighbours.lost_after_arrival = 1
     settled_sub = bus.subscribe("voices.episode.settled")
     finish_all(probe, neighbours)
-    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])  # the number is found again
+    await job_numbers_known(probe, {"job-1"})  # the number is found again
     assert len(neighbours.submits) == 1
-    assert {r["job_id"] for r in await rows(probe)} == {"job-1"}
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
     await asyncio.wait_for(settled_sub.queue.get(), 5)
     assert {r["status"] for r in await rows(probe)} == {"placed"} and len(neighbours.submits) == 1
@@ -1919,8 +1983,8 @@ async def test_a_job_that_never_arrived_is_sent_again_once_the_service_says_it_h
     probe, neighbours, voices, bus, sub, ref = await ready_to_send(dubs, monkeypatch)
     neighbours.lost_before_arrival = 1
     finish_all(probe, neighbours)
-    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    assert len(neighbours.submits) == 1 and {r["job_id"] for r in await rows(probe)} == {"job-1"}
+    await job_numbers_known(probe, {"job-1"})
+    assert len(neighbours.submits) == 1
 
 
 @pytest.mark.asyncio
@@ -1935,8 +1999,8 @@ async def test_while_the_service_cannot_say_whether_it_has_the_job_nothing_is_se
     assert {(r["status"], r["job_id"]) for r in await rows(probe)} == {("aligning", None)}
     neighbours.service_reachable = True
     probe.publish_event("conform.daemon.up", {})
-    await statuses_until(sub, ["aligning", "aligning"])
-    assert len(neighbours.submits) == 1 and {r["job_id"] for r in await rows(probe)} == {"job-1"}
+    await job_numbers_known(probe, {"job-1"})
+    assert len(neighbours.submits) == 1
 
 
 @pytest.mark.asyncio
@@ -2202,3 +2266,73 @@ async def test_a_job_and_its_ending_that_meet_in_the_middle_of_each_others_check
     await quiet(voices)
     assert not voices._unclaimed
     assert {r["status"] for r in await rows(probe)} <= {"aligned", "placed"}
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_submission_is_asked_for_again_with_no_outside_event(dubs, monkeypatch):
+    probe, neighbours, voices, bus, sub, ref = await ready_to_send(dubs, monkeypatch)
+    neighbours.lost_after_arrival = 1
+    neighbours.service_reachable = False  # the look at the service fails; the event feed stays up
+    finish_all(probe, neighbours)
+    await statuses_until(sub, ["ready", "ready"])
+    await quiet(voices)
+    assert len(neighbours.submits) == 1 and all(r["job_id"] is None for r in await rows(probe))
+    assert voices._recovery.failures().keys() == {"submission:" + next(iter(neighbours.sent_keys))}
+    neighbours.service_reachable = True
+    deadline = asyncio.get_running_loop().time() + 5
+    while not all(r["job_id"] for r in await rows(probe)):
+        assert asyncio.get_running_loop().time() < deadline, (await rows(probe), voices._recovery.failures())
+        await asyncio.sleep(0.02)
+    while voices._recovery.failures():
+        assert asyncio.get_running_loop().time() < deadline, voices._recovery.failures()
+        await asyncio.sleep(0.02)
+    assert len(neighbours.submits) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_reply_that_is_not_a_clear_answer_is_no_answer_and_the_interface_is_told(dubs, monkeypatch):
+    probe, neighbours, voices, bus, sub, ref = await ready_to_send(dubs, monkeypatch)
+    neighbours.submit_reply = {"job_id": "job-1"}  # the old shape: not an outcome, so not an answer
+    finish_all(probe, neighbours)
+    await statuses_until(sub, ["ready", "ready"])
+    waiting = await change(sub, "aligning")
+    assert waiting["hint"] == "awaiting_answer" and waiting["state"] == "align_queued"
+    neighbours.submit_reply = None
+    deadline = asyncio.get_running_loop().time() + 5
+    while not all(r["job_id"] == "job-1" for r in await rows(probe)):
+        assert asyncio.get_running_loop().time() < deadline, await rows(probe)
+        await asyncio.sleep(0.02)
+    assert len(neighbours.submits) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_job_whose_ending_could_not_be_learned_is_asked_about_again_by_itself(dubs, db_path, monkeypatch):
+    monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.05)
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    await quiet(voices)
+    await voices.stop()
+    neighbours.jobs["job-1"] = job_done(neighbours, "job-1")
+    neighbours.job_get_failures = 2  # the service is up for the feed and does not answer the question twice
+    again = VoicesModule(bus, Database(db_path))
+    await again.start()
+    try:
+        await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
+        assert {r["status"] for r in await rows(probe)} == {"placed"} and neighbours.job_get_failures == 0
+    finally:
+        await again.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_could_not_be_cancelled_is_cancelled_when_the_service_can_be_reached_again(dubs, monkeypatch):
+    monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.05)
+    voices, neighbours = dubs[2], dubs[1]
+    neighbours.cancel_done = False
+    await voices._cancel_job("job-9")
+    assert [(e["path"], e["kind"]) for e in await voices.repo.cleanup_list()] == [("job-9", "job")]
+    neighbours.cancel_done = True
+    deadline = asyncio.get_running_loop().time() + 5
+    while await voices.repo.cleanup_list():
+        assert asyncio.get_running_loop().time() < deadline, voices._recovery.failures()
+        await asyncio.sleep(0.02)
+    assert neighbours.conform_cancels.count("job-9") >= 2
