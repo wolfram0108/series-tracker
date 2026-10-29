@@ -10,29 +10,11 @@ import os
 from core.contracts import AlignmentJob, DubResult, JobStatus
 from core.reasons import reason
 
-OUT_DIR = "_aligned"
-CACHE_DIR = "_cache"
-# The service makes this directory next to the reference when a job starts and leaves it empty.
-SCRATCH_DIR = "_tmp"
 ENDED = (JobStatus.DONE, JobStatus.FAILED, JobStatus.CANCELLED)
 
 
 def stem(path: str | None) -> str:
     return os.path.splitext(os.path.basename(path or ""))[0]
-
-
-def job_folders(dub_folder: str) -> tuple[str, str]:
-    """(where the service writes aligned tracks, where it keeps its cache) for the voice-overs in a folder."""
-    return os.path.join(dub_folder, OUT_DIR), os.path.join(dub_folder, CACHE_DIR)
-
-
-def dub_folder_of_track(track: str) -> str:
-    """The folder of the voice-overs a track was aligned from."""
-    return os.path.dirname(os.path.dirname(track))
-
-
-def scratch_of(reference_folder: str) -> str:
-    return os.path.join(reference_folder, SCRATCH_DIR)
 
 
 def result_for(job: AlignmentJob, dub_path: str) -> DubResult | None:

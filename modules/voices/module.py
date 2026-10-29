@@ -22,9 +22,11 @@ Command:
       lay the voices out around the selected reference, record a voice_dubs row per planned
       reference episode and voice, and download what is not on disk yet into the temporary
       directory (setting `voices.temp_root`, default /nas/torrents/series-tracker).
-Commands out: downloads.fetch, downloads.fetch.cancel. Queries to conform: submit (with a key that finds
-            the job again), job.find, cancel (a job whose reference was replaced or whose series was deleted;
-            what could not be cancelled is retried from the cleanup journal).
+Commands out: downloads.fetch, downloads.fetch.cancel. Queries to conform: workspace (the folders of the service
+            for a place, asked of the bridge: this module does not know its layout), submit (with a key that
+            finds the job again; its answer is accepted, rejected, not sent or of unknown outcome, and only
+            "not sent" releases the key), job.find, cancel (a job whose reference was replaced or whose series
+            was deleted; what could not be cancelled is retried from the cleanup journal).
 
 Events in:  downloads.fetch.started and .finished (our keys `dub:<id>`), conform.queue.changed (waiting or running
             jobs of the service), series.downloaded.changed,
@@ -82,7 +84,7 @@ Deleting a series removes only records and temporary files: videos stay, and so 
 Setting `voices.max_temp_episodes` (integer; 0 or unset: no limit) caps how many episodes may hold
 temporary files at once: further voice-overs stay planned until an episode settles.
 
-The service leaves an empty `_tmp` directory
+The service leaves an empty scratch directory
 next to every reference video it worked on; it is removed once no job of the series is running.
 The series' own folder in the temporary directory goes when every voice-over of the series is
 settled and the folder is empty.
@@ -108,8 +110,7 @@ from core.envelope import Envelope
 from core.reasons import describe, parse as parse_reason, reason
 
 from .identity import Equivalence, same_voice
-from .alignment import (ENDED, dub_folder_of_track, job_failure, job_folders, refusal, result_for, scratch_of,
-                        track_of)
+from .alignment import ENDED, job_failure, refusal, result_for, track_of
 from .layout import download_chain, plan_layout
 from .lifecycle import FINAL, WORKING
 from .outputs import Output, SidecarOutput
@@ -194,6 +195,11 @@ class VoicesModule(BaseModule):
     async def _io(self, fn, *args, timeout: float = IO_TIMEOUT_S, owns=()):
         """A call into the storage that waits for a limited time; `owns` is what a changing call changes."""
         return await storage.call(fn, *args, timeout=timeout, owns=owns)
+
+    async def _workspace(self, *, dub_folder: str | None = None, reference_folder: str | None = None) -> dict:
+        """The folders of the alignment service for these places: only the service's bridge knows its layout."""
+        return await self.request("conform.workspace", {"dub_folder": dub_folder, "reference_folder": reference_folder},
+                                  timeout=10)
 
     def _when_free(self, path: str, series_id: int) -> None:
         """A step that needs a path an unfinished storage call still owns waits for that call to end."""
@@ -579,7 +585,9 @@ class VoicesModule(BaseModule):
         if any(row["status"] == S.ALIGNING for row in await self.repo.for_series(series_id)):
             return
         for folder in folders:
-            await self._io(self._remove_if_empty, scratch_of(folder))
+            scratch = (await self._workspace(reference_folder=folder)).get("scratch")
+            if scratch:
+                await self._io(self._remove_if_empty, scratch)
 
     @staticmethod
     def _remove_if_empty(path: str) -> None:
@@ -744,7 +752,6 @@ class VoicesModule(BaseModule):
     def _folders_of(group: list[dict], fallback: str) -> list[str]:
         """Episode folders of voice-overs as they were made, not as the settings say now."""
         found = {os.path.dirname(row["temp_path"]) for row in group if row["temp_path"]}
-        found |= {dub_folder_of_track(row["aligned_path"]) for row in group if row["aligned_path"]}
         return sorted(found) or [fallback]
 
     async def _finish_move(self, row: dict, reference: str | None = None) -> bool:
@@ -769,7 +776,8 @@ class VoicesModule(BaseModule):
         ready = await self._with_files(ready, label)
         if not ready:
             return
-        out_dir, cache_dir = job_folders(os.path.dirname(ready[0]["temp_path"]))
+        folders = await self._workspace(dub_folder=os.path.dirname(ready[0]["temp_path"]))
+        out_dir, cache_dir = folders["out_dir"], folders["cache_dir"]
         key = uuid.uuid4().hex[:12]
         for guarded in (out_dir, cache_dir, *[row["temp_path"] for row in ready]):
             if storage.busy(guarded):  # the service would write where an unfinished removal may still act
@@ -932,7 +940,7 @@ class VoicesModule(BaseModule):
             return
         result = result_for(job, row["temp_path"])
         verdict = refusal(result)
-        out_dir = row["out_dir"] or job_folders(os.path.dirname(row["temp_path"]))[0]
+        out_dir = row["out_dir"] or (await self._workspace(dub_folder=os.path.dirname(row["temp_path"])))["out_dir"]
         track = track_of(out_dir, result) if verdict is None else None
         if verdict is None and not await self._io(os.path.isfile, track):
             verdict = reason("output_missing")

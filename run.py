@@ -6,8 +6,8 @@
 Окружение:
   ST_DB_PATH   путь к SQLite (по умолчанию app.db)
   ST_CONFORM_URL
-               адрес демона выравнивания (track-muxer); пусто — модуль conform
-               простаивает
+               address of the alignment daemon (track-muxer); empty — the conform module
+               stays idle
   ST_QBIT_URL / ST_QBIT_USER / ST_QBIT_PASS
                qBittorrent; без ST_QBIT_URL модуль torrents не стартует
                (удобно для разработки без qBit)

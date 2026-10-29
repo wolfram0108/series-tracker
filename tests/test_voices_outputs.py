@@ -22,15 +22,14 @@ def output(request):
     return request.param()
 
 
-def test_a_track_is_delivered_followed_and_removed(output, tmp_path):
+def test_a_track_is_made_moved_after_its_video_and_removed(output, tmp_path):
     video = make(tmp_path / "lib" / "Series s01e01 720p.mp4")
     track = make(tmp_path / "work" / "a.flac", b"audio")
     where = output.destination(video, "BlackCat", track, set())
-    output.deliver(track, where)
-    assert output.exists(where) and not os.path.exists(track)
+    assert output.settle(track, where) and output.exists(where) and not os.path.exists(track)
     renamed = make(tmp_path / "lib" / "Series s01e01 2160p.mp4")
     after = output.destination(renamed, "BlackCat", where, set())
-    output.follow(where, after)
+    assert output.settle(where, after)
     assert output.exists(after) and not output.exists(where)
     output.remove(after)
     assert not output.exists(after)

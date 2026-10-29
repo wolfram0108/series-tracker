@@ -1,8 +1,10 @@
 """The form in which a finished voice-over reaches the library, behind one contract.
 
-The module decides when a voice-over is delivered, followed after its video, removed or recovered after an
-interruption; an `Output` decides what that means for the files. The only form today is a track next to the
-video (`SidecarOutput`); another form is another class with the same five operations.
+The module decides when the artifact of a voice-over is made, moved after its video, removed or recovered
+after an interruption, and writes the intent down first; an `Output` decides what that means for the files.
+The only form today is a track next to the video (`SidecarOutput`); another form is another class with the
+same four operations. The artifact of one voice-over is the unit: a form that joins the video and all its
+tracks in one container needs a contract of the episode, which no stage asks for yet.
 """
 from __future__ import annotations
 
@@ -18,14 +20,10 @@ class Output(Protocol):
 
     def exists(self, artifact: str) -> bool: ...
 
-    def deliver(self, source: str, destination: str) -> None:
-        """Make the artifact from an aligned track; a reader never sees it half made."""
-
-    def follow(self, artifact: str, destination: str) -> None:
-        """Move the artifact after its video."""
-
     def settle(self, source: str, destination: str) -> bool:
-        """Finish a delivery or a move that was interrupted; False when the artifact is lost."""
+        """Make the artifact at `destination` from `source` (an aligned track, or the artifact of the video
+        before it was renamed); a reader never sees it half made, doing it twice is doing it once, and False
+        means the artifact is in neither place."""
 
     def remove(self, artifact: str) -> None: ...
 
@@ -38,12 +36,6 @@ class SidecarOutput:
 
     def exists(self, artifact: str) -> bool:
         return os.path.isfile(artifact)
-
-    def deliver(self, source: str, destination: str) -> None:
-        move(source, destination)
-
-    def follow(self, artifact: str, destination: str) -> None:
-        move(artifact, destination)
 
     def settle(self, source: str, destination: str) -> bool:
         if os.path.isfile(source):

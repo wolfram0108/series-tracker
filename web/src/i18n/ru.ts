@@ -128,6 +128,7 @@ export const ru = {
   "reason.daemon_refused": "демон отклонил задачу ({status}): {text}",
   "reason.path_outside_share": "путь {path} вне общего хранилища демона",
   "reason.stream_closed": "поток событий закрыт демоном",
+  "reason.release_off_contract": "{service}: разбор страницы не соответствует контракту провайдера",
   "reason.unknown": "причина: {code}",
   "add.error.parse": "Ошибка парсинга URL",
 } as const

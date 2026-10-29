@@ -13,6 +13,7 @@ from core import BaseModule, Bus, Runner
 from core.db import Database
 from core.envelope import Envelope
 from modules.conform import ConformModule
+from modules.conform.paths import workspace
 from modules.settings import SettingsModule
 from modules.voices import VoicesModule
 from modules.voices.identity import Equivalence, group_key, same_voice, tokens, voice_groups
@@ -285,6 +286,7 @@ class Neighbours(BaseModule):
             self.handle("conform.cancel", self.on_conform_cancel)
             self.handle("conform.job.find", self.on_job_find)
             self.handle("conform.job.get", self.on_job_get)
+            self.handle("conform.workspace", self.on_workspace)
 
     async def on_series(self, env):
         return {"id": env.payload["series_id"], "url": "https://site/title.html", "name": "Series",
@@ -332,6 +334,9 @@ class Neighbours(BaseModule):
             self.lost_after_arrival -= 1
             raise RuntimeError("the answer was lost")
         return self.submit_reply or {"job_id": job_id}
+
+    async def on_workspace(self, env):
+        return workspace(env.payload.get("dub_folder"), env.payload.get("reference_folder"))
 
     async def on_conform_cancel(self, env):
         self.conform_cancels.append(env.payload["job_id"])
@@ -2131,15 +2136,10 @@ class FolderOutput:
     def exists(self, artifact):
         return os.path.isfile(artifact)
 
-    def deliver(self, source, destination):
-        os.makedirs(os.path.dirname(destination), exist_ok=True)
-        shutil.move(source, destination)
-
-    follow = deliver
-
     def settle(self, source, destination):
         if os.path.isfile(source):
-            self.deliver(source, destination)
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            shutil.move(source, destination)
             return True
         return os.path.isfile(destination)
 

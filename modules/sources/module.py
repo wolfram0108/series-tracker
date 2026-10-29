@@ -6,8 +6,8 @@ Queries:
   sources.torrent_file.drop {torrent_id} — чистка кэша (каскад Р-19)
   sources.trackers.list          → [{...}] (владелец таблицы trackers)
   sources.tracker.resolve {url}  → {tracker|null} (tracker_info деталей)
-  sources.provider.info {url}    → {provider|null, voices} — провайдер веб-видео по адресу и
-                                   есть ли у него каталог озвучек (без обращения в сеть)
+  sources.provider.info {url}    → {provider|null, voices} — the web-video provider of an address and
+                                   whether it has a voice-over catalog (no network)
 
 Доставка — ТОЛЬКО через `delivery.Delivery` (единственный выход
 наружу): она перебирает хосты-кандидаты (канонический хост ссылки →
@@ -36,6 +36,7 @@ from core import storage
 from core.contracts import Release
 from core.db import Database
 from core.envelope import Envelope
+from core.reasons import reason
 
 from . import anilibria, delivery, parsers, vk
 from .delivery import Delivery
@@ -151,7 +152,7 @@ class SourcesModule(BaseModule):
                 release = Release.model_validate(parsed)
             except ValidationError as exc:
                 self.log.error("провайдер %s вернул разбор не по контракту: %s", service, exc)
-                raise ValueError(f"{service}: разбор страницы не соответствует контракту провайдера") from exc
+                raise ValueError(reason("release_off_contract", service=service)) from exc
             sources = [source.model_dump(mode="json", exclude_unset=True) for source in release.sources]
             if not env.payload.get("with_links"):
                 # Links of every episode are for the voices module; the form does not need them.

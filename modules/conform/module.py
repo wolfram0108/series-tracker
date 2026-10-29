@@ -9,13 +9,18 @@ The daemon owns the state; this module keeps no database. Without a daemon addre
 Query:
   conform.status {} -> {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks: [...]}
   conform.submit {ref, dubs: [path], out_dir, cache_dir, label?, key?}
-      -> {job_id} | {rejected: reason} | {unavailable: reason, retry: bool}
+      -> {job_id} | {rejected: reason} | {unavailable: reason, retry: bool} | {uncertain: reason}
       One episode: a reference video and the voice-over files to align to it, local paths. `key`
       is written into the job's label so that the job can be found again when the answer is lost.
-      `rejected` is final (a path outside the shared storage, a refusal of the daemon).
-      `unavailable` is not: with retry=false the daemon is not configured or down and the caller
-      waits for conform.daemon.up; with retry=true the daemon is up but the request failed in
-      transit and asking again soon may work.
+      `rejected` is final (a path outside the shared storage, a refusal of the daemon). `uncertain`:
+      the request may have reached the daemon (the answer was lost): the caller keeps the key and asks
+      conform.job.find, it does not send again.
+      `unavailable` is not final and the request certainly did not leave: with retry=false the daemon is
+      not configured or down and the caller waits for conform.daemon.up; with retry=true the connection
+      failed before the request was sent and asking again soon may work.
+  conform.workspace {dub_folder?, reference_folder?} -> {out_dir, cache_dir, scratch}   only what is asked for:
+      the folders the daemon is asked to write the aligned tracks and its cache to for the voice-overs in
+      dub_folder, and the scratch folder it leaves next to a reference video. Pure: no daemon is asked.
   conform.cancel {job_id} -> {done: bool} — stop a job whose result nobody needs any more; `done` is
       true when it is stopped or the daemon does not know it, false when the daemon could not be reached.
   conform.job.find {key} -> {reachable: bool, job_id: str | None} — the job sent with this key.
@@ -46,7 +51,7 @@ from core.envelope import Envelope
 from core.reasons import describe, reason
 
 from .client import DaemonClient, DaemonRefused
-from .paths import DEFAULT_PATH_MAP, reverse, translate
+from .paths import DEFAULT_PATH_MAP, reverse, translate, workspace
 
 BACKOFF_START_S = 2.0
 BACKOFF_MAX_S = 30.0
@@ -114,6 +119,7 @@ class ConformModule(BaseModule):
         self.handle("conform.status", self.on_status)
         self.handle("conform.submit", self.on_submit)
         self.handle("conform.job.get", self.on_job_get)
+        self.handle("conform.workspace", self.on_workspace)
         self.handle("conform.cancel", self.on_cancel)
         self.handle("conform.job.find", self.on_job_find)
         self.handle("gateway.sse.clients", self.on_clients)
@@ -165,6 +171,9 @@ class ConformModule(BaseModule):
         self.log.info("conform: поставлена задача %s (%s), озвучек %d", job.get("id"),
                       payload.get("label") or "", len(body["dubs"]))
         return {"job_id": job["id"]}
+
+    async def on_workspace(self, env: Envelope) -> dict:
+        return workspace(env.payload.get("dub_folder"), env.payload.get("reference_folder"))
 
     async def on_cancel(self, env: Envelope) -> dict:
         job_id = env.payload["job_id"]

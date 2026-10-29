@@ -19,16 +19,16 @@ Queries / commands:
       (шлёт только scan._run_series по явному скану/автоскану).
   downloads.queue.get {} → {tasks, count} — активные задачи (загрузка UI)
   downloads.episodes.get {series_id} → {items: [{unique_id, season, episode_start,
-      source_url, status, final_filename, superseded_by}]} — референс-серии плана (читает
-      voices); у вытесненной строки superseded_by указывает на победителя слота
+      source_url, status, final_filename, superseded_by}]} — the reference episodes of the plan (read
+      by voices); superseded_by of a displaced row names the winner of the slot
   downloads.queue.clear {} → {deleted} — всё, кроме идущих загрузок
   downloads.fs.sync {series_id} → {adopted, lost} — синхронизация с
       диском (вызывается сканом и при открытии модалки статуса)
 
 События (исходящие):
-  downloads.item.renamed {series_id, unique_id, filename} — имя файла серии изменено
-      (renaming сообщает его командой downloads.item.set_filename); модули с файлами рядом
-      с видео (voices) идут следом.
+  downloads.item.renamed {series_id, unique_id, filename} — the file name of an episode changed
+      (renaming reports it by downloads.item.set_filename); modules that keep files next to the
+      video (voices) follow.
   downloads.queue.changed {tasks, count} — при реальных изменениях
       (троттлинг на прогрессе) — контракт SSE download_queue_update.
   series.status.contribution {source: downloads, ...} — свёртка Р-11
@@ -44,16 +44,16 @@ _retire_superseded: после загрузки, усыновления, дис�
 смена лимита) — никаких тиков. Параллелизм — счётчик активных задач
 против лимита из настроек.
 
-Общая загрузка «поток → файл» (миссия voice-alignment, этап 6): команда
-  downloads.fetch {key, url, path, max_height?, series_id?} — скачать поток
-      ссылки в абсолютный путь без записи в media_items и download_tasks
-      (озвучки серии во временный каталог). Исполнитель без состояния:
-      владелец очереди (voices) пересылает команду после рестарта.
-  downloads.fetch.cancel {series_id} — снять очередь и активные загрузки серии
-события downloads.fetch.started {key, series_id, path} (загрузка вышла из очереди и пошла) и
+A general "stream to file" download (voice-over mission):
+  downloads.fetch {key, url, path, max_height?, series_id?} — download the stream behind
+      the link to an absolute path without a record in media_items or download_tasks
+      (the voice-overs of a series go to a temporary directory). The executor keeps no state:
+      the owner of the queue (voices) sends the command again after a restart.
+  downloads.fetch.cancel {series_id} — drop the queue and the running downloads of a series
+events downloads.fetch.started {key, series_id, path} (the download left the queue and began) and
 downloads.fetch.finished {key, ok, error, transient, path, series_id}.
-Свой лимит параллелизма — настройка max_parallel_dub_downloads (по умолчанию 2),
-независимый от очереди медиатеки.
+It has a limit of its own, the setting max_parallel_dub_downloads (2 by default),
+independent of the queue of the library.
 """
 from __future__ import annotations
 

@@ -116,8 +116,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.get("/api/series/{series_id}/voices", response_model=VoiceDubs)
     async def series_voices(series_id: int):
-        """Озвучки серий сериала (этап 8б): состояние каждой дополнительной
-        озвучки по сериям. Дальше состояние приходит событием voice_dub_update."""
+        """The voice-overs of a series by episode, each with its state; later changes come as the
+        voice_dub_update event."""
         try:
             reply = await gw.request("voices.dubs.get",
                                      {"series_id": series_id}, timeout=10)

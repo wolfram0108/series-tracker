@@ -69,13 +69,13 @@ class TmdbInfo(ApiModel):
 
 
 class VoiceDubs(ApiModel):
-    """Озвучки сериала (этап 8б); форма записи — модель контракта core.contracts.DubItem."""
+    """The voice-overs of a series; the shape of a record is the contract model core.contracts.DubItem."""
     items: list[DubItem]
 
 
 class ParsedUrl(ApiModel):
-    """Разбор адреса для формы добавления: поля источника и раскладки озвучек — модели контрактов, прочее
-    проходит насквозь."""
+    """A parsed address for the add form: the source and layout fields are contract models, the rest
+    passes through."""
     sources: list[ReleaseSource] = []
     selected_source: str | None = None
     layout: Layout | None = None

@@ -514,3 +514,15 @@ async def test_client_cancel_separates_a_known_job_from_a_forgotten_one():
     client = DaemonClient("http://daemon.test", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     assert await client.cancel("known") is True and await client.cancel("lost") is False
     assert seen == [("DELETE", "/conform/jobs/known"), ("DELETE", "/conform/jobs/lost")]
+
+
+@pytest.mark.asyncio
+async def test_the_layout_of_the_daemon_is_known_only_here_and_needs_no_daemon():
+    client = FakeClient()
+    _, probe, runner = await started(client)
+    try:
+        both = await probe.request("conform.workspace", {"dub_folder": "/t/7/s01e01", "reference_folder": "/lib"}, timeout=5)
+        assert both == {"out_dir": "/t/7/s01e01/_aligned", "cache_dir": "/t/7/s01e01/_cache", "scratch": "/lib/_tmp"}
+        assert await probe.request("conform.workspace", {"reference_folder": "/lib"}, timeout=5) == {"scratch": "/lib/_tmp"}
+    finally:
+        await runner.stop()
