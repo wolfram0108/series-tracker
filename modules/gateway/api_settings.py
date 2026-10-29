@@ -19,6 +19,7 @@ from core import BusRequestError
 from core import logging as core_logging
 from core.contracts import VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView
 
+from .routing import route_per_method
 from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse, ParsedUrl
 
 # Документация веток ошибок (JSONResponse, response_model не трогает).
@@ -154,23 +155,23 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                  timeout=10)
         return {response_key: (reply.get("value") or "false") == "true"}
 
-    @r.api_route("/api/settings/force_replace", methods=["GET", "POST"],
-                 response_model=DynamicObject)
+    @route_per_method(r, "/api/settings/force_replace", methods=["GET", "POST"],
+                      response_model=DynamicObject)
     async def force_replace(request: Request):
         return await _setting_flag("debug_force_replace", request)
 
-    @r.api_route("/api/settings/less_strict_scan", methods=["GET", "POST"],
-                 response_model=DynamicObject)
+    @route_per_method(r, "/api/settings/less_strict_scan", methods=["GET", "POST"],
+                      response_model=DynamicObject)
     async def less_strict_scan(request: Request):
         return await _setting_flag("debug_less_strict_scan", request)
 
-    @r.api_route("/api/settings/slicing_delete_source",
-                 methods=["GET", "POST"], response_model=DynamicObject)
+    @route_per_method(r, "/api/settings/slicing_delete_source",
+                      methods=["GET", "POST"], response_model=DynamicObject)
     async def slicing_delete_source(request: Request):
         return await _setting_flag("slicing_delete_source_file", request)
 
-    @r.api_route("/api/settings/parallel_downloads", methods=["GET", "POST"],
-                 response_model=DynamicObject)
+    @route_per_method(r, "/api/settings/parallel_downloads", methods=["GET", "POST"],
+                      response_model=DynamicObject)
     async def parallel_downloads(request: Request):
         if request.method == "POST":
             data = await request.json()
@@ -184,8 +185,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                  timeout=10)
         return {"value": int(reply.get("value") or 2)}
 
-    @r.api_route("/api/settings/concurrent_fragments",
-                 methods=["GET", "POST"], response_model=DynamicObject)
+    @route_per_method(r, "/api/settings/concurrent_fragments",
+                      methods=["GET", "POST"], response_model=DynamicObject)
     async def concurrent_fragments(request: Request):
         """Число параллельных фрагментов yt-dlp (-N) — ускорение одной
         загрузки на hls-потоках."""
@@ -201,8 +202,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                  timeout=10)
         return {"value": int(reply.get("value") or 6)}
 
-    @r.api_route("/api/settings/saved_paths", methods=["GET", "POST", "DELETE"],
-                 response_model=DynamicObject)
+    @route_per_method(r, "/api/settings/saved_paths", methods=["GET", "POST", "DELETE"],
+                      response_model=DynamicObject)
     async def saved_paths(request: Request):
         """Сохранённые пути загрузки: список, добавление, удаление.
         Источник истины — модуль settings (таблица saved_paths)."""
@@ -240,8 +241,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         core_logging.set_debug_groups(groups)
         return flags
 
-    @r.api_route("/api/settings/debug_flags", methods=["GET", "POST"],
-                 response_model=DynamicObject, responses=_ERR)
+    @route_per_method(r, "/api/settings/debug_flags", methods=["GET", "POST"],
+                      response_model=DynamicObject, responses=_ERR)
     async def debug_flags(request: Request):
         if request.method == "POST":
             data = await request.json()
