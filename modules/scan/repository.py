@@ -132,11 +132,12 @@ class ScanRepository:
                     "plan_status, status, is_ignored_by_user, source_url, "
                     "publication_date, voiceover_tag, slicing_status, "
                     "is_available, resolution, download_url) VALUES "
-                    "(?, ?, ?, ?, ?, ?, ?, 'candidate', 'pending', 0, ?, ?, ?, "
+                    "(?, ?, ?, ?, ?, ?, ?, 'candidate', 'pending', ?, ?, ?, ?, "
                     "'none', 1, ?, ?)",
                     (series_id, item["unique_id"], item.get("source_title"),
                      item.get("season"), item["episode_start"],
                      item.get("episode_end"), item.get("part"),
+                     int(bool(item.get("is_ignored_by_user"))),
                      item["source_url"], item["publication_date"],
                      item.get("voiceover_tag"), item.get("resolution"),
                      item.get("download_url")))

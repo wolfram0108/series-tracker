@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from core.ignored import covered, episodes_of, parse_memory  # noqa: F401 - the shared rule, re-exported
+
 # qBittorrent file priority: 0 — не скачивать, 1 — обычный.
 PRIORITY_SKIP = 0
 PRIORITY_NORMAL = 1
@@ -31,36 +33,6 @@ class Selection:
     wanted_empty: bool = False
 
 
-def episodes_of(extracted: dict | None) -> set[int]:
-    """Номера серий, которые покрывает файл (одиночка или сборник)."""
-    meta = extracted or {}
-    start, end = meta.get("start"), meta.get("end")
-    if start is not None and end is not None and int(end) >= int(start):
-        return set(range(int(start), int(end) + 1))
-    episode = meta.get("episode")
-    if episode is not None:
-        return {int(episode)}
-    if start is not None:
-        return {int(start)}
-    return set()
-
-
-def parse_memory(raw: object) -> dict[int, set[int]]:
-    """JSON-память исключённых серий -> {сезон: {номера}}."""
-    if not isinstance(raw, dict):
-        return {}
-    memory: dict[int, set[int]] = {}
-    for season, episodes in raw.items():
-        try:
-            key = int(season)
-        except (TypeError, ValueError):
-            continue
-        numbers = {int(e) for e in (episodes or []) if e is not None}
-        if numbers:
-            memory[key] = numbers
-    return memory
-
-
 def is_wanted(extracted: dict | None, ignored_seasons: set[int],
               ignored_episodes: dict[int, set[int]]
               ) -> tuple[bool, str | None]:
@@ -76,10 +48,7 @@ def is_wanted(extracted: dict | None, ignored_seasons: set[int],
         return False, REASON_UNRECOGNIZED
     if season is None:
         return True, None
-    ignored = ignored_episodes.get(int(season), set())
-    # Сборник гасим только когда не нужна ни одна его серия: иначе вместе
-    # с лишними потеряли бы нужные.
-    if episodes <= ignored:
+    if covered(season, episodes, ignored_episodes):
         return False, REASON_USER
     return True, None
 

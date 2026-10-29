@@ -25,6 +25,9 @@ Commands:
       шлёт команду downloads.dispatch (открытие композиции — не шлёт).
   After downloads.dispatch a web_video series gets voices.dispatch — the voice-overs of the
       same episodes into a temporary directory.
+  The memory of switched-off episodes (series.ignored_episodes, the rule of core/ignored.py shared with the
+      torrents) holds for web and VK sources too: a row of such an episode is created switched off
+      (is_ignored_by_user=1), so the plan, the download and the voice-overs leave it out.
   scan.status.changed {scanner_enabled, scan_interval, is_scanning,
       is_awaiting_tasks, next_scan_time} — состояние планировщика
       (контракт старого scanner_status_update).
@@ -60,6 +63,7 @@ from datetime import datetime, timedelta, timezone
 from core import BaseModule, BusRequestError, ids, is_video_source
 from core.db import Database
 from core.envelope import Envelope
+from core.ignored import covered, episodes_of, parse_memory
 from .planner import plan_with_supersession
 from .repository import ScanRepository
 
@@ -523,8 +527,8 @@ class ScanModule(BaseModule):
             "profile_id": series["parser_profile_id"],
             "titles": [v["title"] for v in videos],
             "series_season": series.get("season")}, timeout=300)
-        candidates = self._vk_candidates(series_id, videos,
-                                         applied["results"])
+        candidates = self._vk_candidates(series_id, videos, applied["results"],
+                                         self._ignored_episodes(series))
         candidates = await self._skip_completed_downgrades(series_id, candidates)
         try:
             stats = await self.repo.upsert_candidates(series_id, candidates)
@@ -621,6 +625,15 @@ class ScanModule(BaseModule):
         return statuses
 
     @staticmethod
+    def _ignored_episodes(series: dict) -> dict[int, set[int]]:
+        """Серии, отключённые пользователем заранее (series.ignored_episodes, как у торрентов): новая
+        строка такой серии создаётся отключённой и не попадает ни в загрузку, ни в озвучки."""
+        try:
+            return parse_memory(json.loads(series.get("ignored_episodes") or "{}"))
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    @staticmethod
     def _quality_priority(series: dict) -> list[int]:
         try:
             return json.loads(series.get("vk_quality_priority") or "[]")
@@ -680,7 +693,8 @@ class ScanModule(BaseModule):
 
     @staticmethod
     def _vk_candidates(series_id: int, videos: list[dict],
-                       results: list[dict]) -> list[dict]:
+                       results: list[dict],
+                       ignored: dict[int, set[int]] | None = None) -> list[dict]:
         """Видео + извлечения правил -> строки media_items. Кандидат
         обязан иметь извлечённый episode или start (семантика
         оригинала); даты — naive UTC '%Y-%m-%d %H:%M:%S' (формат
@@ -714,6 +728,7 @@ class ScanModule(BaseModule):
                 item["episode_start"] = extracted["start"]
                 if extracted.get("end") is not None:
                     item["episode_end"] = extracted["end"]
+            item["is_ignored_by_user"] = covered(item["season"], episodes_of(extracted), ignored or {})
             candidates.append(item)
         ScanModule._resolve_part_ones(candidates)
         return candidates

@@ -706,6 +706,43 @@ async def test_web_video_scan_skips_excluded_episodes(system):
 
 
 @pytest.mark.asyncio
+async def test_a_web_video_episode_switched_off_in_advance_is_created_switched_off_and_not_planned(system, db_path):
+    """The memory of the series (ignored_episodes) holds for web sources as for torrents: the row of a
+    switched-off episode is created switched off, so neither the download nor the voice-overs take it."""
+    _, fake, probe, _ = system
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE series SET ignored_episodes='{\"1\": [2, 3]}' WHERE id=3")
+        conn.commit()
+    titles = ["Т3 1 серия", "Т3 2 серия", "Т3 3 серия"]
+    fake.parse_titles = titles
+    fake.parse_episodes = [{"number": 1}, {"number": 2}, {"number": 3}]
+    fake.rules_by_title = {title: {"excluded": False, "extracted": {"episode": n, "season": 1}}
+                           for n, title in enumerate(titles, 1)}
+    fake.web_videos = [{"title": title, "url": f"https://fsst.online/embed/{n}/",
+                        "publication_date": "2026-10-20T12:00:00Z", "resolution": 720}
+                       for n, title in enumerate(titles, 1)]
+    fake.web_players = {"episodes": 3, "sources": {"allvideo": 3}, "players": {}, "holes": []}
+
+    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
+
+    with sqlite3.connect(db_path) as conn:
+        rows = {r[0]: (r[1], r[2]) for r in conn.execute(
+            "SELECT episode_start, is_ignored_by_user, plan_status FROM media_items WHERE series_id=3")}
+    assert rows[1][0] == 0 and rows[1][1].startswith("in_plan")
+    assert rows[2][0] == 1 and not rows[2][1].startswith("in_plan")
+    assert rows[3][0] == 1 and not rows[3][1].startswith("in_plan")
+
+
+def test_a_compilation_row_is_switched_off_in_advance_only_when_none_of_its_episodes_is_wanted():
+    videos = [{"title": "Т 2-3", "url": "https://x/1", "publication_date": "2026-10-20T12:00:00Z"}]
+    results = [{"excluded": False, "extracted": {"start": 2, "end": 3, "season": 1}}]
+    some = ScanModule._vk_candidates(1, videos, results, {1: {2}})
+    every = ScanModule._vk_candidates(1, videos, results, {1: {2, 3}})
+    assert some[0]["is_ignored_by_user"] is False and every[0]["is_ignored_by_user"] is True
+    assert ScanModule._vk_candidates(1, videos, results)[0]["is_ignored_by_user"] is False
+
+
+@pytest.mark.asyncio
 async def test_composition_refresh_surfaces_scan_error(system):
     """Ошибка скана при refresh не маскируется старыми данными."""
     _, fake, probe, _ = system
