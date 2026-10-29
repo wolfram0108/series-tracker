@@ -90,8 +90,6 @@ defineExpose({ save })
       </div>
     </div>
 
-    <SettingsConformServer ref="conform" />
-
     <div class="modern-fieldset">
       <div class="fieldset-header"><i class="pi pi-download"></i> Kinozal.me</div>
       <div class="fieldset-content">
@@ -136,5 +134,7 @@ defineExpose({ save })
         <small class="fieldset-hint">Необходим для поиска информации о сериалах и эпизодах.</small>
       </div>
     </div>
+
+    <SettingsConformServer ref="conform" />
   </div>
 </template>
