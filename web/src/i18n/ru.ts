@@ -74,6 +74,7 @@ export const ru = {
   "reason.suspect": "подозрительно: {text}",
   "reason.suspect_residual": "подозрительно: остаток вне допуска",
   "reason.output_missing": "выходной файл не найден",
+  "reason.result_unreadable": "результат выравнивания не удалось разобрать: {error}",
   "reason.player_unreachable": "{player} недоступен: {error}",
   "reason.player_status": "{player} ответил {status}",
   "reason.player_not_json": "{player} вернул не JSON",

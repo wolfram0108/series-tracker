@@ -50,7 +50,8 @@ def track_of(dub_path: str, result: DubResult | None) -> str | None:
 
 def refusal(result: DubResult | None) -> str | None:
     """Why a result may not be placed; None when it may. The service's own verdict is the only measure:
-    a pair that did not converge, or that it marks suspect or critical, is refused."""
+    a pair that did not converge, or that it marks suspect or critical, is refused; so is a success that
+    names no file."""
     if result is None:
         return reason("no_result")
     if not result.ok:
@@ -59,6 +60,8 @@ def refusal(result: DubResult | None) -> str | None:
         return reason("critical", text="; ".join(result.critical))
     if result.suspect:
         return reason("suspect", text="; ".join(result.warnings)) if result.warnings else reason("suspect_residual")
+    if not result.out_path:
+        return reason("output_missing")
     return None
 
 

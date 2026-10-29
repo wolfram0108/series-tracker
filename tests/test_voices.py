@@ -730,6 +730,49 @@ async def test_a_result_that_is_not_clean_is_rejected_and_never_placed(dubs, cap
 
 
 @pytest.mark.asyncio
+async def test_a_success_without_a_file_refuses_that_voice_and_leaves_the_others_alone(dubs):
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    view = job_done(neighbours, "job-1")
+    next(r for r in view["results"] if "redheadsound" in r["dub"].lower())["out_path"] = None
+    probe.publish_event("conform.job.finished", view)
+    await statuses_until(sub, ["aligned", "placed", "rejected"])
+    by_voice = {r["voice_key"]: r for r in await rows(probe)}
+    assert by_voice["redheadsound"]["status"] == "rejected" and code_of(by_voice["redheadsound"]["outcome"]) == "output_missing"
+    assert by_voice["blackcat"]["status"] == "placed"
+
+
+@pytest.mark.asyncio
+async def test_a_result_that_breaks_the_handler_fails_its_voice_and_not_the_batch(dubs, monkeypatch):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    real = voices.repo.mark_aligned
+
+    async def broken(dub_id, track):
+        if "redheadsound" in track.lower():
+            raise RuntimeError("database is locked")
+        return await real(dub_id, track)
+
+    monkeypatch.setattr(voices.repo, "mark_aligned", broken)
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    await statuses_until(sub, ["aligned", "placed", "failed"])
+    by_voice = {r["voice_key"]: r for r in await rows(probe)}
+    assert code_of(by_voice["redheadsound"]["error"]) == "result_unreadable" and by_voice["blackcat"]["status"] == "placed"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_settle_is_never_announced_as_placed(dubs, monkeypatch):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    monkeypatch.setattr(voices._output, "settle", lambda source, destination: False)
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    seen = await statuses_until(sub, ["aligned", "aligned", "failed", "failed"])
+    await quiet(voices)
+    assert "placed" not in seen and all(r["status"] == "failed" for r in await rows(probe))
+    assert not sub.queue.qsize() or all((await sub.queue.get()).payload["status"] != "placed" for _ in range(sub.queue.qsize()))
+
+
+@pytest.mark.asyncio
 async def test_a_missing_result_or_a_failed_job_never_places_anything(dubs):
     probe, neighbours, _, _, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
