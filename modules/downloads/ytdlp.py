@@ -27,6 +27,7 @@ from typing import Awaitable, Callable
 import httpx
 
 from core.ffprobe import duration_of
+from core.proc import run_capture
 
 ProgressCb = Callable[[dict], Awaitable[None]]
 
@@ -170,13 +171,11 @@ async def _probe_duration(video_url: str) -> float:
     executable = shutil.which("yt-dlp")
     if not executable:
         return 0.0
-    proc = await asyncio.create_subprocess_exec(
-        executable, "--no-download", "--print", "%(duration)s", video_url,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    out, _ = await proc.communicate()
     try:
+        _, out, _ = await run_capture(
+            [executable, "--no-download", "--print", "%(duration)s", video_url], timeout=PROBE_TIMEOUT_S)
         return float(out.decode().strip())
-    except (ValueError, AttributeError):
+    except (asyncio.TimeoutError, OSError, ValueError):
         return 0.0
 
 

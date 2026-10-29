@@ -78,3 +78,33 @@ async def test_duration_of_a_real_file_and_of_what_cannot_be_read(tmp_path):
 async def test_without_ffprobe_the_duration_is_unknown_not_an_error():
     with patch("core.ffprobe.shutil.which", return_value=None):
         assert await duration_of("/any/file.mp4") == 0.0
+
+
+def stalled_downloader(tmp_path) -> str:
+    script = tmp_path / "yt-dlp"
+    script.write_text("#!/bin/sh\nexec sleep 60\n")
+    script.chmod(0o755)
+    return str(script)
+
+
+@pytest.mark.asyncio
+async def test_the_duration_query_of_a_stalled_downloader_ends_with_unknown_and_stops_it(tmp_path):
+    from modules.downloads import ytdlp
+    spy = Spy()
+    with patch("core.proc.asyncio.create_subprocess_exec", spy), \
+            patch.object(ytdlp.shutil, "which", return_value=stalled_downloader(tmp_path)), \
+            patch.object(ytdlp, "PROBE_TIMEOUT_S", 0.3):
+        assert await asyncio.wait_for(ytdlp._probe_duration("https://example.test/v"), 10) == 0.0
+    assert not alive(spy.started[0].pid)
+
+
+@pytest.mark.asyncio
+async def test_the_chapters_query_of_a_stalled_downloader_fails_and_stops_it(tmp_path):
+    from modules.slicing import chapters
+    spy = Spy()
+    with patch("core.proc.asyncio.create_subprocess_exec", spy), \
+            patch.object(chapters.shutil, "which", return_value=stalled_downloader(tmp_path)), \
+            patch.object(chapters, "YTDLP_TIMEOUT", 0.3):
+        with pytest.raises(RuntimeError):
+            await chapters.fetch_chapters("https://example.test/v")
+    assert not alive(spy.started[0].pid)

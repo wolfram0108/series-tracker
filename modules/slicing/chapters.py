@@ -11,6 +11,8 @@ import json
 import re
 import shutil
 
+from core.proc import run_capture
+
 YTDLP_TIMEOUT = 180.0
 
 GARBAGE_PATTERNS = [
@@ -123,18 +125,14 @@ async def fetch_chapters(video_url: str) -> list[dict]:
     executable = shutil.which("yt-dlp")
     if not executable:
         raise RuntimeError("yt-dlp не найден в PATH")
-    proc = await asyncio.create_subprocess_exec(
-        executable, "--print", "%(chapters)j", "--no-warnings",
-        "--no-progress", "--no-cache-dir", video_url,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(),
-                                                YTDLP_TIMEOUT)
+        returncode, stdout, stderr = await run_capture(
+            [executable, "--print", "%(chapters)j", "--no-warnings",
+             "--no-progress", "--no-cache-dir", video_url], timeout=YTDLP_TIMEOUT)
     except asyncio.TimeoutError:
-        proc.kill()
         raise RuntimeError(
             f"yt-dlp не ответил за {YTDLP_TIMEOUT:.0f} с (главы)") from None
-    if proc.returncode != 0:
+    if returncode != 0:
         raise RuntimeError("yt-dlp завершился с ошибкой: "
                            + stderr.decode("utf-8", "replace").strip())
     output = stdout.decode("utf-8", "replace").strip()
