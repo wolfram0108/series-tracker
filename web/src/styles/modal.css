@@ -47,12 +47,13 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-shrink: 0;
+  /* the tabs (shrink 100) give way first; a title that still does not fit is cut, the close button stays in sight */
+  flex-shrink: 1; min-width: 0; overflow: hidden;
 }
 /* контейнер вкладок — по содержимому (облегает остров), сжимается при
    нехватке места. БЕЗ container-type: он ломает «размер по содержимому»
    у потомков (остров растягивался). Адаптивность — через @media ниже. */
-.modern-header .header-tabs { flex: 0 1 auto; min-width: 0; }
+.modern-header .header-tabs { flex: 0 100 auto; min-width: 0; }
 
 .modern-close {
   flex-shrink: 0; margin-left: auto; /* прижать к правому краю шапки */
@@ -104,12 +105,15 @@
   content: attr(data-text); grid-area: 1 / 1;
   font-weight: 600; height: 0; visibility: hidden; white-space: nowrap;
 }
-/* узко (подписи суммарно не влезают): невыбранные → иконка (подпись
-   схлопывается), выбранная остаётся развёрнутой. По viewport, т.к.
-   container-query несовместим с обтеканием острова. */
-@media (max-width: 1000px) {
-  .st-tab:not(.active) .tab-label { max-width: 0; opacity: 0; margin-left: -8px; }
-}
+/* подписи суммарно не влезают (меряет ModalShell): невыбранные → иконка, выбранная
+   остаётся развёрнутой. Порога по ширине экрана нет: вид зависит от места в шапке. */
+.modern-header.tabs-compact .st-tab:not(.active) .tab-label { max-width: 0; opacity: 0; margin-left: -8px; }
+.modern-header.tabs-tight .st-tab { padding-inline: 10px; gap: 6px; }
+.modern-header.tabs-icons .st-tab .tab-label { max-width: 0; opacity: 0; margin-left: -8px; }
+.modern-header.tabs-measuring .st-tab .tab-label { transition: none; }
+/* не помещаются и иконки: остров прокручивается и не выталкивает крестик */
+.modern-header .st-tabs { overflow-x: auto; scrollbar-width: none; min-width: 5rem; }
+.modern-header .st-tabs::-webkit-scrollbar { display: none; }
 
 /* Тело */
 .modern-body {
@@ -125,4 +129,5 @@
   display: flex;
   gap: 12px;
   justify-content: flex-end;
+  flex-wrap: wrap;
 }

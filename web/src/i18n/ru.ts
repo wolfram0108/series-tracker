@@ -147,7 +147,6 @@ export const ru = {
   "voices.settings.saveFailed": "Не удалось сохранить настройки озвучек",
   "voices.settings.saved": "Настройки озвучек сохранены",
   "voices.settings.notSaved": "Не сохранено: исправьте отмеченные поля",
-  "voices.settings.save": "Сохранить",
   "voices.settings.discard": "Отменить изменения",
   "voices.settings.dirty": "Есть несохранённые изменения",
   "voices.settings.rejected": "Сохранённое значение не подходит и не применяется, действует значение по умолчанию",

@@ -37,7 +37,6 @@ const maxTemp = ref<number | "">(0)
 const pickedPlayer = ref("")
 const elsewhere = ref<View | null>(null)
 const problems = ref<Problem[]>([])
-const saving = ref(false)
 
 const namesText = ref("")
 const groups = ref<Groups | null>(null)
@@ -90,27 +89,24 @@ async function load() {
   if (next) apply(next)
 }
 
-async function save() {
+/** Called by the footer of the settings window; true when the form was saved. */
+async function save(): Promise<boolean> {
   if (clientProblems.value.length) {
     problems.value = clientProblems.value
-    return
+    return false
   }
-  saving.value = true
-  try {
-    const reply = await request(api.PUT("/api/voices/settings", { body: draft.value }), {
-      errorMessage: t("voices.settings.saveFailed"),
-    })
-    if (!reply) return
-    if (reply.saved) {
-      apply(reply.settings)
-      toast.add({ severity: "success", summary: t("voices.settings.saved"), life: 2500 })
-    } else {
-      problems.value = reply.problems
-      toast.add({ severity: "warn", summary: t("voices.settings.notSaved"), life: 4000 })
-    }
-  } finally {
-    saving.value = false
+  const reply = await request(api.PUT("/api/voices/settings", { body: draft.value }), {
+    errorMessage: t("voices.settings.saveFailed"),
+  })
+  if (!reply) return false
+  if (reply.saved) {
+    apply(reply.settings)
+    toast.add({ severity: "success", summary: t("voices.settings.saved"), life: 2500 })
+    return true
   }
+  problems.value = reply.problems
+  toast.add({ severity: "warn", summary: t("voices.settings.notSaved"), life: 4000 })
+  return false
 }
 
 function discard() {
@@ -175,10 +171,15 @@ async function fillKnown() {
 }
 
 onMounted(load)
+defineExpose({ save, discard, dirty, elsewhere })
 </script>
 
 <template>
   <div class="settings-voices">
+    <div v-if="dirty || elsewhere" class="status-line">
+      <span v-if="elsewhere" class="problem">{{ t("voices.settings.elsewhere") }}</span>
+      <span v-else class="muted-hint">{{ t("voices.settings.dirty") }}</span>
+    </div>
     <!-- Voice names that mean one voice-over -->
     <div class="modern-fieldset">
       <div class="fieldset-header"><i class="pi pi-users"></i> {{ t("voices.settings.voices.title") }}</div>
@@ -287,13 +288,6 @@ onMounted(load)
       </div>
     </div>
 
-    <!-- One save for the whole form -->
-    <div class="save-bar">
-      <span v-if="elsewhere" class="problem">{{ t("voices.settings.elsewhere") }}</span>
-      <Button :label="t('voices.settings.save')" icon="pi pi-check" :loading="saving" :disabled="!dirty" @click="save" />
-      <Button :label="t('voices.settings.discard')" icon="pi pi-undo" severity="secondary" :disabled="!dirty && !elsewhere" @click="discard" />
-      <span v-if="dirty" class="muted-hint">{{ t("voices.settings.dirty") }}</span>
-    </div>
   </div>
 </template>
 
@@ -319,5 +313,6 @@ onMounted(load)
 .temp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 1rem 1.5rem; }
 .temp-field { display: flex; flex-direction: column; gap: 0.35rem; }
 .num-input { max-width: 10rem; }
-.save-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; position: sticky; bottom: 0; padding: 0.6rem 0; background: var(--bg-white); }
+.status-line { margin: 0; }
+.status-line .muted-hint, .status-line .problem { margin: 0; }
 </style>

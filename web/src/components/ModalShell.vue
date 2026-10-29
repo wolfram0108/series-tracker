@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from "vue"
+import { onMounted, onUnmounted, onUpdated, ref } from "vue"
 import { useBodyScrollLock } from "../composables/useBodyScrollLock"
 
 // Переиспользуемая оболочка модального окна (порт modern-modal): оверлей +
@@ -36,6 +36,39 @@ onUnmounted(() => document.removeEventListener("keydown", onKey))
 
 // фон не прокручивается, пока окно открыто (scroll chaining)
 useBodyScrollLock()
+
+// Вкладки шапки сами выбирают вид по тому, что помещается, а не по ширине экрана: сначала
+// отступы плотнее, потом подписи в иконки, а если не помещаются и иконки, полоса прокручивается.
+const header = ref<HTMLElement | null>(null)
+let observer: ResizeObserver | null = null
+let shownTab: Element | null = null
+
+function fitTabs(follow = false) {
+  const bar = header.value
+  const strip = bar?.querySelector<HTMLElement>(".st-tabs")
+  if (!bar || !strip) return
+  // Without the transition the labels have their final width at the moment of measuring.
+  bar.classList.add("tabs-measuring")
+  bar.classList.remove("tabs-tight", "tabs-compact", "tabs-icons")
+  const overflows = () => strip.scrollWidth > strip.clientWidth + 1
+  if (overflows()) bar.classList.add("tabs-tight")
+  if (overflows()) bar.classList.add("tabs-compact")
+  const active = strip.querySelector<HTMLElement>(".st-tab.active")
+  // The chosen tab does not fit even alone: its label goes too.
+  if (active && active.offsetWidth > strip.clientWidth) bar.classList.add("tabs-icons")
+  // A resize brings the chosen tab back into sight; a re-render does it only when another tab was chosen.
+  if (active && (follow || active !== shownTab)) active.scrollIntoView({ block: "nearest", inline: "nearest" })
+  shownTab = active
+  requestAnimationFrame(() => bar.classList.remove("tabs-measuring"))
+}
+onMounted(() => {
+  observer = new ResizeObserver(() => fitTabs(true))
+  if (header.value) observer.observe(header.value)
+  void document.fonts?.ready.then(() => fitTabs(true))
+  fitTabs(true)
+})
+onUpdated(() => fitTabs())
+onUnmounted(() => observer?.disconnect())
 </script>
 
 <template>
@@ -44,7 +77,7 @@ useBodyScrollLock()
       class="modern-modal"
       :class="[size === 'xl' ? 'modal-xl' : size === 'full' ? 'modal-full' : '', { 'modal-fixed': fixedHeight }]"
     >
-      <div class="modern-header">
+      <div ref="header" class="modern-header">
         <h5 class="modal-title"><slot name="title">{{ title }}</slot></h5>
         <slot name="header-extra" />
         <button class="modern-close" title="Закрыть" @click="emit('close')"><i class="pi pi-times"></i></button>
