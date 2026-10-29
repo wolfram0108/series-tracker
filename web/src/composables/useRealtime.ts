@@ -3,7 +3,7 @@ import { useSeriesStore, type Series, type SeriesDelta } from "../stores/series"
 import { useQueuesStore, type ConformPicture, type QueueTask } from "../stores/queues"
 import { useScannerStore, type ScannerStatus } from "../stores/scanner"
 import { useVideoScanStore, type VideoScanProgress } from "../stores/videoScan"
-import { useVoicesStore, type VoiceDubEvent, type VoiceDubsSnapshot } from "../stores/voices"
+import { useVoicesStore, type VoiceDubEvent, type VoiceDubsSnapshot, type VoiceSettingsView } from "../stores/voices"
 
 /** Связывает SSE-события со сторами и открывает соединение. Вызывается один
  *  раз при старте приложения (после установки Pinia). Маппинг 1:1 с SSE_MAP
@@ -27,6 +27,7 @@ export function setupRealtime(): void {
   sse.on("conform_queue_update", (d) => queues.setConform(d as ConformPicture))
   sse.on("voice_dub_update", (d) => voices.apply(d as VoiceDubEvent))
   sse.on("voice_dubs_snapshot", (d) => voices.snapshot(d as VoiceDubsSnapshot))
+  sse.on("voice_settings_update", (d) => voices.applySettings(d as VoiceSettingsView))
 
   sse.on("scanner_status_update", (d) => scanner.set(d as ScannerStatus))
   sse.on("video_scan_progress", (d) => videoScan.set(d as VideoScanProgress))

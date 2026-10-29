@@ -10,6 +10,8 @@ export type VoiceDub = Schemas["DubItem"]
 export type VoiceDubEvent = Schemas["DubEvent"]
 /** Packet of voice_dubs_snapshot: every voice-over, sent when this interface connects. */
 export type VoiceDubsSnapshot = Schemas["DubsSnapshot"]
+/** Packet of voice_settings_update: the settings as they apply after a save, whole, so nothing is asked back. */
+export type VoiceSettingsView = Schemas["VoiceSettingsView"]
 
 /** The place of a packet in the order of the core: a later start of the module (epoch) outranks any earlier one. */
 type Stamp = { epoch: number; rev: number }
@@ -22,6 +24,8 @@ const identity = (slotKey: string, voiceKey: string) => `${slotKey}:${voiceKey}`
 /** Voice-overs per episode of every series, fed only by the core's pushes (snapshot, then updates). */
 export const useVoicesStore = defineStore("voices", () => {
   const bySlot = ref<Record<string, VoiceDub[]>>({})
+  // The newest settings the core announced; the settings screen follows it.
+  const settings = ref<VoiceSettingsView | null>(null)
   // The newest stamp seen per voice-over; a removed one stays here so that a late packet cannot revive it.
   const stamps = new Map<string, Stamp>()
   // The newest full picture taken in: it also says what did not exist, so a packet not newer than it is dropped.
@@ -95,5 +99,9 @@ export const useVoicesStore = defineStore("voices", () => {
     return bySlot.value[slot(seriesId, season, episode)] ?? []
   }
 
-  return { bySlot, apply, snapshot, forEpisode }
+  function applySettings(next: VoiceSettingsView): void {
+    settings.value = next
+  }
+
+  return { bySlot, settings, apply, snapshot, forEpisode, applySettings }
 })

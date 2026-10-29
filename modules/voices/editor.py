@@ -61,6 +61,14 @@ def _pair_problems(field: str, aliases: Mapping[str, str]) -> list[SettingProble
     return problems
 
 
+def known_players(player_aliases: Mapping[str, str]) -> set[str]:
+    """Player kinds the order of sources may name: the built-in ones and every name the player rules mention."""
+    named = {folded_name(kind) for kind in DEFAULT_PRIORITY}
+    for alias, canonical in _pairs(player_aliases).items():
+        named |= {folded_name(alias), folded_name(canonical)}
+    return named
+
+
 def check(draft: VoiceSettingsDraft) -> list[SettingProblem]:
     """Every reason this form cannot be saved; empty when it can."""
     problems = []
@@ -68,9 +76,12 @@ def check(draft: VoiceSettingsDraft) -> list[SettingProblem]:
     if not names:
         problems.append(_problem("priority", reason("priority_empty")))
     seen: set[str] = set()
+    known = known_players(draft.player_aliases)
     for name in names:
         if folded_name(name) in seen:
             problems.append(_problem("priority", reason("priority_duplicate", player=name)))
+        elif folded_name(name) not in known:
+            problems.append(_problem("priority", reason("priority_unknown_player", player=name)))
         seen.add(folded_name(name))
     problems += _pair_problems("voice_aliases", draft.voice_aliases)
     problems += _pair_problems("player_aliases", draft.player_aliases)

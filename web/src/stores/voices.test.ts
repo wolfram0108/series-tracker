@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { createPinia, setActivePinia } from "pinia"
-import { useVoicesStore, type VoiceDub, type VoiceDubEvent, type VoiceDubsSnapshot } from "./voices"
+import { useVoicesStore, type VoiceDub, type VoiceDubEvent, type VoiceDubsSnapshot, type VoiceSettingsView } from "./voices"
 
 const dub = (over: Partial<VoiceDub> = {}): VoiceDub => ({
   season: 1, episode: 2, voice_key: "blackcat", voice_label: "BlackCat", status: "ready", state: "align_queued", hint: "ready", detail: null, ...over,
@@ -144,5 +144,17 @@ describe("voices store", () => {
     store.apply(event(1, { epoch: 2, voice_key: "red", voice_label: "RedHeadSound" }))
     store.apply(event(900, { epoch: 1 }))
     expect(store.forEpisode(7, 1, 2).map((v) => v.voice_key)).toEqual(["red"])
+  })
+
+  it("keeps the newest settings the core announced", () => {
+    const store = useVoicesStore()
+    const view = (max: number): VoiceSettingsView => ({
+      priority: ["kodik"], voice_aliases: {}, player_aliases: {}, temp_root: "/data/tmp", max_temp_episodes: max,
+      defaults: { priority: ["kodik"], temp_root: "/data/tmp", max_temp_episodes: 0 }, rejected: [], known_voices: [],
+    })
+    expect(store.settings).toBeNull()
+    store.applySettings(view(1))
+    store.applySettings(view(3))
+    expect(store.settings?.max_temp_episodes).toBe(3)
   })
 })

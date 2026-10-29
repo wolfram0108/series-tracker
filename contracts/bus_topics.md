@@ -52,6 +52,7 @@
 | voices.dubs.snapshot {epoch, rev, items} — `DubsSnapshot` (при gateway.sse.clients) | voices | gateway | voice_dubs_snapshot |
 | downloads.item.renamed {series_id, unique_id, filename} | downloads | voices | — |
 | downloads.fetch.started {key, series_id, path} | downloads | voices (ключи `dub:<id>`) | — |
+| voices.settings.changed `VoiceSettingsView` (после сохранения настроек озвучек) | voices | gateway | voice_settings_update (Р-54) |
 | voices.episode.settled {series_id, season, episode} | voices | — | — |
 | conform.job.finished {job_id, status, error, results} | conform | voices | — |
 | conform.daemon.up {} | conform | voices | — |

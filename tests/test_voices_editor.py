@@ -29,6 +29,7 @@ def test_an_empty_form_value_that_means_the_default_is_allowed():
     ({"priority": []}, [("priority", "priority_empty")]),
     ({"priority": [" ", ""]}, [("priority", "priority_empty")]),
     ({"priority": ["Kodik", "kodik"]}, [("priority", "priority_duplicate")]),
+    ({"priority": ["kodik", "nowhere"]}, [("priority", "priority_unknown_player")]),
     ({"temp_root": "relative/path"}, [("temp_root", "temp_root_not_absolute")]),
     ({"max_temp_episodes": -1}, [("max_temp_episodes", "max_temp_negative")]),
 ])
@@ -96,3 +97,18 @@ def test_the_preview_names_the_faults_of_the_draft_and_ignores_blank_and_repeate
     found = editor.preview(GroupsDraft(names=["A", " ", "A", "B"], voice_aliases={"x": "x"}, player_aliases={}))
     assert [group.members for group in found.groups] == [["A"], ["B"]]
     assert codes(found.problems) == [("voice_aliases", "alias_self")]
+
+
+def test_a_player_the_rules_mention_may_stand_in_the_order_even_if_it_is_not_built_in():
+    assert editor.check(draft(priority=["kodik", "anilibria"], player_aliases={"aniliberty": "anilibria"})) == []
+    assert editor.check(draft(priority=["kodik", "Aniliberty"], player_aliases={"aniliberty": "anilibria"})) == []
+
+
+def test_the_settings_reach_every_open_screen_by_the_stream_and_the_screen_listens_for_it():
+    from pathlib import Path
+    from modules.gateway import SSE_MAP
+    root = Path(__file__).resolve().parent.parent
+    name, _ = SSE_MAP["voices.settings.changed"]
+    assert name == "voice_settings_update"
+    assert f"`{name}`" in (root / "contracts" / "sse_contract.md").read_text(encoding="utf-8")
+    assert f'"{name}"' in (root / "web" / "src" / "composables" / "useRealtime.ts").read_text(encoding="utf-8")

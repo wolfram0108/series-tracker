@@ -1469,6 +1469,46 @@ async def test_the_module_reads_the_rules_from_settings_and_survives_garbage(sys
     assert len([r for r in again["voices"] if r["role"] == "dub"]) == 2
 
 
+FORM = {"priority": ["kodik", "cvh"], "voice_aliases": {"aniliberty": "anilibria"}, "player_aliases": {},
+        "temp_root": "/data/tmp", "max_temp_episodes": 2}
+
+
+@pytest.mark.asyncio
+async def test_a_saved_form_applies_at_once_and_is_announced_to_every_open_screen(system):
+    announced = system.bus.subscribe("voices.settings.changed")
+    saved = await system.request("voices.settings.set", FORM, timeout=5)
+    assert saved["saved"] is True and saved["problems"] == []
+    assert saved["settings"]["priority"] == ["kodik", "cvh"] and saved["settings"]["max_temp_episodes"] == 2
+    assert (await system.request("voices.settings.get", {}, timeout=5)) == saved["settings"]
+    assert (await asyncio.wait_for(announced.queue.get(), 5)).payload == saved["settings"]
+    sources = [src("cvh", "Ref", [1], url="https://site/?player=cvh&voice=Ref"),
+               src("kodik", "AniLibria", [1, 2]), src("cvh", "AniLiberty", [1])]
+    layout = await system.request("voices.layout", {"sources": sources, "reference": sources[0]["url"]}, timeout=5)
+    assert layout["priority"] == ["kodik", "cvh"]
+    assert len([row for row in layout["voices"] if row["role"] == "dub"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_refused_form_writes_nothing_says_why_and_announces_nothing(system):
+    announced = system.bus.subscribe("voices.settings.changed")
+    refused = await system.request("voices.settings.set", {
+        **FORM, "temp_root": "relative", "priority": ["kodik", "nowhere"],
+        "voice_aliases": {"a": "b", "b": "c"}}, timeout=5)
+    assert refused["saved"] is False
+    assert sorted((problem["field"], problem["detail"]["code"]) for problem in refused["problems"]) == [
+        ("priority", "priority_unknown_player"), ("temp_root", "temp_root_not_absolute"), ("voice_aliases", "alias_chain")]
+    stored = await system.request("settings.values.by_prefix", {"prefix": "voices."}, timeout=5)
+    assert stored["values"] == {} and announced.queue.empty()
+    assert refused["settings"]["priority"] == list(DEFAULT_PRIORITY)
+
+
+@pytest.mark.asyncio
+async def test_a_stored_value_the_module_cannot_use_is_shown_as_refused_not_as_a_default(system):
+    await system.request("settings.value.set", {"key": "voices.aliases", "value": "{broken"}, timeout=5)
+    view = await system.request("voices.settings.get", {}, timeout=5)
+    assert view["rejected"] == ["voice_aliases"] and view["voice_aliases"] == {}
+
+
 def test_two_voices_with_the_same_safe_title_get_two_names():
     from modules.voices.placement import sidecar_path as path_of
     first = path_of("/lib/Show s01e01.mp4", "AniMy / RuChiMe", ".flac")

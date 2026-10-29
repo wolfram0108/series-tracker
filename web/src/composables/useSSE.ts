@@ -14,6 +14,7 @@ export const SSE_EVENTS = [
   "conform_queue_update",
   "voice_dub_update",
   "voice_dubs_snapshot",
+  "voice_settings_update",
   "scanner_status_update",
   "video_scan_progress",
   "renaming_complete",

@@ -56,6 +56,8 @@ Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_lab
             ready, aligning, aligned, placed, rejected, failed, moved (the track followed its video),
             stale (its reference was replaced) and removed (the episode and its video are gone);
             series.purged,
+            voices.settings.changed VoiceSettingsView — the settings as they apply after a save, so that every open
+            settings screen shows them without asking back,
             voices.episode.settled {series_id, season, episode} — every voice-over of the episode is
             placed, rejected or failed and its temporary files are gone or on the cleanup journal.
 
@@ -337,9 +339,11 @@ class VoicesModule(BaseModule):
         problems = editor.check(draft)
         if not problems:
             await self.request("settings.values.set_many", {"values": editor.stored(editor.clean(draft))}, timeout=10)
+        view = await self._settings_view()
+        if not problems:
             self.log.info("озвучки: настройки сохранены")
-        return VoiceSettingsSaved(saved=not problems, problems=problems,
-                                  settings=await self._settings_view()).model_dump(mode="json")
+            self.publish_event("voices.settings.changed", view.model_dump(mode="json"))
+        return VoiceSettingsSaved(saved=not problems, problems=problems, settings=view).model_dump(mode="json")
 
     async def on_groups_preview(self, env: Envelope) -> dict:
         return editor.preview(GroupsDraft.model_validate(env.payload)).model_dump(mode="json")

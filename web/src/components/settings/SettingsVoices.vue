@@ -8,6 +8,7 @@ import type { components } from "../../api/schema"
 import { useApi } from "../../composables/useApi"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
+import { useVoicesStore } from "../../stores/voices"
 
 // Settings of the voices: groups of names that mean one voice-over, player names, source order, temporary files.
 // Checking and saving belong to the voices module; this screen shows what applies and what a save was refused for.
@@ -20,6 +21,7 @@ interface Row { id: number; from: string; to: string }
 
 const { request } = useApi()
 const toast = useToast()
+const voicesStore = useVoicesStore()
 
 let nextId = 0
 const rowsOf = (pairs: Record<string, string>): Row[] =>
@@ -32,7 +34,8 @@ const voices = ref<Row[]>([])
 const players = ref<Row[]>([])
 const tempRoot = ref("")
 const maxTemp = ref<number | "">(0)
-const newPlayer = ref("")
+const pickedPlayer = ref("")
+const elsewhere = ref<View | null>(null)
 const problems = ref<Problem[]>([])
 const saving = ref(false)
 
@@ -78,6 +81,7 @@ function apply(next: View) {
   maxTemp.value = next.max_temp_episodes
   snapshot.value = JSON.stringify(draft.value)
   problems.value = []
+  elsewhere.value = null
   loaded.value = true
 }
 
@@ -110,8 +114,16 @@ async function save() {
 }
 
 function discard() {
-  if (view.value) apply(view.value)
+  const latest = elsewhere.value ?? view.value
+  if (latest) apply(latest)
 }
+
+// The core announces every save; an untouched form follows it, a form being edited only says so.
+watch(() => voicesStore.settings, (next) => {
+  if (!next || !loaded.value || JSON.stringify(next) === JSON.stringify(view.value)) return
+  if (dirty.value) elsewhere.value = next
+  else apply(next)
+})
 
 // A problem belongs to the form as it was sent; once the form changes the marks are stale.
 watch(draft, () => { problems.value = [] })
@@ -128,10 +140,18 @@ function move(index: number, by: -1 | 1) {
   if (target < 0 || target >= list.length) return
   ;[list[index], list[target]] = [list[target], list[index]]
 }
+/** Players that can still be put into the order: the built-in kinds and every name the player rules mention. */
+const availablePlayers = computed(() => {
+  const named = [
+    ...(view.value?.defaults.priority ?? []),
+    ...players.value.flatMap((row) => [row.from.trim(), row.to.trim()]),
+  ].filter(Boolean)
+  const taken = new Set(priority.value.map((name) => name.toLowerCase()))
+  return [...new Map(named.map((name) => [name.toLowerCase(), name])).values()].filter((name) => !taken.has(name.toLowerCase()))
+})
 function addPlayer() {
-  const name = newPlayer.value.trim()
-  if (name) priority.value.push(name)
-  newPlayer.value = ""
+  if (pickedPlayer.value) priority.value.push(pickedPlayer.value)
+  pickedPlayer.value = ""
 }
 function resetPriority() {
   if (view.value) priority.value = [...view.value.defaults.priority]
@@ -146,7 +166,13 @@ async function showGroups() {
     { errorMessage: t("voices.settings.loadFailed") },
   )
 }
-function fillKnown() { namesText.value = (view.value?.known_voices ?? []).join("\n") }
+/** Names met by now are asked for at the click: the list grows with every downloaded voice-over. */
+async function fillKnown() {
+  const fresh = await request(api.GET("/api/voices/settings"), { errorMessage: t("voices.settings.loadFailed") })
+  if (!fresh) return
+  if (view.value) view.value = { ...view.value, known_voices: fresh.known_voices }
+  namesText.value = fresh.known_voices.join("\n")
+}
 
 onMounted(load)
 </script>
@@ -230,8 +256,11 @@ onMounted(load)
         </ol>
         <p v-for="(problem, index) in problemsOf('priority')" :key="index" class="problem">{{ reasonText(problem.detail) }}</p>
         <div class="actions-row">
-          <InputText v-model="newPlayer" class="pair-input" :placeholder="t('voices.settings.priority.addPlaceholder')" :aria-label="t('voices.settings.priority.add')" @keyup.enter="addPlayer" />
-          <Button :label="t('voices.settings.priority.add')" icon="pi pi-plus" severity="secondary" size="small" @click="addPlayer" />
+          <select v-model="pickedPlayer" class="p-inputtext pair-input" :aria-label="t('voices.settings.priority.add')">
+            <option value="" disabled>{{ t("voices.settings.priority.pick") }}</option>
+            <option v-for="name in availablePlayers" :key="name" :value="name">{{ name }}</option>
+          </select>
+          <Button :label="t('voices.settings.priority.add')" icon="pi pi-plus" severity="secondary" size="small" :disabled="!pickedPlayer" @click="addPlayer" />
           <Button :label="t('voices.settings.priority.reset')" icon="pi pi-undo" severity="secondary" size="small" text @click="resetPriority" />
         </div>
       </div>
@@ -260,8 +289,9 @@ onMounted(load)
 
     <!-- One save for the whole form -->
     <div class="save-bar">
+      <span v-if="elsewhere" class="problem">{{ t("voices.settings.elsewhere") }}</span>
       <Button :label="t('voices.settings.save')" icon="pi pi-check" :loading="saving" :disabled="!dirty" @click="save" />
-      <Button :label="t('voices.settings.discard')" icon="pi pi-undo" severity="secondary" :disabled="!dirty" @click="discard" />
+      <Button :label="t('voices.settings.discard')" icon="pi pi-undo" severity="secondary" :disabled="!dirty && !elsewhere" @click="discard" />
       <span v-if="dirty" class="muted-hint">{{ t("voices.settings.dirty") }}</span>
     </div>
   </div>
