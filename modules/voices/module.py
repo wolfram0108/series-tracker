@@ -807,8 +807,6 @@ class VoicesModule(BaseModule):
             if reply.get("done"):
                 await self.repo.cleanup_done(path)
             return bool(reply.get("done"))
-        if storage.busy(path):
-            return False  # the removal that timed out has not ended: it may still act on this name
         rows = await self.repo.all_rows()
         if self._held(path, rows):
             await self.repo.cleanup_done(path)  # the name belongs to a live voice-over again: removing it destroys new work
@@ -819,6 +817,8 @@ class VoicesModule(BaseModule):
             await self._io(self._unlink, path, entry["kind"], timeout=REMOVE_TIMEOUT_S, owns=path)
         except FileNotFoundError:
             pass
+        except storage.StorageBusy:
+            return False  # a removal that timed out has not ended: it may still act on this name
         except OSError as exc:
             await self.repo.journal_cleanup(path, entry["kind"], str(exc))
             return False

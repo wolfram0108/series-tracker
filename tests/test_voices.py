@@ -2336,3 +2336,21 @@ async def test_a_job_that_could_not_be_cancelled_is_cancelled_when_the_service_c
         assert asyncio.get_running_loop().time() < deadline, voices._recovery.failures()
         await asyncio.sleep(0.02)
     assert neighbours.conform_cancels.count("job-9") >= 2
+
+
+@pytest.mark.asyncio
+async def test_a_sent_download_is_announced_before_its_command_goes_out(dubs, monkeypatch):
+    probe, neighbours, voices, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    announced_at_send = []
+    real = voices.send_command
+
+    def watching(topic, payload, *args, **kwargs):
+        if topic == "downloads.fetch":
+            announced_at_send.append(sum(1 for env in list(sub.queue._queue) if env.payload["status"] == "downloading"))
+        return real(topic, payload, *args, **kwargs)
+
+    monkeypatch.setattr(voices, "send_command", watching)
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    assert announced_at_send == [1, 2, 3], "each command finds its announcement already published"

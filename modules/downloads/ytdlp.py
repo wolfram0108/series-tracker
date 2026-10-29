@@ -76,10 +76,7 @@ def _ytdlp_error(tail: str, default: str) -> str:
 
 def _cleanup_artifacts(full_output_path: str) -> None:
     for leftover in download_artifacts(full_output_path):
-        try:
-            os.remove(leftover)
-        except OSError:
-            pass
+        storage.remove_file(leftover)
 
 # Формат hlsnative+-N отличается от обычного: после '~' идут пробелы,
 # ETA бывает 'Unknown', в хвосте '(frag X/Y)' (находка 47).
@@ -377,12 +374,12 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
     tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
 
     if stopped:
-        await storage.call(_remove_file, tmp_out, owns=tmp_out)
+        await storage.discard(tmp_out)
         return False, stopped
     if proc.returncode == 0:
         got = await _local_duration(tmp_out)
         if got <= 0 or (duration > 0 and got < duration * MIN_COMPLETE_FRACTION):
-            await storage.call(_remove_file, tmp_out, owns=tmp_out)
+            await storage.discard(tmp_out)
             return False, (f"обрыв: скачано {got:.0f} с из ожидаемых ~{duration:.0f} с — "
                            "неполная загрузка")
         await storage.call(os.replace, tmp_out, full_output_path, owns=(tmp_out, full_output_path))
@@ -390,13 +387,6 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
         return True, ""
     last = tail.strip().splitlines()[-1] if tail.strip() else ""
     return False, f"ffmpeg direct download: {last or proc.returncode}"
-
-
-def _remove_file(path: str) -> None:
-    try:
-        os.remove(path)
-    except OSError:
-        pass
 
 
 def _unavailable_error(error: str) -> bool:
@@ -574,7 +564,7 @@ async def _phase_remux(raw: str, full_output_path: str,
     tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
 
     if stopped:
-        await storage.call(_remove_file, tmp_out, owns=tmp_out)
+        await storage.discard(tmp_out)
         return False, stopped
     if proc.returncode == 0:
         await storage.call(os.replace, tmp_out, full_output_path, owns=(tmp_out, full_output_path))  # atomic publication

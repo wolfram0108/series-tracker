@@ -433,11 +433,8 @@ class DownloadsModule(BaseModule):
         НЕ glob: каталоги медиатеки именуются с `[tmdbid-NNNN]`, а glob трактует
         `[...]` как класс символов и не находит реальные файлы."""
         for path in (save_path, *ytdlp.download_artifacts(save_path)):
-            try:
-                if os.path.isfile(path):
-                    os.remove(path)
-            except OSError:
-                pass
+            if os.path.isfile(path):
+                storage.remove_file(path)
 
     async def on_queue_get(self, env: Envelope) -> dict:
         tasks = await self.repo.active_tasks()

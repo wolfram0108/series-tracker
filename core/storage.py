@@ -21,12 +21,15 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Iterator
 
+from .logging import get_logger
+
 # Wait limits by the weight of the call: a metadata call, the removal of a tree, a move across directories.
 DEFAULT_TIMEOUT_S = 30.0
 REMOVE_TIMEOUT_S = 300.0
 MOVE_TIMEOUT_S = 900.0
 POOL_SIZE = 8
 
+_log = get_logger("storage")
 _pool = ThreadPoolExecutor(max_workers=POOL_SIZE, thread_name_prefix="storage")
 _tokens = itertools.count(1)
 _holds: dict[int, "Hold"] = {}
@@ -146,3 +149,24 @@ async def call(fn: Callable[..., Any], *args: Any, timeout: float = DEFAULT_TIME
         return await asyncio.wait_for(asyncio.shield(future), timeout)
     except asyncio.TimeoutError:
         raise StorageTimeout(f"хранилище не ответило за {timeout:.0f} с: {getattr(fn, '__name__', fn)}") from None
+
+
+def remove_file(path: str) -> bool:
+    """Remove a file that is not wanted any more. True when the name is free; a failure is logged, never swallowed."""
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        return True
+    except OSError as exc:
+        _log.warning("не удалось удалить %s: %s", path, exc)
+        return False
+    return True
+
+
+async def discard(path: str) -> bool:
+    """`remove_file` as a storage call that owns the name; a refusal or a stalled share is logged and reported."""
+    try:
+        return bool(await call(remove_file, path, timeout=REMOVE_TIMEOUT_S, owns=path))
+    except OSError as exc:  # the name is owned by someone else or the share did not answer: the file stays
+        _log.warning("не удалось удалить %s: %s", path, exc)
+        return False

@@ -99,10 +99,7 @@ async def _cut(executable: str, source: str, start: str, duration: str | None, t
         return True, ""
     finally:
         if not success:  # таймаут / ошибка / отмена — не оставляем tmp
-            try:
-                await storage.call(os.remove, tmp, owns=tmp)
-            except OSError:
-                pass
+            await storage.discard(tmp)
 
 
 class SlicingModule(BaseModule):
@@ -327,7 +324,7 @@ class SlicingModule(BaseModule):
                 except asyncio.CancelledError:
                     # серию удалили во время ffmpeg → снести недоделанный
                     # полуфайл (законченные ранее главы остаются)
-                    await storage.call(self._remove_file, out_abs, owns=out_abs)
+                    await storage.discard(out_abs)
                     self.log.info("нарезка %s прервана — недоделанный %s "
                                   "снесён", uid, out_rel)
                     return
@@ -359,14 +356,6 @@ class SlicingModule(BaseModule):
             self._aborted.discard(series_id)
             await self._contribute(series_id)
             await self._broadcast_queue()
-
-    @staticmethod
-    def _remove_file(path: str) -> None:
-        try:
-            if os.path.isfile(path):
-                os.remove(path)
-        except OSError:
-            pass
 
     async def _init_progress(self, series: dict, item: dict,
                              chapters: list[dict], task_id: int) -> dict:

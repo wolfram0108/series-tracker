@@ -152,3 +152,42 @@ async def test_a_hold_is_released_when_its_block_fails(tmp_path):
         with storage.hold(path):
             raise RuntimeError("boom")
     assert not storage.busy(path)
+
+
+@pytest.mark.asyncio
+async def test_a_file_that_is_not_wanted_is_removed_and_a_failure_is_named_not_swallowed(tmp_path, monkeypatch):
+    import threading
+    told = []
+    monkeypatch.setattr(storage._log, "warning", lambda message, *args: told.append(message % args))
+    unwanted = tmp_path / "a.part"
+    unwanted.write_text("x")
+    assert await storage.discard(str(unwanted)) is True and not unwanted.exists()
+    assert await storage.discard(str(tmp_path / "never-was")) is True and told == []
+    kept = tmp_path / "b.part"
+    kept.write_text("x")
+
+    def refuse(path):
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(os, "remove", refuse)
+    assert await storage.discard(str(kept)) is False and kept.exists()
+    assert len(told) == 1 and str(kept) in told[0]
+    monkeypatch.undo()
+    release = threading.Event()
+    owned = str(kept)
+    with pytest.raises(storage.StorageTimeout):
+        await storage.call(stalled, release, timeout=0.05, owns=owned)
+    try:
+        assert await storage.discard(owned) is False and kept.exists(), "a name another call owns is not touched"
+    finally:
+        release.set()
+
+
+def test_no_module_swallows_the_failure_of_a_file_removal():
+    import pathlib
+    import re
+    root = pathlib.Path(__file__).resolve().parent.parent
+    silent = re.compile(r"os\.(remove|unlink)\([^)\n]*\)\s*\n\s*except OSError:\s*\n\s*pass")
+    offenders = [str(path.relative_to(root)) for folder in ("core", "modules") for path in (root / folder).rglob("*.py")
+                 if silent.search(path.read_text(encoding="utf-8"))]
+    assert offenders == [], "use core.storage.remove_file or discard: a leftover must be named"

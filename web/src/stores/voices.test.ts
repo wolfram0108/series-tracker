@@ -139,4 +139,10 @@ describe("voices store", () => {
     store.apply(event(6, { status: "aligning", state: "running" }))
     expect(store.forEpisode(7, 1, 2)[0]).toMatchObject({ status: "ready" })
   })
+  it("drops a packet of an earlier start even about a voice-over the later start has not mentioned", () => {
+    const store = useVoicesStore()
+    store.apply(event(1, { epoch: 2, voice_key: "red", voice_label: "RedHeadSound" }))
+    store.apply(event(900, { epoch: 1 }))
+    expect(store.forEpisode(7, 1, 2).map((v) => v.voice_key)).toEqual(["red"])
+  })
 })
