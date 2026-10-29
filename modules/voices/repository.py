@@ -30,7 +30,8 @@ def _in(steps: Iterable[S]) -> tuple[str, tuple[str, ...]]:
 POINTERS = (("output_path", "artifact"), ("move_from", "artifact"), ("aligned_path", "path"), ("temp_path", "path"))
 HANDED_OVER = "handed over"
 _UPSERT = ("ON CONFLICT (path) DO UPDATE SET kind=excluded.kind, error=excluded.error, "
-           "scope=COALESCE(excluded.scope, voice_cleanup.scope), updated_at=excluded.updated_at")
+           "scope=COALESCE(excluded.scope, voice_cleanup.scope), version=voice_cleanup.version + 1, "
+           "updated_at=excluded.updated_at")
 
 
 def _hand_over(where: str, args: tuple, *, files: bool = True) -> list[tuple[str, tuple]]:
@@ -272,8 +273,18 @@ class VoicesRepository:
     async def cleanup_list(self) -> list[dict[str, Any]]:
         return await self._db.fetch_all("SELECT * FROM voice_cleanup ORDER BY updated_at")
 
-    async def cleanup_done(self, path: str) -> None:
-        await self._db.execute("DELETE FROM voice_cleanup WHERE path=?", (path,))
+    async def cleanup_done(self, path: str, version: int) -> bool:
+        """End the entry in the version that was read; an entry handed over again since is not touched."""
+        return bool(await self._db.execute("DELETE FROM voice_cleanup WHERE path=? AND version=?", (path, version)))
+
+    async def note_cleanup_error(self, path: str, error: str, only_if: str | None = None) -> None:
+        """Remember why an attempt did not end the entry (`only_if`: only when it still says that); the version
+        stays, since the obligation is the same."""
+        if only_if is None:
+            await self._db.execute("UPDATE voice_cleanup SET error=?, updated_at=? WHERE path=?", (error, _now(), path))
+        else:
+            await self._db.execute("UPDATE voice_cleanup SET error=?, updated_at=? WHERE path=? AND error=?",
+                                   (error, _now(), path, only_if))
 
     async def drop_episode(self, series_id: int, season: int, episode: int, folders: Iterable[str]) -> None:
         """An episode left the plan: its rows go, and everything they owned, with the `folders`, to the journal."""

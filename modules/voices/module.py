@@ -105,6 +105,13 @@ is not removed by a deferred attempt. No clock takes part.
 Every submission writes in folders of its own (`<out>/<key>`, `<cache>/<key>`), so a job that is not
 confirmed stopped can not put its files into the result of a later job, whatever names they share.
 
+A removal waits for every area of ownership that overlaps its path, a folder above or below it included: the
+folder of a job of a live voice-over and the folder of a job or a submission on the journal that is not confirmed
+stopped. An entry is ended in the version that was read: a name handed over again meanwhile keeps its new entry.
+A submission is on its way until its outcome is handled (`_sending`): no look at the service ends its entry or
+sends its voice-overs anew meanwhile, and a job accepted for voice-overs that are gone is cancelled at once.
+An operation carries out the entries it has just handed over; older ones belong to the recovery.
+
 Setting `voices.max_temp_episodes` (integer; 0 or unset: no limit) caps how many episodes may hold
 temporary files at once: further voice-overs stay planned until an episode settles.
 
@@ -141,7 +148,7 @@ from .layout import download_chain, plan_layout
 from .lifecycle import FINAL, WORKING
 from .outputs import Output, SidecarOutput
 from .recovery import Recovery
-from .repository import VoicesRepository
+from .repository import HANDED_OVER, VoicesRepository
 from .settings import PREFIX, VoiceSettings, parse
 from .states import public_hint, public_state
 
@@ -191,6 +198,8 @@ class VoicesModule(BaseModule):
         # The number of a job and its ending arrive in any order; each looks for the other under this lock.
         self._claim_lock = asyncio.Lock()
         self._unclaimed: OrderedDict[str, AlignmentJob] = OrderedDict()
+        # Keys of submissions whose request is on its way: the service may still take such a job.
+        self._sending: set[str] = set()
         self._watched: set[str] = set()
         self._epoch = 0
         self._epoch_lock = asyncio.Lock()
@@ -354,7 +363,7 @@ class VoicesModule(BaseModule):
             self.log.info("сериал %d: озвучка %s серии %d вышла из плана", series_id,
                           gone["voice_label"], gone["episode"])
             await self._announce(gone, E.REMOVED)
-        await self._sweep_cleanup()
+        await self._work_off()
         after = await self.repo.for_series(series_id)
         await self._announce_difference(before, [row for row in after
                                                  if (row["season"], row["episode"], row["voice_key"]) in touched])
@@ -402,7 +411,7 @@ class VoicesModule(BaseModule):
     async def _forget_all(self, series_id: int) -> None:
         for gone in await self.repo.drop_unplanned(series_id, set()):
             await self._announce(gone, E.REMOVED)
-        await self._sweep_cleanup()
+        await self._work_off()
 
     async def _recheck_ready(self, series_id: int) -> None:
         """A ready dub whose file vanished from the temporary directory is downloaded again."""
@@ -646,7 +655,7 @@ class VoicesModule(BaseModule):
                 owed = await self._submit(series, season, episode, reference, uid, ready) or owed
             await self._tidy(series_id, season, episode, root)
         await self._admit()
-        await self._sweep_cleanup()
+        await self._work_off()
         if restart:
             self.send_command("voices.dispatch", {"series_id": series_id})
         await self._sweep_scratch(series_id, {os.path.dirname(path) for path, _ in references.values()})
@@ -697,7 +706,7 @@ class VoicesModule(BaseModule):
             for row in stale:
                 # What the row owns, its job included, goes to the journal in the same transaction.
                 await self.repo.reset(row["id"], reason("reference_replaced"))
-            await self._sweep_cleanup()
+            await self._work_off()
             for row in stale:
                 await self._announce(row, E.STALE)
             self.log.info("сериал %d, s%02de%02d: референс заменён, дорожки устарели и удалены: %d",
@@ -744,7 +753,7 @@ class VoicesModule(BaseModule):
                 return
         folders = self._folders_of(group, episode_dir(root, series_id, season, episode))
         await self.repo.drop_episode(series_id, season, episode, folders)
-        await self._sweep_cleanup()
+        await self._work_off()
         for row in group:
             await self._announce(row, E.REMOVED)
         self.log.info("сериал %d, s%02de%02d: серии нет в плане и видео нет — дорожки удалены",
@@ -780,30 +789,49 @@ class VoicesModule(BaseModule):
                    if held)
 
     @staticmethod
-    def _written_to(path: str, rows: list[dict]) -> bool:
-        """True when a job of the service is writing in a folder the path lies in: what is there may be its."""
-        return any(path.startswith(row["out_dir"].rstrip(os.sep) + os.sep) for row in rows
-                   if row["status"] == S.ALIGNING and row["out_dir"])
+    def _overlap(one: str, other: str) -> bool:
+        """The same place, one inside the other, either way round."""
+        one, other = one.rstrip(os.sep), other.rstrip(os.sep)
+        return one == other or one.startswith(other + os.sep) or other.startswith(one + os.sep)
+
+    def _contested(self, path: str, rows: list[dict], entries: list[dict]) -> bool:
+        """True when something that may still write overlaps the path: a job of a live voice-over, or a job or a
+        submission on the journal that is not confirmed stopped (a file, the folder it writes in, or a folder above it)."""
+        return (any(self._overlap(path, row["out_dir"]) for row in rows if row["status"] == S.ALIGNING and row["out_dir"])
+                or any(self._overlap(path, entry["scope"]) for entry in entries
+                       if entry["kind"] in (JOB, SUBMISSION) and entry["scope"]))
 
     async def _sweep_cleanup(self) -> None:
-        """A pass over the journal now; what does not end here stays with the recovery."""
+        """A pass over the whole journal; what does not end here stays with the recovery."""
         for entry in await self.repo.cleanup_list():
             if not await self._clear(entry["path"]):
                 self._await_cleanup(entry["path"])
 
+    async def _work_off(self) -> None:
+        """Carry out what has just been handed over; entries tried before belong to the recovery."""
+        for entry in await self.repo.cleanup_list():
+            if entry["error"] == HANDED_OVER and not await self._clear(entry["path"]):
+                await self.repo.note_cleanup_error(entry["path"], "deferred", only_if=HANDED_OVER)
+                self._await_cleanup(entry["path"])
+
+    async def _finish(self, entry: dict) -> bool:
+        """End the entry in the version that was read: when the name was handed over again meanwhile, the entry
+        stays for the pass that belongs to the new hand-over."""
+        return await self.repo.cleanup_done(entry["path"], entry["version"])
+
     async def _clear(self, path: str) -> bool:
         """One attempt to finish a journal entry; True when it is over."""
-        entry = next((entry for entry in await self.repo.cleanup_list() if entry["path"] == path), None)
+        entries = await self.repo.cleanup_list()
+        entry = next((entry for entry in entries if entry["path"] == path), None)
         if entry is None:
             return True
         if entry["kind"] in (JOB, SUBMISSION):
             return await self._stop_job(entry)
         rows = await self.repo.all_rows()
         if self._held(path, rows):
-            await self.repo.cleanup_done(path)  # the name belongs to a live voice-over again: removing it destroys new work
-            return True
-        if self._written_to(path, rows):
-            return False  # the job that writes there ends first; the folder goes with its episode in any case
+            return await self._finish(entry)  # the name belongs to a live voice-over again: removing it destroys new work
+        if self._contested(path, rows, entries):
+            return False  # the job that may write there ends first
         try:
             await self._io(self._unlink, path, entry["kind"], timeout=REMOVE_TIMEOUT_S, owns=path)
         except FileNotFoundError:
@@ -811,10 +839,11 @@ class VoicesModule(BaseModule):
         except storage.StorageBusy:
             return False  # a removal that timed out has not ended: it may still act on this name
         except OSError as exc:
-            await self.repo.journal_cleanup(path, entry["kind"], str(exc))
+            await self.repo.note_cleanup_error(path, str(exc))
             self.log.error("не удалось удалить %s, повторим: %s", path, exc)
             return False
-        await self.repo.cleanup_done(path)
+        if not await self._finish(entry):
+            return False
         self.log.info("очистка выполнена: %s", path)
         return True
 
@@ -823,6 +852,8 @@ class VoicesModule(BaseModule):
         confirmed stop ends the entry, and then the folder the job wrote in is cleaned."""
         job_id = entry["path"]
         if entry["kind"] == SUBMISSION:
+            if entry["path"] in self._sending:
+                return False  # the request is on its way: the service may take the job after any look at it
             try:
                 found = await self.request("conform.job.find", {"key": entry["path"]}, timeout=30)
             except (BusRequestError, asyncio.TimeoutError):
@@ -837,10 +868,12 @@ class VoicesModule(BaseModule):
                 return False
             if not reply.get("done"):
                 return False
-        scope = entry.get("scope")
+        scope = entry["scope"]
         if scope:
             await self.repo.journal_cleanup(scope, TREE, "job stopped")
-        await self.repo.cleanup_done(entry["path"])
+        if not await self._finish(entry):
+            return False
+        self._recovery.poke("cleanup:")  # what waited for this job to stop may go on now
         if scope and not await self._clear(scope):
             self._await_cleanup(scope)
         return True
@@ -886,6 +919,17 @@ class VoicesModule(BaseModule):
         await self._io(lambda: [os.makedirs(folder, exist_ok=True) for folder in (out_dir, cache_dir)],
                        owns=(out_dir, cache_dir))
         await self.repo.mark_submitting([row["id"] for row in ready], key, uid, reference, out_dir)
+        self._sending.add(key)
+        try:
+            return await self._send(label, key, ready, reference, out_dir, cache_dir)
+        finally:
+            self._sending.discard(key)
+            self._recovery.poke("cleanup:")  # what waited for the answer to this submission may go on now
+            self._recovery.poke("submission:")
+
+    async def _send(self, label: str, key: str, ready: list[dict], reference: str, out_dir: str,
+                    cache_dir: str) -> bool:
+        """Send the job and take its outcome: until this returns the service may still take the job."""
         try:
             reply = SubmitReply.model_validate(await self.request("conform.submit", {
                 "ref": reference, "dubs": [row["temp_path"] for row in ready],
@@ -909,7 +953,7 @@ class VoicesModule(BaseModule):
                 await self._announce(row)
             self.log.warning("%s: задача выравнивания отклонена: %s", label, describe(reply.reason))
             return False
-        await self._attach(key, reply.job_id)
+        await self._attach(key, reply.job_id, out_dir)
         return False
 
     async def _ask_service(self, key: str, rows: list[dict]) -> None:
@@ -918,20 +962,26 @@ class VoicesModule(BaseModule):
             await self._announce(row)
         self._await_submission(key)
 
-    async def _attach(self, key: str, job_id: str) -> None:
-        """The service has the job of this key: its voice-overs get the number, an early ending is applied."""
+    async def _attach(self, key: str, job_id: str, scope: str | None = None) -> None:
+        """The service has the job of this key: its voice-overs get the number, an early ending is applied. A job
+        that no voice-over waits for any more (the rows were reset or deleted while the request was on its way)
+        is handed to cancellation with the folder it writes in."""
         async with self._claim_lock:
             await self.repo.attach_job(key, job_id)
-            for row in await self.repo.by_key(key):
-                if row["job_id"] == job_id:
-                    await self._announce(row)
+            mine = [row for row in await self.repo.by_key(key) if row["job_id"] == job_id]
+            for row in mine:
+                await self._announce(row)
             early = self._unclaimed.pop(job_id, None)
-            if early is not None:
+            if early is not None and mine:
                 await self._apply_job(early)
+        if not mine:
+            await self._cancel_job(job_id, scope)
 
     async def _recover_one(self, key: str) -> bool:
         """Ask the service about a job sent without an answer: it names the job, or it never got it and the
-        voice-overs are sent anew. False when the service cannot say."""
+        voice-overs are sent anew. False when the service cannot say, or while the request is still on its way."""
+        if key in self._sending:
+            return False
         try:
             reply = await self.request("conform.job.find", {"key": key}, timeout=30)
         except (BusRequestError, asyncio.TimeoutError):
@@ -1072,7 +1122,7 @@ class VoicesModule(BaseModule):
                 or any([await self._io(os.path.isdir, folder) for folder in folders])):
             return
         await self.repo.settle_episode(series_id, season, episode, folders)
-        await self._sweep_cleanup()
+        await self._work_off()
         self.publish_event("voices.episode.settled",
                            {"series_id": series_id, "season": season, "episode": episode})
 
@@ -1087,6 +1137,6 @@ class VoicesModule(BaseModule):
             series_id, folders or {os.path.join(await self._temp_root(), str(series_id))})
         for row in rows:
             await self._announce(row, E.REMOVED)
-        await self._sweep_cleanup()
+        await self._work_off()
         await self._admit()
         self.publish_event("series.purged", {"series_id": series_id, "owner": self.name})

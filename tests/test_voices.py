@@ -2410,6 +2410,7 @@ async def test_an_old_job_that_is_not_confirmed_stopped_cannot_put_its_bytes_int
     actual = await voices.repo.for_series(7)
     assert all(r["ref_uid"] == "u1-new" for r in actual)
     assert all(Path(r["output_path"]).read_bytes() == b"new-reference-audio" for r in actual)
+    assert os.path.isdir(old_submit["out_dir"]), "the folder of a job not confirmed stopped goes with no episode"
 
 
 @pytest.mark.asyncio
@@ -2582,3 +2583,123 @@ async def test_a_failed_voice_over_that_leaves_the_plan_hands_its_file_to_the_jo
 
     await until_true(file_gone, (os.path.exists(red["path"]), await voices.repo.cleanup_list()))
     assert {r["voice_key"] for r in await voices.repo.for_series(7)} == {"blackcat"}
+
+
+@pytest.mark.asyncio
+async def test_the_folder_above_an_unconfirmed_job_stays_while_the_job_may_write(dubs, monkeypatch):
+    monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.05)
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    await quiet(voices)
+    folder = neighbours.submits[0]["out_dir"]
+    series_folder = os.path.dirname(os.path.dirname(os.path.dirname(folder)))
+    track = os.path.join(folder, "still-being-written.flac")
+    touch(track, b"in progress")
+    neighbours.cancel_done = False
+    purged = bus.subscribe("series.purged")
+    probe.publish_event("series.deleted", {"series_id": 7})
+    await asyncio.wait_for(purged.queue.get(), 5)
+    await asyncio.sleep(0.3)
+    entries = {e["path"]: e for e in await voices.repo.cleanup_list()}
+    assert entries["job-1"]["scope"] == folder and series_folder in entries, "the folder above waits on the journal"
+    assert os.path.exists(track) and os.path.isdir(series_folder)
+    neighbours.cancel_done = True
+
+    async def everything_gone():
+        return await voices.repo.cleanup_list() == [] and not os.path.exists(series_folder)
+
+    await until_true(everything_gone, (await voices.repo.cleanup_list(), os.path.exists(series_folder)))
+
+
+@pytest.mark.asyncio
+async def test_an_entry_is_ended_only_in_the_version_that_was_read(dubs):
+    repo = dubs[2].repo
+    await repo.journal_cleanup("/some/name", "path", "first hand-over")
+    read = (await repo.cleanup_list())[0]
+    await repo.note_cleanup_error("/some/name", "a failed attempt")  # the same obligation: the version stays
+    assert (await repo.cleanup_list())[0]["version"] == read["version"]
+    await repo.journal_cleanup("/some/name", "path", "handed over again")
+    assert await repo.cleanup_done("/some/name", read["version"]) is False
+    assert [e["path"] for e in await repo.cleanup_list()] == ["/some/name"]
+    assert await repo.cleanup_done("/some/name", (await repo.cleanup_list())[0]["version"]) is True
+
+
+@pytest.mark.asyncio
+async def test_a_pass_that_removed_the_old_file_does_not_end_the_entry_of_its_new_owner(dubs, tmp_path, monkeypatch):
+    voices = dubs[2]
+    path = str(tmp_path / "reused.flac")
+    touch(path, b"old")
+    await voices.repo.journal_cleanup(path, "path", "old owner")
+    real = voices.repo.cleanup_done
+
+    async def when_a_new_owner_arrives(name, version):
+        await voices.repo.journal_cleanup(name, "path", "new owner")  # between the removal and the end of the pass
+        return await real(name, version)
+
+    monkeypatch.setattr(voices.repo, "cleanup_done", when_a_new_owner_arrives)
+    assert await voices._clear(path) is False
+    assert [e["path"] for e in await voices.repo.cleanup_list()] == [path]
+
+
+async def sending_held_back(voices, monkeypatch):
+    """The request of a submission stays on its way until `release` is set."""
+    entered, release = asyncio.Event(), asyncio.Event()
+    request = voices.request
+
+    async def delayed(topic, payload=None, **kwargs):
+        if topic == "conform.submit":
+            entered.set()
+            await release.wait()
+        return await request(topic, payload, **kwargs)
+
+    monkeypatch.setattr(voices, "request", delayed)
+    return entered, release
+
+
+@pytest.mark.asyncio
+async def test_a_submission_accepted_after_its_series_was_deleted_is_cancelled(dubs, monkeypatch):
+    monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.05)
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs, finished=False)
+    entered, release = await sending_held_back(voices, monkeypatch)
+    for fetch in neighbours.fetches:
+        touch(fetch["path"], b"video")
+        finish(probe, fetch["key"])
+    await asyncio.wait_for(entered.wait(), 3)
+    key = next(r["submit_key"] for r in await voices.repo.for_series(7))
+    try:
+        await voices.on_series_deleted(Envelope("series.deleted", "event", {"series_id": 7}))
+        await asyncio.sleep(0.3)
+        assert (key, "submission") in {(e["path"], e["kind"]) for e in await voices.repo.cleanup_list()}, \
+            "while the request is on its way no look at the service ends the entry"
+    finally:
+        release.set()
+
+    async def cancelled_and_cleared():
+        return set(neighbours.conform_cancels) == {"job-1"} and await voices.repo.cleanup_list() == []
+
+    await until_true(cancelled_and_cleared, (neighbours.conform_cancels, await voices.repo.cleanup_list()))
+    assert len(neighbours.submits) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_job_accepted_for_voice_overs_that_are_gone_is_cancelled_at_once(dubs):
+    voices, neighbours = dubs[2], dubs[1]
+    await voices._attach("a-key-nobody-waits-for", "job-77", "/some/folder/of/the/job")
+    assert neighbours.conform_cancels == ["job-77"] and await voices.repo.cleanup_list() == []
+
+
+@pytest.mark.asyncio
+async def test_a_submission_on_its_way_is_not_sent_again_when_the_service_comes_back(dubs, monkeypatch):
+    monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.05)
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs, finished=False)
+    entered, release = await sending_held_back(voices, monkeypatch)
+    for fetch in neighbours.fetches:
+        touch(fetch["path"], b"video")
+        finish(probe, fetch["key"])
+    await asyncio.wait_for(entered.wait(), 3)
+    probe.publish_event("conform.daemon.up", {})
+    await asyncio.sleep(0.4)
+    release.set()
+    await job_numbers_known(probe, {"job-1"})
+    await quiet(voices)
+    assert len(neighbours.submits) == 1

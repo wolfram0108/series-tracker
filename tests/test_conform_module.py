@@ -570,7 +570,7 @@ async def test_the_outcome_of_a_submission_is_what_was_proved_not_the_kind_of_er
 
 @pytest.mark.asyncio
 async def test_a_failure_to_read_the_list_of_jobs_is_no_answer_not_no_job():
-    for body in ("{broken", '{"not": "a list"}'):
+    for body in ("{broken", '{"not": "a list"}', '[{"label": "unreadable job"}]'):
         http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request, body=body: httpx.Response(200, text=body)))
         bridge = ConformModule(Bus(), DaemonClient("http://daemon", http))
         bridge._daemon["up"] = True
