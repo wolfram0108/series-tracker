@@ -2703,3 +2703,43 @@ async def test_a_submission_on_its_way_is_not_sent_again_when_the_service_comes_
     await job_numbers_known(probe, {"job-1"})
     await quiet(voices)
     assert len(neighbours.submits) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_name_is_owned_before_the_removal_looks_at_who_holds_it(dubs, tmp_path, monkeypatch):
+    from core import storage
+    voices = dubs[2]
+    path = str(tmp_path / "track.flac")
+    touch(path, b"old")
+    await voices.repo.journal_cleanup(path, "path", "handed over")
+    go, outcome = asyncio.Event(), []
+
+    async def a_new_owner():
+        await go.wait()
+        try:
+            await storage.call(lambda: None, owns=path)
+            outcome.append("took the name")
+        except storage.StorageBusy:
+            outcome.append("had to wait")
+
+    other = asyncio.create_task(a_new_owner())
+    real = voices.repo.all_rows
+
+    async def looking(*args):
+        found = await real(*args)
+        go.set()
+        await asyncio.sleep(0.05)  # the pass has looked and not yet removed
+        return found
+
+    monkeypatch.setattr(voices.repo, "all_rows", looking)
+    assert await voices._clear(path) is True
+    await other
+    assert outcome == ["had to wait"] and not os.path.exists(path)
+
+
+@pytest.mark.asyncio
+async def test_a_job_found_by_its_key_that_nothing_owns_is_cancelled(dubs):
+    voices, neighbours = dubs[2], dubs[1]
+    neighbours.sent_keys["a-key-nobody-owns"] = "job-88"
+    assert await voices._recover_one("a-key-nobody-owns") is True
+    assert neighbours.conform_cancels == ["job-88"] and await voices.repo.cleanup_list() == []

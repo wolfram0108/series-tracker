@@ -105,7 +105,7 @@ is not removed by a deferred attempt. No clock takes part.
 Every submission writes in folders of its own (`<out>/<key>`, `<cache>/<key>`), so a job that is not
 confirmed stopped can not put its files into the result of a later job, whatever names they share.
 
-A removal waits for every area of ownership that overlaps its path, a folder above or below it included: the
+A removal owns the name before it looks at who holds it, and waits for every area of ownership that overlaps its path, a folder above or below it included: the
 folder of a job of a live voice-over and the folder of a job or a submission on the journal that is not confirmed
 stopped. An entry is ended in the version that was read: a name handed over again meanwhile keeps its new entry.
 A submission is on its way until its outcome is handled (`_sending`): no look at the service ends its entry or
@@ -820,13 +820,24 @@ class VoicesModule(BaseModule):
         return await self.repo.cleanup_done(entry["path"], entry["version"])
 
     async def _clear(self, path: str) -> bool:
-        """One attempt to finish a journal entry; True when it is over."""
-        entries = await self.repo.cleanup_list()
-        entry = next((entry for entry in entries if entry["path"] == path), None)
+        """One attempt to finish a journal entry; True when it is over. The name is owned before anything about it
+        is looked at, so a voice-over that takes the name meanwhile waits for the end of the removal."""
+        entry = next((entry for entry in await self.repo.cleanup_list() if entry["path"] == path), None)
         if entry is None:
             return True
         if entry["kind"] in (JOB, SUBMISSION):
             return await self._stop_job(entry)
+        try:
+            with storage.hold(path):
+                return await self._remove(path)
+        except storage.StorageBusy:
+            return False  # another removal, or a call that timed out and has not ended, owns the name
+
+    async def _remove(self, path: str) -> bool:
+        entries = await self.repo.cleanup_list()
+        entry = next((entry for entry in entries if entry["path"] == path), None)
+        if entry is None:
+            return True
         rows = await self.repo.all_rows()
         if self._held(path, rows):
             return await self._finish(entry)  # the name belongs to a live voice-over again: removing it destroys new work
@@ -836,8 +847,6 @@ class VoicesModule(BaseModule):
             await self._io(self._unlink, path, entry["kind"], timeout=REMOVE_TIMEOUT_S, owns=path)
         except FileNotFoundError:
             pass
-        except storage.StorageBusy:
-            return False  # a removal that timed out has not ended: it may still act on this name
         except OSError as exc:
             await self.repo.note_cleanup_error(path, str(exc))
             self.log.error("не удалось удалить %s, повторим: %s", path, exc)
@@ -991,16 +1000,22 @@ class VoicesModule(BaseModule):
         rows = await self.repo.by_key(key)
         waiting = [row for row in rows if row["status"] == S.ALIGNING and not row["job_id"]]
         if reply.get("job_id"):
-            if waiting:  # no voice-over waits any more: the journal entry of the submission owns the job
-                self.log.info("задача %s принята сервисом, ответ потерян: номер восстановлен", reply["job_id"])
-                await self._attach(key, reply["job_id"])
-                self._await_job(reply["job_id"], now=True)  # the duty to learn its end starts with its number
+            job_id = reply["job_id"]
+            if waiting:
+                self.log.info("задача %s принята сервисом, ответ потерян: номер восстановлен", job_id)
+                await self._attach(key, job_id)
+                self._await_job(job_id, now=True)  # the duty to learn its end starts with its number
+            elif not any(row["job_id"] == job_id for row in rows) and not await self._journaled(key):
+                await self._cancel_job(job_id)  # no voice-over and no journal entry owns this job
             return True
         await self.repo.release_submission(key)
         self.log.info("задачу %s сервис не получил, озвучки отправятся заново", key)
         for series_id in {row["series_id"] for row in rows}:
             self._kick(series_id)
         return True
+
+    async def _journaled(self, path: str) -> bool:
+        return any(entry["path"] == path for entry in await self.repo.cleanup_list())
 
     async def _cancel_job(self, job_id: str, scope: str | None = None) -> None:
         """Stop a job nobody needs: written to the journal first, with the folder it writes in, then asked to stop."""
