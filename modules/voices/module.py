@@ -94,6 +94,7 @@ import json
 import os
 import re
 import shutil
+import time
 import uuid
 from collections import OrderedDict, defaultdict
 
@@ -154,6 +155,7 @@ class VoicesModule(BaseModule):
         # The number of a job and its ending arrive in any order; each looks for the other under this lock.
         self._claim_lock = asyncio.Lock()
         self._unclaimed: OrderedDict[str, AlignmentJob] = OrderedDict()
+        self._watched: set[str] = set()
         self._epoch = 0
         self._epoch_lock = asyncio.Lock()
         self._rev = 0
@@ -189,9 +191,20 @@ class VoicesModule(BaseModule):
             self._kick(series_id)
 
 
-    async def _io(self, fn, *args, timeout: float = IO_TIMEOUT_S):
-        """A call into the storage that waits for a limited time."""
-        return await storage.call(fn, *args, timeout=timeout)
+    async def _io(self, fn, *args, timeout: float = IO_TIMEOUT_S, owns=()):
+        """A call into the storage that waits for a limited time; `owns` is what a changing call changes."""
+        return await storage.call(fn, *args, timeout=timeout, owns=owns)
+
+    def _when_free(self, path: str, series_id: int) -> None:
+        """A step that needs a path an unfinished storage call still owns waits for that call to end."""
+        if path not in self._watched:
+            self._watched.add(path)
+
+            def free() -> None:
+                self._watched.discard(path)
+                self._kick(series_id)
+
+            storage.when_free(path, free)
 
     async def _settings(self) -> VoiceSettings:
         """Every setting of the module in one read; a problem with a value is logged once, then the default is used."""
@@ -353,6 +366,9 @@ class VoicesModule(BaseModule):
             return
         path = temp_path(root or await self._temp_root(), row["series_id"], row["season"],
                          row["episode"], row["voice_key"])
+        if storage.busy(path):  # an earlier removal of this name has not ended: a file written now could be lost
+            self._when_free(path, row["series_id"])
+            return
         if not await self.repo.claim_download(row["id"], path):
             return
         self._fetching.discard(row["id"])
@@ -511,6 +527,8 @@ class VoicesModule(BaseModule):
                 await self._advance(series_id)
             except (BusRequestError, asyncio.TimeoutError, OSError) as exc:
                 self.log.warning("сериал %d: выравнивание озвучек отложено: %s", series_id, exc)
+                if isinstance(exc, (TimeoutError, OSError)):
+                    self._retry_later(series_id)
             except Exception:  # noqa: BLE001 - one series must not stop the others
                 self.log.exception("сериал %d: сбой оркестрации озвучек", series_id)
 
@@ -660,7 +678,11 @@ class VoicesModule(BaseModule):
             if path:
                 await self._discard(path)
 
-    def _unlink(self, path: str, kind: str) -> None:
+    def _unlink(self, path: str, kind: str, requested_ns: int) -> None:
+        # Whatever was written at this name after the removal was asked for is not what was meant to go;
+        # a difference between the clocks only weakens this check, the ownership of the path does not depend on it.
+        if os.stat(path).st_mtime_ns > requested_ns:
+            return
         if kind == TREE:
             shutil.rmtree(path)
         elif kind == ARTIFACT:
@@ -672,7 +694,7 @@ class VoicesModule(BaseModule):
         """Remove a file, an artifact or a tree. What cannot be removed goes to the cleanup journal and is
         tried again: a record of the file is never dropped before the file is gone."""
         try:
-            await self._io(self._unlink, path, kind, timeout=REMOVE_TIMEOUT_S)
+            await self._io(self._unlink, path, kind, time.time_ns(), timeout=REMOVE_TIMEOUT_S, owns=path)
         except FileNotFoundError:
             return True
         except OSError as exc:
@@ -693,6 +715,8 @@ class VoicesModule(BaseModule):
     async def _sweep_cleanup(self) -> None:
         rows = await self.repo.all_rows()
         for entry in await self.repo.cleanup_list():
+            if entry["kind"] != JOB and storage.busy(entry["path"]):
+                continue  # the removal that timed out has not ended: it may still act on this name
             if entry["kind"] != JOB and self._held(entry["path"], rows):
                 # The name belongs to a live voice-over again: removing it now would destroy new work.
                 await self.repo.cleanup_done(entry["path"])
@@ -706,7 +730,8 @@ class VoicesModule(BaseModule):
                     await self.repo.cleanup_done(entry["path"])
                 continue
             try:
-                await self._io(self._unlink, entry["path"], entry["kind"], timeout=REMOVE_TIMEOUT_S)
+                await self._io(self._unlink, entry["path"], entry["kind"], time.time_ns(), timeout=REMOVE_TIMEOUT_S,
+                               owns=entry["path"])
             except FileNotFoundError:
                 pass
             except OSError as exc:
@@ -726,7 +751,8 @@ class VoicesModule(BaseModule):
         """Complete a track move whose start is written down: safe to repeat after any interruption.
         False when the track is in neither place; the row is failed and announced then."""
         source, destination = row["move_from"], row["output_path"]
-        if not await self._io(self._output.settle, source, destination, timeout=MOVE_TIMEOUT_S):
+        if not await self._io(self._output.settle, source, destination, timeout=MOVE_TIMEOUT_S,
+                              owns=(source, destination)):
             await self.repo.mark_failed(row["id"], reason("track_vanished_on_move"))
             await self._announce(row)
             return False
@@ -745,6 +771,10 @@ class VoicesModule(BaseModule):
             return
         out_dir, cache_dir = job_folders(os.path.dirname(ready[0]["temp_path"]))
         key = uuid.uuid4().hex[:12]
+        for guarded in (out_dir, cache_dir, *[row["temp_path"] for row in ready]):
+            if storage.busy(guarded):  # the service would write where an unfinished removal may still act
+                self._when_free(guarded, series["id"])
+                return
         await self.repo.mark_submitting([row["id"] for row in ready], key, uid, reference, out_dir)
         try:
             reply = await self.request("conform.submit", {
@@ -926,6 +956,10 @@ class VoicesModule(BaseModule):
             await self._announce(row)
             return
         destination = self._output.destination(reference, row["voice_label"], source, await self._taken_paths(row))
+        for guarded in (destination, source):
+            if storage.busy(guarded):
+                self._when_free(guarded, row["series_id"])
+                return
         await self.repo.begin_move(row["id"], destination, source)
         if not await self._finish_move(await self.repo.get(row["id"]), reference):
             return

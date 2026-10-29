@@ -12,3 +12,12 @@ def stuck_test_guard():
     faulthandler.dump_traceback_later(STUCK_AFTER_S, exit=True)
     yield
     faulthandler.cancel_dump_traceback_later()
+
+
+@pytest.fixture(autouse=True)
+def storage_without_leftovers():
+    """What a test's stalled storage call still owns must not reach the next test."""
+    from core import storage
+    yield
+    storage._running.clear()
+    storage._waiting.clear()

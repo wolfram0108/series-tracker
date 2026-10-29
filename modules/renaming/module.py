@@ -267,7 +267,7 @@ class RenamingModule(BaseModule):
             os.makedirs(os.path.dirname(new_abs), exist_ok=True)
             os.rename(old_abs, new_abs)
 
-        await storage.call(_do)
+        await storage.call(_do, owns=(old_abs, new_abs))
         self.log.info("переименован: %s -> %s", old_rel, new_rel)
         return True
 

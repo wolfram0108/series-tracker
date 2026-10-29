@@ -378,15 +378,15 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
     tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
 
     if stopped:
-        await storage.call(_remove_file, tmp_out)
+        await storage.call(_remove_file, tmp_out, owns=tmp_out)
         return False, stopped
     if proc.returncode == 0:
         got = await _local_duration(tmp_out)
         if got <= 0 or (duration > 0 and got < duration * MIN_COMPLETE_FRACTION):
-            await storage.call(_remove_file, tmp_out)
+            await storage.call(_remove_file, tmp_out, owns=tmp_out)
             return False, (f"обрыв: скачано {got:.0f} с из ожидаемых ~{duration:.0f} с — "
                            "неполная загрузка")
-        await storage.call(os.replace, tmp_out, full_output_path)
+        await storage.call(os.replace, tmp_out, full_output_path, owns=(tmp_out, full_output_path))
         await on_progress({"phase": "download", "progress": 100, "eta": 0, "speed": 0.0})
         return True, ""
     last = tail.strip().splitlines()[-1] if tail.strip() else ""
@@ -413,6 +413,8 @@ async def download(video_url: str, full_output_path: str,
     """Two-phase video download. Supports direct ffmpeg copy and yt-dlp."""
     if not os.path.isabs(full_output_path):
         return False, "путь сохранения должен быть абсолютным"
+    if storage.busy(full_output_path):  # a removal of this name has not ended: a file written now could be lost
+        return False, "путь занят незавершённой файловой операцией (timeout)"
     await storage.call(os.makedirs, os.path.dirname(full_output_path), exist_ok=True)
     if await storage.call(os.path.exists, full_output_path):
         return True, "файл уже существует"
@@ -438,18 +440,18 @@ async def download(video_url: str, full_output_path: str,
                                 threads, HLS_FORMAT)
     if not isinstance(raw, str) and not _unavailable_error(raw[1]):
         # VK HLS fragments are fragile; progressive/DASH retry is reliable.
-        await storage.call(_cleanup_artifacts, full_output_path)
+        await storage.call(_cleanup_artifacts, full_output_path, owns=full_output_path)
         raw = await _phase_download(video_url, full_output_path, on_progress,
                                     threads, DASH_FALLBACK_FORMAT)
     if not isinstance(raw, str):
-        await storage.call(_cleanup_artifacts, full_output_path)
+        await storage.call(_cleanup_artifacts, full_output_path, owns=full_output_path)
         return raw  # (False, error)
     try:
         return await _phase_remux(raw, full_output_path, on_progress,
                                   duration)
     finally:
         # A partial final must never be accepted as ready (finding 50).
-        await storage.call(_cleanup_artifacts, full_output_path)
+        await storage.call(_cleanup_artifacts, full_output_path, owns=full_output_path)
 
 
 async def _phase_download(video_url: str, full_output_path: str,
@@ -564,10 +566,10 @@ async def _phase_remux(raw: str, full_output_path: str,
     tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
 
     if stopped:
-        await storage.call(_remove_file, tmp_out)
+        await storage.call(_remove_file, tmp_out, owns=tmp_out)
         return False, stopped
     if proc.returncode == 0:
-        await storage.call(os.replace, tmp_out, full_output_path)  # атомарная публикация
+        await storage.call(os.replace, tmp_out, full_output_path, owns=(tmp_out, full_output_path))  # атомарная публикация
         await on_progress({"phase": "remux", "progress": 100, "eta": 0,
                            "speed": 0.0})
         return True, ""

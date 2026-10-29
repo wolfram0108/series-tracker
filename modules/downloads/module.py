@@ -287,7 +287,7 @@ class DownloadsModule(BaseModule):
             if not await storage.call(os.path.isfile, winner_path):
                 continue
             try:
-                await storage.call(os.remove, path)
+                await storage.call(os.remove, path, owns=path)
             except FileNotFoundError:
                 pass
             except OSError as exc:
@@ -376,7 +376,7 @@ class DownloadsModule(BaseModule):
             # final отсутствует → загрузка не закончена → снести полуфайлы;
             # если final на месте — это законченный файл, не трогаем.
             if sp and not await storage.call(os.path.exists, sp):
-                await storage.call(self._remove_partial, sp, timeout=storage.REMOVE_TIMEOUT_S)
+                await storage.call(self._remove_partial, sp, timeout=storage.REMOVE_TIMEOUT_S, owns=sp)
         await self.repo.delete_for_series(series_id)
         await self._broadcast_queue()
         self.publish_event("series.purged",
@@ -405,7 +405,8 @@ class DownloadsModule(BaseModule):
 
         # 2) удалить недокачанный файл и временные артефакты yt-dlp
         if task.get("save_path"):
-            await storage.call(self._remove_partial, task["save_path"], timeout=storage.REMOVE_TIMEOUT_S)
+            await storage.call(self._remove_partial, task["save_path"], timeout=storage.REMOVE_TIMEOUT_S,
+                               owns=task["save_path"])
 
         # 3) снять задачу, вернуть элемент в pending (был downloading)
         await self.repo.delete_task(task_id)
@@ -618,7 +619,7 @@ class DownloadsModule(BaseModule):
                                  key, error, attempt, MAX_DOWNLOAD_ATTEMPTS, RETRY_DELAY_S)
                 await asyncio.sleep(RETRY_DELAY_S)
         except asyncio.CancelledError:
-            await storage.call(self._remove_partial, path, timeout=storage.REMOVE_TIMEOUT_S)
+            await storage.call(self._remove_partial, path, timeout=storage.REMOVE_TIMEOUT_S, owns=path)
             self._fetch_active.pop(key, None)
             self._fetch_pump()
             raise
@@ -626,7 +627,7 @@ class DownloadsModule(BaseModule):
             self.log.exception("сбой общей загрузки %s", key)
             ok, error, transient = False, f"внутренняя ошибка: {exc}", False
         if not ok:
-            await storage.call(self._remove_partial, path, timeout=storage.REMOVE_TIMEOUT_S)
+            await storage.call(self._remove_partial, path, timeout=storage.REMOVE_TIMEOUT_S, owns=path)
         self._fetch_active.pop(key, None)
         self.publish_event("downloads.fetch.finished", {
             "key": key, "ok": ok, "error": "" if ok else error, "transient": transient,

@@ -136,7 +136,7 @@ class SourcesModule(BaseModule):
         import os
         path = self._cache_path(env.payload["torrent_id"])
         await storage.call(
-            lambda: os.path.isfile(path) and os.remove(path))
+            lambda: os.path.isfile(path) and os.remove(path), owns=path)
 
     async def on_parse(self, env: Envelope) -> dict:
         url = env.payload["url"]
@@ -454,7 +454,7 @@ class SourcesModule(BaseModule):
             timeout=delivery.TORRENT_TIMEOUT)
         content = delivered.value
 
-        await storage.call(self._cache_write, torrent_id, content)
+        await storage.call(self._cache_write, torrent_id, content, owns=self._cache_path(torrent_id))
         return {"content_b64": base64.b64encode(content).decode(),
                 "from_cache": False}
 

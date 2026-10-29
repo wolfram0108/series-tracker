@@ -169,3 +169,17 @@ async def test_a_silent_remux_is_stopped_and_leaves_no_partial_file(tmp_path, mo
         ok, error = await asyncio.wait_for(ytdlp._phase_remux(str(tmp_path / "raw.ts"), target, noop, 10.0), 10)
     assert not ok and "нет прогресса" in error and _transient_download_error(error)
     assert not alive(spy.started[0].pid) and not os.path.exists(target + ".remux.mp4")
+
+
+@pytest.mark.asyncio
+async def test_a_download_does_not_start_on_a_name_an_unfinished_removal_still_owns(tmp_path):
+    import threading
+    from core import storage
+
+    release = threading.Event()
+    target = str(tmp_path / "e.mp4")
+    with pytest.raises(storage.StorageTimeout):
+        await storage.call(lambda: release.wait(5), timeout=0.05, owns=target + ".remux.mp4")
+    ok, error = await ytdlp.download("https://cdn.test/v.m3u8", target, noop, headers={"Referer": "x"})
+    assert not ok and "занят" in error and _transient_download_error(error)
+    release.set()

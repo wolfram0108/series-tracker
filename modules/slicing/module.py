@@ -84,13 +84,13 @@ async def run_ffmpeg(source: str, start: str, duration: str | None,
             raise
         if proc.returncode != 0:
             return False, stderr.decode("utf-8", "replace").strip()[-500:]
-        await storage.call(os.replace, tmp, output)  # атомарная публикация
+        await storage.call(os.replace, tmp, output, owns=(tmp, output))  # атомарная публикация
         success = True
         return True, ""
     finally:
         if not success:  # таймаут / ошибка / отмена — не оставляем tmp
             try:
-                await storage.call(os.remove, tmp)
+                await storage.call(os.remove, tmp, owns=tmp)
             except OSError:
                 pass
 
@@ -317,7 +317,7 @@ class SlicingModule(BaseModule):
                 except asyncio.CancelledError:
                     # серию удалили во время ffmpeg → снести недоделанный
                     # полуфайл (законченные ранее главы остаются)
-                    await storage.call(self._remove_file, out_abs)
+                    await storage.call(self._remove_file, out_abs, owns=out_abs)
                     self.log.info("нарезка %s прервана — недоделанный %s "
                                   "снесён", uid, out_rel)
                     return
@@ -408,7 +408,7 @@ class SlicingModule(BaseModule):
     async def _delete_source_file(self, uid: str, source: str) -> None:
         """Удаление файла-исходника + очистка ссылки на него. Общий код
         для авто-удаления по настройке и ручного удаления кнопкой."""
-        await storage.call(os.remove, source)
+        await storage.call(os.remove, source, owns=source)
         self.log.info("исходник удалён: %s", source)
         # final_filename — колонка downloads; чистим через её владельца
         self.send_command("downloads.item.set_filename",

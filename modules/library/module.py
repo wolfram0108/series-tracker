@@ -177,7 +177,8 @@ class LibraryModule(BaseModule):
         for child in await self._sliced_files(series_id):
             paths.append(child["file_path"])
         for rel in paths:
-            await storage.call(self._move_one, old_base, new_base, rel, timeout=storage.MOVE_TIMEOUT_S)
+            await storage.call(self._move_one, old_base, new_base, rel, timeout=storage.MOVE_TIMEOUT_S,
+                               owns=(os.path.join(old_base, rel), os.path.join(new_base, rel)))
 
     async def _sliced_files(self, series_id: int) -> list[dict]:
         try:

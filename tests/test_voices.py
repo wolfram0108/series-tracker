@@ -1784,11 +1784,70 @@ async def test_a_removal_that_the_storage_does_not_answer_is_journaled_not_await
 
     voices = dubs[2]
     monkeypatch.setattr("modules.voices.module.REMOVE_TIMEOUT_S", 0.1)
-    monkeypatch.setattr(type(voices), "_unlink", staticmethod(lambda path, tree: time.sleep(0.6)))
+    monkeypatch.setattr(type(voices), "_unlink", staticmethod(lambda path, kind, requested: time.sleep(0.6)))
     started = time.monotonic()
     assert await voices._discard("/some/slow/file") is False
     assert time.monotonic() - started < 0.5
     assert [entry["path"] for entry in await voices.repo.cleanup_list()] == ["/some/slow/file"]
+
+
+async def stalled_removal(path, release):
+    """A removal of `path` that the storage does not answer: the wait ends, the call goes on."""
+    from core import storage
+    with pytest.raises(storage.StorageTimeout):
+        await storage.call(lambda: release.wait(10), timeout=0.05, owns=path)
+
+
+@pytest.mark.asyncio
+async def test_a_name_whose_removal_has_not_ended_is_not_given_to_a_new_download_until_it_has(dubs):
+    import threading
+
+    probe, neighbours, voices, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    await quiet(voices)
+    taken = neighbours.fetches[0]["path"]
+    release = threading.Event()
+    await stalled_removal(taken, release)
+    neighbours.fetches.clear()
+    await voices.repo.requeue_interrupted()  # every download is waiting to be started again
+    await voices._admit()
+    assert taken not in [fetch["path"] for fetch in neighbours.fetches]  # the other names go on
+    assert len(neighbours.fetches) == 2
+    release.set()
+    await settled(neighbours, 3)  # the name is free again: the voice-over takes it
+    assert taken in [fetch["path"] for fetch in neighbours.fetches]
+
+
+@pytest.mark.asyncio
+async def test_the_cleanup_sweep_leaves_an_entry_alone_while_its_removal_still_runs(dubs, tmp_path):
+    import threading
+
+    voices = dubs[2]
+    path = str(tmp_path / "stuck.flac")
+    touch(path, b"flac")
+    release = threading.Event()
+    await stalled_removal(path, release)
+    await voices.repo.journal_cleanup(path, "path", "timed out")
+    await voices._sweep_cleanup()
+    assert [entry["path"] for entry in await voices.repo.cleanup_list()] == [path] and os.path.exists(path)
+    release.set()
+    await asyncio.sleep(0.2)
+    await voices._sweep_cleanup()
+    assert await voices.repo.cleanup_list() == [] and not os.path.exists(path)
+
+
+@pytest.mark.asyncio
+async def test_a_file_written_after_a_removal_was_asked_for_is_not_the_one_meant(dubs, tmp_path):
+    import time
+
+    voices = dubs[2]
+    path = str(tmp_path / "later.flac")
+    touch(path, b"written after the request")
+    voices._unlink(path, "path", time.time_ns() - 10**10)
+    assert os.path.exists(path)
+    voices._unlink(path, "path", time.time_ns() + 10**9)
+    assert not os.path.exists(path)
 
 
 async def ready_to_send(dubs, monkeypatch):
