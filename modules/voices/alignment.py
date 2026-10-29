@@ -8,8 +8,7 @@ from __future__ import annotations
 import os
 
 from core.contracts import AlignmentJob, DubResult, JobStatus
-
-from .reasons import reason
+from core.reasons import reason
 
 OUT_DIR = "_aligned"
 CACHE_DIR = "_cache"

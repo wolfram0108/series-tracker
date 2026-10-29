@@ -13,6 +13,8 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 import httpx
 
+from core.reasons import reason
+
 from .retry import send_with_retry
 
 ORIGIN = "https://kodikplayer.com"
@@ -110,7 +112,7 @@ def parse_signatures(page: str) -> dict[str, str]:
     found = {name: (number or text) for name, number, text in _VAR.findall(page)}
     missing = [name for name in _SIGNED if name not in found]
     if missing:
-        raise KodikError(f"в iframe Kodik нет параметров {missing}: разметка изменилась")
+        raise KodikError(reason("kodik_params_missing", missing=", ".join(missing)))
     return {name: found[name] for name in _SIGNED}
 
 
@@ -135,15 +137,15 @@ async def open_session(http: httpx.AsyncClient, url: str, referer: str) -> Kodik
             url, headers={"Referer": referer, "User-Agent": USER_AGENT},
             timeout=REQUEST_TIMEOUT, follow_redirects=True))
     except httpx.HTTPError as exc:
-        raise KodikError(f"Kodik недоступен: {exc}", transient=True) from exc
+        raise KodikError(reason("player_unreachable", player="Kodik", error=str(exc)), transient=True) from exc
     if response.status_code >= 500 or response.status_code == 429:
-        raise KodikError(f"Kodik ответил {response.status_code}", transient=True)
+        raise KodikError(reason("player_status", player="Kodik", status=response.status_code), transient=True)
     if response.status_code != 200:
-        raise KodikError(f"Kodik ответил {response.status_code}")
+        raise KodikError(reason("player_status", player="Kodik", status=response.status_code))
     page = response.text
     episodes = parse_episodes(page)
     if not episodes:
-        raise KodikError("в iframe Kodik нет списка серий")
+        raise KodikError(reason("kodik_no_episode_list"))
     return KodikSession(iframe_url=url, signed=parse_signatures(page),
                         episodes=episodes, voices=parse_voices(page))
 
@@ -152,7 +154,7 @@ async def episode_qualities(http: httpx.AsyncClient, session: KodikSession,
                             episode: int) -> dict[int, str]:
     """HLS link per quality (height) of one episode."""
     if episode not in session.episodes:
-        raise KodikError(f"у озвучки Kodik нет серии {episode}")
+        raise KodikError(reason("kodik_no_episode", episode=episode))
     episode_id, episode_hash = session.episodes[episode]
     base = session.iframe_url.split("?")[0]
     payload = {**session.signed, "bad_user": "false", "cdn_is_working": "true",
@@ -164,15 +166,15 @@ async def episode_qualities(http: httpx.AsyncClient, session: KodikSession,
         response = await send_with_retry(lambda: http.post(
             FTOR_URL, data=payload, headers=headers, timeout=REQUEST_TIMEOUT))
     except httpx.HTTPError as exc:
-        raise KodikError(f"Kodik недоступен: {exc}", transient=True) from exc
+        raise KodikError(reason("player_unreachable", player="Kodik", error=str(exc)), transient=True) from exc
     if response.status_code >= 500 or response.status_code == 429:
-        raise KodikError(f"Kodik ответил {response.status_code}", transient=True)
+        raise KodikError(reason("player_status", player="Kodik", status=response.status_code), transient=True)
     if response.status_code != 200:
-        raise KodikError(f"Kodik ответил {response.status_code}")
+        raise KodikError(reason("player_status", player="Kodik", status=response.status_code))
     try:
         links = response.json().get("links")
     except ValueError as exc:
-        raise KodikError("Kodik вернул не JSON") from exc
+        raise KodikError(reason("player_not_json", player="Kodik")) from exc
     qualities: dict[int, str] = {}
     for height, items in (links or {}).items():
         src = items[0].get("src", "") if isinstance(items, list) and items else ""
@@ -181,7 +183,7 @@ async def episode_qualities(http: httpx.AsyncClient, session: KodikSession,
         link = src if src.startswith(("http", "//")) else rot18_b64(src)
         qualities[int(height)] = "https:" + link if link.startswith("//") else link
     if not qualities:
-        raise KodikError("Kodik не отдал ссылок на серию")
+        raise KodikError(reason("kodik_no_links"))
     return qualities
 
 

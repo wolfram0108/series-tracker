@@ -20,6 +20,8 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from core.reasons import describe, reason
+
 from .base import BaseVideoProvider, StreamUnavailable
 from .players import (PLAYER_ORDER, AllVideoPlayer, PlayerAdapter, PlayerRef)
 from .vibix import (Episode, KeyStore, Stream, VibixProtocolError,
@@ -261,11 +263,11 @@ class RuchimeProvider(BaseVideoProvider):
         response = await self._fetch_episode_page(http, page_url, headers, sem)
         if response is None:
             info.page_failed = True
-            info.reason = "страница недоступна"
+            info.reason = reason("page_unreachable")
             return info
         if response.status_code != 200:
             info.page_failed = True
-            info.reason = f"страница ответила {response.status_code}"
+            info.reason = reason("page_status", status=response.status_code)
             return info
         text = html.unescape(response.text)
         for adapter in PLAYER_ORDER:
@@ -306,7 +308,7 @@ class RuchimeProvider(BaseVideoProvider):
                                       return_exceptions=True)
         for item, probe in zip(targets, probes):
             if isinstance(probe, Exception):
-                item.reason = f"{adapter.name}: {probe}"
+                item.reason = reason("player_failed", player=adapter.name, cause=str(probe))
                 item.player_reasons[adapter.name] = item.reason
                 logger.warning("%s probe failed for %s: %s",
                                adapter.name, item.page_url, probe)
@@ -332,7 +334,7 @@ class RuchimeProvider(BaseVideoProvider):
             logger.warning("Vibix playlist unavailable for %s: %s",
                            targets[0].page_url, exc)
             for item in targets:
-                item.reason = f"Vibix: {exc}"
+                item.reason = reason("player_failed", player="Vibix", cause=str(exc))
                 item.player_reasons["vibix"] = str(exc)
             return
 
@@ -341,9 +343,9 @@ class RuchimeProvider(BaseVideoProvider):
         for item in targets:
             episode = by_number.get(item.number)
             if episode is None or not episode.streams:
-                item.player_reasons["vibix"] = "серии нет в плейлисте Vibix"
+                item.player_reasons["vibix"] = reason("vibix_no_episode")
                 if not item.candidates:
-                    item.reason = "серии нет в плейлисте Vibix"
+                    item.reason = reason("vibix_no_episode")
                 continue
             declared = max(stream.quality for stream in episode.streams)
             floor = item.best_resolution
@@ -380,18 +382,18 @@ class RuchimeProvider(BaseVideoProvider):
         try:
             response = await http.get(stream.url, follow_redirects=True, timeout=15.0)
         except httpx.HTTPError as exc:
-            raise _ManifestUnavailable(f"{label}: {type(exc).__name__}",
+            raise _ManifestUnavailable(reason("manifest_failed", label=label, error=type(exc).__name__),
                                        transient=True) from exc
         status = response.status_code
         if status != 200:
             logger.warning("Vibix manifest HTTP %s for %s", status, stream.url)
             raise _ManifestUnavailable(
-                f"{label}: манифест ответил {status}",
+                reason("manifest_status", label=label, status=status),
                 transient=status in (408, 425, 429) or status >= 500)
         try:
             return parse_manifest(response.content, key)
         except VibixProtocolError as exc:
-            raise _ManifestUnavailable(f"{label}: манифест не расшифрован ({exc})") from exc
+            raise _ManifestUnavailable(reason("manifest_undecoded", label=label, error=str(exc))) from exc
 
     async def _live_vibix_stream(self, episode: Episode, key: bytes,
                                  http: httpx.AsyncClient,
@@ -406,7 +408,7 @@ class RuchimeProvider(BaseVideoProvider):
                 return stream, await self._read_vibix_manifest(stream, key, http)
             except _ManifestUnavailable as exc:
                 failure = exc
-        raise failure or _ManifestUnavailable("Vibix: у серии нет потоков")
+        raise failure or _ManifestUnavailable(reason("vibix_no_streams"))
 
     @staticmethod
     def _availability_report(episodes: list[_Episode]) -> dict:
@@ -453,7 +455,7 @@ class RuchimeProvider(BaseVideoProvider):
             if cached is not None and cached[0] - now > VIBIX_REFRESH_MARGIN_S:
                 return cached[1], cached[2]
             if self._browser_getter is None:
-                raise VibixUnavailable("браузерный пул не подключён")
+                raise VibixUnavailable(reason("vibix_no_browser_pool"))
             browser = await self._browser_getter()
             capture = await capture_with_browser(browser, page_url)
             key, _ = self._key_store.resolve(api_body=capture.body,
@@ -560,18 +562,18 @@ class RuchimeProvider(BaseVideoProvider):
                     "present": ref is not None,
                     "available": None,
                     "resolution": None,
-                    "reason": "проверяется при сканировании",
+                    "reason": reason("checked_on_scan"),
                 }
                 continue
             if ref is None:
                 report[adapter.name] = {"present": False, "available": False,
-                                        "resolution": None, "reason": "плеера нет на странице"}
+                                        "resolution": None, "reason": reason("page_no_player", player=adapter.name)}
                 continue
             probe = probes[adapters.index(adapter)] if tasks else None
             if isinstance(probe, Exception) or probe is None:
                 report[adapter.name] = {"present": True, "available": False,
                                         "resolution": None,
-                                        "reason": f"проба не удалась: {probe}"}
+                                        "reason": reason("probe_failed", error=str(probe))}
                 continue
             report[adapter.name] = {
                 "present": True,
@@ -629,9 +631,7 @@ class RuchimeProvider(BaseVideoProvider):
 
         failed = [item for item in episodes if item.page_failed]
         if failed:
-            raise ValueError(
-                f"Ruchime: не прочитаны страницы {len(failed)} из {len(episodes)} "
-                "серий (сайт ограничил доступ) — повторный скан позже")
+            raise ValueError(reason("pages_unread", site="Ruchime", count=len(failed), total=len(episodes)))
 
         for adapter in PLAYER_ORDER[1:]:
             if episodes and all(item.best_resolution >= RESOLUTION_CEILING
@@ -647,10 +647,10 @@ class RuchimeProvider(BaseVideoProvider):
             if not item.candidates:
                 if item.unverified:
                     logger.warning("Skipping episode %s: source not confirmed (%s)",
-                                   item.page_url, item.reason or "нет данных")
+                                   item.page_url, describe(item.reason) or "no data")
                 else:
                     logger.warning("Skipping episode %s: no playable player (%s)",
-                                   item.page_url, item.reason or "нет источника")
+                                   item.page_url, describe(item.reason) or "no source")
                 continue
             resolution, source, url = max(
                 item.candidates,
@@ -752,20 +752,20 @@ class RuchimeProvider(BaseVideoProvider):
         """Episode page URL -> local manifest; a page is no stream, so failure is explicit."""
         match = _EPISODE_IN_URL.search(url)
         if not match:
-            raise StreamUnavailable("Vibix: в ссылке нет номера серии")
+            raise StreamUnavailable(reason("player_failed", player="Vibix", cause=reason("link_no_episode")))
         number = int(match.group(1))
         try:
             playlist, key = await self._vibix_playlist(url)
         except VibixUnavailable as exc:
             logger.warning("Vibix playlist unavailable for %s: %s", url, exc)
-            raise StreamUnavailable(f"Vibix: {exc}", transient=True) from exc
+            raise StreamUnavailable(reason("player_failed", player="Vibix", cause=str(exc)), transient=True) from exc
         except VibixProtocolError as exc:
             logger.warning("Vibix playlist unavailable for %s: %s", url, exc)
-            raise StreamUnavailable(f"Vibix: {exc}") from exc
+            raise StreamUnavailable(reason("player_failed", player="Vibix", cause=str(exc))) from exc
         episode = next((item for item in playlist if item.number == number), None)
         if episode is None or not episode.streams:
             logger.warning("Episode %s is missing from the Vibix playlist", number)
-            raise StreamUnavailable("Vibix: серии нет в плейлисте")
+            raise StreamUnavailable(reason("player_failed", player="Vibix", cause=reason("vibix_no_episode")))
         try:
             stream, text = await self._live_vibix_stream(episode, key, http, floor=0)
         except _ManifestUnavailable as exc:

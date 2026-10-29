@@ -11,6 +11,7 @@ import SavedPathDropdown from "./SavedPathDropdown.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
 import { api } from "../api/client"
 import { t } from "../i18n"
+import { reasonText } from "../lib/reason"
 import type { components } from "../api/schema"
 import { useApi } from "../composables/useApi"
 import { useSSE } from "../composables/useSSE"
@@ -255,10 +256,10 @@ const selectedWebSource = computed(() => webSources.value.find((s) => s.url === 
 const playerReportRows = computed(() => {
   const labels: Record<string, string> = { vk: "VK", allvideo: "AllVideo", vibix: "Vibix", cvh: t("player.cvh") }
   return Object.entries(parsePlayers.value).map(([name, report]) => {
-    let text = report.reason || "недоступен"
-    if (!report.present) text = "нет на странице"
-    else if (report.available === null) text = "проверяется при сканировании"
-    else if (report.available) text = report.resolution ? `${report.resolution}p` : "доступен"
+    let text = reasonText(report.reason) || t("player.state.unavailable")
+    if (!report.present) text = t("player.state.absent")
+    else if (report.available === null) text = t("player.state.pending")
+    else if (report.available) text = report.resolution ? `${report.resolution}p` : t("player.state.available")
     return {
       name,
       label: labels[name] ?? name.toUpperCase(),
@@ -340,7 +341,7 @@ async function pickSource(address: string) {
     const res = (data ?? null) as WebParse | null
     if (error || !res) {
       const err = (error ?? null) as { error?: string } | null
-      throw new Error(err?.error || t("add.error.parse"))
+      throw new Error(reasonText(err?.error) || t("add.error.parse"))
     }
     applyWebParse(res)
   } catch (e) {
@@ -371,7 +372,7 @@ async function parseTorrentUrl() {
     }) | null
     if (error || !res) {
       const err = (error ?? null) as { error?: string } | null
-      throw new Error(err?.error || t("add.error.parse"))
+      throw new Error(reasonText(err?.error) || t("add.error.parse"))
     }
     if (res.source_type === "web_video") {
       sourceType.value = "web_video"

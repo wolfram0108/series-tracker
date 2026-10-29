@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
 
+from core.reasons import reason
+
 if TYPE_CHECKING:
     from playwright.async_api import Browser
 
@@ -347,7 +349,7 @@ async def capture_with_browser(browser: Browser, page_url: str, *,
             button = await page.wait_for_selector(
                 '.source-btn[data-player="vibix"]', timeout=15_000)
         except Exception as exc:
-            raise VibixUnavailable("на странице нет кнопки Vibix") from exc
+            raise VibixUnavailable(reason("vibix_no_button")) from exc
         await button.click(timeout=15_000)
         response = await asyncio.wait_for(api_future, timeout=timeout_s)
         body = await response.body()
@@ -355,9 +357,7 @@ async def capture_with_browser(browser: Browser, page_url: str, *,
         return Capture(page_url=page_url, api_url=response.url, body=body,
                        manifest_url=manifest_url, manifest_body=manifest_body)
     except asyncio.TimeoutError as exc:
-        raise VibixUnavailable(
-            "Vibix API не ответил за отведённое время; проверьте страницу и браузер"
-        ) from exc
+        raise VibixUnavailable(reason("vibix_api_timeout")) from exc
     finally:
         await context.close()
 

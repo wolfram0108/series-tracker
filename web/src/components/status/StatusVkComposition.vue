@@ -10,7 +10,7 @@ import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { useVideoScanStore } from "../../stores/videoScan"
 import { useVoicesStore, type VoiceDub } from "../../stores/voices"
-import { reasonText } from "../../lib/voiceReason"
+import { reasonText } from "../../lib/reason"
 import { t } from "../../i18n"
 
 // Вкладка «Композиция» VK — порт seriesCompositionManager. Компиляции +
@@ -259,9 +259,9 @@ const availabilityRows = computed(() => {
   return Object.entries(report.players).map(([name, player]) => {
     const selected = player.selected ?? 0
     const available = player.available ?? 0
-    let text = player.reason || "нет на странице"
-    if (selected) text = `${player.max_resolution ? `${player.max_resolution}p` : "доступен"} · ${selected} из ${total}`
-    else if (available) text = `доступен · ${available} из ${total}`
+    let text = reasonText(player.reason) || t("player.state.absent")
+    if (selected) text = t("player.coverage", { quality: player.max_resolution ? `${player.max_resolution}p` : t("player.state.available"), count: selected, total })
+    else if (available) text = t("player.coverage", { quality: t("player.state.available"), count: available, total })
     return {
       name,
       label: labels[name] ?? name.toUpperCase(),

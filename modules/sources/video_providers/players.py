@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from core.reasons import reason
+
 if TYPE_CHECKING:
     import httpx
 
@@ -95,16 +97,16 @@ class VkPlayer(PlayerAdapter):
         response = await _get_with_retry(http, ref.raw_url,
                                          {"Referer": page_url, "User-Agent": _UA})
         if response is None:
-            return PlayerProbe(ref, False, reason="VK не ответил", transient=True)
+            return PlayerProbe(ref, False, reason=reason("player_no_answer", player="VK"), transient=True)
         if response.status_code in (403, 408, 425, 429) or response.status_code >= 500:
             return PlayerProbe(ref, False,
-                               reason=f"VK ответил {response.status_code}",
+                               reason=reason("player_status", player="VK", status=response.status_code),
                                transient=True)
         if response.status_code == 404:
-            return PlayerProbe(ref, False, reason="VK: видео не найдено")
+            return PlayerProbe(ref, False, reason=reason("player_video_missing", player="VK"))
         if response.status_code != 200:
             return PlayerProbe(ref, False,
-                               reason=f"VK ответил {response.status_code}",
+                               reason=reason("player_status", player="VK", status=response.status_code),
                                transient=True)
         lowered = response.text.lower()
         # A private video can still expose mp4 URLs in the page config.
@@ -112,12 +114,12 @@ class VkPlayer(PlayerAdapter):
                 or "protected by privacy" in lowered
                 or "private video" in lowered):
             return PlayerProbe(ref, False,
-                               reason="видео закрыто настройками приватности")
+                               reason=reason("video_private"))
         resolutions = [int(q) for q in re.findall(r"mp4_(\d+)", response.text)]
         if resolutions:
             return PlayerProbe(ref, True, max(resolutions))
         # A page without markers and without an explicit refusal is inconclusive.
-        return PlayerProbe(ref, False, reason="VK не подтвердил источник", transient=True)
+        return PlayerProbe(ref, False, reason=reason("player_unconfirmed", player="VK"), transient=True)
 
 
 class AllVideoPlayer(PlayerAdapter):
@@ -138,17 +140,17 @@ class AllVideoPlayer(PlayerAdapter):
         response = await _get_with_retry(http, ref.url,
                                          {"Referer": page_url, "User-Agent": _UA})
         if response is None:
-            return PlayerProbe(ref, False, reason="AllVideo не ответил", transient=True)
+            return PlayerProbe(ref, False, reason=reason("player_no_answer", player="AllVideo"), transient=True)
         if response.status_code in (403, 408, 425, 429) or response.status_code >= 500:
             return PlayerProbe(ref, False,
-                               reason=f"AllVideo ответил {response.status_code}",
+                               reason=reason("player_status", player="AllVideo", status=response.status_code),
                                transient=True)
         if response.status_code != 200:
             return PlayerProbe(ref, False,
-                               reason=f"AllVideo ответил {response.status_code}")
+                               reason=reason("player_status", player="AllVideo", status=response.status_code))
         resolution = self.extract_resolution(response.text)
         if resolution is None:
-            return PlayerProbe(ref, False, reason="AllVideo не отдал качеств")
+            return PlayerProbe(ref, False, reason=reason("player_no_qualities", player="AllVideo"))
         return PlayerProbe(ref, True, resolution)
 
     @staticmethod

@@ -1,7 +1,7 @@
 {
   "App.vue": 10,
   "Gallery.vue": 161,
-  "components/AddSeriesModal.vue": 69,
+  "components/AddSeriesModal.vue": 65,
   "components/AppHeader.vue": 7,
   "components/ConfirmDialog.vue": 2,
   "components/LoginModal.vue": 7,
@@ -29,7 +29,7 @@
   "components/status/StatusHistory.vue": 21,
   "components/status/StatusProperties.vue": 59,
   "components/status/StatusSlicing.vue": 43,
-  "components/status/StatusVkComposition.vue": 46,
+  "components/status/StatusVkComposition.vue": 43,
   "composables/useApi.ts": 3,
   "composables/useConfirm.ts": 2,
   "composables/useSSE.ts": 3,

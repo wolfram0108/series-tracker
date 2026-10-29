@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
+from core.reasons import parse
 from provider_contract import check_release
 from modules.sources.video_providers.base import StreamUnavailable
 from modules.sources.video_providers.ruchime import RuchimeProvider
@@ -309,7 +310,7 @@ async def test_parse_release_reports_preview_players():
     assert result["episodes_count"] == 2
     assert result["players"]["vk"]["present"] is True
     assert result["players"]["vk"]["available"] is False
-    assert "приватности" in result["players"]["vk"]["reason"]
+    assert parse(result["players"]["vk"]["reason"])["code"] == "video_private"
     assert result["players"]["allvideo"]["available"] is True
     assert result["players"]["allvideo"]["resolution"] == 1080
     assert result["players"]["vibix"]["present"] is True

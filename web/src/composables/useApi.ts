@@ -1,10 +1,11 @@
 import { ref } from "vue"
 import { useToast } from "primevue/usetoast"
+import { reasonText } from "../lib/reason"
 
 /** Тело ошибки бэка по контракту (schemas.py: ErrorResponse/ErrorOnly). */
 function extractError(error: unknown): string | null {
   if (error && typeof error === "object" && "error" in error) {
-    return String((error as { error: unknown }).error)
+    return reasonText(String((error as { error: unknown }).error))
   }
   return null
 }

@@ -130,7 +130,7 @@ def test_the_aligned_track_is_where_the_module_asked_for_it():
 ])
 def test_a_result_is_admitted_by_the_services_own_verdict_alone(result, code):
     from core.contracts import DubResult
-    from modules.voices.reasons import parse
+    from core.reasons import parse
     refusal = alignment.refusal(None if result is None else DubResult(**result))
     if code == "clean":
         assert refusal is None

@@ -1,8 +1,8 @@
-"""Tests of the reasons a voice-over is refused: codes the interface words, not sentences."""
+"""Tests of reasons: codes the interface words, not sentences."""
 import re
 from pathlib import Path
 
-from modules.voices.reasons import EXTERNAL, parse, reason
+from core.reasons import EXTERNAL, describe, parse, reason
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -22,9 +22,15 @@ def test_no_reason_is_none():
     assert parse(None) is None and parse("") is None
 
 
-def test_every_code_the_module_can_give_has_a_wording_in_the_catalog():
+def test_a_reason_in_a_log_line_is_the_code_and_its_facts():
+    assert describe(reason("player_status", player="VK", status=503)) == "player_status(player=VK, status=503)"
+    assert describe(reason("episode_failed", cause=reason("player_gone"))) == "episode_failed(cause=player_gone)"
+    assert describe("HTTP 404") == "HTTP 404" and describe(None) == ""
+
+
+def test_every_code_any_module_can_give_has_a_wording_in_the_catalog():
     used = set()
-    for source in (ROOT / "modules" / "voices").glob("*.py"):
+    for source in (ROOT / "modules").rglob("*.py"):
         used |= set(re.findall(r'\breason\(\s*"([a-z_]+)"', source.read_text(encoding="utf-8")))
     catalog = (ROOT / "web" / "src" / "i18n" / "ru.ts").read_text(encoding="utf-8")
-    assert used and not [code for code in sorted(used) if f'"voices.reason.{code}"' not in catalog]
+    assert used and not [code for code in sorted(used) if f'"reason.{code}"' not in catalog]

@@ -13,6 +13,7 @@ from typing import Awaitable, Callable
 import httpx
 
 from core.proc import run_capture
+from core.reasons import reason
 
 from .retry import send_with_retry
 
@@ -76,19 +77,19 @@ async def _get_json(http: httpx.AsyncClient, url: str, params: dict | None = Non
             url, params=params, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT,
             follow_redirects=True))
     except httpx.HTTPError as exc:
-        raise CdnVideoHubError(f"CDN VideoHub недоступен: {exc}", transient=True) from exc
+        raise CdnVideoHubError(reason("player_unreachable", player="CVH", error=str(exc)), transient=True) from exc
     if response.status_code >= 500 or response.status_code == 429:
-        raise CdnVideoHubError(f"CDN VideoHub ответил {response.status_code}", transient=True)
+        raise CdnVideoHubError(reason("player_status", player="CVH", status=response.status_code), transient=True)
     if response.status_code == 204:
         return None
     if response.status_code != 200:
-        raise CdnVideoHubError(f"CDN VideoHub ответил {response.status_code}")
+        raise CdnVideoHubError(reason("player_status", player="CVH", status=response.status_code))
     if not response.text.strip():
         return None
     try:
         return response.json()
     except ValueError as exc:
-        raise CdnVideoHubError("CDN VideoHub вернул не JSON") from exc
+        raise CdnVideoHubError(reason("player_not_json", player="CVH")) from exc
 
 
 async def fetch_playlist(http: httpx.AsyncClient, title_id: int,
@@ -114,12 +115,12 @@ async def fetch_rungs(http: httpx.AsyncClient, vk_id: str) -> list[Rung]:
     """Direct mp4 links of a VK video; rungs above 1080p carry height 0 until measured."""
     data = await _get_json(http, f"{API}/player/sv/video/{vk_id}")
     if not data:
-        raise CdnVideoHubError("VK-видео недоступно")
+        raise CdnVideoHubError(reason("vk_video_unavailable"))
     sources = data.get("sources") or {}
     rungs = [Rung(key, height or 0, sources[key]) for key, height in LADDER
              if sources.get(key)]
     if not rungs:
-        raise CdnVideoHubError("у VK-видео нет прямых ссылок")
+        raise CdnVideoHubError(reason("vk_no_direct_links"))
     return rungs
 
 
@@ -154,7 +155,7 @@ async def best_rung(rungs: list[Rung], measure: Measure = measure_rung) -> Rung:
         height = await measure(rung)
         if height:
             return Rung(rung.key, height, rung.url)
-    raise CdnVideoHubError("у VK-видео нет ссылки с известным разрешением")
+    raise CdnVideoHubError(reason("vk_no_known_resolution"))
 
 
 async def rung_within(rungs: list[Rung], cap: int, measure: Measure = measure_rung) -> Rung:

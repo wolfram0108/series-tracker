@@ -7,6 +7,7 @@ import pytest
 
 from modules.sources.video_providers import (DunhuaTvProvider, StreamUnavailable,
                                               get_default_registry)
+from core.reasons import parse
 from provider_contract import check_release
 from modules.sources.video_providers import cdnvideohub, kodik
 from modules.sources.video_providers.cdnvideohub import CdnVideoHubError, Rung
@@ -378,8 +379,9 @@ async def test_parse_release_titles_follow_the_chosen_voice(site, provider):
 async def test_parse_release_rejects_an_unknown_voice(site, provider):
     from modules.sources.video_providers.dunhuatv import Choice, address_of
     async with site.client() as http:
-        with pytest.raises(ValueError, match="не найдена"):
+        with pytest.raises(ValueError) as refused:
             await provider.parse_release(address_of(PAGE_URL, Choice("cvh", "Nobody")), http)
+    assert parse(str(refused.value))["code"] == "voice_not_found"
 
 
 @pytest.mark.asyncio
@@ -390,7 +392,7 @@ async def test_parse_release_falls_back_to_kodik_when_cvh_is_absent(site, provid
     assert {s["player"] for s in release["sources"]} == {"kodik"}
     assert "player=kodik" in release["selected_source"]
     assert not release["players"]["cvh"]["available"]
-    assert "нет плеера CVH" in release["players"]["cvh"]["reason"]
+    assert parse(release["players"]["cvh"]["reason"]) == {"code": "page_no_player", "params": {"player": "CVH"}}
 
 
 def _second_season(*episodes):
@@ -405,8 +407,9 @@ async def test_parse_release_refuses_a_cvh_catalog_whose_seasons_share_episode_n
     async with site.client() as http:
         release = await provider.parse_release(PAGE_URL, http)
     assert {s["player"] for s in release["sources"]} == {"kodik"}
-    reason = release["players"]["cvh"]["reason"]
-    assert not release["players"]["cvh"]["available"] and "несколько сезонов" in reason and "(1)" in reason
+    assert not release["players"]["cvh"]["available"]
+    assert parse(release["players"]["cvh"]["reason"]) == {
+        "code": "season_clash", "params": {"player": "CVH", "episodes": "1"}}
 
 
 @pytest.mark.asyncio
@@ -414,8 +417,10 @@ async def test_a_cvh_catalog_without_other_players_names_the_season_clash(site, 
     site.playlist = _second_season(1, 2)
     site.page = PAGE_HTML.replace("<iframe", "<x-frame")
     async with site.client() as http:
-        with pytest.raises(ValueError, match="несколько сезонов.*1, 2"):
+        with pytest.raises(ValueError) as refused:
             await provider.parse_release(PAGE_URL, http)
+    causes = parse(str(refused.value))["params"]["causes"]
+    assert parse(causes[0])["code"] == "season_clash" and parse(causes[0])["params"]["episodes"] == "1, 2"
 
 
 @pytest.mark.asyncio
@@ -431,8 +436,9 @@ async def test_seasons_with_distinct_episode_numbers_lose_nothing(site, provider
 async def test_parse_release_without_any_player_is_an_error(site, provider):
     site.page = "<h1>Пусто</h1>"
     async with site.client() as http:
-        with pytest.raises(ValueError, match="нет доступных плееров"):
+        with pytest.raises(ValueError) as refused:
             await provider.parse_release(PAGE_URL, http)
+    assert parse(str(refused.value))["code"] == "no_players"
 
 
 
@@ -520,7 +526,7 @@ async def test_scan_reports_episode_without_a_stream(site, provider):
             address_of(PAGE_URL, Choice("cvh", "AniMy / RuChiMe", "Многоголосый")), http, {})
     assert _links(scan) == {1: ("cvh=v1", 720)}
     assert scan["players"]["holes"][0]["episode"] == 2
-    assert "CVH" in scan["players"]["holes"][0]["reason"]
+    assert parse(scan["players"]["holes"][0]["reason"])["params"]["player"] == "CVH"
 
 
 @pytest.mark.asyncio
@@ -528,9 +534,10 @@ async def test_scan_asks_for_a_retry_when_a_player_throttles(site, provider):
     from modules.sources.video_providers.dunhuatv import Choice, address_of
     site.failing_videos["v2"] = 503
     async with site.client() as http:
-        with pytest.raises(ValueError, match="повторный скан"):
+        with pytest.raises(ValueError) as refused:
             await provider.scan_episodes(
                 address_of(PAGE_URL, Choice("cvh", "AniMy / RuChiMe", "Многоголосый")), http, {})
+    assert parse(str(refused.value))["code"] in {"episodes_unread", "players_silent"}
 
 
 @pytest.mark.asyncio
@@ -538,18 +545,20 @@ async def test_scan_asks_for_a_retry_when_the_playlist_is_down(site, provider):
     from modules.sources.video_providers.dunhuatv import Choice, address_of
     site.playlist = 503
     async with site.client() as http:
-        with pytest.raises(ValueError, match="повторный скан"):
+        with pytest.raises(ValueError) as refused:
             await provider.scan_episodes(
                 address_of(PAGE_URL, Choice("cvh", "AniMy / RuChiMe", "Многоголосый")), http, {})
+    assert parse(str(refused.value))["code"] in {"episodes_unread", "players_silent"}
 
 
 @pytest.mark.asyncio
 async def test_scan_of_a_vanished_voice_is_an_error_not_a_switch(site, provider):
     from modules.sources.video_providers.dunhuatv import Choice, address_of
     async with site.client() as http:
-        with pytest.raises(ValueError, match="не найдена"):
+        with pytest.raises(ValueError) as refused:
             await provider.scan_episodes(address_of(PAGE_URL, Choice("kodik", "Gone", "voice")),
                                          http, {})
+    assert parse(str(refused.value))["code"] == "voice_not_found"
 
 
 @pytest.mark.asyncio
@@ -595,7 +604,7 @@ async def test_resolve_failures_are_stream_unavailable(site, provider):
     async with site.client() as http:
         with pytest.raises(StreamUnavailable) as gone:
             await provider.resolve_stream(f"{PAGE_URL}#cvh=missing", http)
-        assert not gone.value.transient and "CVH" in gone.value.reason
+        assert not gone.value.transient and parse(gone.value.reason)["params"]["player"] == "CVH"
         site.failing_videos["v2"] = 503
         with pytest.raises(StreamUnavailable) as busy:
             await provider.resolve_stream(f"{PAGE_URL}#cvh=v2", http)

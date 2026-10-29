@@ -8,10 +8,10 @@ from typing import Any, Iterable
 
 from core.contracts import DubStatus as S
 from core.db import Database
+from core.reasons import reason
 
 from . import lifecycle
 from .lifecycle import Transition
-from .reasons import reason
 
 log = logging.getLogger("voices")
 

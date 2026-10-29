@@ -21,7 +21,7 @@ from modules.voices.states import public_state
 
 def code_of(stored):
     """The code of a stored reason or of a pushed detail."""
-    from modules.voices.reasons import parse
+    from core.reasons import parse
     detail = stored if isinstance(stored, dict) else parse(stored)
     return detail and detail["code"]
 

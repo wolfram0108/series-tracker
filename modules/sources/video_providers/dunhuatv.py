@@ -18,6 +18,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
+from core.reasons import describe, reason
+
 from . import cdnvideohub, kodik
 from .base import BaseVideoProvider, StreamUnavailable
 from .cdnvideohub import CdnVideoHubError, Rung
@@ -27,6 +29,7 @@ from .retry import send_with_retry
 logger = logging.getLogger("sources.video.dunhuatv")
 
 SITE = "https://dunhuatv.ru"
+SITE_NAME = "dunhuatv.ru"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 PAGE_TIMEOUT = 20.0
 MAX_CONCURRENT = 6
@@ -119,11 +122,15 @@ def parse_title_page(text: str, fallback_name: str = "") -> TitlePage:
         kodik_frame=kodik.normalize_iframe(html.unescape(frame.group(1))) if frame else None)
 
 
+def no_players(causes) -> str:
+    return reason("no_players", site=SITE_NAME, causes=list(causes)) if causes else reason("no_players_empty", site=SITE_NAME)
+
+
 def split_address(url: str) -> tuple[str, Choice | None]:
     """Title page address without the query, and the choice the query carries."""
     parsed = urlparse(url)
     if not _TITLE_PATH.match(parsed.path):
-        raise ValueError(f"Не страница тайтла dunhuatv.ru: {url}")
+        raise ValueError(reason("not_a_title_page", site=SITE_NAME, url=url))
     query = parse_qs(parsed.query)
     player = (query.get("player") or [""])[0]
     player = _LEGACY_PLAYER.get(player, player)
@@ -195,8 +202,7 @@ class DunhuaTvProvider(BaseVideoProvider):
         page = parse_title_page(await self._read_page(page_url, http), page_url)
         catalog = await self._catalog(page, http, wanted, everything=True)
         if not catalog.sources:
-            raise ValueError("dunhuatv.ru: у тайтла нет доступных плееров "
-                             f"({'; '.join(catalog.reasons.values()) or 'пусто'})")
+            raise ValueError(no_players(catalog.reasons.values()))
         chosen = self._choose(catalog.sources, wanted)
         numbers = sorted(chosen.episodes)
         titles = [self._episode_title(page.name_ru, number) for number in numbers]
@@ -225,8 +231,7 @@ class DunhuaTvProvider(BaseVideoProvider):
         page = parse_title_page(await self._read_page(page_url, http), page_url)
         catalog = await self._catalog(page, http, wanted, everything=False)
         if catalog.transient and not catalog.sources:
-            raise ValueError("dunhuatv.ru: плеер не ответил "
-                             f"({'; '.join(catalog.reasons.values())}) — повторный скан позже")
+            raise ValueError(reason("players_silent", site=SITE_NAME, causes=list(catalog.reasons.values())))
         chosen = self._choose(catalog.sources, wanted)
         name = series.get("name") or page.name_ru
         numbers = [n for n in sorted(chosen.episodes) if episodes is None or n in set(episodes)]
@@ -241,14 +246,13 @@ class DunhuaTvProvider(BaseVideoProvider):
 
         probes = await self._probe(chosen, numbers, page_url, http, gate, tick)
         if probes.transient:
-            raise ValueError(f"dunhuatv.ru: не прочитаны {probes.transient} серий "
-                             "(плеер ограничил доступ) — повторный скан позже")
+            raise ValueError(reason("episodes_unread", site=SITE_NAME, count=probes.transient))
         facts = [{"title": self._episode_title(name, number), "url": link,
                   "download_url": None, "publication_date": DEFAULT_DATE,
                   "resolution": resolution}
                  for number, (resolution, link) in sorted(probes.resolutions.items())]
         holes = [{"episode": number, "unverified": False,
-                  "reason": probes.failures.get(number) or "нет доступного плеера"}
+                  "reason": probes.failures.get(number) or reason("no_player")}
                  for number in numbers if number not in probes.resolutions]
         if progress is not None:
             progress(total, total, "done")
@@ -287,9 +291,9 @@ class DunhuaTvProvider(BaseVideoProvider):
                 url, headers={"User-Agent": USER_AGENT}, timeout=PAGE_TIMEOUT,
                 follow_redirects=True))
         except httpx.HTTPError as exc:
-            raise ValueError(f"dunhuatv.ru недоступен: {exc}") from exc
+            raise ValueError(reason("site_unreachable", site=SITE_NAME, error=str(exc))) from exc
         if response.status_code != 200:
-            raise ValueError(f"dunhuatv.ru: страница вернула {response.status_code}: {url}")
+            raise ValueError(reason("site_status", site=SITE_NAME, status=response.status_code, url=url))
         return response.text
 
     async def _catalog(self, page: TitlePage, http: httpx.AsyncClient, wanted: Choice | None,
@@ -305,7 +309,7 @@ class DunhuaTvProvider(BaseVideoProvider):
 
     async def _add_cvh(self, catalog: _Catalog, page: TitlePage, http: httpx.AsyncClient) -> None:
         if page.aggregator_id is None:
-            catalog.reasons["cvh"] = "на странице нет плеера CVH"
+            catalog.reasons["cvh"] = reason("page_no_player", player="CVH")
             return
         try:
             items = await cdnvideohub.fetch_playlist(http, page.aggregator_id, page.publisher_id)
@@ -314,8 +318,7 @@ class DunhuaTvProvider(BaseVideoProvider):
             return
         clashing = sorted({episode for (_, _, episode), found in _seasons_of(items).items() if len(found) > 1})
         if clashing:
-            catalog.reasons["cvh"] = ("в плеере CVH несколько сезонов с одинаковыми номерами серий "
-                                      f"({', '.join(map(str, clashing))}): сезоны не различаются")
+            catalog.reasons["cvh"] = reason("season_clash", player="CVH", episodes=", ".join(map(str, clashing)))
             return
         grouped: dict[tuple[str, str], dict[int, str]] = {}
         for item in items:
@@ -323,12 +326,12 @@ class DunhuaTvProvider(BaseVideoProvider):
         catalog.sources += [Source(Choice("cvh", studio or "без студии", kind), episodes)
                             for (studio, kind), episodes in grouped.items()]
         if not grouped:
-            catalog.reasons["cvh"] = "у тайтла нет видео CVH"
+            catalog.reasons["cvh"] = reason("title_no_videos", player="CVH")
 
     async def _add_kodik(self, catalog: _Catalog, page: TitlePage, http: httpx.AsyncClient,
                          wanted: Choice | None) -> None:
         if not page.kodik_frame:
-            catalog.reasons["kodik"] = "на странице нет плеера Kodik"
+            catalog.reasons["kodik"] = reason("page_no_player", player="Kodik")
             return
         try:
             default = await kodik.open_session(http, page.kodik_frame, SITE + "/")
@@ -343,28 +346,27 @@ class DunhuaTvProvider(BaseVideoProvider):
                 session = (default if kodik.voice_iframe(voice) == page.kodik_frame
                            else await kodik.open_session(http, kodik.voice_iframe(voice), SITE + "/"))
             except KodikError as exc:
-                logger.warning("Dunhuatv: озвучка Kodik %s не открылась: %s", voice.studio, exc.reason)
-                catalog.reasons["kodik"] = f"{voice.studio}: {exc.reason}"
+                logger.warning("Dunhuatv: озвучка Kodik %s не открылась: %s", voice.studio, describe(exc.reason))
+                catalog.reasons["kodik"] = reason("voice_failed", studio=voice.studio, cause=exc.reason)
                 catalog.transient = catalog.transient or exc.transient
                 continue
             catalog.sources.append(Source(
                 choice, {number: "" for number in session.episodes},
                 (voice.media_id, voice.media_hash), session))
         if not any(s.choice.player == "kodik" for s in catalog.sources):
-            catalog.reasons["kodik"] = "у тайтла нет озвучек Kodik"
+            catalog.reasons["kodik"] = reason("title_no_voices", player="Kodik")
 
     @staticmethod
     def _choose(sources: list[Source], wanted: Choice | None) -> Source:
         """The wanted source, or the first one (player 1 before player 2) when none is named."""
         if wanted is None:
             if not sources:
-                raise ValueError("dunhuatv.ru: у тайтла нет доступных плееров")
+                raise ValueError(no_players([]))
             return min(sources, key=lambda s: PLAYERS.index(s.choice.player))
         for source in sources:
             if source.choice == wanted:
                 return source
-        raise ValueError(f"dunhuatv.ru: озвучка «{wanted.studio}» ({wanted.player}) "
-                         "не найдена у тайтла — выберите источник заново")
+        raise ValueError(reason("voice_not_found", site=SITE_NAME, studio=wanted.studio, player=wanted.player))
 
     @staticmethod
     def _describe(page_url: str, source: Source) -> dict:
@@ -407,7 +409,7 @@ class DunhuaTvProvider(BaseVideoProvider):
         for number, outcome in zip(numbers, await asyncio.gather(*(one(n) for n in numbers))):
             if isinstance(outcome, (CdnVideoHubError, KodikError)):
                 result.transient += outcome.transient
-                result.failures[number] = f"{label}: {outcome.reason}"
+                result.failures[number] = reason("player_failed", player=label, cause=outcome.reason)
             else:
                 result.resolutions[number] = outcome
         return result
@@ -429,21 +431,21 @@ class DunhuaTvProvider(BaseVideoProvider):
             rung = (await cdnvideohub.rung_within(rungs, max_height, measure) if max_height
                     else await cdnvideohub.best_rung(rungs, measure))
         except CdnVideoHubError as exc:
-            raise StreamUnavailable(f"CVH: {exc.reason}", exc.transient) from exc
+            raise StreamUnavailable(reason("player_failed", player="CVH", cause=exc.reason), exc.transient) from exc
         return {"stream_url": rung.url, "headers": dict(cdnvideohub.STREAM_HEADERS)}
 
     async def _resolve_kodik(self, value: str, http: httpx.AsyncClient,
                              max_height: int | None = None) -> dict:
         parts = value.split("/")
         if len(parts) != 3 or not parts[2].isdigit():
-            raise StreamUnavailable(f"Kodik: непонятная ссылка {value!r}")
+            raise StreamUnavailable(reason("player_failed", player="Kodik", cause=reason("bad_link", link=value)))
         media_id, media_hash, episode = parts[0], parts[1], int(parts[2])
         try:
             session = await kodik.open_session(
                 http, kodik.iframe_url(media_id, media_hash), SITE + "/")
             qualities = await kodik.episode_qualities(http, session, episode)
         except KodikError as exc:
-            raise StreamUnavailable(f"Kodik: {exc.reason}", exc.transient) from exc
+            raise StreamUnavailable(reason("player_failed", player="Kodik", cause=exc.reason), exc.transient) from exc
         return {"stream_url": qualities[self._quality_within(qualities, max_height)],
                 "headers": {"Referer": kodik.ORIGIN + "/"}}
 
@@ -475,5 +477,4 @@ class DunhuaTvProvider(BaseVideoProvider):
     def _quick_report(catalog: _Catalog, player: str) -> dict:
         present = any(source.choice.player == player for source in catalog.sources)
         return {"present": present, "available": present, "resolution": None,
-                "reason": ("проверяется при сканировании" if present
-                           else catalog.reasons.get(player, "нет данных"))}
+                "reason": reason("checked_on_scan") if present else catalog.reasons.get(player, reason("no_data"))}
