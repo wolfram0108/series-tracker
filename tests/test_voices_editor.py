@@ -86,11 +86,11 @@ def test_what_the_editor_stores_is_read_back_by_the_module_as_it_was_written_eve
     assert settings.problems == ()
 
 
-def test_the_view_gives_the_order_to_return_to_the_players_and_the_refused_fields():
-    shown = editor.view(parse({"voices.groups": "{broken", "voices.player_groups": '{"anilibria": ["aniliberty"]}'}))
+def test_the_view_gives_the_order_to_return_to_and_the_refused_fields():
+    shown = editor.view(parse({"voices.groups": "{broken"}))
     assert shown.rejected == ["voice_groups"] and shown.voice_groups == {}
     assert shown.default_priority == list(DEFAULT_PRIORITY) and shown.priority == list(DEFAULT_PRIORITY)
-    assert shown.players == [*DEFAULT_PRIORITY, "anilibria", "aniliberty"]
+    assert not hasattr(shown, "players")
 
 
 def test_the_settings_reach_every_open_screen_by_the_stream_and_the_screen_listens_for_it():

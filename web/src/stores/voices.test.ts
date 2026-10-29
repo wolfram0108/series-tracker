@@ -149,7 +149,7 @@ describe("voices store", () => {
   it("keeps the newest settings the core announced", () => {
     const store = useVoicesStore()
     const view = (first: string): VoiceSettingsView => ({
-      priority: ["kodik"], voice_groups: { [first]: [] }, default_priority: ["kodik"], players: ["kodik"], rejected: [],
+      priority: ["kodik"], voice_groups: { [first]: [] }, default_priority: ["kodik"], rejected: [],
     })
     expect(store.settings).toBeNull()
     store.applySettings(view("first"))

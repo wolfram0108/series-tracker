@@ -1511,7 +1511,7 @@ async def test_a_stored_value_the_module_cannot_use_is_shown_as_refused_not_as_a
 async def test_a_player_named_in_the_stored_player_groups_may_stand_in_a_saved_order(system):
     await system.request("settings.value.set", {"key": "voices.player_groups", "value": '{"anilibria": ["aniliberty"]}'}, timeout=5)
     saved = await system.request("voices.settings.set", {"priority": ["anilibria", "kodik"], "voice_groups": {}}, timeout=5)
-    assert saved["saved"] is True and "aniliberty" in saved["settings"]["players"]
+    assert saved["saved"] is True and saved["settings"]["priority"] == ["anilibria", "kodik"]
 
 
 def test_two_voices_with_the_same_safe_title_get_two_names():

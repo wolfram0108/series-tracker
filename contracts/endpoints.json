@@ -1146,9 +1146,9 @@
   "line": 224,
   "access": "session",
   "conditional": null,
-  "summary": "Группы озвучек и порядок источников: как действуют, порядок по умолчанию, допустимые плееры",
+  "summary": "Группы озвучек и порядок источников: как действуют, порядок по умолчанию",
   "panel_sites": [
-   "components/settings/SettingsVoices.vue:27"
+   "components/settings/SettingsVoices.vue:26"
   ]
  },
  {
@@ -1161,7 +1161,7 @@
   "conditional": null,
   "summary": "Записать группы и порядок источников целиком или получить коды причин отказа",
   "panel_sites": [
-   "components/settings/SettingsVoices.vue:36"
+   "components/settings/SettingsVoices.vue:35"
   ]
  },
  {

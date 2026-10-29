@@ -14,7 +14,7 @@ Query:
       The source priority is the setting `voices.source_priority` (JSON list of player kinds);
       layout.DEFAULT_PRIORITY when unset.
   voices.settings.get {} -> VoiceSettingsView: the groups of voice-overs and the order of sources as they apply, the
-      order to return to, the players that may stand in it and the fields whose stored value was refused
+      order to return to and the fields whose stored value was refused
   voices.dubs.get {series_id} -> {items: [{season, episode, voice_key, voice_label, status,
       attempt, error, temp_path, job_id, aligned_path, output_path, outcome, ref_uid, ref_path,
       detail, state, hint}]}  (detail = {code, params} of the outcome or error, see reasons.py; the

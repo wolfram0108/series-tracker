@@ -42,7 +42,7 @@ SUMMARIES = {
     "GET /api/series/active_torrents": "Прогресс активных загрузок",
     "GET /api/series/{series_id}": "Карточка серии",
     "GET /api/series/{series_id}/voices": "Озвучки сериала по сериям с состоянием каждой",
-    "GET /api/voices/settings": "Группы озвучек и порядок источников: как действуют, порядок по умолчанию, допустимые плееры",
+    "GET /api/voices/settings": "Группы озвучек и порядок источников: как действуют, порядок по умолчанию",
     "PUT /api/voices/settings": "Записать группы и порядок источников целиком или получить коды причин отказа",
     "POST /api/series/{series_id}": "Сохранение свойств серии",
     "DELETE /api/series/{series_id}": "Удаление серии",

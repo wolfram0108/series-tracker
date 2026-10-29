@@ -170,11 +170,10 @@ class SettingProblem(BaseModel):
 
 
 class VoiceSettingsView(VoiceSettingsDraft):
-    """The reply of `voices.settings.get`: what applies now, the order to return to, the players that may stand
-    in the order, and the fields whose stored value was refused."""
+    """The reply of `voices.settings.get`: what applies now, the order to return to, and the fields whose stored
+    value was refused."""
 
     default_priority: list[str]
-    players: list[str]
     rejected: list[str]
 
 

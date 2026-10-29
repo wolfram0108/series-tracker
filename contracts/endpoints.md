@@ -152,7 +152,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | GET, POST | `/api/settings/concurrent_fragments` | Число параллельных фрагментов yt-dlp (`-N`) | `SettingsDebug.vue` |
 | GET, POST, DELETE | `/api/settings/saved_paths` | Сохранённые пути загрузки | `SettingsDebug.vue`, `SavedPathDropdown.vue` |
 | GET, POST | `/api/settings/debug_flags` | Флаги отладочного логирования | `LogsLoggingTab.vue` |
-| GET | `/api/voices/settings` | Группы озвучек и порядок источников (`VoiceSettingsView`): как действуют сейчас, порядок по умолчанию, допустимые плееры, отвергнутые сохранённые значения (Р-54) | `SettingsVoices.vue` |
+| GET | `/api/voices/settings` | Группы озвучек и порядок источников (`VoiceSettingsView`): как действуют сейчас, порядок по умолчанию, отвергнутые сохранённые значения (Р-54) | `SettingsVoices.vue` |
 | PUT | `/api/voices/settings` | Группы и порядок целиком (`VoiceSettingsDraft` {priority, voice_groups}); ответ `VoiceSettingsSaved`: `saved: true` и действующие значения либо `saved: false` и коды причин, ничего не записано. Экран шлёт каждое действие сразу (Р-54) | `SettingsVoices.vue` |
 | POST | `/api/tmdb/search` | Поиск сериала в TMDB | `AddSeriesModal.vue`, `StatusProperties.vue` |
 | GET | `/api/tmdb/details/{tmdb_id}` | Детали сериала TMDB | `AddSeriesModal.vue`, `StatusProperties.vue` |

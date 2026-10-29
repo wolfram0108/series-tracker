@@ -21,7 +21,6 @@ const voicesStore = useVoicesStore()
 const view = ref<View | null>(null)
 const problems = ref<Problem[]>([])
 const busy = ref(false)
-const pickedPlayer = ref("")
 
 async function load() {
   const next = await request(api.GET("/api/voices/settings"), { errorMessage: t("voices.settings.loadFailed") })
@@ -56,10 +55,6 @@ const problemsOf = (field: string) => problems.value.filter((problem) => problem
 const rejected = (field: string) => !!view.value?.rejected.includes(field)
 
 const order = computed(() => view.value?.priority ?? [])
-const available = computed(() => {
-  const taken = new Set(order.value.map((name) => name.toLowerCase()))
-  return (view.value?.players ?? []).filter((name) => !taken.has(name.toLowerCase()))
-})
 
 function move(index: number, by: -1 | 1) {
   const list = [...order.value]
@@ -67,13 +62,6 @@ function move(index: number, by: -1 | 1) {
   if (target < 0 || target >= list.length) return
   ;[list[index], list[target]] = [list[target], list[index]]
   void commit({ priority: list })
-}
-function removePlayer(index: number) {
-  void commit({ priority: order.value.filter((_, at) => at !== index) })
-}
-async function addPlayer() {
-  if (!pickedPlayer.value) return
-  if (await commit({ priority: [...order.value, pickedPlayer.value] })) pickedPlayer.value = ""
 }
 function resetOrder() {
   if (view.value) void commit({ priority: [...view.value.default_priority] })
@@ -110,16 +98,10 @@ onMounted(load)
             <span class="priority-name">{{ name }}</span>
             <Button icon="pi pi-arrow-up" text rounded :disabled="busy || index === 0" :title="t('voices.settings.priority.up')" :aria-label="t('voices.settings.priority.up')" @click="move(index, -1)" />
             <Button icon="pi pi-arrow-down" text rounded :disabled="busy || index === order.length - 1" :title="t('voices.settings.priority.down')" :aria-label="t('voices.settings.priority.down')" @click="move(index, 1)" />
-            <Button icon="pi pi-times" severity="danger" text rounded :disabled="busy" :title="t('voices.settings.priority.remove')" :aria-label="t('voices.settings.priority.remove')" @click="removePlayer(index)" />
           </li>
         </ol>
         <p v-for="(problem, index) in problemsOf('priority')" :key="index" class="problem">{{ reasonText(problem.detail) }}</p>
         <div class="actions-row">
-          <select v-model="pickedPlayer" class="p-inputtext player-pick" :aria-label="t('voices.settings.priority.add')">
-            <option value="" disabled>{{ t("voices.settings.priority.pick") }}</option>
-            <option v-for="name in available" :key="name" :value="name">{{ name }}</option>
-          </select>
-          <Button :label="t('voices.settings.priority.add')" icon="pi pi-plus" severity="secondary" size="small" :disabled="busy || !pickedPlayer" @click="addPlayer" />
           <Button :label="t('voices.settings.priority.reset')" icon="pi pi-undo" severity="secondary" size="small" text :disabled="busy" @click="resetOrder" />
         </div>
       </div>
@@ -132,7 +114,6 @@ onMounted(load)
 .muted-hint { color: var(--text-muted); margin: 0 0 0.75rem; }
 .problem { color: var(--color-red-1); margin: 0.4rem 0; }
 .actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin: 0.75rem 0 0; }
-.player-pick { flex: 1 1 12rem; min-width: 0; }
 .priority-list { list-style: none; margin: 0 0 0.5rem; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
 .priority-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0.4rem 0.15rem 0.8rem; background: var(--bg-light); border-radius: var(--border-radius); }
 .priority-place { color: var(--text-muted); min-width: 1.5rem; }

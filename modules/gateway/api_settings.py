@@ -223,7 +223,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.get("/api/voices/settings", response_model=VoiceSettingsView)
     async def voices_settings():
-        """Группы озвучек и порядок источников: как действуют сейчас, порядок по умолчанию, допустимые плееры."""
+        """Группы озвучек и порядок источников: как действуют сейчас, порядок по умолчанию."""
         return await gw.request("voices.settings.get", {}, timeout=10)
 
     @r.put("/api/voices/settings", response_model=VoiceSettingsSaved)

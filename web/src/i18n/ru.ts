@@ -168,9 +168,6 @@ export const ru = {
   "voices.settings.priority.hint": "Выше в списке значит предпочтительнее: при равном разрешении референсом становится верхний плеер, он же первым пробуется при скачивании озвучки.",
   "voices.settings.priority.up": "Выше",
   "voices.settings.priority.down": "Ниже",
-  "voices.settings.priority.remove": "Убрать из списка",
-  "voices.settings.priority.add": "Добавить плеер",
-  "voices.settings.priority.pick": "Выберите плеер",
   "voices.settings.priority.reset": "Порядок по умолчанию",
 } as const
 

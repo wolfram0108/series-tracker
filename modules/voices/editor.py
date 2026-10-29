@@ -104,9 +104,9 @@ def stored(draft: VoiceSettingsDraft) -> dict[str, str]:
 
 
 def view(settings: VoiceSettings) -> VoiceSettingsView:
-    """What applies now, with the order to return to and the players that may stand in it."""
+    """What applies now, with the order to return to."""
     return VoiceSettingsView(
         priority=list(settings.priority),
         voice_groups={name: list(triggers) for name, triggers in settings.voice_groups.items()},
-        default_priority=list(DEFAULT_PRIORITY), players=player_names(settings.player_groups),
+        default_priority=list(DEFAULT_PRIORITY),
         rejected=[_FIELD_OF_KEY[key] for key in settings.rejected if key in _FIELD_OF_KEY])
