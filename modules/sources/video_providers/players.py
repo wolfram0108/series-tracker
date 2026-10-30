@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 
 from core.reasons import reason
 
+from .vk_embed import EmbedKind, read_embed
+
 if TYPE_CHECKING:
     import httpx
 
@@ -98,27 +100,17 @@ class VkPlayer(PlayerAdapter):
                                          {"Referer": page_url, "User-Agent": _UA})
         if response is None:
             return PlayerProbe(ref, False, reason=reason("player_no_answer", player="VK"), transient=True)
-        if response.status_code in (403, 408, 425, 429) or response.status_code >= 500:
-            return PlayerProbe(ref, False,
-                               reason=reason("player_status", player="VK", status=response.status_code),
-                               transient=True)
-        if response.status_code == 404:
+        answer = read_embed(response.status_code, response.text)
+        if answer.kind is EmbedKind.PLAYABLE:
+            return PlayerProbe(ref, True, max(answer.resolutions))
+        if answer.kind is EmbedKind.NOT_FOUND:
             return PlayerProbe(ref, False, reason=reason("player_video_missing", player="VK"))
-        if response.status_code != 200:
-            return PlayerProbe(ref, False,
-                               reason=reason("player_status", player="VK", status=response.status_code),
+        if answer.kind is EmbedKind.RESTRICTED:
+            return PlayerProbe(ref, False, reason=reason("video_private"))
+        if answer.kind is EmbedKind.HTTP_ERROR:
+            return PlayerProbe(ref, False, reason=reason("player_status", player="VK", status=answer.status),
                                transient=True)
-        lowered = response.text.lower()
-        # A private video can still expose mp4 URLs in the page config.
-        if ("access denied" in lowered or "access restricted" in lowered
-                or "protected by privacy" in lowered
-                or "private video" in lowered):
-            return PlayerProbe(ref, False,
-                               reason=reason("video_private"))
-        resolutions = [int(q) for q in re.findall(r"mp4_(\d+)", response.text)]
-        if resolutions:
-            return PlayerProbe(ref, True, max(resolutions))
-        # A page without markers and without an explicit refusal is inconclusive.
+        # The page is not the player, or the player shows no file: left to the layer that decides on asking again.
         return PlayerProbe(ref, False, reason=reason("player_unconfirmed", player="VK"), transient=True)
 
 
