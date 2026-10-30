@@ -12,6 +12,7 @@ from typing import Awaitable, Callable
 
 import httpx
 
+from core.reasons import reason
 from core.retry import Budget, retrying
 
 from .players.contract import Answer, Kind, Player, PlayerRef, Reading
@@ -40,6 +41,34 @@ class Verdict:
     reading: Reading
     attempts: int
     exhausted: bool
+
+
+@dataclass(frozen=True)
+class PlayerProbe:
+    ref: PlayerRef
+    available: bool
+    resolution: int | None = None
+    reason: str = ""
+    transient: bool = False
+    # The address the downloader is given for this player's video, when the player knows a better one than its link.
+    download: str | None = None
+
+
+def probe_from(verdict: Verdict, ref: PlayerRef, label: str) -> PlayerProbe:
+    """What a settled ask means to a parser; `transient` is an answer that stayed unsure to the end."""
+    reading = verdict.reading
+    if reading.kind is Kind.PLAYABLE:
+        return PlayerProbe(ref, True, max(reading.resolutions, default=None))
+    if reading.kind is Kind.NOT_FOUND:
+        return PlayerProbe(ref, False, reason=reason("player_video_missing", player=label))
+    if reading.kind is Kind.RESTRICTED:
+        return PlayerProbe(ref, False, reason=reason("video_private"))
+    if reading.kind is Kind.HTTP_ERROR:
+        return PlayerProbe(ref, False, reason=reason("player_status", player=label, status=reading.status),
+                           transient=verdict.exhausted)
+    if reading.kind is Kind.NO_ANSWER:
+        return PlayerProbe(ref, False, reason=reason("player_no_answer", player=label), transient=True)
+    return PlayerProbe(ref, False, reason=reason("player_unconfirmed", player=label), transient=True)
 
 
 class Pacer:
@@ -74,6 +103,22 @@ class AdaptivePacer(Pacer):
         self.interval = min(self.interval * self._factor, self._ceiling)
         if hold_s > 0:
             self._next_at = max(self._next_at, self._clock() + hold_s)
+
+
+def busy(status: int | None) -> bool:
+    """A host that is silent, rate-limiting or failing: the same request may succeed a moment later."""
+    return status is None or status == 429 or status >= 500
+
+
+async def ask(call: Callable[[], Awaitable[Answer]], budget: Budget | None = None, *,
+              clock: Callable[[], float] = time.monotonic,
+              sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> Answer:
+    """One request of a catalog or a page under the budget: asked again while the host is busy; the last answer
+    comes back whatever it is, and the caller says what it means."""
+    answer, _attempts, _exhausted = await retrying(
+        call, final=lambda got: not busy(got.status), budget=budget or DEFAULT,
+        retry_after=lambda got: got.retry_after, clock=clock, sleep=sleep)
+    return answer
 
 
 async def settle(player: Player, ref: PlayerRef, http: httpx.AsyncClient, page_url: str,

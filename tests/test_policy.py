@@ -159,3 +159,36 @@ async def test_every_ask_goes_through_the_pacer():
     verdict, _ = await run(FakePlayer(said("shell"), said("video")), pacer=Counting(0.0))
 
     assert (verdict.attempts, Counting.waited) == (2, 2)
+
+
+def scripted(*answers: Answer):
+    """A request that answers from a script; the last answer repeats."""
+    given = []
+
+    async def call() -> Answer:
+        given.append(1)
+        return answers[min(len(given) - 1, len(answers) - 1)]
+    return call, given
+
+
+@pytest.mark.asyncio
+async def test_a_page_or_catalog_is_asked_again_while_the_host_is_busy_and_then_taken_as_it_is():
+    fake = FakeTime()
+    call, given = scripted(Answer(None, error="ReadTimeout"), Answer(503), Answer(200, "page"))
+    answer = await policy.ask(call, Budget(attempts=3, pauses=(1.0, 2.0), limit_s=30.0), clock=fake.clock, sleep=fake.sleep)
+    assert (answer.status, answer.text, len(given), fake.slept) == (200, "page", 3, [1.0, 2.0])
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_that_is_not_the_host_being_busy_is_not_asked_again():
+    call, given = scripted(Answer(404))
+    answer = await policy.ask(call, Budget(attempts=3, pauses=(0.0,), limit_s=30.0))
+    assert (answer.status, len(given)) == (404, 1)
+
+
+@pytest.mark.asyncio
+async def test_the_last_answer_comes_back_when_the_host_stays_busy():
+    call, given = scripted(Answer(429, retry_after=7.0), Answer(503))
+    fake = FakeTime()
+    answer = await policy.ask(call, Budget(attempts=2, pauses=(1.0,), limit_s=30.0), clock=fake.clock, sleep=fake.sleep)
+    assert (answer.status, len(given), fake.slept) == (503, 2, [7.0])

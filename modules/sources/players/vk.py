@@ -54,6 +54,7 @@ def _sure(reading: Reading, want_files: bool) -> bool:
 
 class VkPlayer:
     name = "vk"
+    label = "VK"
     series_scope = False
 
     _SOURCE = re.compile(

@@ -21,19 +21,22 @@ def _retry_after(response: httpx.Response) -> float | None:
         return None
 
 
-async def get_answer(http: httpx.AsyncClient, url: str, referer: str, agent: str = USER_AGENT) -> Answer:
+async def get_answer(http: httpx.AsyncClient, url: str, referer: str, agent: str = USER_AGENT, *,
+                     headers: dict | None = None, params: dict | None = None, timeout: float = REQUEST_TIMEOUT_S) -> Answer:
+    """`headers` replace the default pair when a host wants its own (an Origin, a fixed agent)."""
     try:
-        response = await http.get(url, headers={"Referer": referer, "User-Agent": agent},
-                                  follow_redirects=True, timeout=REQUEST_TIMEOUT_S)
+        response = await http.get(url, headers=headers or {"Referer": referer, "User-Agent": agent}, params=params,
+                                  follow_redirects=True, timeout=timeout)
     except httpx.HTTPError as exc:
         return Answer(None, error=type(exc).__name__)
     return Answer(response.status_code, response.text, _retry_after(response))
 
 
-async def post_answer(http: httpx.AsyncClient, url: str, data: dict, headers: dict) -> Answer:
+async def post_answer(http: httpx.AsyncClient, url: str, data: dict, headers: dict, *,
+                      timeout: float = REQUEST_TIMEOUT_S) -> Answer:
     try:
         response = await http.post(url, data=data, headers={"User-Agent": USER_AGENT, **headers},
-                                   follow_redirects=True, timeout=REQUEST_TIMEOUT_S)
+                                   follow_redirects=True, timeout=timeout)
     except httpx.HTTPError as exc:
         return Answer(None, error=type(exc).__name__)
     return Answer(response.status_code, response.text, _retry_after(response))

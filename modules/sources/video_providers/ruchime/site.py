@@ -19,7 +19,7 @@ from core.retry import UNTIMED, Budget, retrying
 
 from ...policy import AdaptivePacer
 from ..players import PLAYER_ORDER
-from .table import Row
+from ..table import Row
 
 logger = logging.getLogger("sources.video.ruchime")
 

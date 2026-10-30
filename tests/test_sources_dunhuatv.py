@@ -9,8 +9,9 @@ from modules.sources.video_providers import (DunhuaTvProvider, StreamUnavailable
                                               get_default_registry)
 from core.reasons import parse
 from provider_contract import check_release
-from modules.sources.video_providers import cdnvideohub, kodik
-from modules.sources.video_providers.cdnvideohub import CdnVideoHubError, Rung
+from modules.sources.players import cdnvideohub, kodik
+from modules.sources.players.cdnvideohub import CdnVideoHubError, Rung
+from modules.sources.players.contract import Kind
 
 PAGE_URL = "https://dunhuatv.ru/28-praktikuja-ci-sto-tysjach-let-smotret-onlajn.html"
 
@@ -154,13 +155,6 @@ async def fake_measure(rung: Rung) -> int | None:
     return {"mpeg4kUrl": 1440}.get(rung.key)
 
 
-@pytest.fixture(autouse=True)
-def no_retry_pause(monkeypatch):
-    async def instant(_seconds):
-        return None
-    monkeypatch.setattr("modules.sources.video_providers.retry.asyncio.sleep", instant)
-
-
 @pytest.fixture
 def site() -> Site:
     return Site()
@@ -210,6 +204,10 @@ def test_title_page_without_players():
 
 
 
+async def fetch_playlist(http):
+    return cdnvideohub.read_playlist(await cdnvideohub.playlist_request(http, 1, 1110))
+
+
 @pytest.mark.asyncio
 async def test_playlist_keeps_playable_items_and_last_duplicate(site):
     site.playlist = {"items": [
@@ -219,7 +217,7 @@ async def test_playlist_keeps_playable_items_and_last_duplicate(site):
         {"vkId": "frac", "voiceStudio": "A", "season": 1, "episode": 2.5},
         {"vkId": "other", "voiceStudio": "B", "voiceType": "x", "season": 1, "episode": 1}]}
     async with site.client() as http:
-        items = await cdnvideohub.fetch_playlist(http, 1, 1110)
+        items = await fetch_playlist(http)
     assert [(i.studio, i.vk_id) for i in items] == [("A", "new"), ("B", "other")]
 
 
@@ -227,7 +225,7 @@ async def test_playlist_keeps_playable_items_and_last_duplicate(site):
 async def test_playlist_empty_answer_is_no_items(site):
     site.playlist = 204
     async with site.client() as http:
-        assert await cdnvideohub.fetch_playlist(http, 1, 1110) == []
+        assert await fetch_playlist(http) == []
 
 
 @pytest.mark.asyncio
@@ -235,14 +233,13 @@ async def test_playlist_server_error_is_transient(site):
     site.playlist = 503
     async with site.client() as http:
         with pytest.raises(CdnVideoHubError) as caught:
-            await cdnvideohub.fetch_playlist(http, 1, 1110)
+            await fetch_playlist(http)
     assert caught.value.transient
 
 
 @pytest.mark.asyncio
-async def test_best_rung_measures_labels_that_are_not_resolutions(site):
-    async with site.client() as http:
-        rungs = await cdnvideohub.fetch_rungs(http, "v4k")
+async def test_best_rung_measures_labels_that_are_not_resolutions():
+    rungs = cdnvideohub.read_rungs(json.dumps({"sources": VIDEO_SOURCES["v4k"]}))
     assert [(r.key, r.height) for r in rungs] == [("mpegHighUrl", 720), ("mpeg4kUrl", 0)]
     assert (await cdnvideohub.best_rung(rungs, fake_measure)).height == 1440
 
@@ -253,15 +250,22 @@ async def test_best_rung_measures_labels_that_are_not_resolutions(site):
 
 
 @pytest.mark.asyncio
-async def test_video_without_links_is_unavailable(site):
+async def test_a_video_without_links_or_answer_reads_as_no_file_or_missing(site):
     site.sources["empty"] = {}
+    player = cdnvideohub.CdnVideoHubPlayer(fake_measure)
     async with site.client() as http:
-        with pytest.raises(CdnVideoHubError):
-            await cdnvideohub.fetch_rungs(http, "empty")
-        with pytest.raises(CdnVideoHubError):
-            await cdnvideohub.fetch_rungs(http, "missing")
+        empty = player.read(await player.fetch(player.ref_of(PAGE_URL, "empty"), http, PAGE_URL))
+        missing = player.read(await player.fetch(player.ref_of(PAGE_URL, "missing"), http, PAGE_URL))
+    assert (empty.kind, missing.kind) == (Kind.NO_FILE, Kind.NOT_FOUND)
 
 
+@pytest.mark.asyncio
+async def test_a_cvh_video_reads_with_the_measured_height_and_every_known_file(site):
+    player = cdnvideohub.CdnVideoHubPlayer(fake_measure)
+    async with site.client() as http:
+        reading = player.read(await player.fetch(player.ref_of(PAGE_URL, "v4k"), http, PAGE_URL))
+    assert reading.kind is Kind.PLAYABLE and reading.resolutions == (720, 1440)
+    assert dict(reading.files) == {720: "https://okcdn.test/v4k/720", 1440: "https://okcdn.test/v4k/4k"}
 
 
 def test_kodik_page_parts():
@@ -291,16 +295,22 @@ def test_kodik_iframe_url_drops_truncating_parameters():
 
 @pytest.mark.asyncio
 async def test_kodik_qualities(site):
+    player = kodik.KodikPlayer()
     async with site.client() as http:
-        session = await kodik.open_session(http, "//kodikplayer.com/serial/50228/7bbb4c6b/720p",
-                                           "https://dunhuatv.ru/")
-        qualities = await kodik.episode_qualities(http, session, 3)
-        assert qualities == {h: f"https://cloud.kodik.test/{h}.mp4:hls:manifest.m3u8"
-                             for h in (360, 480, 720)}
-        with pytest.raises(kodik.KodikError):
-            await kodik.episode_qualities(http, session, 99)
+        reading = player.read(await player.fetch(player.ref_of(PAGE_URL, "50228", "7bbb4c6b", 3), http, PAGE_URL))
+        assert reading.kind is Kind.PLAYABLE
+        assert dict(reading.files) == {h: f"https://cloud.kodik.test/{h}.mp4:hls:manifest.m3u8" for h in (360, 480, 720)}
+        absent = player.read(await player.fetch(player.ref_of(PAGE_URL, "50228", "7bbb4c6b", 99), http, PAGE_URL))
+        assert absent.kind is Kind.NOT_FOUND
 
 
+@pytest.mark.asyncio
+async def test_kodik_opens_an_iframe_once_for_all_the_episodes_of_a_voice(site):
+    player = kodik.KodikPlayer()
+    async with site.client() as http:
+        for episode in (1, 2, 3):
+            await player.fetch(player.ref_of(PAGE_URL, "50228", "7bbb4c6b", episode), http, PAGE_URL)
+    assert sum(1 for request in site.requests if "/serial/" in str(request.url)) == 1
 
 
 def test_address_roundtrip_keeps_the_choice():
@@ -539,14 +549,26 @@ async def test_scan_reports_episode_without_a_stream(site, provider):
 
 
 @pytest.mark.asyncio
-async def test_scan_asks_for_a_retry_when_a_player_throttles(site, provider):
+async def test_a_throttled_episode_is_unverified_and_the_others_are_kept(site, provider):
     from modules.sources.video_providers.dunhuatv import Choice, address_of
     site.failing_videos["v2"] = 503
+    async with site.client() as http:
+        scan = await provider.scan_episodes(
+            address_of(PAGE_URL, Choice("cvh", "AniMy / RuChiMe", "Многоголосый")), http, {})
+    assert _links(scan) == {1: ("cvh=v1", 720)}
+    assert [(hole["episode"], hole["unverified"]) for hole in scan["players"]["holes"]] == [(2, True)]
+    assert scan["players"]["players"]["cvh"]["unverified"] == 1
+
+
+@pytest.mark.asyncio
+async def test_scan_asks_for_a_retry_when_no_episode_could_be_read(site, provider):
+    from modules.sources.video_providers.dunhuatv import Choice, address_of
+    site.failing_videos.update({"v1": 503, "v2": 503})
     async with site.client() as http:
         with pytest.raises(ValueError) as refused:
             await provider.scan_episodes(
                 address_of(PAGE_URL, Choice("cvh", "AniMy / RuChiMe", "Многоголосый")), http, {})
-    assert parse(str(refused.value))["code"] in {"episodes_unread", "players_silent"}
+    assert parse(str(refused.value))["code"] == "episodes_unread"
 
 
 @pytest.mark.asyncio

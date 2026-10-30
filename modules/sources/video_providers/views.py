@@ -7,8 +7,8 @@ from typing import Iterable, Sequence
 
 from core.reasons import reason
 
-from ...players.contract import Player
-from ..ranges import episode_ranges
+from ..players.contract import Player
+from .ranges import episode_ranges
 from .table import Row
 
 

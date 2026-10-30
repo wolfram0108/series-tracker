@@ -5,42 +5,9 @@ stream never becomes a media candidate.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from core.reasons import reason
-
 from ..players.allvideo import AllVideoPlayer
-from ..players.contract import Kind, Player, PlayerRef
+from ..players.contract import Player, PlayerRef
 from ..players.vk import VkPlayer
-from ..policy import Verdict
-
-
-@dataclass(frozen=True)
-class PlayerProbe:
-    ref: PlayerRef
-    available: bool
-    resolution: int | None = None
-    reason: str = ""
-    transient: bool = False
-    # The address the downloader is given for this player's video, when the player knows a better one than its link.
-    download: str | None = None
-
-
-def probe_from(verdict: Verdict, ref: PlayerRef, label: str) -> PlayerProbe:
-    """What a settled ask means to the provider; `transient` is an answer that stayed unsure to the end."""
-    reading = verdict.reading
-    if reading.kind is Kind.PLAYABLE:
-        return PlayerProbe(ref, True, max(reading.resolutions, default=None))
-    if reading.kind is Kind.NOT_FOUND:
-        return PlayerProbe(ref, False, reason=reason("player_video_missing", player=label))
-    if reading.kind is Kind.RESTRICTED:
-        return PlayerProbe(ref, False, reason=reason("video_private"))
-    if reading.kind is Kind.HTTP_ERROR:
-        return PlayerProbe(ref, False, reason=reason("player_status", player=label, status=reading.status),
-                           transient=verdict.exhausted)
-    if reading.kind is Kind.NO_ANSWER:
-        return PlayerProbe(ref, False, reason=reason("player_no_answer", player=label), transient=True)
-    return PlayerProbe(ref, False, reason=reason("player_unconfirmed", player=label), transient=True)
 
 
 class VibixPlayer:

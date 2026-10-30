@@ -9,15 +9,14 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field, replace
-from typing import Iterable
+from typing import Callable, Iterable
 
 import httpx
 
 from core.reasons import reason
 
-from ...players.contract import Player, PlayerRef
-from ...policy import Pacer, Verdict, settle
-from ..players import PlayerProbe, probe_from
+from ..players.contract import Player, PlayerRef
+from ..policy import Pacer, PlayerProbe, Verdict, probe_from, settle
 
 logger = logging.getLogger("sources.video.ruchime")
 
@@ -83,7 +82,7 @@ def cell_of(probe: PlayerProbe) -> Cell:
 
 
 def probe_of(adapter: Player, ref: PlayerRef, verdict: Verdict) -> PlayerProbe:
-    probe = probe_from(verdict, ref, adapter.name if adapter.name != "vk" else "VK")
+    probe = probe_from(verdict, ref, getattr(adapter, "label", adapter.name))
     address = getattr(adapter, "download_address", None)
     if probe.available and address is not None:
         probe = replace(probe, download=address(ref))
@@ -121,8 +120,10 @@ class ReleaseTable:
     def fresh(self, now: float | None = None) -> bool:
         return self.expires_at > (time.monotonic() if now is None else now)
 
-    async def fill(self, adapter: Player, http: httpx.AsyncClient, pacer: Pacer, rows: Iterable[Row] | None = None) -> None:
-        """Ask `adapter` on the given rows (all by default) that show it and have no answer from it yet."""
+    async def fill(self, adapter: Player, http: httpx.AsyncClient, pacer: Pacer, rows: Iterable[Row] | None = None, *,
+                   gate: asyncio.Semaphore | None = None, on_asked: Callable[[], None] | None = None) -> None:
+        """Ask `adapter` on the given rows (all by default) that show it and have no answer from it yet; `gate` bounds
+        the asks in flight and `on_asked` is told as each one ends."""
         targets = [row for row in (self.rows.values() if rows is None else rows)
                    if adapter.name in row.refs and not row.settled(adapter.name)]
         if not targets:
@@ -131,9 +132,16 @@ class ReleaseTable:
 
         async def ask(row: Row) -> PlayerProbe:
             ref = row.refs[adapter.name]
-            if ref in settled:
-                return probe_of(adapter, ref, Verdict(settled[ref], 1, False))
-            return await probe(adapter, ref, http, row.page_url, pacer)
+            try:
+                if ref in settled:
+                    return probe_of(adapter, ref, Verdict(settled[ref], 1, False))
+                if gate is None:
+                    return await probe(adapter, ref, http, row.page_url, pacer)
+                async with gate:
+                    return await probe(adapter, ref, http, row.page_url, pacer)
+            finally:
+                if on_asked is not None:
+                    on_asked()
 
         answers = await asyncio.gather(*(ask(row) for row in targets), return_exceptions=True)
         for row, answer in zip(targets, answers):

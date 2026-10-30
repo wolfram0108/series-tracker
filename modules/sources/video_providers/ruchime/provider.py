@@ -24,17 +24,17 @@ from core.reasons import describe, reason
 from ..base import BaseVideoProvider, StreamUnavailable
 from ...players.contract import Kind, Player
 from ...players.vk_files import pick_file
-from ...policy import Pacer, settle
-from ..players import PLAYER_ORDER, VibixPlayer, probe_from
+from ...policy import Pacer, probe_from, settle
+from ..players import PLAYER_ORDER, VibixPlayer
 from ..ranges import episode_ranges
 from ..vibix import (Episode, KeyStore, Stream, VibixProtocolError,
                     VibixUnavailable, capture_with_browser, decode_playlist,
                     parse_manifest, stream_expires)
-from . import views
+from .. import views
 from .address import Choice, address_of, choice_of, parse_vibix_link, vibix_link
 from .site import (MAX_CONCURRENT_PAGES, SITE_ROOT, Site, episode_title, extract_slug, parse_date, release_episodes,
                    release_names)
-from .table import Cell, ReleaseTable, Row, probe
+from ..table import Cell, ReleaseTable, Row, probe
 
 logger = logging.getLogger("sources.video.ruchime")
 
