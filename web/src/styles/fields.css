@@ -56,6 +56,8 @@
   padding: 0 1rem;
   gap: 0.5rem;
   justify-content: flex-start;
+  /* a row that does not fit takes its room from the text, which wraps */
+  flex-shrink: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.15;
   background-color: var(--color-gray-100);
   color: var(--color-gray-600);
   z-index: 1;
@@ -91,7 +93,7 @@
 }
 .item-input:focus, .item-input:active { outline: 0; }
 
-.item-floating-label { flex-grow: 1; overflow: hidden; }
+.item-floating-label { flex-grow: 1; flex-shrink: 1; min-width: 0; overflow: hidden; }
 .item-floating-label .item-input {
   height: 100%;
   width: 100%;
@@ -106,13 +108,17 @@
   pointer-events: none; transition: all 0.2s ease-in-out;
   transform-origin: left center;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* at rest a long label wraps; raised above the value it stays on one line */
+  overflow-wrap: anywhere; line-height: 1.15;
+  --float-scale: 0.85;
 }
 .item-floating-label .item-input:focus + label,
 .item-floating-label .item-input:not(:placeholder-shown) + label {
-  transform: translateY(-1.3rem) scale(0.85);
+  transform: translateY(-1.3rem) scale(var(--float-scale));
   color: var(--color-blue);
+  white-space: nowrap; text-overflow: ellipsis;
+  /* the box is made as much wider as the scale shrinks the text, so that the text keeps the whole width of the field */
+  right: auto; width: calc((100% - 2rem) / var(--float-scale));
 }
 .is-valid .item-floating-label .item-input:focus + label,
 .is-valid .item-floating-label .item-input:not(:placeholder-shown) + label { color: var(--color-green-1); }
@@ -131,11 +137,13 @@
 
 /* select-айтем внутри группы (constructor-item-select) */
 .item-select {
-  padding: 0 1rem; min-width: 150px; cursor: pointer;
+  padding: 0 1rem; min-width: 0; cursor: pointer;
   justify-content: space-between; flex-shrink: 1; flex-grow: 1;
 }
+/* the value wraps into the row instead of being cut; only a third line is cut */
 .selected-value {
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere; line-height: 1.15; min-width: 0;
   color: var(--color-text); flex-grow: 1;
 }
 .chevron { color: var(--color-gray-600); transition: transform 0.2s ease, color 0.2s ease; margin-left: 0.5rem; }
