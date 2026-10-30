@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 
-from modules.sources.video_providers.vibix import (  # noqa: F401 - re-exported for the stand
+from modules.sources.players.vibix_protocol import (  # noqa: F401 - re-exported for the stand
     Episode, KeyState, KeyStore, Stream, VibixProtocolError,
     decode_envelope, decode_payload, decode_playlist, encode_envelope,
     envelope_bytes, parse_manifest, parse_playlist, pick_stream, recover_key,

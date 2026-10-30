@@ -13,7 +13,7 @@ from modules.sources import policy
 from modules.sources.players.vk import VkPlayer
 from modules.sources.video_providers.base import StreamUnavailable
 from modules.sources.video_providers.ruchime import RuchimeProvider
-from modules.sources.video_providers.vibix import (Episode, Stream, VibixUnavailable,
+from modules.sources.players.vibix_protocol import (Episode, Stream, VibixUnavailable,
                                                     encode_envelope)
 
 VK_URL = "https://vkvideo.ru/video_ext.php?oid=-1&amp;id=100&amp;hash=abc"
@@ -179,7 +179,7 @@ def fake_vibix(provider: RuchimeProvider, monkeypatch, streams: tuple[Stream, ..
     async def fake_playlist(page_url: str):
         return [Episode(1, "Серия 1", "Сезон 1", streams)], VIBIX_KEY
 
-    monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
+    monkeypatch.setattr(provider.vibix, "playlist", fake_playlist)
 
 
 @pytest.mark.asyncio
@@ -195,7 +195,7 @@ async def test_vibix_fallback_maps_episode_numbers(monkeypatch):
                  Episode(2, "Серия 2", "Сезон 1",
                          (Stream(480, "https://cdn/2.m3u8"),))], b"k" * 32)
 
-    monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
+    monkeypatch.setattr(provider.vibix, "playlist", fake_playlist)
     client = manifest_client({"cdn/": 200}, {
         "episode-1": page_html(vibix=True),
         "episode-2": page_html(vibix=True),
@@ -208,7 +208,7 @@ async def test_vibix_fallback_maps_episode_numbers(monkeypatch):
     assert facts[0]["url"] == "https://1.ruchime.org/release/test/episode-1#vibix=1/1"
     assert facts[0]["resolution"] == 1080
     assert facts[1]["resolution"] == 480
-    assert len(calls) == 1
+    assert set(calls) == {"https://1.ruchime.org/release/test/episode-1", "https://1.ruchime.org/release/test/episode-2"}
 
 
 @pytest.mark.asyncio
@@ -219,7 +219,7 @@ async def test_vibix_skips_episode_missing_from_playlist(monkeypatch):
         return ([Episode(1, "Серия 1", "Сезон 1", (Stream(720, "https://cdn/1.m3u8"),))],
                 b"k" * 32)
 
-    monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
+    monkeypatch.setattr(provider.vibix, "playlist", fake_playlist)
     client = manifest_client({"cdn/": 200}, {
         "episode-1": page_html(vibix=True),
         "episode-2": page_html(vibix=True),
@@ -243,7 +243,7 @@ async def test_resolve_vibix_writes_absolute_manifest(monkeypatch, tmp_path: Pat
     async def fake_playlist(page_url: str):
         return ([Episode(387, "Серия 387", "Сезон 1", (stream,))], key)
 
-    monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
+    monkeypatch.setattr(provider.vibix, "playlist", fake_playlist)
     response = fake_response()
     response.status_code = 200
     response.content = encode_envelope(manifest, key)
@@ -308,7 +308,7 @@ async def test_resolve_vibix_returns_absolute_file_url(monkeypatch, tmp_path: Pa
     async def fake_playlist(page_url: str):
         return ([Episode(1, "Серия 1", "Сезон 1", (stream,))], key)
 
-    monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
+    monkeypatch.setattr(provider.vibix, "playlist", fake_playlist)
     response = fake_response()
     response.status_code = 200
     response.content = encode_envelope(manifest, key)
@@ -498,7 +498,7 @@ async def test_resolve_vibix_playlist_failure_is_explicit_and_transient(monkeypa
     async def broken_playlist(page_url: str):
         raise VibixUnavailable("Vibix API не ответил")
 
-    monkeypatch.setattr(provider, "_vibix_playlist", broken_playlist)
+    monkeypatch.setattr(provider.vibix, "playlist", broken_playlist)
 
     with pytest.raises(StreamUnavailable) as caught:
         await provider.resolve_stream(
@@ -516,7 +516,7 @@ def two_seasons(provider: RuchimeProvider, monkeypatch) -> None:
                  Episode(2, "Серия 2", "Сезон 2", (Stream(720, "https://cdn.test/s2-2.m3u8"),), 2)],
                 VIBIX_KEY)
 
-    monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
+    monkeypatch.setattr(provider.vibix, "playlist", fake_playlist)
 
 
 def vibix_pages() -> dict[str, str]:
@@ -705,7 +705,7 @@ async def test_layout_does_not_read_the_catalog_of_a_disabled_player(monkeypatch
     async def never(page_url: str):
         raise AssertionError("the catalog of a disabled player must not be read")
 
-    monkeypatch.setattr(provider, "_vibix_playlist", never)
+    monkeypatch.setattr(provider.vibix, "playlist", never)
 
     layout = await provider.layout("https://1.ruchime.org/release/test?off=vibix", make_client(vibix_pages()))
 
@@ -731,7 +731,7 @@ async def test_layout_names_an_unreadable_catalog(monkeypatch):
     async def broken(page_url: str):
         raise VibixUnavailable("Vibix API не ответил")
 
-    monkeypatch.setattr(provider, "_vibix_playlist", broken)
+    monkeypatch.setattr(provider.vibix, "playlist", broken)
 
     layout = await provider.layout("https://1.ruchime.org/release/test", make_client(vibix_pages()))
 

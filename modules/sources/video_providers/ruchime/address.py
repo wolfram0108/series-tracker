@@ -4,12 +4,12 @@ The choice travels in the address, as at dunhuatv.ru, so the series row needs no
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlencode, urlparse
 
+from ...players.vibix import link_of as vibix_link, parse_link as parse_vibix_link  # noqa: F401 - the link is the player's
+
 PLAYERS = ("vk", "allvideo", "vibix")
-_VIBIX_LINK = re.compile(r"^vibix=(\d+)/(\d+)$")
 
 
 @dataclass(frozen=True)
@@ -41,13 +41,3 @@ def address_of(page_url: str, choice: Choice) -> str:
     if choice.off:
         query["off"] = ",".join(name for name in PLAYERS if name in choice.off)
     return f"{page_url}?{urlencode(query, safe=',')}" if query else page_url
-
-
-def vibix_link(page_url: str, season: int, number: int) -> str:
-    """Candidate link of one Vibix episode: the catalog entry the scan checked is the one that gets downloaded."""
-    return f"{page_url}#vibix={season}/{number}"
-
-
-def parse_vibix_link(url: str) -> tuple[int, int] | None:
-    found = _VIBIX_LINK.match(urlparse(url).fragment)
-    return (int(found.group(1)), int(found.group(2))) if found else None

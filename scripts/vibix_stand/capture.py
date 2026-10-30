@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from modules.sources.video_providers.vibix import (  # noqa: F401 - re-exported for the stand
+from modules.sources.players.vibix_protocol import (  # noqa: F401 - re-exported for the stand
     Capture, VibixUnavailable, capture_with_browser)
 
 
