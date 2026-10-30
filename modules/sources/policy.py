@@ -60,6 +60,22 @@ class Pacer:
             self._next_at = self._clock() + self._interval()
 
 
+class AdaptivePacer(Pacer):
+    """A pacer that goes slower when the host asks for it: every request after a refusal waits the gap longer, and
+    everybody waits the pause the host named."""
+
+    def __init__(self, interval_s: float, *, ceiling_s: float = 1.0, factor: float = 1.25,
+                 clock: Callable[[], float] = time.monotonic,
+                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> None:
+        super().__init__(lambda: self.interval, clock=clock, sleep=sleep)
+        self.interval, self._ceiling, self._factor = interval_s, max(ceiling_s, interval_s), factor
+
+    def slow_down(self, hold_s: float = 0.0) -> None:
+        self.interval = min(self.interval * self._factor, self._ceiling)
+        if hold_s > 0:
+            self._next_at = max(self._next_at, self._clock() + hold_s)
+
+
 async def settle(player: Player, ref: PlayerRef, http: httpx.AsyncClient, page_url: str,
                  budget: Budget | None = None, *, pacer: Pacer | None = None,
                  clock: Callable[[], float] = time.monotonic,

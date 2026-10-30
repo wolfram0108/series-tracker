@@ -8,13 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import html
-import json
 import logging
 import re
 import tempfile
 import time
-from collections import Counter
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urldefrag, urljoin, urlparse
@@ -24,42 +22,29 @@ import httpx
 from core.reasons import describe, reason
 
 from ..base import BaseVideoProvider, StreamUnavailable
-from ...players.contract import Kind, Player, PlayerRef
+from ...players.contract import Kind, Player
 from ...players.vk_files import pick_file
-from ...policy import Pacer, Verdict, settle
-from ..players import PLAYER_ORDER, PlayerProbe, VibixPlayer, probe_from
+from ...policy import Pacer, settle
+from ..players import PLAYER_ORDER, VibixPlayer, probe_from
 from ..ranges import episode_ranges
-from .address import Choice, address_of, choice_of, parse_vibix_link, vibix_link
 from ..vibix import (Episode, KeyStore, Stream, VibixProtocolError,
                     VibixUnavailable, capture_with_browser, decode_playlist,
                     parse_manifest, stream_expires)
+from . import views
+from .address import Choice, address_of, choice_of, parse_vibix_link, vibix_link
+from .site import (MAX_CONCURRENT_PAGES, SITE_ROOT, Site, episode_title, extract_slug, parse_date, release_episodes,
+                   release_names)
+from .table import Cell, ReleaseTable, Row, probe
 
 logger = logging.getLogger("sources.video.ruchime")
 
-# Bound concurrent HTTP requests to respect host limits and prevent connection pool saturation.
-MAX_CONCURRENT_PROBES = 4
-PAGE_RETRY_ATTEMPTS = 4
-PAGE_INTERVAL_S = 0.6
 PROBE_INTERVAL_S = 0.12
-PAGE_COOLDOWN_S = 60.0
-PAGE_PAUSE_S = 0.05
 RESOLUTION_CEILING = 2160
 _PRIORITY = {adapter.name: index for index, adapter in enumerate(PLAYER_ORDER)}
 _PLAYERS = {adapter.name: adapter for adapter in PLAYER_ORDER}
 VIBIX_REFRESH_MARGIN_S = 600
 # How long what the coverage has read stays good for a scan: the series is usually added right after it.
 SURVEY_TTL_S = 900
-REQUEST_TIMEOUT = 8.0
-SITE_ROOT = "https://1.ruchime.org/"
-
-_MONTHS = {
-    "янв": "01", "фев": "02", "мар": "03", "апр": "04", "мая": "05",
-    "июн": "06", "июл": "07", "авг": "08", "сен": "09", "окт": "10",
-    "ноя": "11", "дек": "12",
-    "jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05",
-    "jun": "06", "jul": "07", "aug": "08", "sep": "09", "oct": "10",
-    "nov": "11", "dec": "12",
-}
 
 _EPISODE_IN_URL = re.compile(r"/episode-(\d+)")
 _ABSOLUTE_URL = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
@@ -73,50 +58,6 @@ class _ManifestUnavailable(VibixUnavailable):
         self.transient = transient
 
 
-async def _get_with_retry(http: httpx.AsyncClient, url: str, headers: dict | None = None,
-                          max_retries: int = 3, timeout: float = 15.0) -> httpx.Response:
-    last_exc: Exception | None = None
-    for attempt in range(max_retries):
-        try:
-            resp = await http.get(url, headers=headers, timeout=timeout, follow_redirects=True)
-            if resp.status_code == 200:
-                return resp
-            if attempt == max_retries - 1:
-                return resp
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
-            last_exc = exc
-            if attempt < max_retries - 1:
-                await asyncio.sleep(0.5 * (attempt + 1))
-    if last_exc:
-        raise last_exc
-    raise RuntimeError(f"Failed to fetch {url}")
-
-
-@dataclass
-class _Episode:
-    number: int
-    page_url: str
-    title: str
-    publication_date: str
-    refs: dict[str, PlayerRef] = field(default_factory=dict)
-    candidates: list[tuple[int, str, str]] = field(default_factory=list)
-    player_reasons: dict[str, str] = field(default_factory=dict)
-    video_url: str | None = None
-    resolution: int | None = None
-    source: str | None = None
-    reason: str = ""
-    page_failed: bool = False
-    unverified: bool = False
-    downloads: dict[str, str] = field(default_factory=dict)
-    # Every page player was probed on this episode, so a scan has nothing left to ask them.
-    surveyed: bool = False
-
-    @property
-    def best_resolution(self) -> int:
-        return max((resolution for resolution, _source, _url in self.candidates),
-                   default=0)
-
-
 class RuchimeProvider(BaseVideoProvider):
     name = "ruchime"
     domains = ("1.ruchime.org", "ruchime.org")
@@ -128,10 +69,10 @@ class RuchimeProvider(BaseVideoProvider):
         self._manifest_dir = Path(manifest_dir) if manifest_dir else None
         self._vibix_cache: dict[str, tuple[int, list[Episode], bytes]] = {}
         self._vibix_locks: dict[str, asyncio.Lock] = {}
-        self._surveys: dict[str, tuple[float, dict[int, _Episode]]] = {}
-        self._cooldown_until = 0.0
-        self._page_next_at = 0.0
-        self._page_gate = asyncio.Lock()
+        self._site = Site()
+        # Releases read completely, for the scan that follows; one request at a time reads a release.
+        self._tables: dict[str, ReleaseTable] = {}
+        self._table_locks: dict[str, asyncio.Lock] = {}
         self._probe_pacer = Pacer(lambda: PROBE_INTERVAL_S)
 
     def configure(self, *, browser_getter=None, key_path: str | Path | None = None,
@@ -154,12 +95,7 @@ class RuchimeProvider(BaseVideoProvider):
         except Exception:
             return False
 
-    def _extract_slug(self, url: str) -> str:
-        path = urlparse(url).path
-        match = re.search(r"/release/([^/?#]+)", path)
-        if not match:
-            raise ValueError(f"Failed to extract release slug from URL: {url}")
-        return match.group(1)
+    _extract_slug = staticmethod(extract_slug)
 
     def _page_url(self, url: str) -> str:
         return f"https://1.ruchime.org/release/{self._extract_slug(url)}"
@@ -167,200 +103,17 @@ class RuchimeProvider(BaseVideoProvider):
     def canonical_url(self, url: str) -> str:
         return address_of(self._page_url(url), choice_of(url))
 
-    @staticmethod
-    def _parse_date(raw_date: str | None) -> str:
-        # Deterministic date parsing to keep media_unique_id stable across scans.
-        default_date = "1970-01-01T12:00:00Z"
-        if not raw_date:
-            return default_date
-        parts = raw_date.strip().split()
-        if len(parts) == 3:
-            day, mon, year = parts
-            month = _MONTHS.get(mon.lower()[:3])
-            if month and day.isdigit() and year.isdigit():
-                return f"{year}-{month}-{day.zfill(2)}T12:00:00Z"
-        return default_date
-
-    @staticmethod
-    def _episode_title(series_name: str, ep: dict) -> str:
-        num = ep.get("number")
-        c_from = ep.get("compilation_from")
-        c_to = ep.get("compilation_to")
-        if c_from is not None and c_to is not None:
-            label = f"{c_from}-{c_to} серия"
-        else:
-            label = f"{num} серия"
-        return f"{series_name} - {label}"
-
-    async def _read_release(self, url: str, http: httpx.AsyncClient,
-                            headers: dict) -> tuple[httpx.Response, str]:
-        slug = self._extract_slug(url)
-        canonical = f"https://1.ruchime.org/release/{slug}"
-        try:
-            resp = await _get_with_retry(http, canonical, headers=headers)
-        except Exception:
-            resp = await _get_with_retry(http, url, headers=headers)
-        if resp.status_code != 200:
-            resp = await _get_with_retry(http, url, headers=headers)
-        resp.raise_for_status()
-        return resp, slug
-
-    async def _wait_page_slot(self) -> None:
-        """Keep episode-page requests under the site's burst limit."""
-        async with self._page_gate:
-            delay = self._page_next_at - time.monotonic()
-            if delay > 0:
-                await asyncio.sleep(delay)
-            self._page_next_at = time.monotonic() + PAGE_INTERVAL_S
+    _parse_date = staticmethod(parse_date)
+    _episode_title = staticmethod(episode_title)
 
     async def _wait_probe_slot(self) -> None:
         """Spread player probes so a burst is not read as a missing source."""
         await self._probe_pacer.wait()
 
-    async def _probe_settled(self, adapter: Player, ref: PlayerRef, http: httpx.AsyncClient,
-                             page_url: str) -> PlayerProbe:
-        """Ask a page player under the one policy: asking again and the pauses between asks are decided there."""
-        verdict = await settle(adapter, ref, http, page_url, pacer=self._probe_pacer)
-        return self._probe_of(adapter, ref, verdict)
-
     @staticmethod
-    def _probe_of(adapter: Player, ref: PlayerRef, verdict: Verdict) -> PlayerProbe:
-        probe = probe_from(verdict, ref, adapter.name if adapter.name != "vk" else "VK")
-        address = getattr(adapter, "download_address", None)
-        if probe.available and address is not None:
-            probe = replace(probe, download=address(ref))
-        return probe
-
-    async def _fetch_episode_page(self, http: httpx.AsyncClient, url: str,
-                                  headers: dict,
-                                  sem: asyncio.Semaphore) -> httpx.Response | None:
-        """Fetch one episode page with cooldown-aware retries for 429/5xx."""
-        response: httpx.Response | None = None
-        for attempt in range(PAGE_RETRY_ATTEMPTS):
-            delay = self._cooldown_until - time.monotonic()
-            if delay > 0:
-                await asyncio.sleep(delay)
-            await self._wait_page_slot()
-            async with sem:
-                try:
-                    response = await http.get(url, headers=headers,
-                                              follow_redirects=True,
-                                              timeout=REQUEST_TIMEOUT)
-                except Exception as exc:  # noqa: BLE001 - retried below
-                    logger.warning("Episode page %s attempt %d failed: %s",
-                                   url, attempt + 1, exc)
-                    response = None
-                await asyncio.sleep(PAGE_PAUSE_S)
-            if response is not None and response.status_code == 200:
-                return response
-            if response is not None and response.status_code == 429:
-                retry_after = _retry_after(response) or PAGE_COOLDOWN_S * (attempt + 1)
-                self._cooldown_until = max(self._cooldown_until,
-                                           time.monotonic() + retry_after)
-                logger.warning("Episode page %s rate-limited; cooling down %.0f s",
-                               url, retry_after)
-                continue
-            if response is not None and response.status_code < 500:
-                return response
-        return response
-
-    async def _read_episode(self, slug: str, series_name: str, ep: dict,
-                            http: httpx.AsyncClient, headers: dict,
-                            sem: asyncio.Semaphore,
-                            first_adapter: Player | None = None
-                            ) -> _Episode | None:
-        """Fetch one episode page, record its players and probe the first one."""
-        num = ep.get("number")
-        if num is None:
-            return None
-        page_url = f"https://1.ruchime.org/release/{slug}/episode-{num}"
-        info = _Episode(number=int(num), page_url=page_url,
-                        title=self._episode_title(series_name, ep),
-                        publication_date=self._parse_date(ep.get("date")))
-        response = await self._fetch_episode_page(http, page_url, headers, sem)
-        if response is None:
-            info.page_failed = True
-            info.reason = reason("page_unreachable")
-            return info
-        if response.status_code != 200:
-            info.page_failed = True
-            info.reason = reason("page_status", status=response.status_code)
-            return info
-        text = html.unescape(response.text)
-        for adapter in PLAYER_ORDER:
-            ref = adapter.find(text, page_url)
-            if ref is not None:
-                info.refs[adapter.name] = ref
-        if first_adapter is not None and first_adapter.name in info.refs:
-            probe = await self._probe_settled(first_adapter, info.refs[first_adapter.name], http, page_url)
-            if probe.available:
-                info.candidates.append((probe.resolution or 0, first_adapter.name,
-                                        probe.ref.url))
-                if probe.download:
-                    info.downloads[first_adapter.name] = probe.download
-            else:
-                info.reason = probe.reason
-                info.player_reasons[first_adapter.name] = probe.reason
-                if probe.transient:
-                    info.unverified = True
-        return info
-
-    @staticmethod
-    def _needs_lower_source(episodes: list[_Episode], adapter_name: str) -> list[_Episode]:
+    def _needs_lower_source(rows: list[Row], adapter_name: str, off: frozenset[str] = frozenset()) -> list[Row]:
         """Check lower sources while a higher resolution is still possible."""
-        return [item for item in episodes
-                if adapter_name in item.refs
-                and item.best_resolution < RESOLUTION_CEILING]
-
-    async def _apply_adapter(self, episodes: list[_Episode], adapter: Player,
-                             http: httpx.AsyncClient, every: bool = False) -> None:
-        """Probe one player where it can improve on the current best resolution; `every` probes all its episodes."""
-        targets = ([item for item in episodes if adapter.name in item.refs] if every
-                   else [item for item in self._needs_lower_source(episodes, adapter.name) if not item.surveyed])
-        if not targets:
-            return
-        settled = await self._read_batch(adapter, targets, http)
-
-        async def probe_one(item: _Episode):
-            ref = item.refs[adapter.name]
-            if ref in settled:
-                return self._probe_of(adapter, ref, Verdict(settled[ref], 1, False))
-            return await self._probe_settled(adapter, ref, http, item.page_url)
-
-        probes = await asyncio.gather(*(probe_one(item) for item in targets),
-                                      return_exceptions=True)
-        for item, probe in zip(targets, probes):
-            if isinstance(probe, Exception):
-                item.reason = reason("player_failed", player=adapter.name, cause=str(probe))
-                item.player_reasons[adapter.name] = item.reason
-                logger.warning("%s probe failed for %s: %s",
-                               adapter.name, item.page_url, probe)
-                continue
-            if probe.available:
-                item.candidates.append((probe.resolution or 0, adapter.name,
-                                        probe.ref.url))
-                if probe.download:
-                    item.downloads[adapter.name] = probe.download
-            else:
-                item.reason = probe.reason
-                item.player_reasons[adapter.name] = probe.reason
-                if probe.transient:
-                    item.unverified = True
-
-    @staticmethod
-    async def _read_batch(adapter: Player, targets: list[_Episode], http: httpx.AsyncClient) -> dict:
-        """What a player that can answer for many videos at once settles; the rest is asked one by one."""
-        batch = getattr(adapter, "read_batch", None)
-        if batch is None or len(targets) < 2:
-            return {}
-        try:
-            settled = await batch([item.refs[adapter.name] for item in targets], http, targets[0].page_url)
-        except httpx.HTTPError as exc:
-            logger.warning("%s batch failed: %s", adapter.name, type(exc).__name__)
-            return {}
-        logger.info("%s batch: %d of %d players settled, %d asked one by one", adapter.name, len(settled),
-                    len(targets), len(targets) - len(settled))
-        return settled
+        return [row for row in rows if adapter_name in row.refs and row.best(off) < RESOLUTION_CEILING]
 
     @staticmethod
     def _vibix_season(playlist: list[Episode], choice: Choice) -> tuple[int | None, str]:
@@ -374,67 +127,63 @@ class RuchimeProvider(BaseVideoProvider):
             return seasons[0], ""
         return None, reason("vibix_season_required", seasons=len(seasons))
 
-    async def _apply_vibix(self, episodes: list[_Episode], http: httpx.AsyncClient,
-                           choice: Choice) -> None:
+    async def _apply_vibix(self, rows: list[Row], http: httpx.AsyncClient, choice: Choice) -> None:
         """Resolve the series playlist once and map episodes by their number within the chosen season."""
-        targets = self._needs_lower_source(episodes, "vibix")
+        off = choice.off
+        targets = self._needs_lower_source(rows, "vibix", off)
         if not targets:
             return
+
+        def fail(row: Row, why: str, *, transient: bool = False, always: bool = True) -> None:
+            row.cells["vibix"] = Cell(False, reason=why, transient=transient)
+            if always or not row.candidates(off):
+                row.reason = why
+
         try:
             playlist, key = await self._vibix_playlist(targets[0].page_url)
         except (VibixUnavailable, VibixProtocolError) as exc:
-            logger.warning("Vibix playlist unavailable for %s: %s",
-                           targets[0].page_url, exc)
-            for item in targets:
-                item.reason = reason("player_failed", player="Vibix", cause=str(exc))
-                item.player_reasons["vibix"] = str(exc)
+            logger.warning("Vibix playlist unavailable for %s: %s", targets[0].page_url, exc)
+            for row in targets:
+                row.cells["vibix"] = Cell(False, reason=str(exc))
+                row.reason = reason("player_failed", player="Vibix", cause=str(exc))
             return
 
         position, refusal = self._vibix_season(playlist, choice)
         if position is None:
-            for item in targets:
-                item.player_reasons["vibix"] = refusal
-                if not item.candidates:
-                    item.reason = refusal
+            for row in targets:
+                fail(row, refusal, always=False)
             return
 
-        by_number = {episode.number: episode for episode in playlist
-                     if episode.season_index == position}
-        to_probe: list[tuple[_Episode, Episode, int]] = []
-        for item in targets:
-            episode = by_number.get(item.number)
+        by_number = {episode.number: episode for episode in playlist if episode.season_index == position}
+        to_probe: list[tuple[Row, Episode, int]] = []
+        for row in targets:
+            episode = by_number.get(row.number)
             if episode is None or not episode.streams:
-                item.player_reasons["vibix"] = reason("vibix_no_episode")
-                if not item.candidates:
-                    item.reason = reason("vibix_no_episode")
+                fail(row, reason("vibix_no_episode"), always=False)
                 continue
             declared = max(stream.quality for stream in episode.streams)
-            floor = item.best_resolution
+            floor = row.best(off)
             if declared <= floor:
                 # Cannot outrank a better source, so a manifest request is wasted.
-                item.candidates.append((declared, "vibix", vibix_link(item.page_url, position, item.number)))
+                row.cells["vibix"] = Cell(True, declared, vibix_link(row.page_url, position, row.number))
                 continue
-            to_probe.append((item, episode, floor))
+            to_probe.append((row, episode, floor))
 
         async def probe_one(episode: Episode, floor: int):
             await self._wait_probe_slot()
             return await self._live_vibix_stream(episode, key, http, floor)
 
         results = await asyncio.gather(
-            *(probe_one(episode, floor) for _item, episode, floor in to_probe),
+            *(probe_one(episode, floor) for _row, episode, floor in to_probe),
             return_exceptions=True)
-        for (item, _episode, _floor), outcome in zip(to_probe, results):
+        for (row, _episode, _floor), outcome in zip(to_probe, results):
             if isinstance(outcome, _ManifestUnavailable):
-                item.player_reasons["vibix"] = str(outcome)
-                if not item.candidates:
-                    item.reason = str(outcome)
-                if outcome.transient:
-                    item.unverified = True
+                fail(row, str(outcome), transient=outcome.transient, always=False)
                 continue
             if isinstance(outcome, BaseException):
                 raise outcome
             stream, _manifest = outcome
-            item.candidates.append((stream.quality, "vibix", vibix_link(item.page_url, position, item.number)))
+            row.cells["vibix"] = Cell(True, stream.quality, vibix_link(row.page_url, position, row.number))
 
     async def _read_vibix_manifest(self, stream: Stream, key: bytes,
                                    http: httpx.AsyncClient) -> str:
@@ -471,48 +220,6 @@ class RuchimeProvider(BaseVideoProvider):
                 failure = exc
         raise failure or _ManifestUnavailable(reason("vibix_no_streams"))
 
-    @staticmethod
-    def _availability_report(episodes: list[_Episode], off: frozenset[str] = frozenset()) -> dict:
-        """Aggregate per-player availability for the series status; a disabled player is never counted."""
-        players: dict[str, dict] = {}
-        for adapter in PLAYER_ORDER:
-            if adapter.name in off:
-                players[adapter.name] = {
-                    "present": sum(1 for item in episodes if adapter.name in item.refs),
-                    "available": 0, "selected": 0, "unverified": 0, "max_resolution": None,
-                    "reason": reason("source_disabled"),
-                }
-                continue
-            present = [item for item in episodes if adapter.name in item.refs]
-            available = [item for item in episodes
-                         if any(source == adapter.name
-                                for _resolution, source, _url in item.candidates)]
-            available_numbers = {item.number for item in available}
-            selected = [item for item in episodes if item.source == adapter.name]
-            reasons = Counter(item.player_reasons.get(adapter.name)
-                              for item in present
-                              if item.number not in available_numbers)
-            reasons.pop(None, None)
-            players[adapter.name] = {
-                "present": len(present),
-                "available": len(available),
-                "selected": len(selected),
-                "unverified": sum(1 for item in present if item.unverified),
-                "max_resolution": max(
-                    (item.resolution for item in selected if item.resolution),
-                    default=None),
-                "reason": reasons.most_common(1)[0][0] if reasons else "",
-            }
-        holes = [{"episode": item.number, "reason": item.reason,
-                  "unverified": item.unverified}
-                 for item in episodes if not item.candidates]
-        return {
-            "episodes": len(episodes),
-            "sources": dict(Counter(item.source for item in episodes if item.source)),
-            "players": players,
-            "holes": holes,
-        }
-
     async def _vibix_playlist(self, page_url: str) -> tuple[list[Episode], bytes]:
         """Return the cached series playlist; capture it once per signature window."""
         page_url = urldefrag(page_url).url
@@ -542,11 +249,11 @@ class RuchimeProvider(BaseVideoProvider):
     async def parse_release(self, url: str, http: httpx.AsyncClient) -> dict:
         """Read only the release page; probe its preview players for a quick report."""
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        resp, slug = await self._read_release(url, http, headers)
+        resp, slug = await self._site.read_release(url, http, headers)
         raw_text = resp.text
 
-        name_ru, name_en = self._release_names(raw_text, slug, url)
-        episodes_raw = self._release_episodes(raw_text)
+        name_ru, name_en = release_names(raw_text, slug)
+        episodes_raw = release_episodes(raw_text)
 
         page_url, choice = self._page_url(url), choice_of(url)
         report, _preview_resolution = await self._quick_report(raw_text, page_url, http)
@@ -588,13 +295,13 @@ class RuchimeProvider(BaseVideoProvider):
         if "vibix" in choice.off:
             return {**empty, "reason": ""}
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        resp, slug = await self._read_release(url, http, headers)
-        numbers = sorted(int(ep["number"]) for ep in self._release_episodes(resp.text)
+        resp, slug = await self._site.read_release(url, http, headers)
+        numbers = sorted(int(ep["number"]) for ep in release_episodes(resp.text)
                          if ep.get("number") is not None)
         if not numbers:
             return {**empty, "reason": reason("title_no_videos", player="Vibix")}
         episode_url = f"https://1.ruchime.org/release/{slug}/episode-{numbers[0]}"
-        page = await self._fetch_episode_page(http, episode_url, headers, asyncio.Semaphore(1))
+        page = await self._site.read_episode_page(http, episode_url, headers, asyncio.Semaphore(1))
         if page is None or page.status_code != 200:
             return {**empty, "reason": reason("page_unreachable")}
         if VibixPlayer().find(html.unescape(page.text), episode_url) is None:
@@ -613,95 +320,63 @@ class RuchimeProvider(BaseVideoProvider):
                        progress: Callable[[int, int, str], None] | None = None) -> dict:
         """What each page player really gives: its episodes and the resolution of each, grouped by ranges.
 
-        Every episode page is read and every player is probed, which is slow, so the add form asks for it
+        Every episode page is read and every player is asked, which is slow, so the add form asks for it
         apart from the parse and shows the progress. The choice of the address does not change the answer:
         it is read once per page, and a disabled player is only hidden by the form."""
         probes = [adapter for adapter in PLAYER_ORDER if not adapter.series_scope]
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        resp, slug = await self._read_release(url, http, headers)
-        listed = self._release_episodes(resp.text)
+        resp, slug = await self._site.read_release(url, http, headers)
+        listed = release_episodes(resp.text)
         if not listed:
             return {"players": {}, "reason": reason("title_no_videos", player="Ruchime")}
-        try:
-            episodes = await self._survey(slug, listed, http, headers, probes, progress)
-        except ValueError as exc:
-            logger.warning("Coverage of %s not read: %s", slug, exc)
-            return {"players": {}, "reason": str(exc)}
-        players = self._coverage(episodes, probes)
-        self._surveys[slug] = (time.monotonic() + SURVEY_TTL_S, {item.number: item for item in episodes})
+        async with self._lock_of(slug):
+            try:
+                table = await self._survey(slug, listed, http, headers, probes, progress)
+            except ValueError as exc:
+                logger.warning("Coverage of %s not read: %s", slug, exc)
+                return {"players": {}, "reason": str(exc)}
+            table.expires_at = time.monotonic() + SURVEY_TTL_S
+            self._tables[slug] = table
+        rows = list(table.rows.values())
+        players = views.coverage(rows, probes)
         for adapter in probes:
-            played = {item.number for item in episodes
-                      if any(source == adapter.name for _resolution, source, _url in item.candidates)}
-            causes = Counter(item.player_reasons.get(adapter.name) for item in episodes
-                             if adapter.name in item.refs and item.number not in played)
-            causes.pop(None, None)
+            causes = views.causes(rows, adapter.name)
             logger.info("Coverage of %s: %s shows on %d episodes and plays on %d%s", slug, adapter.name,
-                        players[adapter.name]["present"], len(played),
+                        players[adapter.name]["present"], len(views.played(rows, adapter.name)),
                         f" ({describe(causes.most_common(1)[0][0])})" if causes else "")
         return {"players": players, "reason": ""}
 
+    def _lock_of(self, slug: str) -> asyncio.Lock:
+        """One release is read by one request at a time; the others wait for the table and do not read the site."""
+        return self._table_locks.setdefault(slug, asyncio.Lock())
+
     async def _survey(self, slug: str, listed: list[dict], http: httpx.AsyncClient, headers: dict,
-                      probes: list[Player], progress: Callable[[int, int, str], None] | None) -> list[_Episode]:
-        """Read every episode page, then probe every page player on every episode that shows it."""
-        sem = asyncio.Semaphore(MAX_CONCURRENT_PROBES)
+                      probes: list[Player], progress: Callable[[int, int, str], None] | None) -> ReleaseTable:
+        """Read every episode page, then ask every page player on every episode that shows it."""
+        sem = asyncio.Semaphore(MAX_CONCURRENT_PAGES)
         total, done, last_emit = len(listed), 0, 0.0
 
-        async def read_one(ep: dict) -> _Episode | None:
+        async def read_one(ep: dict) -> Row | None:
             nonlocal done, last_emit
-            info = await self._read_episode(slug, slug, ep, http, headers, sem)
+            row = await self._site.read_episode(slug, slug, ep, http, headers, sem)
             done += 1
             now = time.monotonic()
             if progress is not None and (done == total or now - last_emit >= 0.5):
                 last_emit = now
                 progress(done, total, "pages")
-            return info
+            return row
 
         read = await asyncio.gather(*(read_one(ep) for ep in listed))
-        episodes = [item for item in read if item is not None]
-        failed = [item for item in episodes if item.page_failed]
+        rows = [row for row in read if row is not None]
+        failed = [row for row in rows if row.page_failed]
         if failed:
-            raise ValueError(reason("pages_unread", site="Ruchime", count=len(failed), total=len(episodes)))
+            raise ValueError(reason("pages_unread", site="Ruchime", count=len(failed), total=len(rows)))
         if progress is not None:
             progress(total, total, "players")
+        table = ReleaseTable(slug, rows)
         for adapter in probes:
-            await self._apply_adapter(episodes, adapter, http, every=True)
-        for item in episodes:
-            item.surveyed = True
-        return episodes
-
-    def _recall(self, slug: str, ep: dict, name_ru: str, off: frozenset[str]) -> _Episode | None:
-        """An episode the coverage has just read, as a scan needs it; one a transient refusal left unsure is read again."""
-        kept = self._surveys.get(slug)
-        if kept is None or kept[0] < time.monotonic():
-            return None
-        item = kept[1].get(ep.get("number"))
-        if item is None or item.unverified or item.page_failed:
-            return None
-        return replace(item, title=self._episode_title(name_ru, ep), refs=dict(item.refs),
-                       candidates=[c for c in item.candidates if c[1] not in off],
-                       downloads={name: address for name, address in item.downloads.items() if name not in off},
-                       player_reasons={name: why for name, why in item.player_reasons.items() if name not in off},
-                       video_url=None, resolution=None, source=None)
-
-    @staticmethod
-    def _coverage(episodes: list[_Episode], probes: list[Player]) -> dict[str, dict]:
-        """Per player: episodes that show it, episodes it plays, and their resolution grouped by ranges."""
-        players: dict[str, dict] = {}
-        for adapter in probes:
-            by_resolution: dict[int, set[int]] = {}
-            for item in episodes:
-                for resolution, source, _url in item.candidates:
-                    if source == adapter.name:
-                        by_resolution.setdefault(resolution, set()).add(item.number)
-            numbers = sorted(set().union(*by_resolution.values())) if by_resolution else []
-            players[adapter.name] = {
-                "present": sum(1 for item in episodes if adapter.name in item.refs),
-                "available": len(numbers), "count": len(numbers), "ranges": episode_ranges(numbers),
-                "resolutions": [{"resolution": height, "ranges": episode_ranges(by_resolution[height]),
-                                 "count": len(by_resolution[height])}
-                                for height in sorted(by_resolution, reverse=True)],
-            }
-        return players
+            await table.fill(adapter, http, self._probe_pacer)
+        return table
 
     @staticmethod
     def _vibix_sources(playlist: list[Episode], page_url: str, choice: Choice) -> list[dict]:
@@ -728,40 +403,6 @@ class RuchimeProvider(BaseVideoProvider):
             })
         return sources
 
-    @staticmethod
-    def _release_names(raw_text: str, slug: str, url: str) -> tuple[str | None, str | None]:
-        name_ru: str | None = None
-        name_en: str | None = None
-        for match in re.finditer(r'<script type="application/ld\+json">(.*?)</script>',
-                                 raw_text, re.DOTALL):
-            try:
-                data = json.loads(match.group(1))
-            except Exception:
-                continue
-            if data.get("@type") == "TVSeries":
-                name_ru = data.get("name")
-                name_en = data.get("alternateName")
-                break
-        if not name_ru:
-            title = re.search(r"<title>(.*?)(?:—\s*Ruchime.*)?</title>", raw_text)
-            if title:
-                name_ru = re.sub(r"\s+\d+\s+серия.*", "", title.group(1)).strip()
-            else:
-                name_ru = slug.replace("-", " ").title()
-        return name_ru, name_en
-
-    @staticmethod
-    def _release_episodes(raw_text: str) -> list[dict]:
-        match = re.search(r"const ALL_EPS\s*=\s*(\[.*?\]);", raw_text, re.DOTALL)
-        if not match:
-            return []
-        try:
-            episodes = json.loads(match.group(1))
-        except Exception as exc:
-            logger.warning("Failed parsing ALL_EPS JSON: %s", exc)
-            return []
-        return episodes if isinstance(episodes, list) else []
-
     async def _quick_report(self, raw_text: str, page_url: str,
                             http: httpx.AsyncClient) -> tuple[dict, int | None]:
         """Probe the page's preview players; Vibix is checked on scan."""
@@ -773,8 +414,8 @@ class RuchimeProvider(BaseVideoProvider):
             if adapter.series_scope or refs[adapter.name] is None:
                 continue
             adapters.append(adapter)
-            tasks.append(self._probe_settled(adapter, refs[adapter.name], http, page_url))
-        probes = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
+            tasks.append(probe(adapter, refs[adapter.name], http, page_url, self._probe_pacer))
+        answers = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
         report: dict[str, dict] = {}
         resolutions: list[int] = []
@@ -792,20 +433,20 @@ class RuchimeProvider(BaseVideoProvider):
                 report[adapter.name] = {"present": False, "available": False,
                                         "resolution": None, "reason": reason("page_no_player", player=adapter.name)}
                 continue
-            probe = probes[adapters.index(adapter)] if tasks else None
-            if isinstance(probe, Exception) or probe is None:
+            answer = answers[adapters.index(adapter)] if tasks else None
+            if isinstance(answer, Exception) or answer is None:
                 report[adapter.name] = {"present": True, "available": False,
                                         "resolution": None,
-                                        "reason": reason("probe_failed", error=str(probe))}
+                                        "reason": reason("probe_failed", error=str(answer))}
                 continue
             report[adapter.name] = {
                 "present": True,
-                "available": probe.available,
-                "resolution": probe.resolution,
-                "reason": probe.reason,
+                "available": answer.available,
+                "resolution": answer.resolution,
+                "reason": answer.reason,
             }
-            if probe.available and probe.resolution is not None:
-                resolutions.append(probe.resolution)
+            if answer.available and answer.resolution is not None:
+                resolutions.append(answer.resolution)
         return report, (max(resolutions) if resolutions else None)
 
     async def scan_episodes(self, url: str, http: httpx.AsyncClient,
@@ -813,19 +454,14 @@ class RuchimeProvider(BaseVideoProvider):
                             episodes: list[int] | None = None,
                             progress: Callable[[int, int, str], None] | None = None) -> dict:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        resp, slug = await self._read_release(url, http, headers)
+        resp, slug = await self._site.read_release(url, http, headers)
 
         choice = choice_of(url)
         active = [adapter for adapter in PLAYER_ORDER if adapter.name not in choice.off]
         if not active:
-            return {"videos": [], "players": self._availability_report([], choice.off)}
-        # Vibix has no per-page probe: it is resolved later for the whole series. A player that answers for many
-        # videos at once waits for every page, so it is asked after them.
-        first = active[0]
-        probed_first = first if not first.series_scope and not hasattr(first, "read_batch") else None
-        later = active[1:] if probed_first else active
+            return {"videos": [], "players": views.availability_report([], PLAYER_ORDER, choice.off, _PRIORITY)}
 
-        all_episodes = self._release_episodes(resp.text)
+        all_episodes = release_episodes(resp.text)
         if not all_episodes:
             raise ValueError(f"Ruchime: array ALL_EPS not found on page {url}")
         if episodes is not None:
@@ -839,72 +475,59 @@ class RuchimeProvider(BaseVideoProvider):
             match = re.search(r'"name":"([^"]+)"', resp.text)
             name_ru = match.group(1) if match else slug
 
-        sem = asyncio.Semaphore(MAX_CONCURRENT_PROBES)
-        total = len(episodes_raw)
-        done = 0
-        last_emit = 0.0
-        counter_lock = asyncio.Lock()
-
-        async def read_one(ep: dict) -> _Episode | None:
-            nonlocal done, last_emit
-            info = self._recall(slug, ep, name_ru, choice.off) or await self._read_episode(
-                slug, name_ru, ep, http, headers, sem, first_adapter=probed_first)
-            async with counter_lock:
-                done += 1
-                now = time.monotonic()
-                if progress is not None and (done == total or now - last_emit >= 0.5):
-                    last_emit = now
-                    progress(done, total, "pages")
-            return info
-
-        resolved = await asyncio.gather(*(read_one(ep) for ep in episodes_raw))
-        if progress is not None:
-            progress(total, total, "players")
-        episodes = [item for item in resolved if item is not None]
-
-        failed = [item for item in episodes if item.page_failed]
-        if failed:
-            raise ValueError(reason("pages_unread", site="Ruchime", count=len(failed), total=len(episodes)))
-
-        for adapter in later:
-            if episodes and all(item.best_resolution >= RESOLUTION_CEILING
-                                for item in episodes):
-                break
-            if adapter.series_scope:
-                await self._apply_vibix(episodes, http, choice)
-            else:
-                await self._apply_adapter(episodes, adapter, http)
-
-        facts: list[dict] = []
-        for item in episodes:
-            if not item.candidates:
-                if item.unverified:
-                    logger.warning("Skipping episode %s: source not confirmed (%s)",
-                                   item.page_url, describe(item.reason) or "no data")
+        async with self._lock_of(slug):
+            rows = await self._rows_for(slug, name_ru, episodes_raw, http, headers, progress)
+            failed = [row for row in rows if row.page_failed]
+            if failed:
+                raise ValueError(reason("pages_unread", site="Ruchime", count=len(failed), total=len(rows)))
+            if progress is not None:
+                progress(len(rows), len(rows), "players")
+            table = ReleaseTable(slug, rows)
+            # The first player is asked on every episode; the next ones only where a better stream is still possible.
+            for index, adapter in enumerate(active):
+                if index and rows and all(row.best(choice.off) >= RESOLUTION_CEILING for row in rows):
+                    break
+                if adapter.series_scope:
+                    await self._apply_vibix(rows, http, choice)
                 else:
-                    logger.warning("Skipping episode %s: no playable player (%s)",
-                                   item.page_url, describe(item.reason) or "no source")
-                continue
-            resolution, source, url = max(
-                item.candidates,
-                key=lambda candidate: (candidate[0], -_PRIORITY[candidate[1]]))
-            item.video_url, item.resolution, item.source = url, resolution, source
-            download_url = item.downloads.get(source)
-            facts.append({
-                "title": item.title,
-                "url": item.video_url,
-                "download_url": download_url,
-                "publication_date": item.publication_date,
-                "resolution": item.resolution,
-            })
+                    targets = rows if index == 0 else self._needs_lower_source(rows, adapter.name, choice.off)
+                    await table.fill(adapter, http, self._probe_pacer, rows=targets)
 
-        facts.sort(key=lambda fact: fact["publication_date"])
-        report = self._availability_report(episodes, choice.off)
-        logger.info("Ruchime scan %s: серий %d, источники %s",
-                    slug, len(facts), report["sources"])
+        found, skipped = views.facts(rows, choice.off, _PRIORITY)
+        for row in skipped:
+            if row.unverified(choice.off):
+                logger.warning("Skipping episode %s: source not confirmed (%s)", row.page_url, describe(row.reason) or "no data")
+            else:
+                logger.warning("Skipping episode %s: no playable player (%s)", row.page_url, describe(row.reason) or "no source")
+        report = views.availability_report(rows, PLAYER_ORDER, choice.off, _PRIORITY)
+        logger.info("Ruchime scan %s: серий %d, источники %s", slug, len(found), report["sources"])
         if progress is not None:
-            progress(total, total, "done")
-        return {"videos": facts, "players": report}
+            progress(len(rows), len(rows), "done")
+        return {"videos": found, "players": report}
+
+    async def _rows_for(self, slug: str, name_ru: str, episodes_raw: list[dict], http: httpx.AsyncClient, headers: dict,
+                        progress: Callable[[int, int, str], None] | None) -> list[Row]:
+        """The rows of the episodes a scan needs: what the coverage has just read is taken, the rest is read once."""
+        kept = self._tables.get(slug)
+        kept = kept if kept is not None and kept.fresh() else None
+        sem = asyncio.Semaphore(MAX_CONCURRENT_PAGES)
+        total, done, last_emit = len(episodes_raw), 0, 0.0
+
+        async def read_one(ep: dict) -> Row | None:
+            nonlocal done, last_emit
+            cached = kept.rows.get(ep.get("number")) if kept is not None else None
+            if cached is not None and not cached.page_failed:
+                row = replace(cached, title=episode_title(name_ru, ep), refs=dict(cached.refs), cells=dict(cached.cells))
+            else:
+                row = await self._site.read_episode(slug, name_ru, ep, http, headers, sem)
+            done += 1
+            now = time.monotonic()
+            if progress is not None and (done == total or now - last_emit >= 0.5):
+                last_emit = now
+                progress(done, total, "pages")
+            return row
+
+        return [row for row in await asyncio.gather(*(read_one(ep) for ep in episodes_raw)) if row is not None]
 
     async def resolve_stream(self, url: str, http: httpx.AsyncClient,
                              max_height: int | None = None) -> dict | None:
@@ -988,14 +611,6 @@ class RuchimeProvider(BaseVideoProvider):
                 lines.append(line)
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return path
-
-
-def _retry_after(response: httpx.Response) -> float | None:
-    try:
-        value = response.headers.get("Retry-After")
-        return float(value) if value else None
-    except (AttributeError, TypeError, ValueError):
-        return None
 
 
 def _absolute_url(base_url: str, reference: str) -> str:

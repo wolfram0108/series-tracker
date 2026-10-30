@@ -922,7 +922,9 @@ async def test_a_scan_reads_again_an_episode_the_coverage_could_not_be_sure_of()
 
     scanned = await provider.scan_episodes(PAGE, base, {"name": "Тест"})
 
-    assert counts["episode-1"] == read["episode-1"] + 1 and counts["episode-2"] == read["episode-2"]
+    assert counts["id=101&hash"] > read["id=101&hash"]
+    assert (counts["episode-1"], counts["episode-2"], counts["id=102&hash"]) == (
+        read["episode-1"], read["episode-2"], read["id=102&hash"])
     assert scanned["videos"][0]["url"] == "https://vk.com/video-1_101"
 
 
@@ -932,8 +934,7 @@ async def test_a_scan_does_not_trust_what_the_coverage_read_long_ago():
     client = make_client(SURVEY_ROUTES, counts)
     await provider.coverage(PAGE, client)
     read = dict(counts)
-    expires, kept = provider._surveys["test"]
-    provider._surveys["test"] = (0.0, kept)
+    provider._tables["test"].expires_at = 0.0
 
     await provider.scan_episodes(PAGE, client, {"name": "Тест"})
 

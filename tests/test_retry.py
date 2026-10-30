@@ -8,7 +8,7 @@ from core.retry import UNTIMED, Budget, retrying
 
 ROOT = Path(__file__).resolve().parent.parent
 # Where asking again is decided by `core.retry`; a loop with its own attempts or its own sleep would be a second place.
-GUARDED = ["modules/downloads", "modules/sources/players", "modules/sources/policy.py"]
+GUARDED = ["modules/downloads", "modules/sources/players", "modules/sources/policy.py", "modules/sources/video_providers/ruchime"]
 
 
 class FakeTime:
