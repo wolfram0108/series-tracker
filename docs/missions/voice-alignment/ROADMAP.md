@@ -150,7 +150,7 @@ Kodik и CVH скачаны без повторов и отказов проти
   набор «плеер × озвучка × серии».
 - Провайдеры веб-видео: `modules/sources/video_providers/` (реестр, база,
   `StreamUnavailable`, разрешение потока перед скачиванием).
-- Протокол Kodik на Python (ROADMAP миссии `ruchime-players`): страница плеера
+- Протокол Kodik на Python (`contracts/findings.md`, находка 119): страница плеера
   → подписи → `POST /ftor` → ROT18 + base64 → HLS; серия выбирается параметрами
   `season` и `episode`.
 - Планировщик слотов и замена низкого разрешения высоким: `plan_with_supersession`,
