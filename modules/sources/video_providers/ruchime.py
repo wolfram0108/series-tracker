@@ -24,7 +24,9 @@ import httpx
 from core.reasons import describe, reason
 
 from .base import BaseVideoProvider, StreamUnavailable
-from .players import (PLAYER_ORDER, AllVideoPlayer, PlayerAdapter, PlayerProbe, PlayerRef, VibixPlayer)
+from ..players.contract import Player, PlayerRef
+from ..policy import Pacer, settle
+from .players import PLAYER_ORDER, PlayerProbe, VibixPlayer, probe_from
 from .ranges import episode_ranges
 from .ruchime_address import Choice, address_of, choice_of, parse_vibix_link, vibix_link
 from .vibix import (Episode, KeyStore, Stream, VibixProtocolError,
@@ -38,13 +40,11 @@ MAX_CONCURRENT_PROBES = 4
 PAGE_RETRY_ATTEMPTS = 4
 PAGE_INTERVAL_S = 0.6
 PROBE_INTERVAL_S = 0.12
-# One refusal of the host says nothing about the video, so an unsure probe is asked again after a pause.
-PROBE_ATTEMPTS = 2
-UNSURE_PAUSE_S = 3.0
 PAGE_COOLDOWN_S = 60.0
 PAGE_PAUSE_S = 0.05
 RESOLUTION_CEILING = 2160
 _PRIORITY = {adapter.name: index for index, adapter in enumerate(PLAYER_ORDER)}
+_PLAYERS = {adapter.name: adapter for adapter in PLAYER_ORDER}
 VIBIX_REFRESH_MARGIN_S = 600
 # How long what the coverage has read stays good for a scan: the series is usually added right after it.
 SURVEY_TTL_S = 900
@@ -129,8 +129,7 @@ class RuchimeProvider(BaseVideoProvider):
         self._cooldown_until = 0.0
         self._page_next_at = 0.0
         self._page_gate = asyncio.Lock()
-        self._probe_next_at = 0.0
-        self._probe_gate = asyncio.Lock()
+        self._probe_pacer = Pacer(lambda: PROBE_INTERVAL_S)
 
     def configure(self, *, browser_getter=None, key_path: str | Path | None = None,
                   manifest_dir: str | Path | None = None) -> None:
@@ -190,14 +189,6 @@ class RuchimeProvider(BaseVideoProvider):
             label = f"{num} серия"
         return f"{series_name} - {label}"
 
-    @staticmethod
-    def _extract_allvideo_resolution(html_text: str) -> int | None:
-        return AllVideoPlayer.extract_resolution(html_text)
-
-    @staticmethod
-    def _extract_best_stream_url(file_val: str) -> str | None:
-        return AllVideoPlayer.best_stream_url(file_val)
-
     async def _read_release(self, url: str, http: httpx.AsyncClient,
                             headers: dict) -> tuple[httpx.Response, str]:
         slug = self._extract_slug(url)
@@ -221,23 +212,13 @@ class RuchimeProvider(BaseVideoProvider):
 
     async def _wait_probe_slot(self) -> None:
         """Spread player probes so a burst is not read as a missing source."""
-        async with self._probe_gate:
-            delay = self._probe_next_at - time.monotonic()
-            if delay > 0:
-                await asyncio.sleep(delay)
-            self._probe_next_at = time.monotonic() + PROBE_INTERVAL_S
+        await self._probe_pacer.wait()
 
-    async def _probe_settled(self, adapter: PlayerAdapter, ref: PlayerRef, http: httpx.AsyncClient,
+    async def _probe_settled(self, adapter: Player, ref: PlayerRef, http: httpx.AsyncClient,
                              page_url: str) -> PlayerProbe:
-        """Probe a player; an unsure answer is asked again after a pause, since one refusal of the host proves nothing."""
-        for attempt in range(PROBE_ATTEMPTS):
-            if attempt:
-                await asyncio.sleep(UNSURE_PAUSE_S)
-            await self._wait_probe_slot()
-            probe = await adapter.probe(ref, http, page_url)
-            if probe.available or not probe.transient:
-                break
-        return probe
+        """Ask a page player under the one policy: asking again and the pauses between asks are decided there."""
+        verdict = await settle(adapter, ref, http, page_url, pacer=self._probe_pacer)
+        return probe_from(verdict, ref, adapter.name if adapter.name != "vk" else "VK")
 
     async def _fetch_episode_page(self, http: httpx.AsyncClient, url: str,
                                   headers: dict,
@@ -275,7 +256,7 @@ class RuchimeProvider(BaseVideoProvider):
     async def _read_episode(self, slug: str, series_name: str, ep: dict,
                             http: httpx.AsyncClient, headers: dict,
                             sem: asyncio.Semaphore,
-                            first_adapter: PlayerAdapter | None = None
+                            first_adapter: Player | None = None
                             ) -> _Episode | None:
         """Fetch one episode page, record its players and probe the first one."""
         num = ep.get("number")
@@ -318,7 +299,7 @@ class RuchimeProvider(BaseVideoProvider):
                 if adapter_name in item.refs
                 and item.best_resolution < RESOLUTION_CEILING]
 
-    async def _apply_adapter(self, episodes: list[_Episode], adapter: PlayerAdapter,
+    async def _apply_adapter(self, episodes: list[_Episode], adapter: Player,
                              http: httpx.AsyncClient, every: bool = False) -> None:
         """Probe one player where it can improve on the current best resolution; `every` probes all its episodes."""
         targets = ([item for item in episodes if adapter.name in item.refs] if every
@@ -625,7 +606,7 @@ class RuchimeProvider(BaseVideoProvider):
         return {"players": players, "reason": ""}
 
     async def _survey(self, slug: str, listed: list[dict], http: httpx.AsyncClient, headers: dict,
-                      probes: list[PlayerAdapter], progress: Callable[[int, int, str], None] | None) -> list[_Episode]:
+                      probes: list[Player], progress: Callable[[int, int, str], None] | None) -> list[_Episode]:
         """Read every episode page, then probe every page player on every episode that shows it."""
         sem = asyncio.Semaphore(MAX_CONCURRENT_PROBES)
         total, done, last_emit = len(listed), 0, 0.0
@@ -667,7 +648,7 @@ class RuchimeProvider(BaseVideoProvider):
                        video_url=None, resolution=None, source=None)
 
     @staticmethod
-    def _coverage(episodes: list[_Episode], probes: list[PlayerAdapter]) -> dict[str, dict]:
+    def _coverage(episodes: list[_Episode], probes: list[Player]) -> dict[str, dict]:
         """Per player: episodes that show it, episodes it plays, and their resolution grouped by ranges."""
         players: dict[str, dict] = {}
         for adapter in probes:
@@ -751,7 +732,7 @@ class RuchimeProvider(BaseVideoProvider):
         text = html.unescape(raw_text)
         refs = {adapter.name: adapter.find(text, page_url) for adapter in PLAYER_ORDER}
         tasks = []
-        adapters: list[PlayerAdapter] = []
+        adapters: list[Player] = []
         for adapter in PLAYER_ORDER:
             if adapter.series_scope or refs[adapter.name] is None:
                 continue
@@ -901,66 +882,10 @@ class RuchimeProvider(BaseVideoProvider):
         return None
 
     async def _resolve_vk(self, url: str, http: httpx.AsyncClient) -> dict | None:
-        """Fresh direct stream from the VK embed page.
-
-        The canonical `vk.com/video...` page is rejected by yt-dlp as
-        «Access restricted» for some videos, while the embed page with hash
-        still exposes signed mp4 URLs. Resolve them at download time so the
-        signature is fresh.
-        """
-        try:
-            response = await http.get(
-                url,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                         "Referer": "https://vk.com/"},
-                follow_redirects=True, timeout=15.0)
-            if response.status_code != 200:
-                logger.warning("VK embed HTTP %s for %s",
-                               response.status_code, url)
-                return None
-            streams = [
-                (int(quality), html.unescape(raw.replace("\\/", "/")))
-                for quality, raw in re.findall(r'"mp4_(\d+)":"([^"]+)"',
-                                                response.text)
-            ]
-            if streams:
-                _quality, stream_url = max(streams, key=lambda item: item[0])
-                return {"stream_url": stream_url,
-                        "headers": {"Referer": "https://vk.com/"}}
-            hls = re.search(r'"hls":"([^"]+)"', response.text)
-            if hls:
-                stream_url = html.unescape(hls.group(1).replace("\\/", "/"))
-                return {"stream_url": stream_url,
-                        "headers": {"Referer": "https://vk.com/"}}
-            logger.warning("VK embed has no playable stream: %s", url)
-            return None
-        except (httpx.HTTPError, ValueError) as exc:
-            logger.warning("Failed resolving VK stream for %s: %s", url, exc)
-            return None
+        return await _PLAYERS["vk"].resolve(url, http)
 
     async def _resolve_allvideo(self, url: str, http: httpx.AsyncClient) -> dict | None:
-        try:
-            response = await http.get(url, headers={"Referer": "https://1.ruchime.org/"},
-                                      follow_redirects=True)
-            if response.status_code != 200:
-                return None
-            match = re.search(r'file:\s*["\']([^"\']+)["\']', response.text)
-            if not match:
-                return None
-            stream_url = self._extract_best_stream_url(match.group(1))
-            if not stream_url:
-                return None
-            final_url = str(getattr(response, "url", "") or url)
-            parsed = urlparse(final_url)
-            if not parsed.scheme or not parsed.netloc:
-                parsed = urlparse(url)
-            origin = (f"{parsed.scheme}://{parsed.netloc}/"
-                      if parsed.scheme and parsed.netloc else "")
-            return {"stream_url": stream_url,
-                    "headers": {"Referer": origin} if origin else {}}
-        except Exception as exc:  # noqa: BLE001 - resolution is retried by download
-            logger.warning("Failed resolving AllVideo stream for %s: %s", url, exc)
-            return None
+        return await _PLAYERS["allvideo"].resolve(url, http)
 
     async def _resolve_vibix(self, url: str, http: httpx.AsyncClient) -> dict:
         """Episode page URL -> local manifest; a page is no stream, so failure is explicit."""

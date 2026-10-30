@@ -12,6 +12,7 @@ from modules.sources.module import SourcesModule
 from modules.sources.video_providers.base import BaseVideoProvider, StreamUnavailable
 from modules.sources.video_providers.registry import VideoProviderRegistry
 from modules.sources.video_providers.ruchime import RuchimeProvider
+from http_fakes import fake_response
 
 SAMPLE_RELEASE_HTML = """
 <!DOCTYPE html>
@@ -151,7 +152,7 @@ async def test_ruchime_parse_release():
     mock_client = AsyncMock(spec=httpx.AsyncClient)
 
     def side_effect(url, headers=None, follow_redirects=True, **kwargs):
-        resp = AsyncMock(spec=httpx.Response)
+        resp = fake_response()
         resp.status_code = 200
         if "episode-2" in url:
             resp.text = SAMPLE_EPISODE_2_VK_HTML
@@ -199,7 +200,7 @@ async def test_ruchime_scan_episodes_cascade_and_filtering():
     mock_client = AsyncMock(spec=httpx.AsyncClient)
 
     def side_effect(url, headers=None, follow_redirects=True, **kwargs):
-        resp = AsyncMock(spec=httpx.Response)
+        resp = fake_response()
         resp.status_code = 200
         if "episode-2" in url:
             resp.text = SAMPLE_EPISODE_2_VK_HTML
@@ -264,7 +265,7 @@ async def test_ruchime_resolve_stream():
     mock_client = AsyncMock(spec=httpx.AsyncClient)
 
     # 1. 1080p AllVideo embed
-    resp_1080 = AsyncMock(spec=httpx.Response)
+    resp_1080 = fake_response()
     resp_1080.status_code = 200
     resp_1080.text = SAMPLE_ALLVIDEO_EMBED_HTML
     mock_client.get.return_value = resp_1080
@@ -275,7 +276,7 @@ async def test_ruchime_resolve_stream():
     assert stream["headers"]["Referer"] == "https://fsst.online/"
 
     # 2. 4K AllVideo embed
-    resp_4k = AsyncMock(spec=httpx.Response)
+    resp_4k = fake_response()
     resp_4k.status_code = 200
     resp_4k.text = SAMPLE_ALLVIDEO_4K_EMBED_HTML
     mock_client.get.return_value = resp_4k
@@ -315,7 +316,7 @@ async def test_sources_module_bus_parse_and_scan():
 
     try:
         with patch.object(sources._http, "get") as mock_get:
-            resp = AsyncMock(spec=httpx.Response)
+            resp = fake_response()
             resp.status_code = 200
             resp.text = SAMPLE_RELEASE_HTML
             mock_get.return_value = resp
@@ -373,30 +374,6 @@ async def test_sources_module_bus_parse_and_scan():
     finally:
         await client.stop()
         await sources.stop()
-
-
-def test_allvideo_resolution_extraction():
-    provider = RuchimeProvider()
-
-    # 1. Playerjs quality brackets [360p] ... [1080p]
-    html_playerjs = """
-    file:"[360p]https://www.incvideo1.online/get_file/360p.mp4/,[720p]https://www.incvideo1.online/get_file/720p.mp4/,[1080p]https://www.incvideo1.online/get_file/1080p.mp4/"
-    """
-    assert provider._extract_allvideo_resolution(html_playerjs) == 1080
-
-    # 2. 4K quality
-    html_4k = """
-    file:"[720p]url,[1080p]url,[4k]url"
-    """
-    assert provider._extract_allvideo_resolution(html_4k) == 2160
-
-    # 3. Filename patterns in URL
-    html_url_res = """file:"https://video.host/stream_720p.mp4" """
-    assert provider._extract_allvideo_resolution(html_url_res) == 720
-
-    # 4. Fallback to title
-    html_title = "<title>Watch video 1080p HD</title>"
-    assert provider._extract_allvideo_resolution(html_title) == 1080
 
 
 @pytest.mark.asyncio

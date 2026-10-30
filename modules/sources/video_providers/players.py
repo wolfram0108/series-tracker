@@ -1,60 +1,18 @@
-"""Player adapters for Ruchime: find a player on a page, probe, resolve.
+"""The page players of Ruchime in the order they are tried, and the Vibix series-scope player until it moves to players/.
 
-Priority is VK, then AllVideo, then Vibix. An adapter reports availability, so a
-player button without a playable stream never becomes a media candidate.
+Priority is VK, then AllVideo, then Vibix. A player reports what it gave, so a button without a playable
+stream never becomes a media candidate.
 """
 from __future__ import annotations
 
-import asyncio
-import html
-import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from core.reasons import reason
 
-from ..players.contract import Kind
-from ..players.vk_embed import read_embed
-
-if TYPE_CHECKING:
-    import httpx
-
-_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-
-
-def _retry_after(response: "httpx.Response | None") -> float | None:
-    if response is None:
-        return None
-    try:
-        value = response.headers.get("Retry-After")
-        return float(value) if value else None
-    except (AttributeError, TypeError, ValueError):
-        return None
-
-
-async def _get_with_retry(http: "httpx.AsyncClient", url: str, headers: dict,
-                          attempts: int = 3) -> "httpx.Response | None":
-    """Probe a player host with backoff: rate limits must not look like absence."""
-    response: "httpx.Response | None" = None
-    for attempt in range(attempts):
-        try:
-            response = await http.get(url, headers=headers, follow_redirects=True,
-                                      timeout=8.0)
-        except Exception:  # noqa: BLE001 - retried below
-            response = None
-        else:
-            if response.status_code != 429 and response.status_code < 500:
-                return response
-        if attempt < attempts - 1:
-            await asyncio.sleep(_retry_after(response) or 5.0 * (attempt + 1))
-    return response
-
-
-@dataclass(frozen=True)
-class PlayerRef:
-    name: str
-    url: str
-    raw_url: str = ""
+from ..players.allvideo import AllVideoPlayer
+from ..players.contract import Kind, Player, PlayerRef
+from ..players.vk import VkPlayer
+from ..policy import Verdict
 
 
 @dataclass(frozen=True)
@@ -66,139 +24,24 @@ class PlayerProbe:
     transient: bool = False
 
 
-class PlayerAdapter:
-    name = ""
-    series_scope = False
-
-    def find(self, text: str, page_url: str) -> PlayerRef | None:
-        raise NotImplementedError
-
-    async def probe(self, ref: PlayerRef, http: httpx.AsyncClient,
-                    page_url: str) -> PlayerProbe:
-        raise NotImplementedError
-
-
-class VkPlayer(PlayerAdapter):
-    name = "vk"
-
-    _SOURCE = re.compile(
-        r"switchSource\(['\"](https?://(?:vk\.com|vkvideo\.ru)/"
-        r"video_ext\.php\?[^'\"]+)")
-
-    def find(self, text: str, page_url: str) -> PlayerRef | None:
-        match = self._SOURCE.search(text)
-        if not match:
-            return None
-        raw_url = html.unescape(match.group(1))
-        ids = re.search(r"[?&]oid=(-?\d+)&(?:amp;)?id=(\d+)", raw_url)
-        canonical = (f"https://vk.com/video{ids.group(1)}_{ids.group(2)}"
-                     if ids else raw_url)
-        return PlayerRef(name=self.name, url=canonical, raw_url=raw_url)
-
-    async def probe(self, ref: PlayerRef, http: httpx.AsyncClient,
-                    page_url: str) -> PlayerProbe:
-        response = await _get_with_retry(http, ref.raw_url,
-                                         {"Referer": page_url, "User-Agent": _UA})
-        if response is None:
-            return PlayerProbe(ref, False, reason=reason("player_no_answer", player="VK"), transient=True)
-        answer = read_embed(response.status_code, response.text)
-        if answer.kind is Kind.PLAYABLE:
-            return PlayerProbe(ref, True, max(answer.resolutions))
-        if answer.kind is Kind.NOT_FOUND:
-            return PlayerProbe(ref, False, reason=reason("player_video_missing", player="VK"))
-        if answer.kind is Kind.RESTRICTED:
-            return PlayerProbe(ref, False, reason=reason("video_private"))
-        if answer.kind is Kind.HTTP_ERROR:
-            return PlayerProbe(ref, False, reason=reason("player_status", player="VK", status=answer.status),
-                               transient=True)
-        # The page is not the player, or the player shows no file: left to the layer that decides on asking again.
-        return PlayerProbe(ref, False, reason=reason("player_unconfirmed", player="VK"), transient=True)
+def probe_from(verdict: Verdict, ref: PlayerRef, label: str) -> PlayerProbe:
+    """What a settled ask means to the provider; `transient` is an answer that stayed unsure to the end."""
+    reading = verdict.reading
+    if reading.kind is Kind.PLAYABLE:
+        return PlayerProbe(ref, True, max(reading.resolutions, default=None))
+    if reading.kind is Kind.NOT_FOUND:
+        return PlayerProbe(ref, False, reason=reason("player_video_missing", player=label))
+    if reading.kind is Kind.RESTRICTED:
+        return PlayerProbe(ref, False, reason=reason("video_private"))
+    if reading.kind is Kind.HTTP_ERROR:
+        return PlayerProbe(ref, False, reason=reason("player_status", player=label, status=reading.status),
+                           transient=verdict.exhausted)
+    if reading.kind is Kind.NO_ANSWER:
+        return PlayerProbe(ref, False, reason=reason("player_no_answer", player=label), transient=True)
+    return PlayerProbe(ref, False, reason=reason("player_unconfirmed", player=label), transient=True)
 
 
-class AllVideoPlayer(PlayerAdapter):
-    name = "allvideo"
-
-    _SOURCE = re.compile(
-        r"switchSource\(['\"](https?://(?:fsst\.online|incvideo1\.online)/"
-        r"embed/\d+/?)")
-
-    def find(self, text: str, page_url: str) -> PlayerRef | None:
-        match = self._SOURCE.search(text)
-        if not match:
-            return None
-        return PlayerRef(name=self.name, url=html.unescape(match.group(1)))
-
-    async def probe(self, ref: PlayerRef, http: httpx.AsyncClient,
-                    page_url: str) -> PlayerProbe:
-        response = await _get_with_retry(http, ref.url,
-                                         {"Referer": page_url, "User-Agent": _UA})
-        if response is None:
-            return PlayerProbe(ref, False, reason=reason("player_no_answer", player="AllVideo"), transient=True)
-        if response.status_code in (403, 408, 425, 429) or response.status_code >= 500:
-            return PlayerProbe(ref, False,
-                               reason=reason("player_status", player="AllVideo", status=response.status_code),
-                               transient=True)
-        if response.status_code != 200:
-            return PlayerProbe(ref, False,
-                               reason=reason("player_status", player="AllVideo", status=response.status_code))
-        resolution = self.extract_resolution(response.text)
-        if resolution is None:
-            return PlayerProbe(ref, False, reason=reason("player_no_qualities", player="AllVideo"))
-        return PlayerProbe(ref, True, resolution)
-
-    @staticmethod
-    def extract_resolution(html_text: str) -> int | None:
-        """Highest resolution from AllVideo/Playerjs configuration or title."""
-        resolutions: list[int] = []
-        match = re.search(r'file:\s*["\']([^"\']+)["\']', html_text)
-        if match:
-            file_val = match.group(1)
-            for quality in re.findall(r"\[(\d+)p?\]", file_val, re.IGNORECASE):
-                resolutions.append(int(quality))
-            if re.search(r"\[4k\]", file_val, re.IGNORECASE):
-                resolutions.append(2160)
-            for quality in re.findall(r"[-_](\d{3,4})p?\.(?:mp4|m3u8)",
-                                      file_val, re.IGNORECASE):
-                resolutions.append(int(quality))
-
-        if not resolutions:
-            title = re.search(r"<title>(.*?)</title>", html_text, re.IGNORECASE)
-            title_text = title.group(1) if title else ""
-            if re.search(r"\b(?:4k|2160p?)\b", title_text, re.IGNORECASE) \
-                    or "4к" in title_text.lower():
-                resolutions.append(2160)
-            for quality in re.findall(r"\b(1080|720|480|360)p?\b", title_text,
-                                      re.IGNORECASE):
-                resolutions.append(int(quality))
-
-        return max(resolutions) if resolutions else None
-
-    @staticmethod
-    def best_stream_url(file_val: str) -> str | None:
-        """Best stream URL from the comma-separated Playerjs quality list."""
-        streams: list[tuple[int, str]] = []
-        for chunk in file_val.split(","):
-            chunk = chunk.strip()
-            if not chunk:
-                continue
-            match = re.search(r"\[(?:(\d+)p?|(4k))\]", chunk, re.IGNORECASE)
-            if match:
-                quality = 2160 if match.group(2) else int(match.group(1))
-                stream_url = re.sub(r"\[[^\]]+\]", "", chunk).strip()
-                if stream_url:
-                    streams.append((quality, stream_url))
-            else:
-                cleaned = re.sub(r"\[[^\]]+\]", "", chunk).strip()
-                if cleaned:
-                    streams.append((0, cleaned))
-        if streams:
-            streams.sort(key=lambda item: item[0], reverse=True)
-            return streams[0][1]
-        cleaned = re.sub(r"\[[^\]]+\]", "", file_val).strip()
-        return cleaned if cleaned else None
-
-
-class VibixPlayer(PlayerAdapter):
+class VibixPlayer:
     name = "vibix"
     series_scope = True
 
@@ -208,4 +51,4 @@ class VibixPlayer(PlayerAdapter):
         return PlayerRef(name=self.name, url=page_url)
 
 
-PLAYER_ORDER: tuple[PlayerAdapter, ...] = (VkPlayer(), AllVideoPlayer(), VibixPlayer())
+PLAYER_ORDER: tuple[Player, ...] = (VkPlayer(), AllVideoPlayer(), VibixPlayer())

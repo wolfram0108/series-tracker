@@ -7,8 +7,9 @@ import httpx
 import pytest
 
 from core.reasons import parse
+from http_fakes import fake_response
 from provider_contract import check_release
-from modules.sources.video_providers import ruchime as ruchime_module
+from modules.sources import policy
 from modules.sources.video_providers.base import StreamUnavailable
 from modules.sources.video_providers.ruchime import RuchimeProvider
 from modules.sources.video_providers.vibix import (Episode, Stream, VibixUnavailable,
@@ -67,7 +68,7 @@ def make_client(routes: dict[str, str], counts: dict[str, int] | None = None):
             for key in counts:
                 if key in url:
                     counts[key] += 1
-        response = AsyncMock(spec=httpx.Response)
+        response = fake_response()
         response.status_code = 200
         for key, body in routes.items():
             if key in url:
@@ -211,7 +212,7 @@ async def test_resolve_vibix_writes_absolute_manifest(monkeypatch, tmp_path: Pat
         return ([Episode(387, "Серия 387", "Сезон 1", (stream,))], key)
 
     monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
-    response = AsyncMock(spec=httpx.Response)
+    response = fake_response()
     response.status_code = 200
     response.content = encode_envelope(manifest, key)
     client = AsyncMock(spec=httpx.AsyncClient)
@@ -276,7 +277,7 @@ async def test_resolve_vibix_returns_absolute_file_url(monkeypatch, tmp_path: Pa
         return ([Episode(1, "Серия 1", "Сезон 1", (stream,))], key)
 
     monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
-    response = AsyncMock(spec=httpx.Response)
+    response = fake_response()
     response.status_code = 200
     response.content = encode_envelope(manifest, key)
     client = AsyncMock(spec=httpx.AsyncClient)
@@ -401,7 +402,7 @@ def manifest_client(routes: dict[str, int], page_routes: dict[str, str] | None =
             if key in url:
                 if hits is not None:
                     hits.append(url)
-                response = AsyncMock(spec=httpx.Response)
+                response = fake_response()
                 response.status_code = status
                 response.content = (encode_envelope(VIBIX_MANIFEST, VIBIX_KEY)
                                     if status == 200 else b"<html>error</html>")
@@ -848,7 +849,7 @@ async def test_coverage_names_an_unreadable_episode_page_and_gives_no_partial_an
 
     async def get(url, headers=None, follow_redirects=True, **kwargs):
         if "episode-2" in url:
-            gone = AsyncMock(spec=httpx.Response)
+            gone = fake_response()
             gone.status_code, gone.text = 404, ""
             return gone
         return await answer(url, headers=headers, follow_redirects=follow_redirects, **kwargs)
@@ -919,7 +920,7 @@ async def test_a_scan_reads_again_an_episode_the_coverage_could_not_be_sure_of()
 
     async def get(url, headers=None, follow_redirects=True, **kwargs):
         if state["vk_down"] and "id=101&hash" in url:
-            down = AsyncMock(spec=httpx.Response)
+            down = fake_response()
             down.status_code, down.text = 403, ""
             return down
         return await answer(url, headers=headers, follow_redirects=follow_redirects, **kwargs)
@@ -956,7 +957,7 @@ def refuse(client, marker: str, status: int, text: str, times: int) -> dict[str,
     async def get(url, headers=None, follow_redirects=True, **kwargs):
         if marker in url and served["refused"] < times:
             served["refused"] += 1
-            refused = AsyncMock(spec=httpx.Response)
+            refused = fake_response()
             refused.status_code, refused.text = status, text
             return refused
         return await answer(url, headers=headers, follow_redirects=follow_redirects, **kwargs)
@@ -987,7 +988,7 @@ async def test_a_refusal_that_does_not_go_away_is_asked_again_only_as_often_as_a
     vk = (await RuchimeProvider().coverage(PAGE, client))["players"]["vk"]
 
     assert (vk["present"], vk["available"], vk["ranges"]) == (2, 1, "2")
-    assert served["refused"] == ruchime_module.PROBE_ATTEMPTS
+    assert served["refused"] == policy.DEFAULT.attempts
 
 
 @pytest.mark.asyncio

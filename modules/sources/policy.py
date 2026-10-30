@@ -55,9 +55,10 @@ class Verdict:
 class Pacer:
     """Spreads the requests to one host so that a burst is not taken for abuse."""
 
-    def __init__(self, interval_s: float, *, clock: Callable[[], float] = time.monotonic,
+    def __init__(self, interval_s: float | Callable[[], float], *, clock: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> None:
-        self._interval, self._clock, self._sleep = interval_s, clock, sleep
+        self._interval = interval_s if callable(interval_s) else (lambda: interval_s)
+        self._clock, self._sleep = clock, sleep
         self._lock = asyncio.Lock()
         self._next_at = 0.0
 
@@ -66,7 +67,7 @@ class Pacer:
             delay = self._next_at - self._clock()
             if delay > 0:
                 await self._sleep(delay)
-            self._next_at = self._clock() + self._interval
+            self._next_at = self._clock() + self._interval()
 
 
 async def settle(player: Player, ref: PlayerRef, http: httpx.AsyncClient, page_url: str,

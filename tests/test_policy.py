@@ -67,7 +67,7 @@ async def test_a_final_answer_is_taken_at_once(text, kind):
 
 @pytest.mark.asyncio
 async def test_an_unsure_answer_is_asked_again_after_the_scheduled_pause():
-    verdict, time = await run(FakePlayer(said("shell"), said("video")))
+    verdict, time = await run(FakePlayer(said("shell"), said("video")), Budget())
 
     assert (verdict.reading.kind, verdict.attempts, verdict.exhausted, time.slept) == (Kind.PLAYABLE, 2, False, [2.0])
 
@@ -76,7 +76,7 @@ async def test_an_unsure_answer_is_asked_again_after_the_scheduled_pause():
 async def test_pauses_follow_the_schedule_and_what_stays_unsure_is_not_obtained():
     player = FakePlayer(said("shell"))
 
-    verdict, time = await run(player)
+    verdict, time = await run(player, Budget())
 
     assert (verdict.reading.kind, verdict.attempts, verdict.exhausted) == (Kind.NOT_PLAYER, 3, True)
     assert (time.slept, player.fetched) == ([2.0, 6.0], 3)
