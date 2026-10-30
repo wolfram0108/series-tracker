@@ -871,3 +871,78 @@ async def test_coverage_reports_progress_by_pages_and_then_by_players():
                             progress=lambda current, total, phase: calls.append((current, total, phase)))
 
     assert (2, 2, "pages") in calls and calls[-1] == (2, 2, "players")
+
+
+PAGE = "https://1.ruchime.org/release/test"
+SURVEY_ROUTES = {
+    "episode-1": player_page(vk=101, allvideo=77), "episode-2": player_page(vk=102, allvideo=77),
+    "id=101&hash": VK_OPEN, "id=102&hash": VK_OPEN_4K, "fsst.online/embed/77": AV_EMBED_1080,
+    "release/test": release_html([1, 2]),
+}
+SURVEY_COUNTS = {"episode-1": 0, "episode-2": 0, "id=101&hash": 0, "id=102&hash": 0, "fsst.online": 0}
+
+
+@pytest.mark.asyncio
+async def test_a_scan_right_after_the_coverage_reads_nothing_again():
+    provider, counts = RuchimeProvider(), dict(SURVEY_COUNTS)
+    client = make_client(SURVEY_ROUTES, counts)
+    await provider.coverage(PAGE, client)
+    read = dict(counts)
+
+    scanned = await provider.scan_episodes(PAGE, client, {"name": "Тест"})
+
+    assert counts == read
+    fresh = await RuchimeProvider().scan_episodes(PAGE, make_client(SURVEY_ROUTES), {"name": "Тест"})
+    assert scanned["videos"] == fresh["videos"]
+
+
+@pytest.mark.asyncio
+async def test_a_scan_after_the_coverage_still_leaves_out_the_disabled_players():
+    provider, counts = RuchimeProvider(), dict(SURVEY_COUNTS)
+    client = make_client(SURVEY_ROUTES, counts)
+    await provider.coverage(PAGE, client)
+    read = dict(counts)
+
+    scanned = await provider.scan_episodes(f"{PAGE}?off=vk", client, {"name": "Тест"})
+
+    assert counts == read
+    assert [fact["url"] for fact in scanned["videos"]] == [ALLVIDEO_URL, ALLVIDEO_URL]
+    assert parse(scanned["players"]["players"]["vk"]["reason"])["code"] == "source_disabled"
+
+
+@pytest.mark.asyncio
+async def test_a_scan_reads_again_an_episode_the_coverage_could_not_be_sure_of():
+    provider, counts = RuchimeProvider(), dict(SURVEY_COUNTS)
+    base = make_client(SURVEY_ROUTES, counts)
+    answer, state = base.get.side_effect, {"vk_down": True}
+
+    async def get(url, headers=None, follow_redirects=True, **kwargs):
+        if state["vk_down"] and "id=101&hash" in url:
+            down = AsyncMock(spec=httpx.Response)
+            down.status_code, down.text = 403, ""
+            return down
+        return await answer(url, headers=headers, follow_redirects=follow_redirects, **kwargs)
+
+    base.get.side_effect = get
+    await provider.coverage(PAGE, base)
+    read = dict(counts)
+    state["vk_down"] = False
+
+    scanned = await provider.scan_episodes(PAGE, base, {"name": "Тест"})
+
+    assert counts["episode-1"] == read["episode-1"] + 1 and counts["episode-2"] == read["episode-2"]
+    assert scanned["videos"][0]["url"] == "https://vk.com/video-1_101"
+
+
+@pytest.mark.asyncio
+async def test_a_scan_does_not_trust_what_the_coverage_read_long_ago():
+    provider, counts = RuchimeProvider(), dict(SURVEY_COUNTS)
+    client = make_client(SURVEY_ROUTES, counts)
+    await provider.coverage(PAGE, client)
+    read = dict(counts)
+    expires, kept = provider._surveys["test"]
+    provider._surveys["test"] = (0.0, kept)
+
+    await provider.scan_episodes(PAGE, client, {"name": "Тест"})
+
+    assert counts["episode-1"] == read["episode-1"] + 1

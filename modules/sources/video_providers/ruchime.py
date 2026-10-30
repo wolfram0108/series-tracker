@@ -14,7 +14,7 @@ import re
 import tempfile
 import time
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urldefrag, urljoin, urlparse
@@ -43,6 +43,8 @@ PAGE_PAUSE_S = 0.05
 RESOLUTION_CEILING = 2160
 _PRIORITY = {adapter.name: index for index, adapter in enumerate(PLAYER_ORDER)}
 VIBIX_REFRESH_MARGIN_S = 600
+# How long what the coverage has read stays good for a scan: the series is usually added right after it.
+SURVEY_TTL_S = 900
 REQUEST_TIMEOUT = 8.0
 
 _MONTHS = {
@@ -100,6 +102,8 @@ class _Episode:
     reason: str = ""
     page_failed: bool = False
     unverified: bool = False
+    # Every page player was probed on this episode, so a scan has nothing left to ask them.
+    surveyed: bool = False
 
     @property
     def best_resolution(self) -> int:
@@ -118,6 +122,7 @@ class RuchimeProvider(BaseVideoProvider):
         self._manifest_dir = Path(manifest_dir) if manifest_dir else None
         self._vibix_cache: dict[str, tuple[int, list[Episode], bytes]] = {}
         self._vibix_locks: dict[str, asyncio.Lock] = {}
+        self._surveys: dict[str, tuple[float, dict[int, _Episode]]] = {}
         self._cooldown_until = 0.0
         self._page_next_at = 0.0
         self._page_gate = asyncio.Lock()
@@ -303,7 +308,7 @@ class RuchimeProvider(BaseVideoProvider):
                              http: httpx.AsyncClient, every: bool = False) -> None:
         """Probe one player where it can improve on the current best resolution; `every` probes all its episodes."""
         targets = ([item for item in episodes if adapter.name in item.refs] if every
-                   else self._needs_lower_source(episodes, adapter.name))
+                   else [item for item in self._needs_lower_source(episodes, adapter.name) if not item.surveyed])
         if not targets:
             return
         async def probe_one(item: _Episode):
@@ -594,6 +599,7 @@ class RuchimeProvider(BaseVideoProvider):
             logger.warning("Coverage of %s not read: %s", slug, exc)
             return {"players": {}, "reason": str(exc)}
         players = self._coverage(episodes, probes)
+        self._surveys[slug] = (time.monotonic() + SURVEY_TTL_S, {item.number: item for item in episodes})
         for adapter in probes:
             played = {item.number for item in episodes
                       if any(source == adapter.name for _resolution, source, _url in item.candidates)}
@@ -630,7 +636,22 @@ class RuchimeProvider(BaseVideoProvider):
             progress(total, total, "players")
         for adapter in probes:
             await self._apply_adapter(episodes, adapter, http, every=True)
+        for item in episodes:
+            item.surveyed = True
         return episodes
+
+    def _recall(self, slug: str, ep: dict, name_ru: str, off: frozenset[str]) -> _Episode | None:
+        """An episode the coverage has just read, as a scan needs it; one a transient refusal left unsure is read again."""
+        kept = self._surveys.get(slug)
+        if kept is None or kept[0] < time.monotonic():
+            return None
+        item = kept[1].get(ep.get("number"))
+        if item is None or item.unverified or item.page_failed:
+            return None
+        return replace(item, title=self._episode_title(name_ru, ep), refs=dict(item.refs),
+                       candidates=[c for c in item.candidates if c[1] not in off],
+                       player_reasons={name: why for name, why in item.player_reasons.items() if name not in off},
+                       video_url=None, resolution=None, source=None)
 
     @staticmethod
     def _coverage(episodes: list[_Episode], probes: list[PlayerAdapter]) -> dict[str, dict]:
@@ -794,8 +815,8 @@ class RuchimeProvider(BaseVideoProvider):
 
         async def read_one(ep: dict) -> _Episode | None:
             nonlocal done, last_emit
-            info = await self._read_episode(slug, name_ru, ep, http, headers, sem,
-                                            first_adapter=probed_first)
+            info = self._recall(slug, ep, name_ru, choice.off) or await self._read_episode(
+                slug, name_ru, ep, http, headers, sem, first_adapter=probed_first)
             async with counter_lock:
                 done += 1
                 now = time.monotonic()
