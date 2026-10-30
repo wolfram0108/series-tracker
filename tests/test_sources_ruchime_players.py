@@ -761,3 +761,113 @@ async def test_parse_release_carries_the_choice_in_the_address():
     assert players["vk"]["enabled"] is True and players["allvideo"]["enabled"] is False
     assert players["allvideo"]["toggle"] == "https://1.ruchime.org/release/test?vibix=2"
     assert players["vk"]["toggle"] == "https://1.ruchime.org/release/test?vibix=2&off=vk,allvideo"
+
+
+def player_page(vk: int | None = None, allvideo: int | None = None) -> str:
+    parts = []
+    if vk is not None:
+        parts.append('<button data-player="vk" onclick="switchSource(\'https://vkvideo.ru/video_ext.php'
+                     f'?oid=-1&amp;id={vk}&amp;hash=abc\',this)">VK</button>')
+    if allvideo is not None:
+        parts.append(f'<button data-player="allvideo" onclick="switchSource(\'https://fsst.online/embed/{allvideo}/\','
+                     'this)">AllVideo</button>')
+    return "<html><body>" + "".join(parts) + "</body></html>"
+
+
+@pytest.mark.asyncio
+async def test_coverage_probes_every_player_of_every_episode():
+    provider = RuchimeProvider()
+    client = make_client({
+        "episode-1": player_page(vk=101, allvideo=77), "episode-2": player_page(vk=102, allvideo=77),
+        "episode-3": player_page(allvideo=77),
+        "id=101&hash": VK_OPEN_4K, "id=102&hash": VK_OPEN, "fsst.online/embed/77": AV_EMBED_1080,
+        "release/test": release_html([1, 2, 3]),
+    })
+
+    result = await provider.coverage("https://1.ruchime.org/release/test", client)
+
+    vk = result["players"]["vk"]
+    assert (vk["present"], vk["count"], vk["ranges"]) == (2, 2, "1-2")
+    assert vk["resolutions"] == [{"resolution": 2160, "ranges": "1", "count": 1},
+                                 {"resolution": 1080, "ranges": "2", "count": 1}]
+    # A scan would skip AllVideo where VK is at the ceiling; the coverage must not.
+    allvideo = result["players"]["allvideo"]
+    assert (allvideo["count"], allvideo["ranges"]) == (3, "1-3")
+    assert allvideo["resolutions"] == [{"resolution": 1080, "ranges": "1-3", "count": 3}]
+    assert "vibix" not in result["players"] and result["reason"] == ""
+
+
+@pytest.mark.asyncio
+async def test_coverage_counts_only_the_episodes_a_player_really_plays():
+    provider = RuchimeProvider()
+    client = make_client({
+        "episode-1": player_page(vk=101), "episode-2": player_page(vk=102),
+        "id=101&hash": VK_OPEN, "id=102&hash": VK_CLOSED,
+        "release/test": release_html([1, 2]),
+    })
+
+    vk = (await provider.coverage("https://1.ruchime.org/release/test", client))["players"]["vk"]
+
+    assert (vk["present"], vk["available"], vk["count"], vk["ranges"]) == (2, 1, 1, "1")
+
+
+@pytest.mark.asyncio
+async def test_coverage_leaves_out_a_disabled_player():
+    provider = RuchimeProvider()
+    counts = {"video_ext.php": 0}
+    client = make_client({
+        "episode-1": player_page(vk=101, allvideo=77), "id=101&hash": VK_OPEN,
+        "fsst.online/embed/77": AV_EMBED_1080, "release/test": release_html([1]),
+    }, counts)
+
+    result = await provider.coverage("https://1.ruchime.org/release/test?off=vk", client)
+
+    assert list(result["players"]) == ["allvideo"]
+    assert counts["video_ext.php"] == 0
+
+
+@pytest.mark.asyncio
+async def test_coverage_with_every_page_player_disabled_reads_nothing():
+    provider = RuchimeProvider()
+    counts = {"episode-1": 0}
+    client = make_client({"episode-1": player_page(vk=101), "release/test": release_html([1])}, counts)
+
+    result = await provider.coverage("https://1.ruchime.org/release/test?off=vk,allvideo", client)
+
+    assert result == {"players": {}, "reason": ""}
+    assert counts["episode-1"] == 0
+
+
+@pytest.mark.asyncio
+async def test_coverage_names_an_unreadable_episode_page_and_gives_no_partial_answer():
+    provider = RuchimeProvider()
+    client = make_client({"episode-1": player_page(vk=101), "id=101&hash": VK_OPEN,
+                          "release/test": release_html([1, 2])})
+    answer = client.get.side_effect
+
+    async def get(url, headers=None, follow_redirects=True, **kwargs):
+        if "episode-2" in url:
+            gone = AsyncMock(spec=httpx.Response)
+            gone.status_code, gone.text = 404, ""
+            return gone
+        return await answer(url, headers=headers, follow_redirects=follow_redirects, **kwargs)
+
+    client.get.side_effect = get
+
+    result = await provider.coverage("https://1.ruchime.org/release/test", client)
+
+    assert result["players"] == {}
+    assert parse(result["reason"])["code"] == "pages_unread"
+
+
+@pytest.mark.asyncio
+async def test_coverage_reports_progress_by_pages_and_then_by_players():
+    provider = RuchimeProvider()
+    client = make_client({"episode-1": player_page(vk=101), "episode-2": player_page(vk=102),
+                          "id=10": VK_OPEN, "release/test": release_html([1, 2])})
+    calls: list[tuple[int, int, str]] = []
+
+    await provider.coverage("https://1.ruchime.org/release/test", client,
+                            progress=lambda current, total, phase: calls.append((current, total, phase)))
+
+    assert (2, 2, "pages") in calls and calls[-1] == (2, 2, "players")

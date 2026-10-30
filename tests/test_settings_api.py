@@ -240,6 +240,41 @@ async def test_the_layout_of_a_web_release_passes_through_with_its_resolutions(s
 
 
 @pytest.mark.asyncio
+async def test_the_coverage_of_a_web_release_passes_through(system):
+    _, _, client = system
+    registry = get_default_registry()
+
+    class Site(_LayoutSite):
+        name = "withcoverage"
+        domains = ("coverage.test",)
+
+        def match_url(self, url):
+            return "coverage.test" in url
+
+        async def coverage(self, url, http, progress=None):
+            return {"players": {"vk": {"present": 3, "available": 2, "count": 2, "ranges": "1-2",
+                                       "resolutions": [{"resolution": 1080, "ranges": "1-2", "count": 2}]}},
+                    "reason": ""}
+
+    site = Site()
+    registry.register(site)
+    try:
+        body = (await client.post("/api/web_video/coverage", json={"url": "https://coverage.test/t"})).json()
+    finally:
+        registry._providers.remove(site)
+    assert body["players"]["vk"] == {"present": 3, "available": 2, "count": 2, "ranges": "1-2",
+                                     "resolutions": [{"resolution": 1080, "ranges": "1-2", "count": 2}]}
+    assert body["reason"] == ""
+
+
+@pytest.mark.asyncio
+async def test_the_coverage_of_a_release_without_one_is_empty(system):
+    _, _, client = system
+    body = (await client.post("/api/web_video/coverage", json={"url": "http://kinozal.tv/details.php?id=1"})).json()
+    assert body == {"players": {}, "reason": ""}
+
+
+@pytest.mark.asyncio
 async def test_the_layout_of_a_release_without_one_is_empty(system):
     _, _, client = system
     body = (await client.post("/api/web_video/layout", json={"url": "http://kinozal.tv/details.php?id=1"})).json()

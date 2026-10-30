@@ -490,3 +490,48 @@ async def test_sources_module_answers_an_empty_layout_for_a_provider_without_one
     finally:
         await client.stop()
         await sources.stop()
+
+
+@pytest.mark.asyncio
+async def test_sources_module_answers_the_coverage_and_announces_its_progress():
+    bus = Bus()
+    sources = SourcesModule(bus, Database(":memory:"))
+    client = DummyClientModule(bus)
+    await sources.start()
+    await client.start()
+    events = bus.subscribe("sources.coverage.progress")
+    try:
+        async def read(self, url, http, progress=None):
+            progress(1, 2, "pages")
+            return {"players": {"vk": {"present": 2, "available": 2, "count": 2, "ranges": "1-2",
+                                       "resolutions": []}}, "reason": ""}
+
+        with patch.object(RuchimeProvider, "coverage", read):
+            reply = await client.request("sources.video.coverage", {
+                "url": "https://1.ruchime.org/release/test?vibix=1#x"}, timeout=10)
+
+        assert reply["players"]["vk"]["count"] == 2
+        payloads = [(await asyncio.wait_for(events.queue.get(), 2)).payload for _ in range(2)]
+        assert payloads[0] == {"url": "https://1.ruchime.org/release/test", "current": 1, "total": 2,
+                               "phase": "pages", "active": True}
+        assert payloads[1]["active"] is False
+    finally:
+        await client.stop()
+        await sources.stop()
+
+
+@pytest.mark.asyncio
+async def test_sources_module_answers_an_empty_coverage_for_a_provider_without_one():
+    bus = Bus()
+    sources = SourcesModule(bus, Database(":memory:"))
+    client = DummyClientModule(bus)
+    await sources.start()
+    await client.start()
+    try:
+        reply = await client.request("sources.video.coverage", {
+            "url": "https://dunhuatv.ru/28-praktikuja-ci-sto-tysjach-let-smotret-onlajn.html"})
+
+        assert reply == {"players": {}, "reason": ""}
+    finally:
+        await client.stop()
+        await sources.stop()

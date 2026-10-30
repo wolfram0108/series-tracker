@@ -153,6 +153,7 @@ SSE_MAP: dict[str, tuple[str, object]] = {
     "slicing.queue.changed": ("slicing_queue_update", _bare_tasks),
     "scan.status.changed": ("scanner_status_update", None),
     "sources.video.progress": ("video_scan_progress", None),
+    "sources.coverage.progress": ("coverage_progress", None),
     "conform.queue.changed": ("conform_queue_update", None),
     "voices.dub.changed": ("voice_dub_update", None),
     "voices.dubs.snapshot": ("voice_dubs_snapshot", None),

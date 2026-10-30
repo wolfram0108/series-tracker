@@ -88,6 +88,7 @@ SUMMARIES = {
     "POST /api/auth": "Сохранение кредов сервисов",
     "POST /api/parse_url": "Разбор URL серии: заголовок, раздачи, трекер",
     "POST /api/web_video/layout": "Раскладка источников веб-релиза: сезоны каталога, выбранный сезон",
+    "POST /api/web_video/coverage": "Что даёт каждый плеер веб-релиза: серии и разрешение по сериям",
     "GET /api/settings/force_replace": "Чтение флага «всегда заменять торренты»",
     "POST /api/settings/force_replace": "Запись флага «всегда заменять торренты»",
     "GET /api/settings/less_strict_scan": "Чтение флага «менее строгий скан»",

@@ -96,6 +96,28 @@ class WebVideoLayout(ApiModel):
     reason: str = ""
 
 
+class ResolutionGroup(ApiModel):
+    """The episodes of a source that have one resolution, as ranges."""
+    resolution: int
+    ranges: str
+    count: int
+
+
+class PlayerCoverage(ApiModel):
+    """What one page player gives: episodes that show it, episodes it plays, and their resolution by ranges."""
+    present: int
+    available: int
+    count: int
+    ranges: str
+    resolutions: list[ResolutionGroup] = []
+
+
+class WebVideoCoverage(ApiModel):
+    """The coverage of the players of a web release; `reason` is a coded reason when it could not be read."""
+    players: dict[str, PlayerCoverage] = {}
+    reason: str = ""
+
+
 class SeriesObject(ApiModel):
     """Серия (список и карточка). Объявлены ВСЕГДА присутствующие поля;
     условные (tracker_info — только торренты; downloaded_episodes_count —

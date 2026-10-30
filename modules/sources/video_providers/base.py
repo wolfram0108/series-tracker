@@ -33,6 +33,11 @@ class BaseVideoProvider(ABC):
         """{sources, selected_source, reason} of the release at `url`; None when the provider has none."""
         return None
 
+    async def coverage(self, url: str, http: httpx.AsyncClient, progress=None) -> dict | None:
+        """{players: {name: {present, available, count, ranges, resolutions}}, reason}: what each player of
+        the page really gives, by reading every episode; None when the provider has none."""
+        return None
+
     @abstractmethod
     def match_url(self, url: str) -> bool:
         """Check if provider handles the given URL."""

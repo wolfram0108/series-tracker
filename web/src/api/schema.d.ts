@@ -873,6 +873,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/web_video/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Web Video Coverage */
+        post: operations["web_video_coverage_api_web_video_coverage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/web_video/layout": {
         parameters: {
             query?: never;
@@ -1691,6 +1708,27 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * PlayerCoverage
+         * @description What one page player gives: episodes that show it, episodes it plays, and their resolution by ranges.
+         */
+        PlayerCoverage: {
+            /** Present */
+            present: number;
+            /** Available */
+            available: number;
+            /** Count */
+            count: number;
+            /** Ranges */
+            ranges: string;
+            /**
+             * Resolutions
+             * @default []
+             */
+            resolutions: components["schemas"]["ResolutionGroup"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * QueueTask
          * @description Задача очереди (агент/загрузки/прогресс). Поля динамические —
          *     extra='allow' пропускает всё; жёстко фиксировать не требуется.
@@ -1748,6 +1786,20 @@ export interface components {
             links?: {
                 [key: string]: string;
             } | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ResolutionGroup
+         * @description The episodes of a source that have one resolution, as ranges.
+         */
+        ResolutionGroup: {
+            /** Resolution */
+            resolution: number;
+            /** Ranges */
+            ranges: string;
+            /** Count */
+            count: number;
         } & {
             [key: string]: unknown;
         };
@@ -1938,6 +1990,26 @@ export interface components {
             default_priority: string[];
             /** Rejected */
             rejected: string[];
+        };
+        /**
+         * WebVideoCoverage
+         * @description The coverage of the players of a web release; `reason` is a coded reason when it could not be read.
+         */
+        WebVideoCoverage: {
+            /**
+             * Players
+             * @default {}
+             */
+            players: {
+                [key: string]: components["schemas"]["PlayerCoverage"];
+            };
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * WebVideoLayout
@@ -4136,6 +4208,62 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ParsedUrl"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    web_video_coverage_api_web_video_coverage_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebVideoCoverage"];
                 };
             };
             /** @description Bad Request */

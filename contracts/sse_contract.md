@@ -34,6 +34,7 @@
 | `voice_settings_update` | — (новое, Р-54) | настройки озвучек после сохранения (`VoiceSettingsView`); пакет самодостаточен: открытые экраны настроек применяют его без запроса | `voices.settings.changed` | как есть |
 | `scanner_status_update` | `{scanner_enabled, scan_interval, is_scanning, is_awaiting_tasks, next_scan_time}` | подтверждено | `scan.status.changed` | как есть (форма совпадает) |
 | `video_scan_progress` | — (новое) | прогресс опроса серий web-источника | `sources.video.progress {series_id, current, total, rate, phase, active}` | как есть |
+| `coverage_progress` | — (новое) | прогресс чтения серий для окна добавления и свойств (ключ — адрес страницы релиза, не сериал) | `sources.coverage.progress {url, current, total, phase, active}` | как есть |
 | `agent_heartbeat` | `{name, activity?}` | **удалено по согласованию** (см. ниже) | — | — |
 | `relocation_started` | `{series_id}` | подтверждено | `library.relocation.started` | как есть |
 | `relocation_finished` | `{series_id, success, message}` | подтверждено | `library.relocation.finished` | как есть |

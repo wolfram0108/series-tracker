@@ -300,9 +300,10 @@ class RuchimeProvider(BaseVideoProvider):
                 and item.best_resolution < RESOLUTION_CEILING]
 
     async def _apply_adapter(self, episodes: list[_Episode], adapter: PlayerAdapter,
-                             http: httpx.AsyncClient) -> None:
-        """Probe one player where it can improve on the current best resolution."""
-        targets = self._needs_lower_source(episodes, adapter.name)
+                             http: httpx.AsyncClient, every: bool = False) -> None:
+        """Probe one player where it can improve on the current best resolution; `every` probes all its episodes."""
+        targets = ([item for item in episodes if adapter.name in item.refs] if every
+                   else self._needs_lower_source(episodes, adapter.name))
         if not targets:
             return
         async def probe_one(item: _Episode):
@@ -573,6 +574,76 @@ class RuchimeProvider(BaseVideoProvider):
         position, _refusal = self._vibix_season(playlist, choice)
         selected = address_of(self._page_url(url), choice.with_season(position)) if position else None
         return {"sources": sources, "selected_source": selected, "reason": ""}
+
+    async def coverage(self, url: str, http: httpx.AsyncClient,
+                       progress: Callable[[int, int, str], None] | None = None) -> dict:
+        """What each page player really gives: its episodes and the resolution of each, grouped by ranges.
+
+        Every episode page is read and every player is probed, which is slow, so the add form asks for it
+        apart from the parse and shows the progress."""
+        choice = choice_of(url)
+        probes = [adapter for adapter in PLAYER_ORDER
+                  if not adapter.series_scope and adapter.name not in choice.off]
+        if not probes:
+            return {"players": {}, "reason": ""}
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        resp, slug = await self._read_release(url, http, headers)
+        listed = self._release_episodes(resp.text)
+        if not listed:
+            return {"players": {}, "reason": reason("title_no_videos", player="Ruchime")}
+        try:
+            episodes = await self._survey(slug, listed, http, headers, probes, progress)
+        except ValueError as exc:
+            logger.warning("Coverage of %s not read: %s", slug, exc)
+            return {"players": {}, "reason": str(exc)}
+        return {"players": self._coverage(episodes, probes), "reason": ""}
+
+    async def _survey(self, slug: str, listed: list[dict], http: httpx.AsyncClient, headers: dict,
+                      probes: list[PlayerAdapter], progress: Callable[[int, int, str], None] | None) -> list[_Episode]:
+        """Read every episode page, then probe every page player on every episode that shows it."""
+        sem = asyncio.Semaphore(MAX_CONCURRENT_PROBES)
+        total, done, last_emit = len(listed), 0, 0.0
+
+        async def read_one(ep: dict) -> _Episode | None:
+            nonlocal done, last_emit
+            info = await self._read_episode(slug, slug, ep, http, headers, sem)
+            done += 1
+            now = time.monotonic()
+            if progress is not None and (done == total or now - last_emit >= 0.5):
+                last_emit = now
+                progress(done, total, "pages")
+            return info
+
+        read = await asyncio.gather(*(read_one(ep) for ep in listed))
+        episodes = [item for item in read if item is not None]
+        failed = [item for item in episodes if item.page_failed]
+        if failed:
+            raise ValueError(reason("pages_unread", site="Ruchime", count=len(failed), total=len(episodes)))
+        if progress is not None:
+            progress(total, total, "players")
+        for adapter in probes:
+            await self._apply_adapter(episodes, adapter, http, every=True)
+        return episodes
+
+    @staticmethod
+    def _coverage(episodes: list[_Episode], probes: list[PlayerAdapter]) -> dict[str, dict]:
+        """Per player: episodes that show it, episodes it plays, and their resolution grouped by ranges."""
+        players: dict[str, dict] = {}
+        for adapter in probes:
+            by_resolution: dict[int, set[int]] = {}
+            for item in episodes:
+                for resolution, source, _url in item.candidates:
+                    if source == adapter.name:
+                        by_resolution.setdefault(resolution, set()).add(item.number)
+            numbers = sorted(set().union(*by_resolution.values())) if by_resolution else []
+            players[adapter.name] = {
+                "present": sum(1 for item in episodes if adapter.name in item.refs),
+                "available": len(numbers), "count": len(numbers), "ranges": episode_ranges(numbers),
+                "resolutions": [{"resolution": height, "ranges": episode_ranges(by_resolution[height]),
+                                 "count": len(by_resolution[height])}
+                                for height in sorted(by_resolution, reverse=True)],
+            }
+        return players
 
     @staticmethod
     def _vibix_sources(playlist: list[Episode], page_url: str, choice: Choice) -> list[dict]:

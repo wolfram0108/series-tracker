@@ -145,6 +145,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | GET | `/api/auth` | Креды внешних сервисов без секретов + статус TMDB | `SettingsAuth.vue` |
 | POST | `/api/auth` | Сохранение кредов сервисов | `SettingsAuth.vue` |
 | POST | `/api/parse_url` | Разбор URL серии: заголовок, раздачи, трекер; у web-источника — `sources`, `selected_source` и `layout` (раскладка озвучек, Р-39) и `has_layout` (провайдер описывает источники отдельно, Р-60) | `AddSeriesModal.vue`, `StatusProperties.vue` |
+| POST | `/api/web_video/coverage` | Что даёт каждый плеер веб-релиза: серии, диапазоны и разрешение по сериям; читает страницы всех серий (Р-60) | `AddSeriesModal.vue`, `StatusProperties.vue` |
 | POST | `/api/web_video/layout` | Раскладка источников веб-релиза: сезоны каталога как источники, выбранный сезон, причина при отказе (Р-60) | `AddSeriesModal.vue` |
 | GET, POST | `/api/settings/force_replace` | Флаг «всегда заменять торренты» | `SettingsDebug.vue` |
 | GET, POST | `/api/settings/conform_clear_finished` | Флаг «очищать очередь выравнивания по завершении» (Р-59): завершённая задача уходит из истории демона вместе с графиками | `SettingsDebug.vue` |
@@ -215,6 +216,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | Открытие статус-окна | POST | `/api/series/{series_id}/state` |
 | Окно добавления: разбор URL | POST | `/api/parse_url` |
 | Окно добавления: раскладка источников | POST | `/api/web_video/layout` |
+| Окно добавления: покрытие плееров | POST | `/api/web_video/coverage` |
 | Окно добавления: префетч нейминга | POST | `/api/preview/naming/fetch` |
 | Окно добавления: поиск в TMDB | POST | `/api/tmdb/search` |
 | Окно добавления: детали TMDB | GET | `/api/tmdb/details/{tmdb_id}` |

@@ -11,6 +11,9 @@ Queries:
   sources.video.layout {url}     → {sources, selected_source, reason} — the sources of a release that a
                                    provider describes apart from the parse because reading them is slow
                                    (`has_layout` in the parse reply tells whether to ask)
+  sources.video.coverage {url}   → {players, reason} — what each page player gives, episode by episode, with
+                                   the resolution of each grouped by ranges; slow, progress goes out as the
+                                   event sources.coverage.progress {url, current, total, phase, active}
 
 Доставка — ТОЛЬКО через `delivery.Delivery` (единственный выход
 наружу): она перебирает хосты-кандидаты (канонический хост ссылки →
@@ -30,6 +33,7 @@ import asyncio
 import base64
 import os
 import time
+from urllib.parse import urldefrag
 
 import httpx
 from pydantic import ValidationError
@@ -94,6 +98,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.vk.scan", self.on_vk_scan)
         self.handle("sources.video.scan", self.on_video_scan)
         self.handle("sources.video.layout", self.on_video_layout)
+        self.handle("sources.video.coverage", self.on_video_coverage)
         self.handle("sources.video.stream", self.on_video_stream)
         self.handle("sources.provider.info", self.on_provider_info)
 
@@ -426,6 +431,30 @@ class SourcesModule(BaseModule):
             await self._polite(provider.name)
             layout = await provider.layout(url, self._http)
         return layout or {"sources": [], "selected_source": None, "reason": ""}
+
+    async def on_video_coverage(self, env: Envelope) -> dict:
+        """payload: {url}; reply: {players, reason}. What each page player gives, read episode by episode (slow);
+        the progress goes out as `sources.coverage.progress {url, current, total, phase, active}`, keyed by the
+        release page, apart from the progress of a scan."""
+        url = env.payload["url"]
+        provider = self.video_registry.find_provider(url)
+        if not provider or not provider.has_layout:
+            return {"players": {}, "reason": ""}
+        key = urldefrag(url).url.split("?")[0]
+
+        def report(current: int, total: int, phase: str) -> None:
+            self.publish_event("sources.coverage.progress", {
+                "url": key, "current": current, "total": total, "phase": phase, "active": True})
+
+        # Its own lock: a long read must not hold up the parses and scans of the same site.
+        lock = self._locks.setdefault(f"{provider.name}:coverage", asyncio.Lock())
+        async with lock:
+            try:
+                reply = await provider.coverage(url, self._http, progress=report)
+            finally:
+                self.publish_event("sources.coverage.progress", {
+                    "url": key, "current": 0, "total": 0, "phase": "done", "active": False})
+        return reply or {"players": {}, "reason": ""}
 
     async def on_provider_info(self, env: Envelope) -> dict:
         """payload: {url}; reply: {provider: name | None, voices: bool}. No network: what the
