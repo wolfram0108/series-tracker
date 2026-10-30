@@ -60,6 +60,7 @@ _MONTHS = {
 }
 
 _EPISODE_IN_URL = re.compile(r"/episode-(\d+)")
+_VK_LINK = re.compile(r"https?://(?:www\.|m\.)?vk(?:video)?\.(?:com|ru)/video_ext\.php")
 _ABSOLUTE_URL = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 
 
@@ -873,7 +874,7 @@ class RuchimeProvider(BaseVideoProvider):
     async def resolve_stream(self, url: str, http: httpx.AsyncClient,
                              max_height: int | None = None) -> dict | None:
         """Resolve VK embeds, AllVideo embeds and Vibix episode references."""
-        if "video_ext.php" in url and ("vk.com" in url or "vkvideo.ru" in url):
+        if _VK_LINK.match(url):
             return await self._resolve_vk(url, http)
         if any(domain in url for domain in ("fsst.online", "incvideo1.online")):
             return await self._resolve_allvideo(url, http)

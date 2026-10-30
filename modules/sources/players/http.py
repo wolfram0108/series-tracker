@@ -30,6 +30,15 @@ async def get_answer(http: httpx.AsyncClient, url: str, referer: str) -> Answer:
     return Answer(response.status_code, response.text, _retry_after(response))
 
 
+async def post_answer(http: httpx.AsyncClient, url: str, data: dict, headers: dict) -> Answer:
+    try:
+        response = await http.post(url, data=data, headers={"User-Agent": USER_AGENT, **headers},
+                                   follow_redirects=True, timeout=REQUEST_TIMEOUT_S)
+    except httpx.HTTPError as exc:
+        return Answer(None, error=type(exc).__name__)
+    return Answer(response.status_code, response.text, _retry_after(response))
+
+
 def read_answer(answer: Answer, reader: Callable[[int, str], Reading]) -> Reading:
     """A transport failure reads as no answer; anything else goes to the player's own reader."""
     if answer.status is None:

@@ -1,4 +1,8 @@
-"""VK video embed: find it on a release page, ask it once, read the answer, resolve a stream."""
+"""VK video: find it on a release page, ask it once, read the answer, resolve a stream.
+
+The direct call behind vk.com/video<oid>_<id> (al_video.php, act=show) is asked first: it answers the same whichever of
+the two player pages VK serves for an embed. Only a video it refuses is looked at through the player page.
+"""
 from __future__ import annotations
 
 import html
@@ -7,11 +11,29 @@ import re
 
 import httpx
 
-from .contract import Answer, PlayerRef, Reading
-from .http import get_answer, read_answer
+from .contract import Answer, Kind, PlayerRef, Reading
+from .http import get_answer, post_answer, read_answer
 from .vk_embed import read_embed
+from .vk_show import ENDPOINT, best_stream, read_show
 
 logger = logging.getLogger("sources.video.players")
+
+_VIDEO = re.compile(r"video(-?\d+_\d+)|oid=(-?\d+)&(?:amp;)?id=(\d+)")
+_SHOW_HEADERS = {"Referer": ENDPOINT, "X-Requested-With": "XMLHttpRequest"}
+_STREAM_HEADERS = {"Referer": "https://vk.com/"}
+_ENVELOPE = '{"payload"'
+
+
+def video_of(url: str) -> str | None:
+    """The `<oid>_<id>` of a direct link or of an embed address."""
+    found = _VIDEO.search(url or "")
+    if not found:
+        return None
+    return found.group(1) or f"{found.group(2)}_{found.group(3)}"
+
+
+async def _show(http: httpx.AsyncClient, video: str) -> Answer:
+    return await post_answer(http, ENDPOINT, {"act": "show", "video": video, "al": 1}, _SHOW_HEADERS)
 
 
 class VkPlayer:
@@ -33,43 +55,52 @@ class VkPlayer:
         return PlayerRef(name=self.name, url=canonical, raw_url=raw_url)
 
     async def fetch(self, ref: PlayerRef, http: httpx.AsyncClient, page_url: str) -> Answer:
-        return await get_answer(http, ref.raw_url, page_url)
+        video = video_of(ref.url) or video_of(ref.raw_url)
+        if video is None:
+            return await get_answer(http, ref.raw_url, page_url)
+        shown = await _show(http, video)
+        if ref.raw_url and shown.status == 200 and read_show(200, shown.text).kind is Kind.RESTRICTED:
+            # The player page carries the hash that opens a video the direct call refuses.
+            return await get_answer(http, ref.raw_url, page_url)
+        return shown
 
     def read(self, answer: Answer) -> Reading:
-        return read_answer(answer, read_embed)
+        reader = read_show if answer.text.lstrip().startswith(_ENVELOPE) else read_embed
+        return read_answer(answer, reader)
 
     async def resolve(self, url: str, http: httpx.AsyncClient) -> dict | None:
-        """Fresh direct stream from the VK embed page.
+        """Fresh direct stream for a download: from the direct call, else from the player page of an embed address."""
+        video = video_of(url)
+        if video is not None:
+            shown = await _show(http, video)
+            stream = best_stream(shown.text) if shown.status == 200 else None
+            if stream:
+                return {"stream_url": html.unescape(stream), "headers": dict(_STREAM_HEADERS)}
+        if "video_ext.php" not in url:
+            logger.warning("VK gave no stream for %s", url)
+            return None
+        return await self._resolve_page(url, http)
 
-        The canonical `vk.com/video...` page is rejected by yt-dlp as
-        «Access restricted» for some videos, while the embed page with hash
-        still exposes signed mp4 URLs. Resolve them at download time so the
-        signature is fresh.
-        """
+    async def _resolve_page(self, url: str, http: httpx.AsyncClient) -> dict | None:
+        """The embed page of the older kind lists signed mp4 addresses itself."""
         try:
             response = await http.get(
                 url,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                         "Referer": "https://vk.com/"},
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://vk.com/"},
                 follow_redirects=True, timeout=15.0)
             if response.status_code != 200:
-                logger.warning("VK embed HTTP %s for %s",
-                               response.status_code, url)
+                logger.warning("VK embed HTTP %s for %s", response.status_code, url)
                 return None
             streams = [
                 (int(quality), html.unescape(raw.replace("\\/", "/")))
-                for quality, raw in re.findall(r'"mp4_(\d+)":"([^"]+)"',
-                                                response.text)
+                for quality, raw in re.findall(r'"mp4_(\d+)":"([^"]+)"', response.text)
             ]
             if streams:
                 _quality, stream_url = max(streams, key=lambda item: item[0])
-                return {"stream_url": stream_url,
-                        "headers": {"Referer": "https://vk.com/"}}
+                return {"stream_url": stream_url, "headers": dict(_STREAM_HEADERS)}
             hls = re.search(r'"hls":"([^"]+)"', response.text)
             if hls:
-                stream_url = html.unescape(hls.group(1).replace("\\/", "/"))
-                return {"stream_url": stream_url,
-                        "headers": {"Referer": "https://vk.com/"}}
+                return {"stream_url": html.unescape(hls.group(1).replace("\\/", "/")), "headers": dict(_STREAM_HEADERS)}
             logger.warning("VK embed has no playable stream: %s", url)
             return None
         except (httpx.HTTPError, ValueError) as exc:

@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from core.reasons import parse
-from http_fakes import fake_response
+from http_fakes import fake_client, fake_response
 from provider_contract import check_release
 from modules.sources import policy
 from modules.sources.video_providers.base import StreamUnavailable
@@ -78,7 +78,7 @@ def make_client(routes: dict[str, str], counts: dict[str, int] | None = None):
         response.text = ""
         return response
 
-    client = AsyncMock(spec=httpx.AsyncClient)
+    client = fake_client()
     client.get.side_effect = side_effect
     return client
 
@@ -215,7 +215,7 @@ async def test_resolve_vibix_writes_absolute_manifest(monkeypatch, tmp_path: Pat
     response = fake_response()
     response.status_code = 200
     response.content = encode_envelope(manifest, key)
-    client = AsyncMock(spec=httpx.AsyncClient)
+    client = fake_client()
     client.get.return_value = response
 
     resolved = await provider.resolve_stream(
@@ -255,7 +255,7 @@ async def test_allvideo_referer_uses_final_host():
     response = httpx.Response(
         200, text='<script>file:"[1080p]https://cdn.test/1080.mp4/"</script>',
         request=httpx.Request("GET", "https://incvideo1.online/embed/77/"))
-    client = AsyncMock(spec=httpx.AsyncClient)
+    client = fake_client()
     client.get.return_value = response
 
     resolved = await provider.resolve_stream("https://fsst.online/embed/77/", client)
@@ -280,7 +280,7 @@ async def test_resolve_vibix_returns_absolute_file_url(monkeypatch, tmp_path: Pa
     response = fake_response()
     response.status_code = 200
     response.content = encode_envelope(manifest, key)
-    client = AsyncMock(spec=httpx.AsyncClient)
+    client = fake_client()
     client.get.return_value = response
 
     resolved = await provider.resolve_stream(
@@ -410,7 +410,7 @@ def manifest_client(routes: dict[str, int], page_routes: dict[str, str] | None =
         return await pages.get(url, headers=headers, follow_redirects=follow_redirects,
                                **kwargs)
 
-    client = AsyncMock(spec=httpx.AsyncClient)
+    client = fake_client()
     client.get.side_effect = side_effect
     return client
 
@@ -512,7 +512,7 @@ async def test_resolve_vibix_playlist_failure_is_explicit_and_transient(monkeypa
 
     with pytest.raises(StreamUnavailable) as caught:
         await provider.resolve_stream(
-            "https://1.ruchime.org/release/test/episode-1", AsyncMock(spec=httpx.AsyncClient))
+            "https://1.ruchime.org/release/test/episode-1", fake_client())
 
     assert caught.value.transient is True
 

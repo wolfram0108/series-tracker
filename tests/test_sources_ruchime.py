@@ -12,7 +12,7 @@ from modules.sources.module import SourcesModule
 from modules.sources.video_providers.base import BaseVideoProvider, StreamUnavailable
 from modules.sources.video_providers.registry import VideoProviderRegistry
 from modules.sources.video_providers.ruchime import RuchimeProvider
-from http_fakes import fake_response
+from http_fakes import fake_client, fake_response
 
 SAMPLE_RELEASE_HTML = """
 <!DOCTYPE html>
@@ -149,7 +149,7 @@ def test_ruchime_date_deterministic():
 @pytest.mark.asyncio
 async def test_ruchime_parse_release():
     provider = RuchimeProvider()
-    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client = fake_client()
 
     def side_effect(url, headers=None, follow_redirects=True, **kwargs):
         resp = fake_response()
@@ -197,7 +197,7 @@ async def test_ruchime_parse_release():
 @pytest.mark.asyncio
 async def test_ruchime_scan_episodes_cascade_and_filtering():
     provider = RuchimeProvider()
-    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client = fake_client()
 
     def side_effect(url, headers=None, follow_redirects=True, **kwargs):
         resp = fake_response()
@@ -262,7 +262,7 @@ async def test_ruchime_scan_episodes_cascade_and_filtering():
 @pytest.mark.asyncio
 async def test_ruchime_resolve_stream():
     provider = RuchimeProvider()
-    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client = fake_client()
 
     # 1. 1080p AllVideo embed
     resp_1080 = fake_response()
@@ -315,11 +315,12 @@ async def test_sources_module_bus_parse_and_scan():
     await client.start()
 
     try:
-        with patch.object(sources._http, "get") as mock_get:
+        with patch.object(sources._http, "get") as mock_get, patch.object(sources._http, "post") as mock_post:
             resp = fake_response()
             resp.status_code = 200
             resp.text = SAMPLE_RELEASE_HTML
             mock_get.return_value = resp
+            mock_post.side_effect = fake_client().post.side_effect
 
             # 1. sources.parse
             parsed = await client.request("sources.parse", {
