@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from core.reasons import parse
-from http_fakes import fake_client, fake_response
+from http_fakes import SHOW_DENIED, fake_client, fake_response
 from provider_contract import check_release
 from modules.sources import policy
 from modules.sources.video_providers.base import StreamUnavailable
@@ -62,7 +62,7 @@ async def scan(provider: RuchimeProvider, client) -> list[dict]:
     return result["videos"]
 
 
-def make_client(routes: dict[str, str], counts: dict[str, int] | None = None):
+def make_client(routes: dict[str, str], counts: dict[str, int] | None = None, shows: dict[str, str] | None = None):
     async def side_effect(url, headers=None, follow_redirects=True, **kwargs):
         if counts is not None:
             for key in counts:
@@ -78,7 +78,7 @@ def make_client(routes: dict[str, str], counts: dict[str, int] | None = None):
         response.text = ""
         return response
 
-    client = fake_client()
+    client = fake_client(shows)
     client.get.side_effect = side_effect
     return client
 
@@ -114,7 +114,7 @@ async def test_vk_priority_does_not_touch_allvideo_at_ceiling():
     facts = await scan(provider, client)
 
     assert facts[0]["url"] == "https://vk.com/video-1_100"
-    assert facts[0]["download_url"] == VK_URL.replace("&amp;", "&")
+    assert facts[0]["download_url"] == "https://vkvideo.ru/video-1_100"
     assert facts[0]["resolution"] == 2160
     assert counts["fsst.online"] == 0
 
@@ -148,6 +148,36 @@ async def test_unplayable_players_are_not_candidates():
     facts = await scan(provider, client)
 
     assert facts == []
+
+
+def manifest_client(routes: dict[str, int], page_routes: dict[str, str] | None = None,
+                    hits: list[str] | None = None):
+    """Client whose manifest URLs answer with the given status (200 = valid manifest)."""
+    pages = make_client(page_routes or {})
+
+    async def side_effect(url, headers=None, follow_redirects=True, **kwargs):
+        for key, status in routes.items():
+            if key in url:
+                if hits is not None:
+                    hits.append(url)
+                response = fake_response()
+                response.status_code = status
+                response.content = (encode_envelope(VIBIX_MANIFEST, VIBIX_KEY)
+                                    if status == 200 else b"<html>error</html>")
+                return response
+        return await pages.get(url, headers=headers, follow_redirects=follow_redirects,
+                               **kwargs)
+
+    client = fake_client()
+    client.get.side_effect = side_effect
+    return client
+
+
+def fake_vibix(provider: RuchimeProvider, monkeypatch, streams: tuple[Stream, ...]):
+    async def fake_playlist(page_url: str):
+        return [Episode(1, "Серия 1", "Сезон 1", streams)], VIBIX_KEY
+
+    monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
 
 
 @pytest.mark.asyncio
@@ -378,48 +408,6 @@ async def test_vk_refusal_wins_over_markers():
 
     assert result["videos"] == []
     assert result["players"]["players"]["vk"]["available"] == 0
-
-
-@pytest.mark.asyncio
-async def test_resolve_vk_returns_best_fresh_mp4():
-    provider = RuchimeProvider()
-    client = make_client({"video_ext.php": VK_EMBED_STREAMS})
-    raw = "https://vkvideo.ru/video_ext.php?oid=-1&id=100&hash=abc"
-
-    resolved = await provider.resolve_stream(raw, client)
-
-    assert resolved["stream_url"] == "https://cdn.test/2160.mp4"
-    assert resolved["headers"]["Referer"] == "https://vk.com/"
-
-
-def manifest_client(routes: dict[str, int], page_routes: dict[str, str] | None = None,
-                    hits: list[str] | None = None):
-    """Client whose manifest URLs answer with the given status (200 = valid manifest)."""
-    pages = make_client(page_routes or {})
-
-    async def side_effect(url, headers=None, follow_redirects=True, **kwargs):
-        for key, status in routes.items():
-            if key in url:
-                if hits is not None:
-                    hits.append(url)
-                response = fake_response()
-                response.status_code = status
-                response.content = (encode_envelope(VIBIX_MANIFEST, VIBIX_KEY)
-                                    if status == 200 else b"<html>error</html>")
-                return response
-        return await pages.get(url, headers=headers, follow_redirects=follow_redirects,
-                               **kwargs)
-
-    client = fake_client()
-    client.get.side_effect = side_effect
-    return client
-
-
-def fake_vibix(provider: RuchimeProvider, monkeypatch, streams: tuple[Stream, ...]):
-    async def fake_playlist(page_url: str):
-        return [Episode(1, "Серия 1", "Сезон 1", streams)], VIBIX_KEY
-
-    monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
 
 
 @pytest.mark.asyncio
@@ -1012,3 +1000,38 @@ async def test_a_scan_does_not_take_one_refusal_of_the_host_for_a_missing_source
     scanned = await RuchimeProvider().scan_episodes(PAGE, client, {"name": "Тест"})
 
     assert scanned["videos"][0]["url"] == "https://vk.com/video-1_101"
+
+
+SHOW_OK = ('{"payload":[0,["T","<div/>",{"player":{"type":"vk","params":[{"url1080":"https://cdn/1080.mp4","url2160":"https://cdn/2160.mp4"}]}}]]}')
+
+
+@pytest.mark.asyncio
+async def test_a_video_the_direct_call_opens_goes_to_the_downloader_as_the_direct_link():
+    client = make_client({"episode-1": page_html(vk=True), "video_ext.php": VK_OPEN, "release/test": release_html([1])},
+                         shows={"-1_100": SHOW_OK})
+
+    facts = await scan(RuchimeProvider(), client)
+
+    assert (facts[0]["url"], facts[0]["resolution"]) == ("https://vk.com/video-1_100", 2160)
+    assert facts[0]["download_url"] == "https://vkvideo.ru/video-1_100"
+
+
+@pytest.mark.asyncio
+async def test_a_video_the_direct_call_refuses_is_no_candidate_even_if_its_player_page_lists_files():
+    client = make_client({"episode-1": page_html(vk=True, allvideo=True), "video_ext.php": VK_OPEN,
+                          "fsst.online/embed/77": AV_EMBED_1080, "release/test": release_html([1])},
+                         shows={"-1_100": SHOW_DENIED})
+
+    facts = await scan(RuchimeProvider(), client)
+
+    assert facts[0]["url"] == ALLVIDEO_URL and facts[0]["download_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_player_without_a_better_address_leaves_the_download_to_its_own_link():
+    client = make_client({"episode-1": page_html(allvideo=True), "fsst.online/embed/77": AV_EMBED_1080,
+                          "release/test": release_html([1])})
+
+    facts = await scan(RuchimeProvider(), client)
+
+    assert facts[0]["download_url"] is None

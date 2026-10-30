@@ -22,6 +22,8 @@ class PlayerProbe:
     resolution: int | None = None
     reason: str = ""
     transient: bool = False
+    # The address the downloader is given for this player's video, when the player knows a better one than its link.
+    download: str | None = None
 
 
 def probe_from(verdict: Verdict, ref: PlayerRef, label: str) -> PlayerProbe:

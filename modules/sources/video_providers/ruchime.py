@@ -60,7 +60,6 @@ _MONTHS = {
 }
 
 _EPISODE_IN_URL = re.compile(r"/episode-(\d+)")
-_VK_LINK = re.compile(r"https?://(?:www\.|m\.)?vk(?:video)?\.(?:com|ru)/video_ext\.php")
 _ABSOLUTE_URL = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 
 
@@ -106,6 +105,7 @@ class _Episode:
     reason: str = ""
     page_failed: bool = False
     unverified: bool = False
+    downloads: dict[str, str] = field(default_factory=dict)
     # Every page player was probed on this episode, so a scan has nothing left to ask them.
     surveyed: bool = False
 
@@ -219,7 +219,11 @@ class RuchimeProvider(BaseVideoProvider):
                              page_url: str) -> PlayerProbe:
         """Ask a page player under the one policy: asking again and the pauses between asks are decided there."""
         verdict = await settle(adapter, ref, http, page_url, pacer=self._probe_pacer)
-        return probe_from(verdict, ref, adapter.name if adapter.name != "vk" else "VK")
+        probe = probe_from(verdict, ref, adapter.name if adapter.name != "vk" else "VK")
+        address = getattr(adapter, "download_address", None)
+        if probe.available and address is not None:
+            probe = replace(probe, download=address(ref))
+        return probe
 
     async def _fetch_episode_page(self, http: httpx.AsyncClient, url: str,
                                   headers: dict,
@@ -286,6 +290,8 @@ class RuchimeProvider(BaseVideoProvider):
             if probe.available:
                 info.candidates.append((probe.resolution or 0, first_adapter.name,
                                         probe.ref.url))
+                if probe.download:
+                    info.downloads[first_adapter.name] = probe.download
             else:
                 info.reason = probe.reason
                 info.player_reasons[first_adapter.name] = probe.reason
@@ -322,6 +328,8 @@ class RuchimeProvider(BaseVideoProvider):
             if probe.available:
                 item.candidates.append((probe.resolution or 0, adapter.name,
                                         probe.ref.url))
+                if probe.download:
+                    item.downloads[adapter.name] = probe.download
             else:
                 item.reason = probe.reason
                 item.player_reasons[adapter.name] = probe.reason
@@ -645,6 +653,7 @@ class RuchimeProvider(BaseVideoProvider):
             return None
         return replace(item, title=self._episode_title(name_ru, ep), refs=dict(item.refs),
                        candidates=[c for c in item.candidates if c[1] not in off],
+                       downloads={name: address for name, address in item.downloads.items() if name not in off},
                        player_reasons={name: why for name, why in item.player_reasons.items() if name not in off},
                        video_url=None, resolution=None, source=None)
 
@@ -852,9 +861,7 @@ class RuchimeProvider(BaseVideoProvider):
                 item.candidates,
                 key=lambda candidate: (candidate[0], -_PRIORITY[candidate[1]]))
             item.video_url, item.resolution, item.source = url, resolution, source
-            download_url = None
-            if source == "vk" and "vk" in item.refs:
-                download_url = item.refs["vk"].raw_url or None
+            download_url = item.downloads.get(source)
             facts.append({
                 "title": item.title,
                 "url": item.video_url,
@@ -873,17 +880,12 @@ class RuchimeProvider(BaseVideoProvider):
 
     async def resolve_stream(self, url: str, http: httpx.AsyncClient,
                              max_height: int | None = None) -> dict | None:
-        """Resolve VK embeds, AllVideo embeds and Vibix episode references."""
-        if _VK_LINK.match(url):
-            return await self._resolve_vk(url, http)
+        """Resolve AllVideo embeds and Vibix episode references; VK is left to the downloader's own reading of its link."""
         if any(domain in url for domain in ("fsst.online", "incvideo1.online")):
             return await self._resolve_allvideo(url, http)
         if self.match_url(url) and _EPISODE_IN_URL.search(url):
             return await self._resolve_vibix(url, http)
         return None
-
-    async def _resolve_vk(self, url: str, http: httpx.AsyncClient) -> dict | None:
-        return await _PLAYERS["vk"].resolve(url, http)
 
     async def _resolve_allvideo(self, url: str, http: httpx.AsyncClient) -> dict | None:
         return await _PLAYERS["allvideo"].resolve(url, http)

@@ -18,6 +18,7 @@ FULL = with_player(url144="https://cdn/144.mp4", url720="https://cdn/720.mp4", u
 GONE = answer("8", ['"Видеозапись недоступна, так как была удалена."', "false", '""'])
 DENIED = answer("8", ['"Ошибка доступа (1)"', "false", '""'])
 BLOCKED = answer("8", ['"Видеозапись недоступна, так как её автор был заблокирован."'])
+LIMITED = answer("8", ["<!>Доступ ограничен"])  # the words VK was seen to say of the videos that only the player page opens
 LATER = answer("8", ["<!>Видео временно недоступно"])
 OTHER = answer("8", ['"Что-то совсем новое"'])
 
@@ -40,7 +41,7 @@ def test_raw_line_breaks_inside_strings_do_not_break_the_reading():
     assert read_show(200, text).kind == Kind.PLAYABLE
 
 
-@pytest.mark.parametrize("text,kind", [(GONE, Kind.NOT_FOUND), (DENIED, Kind.RESTRICTED), (BLOCKED, Kind.RESTRICTED),
+@pytest.mark.parametrize("text,kind", [(GONE, Kind.NOT_FOUND), (DENIED, Kind.RESTRICTED), (BLOCKED, Kind.RESTRICTED), (LIMITED, Kind.RESTRICTED),
                                        (LATER, Kind.NO_ANSWER), (OTHER, Kind.NOT_PLAYER)])
 def test_what_vk_says_in_words_names_the_kind(text, kind):
     assert read_show(200, text).kind == kind

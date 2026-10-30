@@ -15,7 +15,7 @@ ENDPOINT = "https://vk.com/al_video.php"
 MESSAGE_LENGTH = 200
 # How VK says in words why there is no video; the first group of marks that fits names the kind.
 NOT_FOUND_MARKS = ("была удалена", "не существует", "unknown error", "does not exist", "has been deleted")
-RESTRICTED_MARKS = ("ошибка доступа", "access denied", "please log in", "зарегистрированных", "заблокирован",
+RESTRICTED_MARKS = ("ошибка доступа", "доступ ограничен", "access denied", "access restricted", "please log in", "зарегистрированных", "заблокирован",
                     "правообладател", "rightholder", "copyright", "приватн", "private")
 LATER_MARKS = ("временно недоступно", "temporarily unavailable")
 LOGIN_CODE = "3"

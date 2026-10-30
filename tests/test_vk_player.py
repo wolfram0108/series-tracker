@@ -18,17 +18,14 @@ def shown(**params) -> str:
 GOOD = shown(url720="https://cdn/720.mp4", url2160="https://cdn/2160.mp4")
 DENIED = '{"payload":["8",["\\"Ошибка доступа (1)\\"","false","\\"\\""]]}'
 GONE = '{"payload":["8",["\\"Видеозапись недоступна, так как была удалена.\\"","false","\\"\\""]]}'
-PLAYER_PAGE = '<html><head><title>Video embed</title></head><script>{"mp4_720":"https:\\/\\/cdn\\/p720.mp4","mp4_1080":"https:\\/\\/cdn\\/p1080.mp4"}</script></html>'
 SHELL = "<html><head><title>VK</title></head></html>"
 
 
-def vk(show: str, page: str = PLAYER_PAGE, seen: list | None = None) -> httpx.AsyncClient:
+def vk(show: str, seen: list | None = None) -> httpx.AsyncClient:
     def handler(request: httpx.Request) -> httpx.Response:
         if seen is not None:
             seen.append((request.method, request.url.path, request.content.decode(), dict(request.headers)))
-        if request.method == "POST":
-            return httpx.Response(200, text=show)
-        return httpx.Response(200, text=page)
+        return httpx.Response(200, text=show)
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
@@ -40,11 +37,19 @@ def test_the_video_is_named_by_a_direct_link_and_by_an_embed_address(url, video)
     assert video_of(url) == video
 
 
+def test_a_page_player_gives_the_direct_link_as_its_address():
+    button = f"<button onclick=\"switchSource('{EMBED.replace('&', '&amp;')}',this)\">VK</button>"
+
+    ref = VkPlayer().find(button, PAGE)
+
+    assert (ref.url, ref.raw_url) == ("https://vk.com/video-170515668_456256320", EMBED)
+
+
 @pytest.mark.asyncio
-async def test_the_direct_call_goes_first_with_the_video_and_the_marks_of_an_ajax_request():
+async def test_the_direct_call_is_the_only_request_and_carries_the_video_and_the_marks_of_an_ajax_request():
     seen = []
 
-    answer = await VkPlayer().fetch(REF, vk(GOOD, seen=seen), PAGE)
+    answer = await VkPlayer().fetch(REF, vk(GOOD, seen), PAGE)
 
     method, path, body, headers = seen[0]
     assert (method, path, len(seen)) == ("POST", "/al_video.php", 1)
@@ -54,63 +59,30 @@ async def test_the_direct_call_goes_first_with_the_video_and_the_marks_of_an_aja
 
 
 @pytest.mark.asyncio
-async def test_a_video_the_direct_call_refuses_is_looked_at_through_its_player_page():
+async def test_a_video_the_direct_call_refuses_stays_refused_and_the_player_page_is_not_asked():
     seen = []
 
-    answer = await VkPlayer().fetch(REF, vk(DENIED, seen=seen), PAGE)
-
-    assert [method for method, *_ in seen] == ["POST", "GET"]
-    assert VkPlayer().read(answer).resolutions == (720, 1080)
-
-
-@pytest.mark.asyncio
-async def test_a_refused_video_whose_player_page_is_the_shell_stays_unsure_not_closed():
-    answer = await VkPlayer().fetch(REF, vk(DENIED, SHELL), PAGE)
-
-    assert VkPlayer().read(answer).kind is Kind.NOT_PLAYER
-
-
-@pytest.mark.asyncio
-async def test_a_deleted_video_is_not_looked_for_in_the_player_page():
-    seen = []
-
-    answer = await VkPlayer().fetch(REF, vk(GONE, seen=seen), PAGE)
+    answer = await VkPlayer().fetch(REF, vk(DENIED, seen), PAGE)
 
     assert [method for method, *_ in seen] == ["POST"]
-    assert VkPlayer().read(answer).kind is Kind.NOT_FOUND
+    assert VkPlayer().read(answer).kind is Kind.RESTRICTED
 
 
 @pytest.mark.asyncio
-async def test_without_an_embed_address_a_refusal_has_no_page_to_fall_back_to():
-    seen = []
-    ref = PlayerRef("vk", "https://vk.com/video-1_2", "")
+async def test_an_address_without_a_video_is_no_answer():
+    answer = await VkPlayer().fetch(PlayerRef("vk", "https://example.com/x", ""), vk(GOOD), PAGE)
 
-    answer = await VkPlayer().fetch(ref, vk(DENIED, seen=seen), PAGE)
-
-    assert [method for method, *_ in seen] == ["POST"] and VkPlayer().read(answer).kind is Kind.RESTRICTED
+    assert VkPlayer().read(answer).kind is Kind.NO_ANSWER
 
 
-@pytest.mark.parametrize("answer,kind", [(Answer(200, GOOD), Kind.PLAYABLE), (Answer(200, PLAYER_PAGE), Kind.PLAYABLE),
-                                         (Answer(200, SHELL), Kind.NOT_PLAYER), (Answer(None, error="ReadTimeout"), Kind.NO_ANSWER),
-                                         (Answer(200, DENIED), Kind.RESTRICTED)])
+@pytest.mark.parametrize("answer,kind", [(Answer(200, GOOD), Kind.PLAYABLE), (Answer(200, GONE), Kind.NOT_FOUND),
+                                         (Answer(200, DENIED), Kind.RESTRICTED), (Answer(200, SHELL), Kind.NOT_PLAYER),
+                                         (Answer(None, error="ReadTimeout"), Kind.NO_ANSWER), (Answer(429, ""), Kind.HTTP_ERROR)])
 def test_the_reading_follows_the_kind_of_what_came_back(answer, kind):
     assert VkPlayer().read(answer).kind is kind
 
 
-@pytest.mark.asyncio
-async def test_the_stream_for_a_download_is_the_highest_file_of_the_direct_call():
-    stream = await VkPlayer().resolve("https://vk.com/video-170515668_456256320", vk(GOOD))
-
-    assert stream == {"stream_url": "https://cdn/2160.mp4", "headers": {"Referer": "https://vk.com/"}}
-
-
-@pytest.mark.asyncio
-async def test_a_refused_embed_address_gives_the_stream_of_its_player_page():
-    stream = await VkPlayer().resolve(EMBED, vk(DENIED))
-
-    assert stream["stream_url"] == "https://cdn/p1080.mp4"
-
-
-@pytest.mark.asyncio
-async def test_a_direct_link_that_is_refused_gives_no_stream():
-    assert await VkPlayer().resolve("https://vk.com/video-1_2", vk(DENIED)) is None
+@pytest.mark.parametrize("ref,address", [(REF, "https://vkvideo.ru/video-170515668_456256320"),
+                                         (PlayerRef("vk", "https://example.com/x", ""), None)])
+def test_the_downloader_is_given_the_direct_link_and_nothing_else(ref, address):
+    assert VkPlayer().download_address(ref) == address
