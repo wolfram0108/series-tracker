@@ -812,6 +812,20 @@ async def test_coverage_counts_only_the_episodes_a_player_really_plays():
 
 
 @pytest.mark.asyncio
+async def test_coverage_logs_why_a_player_does_not_play(caplog):
+    provider = RuchimeProvider()
+    client = make_client({
+        "episode-1": player_page(vk=101), "episode-2": player_page(vk=102),
+        "id=101&hash": VK_OPEN, "id=102&hash": VK_CLOSED, "release/test": release_html([1, 2]),
+    })
+
+    with caplog.at_level("INFO", logger="sources.video.ruchime"):
+        await provider.coverage("https://1.ruchime.org/release/test", client)
+
+    assert "vk shows on 2 episodes and plays on 1 (video_private)" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_coverage_does_not_depend_on_the_choice_of_the_address():
     provider = RuchimeProvider()
     routes = {"episode-1": player_page(vk=101, allvideo=77), "id=101&hash": VK_OPEN,

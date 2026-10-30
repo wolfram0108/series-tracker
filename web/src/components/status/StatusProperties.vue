@@ -142,6 +142,8 @@ const url = String((s as Record<string, unknown>).url ?? "")
 const web = useWebSources()
 const { hasLayout, rows: sourceRows, progress: sourcesProgress, parsing: sourcesParsing } = web
 let startAddress = ""
+// The address that will be saved: the one the sources editor stands on once it has moved it.
+const shownUrl = computed(() => (isWebVideo && web.address.value) || url)
 async function showSources(address: string): Promise<void> {
   if (await web.pick(address) && !startAddress) startAddress = web.address.value
 }
@@ -276,14 +278,14 @@ async function copyCatalogName() {
 // url-действия (торрент)
 async function copyUrl() {
   try {
-    await navigator.clipboard.writeText(url)
+    await navigator.clipboard.writeText(shownUrl.value)
     toast.add({ severity: "success", summary: "Скопировано", detail: "Ссылка в буфере", life: 2000 })
   } catch {
     /* ignore */
   }
 }
 function openUrl() {
-  window.open(url, "_blank")
+  window.open(shownUrl.value, "_blank")
 }
 
 const canSave = computed(() => {
@@ -459,7 +461,7 @@ onMounted(() => {
           <StGroup>
             <StIcon icon="pi pi-link" />
             <div class="constructor-item item-floating-label">
-              <input class="item-input" :value="url" readonly />
+              <input class="item-input" :value="shownUrl" readonly />
             </div>
             <div class="constructor-item url-actions">
               <button type="button" class="url-action-btn" title="Скопировать" @click="copyUrl"><i class="pi pi-clipboard" /></button>

@@ -593,7 +593,17 @@ class RuchimeProvider(BaseVideoProvider):
         except ValueError as exc:
             logger.warning("Coverage of %s not read: %s", slug, exc)
             return {"players": {}, "reason": str(exc)}
-        return {"players": self._coverage(episodes, probes), "reason": ""}
+        players = self._coverage(episodes, probes)
+        for adapter in probes:
+            played = {item.number for item in episodes
+                      if any(source == adapter.name for _resolution, source, _url in item.candidates)}
+            causes = Counter(item.player_reasons.get(adapter.name) for item in episodes
+                             if adapter.name in item.refs and item.number not in played)
+            causes.pop(None, None)
+            logger.info("Coverage of %s: %s shows on %d episodes and plays on %d%s", slug, adapter.name,
+                        players[adapter.name]["present"], len(played),
+                        f" ({describe(causes.most_common(1)[0][0])})" if causes else "")
+        return {"players": players, "reason": ""}
 
     async def _survey(self, slug: str, listed: list[dict], http: httpx.AsyncClient, headers: dict,
                       probes: list[PlayerAdapter], progress: Callable[[int, int, str], None] | None) -> list[_Episode]:
