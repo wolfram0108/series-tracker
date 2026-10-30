@@ -171,7 +171,7 @@ async def test_vibix_fallback_maps_episode_numbers(monkeypatch):
     facts = await scan(provider, client)
 
     assert len(facts) == 2
-    assert facts[0]["url"] == "https://1.ruchime.org/release/test/episode-1"
+    assert facts[0]["url"] == "https://1.ruchime.org/release/test/episode-1#vibix=1/1"
     assert facts[0]["resolution"] == 1080
     assert facts[1]["resolution"] == 480
     assert len(calls) == 1
@@ -195,7 +195,7 @@ async def test_vibix_skips_episode_missing_from_playlist(monkeypatch):
     facts = await scan(provider, client)
 
     assert [fact["url"] for fact in facts] == [
-        "https://1.ruchime.org/release/test/episode-1"]
+        "https://1.ruchime.org/release/test/episode-1#vibix=1/1"]
 
 
 @pytest.mark.asyncio
@@ -452,7 +452,7 @@ async def test_vibix_falls_back_to_lower_live_stream(monkeypatch):
 
     facts = await scan(provider, client)
 
-    assert facts[0]["url"] == "https://1.ruchime.org/release/test/episode-1"
+    assert facts[0]["url"] == "https://1.ruchime.org/release/test/episode-1#vibix=1/1"
     assert facts[0]["resolution"] == 720
 
 
@@ -513,3 +513,251 @@ async def test_resolve_vibix_playlist_failure_is_explicit_and_transient(monkeypa
             "https://1.ruchime.org/release/test/episode-1", AsyncMock(spec=httpx.AsyncClient))
 
     assert caught.value.transient is True
+
+
+def two_seasons(provider: RuchimeProvider, monkeypatch) -> None:
+    """One Vibix record that holds two seasons whose episode numbers repeat."""
+    async def fake_playlist(page_url: str):
+        return ([Episode(1, "Серия 1", "Сезон 1", (Stream(480, "https://cdn.test/s1-1.m3u8"),), 1),
+                 Episode(2, "Серия 2", "Сезон 1", (Stream(480, "https://cdn.test/s1-2.m3u8"),), 1),
+                 Episode(1, "Серия 1", "Сезон 2", (Stream(1080, "https://cdn.test/s2-1.m3u8"),), 2),
+                 Episode(2, "Серия 2", "Сезон 2", (Stream(720, "https://cdn.test/s2-2.m3u8"),), 2)],
+                VIBIX_KEY)
+
+    monkeypatch.setattr(provider, "_vibix_playlist", fake_playlist)
+
+
+def vibix_pages() -> dict[str, str]:
+    return {"episode-1": page_html(vibix=True), "episode-2": page_html(vibix=True),
+            "release/test": release_html([1, 2])}
+
+
+@pytest.mark.asyncio
+async def test_vibix_takes_the_chosen_season_and_names_its_entry(monkeypatch):
+    provider = RuchimeProvider()
+    two_seasons(provider, monkeypatch)
+    client = manifest_client({"cdn.test/": 200}, vibix_pages())
+
+    result = await provider.scan_episodes(
+        "https://1.ruchime.org/release/test?vibix=2", client, {"name": "Тест"})
+
+    assert [(fact["url"], fact["resolution"]) for fact in result["videos"]] == [
+        ("https://1.ruchime.org/release/test/episode-1#vibix=2/1", 1080),
+        ("https://1.ruchime.org/release/test/episode-2#vibix=2/2", 720)]
+
+
+@pytest.mark.asyncio
+async def test_vibix_with_several_seasons_and_no_choice_is_refused(monkeypatch):
+    provider = RuchimeProvider()
+    two_seasons(provider, monkeypatch)
+    client = manifest_client({"cdn.test/": 200}, vibix_pages())
+
+    result = await provider.scan_episodes(
+        "https://1.ruchime.org/release/test", client, {"name": "Тест"})
+
+    assert result["videos"] == []
+    vibix = result["players"]["players"]["vibix"]
+    assert vibix["available"] == 0
+    assert parse(vibix["reason"])["code"] == "vibix_season_required"
+    assert parse(result["players"]["holes"][0]["reason"])["code"] == "vibix_season_required"
+
+
+@pytest.mark.asyncio
+async def test_a_chosen_season_the_catalog_lacks_is_refused(monkeypatch):
+    provider = RuchimeProvider()
+    two_seasons(provider, monkeypatch)
+    client = manifest_client({"cdn.test/": 200}, vibix_pages())
+
+    result = await provider.scan_episodes(
+        "https://1.ruchime.org/release/test?vibix=3", client, {"name": "Тест"})
+
+    assert result["videos"] == []
+    refusal = parse(result["players"]["players"]["vibix"]["reason"])
+    assert refusal["code"] == "vibix_season_missing" and refusal["params"]["season"] == 3
+
+
+@pytest.mark.asyncio
+async def test_a_disabled_player_is_not_probed():
+    provider = RuchimeProvider()
+    counts = {"video_ext.php": 0}
+    client = make_client({
+        "episode-1": page_html(vk=True, allvideo=True),
+        "video_ext.php": VK_OPEN,
+        "fsst.online/embed/77": AV_EMBED_1080,
+        "release/test": release_html([1]),
+    }, counts)
+
+    result = await provider.scan_episodes(
+        "https://1.ruchime.org/release/test?off=vk", client, {"name": "Тест"})
+
+    assert result["videos"][0]["url"] == ALLVIDEO_URL
+    assert counts["video_ext.php"] == 0
+    vk = result["players"]["players"]["vk"]
+    assert vk["available"] == 0 and parse(vk["reason"])["code"] == "source_disabled"
+
+
+@pytest.mark.asyncio
+async def test_with_every_player_disabled_no_episode_page_is_read():
+    provider = RuchimeProvider()
+    counts = {"episode-1": 0}
+    client = make_client({"episode-1": page_html(vk=True), "release/test": release_html([1])}, counts)
+
+    result = await provider.scan_episodes(
+        "https://1.ruchime.org/release/test?off=vk,allvideo,vibix", client, {"name": "Тест"})
+
+    assert result["videos"] == []
+    assert counts["episode-1"] == 0
+    assert {parse(entry["reason"])["code"] for entry in result["players"]["players"].values()} == {"source_disabled"}
+
+
+@pytest.mark.asyncio
+async def test_vibix_alone_serves_when_vk_and_allvideo_are_disabled(monkeypatch):
+    provider = RuchimeProvider()
+    two_seasons(provider, monkeypatch)
+    client = manifest_client({"cdn.test/": 200}, {
+        **vibix_pages(), "episode-1": page_html(vk=True, allvideo=True, vibix=True)})
+
+    result = await provider.scan_episodes(
+        "https://1.ruchime.org/release/test?vibix=2&off=vk,allvideo", client, {"name": "Тест"})
+
+    assert [fact["url"] for fact in result["videos"]] == [
+        "https://1.ruchime.org/release/test/episode-1#vibix=2/1",
+        "https://1.ruchime.org/release/test/episode-2#vibix=2/2"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_vibix_takes_the_entry_the_link_names(monkeypatch, tmp_path: Path):
+    provider = RuchimeProvider(manifest_dir=tmp_path)
+    two_seasons(provider, monkeypatch)
+    hits: list[str] = []
+    client = manifest_client({"cdn.test/": 200}, hits=hits)
+
+    resolved = await provider.resolve_stream(
+        "https://1.ruchime.org/release/test/episode-1#vibix=2/1", client)
+
+    assert hits == ["https://cdn.test/s2-1.m3u8"]
+    assert resolved["stream_url"].endswith("test-0001-1080.m3u8")
+
+
+@pytest.mark.asyncio
+async def test_resolve_vibix_link_without_a_season_is_refused_when_the_catalog_has_several(monkeypatch):
+    provider = RuchimeProvider()
+    two_seasons(provider, monkeypatch)
+
+    with pytest.raises(StreamUnavailable) as caught:
+        await provider.resolve_stream(
+            "https://1.ruchime.org/release/test/episode-1", manifest_client({"cdn.test/": 200}))
+
+    assert "vibix_season_required" in caught.value.reason
+    assert caught.value.transient is False
+
+
+@pytest.mark.asyncio
+async def test_resolve_vibix_never_swaps_the_season_of_a_missing_entry(monkeypatch):
+    provider = RuchimeProvider()
+    two_seasons(provider, monkeypatch)
+    hits: list[str] = []
+
+    with pytest.raises(StreamUnavailable) as caught:
+        await provider.resolve_stream(
+            "https://1.ruchime.org/release/test/episode-9#vibix=2/9",
+            manifest_client({"cdn.test/": 200}, hits=hits))
+
+    assert "vibix_no_episode" in caught.value.reason
+    assert hits == []
+
+
+@pytest.mark.asyncio
+async def test_layout_lists_the_seasons_of_the_catalog(monkeypatch):
+    provider = RuchimeProvider()
+    two_seasons(provider, monkeypatch)
+
+    layout = await provider.layout("https://1.ruchime.org/release/test", make_client(vibix_pages()))
+
+    assert [(s["player"], s["studio"], s["count"], s["ranges"]) for s in layout["sources"]] == [
+        ("vibix", "Сезон 1", 2, "1-2"), ("vibix", "Сезон 2", 2, "1-2")]
+    assert [s["url"] for s in layout["sources"]] == [
+        "https://1.ruchime.org/release/test?vibix=1", "https://1.ruchime.org/release/test?vibix=2"]
+    assert layout["sources"][1]["resolutions"] == [
+        {"resolution": 1080, "ranges": "1", "count": 1}, {"resolution": 720, "ranges": "2", "count": 1}]
+    assert layout["selected_source"] is None and layout["reason"] == ""
+
+
+@pytest.mark.asyncio
+async def test_layout_selects_the_season_the_address_chose(monkeypatch):
+    provider = RuchimeProvider()
+    two_seasons(provider, monkeypatch)
+
+    layout = await provider.layout(
+        "https://1.ruchime.org/release/test?vibix=2&off=vk", make_client(vibix_pages()))
+
+    assert layout["selected_source"] == "https://1.ruchime.org/release/test?vibix=2&off=vk"
+    assert layout["sources"][0]["url"] == "https://1.ruchime.org/release/test?vibix=1&off=vk"
+
+
+@pytest.mark.asyncio
+async def test_layout_of_a_single_season_needs_no_choice(monkeypatch):
+    provider = RuchimeProvider()
+    fake_vibix(provider, monkeypatch, (Stream(720, "https://cdn.test/live.m3u8"),))
+
+    layout = await provider.layout("https://1.ruchime.org/release/test", make_client(vibix_pages()))
+
+    assert [s["studio"] for s in layout["sources"]] == ["Сезон 1"]
+    assert layout["selected_source"] == "https://1.ruchime.org/release/test?vibix=1"
+
+
+@pytest.mark.asyncio
+async def test_layout_does_not_read_the_catalog_of_a_disabled_player(monkeypatch):
+    provider = RuchimeProvider()
+
+    async def never(page_url: str):
+        raise AssertionError("the catalog of a disabled player must not be read")
+
+    monkeypatch.setattr(provider, "_vibix_playlist", never)
+
+    layout = await provider.layout("https://1.ruchime.org/release/test?off=vibix", make_client(vibix_pages()))
+
+    assert layout == {"sources": [], "selected_source": None, "reason": ""}
+
+
+@pytest.mark.asyncio
+async def test_layout_names_a_page_without_the_player(monkeypatch):
+    provider = RuchimeProvider()
+    two_seasons(provider, monkeypatch)
+    client = make_client({"episode-1": page_html(vk=True), "release/test": release_html([1])})
+
+    layout = await provider.layout("https://1.ruchime.org/release/test", client)
+
+    assert layout["sources"] == []
+    assert parse(layout["reason"])["code"] == "page_no_player"
+
+
+@pytest.mark.asyncio
+async def test_layout_names_an_unreadable_catalog(monkeypatch):
+    provider = RuchimeProvider()
+
+    async def broken(page_url: str):
+        raise VibixUnavailable("Vibix API не ответил")
+
+    monkeypatch.setattr(provider, "_vibix_playlist", broken)
+
+    layout = await provider.layout("https://1.ruchime.org/release/test", make_client(vibix_pages()))
+
+    assert layout["sources"] == [] and layout["selected_source"] is None
+    assert parse(layout["reason"])["code"] == "player_failed"
+
+
+@pytest.mark.asyncio
+async def test_parse_release_carries_the_choice_in_the_address():
+    provider = RuchimeProvider()
+    client = make_client({"release/test": release_html([1, 2])})
+
+    result = await provider.parse_release(
+        "https://1.ruchime.org/release/test/episode-1?vibix=2&off=allvideo", client)
+
+    check_release(provider, result)
+    assert result["canonical_url"] == "https://1.ruchime.org/release/test?vibix=2&off=allvideo"
+    players = result["players"]
+    assert players["vk"]["enabled"] is True and players["allvideo"]["enabled"] is False
+    assert players["allvideo"]["toggle"] == "https://1.ruchime.org/release/test?vibix=2"
+    assert players["vk"]["toggle"] == "https://1.ruchime.org/release/test?vibix=2&off=vk,allvideo"

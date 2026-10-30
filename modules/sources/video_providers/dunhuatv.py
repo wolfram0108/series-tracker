@@ -24,6 +24,7 @@ from . import cdnvideohub, kodik
 from .base import BaseVideoProvider, StreamUnavailable
 from .cdnvideohub import CdnVideoHubError, Rung
 from .kodik import KodikError, KodikSession
+from .ranges import episode_ranges
 from .retry import send_with_retry
 
 logger = logging.getLogger("sources.video.dunhuatv")
@@ -162,18 +163,6 @@ def episode_link(page_url: str, source: Source, number: int) -> str:
         return cvh_link(page_url, source.episodes[number])
     assert source.serial is not None
     return kodik_link(page_url, *source.serial, number)
-
-
-def episode_ranges(numbers) -> str:
-    """'1-471, 473-501': the real coverage of a voice-over, holes included."""
-    ordered = sorted(set(numbers))
-    spans: list[list[int]] = []
-    for number in ordered:
-        if spans and number == spans[-1][1] + 1:
-            spans[-1][1] = number
-        else:
-            spans.append([number, number])
-    return ", ".join(str(a) if a == b else f"{a}-{b}" for a, b in spans)
 
 
 class DunhuaTvProvider(BaseVideoProvider):

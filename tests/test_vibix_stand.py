@@ -129,3 +129,14 @@ def test_encoded_playlist_payload() -> None:
     payload = {"data": {"playlist": []}}
     raw = encode_envelope(json.dumps(payload).encode(), TEST_KEY)
     assert json.loads(decode_envelope(raw, TEST_KEY)) == payload
+
+
+def test_parse_playlist_numbers_the_seasons_apart_from_the_episodes() -> None:
+    def season(title: str) -> dict:
+        return {"title": title, "folder": [
+            {"title": "Серия 1", "file": "[480p]{X}https://cdn.test/a.m3u8?expires=1"},
+            {"title": "Серия 2", "file": "[480p]{X}https://cdn.test/b.m3u8?expires=1"}]}
+
+    episodes = parse_playlist({"data": {"playlist": [season("Сезон 1"), season("Сезон 2")]}})
+
+    assert [(e.season_index, e.number) for e in episodes] == [(1, 1), (1, 2), (2, 1), (2, 2)]

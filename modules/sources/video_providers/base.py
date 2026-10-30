@@ -25,6 +25,13 @@ class BaseVideoProvider(ABC):
     # True when parse_release lists the voice-overs of a release with the episodes of each
     # (`sources`, `selected_source`); the voices module asks only such providers.
     has_voice_catalog: bool = False
+    # True when the provider describes the sources of a release apart from the parse (`layout`), because
+    # reading them is slow; the add form asks for it after the release is known.
+    has_layout: bool = False
+
+    async def layout(self, url: str, http: httpx.AsyncClient) -> dict | None:
+        """{sources, selected_source, reason} of the release at `url`; None when the provider has none."""
+        return None
 
     @abstractmethod
     def match_url(self, url: str) -> bool:

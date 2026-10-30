@@ -8,6 +8,9 @@ Queries:
   sources.tracker.resolve {url}  → {tracker|null} (tracker_info деталей)
   sources.provider.info {url}    → {provider|null, voices} — the web-video provider of an address and
                                    whether it has a voice-over catalog (no network)
+  sources.video.layout {url}     → {sources, selected_source, reason} — the sources of a release that a
+                                   provider describes apart from the parse because reading them is slow
+                                   (`has_layout` in the parse reply tells whether to ask)
 
 Доставка — ТОЛЬКО через `delivery.Delivery` (единственный выход
 наружу): она перебирает хосты-кандидаты (канонический хост ссылки →
@@ -90,6 +93,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.tracker.set_mirrors", self.on_set_mirrors)
         self.handle("sources.vk.scan", self.on_vk_scan)
         self.handle("sources.video.scan", self.on_video_scan)
+        self.handle("sources.video.layout", self.on_video_layout)
         self.handle("sources.video.stream", self.on_video_stream)
         self.handle("sources.provider.info", self.on_provider_info)
 
@@ -171,6 +175,7 @@ class SourcesModule(BaseModule):
                 "players": parsed.get("players", {}),
                 "sources": sources,
                 "selected_source": parsed.get("selected_source"),
+                "has_layout": provider.has_layout,
                 "ui_features": {},
                 "tracker": None,
             }
@@ -408,6 +413,19 @@ class SourcesModule(BaseModule):
         players = result.get("players", {}) if isinstance(result, dict) else {}
         self.log.info("Видео-скан %s (%s): серий %d", service, url, len(videos))
         return {"videos": videos, "players": players}
+
+    async def on_video_layout(self, env: Envelope) -> dict:
+        """payload: {url}; reply: {sources, selected_source, reason}. The sources of a release that a
+        provider describes apart from the parse (a slow read); a provider without one answers empty."""
+        url = env.payload["url"]
+        provider = self.video_registry.find_provider(url)
+        if not provider or not provider.has_layout:
+            return {"sources": [], "selected_source": None, "reason": ""}
+        lock = self._locks.setdefault(provider.name, asyncio.Lock())
+        async with lock:
+            await self._polite(provider.name)
+            layout = await provider.layout(url, self._http)
+        return layout or {"sources": [], "selected_source": None, "reason": ""}
 
     async def on_provider_info(self, env: Envelope) -> dict:
         """payload: {url}; reply: {provider: name | None, voices: bool}. No network: what the

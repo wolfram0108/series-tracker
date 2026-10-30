@@ -326,6 +326,7 @@ async def test_sources_module_bus_parse_and_scan():
             })
             assert parsed["source_type"] == "web_video"
             assert parsed["service"] == "ruchime"
+            assert parsed["has_layout"] is True
             assert parsed["title"]["ru"] == "Несравненный боевой дух"
             assert len(parsed["titles"]) == 4
             assert len(parsed["episodes"]) == 4
@@ -452,3 +453,40 @@ async def test_vk_scan_publishes_progress():
     assert events[0]["series_id"] == 80
     assert events[-1]["phase"] == "done"
     assert events[-1]["active"] is False
+
+
+@pytest.mark.asyncio
+async def test_sources_module_answers_the_layout_of_a_provider_that_has_one():
+    bus = Bus()
+    sources = SourcesModule(bus, Database(":memory:"))
+    client = DummyClientModule(bus)
+    await sources.start()
+    await client.start()
+    try:
+        described = {"sources": [{"url": "u", "player": "vibix"}], "selected_source": "u", "reason": ""}
+        with patch.object(RuchimeProvider, "layout", return_value=described) as layout:
+            reply = await client.request("sources.video.layout", {
+                "url": "https://1.ruchime.org/release/test?vibix=1"})
+
+        assert reply == described
+        assert layout.call_args.args[0] == "https://1.ruchime.org/release/test?vibix=1"
+    finally:
+        await client.stop()
+        await sources.stop()
+
+
+@pytest.mark.asyncio
+async def test_sources_module_answers_an_empty_layout_for_a_provider_without_one():
+    bus = Bus()
+    sources = SourcesModule(bus, Database(":memory:"))
+    client = DummyClientModule(bus)
+    await sources.start()
+    await client.start()
+    try:
+        reply = await client.request("sources.video.layout", {
+            "url": "https://dunhuatv.ru/28-praktikuja-ci-sto-tysjach-let-smotret-onlajn.html"})
+
+        assert reply == {"sources": [], "selected_source": None, "reason": ""}
+    finally:
+        await client.stop()
+        await sources.stop()

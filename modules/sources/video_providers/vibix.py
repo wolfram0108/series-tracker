@@ -68,6 +68,8 @@ class Episode:
     title: str
     season: str
     streams: tuple[Stream, ...]
+    # 1-based position of the season in the catalog: numbers repeat from season to season, positions do not.
+    season_index: int = 1
 
     def pick_stream(self, preferred: int | None = 1080) -> Stream:
         return pick_stream(self.streams, preferred)
@@ -223,8 +225,8 @@ def parse_playlist(payload: Any) -> list[Episode]:
             match = _EPISODE_NUMBER.search(title)
             number = int(match.group()) if match else item_index
             streams = _parse_streams(str(item.get("file") or ""))
-            episodes.append(Episode(number=number, title=title,
-                                    season=season_title, streams=streams))
+            episodes.append(Episode(number=number, title=title, season=season_title,
+                                    streams=streams, season_index=season_index))
     return episodes
 
 

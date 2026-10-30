@@ -17,14 +17,16 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urldefrag, urljoin, urlparse
 
 import httpx
 
 from core.reasons import describe, reason
 
 from .base import BaseVideoProvider, StreamUnavailable
-from .players import (PLAYER_ORDER, AllVideoPlayer, PlayerAdapter, PlayerRef)
+from .players import (PLAYER_ORDER, AllVideoPlayer, PlayerAdapter, PlayerRef, VibixPlayer)
+from .ranges import episode_ranges
+from .ruchime_address import Choice, address_of, choice_of, parse_vibix_link, vibix_link
 from .vibix import (Episode, KeyStore, Stream, VibixProtocolError,
                     VibixUnavailable, capture_with_browser, decode_playlist,
                     parse_manifest, stream_expires)
@@ -149,9 +151,11 @@ class RuchimeProvider(BaseVideoProvider):
             raise ValueError(f"Failed to extract release slug from URL: {url}")
         return match.group(1)
 
+    def _page_url(self, url: str) -> str:
+        return f"https://1.ruchime.org/release/{self._extract_slug(url)}"
+
     def canonical_url(self, url: str) -> str:
-        slug = self._extract_slug(url)
-        return f"https://1.ruchime.org/release/{slug}"
+        return address_of(self._page_url(url), choice_of(url))
 
     @staticmethod
     def _parse_date(raw_date: str | None) -> str:
@@ -323,9 +327,21 @@ class RuchimeProvider(BaseVideoProvider):
                 if probe.transient:
                     item.unverified = True
 
-    async def _apply_vibix(self, episodes: list[_Episode],
-                           http: httpx.AsyncClient) -> None:
-        """Resolve the series playlist once and map episodes by their number."""
+    @staticmethod
+    def _vibix_season(playlist: list[Episode], choice: Choice) -> tuple[int | None, str]:
+        """Position of the season the series takes from, or a coded refusal: several seasons need a choice."""
+        seasons = sorted({episode.season_index for episode in playlist})
+        if choice.vibix_season is not None:
+            if choice.vibix_season in seasons:
+                return choice.vibix_season, ""
+            return None, reason("vibix_season_missing", season=choice.vibix_season)
+        if len(seasons) == 1:
+            return seasons[0], ""
+        return None, reason("vibix_season_required", seasons=len(seasons))
+
+    async def _apply_vibix(self, episodes: list[_Episode], http: httpx.AsyncClient,
+                           choice: Choice) -> None:
+        """Resolve the series playlist once and map episodes by their number within the chosen season."""
         targets = self._needs_lower_source(episodes, "vibix")
         if not targets:
             return
@@ -339,7 +355,16 @@ class RuchimeProvider(BaseVideoProvider):
                 item.player_reasons["vibix"] = str(exc)
             return
 
-        by_number = {episode.number: episode for episode in playlist}
+        position, refusal = self._vibix_season(playlist, choice)
+        if position is None:
+            for item in targets:
+                item.player_reasons["vibix"] = refusal
+                if not item.candidates:
+                    item.reason = refusal
+            return
+
+        by_number = {episode.number: episode for episode in playlist
+                     if episode.season_index == position}
         to_probe: list[tuple[_Episode, Episode, int]] = []
         for item in targets:
             episode = by_number.get(item.number)
@@ -352,7 +377,7 @@ class RuchimeProvider(BaseVideoProvider):
             floor = item.best_resolution
             if declared <= floor:
                 # Cannot outrank a better source, so a manifest request is wasted.
-                item.candidates.append((declared, "vibix", item.page_url))
+                item.candidates.append((declared, "vibix", vibix_link(item.page_url, position, item.number)))
                 continue
             to_probe.append((item, episode, floor))
 
@@ -374,7 +399,7 @@ class RuchimeProvider(BaseVideoProvider):
             if isinstance(outcome, BaseException):
                 raise outcome
             stream, _manifest = outcome
-            item.candidates.append((stream.quality, "vibix", item.page_url))
+            item.candidates.append((stream.quality, "vibix", vibix_link(item.page_url, position, item.number)))
 
     async def _read_vibix_manifest(self, stream: Stream, key: bytes,
                                    http: httpx.AsyncClient) -> str:
@@ -412,10 +437,17 @@ class RuchimeProvider(BaseVideoProvider):
         raise failure or _ManifestUnavailable(reason("vibix_no_streams"))
 
     @staticmethod
-    def _availability_report(episodes: list[_Episode]) -> dict:
-        """Aggregate per-player availability for the series status."""
+    def _availability_report(episodes: list[_Episode], off: frozenset[str] = frozenset()) -> dict:
+        """Aggregate per-player availability for the series status; a disabled player is never counted."""
         players: dict[str, dict] = {}
         for adapter in PLAYER_ORDER:
+            if adapter.name in off:
+                players[adapter.name] = {
+                    "present": sum(1 for item in episodes if adapter.name in item.refs),
+                    "available": 0, "selected": 0, "unverified": 0, "max_resolution": None,
+                    "reason": reason("source_disabled"),
+                }
+                continue
             present = [item for item in episodes if adapter.name in item.refs]
             available = [item for item in episodes
                          if any(source == adapter.name
@@ -448,6 +480,7 @@ class RuchimeProvider(BaseVideoProvider):
 
     async def _vibix_playlist(self, page_url: str) -> tuple[list[Episode], bytes]:
         """Return the cached series playlist; capture it once per signature window."""
+        page_url = urldefrag(page_url).url
         slug = self._extract_slug(page_url)
         lock = self._vibix_locks.setdefault(slug, asyncio.Lock())
         async with lock:
@@ -480,8 +513,11 @@ class RuchimeProvider(BaseVideoProvider):
         name_ru, name_en = self._release_names(raw_text, slug, url)
         episodes_raw = self._release_episodes(raw_text)
 
-        report, _preview_resolution = await self._quick_report(
-            raw_text, self.canonical_url(url), http)
+        page_url, choice = self._page_url(url), choice_of(url)
+        report, _preview_resolution = await self._quick_report(raw_text, page_url, http)
+        for name, entry in report.items():
+            entry["enabled"] = name not in choice.off
+            entry["toggle"] = address_of(page_url, choice.toggled(name))
         episodes = [
             {"number": ep.get("number"),
              "title": self._episode_title(name_ru, ep),
@@ -492,7 +528,7 @@ class RuchimeProvider(BaseVideoProvider):
         videos = [{"title": title, "resolution": None} for title in titles]
 
         return {
-            "canonical_url": self.canonical_url(url),
+            "canonical_url": address_of(page_url, choice),
             "title": {"ru": name_ru, "en": name_en},
             "titles": titles,
             "episodes": episodes,
@@ -505,6 +541,63 @@ class RuchimeProvider(BaseVideoProvider):
             "releases": [],
             "players": report,
         }
+
+    has_layout = True
+
+    async def layout(self, url: str, http: httpx.AsyncClient) -> dict:
+        """The Vibix catalog as sources, one per season, and the season the address chose.
+
+        The catalog is read through a browser, so it is asked for apart from the release parse."""
+        choice = choice_of(url)
+        empty = {"sources": [], "selected_source": None}
+        if "vibix" in choice.off:
+            return {**empty, "reason": ""}
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        resp, slug = await self._read_release(url, http, headers)
+        numbers = sorted(int(ep["number"]) for ep in self._release_episodes(resp.text)
+                         if ep.get("number") is not None)
+        if not numbers:
+            return {**empty, "reason": reason("title_no_videos", player="Vibix")}
+        episode_url = f"https://1.ruchime.org/release/{slug}/episode-{numbers[0]}"
+        page = await self._fetch_episode_page(http, episode_url, headers, asyncio.Semaphore(1))
+        if page is None or page.status_code != 200:
+            return {**empty, "reason": reason("page_unreachable")}
+        if VibixPlayer().find(html.unescape(page.text), episode_url) is None:
+            return {**empty, "reason": reason("page_no_player", player="vibix")}
+        try:
+            playlist, _key = await self._vibix_playlist(episode_url)
+        except (VibixUnavailable, VibixProtocolError) as exc:
+            logger.warning("Vibix catalog unavailable for %s: %s", episode_url, exc)
+            return {**empty, "reason": reason("player_failed", player="Vibix", cause=str(exc))}
+        sources = self._vibix_sources(playlist, self._page_url(url), choice)
+        position, _refusal = self._vibix_season(playlist, choice)
+        selected = address_of(self._page_url(url), choice.with_season(position)) if position else None
+        return {"sources": sources, "selected_source": selected, "reason": ""}
+
+    @staticmethod
+    def _vibix_sources(playlist: list[Episode], page_url: str, choice: Choice) -> list[dict]:
+        """One source per season of the catalog: the episodes it really has, and their best resolution by ranges."""
+        sources = []
+        for position in sorted({episode.season_index for episode in playlist}):
+            members = [episode for episode in playlist
+                       if episode.season_index == position and episode.streams]
+            if not members:
+                continue
+            numbers = sorted({episode.number for episode in members})
+            by_resolution: dict[int, set[int]] = {}
+            for episode in members:
+                best = max(stream.quality for stream in episode.streams)
+                by_resolution.setdefault(best, set()).add(episode.number)
+            sources.append({
+                "url": address_of(page_url, choice.with_season(position)),
+                "player": "vibix", "studio": members[0].season, "kind": "",
+                "first": numbers[0], "last": numbers[-1], "count": len(numbers),
+                "ranges": episode_ranges(numbers), "episodes": numbers,
+                "resolutions": [{"resolution": height, "ranges": episode_ranges(by_resolution[height]),
+                                 "count": len(by_resolution[height])}
+                                for height in sorted(by_resolution, reverse=True)],
+            })
+        return sources
 
     @staticmethod
     def _release_names(raw_text: str, slug: str, url: str) -> tuple[str | None, str | None]:
@@ -593,6 +686,14 @@ class RuchimeProvider(BaseVideoProvider):
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         resp, slug = await self._read_release(url, http, headers)
 
+        choice = choice_of(url)
+        active = [adapter for adapter in PLAYER_ORDER if adapter.name not in choice.off]
+        if not active:
+            return {"videos": [], "players": self._availability_report([], choice.off)}
+        # Vibix has no per-page probe: it is resolved later for the whole series.
+        probed_first = active[0] if not active[0].series_scope else None
+        later = active[1:] if probed_first else active
+
         all_episodes = self._release_episodes(resp.text)
         if not all_episodes:
             raise ValueError(f"Ruchime: array ALL_EPS not found on page {url}")
@@ -616,7 +717,7 @@ class RuchimeProvider(BaseVideoProvider):
         async def read_one(ep: dict) -> _Episode | None:
             nonlocal done, last_emit
             info = await self._read_episode(slug, name_ru, ep, http, headers, sem,
-                                            first_adapter=PLAYER_ORDER[0])
+                                            first_adapter=probed_first)
             async with counter_lock:
                 done += 1
                 now = time.monotonic()
@@ -634,12 +735,12 @@ class RuchimeProvider(BaseVideoProvider):
         if failed:
             raise ValueError(reason("pages_unread", site="Ruchime", count=len(failed), total=len(episodes)))
 
-        for adapter in PLAYER_ORDER[1:]:
+        for adapter in later:
             if episodes and all(item.best_resolution >= RESOLUTION_CEILING
                                 for item in episodes):
                 break
             if adapter.series_scope:
-                await self._apply_vibix(episodes, http)
+                await self._apply_vibix(episodes, http, choice)
             else:
                 await self._apply_adapter(episodes, adapter, http)
 
@@ -669,7 +770,7 @@ class RuchimeProvider(BaseVideoProvider):
             })
 
         facts.sort(key=lambda fact: fact["publication_date"])
-        report = self._availability_report(episodes)
+        report = self._availability_report(episodes, choice.off)
         logger.info("Ruchime scan %s: серий %d, источники %s",
                     slug, len(facts), report["sources"])
         if progress is not None:
@@ -763,9 +864,18 @@ class RuchimeProvider(BaseVideoProvider):
         except VibixProtocolError as exc:
             logger.warning("Vibix playlist unavailable for %s: %s", url, exc)
             raise StreamUnavailable(reason("player_failed", player="Vibix", cause=str(exc))) from exc
-        episode = next((item for item in playlist if item.number == number), None)
+        target = parse_vibix_link(url)
+        if target is not None:
+            position, number = target
+        else:
+            # A link from before the choice existed: only a single-season catalog leaves no doubt.
+            position, refusal = self._vibix_season(playlist, Choice())
+            if position is None:
+                raise StreamUnavailable(reason("player_failed", player="Vibix", cause=refusal))
+        episode = next((item for item in playlist
+                        if item.season_index == position and item.number == number), None)
         if episode is None or not episode.streams:
-            logger.warning("Episode %s is missing from the Vibix playlist", number)
+            logger.warning("Episode %s of season %s is missing from the Vibix playlist", number, position)
             raise StreamUnavailable(reason("player_failed", player="Vibix", cause=reason("vibix_no_episode")))
         try:
             stream, text = await self._live_vibix_stream(episode, key, http, floor=0)
