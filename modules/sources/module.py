@@ -465,7 +465,8 @@ class SourcesModule(BaseModule):
 
     async def on_video_stream(self, env: Envelope) -> dict:
         """payload: {url, max_height?}
-        reply: {handled, stream_url, headers} | {handled, error, transient}.
+        reply: {handled, stream_url, headers, progressive} | {handled, error, transient}.
+        `progressive` marks one ready file that a server may be asked for in parts.
 
         `error` means the URL belongs to a provider that has no stream for it:
         the caller must not hand the page to a generic downloader."""
@@ -481,6 +482,7 @@ class SourcesModule(BaseModule):
                 "handled": True,
                 "stream_url": stream_info["stream_url"],
                 "headers": stream_info.get("headers", {}),
+                "progressive": bool(stream_info.get("progressive")),
             }
         return {"handled": False}
 

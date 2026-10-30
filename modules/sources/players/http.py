@@ -21,9 +21,9 @@ def _retry_after(response: httpx.Response) -> float | None:
         return None
 
 
-async def get_answer(http: httpx.AsyncClient, url: str, referer: str) -> Answer:
+async def get_answer(http: httpx.AsyncClient, url: str, referer: str, agent: str = USER_AGENT) -> Answer:
     try:
-        response = await http.get(url, headers={"Referer": referer, "User-Agent": USER_AGENT},
+        response = await http.get(url, headers={"Referer": referer, "User-Agent": agent},
                                   follow_redirects=True, timeout=REQUEST_TIMEOUT_S)
     except httpx.HTTPError as exc:
         return Answer(None, error=type(exc).__name__)

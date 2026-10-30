@@ -494,7 +494,7 @@ class DownloadsModule(BaseModule):
                     self._last_event = now
                     await self._broadcast_queue()
 
-            stream_url, stream_headers, stream_error = await self._resolve_stream(
+            stream_url, stream_headers, stream_error, progressive = await self._resolve_stream(
                 task["video_url"], is_web=lambda: self._is_web_series(series_id))
 
             if stream_error is not None:
@@ -503,6 +503,8 @@ class DownloadsModule(BaseModule):
                 kw = {"threads": self._threads}
                 if stream_headers:
                     kw["headers"] = stream_headers
+                if progressive:
+                    kw["progressive"] = True
                 ok, error = await self._download(stream_url,
                                                  task["save_path"], on_progress,
                                                  **kw)
@@ -542,8 +544,8 @@ class DownloadsModule(BaseModule):
             await self._pump()
 
     async def _resolve_stream(self, url: str, *, max_height: int | None = None,
-                              is_web) -> tuple[str, dict | None, tuple[str, bool] | None]:
-        """(stream url, headers, (error, transient)) of a link, via the provider that owns it.
+                              is_web) -> tuple[str, dict | None, tuple[str, bool] | None, bool]:
+        """(stream url, headers, (error, transient), progressive) of a link, via the provider that owns it.
 
         `is_web` is True or an async callable: a failed request is an error for a web link, since
         its page is no stream and yt-dlp would scrape a foreign player."""
@@ -552,14 +554,14 @@ class DownloadsModule(BaseModule):
             reply = await self.request("sources.video.stream", payload,
                                        timeout=STREAM_RESOLVE_TIMEOUT_S)
             if reply.get("error"):
-                return url, None, (reply["error"], bool(reply.get("transient")))
+                return url, None, (reply["error"], bool(reply.get("transient"))), False
             if reply.get("handled"):
-                return reply["stream_url"], reply.get("headers"), None
+                return reply["stream_url"], reply.get("headers"), None, bool(reply.get("progressive"))
         except Exception as exc:
             if is_web is True or await is_web():
-                return url, None, (f"поток не получен: {exc}", True)
+                return url, None, (f"поток не получен: {exc}", True), False
             self.log.debug("sources.video.stream не обработан для %s: %s", url, exc)
-        return url, None, None
+        return url, None, None, False
 
 
     async def on_fetch(self, env: Envelope) -> None:
@@ -600,7 +602,7 @@ class DownloadsModule(BaseModule):
 
         try:
             for attempt in range(1, MAX_DOWNLOAD_ATTEMPTS + 1):
-                stream_url, headers, stream_error = await self._resolve_stream(
+                stream_url, headers, stream_error, progressive = await self._resolve_stream(
                     job["url"], max_height=job.get("max_height"), is_web=True)
                 if stream_error is not None:
                     error, transient = stream_error
@@ -608,6 +610,8 @@ class DownloadsModule(BaseModule):
                     kw: dict = {"threads": self._threads}
                     if headers:
                         kw["headers"] = headers
+                    if progressive:
+                        kw["progressive"] = True
                     ok, error = await self._download(stream_url, path, ignore_progress, **kw)
                     transient = not ok and _transient_download_error(error)
                 if ok or not transient or attempt == MAX_DOWNLOAD_ATTEMPTS:

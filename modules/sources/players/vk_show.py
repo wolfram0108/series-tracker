@@ -61,9 +61,11 @@ def read_show(status: int, text: str) -> Reading:
         params = _params(items)
         if params is None:
             return Reading(Kind.NO_FILE, status, message="no player parameters")
+        files = tuple(sorted((int(found.group(1)), value) for key, value in params.items()
+                             if (found := _HEIGHT.fullmatch(key)) and isinstance(value, str) and value.startswith(("http://", "https://"))))
         heights = tuple(sorted({int(found.group(1)) for key in params if (found := _HEIGHT.fullmatch(key))}))
         if heights or params.get("hls") or any(key.startswith("dash") for key in params):
-            return Reading(Kind.PLAYABLE, status, heights)
+            return Reading(Kind.PLAYABLE, status, heights, files=files)
         return Reading(Kind.NO_FILE, status, message="no stream keys")
     if str(code) == LOGIN_CODE:
         return Reading(Kind.RESTRICTED, status, message="login required")

@@ -4,7 +4,7 @@ Whether to ask again is not a player's business: that is decided in one place, `
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Protocol
 
@@ -36,6 +36,8 @@ class Answer:
     text: str = ""
     retry_after: float | None = None
     error: str = ""
+    # A player that has to look through several entries states its own reading instead of one text to read.
+    reading: "Reading | None" = None
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,8 @@ class Reading:
     resolutions: tuple[int, ...] = ()
     title: str = ""
     message: str = ""
+    # Signed addresses of the files by height; out of repr and comparison so that they reach neither a log nor a test.
+    files: tuple[tuple[int, str], ...] = field(default=(), repr=False, compare=False)
 
 
 class Player(Protocol):

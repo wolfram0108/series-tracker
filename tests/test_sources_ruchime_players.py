@@ -10,6 +10,7 @@ from core.reasons import parse
 from http_fakes import SHOW_DENIED, fake_client, fake_response
 from provider_contract import check_release
 from modules.sources import policy
+from modules.sources.players.vk import VkPlayer
 from modules.sources.video_providers.base import StreamUnavailable
 from modules.sources.video_providers.ruchime import RuchimeProvider
 from modules.sources.video_providers.vibix import (Episode, Stream, VibixUnavailable,
@@ -19,7 +20,8 @@ VK_URL = "https://vkvideo.ru/video_ext.php?oid=-1&amp;id=100&amp;hash=abc"
 ALLVIDEO_URL = "https://fsst.online/embed/77/"
 VK_OPEN = '<script>{"mp4_720":"a","mp4_1080":"b"}</script>'
 VK_OPEN_4K = '<script>{"mp4_1080":"b","mp4_2160":"c"}</script>'
-VK_CLOSED = '<script>{"error_msg":"Access denied"}</script>'
+VK_CLOSED = '<html><head><title>Video embed</title></head><body><div id="video_ext_msg">Access denied</div></body></html>'
+VK_EMBED = "https://vkvideo.ru/video_ext.php?oid=-1&id=100&hash=abc"
 VK_OPEN_DENIED = VK_OPEN + "<div>Access denied</div>"
 VK_AMBIGUOUS = "<html><body>no player data, no refusal</body></html>"
 VK_EMBED_STREAMS = ('<script>{"mp4_1080":"https:\\/\\/cdn.test\\/1080.mp4",'
@@ -114,7 +116,7 @@ async def test_vk_priority_does_not_touch_allvideo_at_ceiling():
     facts = await scan(provider, client)
 
     assert facts[0]["url"] == "https://vk.com/video-1_100"
-    assert facts[0]["download_url"] == "https://vkvideo.ru/video-1_100"
+    assert facts[0]["download_url"] == VK_EMBED
     assert facts[0]["resolution"] == 2160
     assert counts["fsst.online"] == 0
 
@@ -969,8 +971,9 @@ async def test_coverage_does_not_take_one_refusal_of_the_host_for_a_video_it_can
 
 
 @pytest.mark.asyncio
-async def test_a_refusal_that_does_not_go_away_is_asked_again_only_as_often_as_allowed():
-    client = make_client(SURVEY_ROUTES)
+async def test_a_refusal_that_does_not_go_away_is_asked_again_only_as_often_as_allowed(monkeypatch):
+    monkeypatch.setattr(VkPlayer, "read_batch", AsyncMock(return_value={}))
+    client = make_client(SURVEY_ROUTES, shows={"-1_101": SHOW_DENIED, "-1_102": SHOW_DENIED})
     served = refuse(client, "id=101&hash", 403, "", times=99)
 
     vk = (await RuchimeProvider().coverage(PAGE, client))["players"]["vk"]
@@ -1002,29 +1005,26 @@ async def test_a_scan_does_not_take_one_refusal_of_the_host_for_a_missing_source
     assert scanned["videos"][0]["url"] == "https://vk.com/video-1_101"
 
 
-SHOW_OK = ('{"payload":[0,["T","<div/>",{"player":{"type":"vk","params":[{"url1080":"https://cdn/1080.mp4","url2160":"https://cdn/2160.mp4"}]}}]]}')
-
-
 @pytest.mark.asyncio
-async def test_a_video_the_direct_call_opens_goes_to_the_downloader_as_the_direct_link():
-    client = make_client({"episode-1": page_html(vk=True), "video_ext.php": VK_OPEN, "release/test": release_html([1])},
-                         shows={"-1_100": SHOW_OK})
+async def test_a_video_goes_to_the_downloader_as_the_player_link_with_its_key():
+    client = make_client({"episode-1": page_html(vk=True), "video_ext.php": VK_OPEN_4K, "release/test": release_html([1])})
 
     facts = await scan(RuchimeProvider(), client)
 
     assert (facts[0]["url"], facts[0]["resolution"]) == ("https://vk.com/video-1_100", 2160)
-    assert facts[0]["download_url"] == "https://vkvideo.ru/video-1_100"
+    assert facts[0]["download_url"] == VK_EMBED
 
 
 @pytest.mark.asyncio
-async def test_a_video_the_direct_call_refuses_is_no_candidate_even_if_its_player_page_lists_files():
+async def test_a_video_the_page_call_refuses_is_a_candidate_when_its_player_page_lists_files():
     client = make_client({"episode-1": page_html(vk=True, allvideo=True), "video_ext.php": VK_OPEN,
                           "fsst.online/embed/77": AV_EMBED_1080, "release/test": release_html([1])},
                          shows={"-1_100": SHOW_DENIED})
 
     facts = await scan(RuchimeProvider(), client)
 
-    assert facts[0]["url"] == ALLVIDEO_URL and facts[0]["download_url"] is None
+    assert facts[0]["url"] == "https://vk.com/video-1_100" and facts[0]["download_url"] == VK_EMBED
+    assert facts[0]["resolution"] == 1080
 
 
 @pytest.mark.asyncio
@@ -1035,3 +1035,125 @@ async def test_a_player_without_a_better_address_leaves_the_download_to_its_own_
     facts = await scan(RuchimeProvider(), client)
 
     assert facts[0]["download_url"] is None
+
+
+SHELL_TOKEN = ('<html><head><title>VK</title></head><body><script>init = {webToken: {"access_token": "tok-1", '
+               '"expired_at": 4102444800}, apiConfigDomains: {"apiDomain": "api.vkvideo.ru"}};</script></body></html>')
+PLAYER_PARAMS = ('<html><head><title>Video embed</title></head><body><script>\nvar playerParams = {"params": [{"vid": 100, '
+                 '"mp4_720": "https://cdn.test/720.mp4", "mp4_2160": "https://cdn.test/2160.mp4"}]};\n</script></body></html>')
+EMBED_100 = "https://vkvideo.ru/video_ext.php?oid=-1&id=100&hash=abc"
+
+
+def with_api(client, api) -> list[dict]:
+    """Answer the `video.get` calls of the client by `api(form)` and note their forms."""
+    calls, previous = [], client.post.side_effect
+
+    async def post(url, data=None, headers=None, **kwargs):
+        if "/method/video.get" not in url:
+            return await previous(url, data=data, headers=headers, **kwargs)
+        calls.append(dict(data))
+        response = fake_response()
+        response.status_code, response.text = 200, api(data)
+        return response
+
+    client.post.side_effect = post
+    return calls
+
+
+def api_items(*videos: tuple[int, tuple[int, ...]]) -> str:
+    import json
+    return json.dumps({"response": {"items": [
+        {"owner_id": -1, "id": video, "files": {f"mp4_{height}": f"https://cdn.test/{video}/{height}.mp4" for height in heights}}
+        for video, heights in videos]}})
+
+
+@pytest.mark.asyncio
+async def test_a_series_is_asked_in_one_batch_and_only_what_the_batch_leaves_out_is_asked_one_by_one():
+    counts = {"id=101&hash": 0, "id=102&hash": 0, "id=103&hash": 0}
+    client = make_client({
+        "episode-1": player_page(vk=101), "episode-2": player_page(vk=102), "episode-3": player_page(vk=103),
+        "id=101&hash": SHELL_TOKEN, "id=102&hash": SHELL_TOKEN, "id=103&hash": VK_OPEN,
+        "release/test": release_html([1, 2, 3]),
+    }, counts)
+    calls = with_api(client, lambda form: api_items((101, (720, 1080)), (102, (2160,))))
+
+    vk = (await RuchimeProvider().coverage("https://1.ruchime.org/release/test", client))["players"]["vk"]
+
+    assert [call["videos"] for call in calls] == ["-1_101_abc,-1_102_abc,-1_103_abc", "-1_103_abc"]
+    assert (vk["present"], vk["count"], vk["ranges"]) == (3, 3, "1-3")
+    assert vk["resolutions"] == [{"resolution": 2160, "ranges": "2", "count": 1}, {"resolution": 1080, "ranges": "1, 3", "count": 2}]
+    assert counts == {"id=101&hash": 1, "id=102&hash": 0, "id=103&hash": 1}
+
+
+@pytest.mark.asyncio
+async def test_a_scan_takes_the_series_from_the_batch_and_hands_the_player_link_to_the_downloader():
+    client = make_client({
+        "episode-1": player_page(vk=101), "episode-2": player_page(vk=102),
+        "id=101&hash": SHELL_TOKEN, "id=102&hash": SHELL_TOKEN, "release/test": release_html([1, 2]),
+    })
+    with_api(client, lambda form: api_items((101, (720, 1080)), (102, (2160,))))
+
+    facts = await scan(RuchimeProvider(), client)
+
+    assert [(fact["url"], fact["resolution"], fact["download_url"]) for fact in facts] == [
+        ("https://vk.com/video-1_101", 1080, "https://vkvideo.ru/video_ext.php?oid=-1&id=101&hash=abc"),
+        ("https://vk.com/video-1_102", 2160, "https://vkvideo.ru/video_ext.php?oid=-1&id=102&hash=abc")]
+
+
+@pytest.mark.asyncio
+async def test_a_video_the_batch_does_not_return_and_the_player_page_calls_private_is_closed_not_unknown():
+    client = make_client({
+        "episode-1": player_page(vk=101), "episode-2": player_page(vk=102),
+        "id=101&hash": SHELL_TOKEN, "id=102&hash": VK_CLOSED, "release/test": release_html([1, 2]),
+    })
+    with_api(client, lambda form: api_items((101, (720,))))
+
+    vk = (await RuchimeProvider().coverage("https://1.ruchime.org/release/test", client))["players"]["vk"]
+
+    assert (vk["present"], vk["count"], vk["ranges"]) == (2, 1, "1")
+
+
+@pytest.mark.asyncio
+async def test_a_player_link_with_a_key_resolves_to_one_fresh_file_asked_for_in_parts():
+    client = make_client({"video_ext.php": PLAYER_PARAMS})
+
+    stream = await RuchimeProvider().resolve_stream(EMBED_100, client, 1080)
+
+    assert stream == {"stream_url": "https://cdn.test/720.mp4", "headers": {}, "progressive": True}
+
+
+@pytest.mark.asyncio
+async def test_without_a_cap_the_best_file_is_resolved():
+    client = make_client({"video_ext.php": PLAYER_PARAMS})
+
+    stream = await RuchimeProvider().resolve_stream(EMBED_100, client)
+
+    assert stream["stream_url"] == "https://cdn.test/2160.mp4"
+
+
+@pytest.mark.asyncio
+async def test_a_private_video_has_no_stream_and_is_not_asked_again():
+    client = make_client({"video_ext.php": VK_CLOSED})
+
+    with pytest.raises(StreamUnavailable) as raised:
+        await RuchimeProvider().resolve_stream(EMBED_100, client)
+
+    assert raised.value.transient is False and parse(raised.value.reason)["code"] == "video_private"
+
+
+@pytest.mark.asyncio
+async def test_a_player_page_that_gives_nothing_is_a_stream_that_may_come_later():
+    client = make_client({"video_ext.php": VK_AMBIGUOUS}, shows={"-1_100": SHOW_DENIED})
+
+    with pytest.raises(StreamUnavailable) as raised:
+        await RuchimeProvider().resolve_stream(EMBED_100, client)
+
+    assert raised.value.transient is True
+
+
+@pytest.mark.asyncio
+async def test_a_link_to_a_video_without_a_key_is_not_a_player_link_of_this_provider():
+    client = make_client({"video_ext.php": PLAYER_PARAMS})
+
+    assert await RuchimeProvider().resolve_stream("https://vkvideo.ru/video-1_100", client) is None
+    assert await RuchimeProvider().resolve_stream("https://vkvideo.ru/video_ext.php?oid=-1&id=100", client) is None

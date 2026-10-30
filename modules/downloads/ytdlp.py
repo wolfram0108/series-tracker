@@ -30,6 +30,8 @@ from core import storage
 from core.ffprobe import duration_of
 from core.proc import run_capture, spawn
 
+from . import ranged
+
 ProgressCb = Callable[[dict], Awaitable[None]]
 
 # Decoded manifests live on disk while their segments stay remote (Vibix).
@@ -398,24 +400,49 @@ def _unavailable_error(error: str) -> bool:
 async def download(video_url: str, full_output_path: str,
                    on_progress: ProgressCb, *,
                    headers: dict | None = None,
-                   threads: int = 6) -> tuple[bool, str]:
-    """Two-phase video download. Supports direct ffmpeg copy and yt-dlp.
+                   threads: int = 6,
+                   progressive: bool = False) -> tuple[bool, str]:
+    """Two-phase video download. Supports parts of a ready file, direct ffmpeg copy and yt-dlp.
 
-    The name is owned from the first step to the last: the programs, their leftovers and the publication."""
+    `progressive` marks one ready file address: it is asked for in parts at once, and by one stream when the server
+    cannot serve parts. The name is owned from the first step to the last: the programs, their leftovers and the publication."""
     if not os.path.isabs(full_output_path):
         return False, "путь сохранения должен быть абсолютным"
     try:
         with storage.hold(full_output_path):
-            return await _download_owned(video_url, full_output_path, on_progress, headers, threads)
+            return await _download_owned(video_url, full_output_path, on_progress, headers, threads, progressive)
     except storage.StorageBusy:  # an operation on this name has not ended: a file written now could be lost
         return False, "путь занят незавершённой файловой операцией (timeout)"
 
 
+async def _download_ranged_file(video_url: str, headers: dict, full_output_path: str, on_progress: ProgressCb,
+                                threads: int) -> tuple[bool, str] | None:
+    """The file in parts, published like a direct download; None when the server cannot serve parts."""
+    tmp_out = full_output_path + ".download.mp4"
+    try:
+        ok, error = await ranged.download_ranged(video_url, headers, tmp_out, on_progress, threads=threads)
+    except ranged.RangeUnsupported:
+        return None
+    if not ok:
+        return False, error
+    if await _local_duration(tmp_out) <= 0:
+        await storage.discard(tmp_out)
+        return False, "обрыв: скачанный файл не читается"
+    await storage.call(os.replace, tmp_out, full_output_path, owns=(tmp_out, full_output_path))
+    await on_progress({"phase": "download", "progress": 100, "eta": 0, "speed": 0.0})
+    return True, ""
+
+
 async def _download_owned(video_url: str, full_output_path: str, on_progress: ProgressCb,
-                          headers: dict | None, threads: int) -> tuple[bool, str]:
+                          headers: dict | None, threads: int, progressive: bool = False) -> tuple[bool, str]:
     await storage.call(os.makedirs, os.path.dirname(full_output_path), exist_ok=True)
     if await storage.call(os.path.exists, full_output_path):
         return True, "файл уже существует"
+
+    if progressive:
+        done = await _download_ranged_file(video_url, headers or {}, full_output_path, on_progress, threads)
+        return done if done is not None else await _download_direct_ffmpeg(video_url, headers or {}, full_output_path,
+                                                                           on_progress)
 
     # Direct stream download if headers (e.g. Referer) are provided or URL is already an mp4 stream
     if headers or (video_url.startswith("http") and ".mp4" in video_url and "vk.com" not in video_url and "vkvideo.ru" not in video_url):

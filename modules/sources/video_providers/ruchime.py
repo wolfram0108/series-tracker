@@ -24,8 +24,9 @@ import httpx
 from core.reasons import describe, reason
 
 from .base import BaseVideoProvider, StreamUnavailable
-from ..players.contract import Player, PlayerRef
-from ..policy import Pacer, settle
+from ..players.contract import Kind, Player, PlayerRef
+from ..players.vk_files import pick_file
+from ..policy import Pacer, Verdict, settle
 from .players import PLAYER_ORDER, PlayerProbe, VibixPlayer, probe_from
 from .ranges import episode_ranges
 from .ruchime_address import Choice, address_of, choice_of, parse_vibix_link, vibix_link
@@ -49,6 +50,7 @@ VIBIX_REFRESH_MARGIN_S = 600
 # How long what the coverage has read stays good for a scan: the series is usually added right after it.
 SURVEY_TTL_S = 900
 REQUEST_TIMEOUT = 8.0
+SITE_ROOT = "https://1.ruchime.org/"
 
 _MONTHS = {
     "янв": "01", "фев": "02", "мар": "03", "апр": "04", "мая": "05",
@@ -219,6 +221,10 @@ class RuchimeProvider(BaseVideoProvider):
                              page_url: str) -> PlayerProbe:
         """Ask a page player under the one policy: asking again and the pauses between asks are decided there."""
         verdict = await settle(adapter, ref, http, page_url, pacer=self._probe_pacer)
+        return self._probe_of(adapter, ref, verdict)
+
+    @staticmethod
+    def _probe_of(adapter: Player, ref: PlayerRef, verdict: Verdict) -> PlayerProbe:
         probe = probe_from(verdict, ref, adapter.name if adapter.name != "vk" else "VK")
         address = getattr(adapter, "download_address", None)
         if probe.available and address is not None:
@@ -313,8 +319,13 @@ class RuchimeProvider(BaseVideoProvider):
                    else [item for item in self._needs_lower_source(episodes, adapter.name) if not item.surveyed])
         if not targets:
             return
+        settled = await self._read_batch(adapter, targets, http)
+
         async def probe_one(item: _Episode):
-            return await self._probe_settled(adapter, item.refs[adapter.name], http, item.page_url)
+            ref = item.refs[adapter.name]
+            if ref in settled:
+                return self._probe_of(adapter, ref, Verdict(settled[ref], 1, False))
+            return await self._probe_settled(adapter, ref, http, item.page_url)
 
         probes = await asyncio.gather(*(probe_one(item) for item in targets),
                                       return_exceptions=True)
@@ -335,6 +346,21 @@ class RuchimeProvider(BaseVideoProvider):
                 item.player_reasons[adapter.name] = probe.reason
                 if probe.transient:
                     item.unverified = True
+
+    @staticmethod
+    async def _read_batch(adapter: Player, targets: list[_Episode], http: httpx.AsyncClient) -> dict:
+        """What a player that can answer for many videos at once settles; the rest is asked one by one."""
+        batch = getattr(adapter, "read_batch", None)
+        if batch is None or len(targets) < 2:
+            return {}
+        try:
+            settled = await batch([item.refs[adapter.name] for item in targets], http, targets[0].page_url)
+        except httpx.HTTPError as exc:
+            logger.warning("%s batch failed: %s", adapter.name, type(exc).__name__)
+            return {}
+        logger.info("%s batch: %d of %d players settled, %d asked one by one", adapter.name, len(settled),
+                    len(targets), len(targets) - len(settled))
+        return settled
 
     @staticmethod
     def _vibix_season(playlist: list[Episode], choice: Choice) -> tuple[int | None, str]:
@@ -793,8 +819,10 @@ class RuchimeProvider(BaseVideoProvider):
         active = [adapter for adapter in PLAYER_ORDER if adapter.name not in choice.off]
         if not active:
             return {"videos": [], "players": self._availability_report([], choice.off)}
-        # Vibix has no per-page probe: it is resolved later for the whole series.
-        probed_first = active[0] if not active[0].series_scope else None
+        # Vibix has no per-page probe: it is resolved later for the whole series. A player that answers for many
+        # videos at once waits for every page, so it is asked after them.
+        first = active[0]
+        probed_first = first if not first.series_scope and not hasattr(first, "read_batch") else None
         later = active[1:] if probed_first else active
 
         all_episodes = self._release_episodes(resp.text)
@@ -880,12 +908,26 @@ class RuchimeProvider(BaseVideoProvider):
 
     async def resolve_stream(self, url: str, http: httpx.AsyncClient,
                              max_height: int | None = None) -> dict | None:
-        """Resolve AllVideo embeds and Vibix episode references; VK is left to the downloader's own reading of its link."""
+        """Resolve VK player links, AllVideo embeds and Vibix episode references."""
+        if _PLAYERS["vk"].owns(url):
+            return await self._resolve_vk(url, http, max_height)
         if any(domain in url for domain in ("fsst.online", "incvideo1.online")):
             return await self._resolve_allvideo(url, http)
         if self.match_url(url) and _EPISODE_IN_URL.search(url):
             return await self._resolve_vibix(url, http)
         return None
+
+    async def _resolve_vk(self, url: str, http: httpx.AsyncClient, max_height: int | None) -> dict:
+        """A player link with its key -> the address of one file now: the addresses of the files expire, so they are not kept."""
+        player = _PLAYERS["vk"]
+        ref = player.ref_of(url)
+        verdict = await settle(player.with_files(), ref, http, SITE_ROOT, pacer=self._probe_pacer)
+        probe = probe_from(verdict, ref, "VK")
+        picked = pick_file(verdict.reading.files, max_height) if verdict.reading.kind is Kind.PLAYABLE else None
+        if picked is None:
+            raise StreamUnavailable(probe.reason or reason("player_unconfirmed", player="VK"),
+                                    transient=probe.transient or probe.available)
+        return {"stream_url": picked[1], "headers": {}, "progressive": True}
 
     async def _resolve_allvideo(self, url: str, http: httpx.AsyncClient) -> dict | None:
         return await _PLAYERS["allvideo"].resolve(url, http)

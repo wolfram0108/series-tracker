@@ -126,6 +126,7 @@ class FakeDownloader:
         self.fail_urls: set[str] = set()
         self.timeouts: dict[str, int] = {}   # url -> how many more attempts end in a network timeout
         self.started: list[str] = []
+        self.kwargs: dict[str, dict] = {}
         self.gate: asyncio.Event | None = None
         self.concurrent = 0
         self.max_concurrent = 0
@@ -133,6 +134,7 @@ class FakeDownloader:
     async def __call__(self, url, path, on_progress, *, threads=6, **kw):
         self.threads = threads
         self.started.append(url)
+        self.kwargs[url] = kw
         self.concurrent += 1
         self.max_concurrent = max(self.max_concurrent, self.concurrent)
         try:
@@ -697,6 +699,31 @@ async def test_provider_stream_error_fails_task_without_ytdlp(system):
     assert await _wait(lambda: _items(db_path)["web1"]["status"] == "error")
     assert dl.started == []
     assert "400" in _tasks(db_path)[0]["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_a_progressive_file_is_handed_to_the_downloader_as_such(system):
+    _, fake, dl, probe, db_path, _ = system
+    fake.stream_replies[PAGE_URL] = {"handled": True, "stream_url": "https://cdn.test/f?sig=1", "headers": {}, "progressive": True}
+    _add_item(db_path, "web1", 1, series_id=3, source_url=PAGE_URL)
+
+    probe.publish_event("downloads.dispatch", {"series_id": 3})
+
+    assert await _wait(lambda: _items(db_path)["web1"]["status"] == "completed")
+    assert dl.started == ["https://cdn.test/f?sig=1"]
+    assert dl.kwargs["https://cdn.test/f?sig=1"] == {"progressive": True}
+
+
+@pytest.mark.asyncio
+async def test_a_stream_that_is_not_marked_progressive_is_handed_over_without_the_mark(system):
+    _, fake, dl, probe, db_path, _ = system
+    fake.stream_replies[PAGE_URL] = {"handled": True, "stream_url": "https://cdn.test/g.mp4", "headers": {"Referer": "https://r/"}}
+    _add_item(db_path, "web1", 1, series_id=3, source_url=PAGE_URL)
+
+    probe.publish_event("downloads.dispatch", {"series_id": 3})
+
+    assert await _wait(lambda: _items(db_path)["web1"]["status"] == "completed")
+    assert dl.kwargs["https://cdn.test/g.mp4"] == {"headers": {"Referer": "https://r/"}}
 
 
 @pytest.mark.asyncio
