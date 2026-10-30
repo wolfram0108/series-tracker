@@ -1,6 +1,7 @@
 import pytest
 
-from modules.sources.video_providers.vk_embed import EmbedKind, read_embed
+from modules.sources.players.contract import Kind
+from modules.sources.players.vk_embed import read_embed
 
 # The shapes below are the ones VK was seen to answer: the player page, the same page without the file,
 # and the site shell that comes instead of the player.
@@ -16,7 +17,7 @@ SHELL = '<!DOCTYPE html><html lang="EN"><head><meta charset="windows-1251"/><tit
 def test_a_player_page_with_files_is_playable_with_its_resolutions():
     answer = read_embed(200, PLAYER)
 
-    assert (answer.kind, answer.resolutions) == (EmbedKind.PLAYABLE, (720, 1080))
+    assert (answer.kind, answer.resolutions) == (Kind.PLAYABLE, (720, 1080))
 
 
 def test_resolutions_are_numbers_not_text():
@@ -26,41 +27,41 @@ def test_resolutions_are_numbers_not_text():
 def test_a_refusal_outranks_the_files_the_page_still_lists():
     answer = read_embed(200, PRIVATE)
 
-    assert (answer.kind, answer.message) == (EmbedKind.RESTRICTED, "access denied")
+    assert (answer.kind, answer.message) == (Kind.RESTRICTED, "access denied")
 
 
 def test_the_player_page_that_says_the_file_is_not_found_is_not_found():
     answer = read_embed(200, NO_FILE)
 
-    assert answer.kind == EmbedKind.NOT_FOUND
+    assert answer.kind == Kind.NOT_FOUND
 
 
 def test_status_404_is_not_found():
-    assert read_embed(404, "").kind == EmbedKind.NOT_FOUND
+    assert read_embed(404, "").kind == Kind.NOT_FOUND
 
 
 @pytest.mark.parametrize("status", [403, 408, 425, 429, 500, 503, 302])
 def test_any_other_status_is_an_http_error_that_keeps_the_status(status):
     answer = read_embed(status, PLAYER)
 
-    assert (answer.kind, answer.status) == (EmbedKind.HTTP_ERROR, status)
+    assert (answer.kind, answer.status) == (Kind.HTTP_ERROR, status)
 
 
 def test_a_player_page_without_files_and_without_a_known_message_says_what_it_shows():
     answer = read_embed(200, EMPTY)
 
-    assert (answer.kind, answer.title, answer.message) == (EmbedKind.EMPTY_EMBED, "Video embed", "Что-то пошло не так")
+    assert (answer.kind, answer.title, answer.message) == (Kind.NO_FILE, "Video embed", "Что-то пошло не так")
 
 
 def test_the_site_shell_is_not_the_player_and_names_its_title():
     answer = read_embed(200, SHELL)
 
-    assert (answer.kind, answer.title, answer.resolutions) == (EmbedKind.NOT_EMBED, "VK", ())
+    assert (answer.kind, answer.title, answer.resolutions) == (Kind.NOT_PLAYER, "VK", ())
 
 
 @pytest.mark.parametrize("text", ["", "ok", "<html></html>", "<title></title>", "{\"error\": 1}"])
 def test_a_page_that_is_nothing_known_is_not_the_player(text):
-    assert read_embed(200, text).kind == EmbedKind.NOT_EMBED
+    assert read_embed(200, text).kind == Kind.NOT_PLAYER
 
 
 @pytest.mark.parametrize("status,text", [(200, PLAYER), (200, NO_FILE), (200, PRIVATE), (200, EMPTY), (200, SHELL),
@@ -68,4 +69,4 @@ def test_a_page_that_is_nothing_known_is_not_the_player(text):
 def test_every_answer_is_exactly_one_kind_and_reads_the_same_each_time(status, text):
     first, second = read_embed(status, text), read_embed(status, text)
 
-    assert first == second and isinstance(first.kind, EmbedKind)
+    assert first == second and isinstance(first.kind, Kind)

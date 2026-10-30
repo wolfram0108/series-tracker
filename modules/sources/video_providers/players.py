@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING
 
 from core.reasons import reason
 
-from .vk_embed import EmbedKind, read_embed
+from ..players.contract import Kind
+from ..players.vk_embed import read_embed
 
 if TYPE_CHECKING:
     import httpx
@@ -101,13 +102,13 @@ class VkPlayer(PlayerAdapter):
         if response is None:
             return PlayerProbe(ref, False, reason=reason("player_no_answer", player="VK"), transient=True)
         answer = read_embed(response.status_code, response.text)
-        if answer.kind is EmbedKind.PLAYABLE:
+        if answer.kind is Kind.PLAYABLE:
             return PlayerProbe(ref, True, max(answer.resolutions))
-        if answer.kind is EmbedKind.NOT_FOUND:
+        if answer.kind is Kind.NOT_FOUND:
             return PlayerProbe(ref, False, reason=reason("player_video_missing", player="VK"))
-        if answer.kind is EmbedKind.RESTRICTED:
+        if answer.kind is Kind.RESTRICTED:
             return PlayerProbe(ref, False, reason=reason("video_private"))
-        if answer.kind is EmbedKind.HTTP_ERROR:
+        if answer.kind is Kind.HTTP_ERROR:
             return PlayerProbe(ref, False, reason=reason("player_status", player="VK", status=answer.status),
                                transient=True)
         # The page is not the player, or the player shows no file: left to the layer that decides on asking again.
