@@ -812,30 +812,16 @@ async def test_coverage_counts_only_the_episodes_a_player_really_plays():
 
 
 @pytest.mark.asyncio
-async def test_coverage_leaves_out_a_disabled_player():
+async def test_coverage_does_not_depend_on_the_choice_of_the_address():
     provider = RuchimeProvider()
-    counts = {"video_ext.php": 0}
-    client = make_client({
-        "episode-1": player_page(vk=101, allvideo=77), "id=101&hash": VK_OPEN,
-        "fsst.online/embed/77": AV_EMBED_1080, "release/test": release_html([1]),
-    }, counts)
+    routes = {"episode-1": player_page(vk=101, allvideo=77), "id=101&hash": VK_OPEN,
+              "fsst.online/embed/77": AV_EMBED_1080, "release/test": release_html([1])}
 
-    result = await provider.coverage("https://1.ruchime.org/release/test?off=vk", client)
+    plain = await provider.coverage("https://1.ruchime.org/release/test", make_client(routes))
+    chosen = await provider.coverage("https://1.ruchime.org/release/test?vibix=2&off=vk,allvideo", make_client(routes))
 
-    assert list(result["players"]) == ["allvideo"]
-    assert counts["video_ext.php"] == 0
-
-
-@pytest.mark.asyncio
-async def test_coverage_with_every_page_player_disabled_reads_nothing():
-    provider = RuchimeProvider()
-    counts = {"episode-1": 0}
-    client = make_client({"episode-1": player_page(vk=101), "release/test": release_html([1])}, counts)
-
-    result = await provider.coverage("https://1.ruchime.org/release/test?off=vk,allvideo", client)
-
-    assert result == {"players": {}, "reason": ""}
-    assert counts["episode-1"] == 0
+    assert chosen == plain
+    assert set(plain["players"]) == {"vk", "allvideo"} and plain["players"]["vk"]["count"] == 1
 
 
 @pytest.mark.asyncio

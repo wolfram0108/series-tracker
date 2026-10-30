@@ -18,10 +18,13 @@ async function ask<T>(send: () => Promise<{ data?: unknown }>, failed: T): Promi
   }
 }
 
+const pageOf = (address: string) => address.split("?")[0]
+
 /**
  * The sources of a web release as the add form and the series properties show them. A provider that reads its
  * sources apart from the parse (a shared catalog, every episode page) answers after it; each part shows when
- * it arrives, and a change of the choice is an address the provider parses again.
+ * it arrives, and a change of the choice is an address the provider parses again. What the episodes give does
+ * not depend on the choice, so it is read once per page.
  */
 export function useWebSources() {
   const players = ref<Record<string, PlayerReport>>({})
@@ -33,27 +36,36 @@ export function useWebSources() {
   const progress = ref<{ current: number; total: number } | null>(null)
   const address = ref("")
   const parsing = ref(false)
-  let token = 0
+  let layoutToken = 0
+  let coverageFor = ""
 
   const stop = useSSE().on("coverage_progress", (data) => {
     const event = data as { url: string; current: number; total: number; active: boolean }
-    if (event.url === address.value.split("?")[0]) progress.value = event.active ? { current: event.current, total: event.total } : null
+    if (event.url === pageOf(address.value)) progress.value = event.active ? { current: event.current, total: event.total } : null
   })
   onBeforeUnmount(stop)
 
-  function read(url: string): void {
-    const mine = ++token
+  function readLayout(url: string): void {
+    const mine = ++layoutToken
+    layout.value = null
     layoutLoading.value = true
-    coverageLoading.value = true
     void ask<SourcesLayout>(() => api.POST("/api/web_video/layout", { body: { url } } as never),
       { sources: [], reason: "failed" }).then((value) => {
-      if (mine !== token) return
+      if (mine !== layoutToken) return
       layout.value = value
       layoutLoading.value = false
     })
+  }
+
+  function readCoverage(url: string): void {
+    const page = pageOf(url)
+    if (page === coverageFor) return
+    coverageFor = page
+    coverage.value = null
+    coverageLoading.value = true
     void ask<SourcesCoverage>(() => api.POST("/api/web_video/coverage", { body: { url } } as never),
       { players: {}, reason: "failed" }).then((value) => {
-      if (mine !== token) return
+      if (page !== coverageFor) return
       coverage.value = value
       coverageLoading.value = false
       progress.value = null
@@ -61,7 +73,8 @@ export function useWebSources() {
   }
 
   function reset(): void {
-    token++
+    layoutToken++
+    coverageFor = ""
     players.value = {}
     hasLayout.value = false
     layout.value = null
@@ -73,11 +86,14 @@ export function useWebSources() {
   }
 
   function apply(res: WebParse): void {
-    reset()
+    const next = res.canonical_url || ""
+    if (pageOf(next) !== coverageFor) reset()
     players.value = res.players ?? {}
     hasLayout.value = !!res.has_layout
-    address.value = res.canonical_url || ""
-    if (hasLayout.value) read(address.value)
+    address.value = next
+    if (!hasLayout.value) return
+    readLayout(next)
+    readCoverage(next)
   }
 
   /** Parse an address and show its sources; the parse result goes to `onParsed` for whatever else needs it. */

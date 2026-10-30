@@ -580,12 +580,9 @@ class RuchimeProvider(BaseVideoProvider):
         """What each page player really gives: its episodes and the resolution of each, grouped by ranges.
 
         Every episode page is read and every player is probed, which is slow, so the add form asks for it
-        apart from the parse and shows the progress."""
-        choice = choice_of(url)
-        probes = [adapter for adapter in PLAYER_ORDER
-                  if not adapter.series_scope and adapter.name not in choice.off]
-        if not probes:
-            return {"players": {}, "reason": ""}
+        apart from the parse and shows the progress. The choice of the address does not change the answer:
+        it is read once per page, and a disabled player is only hidden by the form."""
+        probes = [adapter for adapter in PLAYER_ORDER if not adapter.series_scope]
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         resp, slug = await self._read_release(url, http, headers)
         listed = self._release_episodes(resp.text)
