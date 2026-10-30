@@ -170,7 +170,7 @@
 
 - `modules/sources/video_providers/` — точка расширения провайдеров
   (`match_url`, `parse_release`, `scan_episodes`, `resolve_stream`).
-- Протокол Kodik на Python (миссия `ruchime-players`, ROADMAP, «Кирпичи»).
+- Протокол Kodik на Python (`contracts/findings.md`, находка 119).
 - Резолверы плееров `kodik` и `cvh` проекта `track-muxer`: готовые протоколы
   получения потоков озвучек.
 - `modules/scan/planner.py` и `superseded_by` (Р-37) — выбор референса и
