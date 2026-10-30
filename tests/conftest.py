@@ -19,7 +19,7 @@ def hosts_are_not_paced_in_tests(monkeypatch):
     """The pauses that spare a real host (between requests, probes and repeated asks) would only slow fakes down."""
     from modules.sources import module as sources
     from modules.sources import policy
-    from modules.sources.video_providers import ruchime
+    from modules.sources.video_providers.ruchime import provider as ruchime
     monkeypatch.setattr(sources, "REQUEST_MIN_INTERVAL", 0.0)
     monkeypatch.setattr(policy, "DEFAULT", policy.Budget(pauses=(0.0,)))
     for pause in ("PAGE_INTERVAL_S", "PROBE_INTERVAL_S", "PAGE_PAUSE_S"):

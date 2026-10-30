@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from modules.sources.video_providers.players import PLAYER_ORDER
-from modules.sources.video_providers.ruchime_address import (
+from modules.sources.video_providers.ruchime.address import (
     PLAYERS, Choice, address_of, choice_of, parse_vibix_link, vibix_link)
 
 PAGE = "https://1.ruchime.org/release/test"
