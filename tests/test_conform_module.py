@@ -409,6 +409,8 @@ async def test_client_enqueue_separates_a_final_refusal_from_a_failure_that_prov
     seen = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/openapi.json":
+            return httpx.Response(404)  # a daemon that publishes no schema: the body goes as it is
         seen.append((request.method, request.url.path, json.loads(request.content)))
         return next(answers)
 

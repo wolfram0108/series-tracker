@@ -46,23 +46,54 @@ def _problem(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
 
 
+def accepted_fields(openapi: Any, route: str = "/conform/enqueue") -> frozenset[str] | None:
+    """The fields the daemon's own schema lets a body of this route carry.
+
+    None when the schema cannot be read or lets any field through: then the body is sent as it is.
+    """
+    try:
+        reference = openapi["paths"][route]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+        schema = openapi["components"]["schemas"][reference.rsplit("/", 1)[-1]]
+    except (KeyError, TypeError):
+        return None
+    if schema.get("additionalProperties") is not False or not isinstance(schema.get("properties"), dict):
+        return None
+    return frozenset(schema["properties"])
+
+
 class DaemonClient:
     def __init__(self, base_url: str, http: httpx.AsyncClient | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self._http = http or httpx.AsyncClient()
+        self._fields: frozenset[str] | None = None
+        self._fields_read = False
 
     async def info(self) -> dict[str, Any]:
         """Version and compute device of the daemon."""
+        self._fields_read = False  # a daemon that came back may speak a newer contract
         health = (await self._http.get(f"{self.base_url}/health", timeout=REQUEST_TIMEOUT_S)).json()
         device = (await self._http.get(f"{self.base_url}/conform/device",
                                        timeout=REQUEST_TIMEOUT_S)).json()
         return {"version": health.get("version"), "device": device.get("device"),
                 "gpu": bool(device.get("gpu")), "gpu_name": device.get("name")}
 
+    async def _body_fields(self) -> frozenset[str] | None:
+        """What a job body may carry, read once from the daemon's schema; an unreadable schema is asked again later."""
+        if not self._fields_read:
+            try:
+                document = _json(await self._http.get(f"{self.base_url}/openapi.json", timeout=REQUEST_TIMEOUT_S))
+            except httpx.HTTPError:
+                return None
+            self._fields, self._fields_read = accepted_fields(document), True
+        return self._fields
+
     async def enqueue(self, body: dict[str, Any]) -> dict[str, Any]:
         """Queue one episode job; the daemon answers with the job. The outcome is told by what was proved:
         a refusal and a failure before sending are certain, and everything after the sending that is not a
-        well-formed acceptance is unconfirmed."""
+        well-formed acceptance is unconfirmed. The body carries only the fields the daemon's schema accepts."""
+        fields = await self._body_fields()
+        if fields is not None:
+            body = {key: value for key, value in body.items() if key in fields}
         try:
             response = await self._http.post(f"{self.base_url}/conform/enqueue", json=body,
                                              timeout=REQUEST_TIMEOUT_S)
