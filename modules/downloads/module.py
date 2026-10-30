@@ -65,6 +65,7 @@ from core import BaseModule, BusRequestError, is_video_source
 from core import storage
 from core.db import Database
 from core.envelope import Envelope
+from core.retry import UNTIMED, Budget, retrying
 
 from . import ytdlp
 from .repository import DownloadsRepository
@@ -89,6 +90,11 @@ def _inside(base: str, path: str) -> bool:
 def _transient_download_error(error: str) -> bool:
     lowered = (error or "").lower()
     return any(marker in lowered for marker in _TRANSIENT_MARKERS)
+
+
+def _download_budget() -> Budget:
+    """The one budget of a whole download, whether its attempts live in a loop or in the queue."""
+    return Budget(attempts=MAX_DOWNLOAD_ATTEMPTS, pauses=(RETRY_DELAY_S,), limit_s=UNTIMED)
 
 
 class DownloadsModule(BaseModule):
@@ -522,11 +528,13 @@ class DownloadsModule(BaseModule):
                 self.log.info("загрузка завершена: %s", rel)
             else:
                 attempt = int(task.get("attempts") or 0) + 1
-                if attempt < MAX_DOWNLOAD_ATTEMPTS and transient:
+                budget = _download_budget()
+                if budget.allows(attempt) and transient:
+                    pause = budget.pause(attempt)
                     self.log.warning(
                         "загрузка %s: %s — повтор %d/%d через %.0f с",
-                        uid, error, attempt, MAX_DOWNLOAD_ATTEMPTS, RETRY_DELAY_S)
-                    await asyncio.sleep(RETRY_DELAY_S)
+                        uid, error, attempt, budget.attempts, pause)
+                    await asyncio.sleep(pause)
                     await self.repo.requeue_task(task_id)
                 else:
                     await self.repo.mark_error(task_id, error)
@@ -600,25 +608,27 @@ class DownloadsModule(BaseModule):
         async def ignore_progress(_data: dict) -> None:
             return None
 
+        async def attempt_once() -> tuple[bool, str, bool]:
+            stream_url, headers, stream_error, progressive = await self._resolve_stream(
+                job["url"], max_height=job.get("max_height"), is_web=True)
+            if stream_error is not None:
+                return (False, *stream_error)
+            kw: dict = {"threads": self._threads}
+            if headers:
+                kw["headers"] = headers
+            if progressive:
+                kw["progressive"] = True
+            done, failure = await self._download(stream_url, path, ignore_progress, **kw)
+            return done, failure, not done and _transient_download_error(failure)
+
+        budget = _download_budget()
+
+        def report(result: tuple[bool, str, bool], attempt: int, pause: float) -> None:
+            self.log.warning("загрузка %s: %s — повтор %d/%d через %.0f с", key, result[1], attempt, budget.attempts, pause)
+
         try:
-            for attempt in range(1, MAX_DOWNLOAD_ATTEMPTS + 1):
-                stream_url, headers, stream_error, progressive = await self._resolve_stream(
-                    job["url"], max_height=job.get("max_height"), is_web=True)
-                if stream_error is not None:
-                    error, transient = stream_error
-                else:
-                    kw: dict = {"threads": self._threads}
-                    if headers:
-                        kw["headers"] = headers
-                    if progressive:
-                        kw["progressive"] = True
-                    ok, error = await self._download(stream_url, path, ignore_progress, **kw)
-                    transient = not ok and _transient_download_error(error)
-                if ok or not transient or attempt == MAX_DOWNLOAD_ATTEMPTS:
-                    break
-                self.log.warning("загрузка %s: %s — повтор %d/%d через %.0f с",
-                                 key, error, attempt, MAX_DOWNLOAD_ATTEMPTS, RETRY_DELAY_S)
-                await asyncio.sleep(RETRY_DELAY_S)
+            (ok, error, transient), _attempts, _exhausted = await retrying(
+                attempt_once, final=lambda result: result[0] or not result[2], budget=budget, on_retry=report)
         except asyncio.CancelledError:
             await storage.call(self._remove_partial, path, timeout=storage.REMOVE_TIMEOUT_S, owns=path)
             self._fetch_active.pop(key, None)

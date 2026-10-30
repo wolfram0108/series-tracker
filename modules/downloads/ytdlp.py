@@ -29,6 +29,7 @@ import httpx
 from core import storage
 from core.ffprobe import duration_of
 from core.proc import run_capture, spawn
+from core.retry import UNTIMED, Budget, retrying
 
 from . import ranged
 
@@ -306,13 +307,11 @@ def _headers_args(stream_url: str, headers: dict) -> list[str]:
 async def _probe_duration_ffprobe(stream_url: str, headers: dict | None = None) -> float:
     """Duration a stream announces; a flaky CDN gets a few looks before the duration is given up."""
     args = [*PROTOCOL_WHITELIST, *_headers_args(stream_url, headers or {})]
-    for attempt in range(PROBE_ATTEMPTS):
-        duration = await duration_of(stream_url, input_args=args, timeout=PROBE_TIMEOUT_S)
-        if duration > 0:
-            return duration
-        if attempt + 1 < PROBE_ATTEMPTS:
-            await asyncio.sleep(PROBE_RETRY_S)
-    return 0.0
+    budget = Budget(attempts=PROBE_ATTEMPTS, pauses=(PROBE_RETRY_S,), limit_s=UNTIMED)
+    duration, _attempts, _exhausted = await retrying(
+        lambda: duration_of(stream_url, input_args=args, timeout=PROBE_TIMEOUT_S), final=lambda seconds: seconds > 0,
+        budget=budget)
+    return max(duration, 0.0)
 
 
 async def _local_duration(path: str) -> float:

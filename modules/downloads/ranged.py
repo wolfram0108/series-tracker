@@ -14,6 +14,7 @@ from typing import Awaitable, Callable
 import httpx
 
 from core import storage
+from core.retry import UNTIMED, Budget, retrying
 
 ProgressCb = Callable[[dict], Awaitable[None]]
 
@@ -68,25 +69,29 @@ async def _probe(client: httpx.AsyncClient, url: str, headers: dict) -> int:
 
 async def _fetch_part(client: httpx.AsyncClient, url: str, headers: dict, first: int, last: int) -> bytes:
     expected = last - first + 1
-    for attempt in range(1, PART_ATTEMPTS + 1):
+
+    async def ask() -> tuple[bytes | None, str]:
+        """The part, or what went wrong with a try that may pass; a refusal that cannot pass ends the download at once."""
         try:
             async with client.stream("GET", url, headers={**headers, "Range": f"bytes={first}-{last}"}) as response:
                 status = response.status_code
                 if status == 206:
                     data = await response.aread()
-                    problem = f"network error: часть {first}-{last} получена на {len(data)} из {expected} байт"
                     if len(data) == expected:
-                        return data
-                elif status in _TRANSIENT_STATUSES or status >= 500:
-                    problem = f"HTTP error {status}: часть {first}-{last}"
-                else:
-                    raise _Failed(f"HTTP error {status}: часть {first}-{last} не отдана по диапазону")
+                        return data, ""
+                    return None, f"network error: часть {first}-{last} получена на {len(data)} из {expected} байт"
+                if status in _TRANSIENT_STATUSES or status >= 500:
+                    return None, f"HTTP error {status}: часть {first}-{last}"
+                raise _Failed(f"HTTP error {status}: часть {first}-{last} не отдана по диапазону")
         except httpx.HTTPError as exc:
-            problem = f"network error: {type(exc).__name__}"
-        if attempt == PART_ATTEMPTS:
-            raise _Failed(problem)
-        await asyncio.sleep(PART_PAUSES_S[min(attempt - 1, len(PART_PAUSES_S) - 1)])
-    raise _Failed("unreachable")
+            return None, f"network error: {type(exc).__name__}"
+
+    (data, problem), _attempts, _exhausted = await retrying(
+        ask, final=lambda got: got[0] is not None,
+        budget=Budget(attempts=PART_ATTEMPTS, pauses=PART_PAUSES_S, limit_s=UNTIMED))
+    if data is None:
+        raise _Failed(problem)
+    return data
 
 
 class _Progress:

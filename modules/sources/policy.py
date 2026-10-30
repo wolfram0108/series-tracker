@@ -1,7 +1,7 @@
-"""The one place that decides whether to ask a player again, how long to wait, and when to stop.
+"""The one place that decides whether to ask a player again: which answers are unsure, and the pace of the requests.
 
 Players only fetch once and read the answer into a kind; nothing else in `modules/sources` repeats a request or pauses
-between attempts on its own account.
+between attempts on its own account. How many times and how long to wait is the budget of `core.retry`.
 """
 from __future__ import annotations
 
@@ -12,7 +12,9 @@ from typing import Awaitable, Callable
 
 import httpx
 
-from .players.contract import Kind, Player, PlayerRef, Reading
+from core.retry import Budget, retrying
+
+from .players.contract import Answer, Kind, Player, PlayerRef, Reading
 
 # A refusal that can pass: the host is asked again, unlike a final "no".
 TRANSIENT_STATUSES = frozenset({403, 408, 425, 429})
@@ -27,18 +29,6 @@ def is_retryable(reading: Reading) -> bool:
     if reading.kind is Kind.HTTP_ERROR:
         return status_is_transient(reading.status)
     return reading.kind in UNSURE_KINDS
-
-
-@dataclass(frozen=True)
-class Budget:
-    """How many times one cell is asked, the pauses between asks, and the time after which it is left unobtained."""
-    attempts: int = 3
-    pauses: tuple[float, ...] = (2.0, 6.0)
-    limit_s: float = 30.0
-
-    def pause(self, attempt: int, retry_after: float | None = None) -> float:
-        scheduled = self.pauses[min(attempt - 1, len(self.pauses) - 1)] if self.pauses else 0.0
-        return max(scheduled, retry_after or 0.0)
 
 
 DEFAULT = Budget()
@@ -75,17 +65,13 @@ async def settle(player: Player, ref: PlayerRef, http: httpx.AsyncClient, page_u
                  clock: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> Verdict:
     """Ask a player until its answer is final or the budget is spent."""
-    budget = budget or DEFAULT
-    started, attempt = clock(), 0
-    while True:
-        attempt += 1
+    async def ask() -> tuple[Answer, Reading]:
         if pacer is not None:
             await pacer.wait()
         answer = await player.fetch(ref, http, page_url)
-        reading = player.read(answer)
-        if not is_retryable(reading):
-            return Verdict(reading, attempt, False)
-        pause = budget.pause(attempt, answer.retry_after)
-        if attempt >= budget.attempts or clock() - started + pause > budget.limit_s:
-            return Verdict(reading, attempt, True)
-        await sleep(pause)
+        return answer, player.read(answer)
+
+    (_answer, reading), attempts, exhausted = await retrying(
+        ask, final=lambda asked: not is_retryable(asked[1]), budget=budget or DEFAULT,
+        retry_after=lambda asked: asked[0].retry_after, clock=clock, sleep=sleep)
+    return Verdict(reading, attempts, exhausted)
