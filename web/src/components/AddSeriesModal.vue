@@ -13,7 +13,7 @@ import WebSourcesEditor from "./WebSourcesEditor.vue"
 import { api } from "../api/client"
 import { t } from "../i18n"
 import { reasonText } from "../lib/reason"
-import { blocksAdd, sourceRows, type SourcesLayout } from "../lib/webSources"
+import { useWebSources } from "../composables/useWebSources"
 import type { components } from "../api/schema"
 import { useApi } from "../composables/useApi"
 import { useSSE } from "../composables/useSSE"
@@ -64,11 +64,9 @@ const vkQuery = ref("")
 const trackerInfo = ref<TrackerInfo | null>(null)
 type PlayerReport = { present: boolean; available: boolean | null; resolution: number | null; reason?: string; enabled?: boolean; toggle?: string }
 const parsePlayers = ref<Record<string, PlayerReport>>({})
-// A provider may describe its sources apart from the parse because reading them is slow (a shared catalog).
-const hasLayout = ref(false)
-const sourcesLayout = ref<SourcesLayout | null>(null)
-const layoutLoading = ref(false)
-let layoutToken = 0
+// The sources of a web release: a provider may read them apart from the parse because that is slow.
+const web = useWebSources()
+const { hasLayout, rows: sourceRowsView, progress: sourcesProgress } = web
 // Player/voice-over choices of a web source, delivered with the link parse.
 type WebSource = components["schemas"]["ReleaseSource"]
 type WebLayout = components["schemas"]["Layout"]
@@ -127,11 +125,10 @@ const canAddSeries = computed(() => {
     return base && vkOk && searchOk
   }
   if (sourceType.value === "web_video") {
-    return parsed.value && base && !!newSeries.parser_profile_id && !(hasLayout.value && blocksAdd(sourceRowsView.value))
+    return parsed.value && base && !!newSeries.parser_profile_id && !web.blocks.value
   }
   return parsed.value && base && isSeasonValid.value
 })
-const sourceRowsView = computed(() => sourceRows(parsePlayers.value, sourcesLayout.value, layoutLoading.value))
 const sortedQualityOptionsKeys = computed(() => {
   if (!site.value.includes("astar")) return []
   return sortEpisodeKeys(Object.keys(episodeQualityOptions))
@@ -299,10 +296,7 @@ function handleUrlInput() {
   webSources.value = []
   selectedSource.value = ""
   webLayout.value = null
-  hasLayout.value = false
-  sourcesLayout.value = null
-  layoutLoading.value = false
-  layoutToken++
+  web.reset()
   newSeries.resolution_override = ""
   if (!newSeries.url) {
     sourceType.value = "torrent"
@@ -341,26 +335,7 @@ function applyWebParse(res: WebParse) {
   webSources.value = res.sources ?? []
   selectedSource.value = res.selected_source ?? ""
   webLayout.value = res.layout ?? null
-  hasLayout.value = !!res.has_layout
-  if (hasLayout.value) void loadLayout(res.canonical_url || newSeries.url)
-  else sourcesLayout.value = null
-}
-
-// The sources of a release that the provider reads apart from the parse; a newer request wins.
-async function loadLayout(address: string) {
-  const token = ++layoutToken
-  layoutLoading.value = true
-  sourcesLayout.value = null
-  let layout: SourcesLayout = { sources: [], reason: "failed" }
-  try {
-    const { data } = await api.POST("/api/web_video/layout", { body: { url: address } } as never)
-    if (data) layout = data as unknown as SourcesLayout
-  } catch {
-    // The failed read stays a layout without sources: the player is shown as unavailable.
-  }
-  if (token !== layoutToken) return
-  sourcesLayout.value = layout
-  layoutLoading.value = false
+  web.apply(res)
 }
 
 // Switching the choice re-parses the link; the form fields stay untouched.
@@ -737,7 +712,7 @@ onBeforeUnmount(() => {
       <div v-if="sourceType === 'web_video' && playerReportRows.length" class="modern-fieldset">
         <div class="fieldset-header"><span class="fieldset-title">Источники</span></div>
         <div class="fieldset-content">
-          <WebSourcesEditor v-if="hasLayout" :rows="sourceRowsView" :busy="parsing" @pick="pickSource" />
+          <WebSourcesEditor v-if="hasLayout" :rows="sourceRowsView" :busy="parsing" :progress="sourcesProgress" @pick="pickSource" />
           <template v-else>
           <div v-if="webSourceOptions.length" class="field-group mb-3">
             <StGroup>

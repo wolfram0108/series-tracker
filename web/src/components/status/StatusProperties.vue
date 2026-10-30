@@ -6,8 +6,11 @@ import StIcon from "../StIcon.vue"
 import StInput from "../StInput.vue"
 import StSelect from "../StSelect.vue"
 import SavedPathDropdown from "../SavedPathDropdown.vue"
+import WebSourcesEditor from "../WebSourcesEditor.vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
+import { useWebSources } from "../../composables/useWebSources"
+import { t } from "../../i18n"
 import type { Series } from "../../stores/series"
 
 // Вкладка «Свойства» статус-окна (Шаг 1, торрент-путь + VK-поля).
@@ -135,6 +138,13 @@ async function refreshSiteTorrents() {
   }
 }
 const url = String((s as Record<string, unknown>).url ?? "")
+// The sources of a web release; the address is sent with the series only when the choice moved it.
+const web = useWebSources()
+const { hasLayout, rows: sourceRows, progress: sourcesProgress, parsing: sourcesParsing } = web
+let startAddress = ""
+async function showSources(address: string): Promise<void> {
+  if (await web.pick(address) && !startAddress) startAddress = web.address.value
+}
 const isSeasonless = ref(!form.season)
 const showValidation = ref(false)
 
@@ -305,7 +315,7 @@ async function save(): Promise<boolean> {
     if (isVk) {
       payload.url = `${vkChannelUrl.value}|${vkQuery.value}`
     } else if (isWebVideo) {
-      payload.url = url
+      payload.url = web.address.value && web.address.value !== startAddress ? web.address.value : url
     } else {
       // строка качества (как в оригинале): anilibria/rutracker → одно
       // значение; astar → версии мульти-групп + по одной из одиночных, ';'
@@ -350,6 +360,7 @@ async function save(): Promise<boolean> {
 defineExpose({ save })
 onMounted(() => {
   void loadProfiles()
+  if (isWebVideo) void showSources(url)
   if (!isVideo) void refreshSiteTorrents() // автопарсинг доступных раздач + качество
 })
 </script>
@@ -456,6 +467,14 @@ onMounted(() => {
             </div>
           </StGroup>
         </div>
+      </div>
+    </div>
+
+    <!-- Sources of a web release: its players, and the season of a shared catalog -->
+    <div v-if="isWebVideo && hasLayout" class="modern-fieldset">
+      <div class="fieldset-header"><span class="fieldset-title">{{ t("add.sources.title") }}</span></div>
+      <div class="fieldset-content">
+        <WebSourcesEditor :rows="sourceRows" :busy="sourcesParsing" :progress="sourcesProgress" @pick="showSources($event)" />
       </div>
     </div>
 

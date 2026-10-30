@@ -18,6 +18,7 @@ export const SSE_EVENTS = [
   "conform_settings_update",
   "scanner_status_update",
   "video_scan_progress",
+  "coverage_progress",
   "renaming_complete",
   "relocation_started",
   "relocation_finished",

@@ -6,7 +6,7 @@ import type { SourceKey, SourceRow, SourceState } from "../lib/webSources"
 
 // Sources of a web release: a switch and the facts of each player, and the season of a shared catalog to take
 // episodes from. A change is an address the form parses again, so the provider owns what an address means.
-defineProps<{ rows: SourceRow[]; busy: boolean }>()
+defineProps<{ rows: SourceRow[]; busy: boolean; progress: { current: number; total: number } | null }>()
 const emit = defineEmits<{ (e: "pick", address: string): void }>()
 
 const NAME: Record<SourceKey, string> = { vk: "VK", allvideo: "AllVideo", vibix: "Vibix" }
@@ -16,9 +16,11 @@ const STATE: Record<SourceState, MessageKey> = {
   pending: "player.state.pending",
   available: "player.state.available",
   unavailable: "player.state.unavailable",
-  reading: "add.sources.readingCatalog",
+  reading: "add.sources.reading",
   choose: "add.sources.choose",
 }
+// The catalog of a shared source is read, the episodes of a page player are walked through.
+const stateText = (row: SourceRow) => t(row.key === "vibix" && row.state === "reading" ? "add.sources.readingCatalog" : STATE[row.state])
 
 const seasonOptions = (row: SourceRow) => row.seasons.map((season) => ({
   value: season.url,
@@ -45,7 +47,7 @@ function toggle(event: Event, row: SourceRow) {
         <span class="source-name">{{ NAME[row.key] }}</span>
         <span v-if="row.count !== null" class="source-count">{{ t("add.sources.count", { count: row.count }) }}</span>
         <span v-else class="source-state" :class="`is-${row.state}`">
-          <i v-if="row.state === 'reading'" class="spin"></i>{{ t(STATE[row.state]) }}
+          <i v-if="row.state === 'reading'" class="spin"></i>{{ stateText(row) }}
         </span>
       </div>
       <div v-if="row.seasons.length > 1 && row.enabled" class="source-field">
@@ -63,6 +65,7 @@ function toggle(event: Event, row: SourceRow) {
         </span>
       </div>
     </div>
+    <div v-if="progress" class="scan-progress">{{ t("add.sources.progress", progress) }}</div>
   </div>
 </template>
 
