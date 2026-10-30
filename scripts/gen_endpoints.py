@@ -43,8 +43,10 @@ SUMMARIES = {
     "GET /api/series/{series_id}": "Карточка серии",
     "GET /api/series/{series_id}/voices": "Озвучки сериала по сериям с состоянием каждой",
     "GET /api/voices/settings": "Группы озвучек и порядок источников: как действуют, порядок по умолчанию",
-    "GET /api/conform/settings": "Адрес демона выравнивания, рабочая папка здесь и на демоне, очистка очереди по завершении: как действуют сейчас",
-    "PUT /api/conform/settings": "Записать настройки сервера выравнивания целиком (адрес применяется сразу) или получить коды причин отказа",
+    "GET /api/conform/settings": "Адрес демона выравнивания, рабочая папка здесь и на демоне, очистка очереди по завершении (только чтение): как действуют сейчас",
+    "PUT /api/conform/settings": "Записать адрес и рабочую папку целиком (адрес применяется сразу) или получить коды причин отказа",
+    "GET /api/settings/conform_clear_finished": "Флаг очистки очереди выравнивания по завершении",
+    "POST /api/settings/conform_clear_finished": "Записать флаг очистки очереди выравнивания по завершении",
     "DELETE /api/conform/jobs/{job_id}": "Остановить задачу выравнивания, которая ждёт или идёт, либо удалить запись завершённой",
     "GET /api/conform/jobs/{job_id}/plot/{name}": "Картинка графика выравнивания озвучки (PNG), как её сделал демон",
     "PUT /api/voices/settings": "Записать группы и порядок источников целиком или получить коды причин отказа",
@@ -127,40 +129,47 @@ SUMMARIES = {
 # поэтому прямой литерал в api.METHOD() не виден. Список — вызовы хелпера.
 DYNAMIC_PANEL_CALLS = {
     ("GET", "/api/settings/force_replace"):
-        ["components/settings/SettingsDebug.vue:53",
-         "components/settings/SettingsDebug.vue:163",
-         "components/settings/SettingsDebug.vue:200"],
-    ("POST", "/api/settings/force_replace"):
-        ["components/settings/SettingsDebug.vue:57",
-         "components/settings/SettingsDebug.vue:200"],
-    ("GET", "/api/settings/less_strict_scan"):
-        ["components/settings/SettingsDebug.vue:53",
-         "components/settings/SettingsDebug.vue:164",
-         "components/settings/SettingsDebug.vue:204"],
-    ("POST", "/api/settings/less_strict_scan"):
-        ["components/settings/SettingsDebug.vue:57",
-         "components/settings/SettingsDebug.vue:204"],
-    ("GET", "/api/settings/slicing_delete_source"):
-        ["components/settings/SettingsDebug.vue:53",
+        ["components/settings/SettingsDebug.vue:55",
          "components/settings/SettingsDebug.vue:165",
-         "components/settings/SettingsDebug.vue:208"],
-    ("POST", "/api/settings/slicing_delete_source"):
-        ["components/settings/SettingsDebug.vue:57",
-         "components/settings/SettingsDebug.vue:208"],
-    ("GET", "/api/settings/parallel_downloads"):
-        ["components/settings/SettingsDebug.vue:68",
+         "components/settings/SettingsDebug.vue:203"],
+    ("POST", "/api/settings/force_replace"):
+        ["components/settings/SettingsDebug.vue:59",
+         "components/settings/SettingsDebug.vue:203"],
+    ("GET", "/api/settings/less_strict_scan"):
+        ["components/settings/SettingsDebug.vue:55",
          "components/settings/SettingsDebug.vue:166",
-         "components/settings/SettingsDebug.vue:219"],
-    ("POST", "/api/settings/parallel_downloads"):
-        ["components/settings/SettingsDebug.vue:73",
-         "components/settings/SettingsDebug.vue:219"],
-    ("GET", "/api/settings/concurrent_fragments"):
-        ["components/settings/SettingsDebug.vue:68",
+         "components/settings/SettingsDebug.vue:207"],
+    ("POST", "/api/settings/less_strict_scan"):
+        ["components/settings/SettingsDebug.vue:59",
+         "components/settings/SettingsDebug.vue:207"],
+    ("GET", "/api/settings/slicing_delete_source"):
+        ["components/settings/SettingsDebug.vue:55",
          "components/settings/SettingsDebug.vue:167",
-         "components/settings/SettingsDebug.vue:228"],
+         "components/settings/SettingsDebug.vue:211"],
+    ("POST", "/api/settings/slicing_delete_source"):
+        ["components/settings/SettingsDebug.vue:59",
+         "components/settings/SettingsDebug.vue:211"],
+    ("GET", "/api/settings/conform_clear_finished"):
+        ["components/settings/SettingsDebug.vue:55",
+         "components/settings/SettingsDebug.vue:168",
+         "components/settings/SettingsDebug.vue:215"],
+    ("POST", "/api/settings/conform_clear_finished"):
+        ["components/settings/SettingsDebug.vue:59",
+         "components/settings/SettingsDebug.vue:215"],
+    ("GET", "/api/settings/parallel_downloads"):
+        ["components/settings/SettingsDebug.vue:70",
+         "components/settings/SettingsDebug.vue:169",
+         "components/settings/SettingsDebug.vue:226"],
+    ("POST", "/api/settings/parallel_downloads"):
+        ["components/settings/SettingsDebug.vue:75",
+         "components/settings/SettingsDebug.vue:226"],
+    ("GET", "/api/settings/concurrent_fragments"):
+        ["components/settings/SettingsDebug.vue:70",
+         "components/settings/SettingsDebug.vue:170",
+         "components/settings/SettingsDebug.vue:235"],
     ("POST", "/api/settings/concurrent_fragments"):
-        ["components/settings/SettingsDebug.vue:73",
-         "components/settings/SettingsDebug.vue:228"],
+        ["components/settings/SettingsDebug.vue:75",
+         "components/settings/SettingsDebug.vue:235"],
 }
 
 PUBLIC_EXACT = {"/", "/legacy", "/v2", "/v2/", "/favicon.svg",

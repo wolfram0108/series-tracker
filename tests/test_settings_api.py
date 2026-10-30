@@ -228,6 +228,18 @@ async def test_settings_flags_and_debug_groups(system):
 
 
 @pytest.mark.asyncio
+async def test_the_flag_that_clears_the_alignment_queue_is_one_of_the_pipeline_flags(system):
+    bus, db, client = system
+    assert (await client.get("/api/settings/conform_clear_finished")).json() == {"enabled": False}
+    await client.post("/api/settings/conform_clear_finished", json={"enabled": True})
+    assert (await client.get("/api/settings/conform_clear_finished")).json() == {"enabled": True}
+    stored = await db.fetch_one("SELECT value FROM settings WHERE key=?", ("conform.clear_finished",))
+    assert stored["value"] == "true"  # the form the bridge reads
+    await client.post("/api/settings/conform_clear_finished", json={"enabled": False})
+    assert (await client.get("/api/settings/conform_clear_finished")).json() == {"enabled": False}
+
+
+@pytest.mark.asyncio
 async def test_tmdb_wrappers(system):
     _, _, client = system
     resp = await client.post("/api/tmdb/search", json={"query": "Тайтл"})

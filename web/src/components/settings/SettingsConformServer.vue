@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue"
-import ToggleSwitch from "primevue/toggleswitch"
 import StGroup from "../StGroup.vue"
 import StIcon from "../StIcon.vue"
 import StInput from "../StInput.vue"
@@ -26,7 +25,6 @@ const core = ref<View | null>(null)
 const url = ref("")
 const here = ref("")
 const there = ref("")
-const clear = ref(false)
 const problems = ref<Problem[]>([])
 
 function adopt(view: View) {
@@ -34,7 +32,6 @@ function adopt(view: View) {
   url.value = view.url
   here.value = view.work_dir
   there.value = view.work_dir_remote
-  clear.value = view.clear_finished
 }
 
 async function load() {
@@ -43,13 +40,13 @@ async function load() {
 }
 
 const dirty = computed(() => !!core.value && (url.value !== core.value.url || here.value !== core.value.work_dir
-  || there.value !== core.value.work_dir_remote || clear.value !== core.value.clear_finished))
+  || there.value !== core.value.work_dir_remote))
 
 /** True when there was nothing to write or the core took it. */
 async function save(): Promise<boolean> {
   if (!dirty.value) return true
   const reply = await request(
-    api.PUT("/api/conform/settings", { body: { url: url.value, work_dir: here.value, work_dir_remote: there.value, clear_finished: clear.value } }),
+    api.PUT("/api/conform/settings", { body: { url: url.value, work_dir: here.value, work_dir_remote: there.value } }),
     { errorMessage: t("conform.settings.saveFailed") },
   )
   if (!reply) return false
@@ -96,11 +93,6 @@ defineExpose({ save })
         <StInput v-model="there" :label="t('conform.settings.daemon')" />
       </StGroup>
 
-      <label class="conform-switch">
-        <ToggleSwitch v-model="clear" />
-        <span>{{ t("conform.settings.clearFinished") }}</span>
-      </label>
-
       <p v-for="(problem, index) in problems" :key="index" class="problem">{{ reasonText(problem.detail) }}</p>
     </div>
   </div>
@@ -109,7 +101,6 @@ defineExpose({ save })
 <style scoped>
 .conform-server { display: flex; flex-direction: column; gap: 0.9rem; }
 .problem { color: var(--color-red-1); margin: 0; }
-.conform-switch { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .conform-status { flex-wrap: wrap; }
 .conform-status .pill { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 /* A row of the form on a narrow screen: its parts wrap into lines instead of running out of the window. */

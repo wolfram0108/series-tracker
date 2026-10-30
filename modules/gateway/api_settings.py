@@ -171,6 +171,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def slicing_delete_source(request: Request):
         return await _setting_flag("slicing_delete_source_file", request)
 
+    @route_per_method(r, "/api/settings/conform_clear_finished", methods=["GET", "POST"],
+                      response_model=DynamicObject)
+    async def conform_clear_finished(request: Request):
+        return await _setting_flag("conform.clear_finished", request)
+
     @route_per_method(r, "/api/settings/parallel_downloads", methods=["GET", "POST"],
                       response_model=DynamicObject)
     async def parallel_downloads(request: Request):

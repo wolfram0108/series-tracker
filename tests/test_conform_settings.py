@@ -14,8 +14,8 @@ from conform_fakes import FakeClient
 HERE, THERE = "/storage/work", "/mnt/share/work"
 
 
-def draft(url="http://daemon:8787", here=HERE, there=THERE, clear=False):
-    return ConformSettingsDraft(url=url, work_dir=here, work_dir_remote=there, clear_finished=clear)
+def draft(url="http://daemon:8787", here=HERE, there=THERE):
+    return ConformSettingsDraft(url=url, work_dir=here, work_dir_remote=there)
 
 
 class Settings(BaseModule):
@@ -103,7 +103,7 @@ async def test_a_saved_address_is_written_announced_and_taken_at_once():
         assert saved["saved"] is True and saved["problems"] == [] and saved["settings"] == {
             "url": "http://new:9000", "work_dir": HERE, "work_dir_remote": THERE, "clear_finished": False}
         assert settings.values == {"conform.url": "http://new:9000", "conform.work_dir": HERE,
-                                   "conform.work_dir_remote": THERE, "conform.clear_finished": "0"}
+                                   "conform.work_dir_remote": THERE}
         assert [c.base_url for c in made] == ["http://env:8787", "http://new:9000"]
         assert made[0].closed is True and made[1].closed is False
         assert (await changed.queue.get()).payload["url"] == "http://new:9000"
@@ -115,17 +115,14 @@ async def test_a_saved_address_is_written_announced_and_taken_at_once():
 
 
 @pytest.mark.asyncio
-async def test_the_choice_to_clear_finished_jobs_is_stored_shown_and_announced():
-    bus, settings, probe, _, runner = await bridge(default_url="http://env:8787")
-    changed = bus.subscribe("conform.settings.changed")
+async def test_the_choice_to_clear_finished_jobs_is_read_from_the_pipeline_flag_and_a_save_never_writes_it():
+    _, settings, probe, _, runner = await bridge({"conform.clear_finished": "true"}, default_url="http://env:8787")
     try:
-        saved = await probe.request("conform.settings.set", draft(clear=True).model_dump(), timeout=5)
-        assert saved["saved"] is True and saved["settings"]["clear_finished"] is True
-        assert settings.values["conform.clear_finished"] == "1"
-        assert (await changed.queue.get()).payload["clear_finished"] is True
         assert (await probe.request("conform.settings.get", {}, timeout=3))["clear_finished"] is True
-        await probe.request("conform.settings.set", draft(clear=False).model_dump(), timeout=5)
-        assert settings.values["conform.clear_finished"] == "0"
+        saved = await probe.request("conform.settings.set", draft().model_dump(), timeout=5)
+        assert saved["saved"] is True and saved["settings"]["clear_finished"] is True
+        assert settings.values["conform.clear_finished"] == "true"  # the save left the flag as the debug tab set it
+        settings.values["conform.clear_finished"] = "false"
         assert (await probe.request("conform.settings.get", {}, timeout=3))["clear_finished"] is False
     finally:
         await runner.stop()

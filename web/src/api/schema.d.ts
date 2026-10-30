@@ -927,6 +927,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/conform_clear_finished": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Conform Clear Finished */
+        get: operations["conform_clear_finished_api_settings_conform_clear_finished_get"];
+        put?: never;
+        /** Conform Clear Finished */
+        post: operations["conform_clear_finished_api_settings_conform_clear_finished_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/parallel_downloads": {
         parameters: {
             query?: never;
@@ -1467,8 +1485,8 @@ export interface components {
         };
         /**
          * ConformSettingsDraft
-         * @description The address of the daemon (empty: none), the work folder as this server names it and as the daemon names the
-         *     same folder, and whether a finished job leaves the daemon's history on its own; a save replaces all four.
+         * @description The address of the daemon (empty: none) and the work folder as this server names it and as the daemon names the
+         *     same folder; a save replaces all three.
          */
         ConformSettingsDraft: {
             /** Url */
@@ -1477,11 +1495,6 @@ export interface components {
             work_dir: string;
             /** Work Dir Remote */
             work_dir_remote: string;
-            /**
-             * Clear Finished
-             * @default false
-             */
-            clear_finished: boolean;
         };
         /**
          * ConformSettingsSaved
@@ -1496,7 +1509,8 @@ export interface components {
         };
         /**
          * ConformSettingsView
-         * @description The reply of `conform.settings.get`: what applies now, every value stated.
+         * @description The reply of `conform.settings.get`: what applies now, every value stated. `clear_finished` is read here and
+         *     written by the pipeline flag of the debug tab.
          */
         ConformSettingsView: {
             /** Url */
@@ -4220,6 +4234,46 @@ export interface operations {
         };
     };
     slicing_delete_source_api_settings_slicing_delete_source_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DynamicObject"];
+                };
+            };
+        };
+    };
+    conform_clear_finished_api_settings_conform_clear_finished_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DynamicObject"];
+                };
+            };
+        };
+    };
+    conform_clear_finished_api_settings_conform_clear_finished_post: {
         parameters: {
             query?: never;
             header?: never;

@@ -22,9 +22,10 @@ Query:
       was sent and nothing well-formed came back, so the daemon may have the job; the caller keeps the key
       and asks conform.job.find, it does not send again.
   conform.settings.get {} -> ConformSettingsView {url, work_dir, work_dir_remote, clear_finished}: what applies now.
-      `clear_finished` (stored as conform.clear_finished): a job that ended and whose result was taken leaves the daemon's
-      history on its own; off, the history keeps it until the owner deletes it.
-  conform.settings.set {url, work_dir, work_dir_remote, clear_finished} -> ConformSettingsSaved {saved, problems, settings}: checked as a whole, written
+      `clear_finished` (the setting conform.clear_finished, "true" or "false", written by the pipeline flag
+      `/api/settings/conform_clear_finished` of the debug tab): a job that ended and whose result was taken leaves the
+      daemon's history on its own; off, the history keeps it until the owner deletes it.
+  conform.settings.set {url, work_dir, work_dir_remote} -> ConformSettingsSaved {saved, problems, settings}: checked as a whole, written
       through settings.values.set_many and taken at once, or refused with coded problems and nothing written.
   conform.workspace {} -> {downloads, conform}: the two folders inside the work folder, where voice-overs wait for
       alignment and where the service works; both empty while no work folder is named.

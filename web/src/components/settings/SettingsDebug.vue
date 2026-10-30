@@ -9,6 +9,7 @@ import StSelect from "../StSelect.vue"
 import DatabaseViewerModal from "./DatabaseViewerModal.vue"
 import { api } from "../../api/client"
 import { sanitizePath } from "../../lib/fsnames"
+import { t } from "../../i18n"
 import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { useScannerStore } from "../../stores/scanner"
@@ -48,6 +49,7 @@ async function scanAll() {
 const forceReplace = ref(false)
 const lessStrict = ref(false)
 const slicingDelete = ref(false)
+const conformClear = ref(false)
 
 async function loadFlag(path: string): Promise<boolean> {
   const d = (await request(api.GET(path as never))) as { enabled?: boolean } | null
@@ -163,6 +165,7 @@ onMounted(async () => {
   forceReplace.value = await loadFlag("/api/settings/force_replace")
   lessStrict.value = await loadFlag("/api/settings/less_strict_scan")
   slicingDelete.value = await loadFlag("/api/settings/slicing_delete_source")
+  conformClear.value = await loadFlag("/api/settings/conform_clear_finished")
   parallelDownloads.value = await loadNum("/api/settings/parallel_downloads", 2)
   concurrentFragments.value = await loadNum("/api/settings/concurrent_fragments", 6)
 })
@@ -207,6 +210,10 @@ onMounted(async () => {
           <label class="debug-switch" title="Агент нарезки удалит исходный файл-компиляцию после успешной нарезки.">
             <ToggleSwitch v-model="slicingDelete" @change="saveFlag('/api/settings/slicing_delete_source', slicingDelete, 'Удалять исходник после нарезки')" />
             <span>Удалять исходник после нарезки</span>
+          </label>
+          <label class="debug-switch" :title="t('conform.settings.clearFinishedHint')">
+            <ToggleSwitch v-model="conformClear" @change="saveFlag('/api/settings/conform_clear_finished', conformClear, t('conform.settings.clearFinished'))" />
+            <span>{{ t("conform.settings.clearFinished") }}</span>
           </label>
         </div>
         <div class="nums-row">

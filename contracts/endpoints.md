@@ -146,6 +146,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | POST | `/api/auth` | Сохранение кредов сервисов | `SettingsAuth.vue` |
 | POST | `/api/parse_url` | Разбор URL серии: заголовок, раздачи, трекер; у web-источника — `sources`, `selected_source` и `layout` (раскладка озвучек, Р-39) | `AddSeriesModal.vue`, `StatusProperties.vue` |
 | GET, POST | `/api/settings/force_replace` | Флаг «всегда заменять торренты» | `SettingsDebug.vue` |
+| GET, POST | `/api/settings/conform_clear_finished` | Флаг «очищать очередь выравнивания по завершении» (Р-59): завершённая задача уходит из истории демона вместе с графиками | `SettingsDebug.vue` |
 | GET, POST | `/api/settings/less_strict_scan` | Флаг «менее строгий скан» | `SettingsDebug.vue` |
 | GET, POST | `/api/settings/slicing_delete_source` | Флаг «удалять исходник после нарезки» | `SettingsDebug.vue` |
 | GET, POST | `/api/settings/parallel_downloads` | Число параллельных загрузок yt-dlp | `SettingsDebug.vue` |
@@ -156,7 +157,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | GET | `/api/conform/settings` | Адрес демона выравнивания, рабочая папка здесь и на демоне, очистка очереди по завершении (`ConformSettingsView`): как действуют сейчас (Р-57, Р-59) | `SettingsConformServer.vue` |
 | DELETE | `/api/conform/jobs/{job_id}` | Остановить задачу выравнивания, которая ждёт или идёт (запись остаётся со статусом «отменено»), либо удалить запись завершённой: демон снимает свои файлы записи, выходной звук остаётся; ответ `{done: true}`, демон недоступен — 502 с кодом `conform_job_unchanged` (Р-59) | `ConformQueue.vue` |
 | GET | `/api/conform/jobs/{job_id}/plot/{name}` | Картинка графика выравнивания (PNG), как её сделал демон; допускается только простое имя `*.png`; нет графика — 404 `conform_plot_missing`, демон недоступен — 502 (Р-59) | `ConformPlotViewer.vue` (адрес картинки) |
-| PUT | `/api/conform/settings` | Адрес, рабочая папка здесь и на демоне и очистка очереди по завершении целиком (`ConformSettingsDraft` {url, work_dir, work_dir_remote, clear_finished}); при заданном адресе обе папки обязательны; ответ `ConformSettingsSaved`: `saved: true`, новый адрес применён сразу, либо `saved: false` и коды причин, ничего не записано (Р-57, Р-58) | `SettingsConformServer.vue` |
+| PUT | `/api/conform/settings` | Адрес и рабочая папка здесь и на демоне целиком (`ConformSettingsDraft` {url, work_dir, work_dir_remote}); при заданном адресе обе папки обязательны; ответ `ConformSettingsSaved`: `saved: true`, новый адрес применён сразу, либо `saved: false` и коды причин, ничего не записано (Р-57, Р-58) | `SettingsConformServer.vue` |
 | PUT | `/api/voices/settings` | Группы и порядок целиком (`VoiceSettingsDraft` {priority, voice_groups}); ответ `VoiceSettingsSaved`: `saved: true` и действующие значения либо `saved: false` и коды причин, ничего не записано. Экран шлёт каждое действие сразу (Р-54) | `SettingsVoices.vue` |
 | POST | `/api/tmdb/search` | Поиск сериала в TMDB | `AddSeriesModal.vue`, `StatusProperties.vue` |
 | GET | `/api/tmdb/details/{tmdb_id}` | Детали сериала TMDB | `AddSeriesModal.vue`, `StatusProperties.vue` |
@@ -266,7 +267,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | Настройки → Правила: имена файлов серии | GET | `/api/series/{series_id}/source-filenames` |
 | Настройки → Отладка: настройки сканера | POST | `/api/scanner/settings` |
 | Настройки → Отладка: сканировать всё | POST | `/api/scanner/scan_all` |
-| Настройки → Отладка: флаги (3 шт.) | GET, POST | `/api/settings/force_replace`, `/api/settings/less_strict_scan`, `/api/settings/slicing_delete_source` |
+| Настройки → Отладка: флаги (4 шт.) | GET, POST | `/api/settings/force_replace`, `/api/settings/less_strict_scan`, `/api/settings/slicing_delete_source`, `/api/settings/conform_clear_finished` |
 | Настройки → Отладка: числа (2 шт.) | GET, POST | `/api/settings/parallel_downloads`, `/api/settings/concurrent_fragments` |
 | Настройки → Отладка: пути | GET, POST, DELETE | `/api/settings/saved_paths` |
 | Настройки → Отладка: список таблиц | GET | `/api/database/tables` |
@@ -496,9 +497,9 @@ tracker_info, source_type, titles, canonical_url, episodes_count,
 resolution, players, sources, selected_source, layout}`. 400 — трекер не распознан; 500 — в теле нет ключа `url`.
 
 **GET|POST `/api/settings/force_replace`**, **`/less_strict_scan`**,
-**`/slicing_delete_source`** — тело `{enabled}`; ответ GET `{enabled}`,
+**`/slicing_delete_source`**, **`/conform_clear_finished`** — тело `{enabled}`; ответ GET `{enabled}`,
 POST `{success}`. Ключи в БД: `debug_force_replace`,
-`debug_less_strict_scan`, `slicing_delete_source_file`.
+`debug_less_strict_scan`, `slicing_delete_source_file`, `conform.clear_finished`.
 
 **GET|POST `/api/settings/parallel_downloads`** и
 **`/concurrent_fragments`** — тело `{value}`; ответ GET `{value}` (fallback 2
