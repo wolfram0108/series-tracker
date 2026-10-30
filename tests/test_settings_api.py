@@ -189,6 +189,63 @@ async def test_parse_url_of_a_web_source_carries_the_voice_layout(system):
     assert all("links" not in source for source in body["sources"])
 
 
+class _LayoutSite(_TwoVoiceSite):
+    """A web source whose sources are described apart from the parse."""
+
+    name = "withlayout"
+    domains = ("layout.test",)
+    has_layout = True
+
+    def match_url(self, url):
+        return "layout.test" in url
+
+    async def parse_release(self, url, http):
+        release = await super().parse_release(url, http)
+        return {**release, "sources": [], "selected_source": None}
+
+    async def layout(self, url, http):
+        return {"sources": [{"url": f"{url}?vibix=1", "player": "vibix", "studio": "Сезон 1", "kind": "",
+                             "first": 1, "last": 2, "count": 2, "ranges": "1-2", "episodes": [1, 2],
+                             "resolutions": [{"resolution": 1080, "ranges": "1-2", "count": 2}]}],
+                "selected_source": f"{url}?vibix=1", "reason": ""}
+
+
+@pytest.mark.asyncio
+async def test_parse_url_says_whether_the_provider_has_a_layout(system):
+    _, _, client = system
+    registry = get_default_registry()
+    site = _LayoutSite()
+    registry.register(site)
+    try:
+        body = (await client.post("/api/parse_url", json={"url": "https://layout.test/t"})).json()
+    finally:
+        registry._providers.remove(site)
+    assert body["has_layout"] is True
+    assert (await client.post("/api/parse_url", json={"url": "http://kinozal.tv/details.php?id=1"})).json()["has_layout"] is False
+
+
+@pytest.mark.asyncio
+async def test_the_layout_of_a_web_release_passes_through_with_its_resolutions(system):
+    _, _, client = system
+    registry = get_default_registry()
+    site = _LayoutSite()
+    registry.register(site)
+    try:
+        body = (await client.post("/api/web_video/layout", json={"url": "https://layout.test/t"})).json()
+    finally:
+        registry._providers.remove(site)
+    assert body["selected_source"] == "https://layout.test/t?vibix=1"
+    assert body["reason"] == ""
+    assert body["sources"][0]["resolutions"] == [{"resolution": 1080, "ranges": "1-2", "count": 2}]
+
+
+@pytest.mark.asyncio
+async def test_the_layout_of_a_release_without_one_is_empty(system):
+    _, _, client = system
+    body = (await client.post("/api/web_video/layout", json={"url": "http://kinozal.tv/details.php?id=1"})).json()
+    assert body == {"sources": [], "selected_source": None, "reason": ""}
+
+
 @pytest.mark.asyncio
 async def test_parse_url_of_a_torrent_has_no_layout(system):
     _, _, client = system

@@ -21,7 +21,7 @@ from core.contracts import (ConformSettingsDraft, ConformSettingsSaved, ConformS
                             VoiceSettingsSaved, VoiceSettingsView)
 
 from .routing import route_per_method
-from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse, ParsedUrl
+from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse, ParsedUrl, WebVideoLayout
 
 # Документация веток ошибок (JSONResponse, response_model не трогает).
 _ERR = {c: {"model": ErrorResponse} for c in (400, 403, 404, 409, 500)}
@@ -139,7 +139,16 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 "sources": result.get("sources", []),
                 "selected_source": result.get("selected_source"),
                 "layout": layout,
+                "has_layout": bool(result.get("has_layout")),
                 "resolution": result.get("resolution")}
+
+    @r.post("/api/web_video/layout", response_model=WebVideoLayout, responses=_ERR1)
+    async def web_video_layout(request: Request):
+        data = await request.json()
+        try:
+            return await gw.request("sources.video.layout", {"url": data["url"]}, timeout=300)
+        except BusRequestError as exc:
+            return JSONResponse({"error": str(exc).split(": ", 1)[-1]}, status_code=400)
 
     # --- настройки -------------------------------------------------------------------
 

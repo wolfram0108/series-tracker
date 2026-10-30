@@ -873,6 +873,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/web_video/layout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Web Video Layout */
+        post: operations["web_video_layout_api_web_video_layout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/force_replace": {
         parameters: {
             query?: never;
@@ -1665,6 +1682,11 @@ export interface components {
             /** Selected Source */
             selected_source?: string | null;
             layout?: components["schemas"]["Layout"] | null;
+            /**
+             * Has Layout
+             * @default false
+             */
+            has_layout: boolean;
         } & {
             [key: string]: unknown;
         };
@@ -1916,6 +1938,27 @@ export interface components {
             default_priority: string[];
             /** Rejected */
             rejected: string[];
+        };
+        /**
+         * WebVideoLayout
+         * @description The sources of a web release that its provider describes apart from the parse; `reason` is a coded
+         *     reason when they could not be read.
+         */
+        WebVideoLayout: {
+            /**
+             * Sources
+             * @default []
+             */
+            sources: components["schemas"]["ReleaseSource"][];
+            /** Selected Source */
+            selected_source?: string | null;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * DubEventStatus
@@ -4093,6 +4136,62 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ParsedUrl"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    web_video_layout_api_web_video_layout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebVideoLayout"];
                 };
             };
             /** @description Bad Request */

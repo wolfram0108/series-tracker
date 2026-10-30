@@ -85,6 +85,15 @@ class ParsedUrl(ApiModel):
     sources: list[ReleaseSource] = []
     selected_source: str | None = None
     layout: Layout | None = None
+    has_layout: bool = False
+
+
+class WebVideoLayout(ApiModel):
+    """The sources of a web release that its provider describes apart from the parse; `reason` is a coded
+    reason when they could not be read."""
+    sources: list[ReleaseSource] = []
+    selected_source: str | None = None
+    reason: str = ""
 
 
 class SeriesObject(ApiModel):
