@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, AsyncIterator
+from urllib.parse import quote
 
 import httpx
 
@@ -89,6 +90,15 @@ class DaemonClient:
             return False
         response.raise_for_status()
         return True
+
+    async def plot(self, job_id: str, name: str) -> bytes | None:
+        """The picture of an alignment plot, or None when the daemon holds no such plot."""
+        response = await self._http.get(f"{self.base_url}/conform/plot/{quote(job_id, safe='')}/{quote(name, safe='')}",
+                                        timeout=REQUEST_TIMEOUT_S)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.content
 
     async def jobs(self) -> list[dict[str, Any]]:
         """Every job the daemon knows."""

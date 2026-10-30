@@ -50,6 +50,12 @@ class QueueTask(ApiModel):
     extra='allow' пропускает всё; жёстко фиксировать не требуется."""
 
 
+class ConformJobChange(ApiModel):
+    """The reply to the stop or deletion of a job of the alignment service."""
+
+    done: bool
+
+
 # --- блок «серии» (api_series) ----------------------------------------------
 
 class DynamicObject(ApiModel):

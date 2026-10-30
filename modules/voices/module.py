@@ -39,7 +39,7 @@ Commands out: downloads.fetch, downloads.fetch.cancel. Queries to conform: works
 
 Events in:  downloads.fetch.started and .finished (our keys `dub:<id>`), conform.queue.changed (waiting or running
             jobs of the service), series.downloaded.changed,
-            downloads.item.renamed, library.relocation.finished, conform.job.finished,
+            downloads.item.renamed, library.relocation.finished, conform.job.finished, conform.job.removed,
             conform.daemon.up, series.deleted.
 Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, hint, detail,
             epoch, rev} — epoch is the number of this start of the module, kept in the database and raised at every
@@ -60,7 +60,9 @@ Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_lab
             voices.settings.changed VoiceSettingsView — the settings as they apply after a save, so that every open
             settings screen shows them without asking back,
             voices.episode.settled {series_id, season, episode} — every voice-over of the episode is
-            placed, rejected or failed and its temporary files are gone or on the cleanup journal.
+            placed, rejected or failed and its temporary files (the downloaded voice-overs and the copy of the
+            reference) are gone or on the cleanup journal; the folders the service wrote in stay with the records of
+            its jobs.
 
 Where each policy lives: the steps a row may take and the sets of steps (lifecycle.py, enforced by the repository),
 what is known of the alignment service (alignment.py), the form in which a finished voice-over reaches the library
@@ -125,9 +127,14 @@ An operation carries out the entries it has just handed over; older ones belong 
 Setting `voices.max_temp_episodes` (integer; 0 or unset: no limit) caps how many episodes may hold
 temporary files at once: further voice-overs stay planned until an episode settles.
 
-The service's scratch directory lies next to the copy of the reference, so it goes with the episode's folder of the
-service. The series' own folders in the work folder go when every voice-over of the series is settled and the
-folders are empty.
+The folder a job wrote in (`<episode folder>/_aligned/<key>`: a track that was refused, the plots, the statistics) is
+kept while the record of the job is in the service's history, because the interface shows the plots from there. The
+record leaves the history when the owner deletes it, or when this module deletes it: the setting `conform.clear_finished`
+asks it to at once when the episode is settled, and a replaced reference, a dropped episode and a deleted series always
+do. The service then drops what it kept for the record, `conform.job.removed` tells this module, and the folder of the
+job goes, with the empty folders around it. A record removed while the module was not listening is found by asking
+the service (`conform.job.get`, status `gone`) when the service becomes reachable and when an episode is settled. The
+series' own folders in the work folder go when every voice-over of the series is settled and the folders are empty.
 """
 from __future__ import annotations
 
@@ -244,6 +251,7 @@ class VoicesModule(BaseModule):
         self.handle("downloads.item.renamed", self.on_downloaded)
         self.handle("library.relocation.finished", self.on_relocated)
         self.handle("conform.job.finished", self.on_job_finished)
+        self.handle("conform.job.removed", self.on_job_removed)
         self.handle("conform.queue.changed", self.on_conform_picture)
         self.handle("conform.daemon.up", self.on_daemon_up)
         self.handle("series.deleted", self.on_series_deleted)
@@ -652,6 +660,7 @@ class VoicesModule(BaseModule):
         """The service is back: whatever waited for it tries again now instead of at its next pause."""
         await self._resume_obligations()
         self._recovery.poke()
+        await self._release_gone([row for row in await self.repo.all_rows() if row["status"] in FINAL])
         for series_id in await self.repo.series_with_open_work():
             self._kick(series_id)
 
@@ -936,6 +945,8 @@ class VoicesModule(BaseModule):
         self._recovery.poke("cleanup:")  # what waited for this job to stop may go on now
         if scope and not await self._clear(scope):
             self._await_cleanup(scope)
+        elif scope:
+            await self._io(self._prune, scope)
         return True
 
     async def _episode_folders(self, group: list[dict], root: str, series_id: int, season: int, episode: int) -> list[str]:
@@ -944,6 +955,69 @@ class VoicesModule(BaseModule):
         # Where the service worked is read from the rows (<episode folder>/_aligned/<key>), not from the settings now.
         made = {os.path.dirname(os.path.dirname(row["out_dir"])) for row in group if row["out_dir"]}
         return sorted({*folders, *made, await self._conform_episode(series_id, season, episode)} - {""})
+
+    async def _settle_folders(self, group: list[dict], root: str, series_id: int, season: int,
+                              episode: int) -> list[str]:
+        """What of a settled episode is of no use: its voice-overs and the copy of the reference. The folders of the
+        jobs stay with their records."""
+        folders = self._folders_of(group, episode_dir(root, series_id, season, episode))
+        service = {os.path.dirname(os.path.dirname(row["out_dir"])) for row in group if row["out_dir"]}
+        service.add(await self._conform_episode(series_id, season, episode))
+        return sorted({*folders, *(os.path.join(folder, REF_DIR) for folder in service if folder)})
+
+    async def _clear_finished(self) -> bool:
+        """The owner's choice: a job whose result is taken leaves the service's history at once."""
+        try:
+            reply = await self.request("conform.settings.get", {}, timeout=10)
+        except (BusRequestError, asyncio.TimeoutError):
+            return False
+        return bool(reply.get("clear_finished"))
+
+    async def on_job_removed(self, env: Envelope) -> None:
+        """The record of a job left the service's history: the folder it wrote in is of no use any more."""
+        if self.repo is None:
+            return
+        await self._release_outputs(await self.repo.by_job(env.payload["job_id"]))
+
+    async def _release_outputs(self, rows: list[dict]) -> None:
+        """Remove the folders the jobs of these rows wrote in, once nothing depends on them: a voice-over that still
+        waits for its track, or still holds its files, keeps the folder until its episode is settled."""
+        if any(row["status"] not in FINAL or row["aligned_path"] or row["temp_path"] for row in rows):
+            return
+        for out_dir in sorted({row["out_dir"] for row in rows if row["out_dir"]}):
+            if await self._io(os.path.isdir, out_dir) and await self._discard(out_dir, kind=TREE):
+                await self._io(self._prune, out_dir)
+
+    async def _release_gone(self, rows: list[dict]) -> None:
+        """Jobs whose record is gone from the history, as the service itself says: a job it was not asked about is not
+        gone. Covers the records removed while this module was not listening."""
+        jobs: dict[str, list[dict]] = defaultdict(list)
+        for row in rows:
+            if row["job_id"] and row["out_dir"] and row["status"] in FINAL:
+                jobs[row["job_id"]].append(row)
+        for job_id, group in jobs.items():
+            if not any([await self._io(os.path.isdir, row["out_dir"]) for row in group]):
+                continue
+            try:
+                job = AlignmentJob.model_validate(await self.request("conform.job.get", {"job_id": job_id}, timeout=30))
+            except (BusRequestError, asyncio.TimeoutError, ValidationError):
+                return  # the service could not say: the next time it is reachable asks again
+            if job.status is JobStatus.GONE:
+                await self._release_outputs(await self.repo.by_job(job_id))
+
+    @staticmethod
+    def _prune(out_dir: str) -> None:
+        """What the removal of a job's folder leaves empty goes too: the job's own folders of the same key (its cache),
+        then the folders around them. Another job's empty folder is not touched, the key tells them apart."""
+        key = os.path.basename(out_dir)
+        episode = os.path.dirname(os.path.dirname(out_dir))
+        if os.path.isdir(episode):
+            for entry in list(os.scandir(episode)):
+                if entry.is_dir(follow_symlinks=False):
+                    VoicesModule._remove_if_empty(os.path.join(entry.path, key))
+                    VoicesModule._remove_if_empty(entry.path)
+        for folder in (episode, os.path.dirname(episode)):
+            VoicesModule._remove_if_empty(folder)
 
     @staticmethod
     def _folders_of(group: list[dict], fallback: str) -> list[str]:
@@ -1199,16 +1273,20 @@ class VoicesModule(BaseModule):
         await self._announce(row)
 
     async def _tidy(self, series_id: int, season: int, episode: int, root: str) -> None:
-        """The episode is settled: its temporary files are of no use any more."""
+        """The episode is settled: its temporary files are of no use any more. What the service wrote stays while the
+        record of its job is in the service's history, since the plots are shown from there."""
         group = await self.repo.for_episode(series_id, season, episode)
         if not group or any(row["status"] not in FINAL for row in group):
             return
-        folders = await self._episode_folders(group, root, series_id, season, episode)
+        folders = await self._settle_folders(group, root, series_id, season, episode)
         if not (any(row["temp_path"] or row["aligned_path"] for row in group)
                 or any([await self._io(os.path.isdir, folder) for folder in folders])):
             return
         await self.repo.settle_episode(series_id, season, episode, folders)
+        if await self._clear_finished():
+            await self.repo.hand_over_jobs(series_id, season, episode)
         await self._work_off()
+        await self._release_gone(await self.repo.for_episode(series_id, season, episode))
         self.publish_event("voices.episode.settled",
                            {"series_id": series_id, "season": season, "episode": episode})
 

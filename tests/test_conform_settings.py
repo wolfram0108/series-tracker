@@ -14,8 +14,8 @@ from conform_fakes import FakeClient
 HERE, THERE = "/storage/work", "/mnt/share/work"
 
 
-def draft(url="http://daemon:8787", here=HERE, there=THERE):
-    return ConformSettingsDraft(url=url, work_dir=here, work_dir_remote=there)
+def draft(url="http://daemon:8787", here=HERE, there=THERE, clear=False):
+    return ConformSettingsDraft(url=url, work_dir=here, work_dir_remote=there, clear_finished=clear)
 
 
 class Settings(BaseModule):
@@ -73,7 +73,7 @@ async def test_nothing_stored_the_address_of_the_environment_applies_and_no_fold
     _, _, probe, made, runner = await bridge(default_url="http://env:8787")
     try:
         view = await probe.request("conform.settings.get", {}, timeout=3)
-        assert view == {"url": "http://env:8787", "work_dir": "", "work_dir_remote": ""}
+        assert view == {"url": "http://env:8787", "work_dir": "", "work_dir_remote": "", "clear_finished": False}
         assert [c.base_url for c in made] == ["http://env:8787"]
         assert await probe.request("conform.workspace", {}, timeout=3) == {"downloads": "", "conform": ""}
     finally:
@@ -101,15 +101,32 @@ async def test_a_saved_address_is_written_announced_and_taken_at_once():
     try:
         saved = await probe.request("conform.settings.set", draft("http://new:9000/", HERE + "/").model_dump(), timeout=5)
         assert saved["saved"] is True and saved["problems"] == [] and saved["settings"] == {
-            "url": "http://new:9000", "work_dir": HERE, "work_dir_remote": THERE}
+            "url": "http://new:9000", "work_dir": HERE, "work_dir_remote": THERE, "clear_finished": False}
         assert settings.values == {"conform.url": "http://new:9000", "conform.work_dir": HERE,
-                                   "conform.work_dir_remote": THERE}
+                                   "conform.work_dir_remote": THERE, "conform.clear_finished": "0"}
         assert [c.base_url for c in made] == ["http://env:8787", "http://new:9000"]
         assert made[0].closed is True and made[1].closed is False
         assert (await changed.queue.get()).payload["url"] == "http://new:9000"
         assert (await probe.request("conform.status", {}, timeout=3))["configured"] is True
         assert await probe.request("conform.workspace", {}, timeout=3) == {
             "downloads": f"{HERE}/downloads", "conform": f"{HERE}/conform"}
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_the_choice_to_clear_finished_jobs_is_stored_shown_and_announced():
+    bus, settings, probe, _, runner = await bridge(default_url="http://env:8787")
+    changed = bus.subscribe("conform.settings.changed")
+    try:
+        saved = await probe.request("conform.settings.set", draft(clear=True).model_dump(), timeout=5)
+        assert saved["saved"] is True and saved["settings"]["clear_finished"] is True
+        assert settings.values["conform.clear_finished"] == "1"
+        assert (await changed.queue.get()).payload["clear_finished"] is True
+        assert (await probe.request("conform.settings.get", {}, timeout=3))["clear_finished"] is True
+        await probe.request("conform.settings.set", draft(clear=False).model_dump(), timeout=5)
+        assert settings.values["conform.clear_finished"] == "0"
+        assert (await probe.request("conform.settings.get", {}, timeout=3))["clear_finished"] is False
     finally:
         await runner.stop()
 

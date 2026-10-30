@@ -20,6 +20,8 @@ class FakeClient:
         self.refuse = False
         self.lose_answers = 0
         self.known = {}
+        self.plots = {}  # (job id, name) -> the picture the daemon holds
+        self.asked = []  # the plots that were asked for
 
     async def info(self):
         return {"version": "0.1.0", "device": "cuda", "gpu": True, "gpu_name": "RTX"}
@@ -61,6 +63,12 @@ class FakeClient:
         if isinstance(self.refuse, Exception):
             raise self.refuse
         return job_id in self.known
+
+    async def plot(self, job_id, name):
+        self.asked.append((job_id, name))
+        if isinstance(self.refuse, Exception):
+            raise self.refuse
+        return self.plots.get((job_id, name))
 
     async def close(self):
         pass

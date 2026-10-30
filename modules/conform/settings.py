@@ -1,4 +1,5 @@
-"""What the settings screen of the alignment server shows and what a save may write: the address and the work folder.
+"""What the settings screen of the alignment server shows and what a save may write: the address, the work folder
+and whether finished jobs clear themselves from the queue.
 
 Pure functions over stored values: the module only carries their results across the bus. A save is checked as a whole and
 refused with coded problems; a refused value is never written. The folders are named by the owner: nothing is assumed.
@@ -14,6 +15,7 @@ from core.reasons import parse as parse_reason, reason
 URL_KEY = "conform.url"
 WORK_DIR_KEY = "conform.work_dir"
 REMOTE_DIR_KEY = "conform.work_dir_remote"
+CLEAR_KEY = "conform.clear_finished"
 
 
 def _problem(field: str, stored: str) -> SettingProblem:
@@ -32,7 +34,7 @@ def mapping_of(work_dir: str | None, work_dir_remote: str | None) -> dict[str, s
 def clean(draft: ConformSettingsDraft) -> ConformSettingsDraft:
     """Address and folders trimmed."""
     return ConformSettingsDraft(url=draft.url.strip().rstrip("/"), work_dir=_folder(draft.work_dir),
-                                work_dir_remote=_folder(draft.work_dir_remote))
+                                work_dir_remote=_folder(draft.work_dir_remote), clear_finished=draft.clear_finished)
 
 
 def check(draft: ConformSettingsDraft) -> list[SettingProblem]:
@@ -58,8 +60,10 @@ def check(draft: ConformSettingsDraft) -> list[SettingProblem]:
 
 def stored(draft: ConformSettingsDraft) -> dict[str, str]:
     """The settings to write for a cleaned draft."""
-    return {URL_KEY: draft.url, WORK_DIR_KEY: draft.work_dir, REMOTE_DIR_KEY: draft.work_dir_remote}
+    return {URL_KEY: draft.url, WORK_DIR_KEY: draft.work_dir, REMOTE_DIR_KEY: draft.work_dir_remote,
+            CLEAR_KEY: "1" if draft.clear_finished else "0"}
 
 
-def view(url: str, work_dir: str, work_dir_remote: str) -> ConformSettingsView:
-    return ConformSettingsView(url=url, work_dir=work_dir, work_dir_remote=work_dir_remote)
+def view(url: str, work_dir: str, work_dir_remote: str, clear_finished: str | None = None) -> ConformSettingsView:
+    return ConformSettingsView(url=url, work_dir=work_dir, work_dir_remote=work_dir_remote,
+                               clear_finished=clear_finished == "1")

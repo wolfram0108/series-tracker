@@ -22,7 +22,7 @@
 | settings | value.get, value.set, values.by_prefix (Р-22), values.set_many {values: {ключ: значение}} → запись пачкой в одной транзакции, `settings.changed` на каждый ключ (Р-54) |
 | trackerauth | fetch, credentials.get/set (Р-22, владелец auth) |
 | voices | layout {sources: [{url, player, studio, kind, episodes, links?}], mode?, reference?} → раскладка озвучек сериала с ключом озвучки (Р-39); приоритет источников — настройка `voices.source_priority`; dispatch {series_id} (скан → озвучки серий во временный каталог, Р-40); dubs.get {series_id} → записи voice_dubs; settings.get {} → `VoiceSettingsView` (группы озвучек и порядок источников как действуют, порядок по умолчанию, отвергнутые поля); settings.set `VoiceSettingsDraft` {priority, voice_groups} → `VoiceSettingsSaved` (группы и порядок проверяются целиком и пишутся через settings.values.set_many либо отклоняются с кодами причин, Р-54) |
-| conform | submit {ref, dubs, out_dir, cache_dir, label?, key?} → {job_id} \| {rejected} \| {unavailable, retry} (постановка серии, Р-41; `key` попадает в метку задачи); job.find {key} → {reachable, job_id}; cancel {job_id} → {done}; job.get {job_id} → итог задачи; status {} → {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks} — зеркало очереди выравнивания демона track-muxer (Р-39); слушает `gateway.sse.clients` |
+| conform | submit {ref, dubs, out_dir, cache_dir, label?, key?} → {job_id} \| {rejected} \| {unavailable, retry} (постановка серии, Р-41; `key` попадает в метку задачи); job.find {key} → {reachable, job_id}; cancel {job_id} → {done} (ждущую или идущую задачу останавливает, запись завершённой удаляет); plot {job_id, name} → {found, data?} (картинка графика, base64); job.get {job_id} → итог задачи; status {} → {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks} — зеркало очереди выравнивания демона track-muxer (Р-39); слушает `gateway.sse.clients` |
 
 ## События (издатель → подписчики)
 
@@ -45,11 +45,12 @@
 | downloads.fetch.finished {key, ok, error, transient, path, series_id} | downloads | voices (ключи `dub:<id>`) | — |
 | conform.submit {ref, dubs, out_dir, cache_dir, label, key} (запрос) → `SubmitReply` {outcome: accepted/rejected/unavailable/uncertain, job_id?, reason?, retry} | voices | conform | — |
 | conform.job.get {job_id} (запрос) → {job_id, status, error, results}; `gone` только когда демон спрошен и не знает задачу, недоступный демон — ошибка запроса | voices | conform | — |
-| conform.cancel {job_id} (запрос) → {done} | voices | conform | — |
+| conform.cancel {job_id} (запрос) → {done}: задача, которая ждёт или идёт, останавливается (запись остаётся «отменено»), запись завершённой удаляется вместе с файлами, которые демон держит для записи (Р-59) | voices, gateway | conform | — |
+| conform.plot {job_id, name} (запрос) → {found, data?}: картинка графика (PNG, base64); спрашивается только простое имя `*.png` (Р-59) | gateway | conform | — |
 | conform.job.find {key} (запрос) → {reachable, job_id} | voices | conform | — |
 | conform.workspace {} (запрос) → {downloads, conform} — две папки внутри рабочей папки (пусто, пока владелец её не назвал); {dub_folder} → {out_dir, cache_dir} — раскладка папок сервиса для папки серии; чистые, демон не опрашивается (Р-58) | voices | conform | — |
-| conform.settings.get {} (запрос) → `ConformSettingsView` {url, work_dir, work_dir_remote}: адрес демона и рабочая папка здесь и на демоне, как действуют сейчас (Р-57, Р-58) | gateway | conform | — |
-| conform.settings.set `ConformSettingsDraft` {url, work_dir, work_dir_remote} (запрос) → `ConformSettingsSaved` {saved, problems, settings}: проверка целиком, запись через settings.values.set_many, новый адрес применяется сразу; отказ — коды причин, ничего не записано (Р-57) | gateway | conform | — |
+| conform.settings.get {} (запрос) → `ConformSettingsView` {url, work_dir, work_dir_remote, clear_finished}: адрес демона, рабочая папка здесь и на демоне, очистка очереди по завершении, как действуют сейчас (Р-57, Р-58, Р-59) | gateway, voices | conform | — |
+| conform.settings.set `ConformSettingsDraft` {url, work_dir, work_dir_remote, clear_finished} (запрос) → `ConformSettingsSaved` {saved, problems, settings}: проверка целиком, запись через settings.values.set_many, новый адрес применяется сразу; отказ — коды причин, ничего не записано (Р-57) | gateway | conform | — |
 | voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, hint, detail, epoch, rev, job_id, file} — `DubEvent` (job_id и file — как очередь выравнивания называет озвучку) | voices | gateway | voice_dub_update (Р-43, Р-44) |
 | voices.dubs.snapshot {epoch, rev, items} — `DubsSnapshot` (при gateway.sse.clients) | voices | gateway | voice_dubs_snapshot |
 | downloads.item.renamed {series_id, unique_id, filename} | downloads | voices | — |
@@ -57,6 +58,7 @@
 | voices.settings.changed `VoiceSettingsView` (после сохранения настроек озвучек) | voices | gateway | voice_settings_update (Р-54) |
 | voices.episode.settled {series_id, season, episode} | voices | — | — |
 | conform.job.finished {job_id, status, error, results} | conform | voices | — |
+| conform.job.removed {job_id} (запись задачи ушла из истории демона: удалил владелец, демон или уборка проекта) | conform | voices (убирает папку результата задачи) | — |
 | conform.daemon.up {} | conform | voices | — |
 | slicing.queue.changed {tasks} | slicing | — | slicing_queue_update |
 | conform.queue.changed {daemon, tasks} | conform | voices (состояние задач) | conform_queue_update (Р-39; вся картина на каждое изменение и при подключении клиента SSE; у задачи `label` — человеческая часть, `key` — ключ постановки, Р-57) |

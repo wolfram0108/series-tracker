@@ -45,12 +45,19 @@ def _hand_over(where: str, args: tuple, *, files: bool = True) -> list[tuple[str
             found.append((f"INSERT INTO voice_cleanup (path, kind, error, updated_at) SELECT {column}, ?, ?, ? "
                           f"FROM voice_dubs WHERE ({where}) AND {column} IS NOT NULL {_UPSERT}",
                           (kind, HANDED_OVER, now, *args)))
-    for column, kind, condition in (("job_id", "job", "job_id IS NOT NULL"),
-                                    ("submit_key", "submission", "job_id IS NULL AND submit_key IS NOT NULL")):
-        found.append((f"INSERT INTO voice_cleanup (path, kind, error, scope, updated_at) SELECT {column}, ?, ?, out_dir, ? "
-                      f"FROM voice_dubs WHERE ({where}) AND status=? AND {condition} {_UPSERT}",
-                      (kind, HANDED_OVER, now, *args, S.ALIGNING.value)))
+    found.extend(_jobs(where, args))
+    found.append(("INSERT INTO voice_cleanup (path, kind, error, scope, updated_at) SELECT submit_key, ?, ?, out_dir, ? "
+                  f"FROM voice_dubs WHERE ({where}) AND status=? AND job_id IS NULL AND submit_key IS NOT NULL {_UPSERT}",
+                  ("submission", HANDED_OVER, now, *args, S.ALIGNING.value)))
     return found
+
+
+def _jobs(where: str, args: tuple) -> list[tuple[str, tuple]]:
+    """Journal entries for the jobs of the rows matching `where`, whatever their step: a job that ended still has a
+    record in the service's history and a folder it wrote in, and both are the owner's to let go."""
+    return [("INSERT INTO voice_cleanup (path, kind, error, scope, updated_at) SELECT job_id, ?, ?, out_dir, ? "
+             f"FROM voice_dubs WHERE ({where}) AND job_id IS NOT NULL {_UPSERT}",
+             ("job", HANDED_OVER, _now(), *args))]
 
 
 def _folders(folders: Iterable[str]) -> list[tuple[str, tuple]]:
@@ -291,6 +298,11 @@ class VoicesRepository:
         where, args = "series_id=? AND season=? AND episode=?", (series_id, season, episode)
         await self._db.execute_many([*_hand_over(where, args), *_folders(folders),
                                      (f"DELETE FROM voice_dubs WHERE {where}", args)])
+
+    async def hand_over_jobs(self, series_id: int, season: int, episode: int) -> None:
+        """The jobs of an episode that is settled go to the journal: the service drops their records and the
+        folders they wrote in are removed."""
+        await self._db.execute_many(_jobs("series_id=? AND season=? AND episode=?", (series_id, season, episode)))
 
     async def settle_episode(self, series_id: int, season: int, episode: int, folders: Iterable[str]) -> None:
         """The episode is done: its temporary `folders` go to the journal as its rows let go of their files."""

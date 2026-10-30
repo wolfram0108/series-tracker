@@ -7,13 +7,13 @@ export type QueueTask = Record<string, unknown>
 
 /** Alignment daemon picture pushed with every change (conform_queue_update). */
 export interface ConformResult {
-  dub: string; ok: boolean; skipped: boolean; resid_ms: number | null; coverage: number | null
+  dub: string; plot: string | null; ok: boolean; skipped: boolean; resid_ms: number | null; coverage: number | null
   cuts: number | null; suspect: boolean; warnings: string[]; critical: string[]; error: string | null
 }
 export interface ConformTask {
   id: string; label: string; key: string | null; status: string; progress: number; stage: string; stage_pct: number
-  detail: string; dub_index: number; dub_total: number; cur_dub: string; elapsed_s: number
-  error: string | null; results: ConformResult[]
+  detail: string; dub_index: number; dub_total: number; cur_dub: string; dubs: string[]; elapsed_s: number
+  created_at: string | null; error: string | null; results: ConformResult[]
 }
 export interface ConformPicture {
   daemon: { up: boolean; error?: string | null; version?: string; device?: string; gpu_name?: string }

@@ -1,5 +1,6 @@
 """Tests of the conform bridge: the daemon's event stream mirrored onto the bus."""
 import asyncio
+import base64
 import json
 
 import httpx
@@ -82,7 +83,7 @@ def test_compact_job_keeps_what_the_interface_shows():
     view = compact_job(full)
     assert "trace" not in view and "ops" not in view
     assert view["results"] == [{
-        "dub": "kodik__rus__A__720p.mp4", "ok": True, "skipped": False, "resid_ms": 12.5,
+        "dub": "kodik__rus__A__720p.mp4", "plot": None, "ok": True, "skipped": False, "resid_ms": 12.5,
         "coverage": 0.97, "cuts": 2, "suspect": False, "warnings": ["drift"], "critical": [],
         "error": None}]
     assert view["stage"] == "" and view["dub_total"] == 2
@@ -642,3 +643,67 @@ async def test_only_the_not_found_of_the_contract_says_that_a_job_is_gone():
         assert reply["status"] == "gone"
     finally:
         await http.aclose()
+
+
+def test_compact_job_names_the_dubs_and_the_picture_of_each_plot():
+    view = compact_job(job("j1", dubs=["/mnt/work/7_s01e01_blackcat.mp4"], results=[{
+        "dub": "7_s01e01_blackcat.mp4", "ok": True,
+        "plots": [{"kind": "html", "name": "b__track.html"}, {"kind": "track", "name": "b__track.png"}]}]))
+    assert view["dubs"] == ["7_s01e01_blackcat.mp4"] and view["results"][0]["plot"] == "b__track.png"
+    bare = compact_job(job("j2", results=[{"dub": "x", "plots": [{"kind": "html", "name": "x.html"}]}, {"dub": "y"}]))
+    assert bare["dubs"] == [] and [result["plot"] for result in bare["results"]] == [None, None]
+
+
+@pytest.mark.asyncio
+async def test_a_record_the_daemon_drops_is_announced_once_for_each_job():
+    client = FakeClient([("conform.snapshot", {"items": [ended("j1"), ended("j2")]}),
+                         ("conform.changed", {"items": [], "removed": ["j1", "j2"]})])
+    bus = Bus()
+    sub = bus.subscribe("conform.job.removed")
+    runner = Runner(bus, [ConformModule(bus, client, backoff_start=0.01), Settings(bus), Probe(bus)])
+    await runner.start()
+    try:
+        first = (await asyncio.wait_for(sub.queue.get(), 3)).payload
+        second = (await asyncio.wait_for(sub.queue.get(), 3)).payload
+        assert {first["job_id"], second["job_id"]} == {"j1", "j2"}
+        await asyncio.sleep(0.1)
+        assert sub.queue.empty()
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_plot_is_fetched_by_a_plain_png_name_and_by_nothing_else():
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    client.plots[("j1", "a__track.png")] = b"\x89PNG picture"
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda status: status["daemon"]["up"])
+        got = await probe.request("conform.plot", {"job_id": "j1", "name": "a__track.png"}, timeout=5)
+        assert got["found"] is True and base64.b64decode(got["data"]) == b"\x89PNG picture"
+        for name in ("../secret.png", "a__track.html", "a/b.png", "x.png.txt", ""):
+            assert await probe.request("conform.plot", {"job_id": "j1", "name": name}, timeout=5) == {"found": False}
+        assert await probe.request("conform.plot", {"job_id": "../j1", "name": "a__track.png"}, timeout=5) == {"found": False}
+        assert await probe.request("conform.plot", {"job_id": "j1", "name": "other.png"}, timeout=5) == {"found": False}
+        assert client.asked == [("j1", "a__track.png"), ("j1", "other.png")]  # only valid names reach the daemon
+        client.refuse = httpx.ConnectError("no route")
+        with pytest.raises(BusRequestError):
+            await probe.request("conform.plot", {"job_id": "j1", "name": "a__track.png"}, timeout=5)
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_client_plot_returns_the_picture_or_none_for_a_plot_the_daemon_does_not_hold():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path.endswith("/a__track.png"):
+            return httpx.Response(200, content=b"png")
+        return httpx.Response(404, json={"detail": "no such plot"})
+
+    client = DaemonClient("http://daemon.test", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    assert await client.plot("j1", "a__track.png") == b"png"
+    assert await client.plot("j1", "b__track.png") is None
+    assert seen == ["/conform/plot/j1/a__track.png", "/conform/plot/j1/b__track.png"]

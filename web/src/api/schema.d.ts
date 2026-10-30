@@ -485,6 +485,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conform/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Conform Job Delete
+         * @description Stops a job that waits or runs; deletes the record of a job that ended.
+         */
+        delete: operations["conform_job_delete_api_conform_jobs__job_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conform/jobs/{job_id}/plot/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Conform Plot
+         * @description The picture of an alignment plot, as the daemon made it.
+         */
+        get: operations["conform_plot_api_conform_jobs__job_id__plot__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/series/{series_id}/media-items": {
         parameters: {
             query?: never;
@@ -1416,9 +1456,19 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * ConformJobChange
+         * @description The reply to the stop or deletion of a job of the alignment service.
+         */
+        ConformJobChange: {
+            /** Done */
+            done: boolean;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * ConformSettingsDraft
-         * @description The address of the daemon (empty: none) and the work folder as this server names it and as the daemon names
-         *     the same folder; a save replaces all three.
+         * @description The address of the daemon (empty: none), the work folder as this server names it and as the daemon names the
+         *     same folder, and whether a finished job leaves the daemon's history on its own; a save replaces all four.
          */
         ConformSettingsDraft: {
             /** Url */
@@ -1427,6 +1477,11 @@ export interface components {
             work_dir: string;
             /** Work Dir Remote */
             work_dir_remote: string;
+            /**
+             * Clear Finished
+             * @default false
+             */
+            clear_finished: boolean;
         };
         /**
          * ConformSettingsSaved
@@ -1441,7 +1496,7 @@ export interface components {
         };
         /**
          * ConformSettingsView
-         * @description The reply of `conform.settings.get`: what applies now.
+         * @description The reply of `conform.settings.get`: what applies now, every value stated.
          */
         ConformSettingsView: {
             /** Url */
@@ -1450,6 +1505,8 @@ export interface components {
             work_dir: string;
             /** Work Dir Remote */
             work_dir_remote: string;
+            /** Clear Finished */
+            clear_finished: boolean;
         };
         /** CreatedSeries */
         CreatedSeries: {
@@ -2927,6 +2984,96 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    conform_job_delete_api_conform_jobs__job_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConformJobChange"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    conform_plot_api_conform_jobs__job_id__plot__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
                 };
             };
         };

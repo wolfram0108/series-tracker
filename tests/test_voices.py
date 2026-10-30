@@ -273,6 +273,7 @@ class Neighbours(BaseModule):
         self.cancel_done = True
         self.service_reachable = True
         self.job_get_failures = 0
+        self.clear_finished = False  # the owner's choice in the settings of the alignment server
         self.running_jobs = set()  # jobs the service has although the answer to their submission was lost
         super().__init__(bus)
 
@@ -291,6 +292,7 @@ class Neighbours(BaseModule):
             self.handle("conform.job.find", self.on_job_find)
             self.handle("conform.job.get", self.on_job_get)
             self.handle("conform.workspace", self.on_workspace)
+            self.handle("conform.settings.get", self.on_conform_settings)
 
     async def on_series(self, env):
         return {"id": env.payload["series_id"], "url": "https://site/title.html", "name": "Series",
@@ -344,6 +346,9 @@ class Neighbours(BaseModule):
         if not env.payload.get("dub_folder"):
             return roots(self.settings.get("conform.work_dir"))
         return workspace(env.payload["dub_folder"])
+
+    async def on_conform_settings(self, env):
+        return {"url": "", "work_dir": "", "work_dir_remote": "", "clear_finished": self.clear_finished}
 
     async def on_conform_cancel(self, env):
         self.conform_cancels.append(env.payload["job_id"])
@@ -1408,30 +1413,46 @@ async def test_the_job_of_a_replaced_reference_is_cancelled_in_the_service(dubs)
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
     await statuses_until(sub, ["stale", "stale"])
     await asyncio.sleep(0.1)
-    assert neighbours.conform_cancels == ["job-1"]  # one job for the two voice-overs
+    assert set(neighbours.conform_cancels) == {"job-1"}  # one job for the two voice-overs; a late answer may cancel it twice
 
 
 @pytest.mark.asyncio
-async def test_deleting_a_series_cancels_its_job_in_the_service_and_a_finished_one_is_left(dubs):
+async def test_deleting_a_series_cancels_its_running_job_in_the_service(dubs):
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     report = bus.subscribe("series.purged")
     probe.publish_event("series.deleted", {"series_id": 7})
     await asyncio.wait_for(report.queue.get(), 5)
     await asyncio.sleep(0.1)
-    assert neighbours.conform_cancels == ["job-1"]
+    assert set(neighbours.conform_cancels) == {"job-1"}  # the journal and a late answer may both cancel the same job
 
 
 @pytest.mark.asyncio
-async def test_a_placed_track_costs_no_cancel_when_its_reference_is_replaced(dubs):
+async def test_a_finished_job_is_taken_out_of_the_history_once_when_its_reference_is_replaced(dubs):
     probe, neighbours, bus, sub, ref = await placed_set(dubs)
     touch(os.path.join(neighbours.library, "Series s01e01 2160p.mp4"))
     neighbours.uids[1] = "u1-new"
     neighbours.references[1] = "Series s01e01 2160p.mp4"
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
     await statuses_until(sub, ["stale", "stale"])
-    await asyncio.sleep(0.1)
-    assert neighbours.conform_cancels == []
+
+    async def dropped():
+        return neighbours.conform_cancels == ["job-1"]  # one job for the two tracks
+
+    await until_true(dropped, neighbours.conform_cancels)
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_series_takes_its_finished_job_out_of_the_history_and_its_folder_off_the_disk(dubs):
+    probe, neighbours, voices, submit = await settled_with_a_record(dubs)
+    report = probe.bus.subscribe("series.purged")
+    probe.publish_event("series.deleted", {"series_id": 7})
+    await asyncio.wait_for(report.queue.get(), 5)
+
+    async def dropped():
+        return neighbours.conform_cancels == ["job-1"] and not os.path.exists(submit["out_dir"])
+
+    await until_true(dropped, (neighbours.conform_cancels, os.path.isdir(submit["out_dir"])))
 
 
 def test_layout_takes_synonymous_voices_of_different_sites_as_one_voice():
@@ -1611,8 +1632,9 @@ async def test_twelve_episodes_of_four_voices_flow_through_under_a_limit_of_thre
     await asyncio.sleep(0.3)
     flacs = [name for name in library_files(neighbours) if name.endswith(".flac")]
     assert len(flacs) == 48 and neighbours.conform_cancels == []
-    for folder in (downloads(neighbours), conform_dir(neighbours)):
-        assert not os.path.exists(folder) or os.listdir(folder) == []
+    assert not os.path.exists(downloads(neighbours)) or os.listdir(downloads(neighbours)) == []
+    # The jobs' records are in the service's history, so their folders stay; the copies of the references are gone.
+    assert not [name for _, names, _ in os.walk(conform_dir(neighbours)) for name in names if name == "_ref"]
     assert not any("нет на месте" in record.getMessage() for record in caplog.records)
 
 
@@ -1818,10 +1840,12 @@ async def test_a_failed_removal_of_the_temporary_folder_is_journaled_and_the_epi
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     settled_sub = bus.subscribe("voices.episode.settled")
     with patch("modules.voices.module.shutil.rmtree", side_effect=PermissionError("busy")):
-        probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+        result = job_done(neighbours, "job-1")
+        neighbours.jobs["job-1"] = result  # the record of the job is in the service's history: its folder stays
+        probe.publish_event("conform.job.finished", result)
         await asyncio.wait_for(settled_sub.queue.get(), 5)
         journal = await voices.repo.cleanup_list()
-    assert len(journal) == 2 and {entry["kind"] for entry in journal} == {"tree"}  # the voice-overs' folder and the service's
+    assert len(journal) == 2 and {entry["kind"] for entry in journal} == {"tree"}  # the voice-overs' folder and the copy of the reference
     assert all(os.path.isdir(entry["path"]) for entry in journal)
     await quiet(voices)  # a pass of the module that runs its own sweep owns the path while it removes it
     await voices._sweep_cleanup()
@@ -2834,3 +2858,94 @@ async def test_without_a_work_folder_no_voice_over_is_recorded_or_downloaded(dub
     neighbours.settings["conform.work_dir"] = ""
     await voices._dispatch(7)
     assert await rows(probe) == [] and neighbours.fetches == []
+
+
+async def settled_with_a_record(dubs, **per_dub):
+    """One episode aligned and settled while the record of its job is still in the service's history."""
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    submit = dict(neighbours.submits[0])
+    settled_sub = bus.subscribe("voices.episode.settled")
+    result = job_done(neighbours, "job-1", **per_dub)
+    neighbours.jobs["job-1"] = result
+    probe.publish_event("conform.job.finished", result)
+    await asyncio.wait_for(settled_sub.queue.get(), 5)
+    await quiet(voices)
+    return probe, neighbours, voices, submit
+
+
+@pytest.mark.asyncio
+async def test_the_folder_a_job_wrote_in_stays_while_its_record_is_in_the_history_and_goes_with_the_record(dubs):
+    probe, neighbours, voices, submit = await settled_with_a_record(dubs, redheadsound={"suspect": True, "warnings": ["w"]})
+    out_dir, episode = submit["out_dir"], os.path.dirname(os.path.dirname(submit["out_dir"]))
+    assert sorted(os.listdir(out_dir)) == ["7_s01e01_redheadsound.flac"]  # the refused track stays, the placed one moved
+    assert not os.path.exists(os.path.join(episode, "_ref")) and not os.path.exists(os.path.join(downloads(neighbours), "7", "s01e01"))
+    assert neighbours.conform_cancels == [] and await voices.repo.cleanup_list() == []
+    del neighbours.jobs["job-1"]  # the owner deletes the record
+    probe.publish_event("conform.job.removed", {"job_id": "job-1"})
+
+    async def folder_gone():
+        return not os.path.exists(episode)
+
+    await until_true(folder_gone, os.listdir(episode) if os.path.isdir(episode) else None)
+    assert not os.path.exists(os.path.join(conform_dir(neighbours), "7"))  # the empty folders around it went too
+
+
+@pytest.mark.asyncio
+async def test_a_record_removed_while_the_module_was_away_is_found_when_the_service_is_back(dubs):
+    probe, neighbours, voices, submit = await settled_with_a_record(dubs)
+    out_dir = submit["out_dir"]
+    assert os.path.isdir(out_dir)
+    del neighbours.jobs["job-1"]  # removed with nobody listening
+    probe.publish_event("conform.daemon.up", {})
+
+    async def folder_gone():
+        return not os.path.exists(out_dir)
+
+    await until_true(folder_gone, os.listdir(out_dir))
+
+
+@pytest.mark.asyncio
+async def test_the_folder_of_a_job_whose_service_cannot_say_if_the_record_is_gone_stays(dubs):
+    probe, neighbours, voices, submit = await settled_with_a_record(dubs)
+    del neighbours.jobs["job-1"]
+    neighbours.job_get_failures = 1  # the service does not answer the question
+    probe.publish_event("conform.daemon.up", {})
+
+    async def asked():
+        return neighbours.job_get_failures == 0
+
+    await until_true(asked, "the service was never asked")
+    await quiet(voices)
+    assert os.path.isdir(submit["out_dir"])
+
+
+@pytest.mark.asyncio
+async def test_a_job_leaves_the_history_with_its_folder_when_the_owner_asked_for_a_clear_queue(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    submit = dict(neighbours.submits[0])
+    neighbours.clear_finished = True
+    settled_sub = bus.subscribe("voices.episode.settled")
+    result = job_done(neighbours, "job-1")
+    neighbours.jobs["job-1"] = result
+    probe.publish_event("conform.job.finished", result)
+    await asyncio.wait_for(settled_sub.queue.get(), 5)
+
+    async def cleared():
+        return not os.path.exists(os.path.dirname(os.path.dirname(submit["out_dir"]))) and await voices.repo.cleanup_list() == []
+
+    await until_true(cleared, "the job and its folder did not go")
+    assert neighbours.conform_cancels == ["job-1"]
+
+
+@pytest.mark.asyncio
+async def test_a_replaced_reference_takes_the_finished_job_out_of_the_history_with_its_folder(dubs):
+    probe, neighbours, voices, submit = await settled_with_a_record(dubs)
+    out_dir = submit["out_dir"]
+    await reference_replaced(neighbours, probe)
+
+    async def job_dropped():
+        return "job-1" in neighbours.conform_cancels and not os.path.exists(out_dir)
+
+    await until_true(job_dropped, (neighbours.conform_cancels, os.path.isdir(out_dir)))

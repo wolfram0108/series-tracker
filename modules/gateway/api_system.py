@@ -6,12 +6,15 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+import base64
+
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
 from core import BusRequestError
+from core.reasons import reason
 
-from .schemas import ErrorResponse, OkResponse, QueueTask, ScannerStatus
+from .schemas import ConformJobChange, ErrorOnly, ErrorResponse, OkResponse, QueueTask, ScannerStatus
 
 
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
@@ -97,5 +100,29 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 {"success": False, "error": msg.split(": ", 1)[-1]},
                 status_code=code)
         return {"success": True, "message": "Загрузка отменена."}
+
+    @r.delete("/api/conform/jobs/{job_id}", response_model=ConformJobChange, responses={502: {"model": ErrorOnly}})
+    async def conform_job_delete(job_id: str):
+        """Stops a job that waits or runs; deletes the record of a job that ended."""
+        try:
+            reply = await gw.request("conform.cancel", {"job_id": job_id}, timeout=30)
+        except BusRequestError:
+            reply = {"done": False}
+        if not reply["done"]:
+            return JSONResponse({"error": reason("conform_job_unchanged")}, status_code=502)
+        return {"done": True}
+
+    @r.get("/api/conform/jobs/{job_id}/plot/{name}", response_class=Response,
+           responses={200: {"content": {"image/png": {}}}, 404: {"model": ErrorOnly}, 502: {"model": ErrorOnly}})
+    async def conform_plot(job_id: str, name: str):
+        """The picture of an alignment plot, as the daemon made it."""
+        try:
+            reply = await gw.request("conform.plot", {"job_id": job_id, "name": name}, timeout=30)
+        except BusRequestError as exc:
+            return JSONResponse({"error": str(exc).split(": ", 1)[-1]}, status_code=502)
+        if not reply["found"]:
+            return JSONResponse({"error": reason("conform_plot_missing")}, status_code=404)
+        return Response(base64.b64decode(reply["data"]), media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=3600"})
 
     return r

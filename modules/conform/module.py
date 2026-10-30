@@ -21,15 +21,21 @@ Query:
       sent (or the daemon asked to come back later) and asking again soon may work. `uncertain`: the request
       was sent and nothing well-formed came back, so the daemon may have the job; the caller keeps the key
       and asks conform.job.find, it does not send again.
-  conform.settings.get {} -> ConformSettingsView {url, work_dir, work_dir_remote}: what applies now.
-  conform.settings.set {url, work_dir, work_dir_remote} -> ConformSettingsSaved {saved, problems, settings}: checked as a whole, written
+  conform.settings.get {} -> ConformSettingsView {url, work_dir, work_dir_remote, clear_finished}: what applies now.
+      `clear_finished` (stored as conform.clear_finished): a job that ended and whose result was taken leaves the daemon's
+      history on its own; off, the history keeps it until the owner deletes it.
+  conform.settings.set {url, work_dir, work_dir_remote, clear_finished} -> ConformSettingsSaved {saved, problems, settings}: checked as a whole, written
       through settings.values.set_many and taken at once, or refused with coded problems and nothing written.
   conform.workspace {} -> {downloads, conform}: the two folders inside the work folder, where voice-overs wait for
       alignment and where the service works; both empty while no work folder is named.
   conform.workspace {dub_folder} -> {out_dir, cache_dir}: the folders the daemon is asked to write the aligned
       tracks and its cache to for an episode folder of the service. Pure: no daemon is asked.
-  conform.cancel {job_id} -> {done: bool} — stop a job whose result nobody needs any more; `done` is
-      true when it is stopped or the daemon does not know it, false when the daemon could not be reached.
+  conform.cancel {job_id} -> {done: bool} — stop a job that waits or runs (its record stays as `cancelled`), or delete the
+      record of a job that ended: the daemon then drops the files it keeps for the record (graphs, journal, time map,
+      cache) and leaves the output audio. `done` is true when it is stopped or the daemon does not know it,
+      false when the daemon could not be reached.
+  conform.plot {job_id, name} -> {found: bool, data?: base64 PNG} — the picture of a plot named in a result (`plot`); only
+      a plain PNG name is asked of the daemon.
   conform.job.find {key} -> {reachable: bool, job_id: str | None} — the job sent with this key.
   conform.job.get {job_id} -> {job_id, status, error, results}   status `gone` only when the daemon was
       asked and does not know the job; when it cannot be asked the query fails; results as in
@@ -41,15 +47,19 @@ Event:
       critical, warnings, resid_ms, error}]}   once per job that ended (done, failed, cancelled);
       out_path is a local path
   conform.daemon.up {}                    the daemon became reachable: waiting work may be sent
+  conform.job.removed {job_id}            the daemon dropped the record of a job (deleted by the owner, by the service
+                                          or by the cleanup of this project)
   conform.settings.changed ConformSettingsView   after every save, so that every open interface shows it
 A task is the compact view of one daemon job: id, label (the human part), key (the one the label carries,
 if any), status, progress, stage, stage_pct,
-detail, dub_index, dub_total, cur_dub, elapsed_s, error and results[{dub, ok, skipped, resid_ms,
-coverage, cuts, suspect, warnings, critical, error}].
+detail, dub_index, dub_total, cur_dub, dubs (file names), elapsed_s, error and results[{dub, plot, ok, skipped, resid_ms,
+coverage, cuts, suspect, warnings, critical, error}]; `plot` names the picture of the voice-over's plot, if the daemon made one.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
+import os
 import re
 from collections.abc import Callable
 from typing import Any
@@ -65,7 +75,7 @@ from core.reasons import describe, reason
 from .client import DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
 from . import settings as conform_settings
 from .paths import reverse, roots, translate, workspace
-from .settings import REMOTE_DIR_KEY, URL_KEY, WORK_DIR_KEY, mapping_of
+from .settings import CLEAR_KEY, REMOTE_DIR_KEY, URL_KEY, WORK_DIR_KEY, mapping_of
 
 BACKOFF_START_S = 2.0
 BACKOFF_MAX_S = 30.0
@@ -79,8 +89,10 @@ def compact_job(job: dict[str, Any]) -> dict[str, Any]:
     """The part of a daemon job the interface shows; traces, plots and operation logs stay behind."""
     view = {field: job.get(field) for field in _JOB_FIELDS}
     view["label"], view["key"] = split_label(job.get("label"))
+    view["dubs"] = [os.path.basename(str(dub)) for dub in job.get("dubs") or []]
     view["results"] = [{
-        "dub": result.get("dub"), "ok": bool(result.get("ok")), "skipped": bool(result.get("skipped")),
+        "dub": result.get("dub"), "plot": plot_of(result),
+        "ok": bool(result.get("ok")), "skipped": bool(result.get("skipped")),
         "resid_ms": result.get("audio_resid_ms"), "coverage": result.get("audio_coverage"),
         "cuts": result.get("audio_cuts"), "suspect": bool(result.get("suspect")),
         "warnings": list(result.get("warnings") or []), "critical": list(result.get("critical") or []),
@@ -89,12 +101,20 @@ def compact_job(job: dict[str, Any]) -> dict[str, Any]:
     return view
 
 
+def plot_of(result: dict[str, Any]) -> str | None:
+    """The name of the picture of a voice-over's alignment plot; the interactive page of it is not shown."""
+    return next((str(ref["name"]) for ref in result.get("plots") or []
+                 if ref.get("kind") == "track" and str(ref.get("name") or "").endswith(".png")), None)
+
+
 def job_label(label: str | None, key: str | None) -> str | None:
     """The label the job carries: the human one and, when given, the key that finds the job again."""
     return f"{label or ''} #{key}".strip() if key else label
 
 
 _KEY_SUFFIX = re.compile(r"(?:^|\s+)#(\S+)$")
+_JOB_ID = re.compile(r"[\w-]+")
+_PLOT_NAME = re.compile(r"[\w.-]+\.png")
 
 
 def split_label(label: str | None) -> tuple[str | None, str | None]:
@@ -146,6 +166,7 @@ class ConformModule(BaseModule):
         self.handle("conform.job.get", self.on_job_get)
         self.handle("conform.workspace", self.on_workspace)
         self.handle("conform.cancel", self.on_cancel)
+        self.handle("conform.plot", self.on_plot)
         self.handle("conform.settings.get", self.on_settings_get)
         self.handle("conform.settings.set", self.on_settings_set)
         self.handle("conform.job.find", self.on_job_find)
@@ -187,7 +208,8 @@ class ConformModule(BaseModule):
 
     async def _settings_view(self):
         url = self._client.base_url if self._client is not None else ""
-        return conform_settings.view(url, await self._stored(WORK_DIR_KEY) or "", await self._stored(REMOTE_DIR_KEY) or "")
+        return conform_settings.view(url, await self._stored(WORK_DIR_KEY) or "", await self._stored(REMOTE_DIR_KEY) or "",
+                                     await self._stored(CLEAR_KEY))
 
     async def _use_address(self, url: str) -> None:
         """Point the bridge at another daemon, or at none: the feed of the old one ends, the picture starts over."""
@@ -257,6 +279,21 @@ class ConformModule(BaseModule):
             return {"done": False}
         self.log.info("conform: задача %s %s", job_id, "отменена" if known else "демону неизвестна")
         return {"done": True}
+
+    async def on_plot(self, env: Envelope) -> dict:
+        """The picture of a plot of a job, taken from the daemon; the names are checked before anything is asked."""
+        job_id, name = str(env.payload.get("job_id")), str(env.payload.get("name"))
+        if not (_JOB_ID.fullmatch(job_id) and _PLOT_NAME.fullmatch(name)):
+            return {"found": False}
+        if self._client is None or not self._daemon.get("up"):
+            raise RuntimeError(reason("conform_down", error=self._daemon.get("error") or ""))
+        try:
+            picture = await self._client.plot(job_id, name)
+        except httpx.HTTPError as exc:
+            raise RuntimeError(reason("conform_down", error=str(exc))) from exc
+        if picture is None:
+            return {"found": False}
+        return {"found": True, "data": base64.b64encode(picture).decode("ascii")}
 
     async def on_job_find(self, env: Envelope) -> dict:
         if self._client is None or not self._daemon.get("up"):
@@ -357,6 +394,8 @@ class ConformModule(BaseModule):
                 self._jobs[job["id"]] = job
             for job_id in payload.get("removed") or []:
                 self._jobs.pop(job_id, None)
+                self._announced.discard(job_id)
+                self.publish_event("conform.job.removed", {"job_id": job_id})
         elif name == "conform.progress":
             job = self._jobs.get(payload.get("id"))
             if job is not None:

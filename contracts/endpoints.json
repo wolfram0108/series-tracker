@@ -26,7 +26,7 @@
   "path": "/api/agent/queue",
   "func": "agent_queue",
   "file": "modules/gateway/api_system.py",
-  "line": 55,
+  "line": 58,
   "access": "session",
   "conditional": null,
   "summary": "Очередь торрент-конвейера",
@@ -85,6 +85,30 @@
   ]
  },
  {
+  "method": "DELETE",
+  "path": "/api/conform/jobs/{job_id}",
+  "func": "conform_job_delete",
+  "file": "modules/gateway/api_system.py",
+  "line": 104,
+  "access": "session",
+  "conditional": null,
+  "summary": "Остановить задачу выравнивания, которая ждёт или идёт, либо удалить запись завершённой",
+  "panel_sites": [
+   "components/settings/ConformQueue.vue:41"
+  ]
+ },
+ {
+  "method": "GET",
+  "path": "/api/conform/jobs/{job_id}/plot/{name}",
+  "func": "conform_plot",
+  "file": "modules/gateway/api_system.py",
+  "line": 115,
+  "access": "session",
+  "conditional": null,
+  "summary": "Картинка графика выравнивания озвучки (PNG), как её сделал демон",
+  "panel_sites": []
+ },
+ {
   "method": "GET",
   "path": "/api/conform/settings",
   "func": "conform_settings",
@@ -92,9 +116,9 @@
   "line": 236,
   "access": "session",
   "conditional": null,
-  "summary": "Адрес демона выравнивания и рабочая папка здесь и на демоне: как действуют сейчас",
+  "summary": "Адрес демона выравнивания, рабочая папка здесь и на демоне, очистка очереди по завершении: как действуют сейчас",
   "panel_sites": [
-   "components/settings/SettingsConformServer.vue:38"
+   "components/settings/SettingsConformServer.vue:41"
   ]
  },
  {
@@ -105,9 +129,9 @@
   "line": 241,
   "access": "session",
   "conditional": null,
-  "summary": "Записать адрес и рабочую папку целиком (адрес применяется сразу) или получить коды причин отказа",
+  "summary": "Записать настройки сервера выравнивания целиком (адрес применяется сразу) или получить коды причин отказа",
   "panel_sites": [
-   "components/settings/SettingsConformServer.vue:49"
+   "components/settings/SettingsConformServer.vue:52"
   ]
  },
  {
@@ -166,7 +190,7 @@
   "path": "/api/downloads/queue",
   "func": "downloads_queue",
   "file": "modules/gateway/api_system.py",
-  "line": 63,
+  "line": 66,
   "access": "session",
   "conditional": null,
   "summary": "Очередь загрузок видео",
@@ -177,7 +201,7 @@
   "path": "/api/downloads/queue/clear",
   "func": "downloads_queue_clear",
   "file": "modules/gateway/api_system.py",
-  "line": 71,
+  "line": 74,
   "access": "session",
   "conditional": null,
   "summary": "Очистка очереди загрузок",
@@ -188,7 +212,7 @@
   "path": "/api/downloads/{task_id}/cancel",
   "func": "downloads_cancel",
   "file": "modules/gateway/api_system.py",
-  "line": 83,
+  "line": 86,
   "access": "session",
   "conditional": null,
   "summary": "Отмена загрузки: процесс, файл, задача",
@@ -537,7 +561,7 @@
   "path": "/api/scanner/scan_all",
   "func": "scan_all",
   "file": "modules/gateway/api_system.py",
-  "line": 40,
+  "line": 43,
   "access": "session",
   "conditional": null,
   "summary": "Полный проход по всем сериалам",
@@ -550,7 +574,7 @@
   "path": "/api/scanner/settings",
   "func": "scanner_settings",
   "file": "modules/gateway/api_system.py",
-  "line": 24,
+  "line": 27,
   "access": "session",
   "conditional": null,
   "summary": "Настройки планировщика (вкл/выкл, интервал)",
@@ -563,7 +587,7 @@
   "path": "/api/scanner/status",
   "func": "scanner_status",
   "file": "modules/gateway/api_system.py",
-  "line": 20,
+  "line": 23,
   "access": "session",
   "conditional": null,
   "summary": "Состояние планировщика сканирования",
