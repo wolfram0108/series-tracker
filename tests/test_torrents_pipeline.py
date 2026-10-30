@@ -360,6 +360,46 @@ async def test_by_hash_prefers_active_and_count_ignores_history(system):
 
 
 @pytest.mark.asyncio
+async def test_the_task_and_the_row_of_a_vanished_torrent_end_in_one_transaction(system):
+    """No reader may see the task gone while the row is still active: both changes are one commit."""
+    _, _, _, _, db_path = system
+    from core.db import Database
+    from modules.torrents.repository import TorrentsRepository
+    db = Database(db_path)
+    repo = TorrentsRepository(db)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, is_active, qb_hash) "
+                     "VALUES (1,'tidv','l',1,'hv')")
+        db_id = conn.execute("SELECT id FROM torrents WHERE torrent_id='tidv'").fetchone()[0]
+        conn.execute("INSERT INTO torrent_files (torrent_db_id, original_path, status) VALUES (?, 'a.mkv', 'renamed')",
+                     (db_id,))
+        conn.commit()
+    await repo.upsert_task({"torrent_hash": "hv", "series_id": 1, "torrent_id": "tidv", "stage": "polling_for_size"})
+    commits: list[int] = []
+    single = db.execute_many
+
+    async def counted(statements):
+        commits.append(len(statements))
+        return await single(statements)
+
+    db.execute_many = counted
+    plain = db.execute
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("a plain execute would commit one statement apart from the others")
+
+    db.execute = forbidden
+    await repo.drop_task_and_row("hv", db_id)
+    db.execute = plain
+
+    assert commits == [3]
+    assert not _agent_tasks(db_path)
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT is_active FROM torrents WHERE id=?", (db_id,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM torrent_files WHERE torrent_db_id=?", (db_id,)).fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
 async def test_sim_C1_readd_after_qb_delete_repipelines(system):
     """Симуляция C1/Q1/Q2 (матрица ситуаций): торрент удалён из qB, строка
     БД осталась is_active=1 с 'renamed'-файлами. Пользователь жмёт скан →

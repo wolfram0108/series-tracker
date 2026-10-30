@@ -1069,15 +1069,15 @@ class TorrentsModule(BaseModule):
         await self._contribute(task["series_id"])
 
     async def _drop_task(self, qb_hash: str, series_id: int) -> None:
-        await self.repo.delete_task(qb_hash)
-        self._pipe.pop(qb_hash, None)
         # раздача исчезла из qB — деактивируем строку и снимаем файло-записи
         # (симметрия с reconcile при старте, R3): серия возвращается к
         # «торрента нет», следующий скан добавит заново. Иначе осталась бы
         # фантомная is_active=1 без живой раздачи (ложные счётчики).
         row = await self.repo.torrent_by_hash(qb_hash)
-        if row and row["is_active"]:
-            await self.repo.deactivate_and_clear_files(row["id"])
+        was_active = bool(row and row["is_active"])
+        await self.repo.drop_task_and_row(qb_hash, row["id"] if was_active else None)
+        self._pipe.pop(qb_hash, None)
+        if was_active:
             await self._broadcast_downloaded(series_id)  # Д1: счёт упал
         self._broadcast_queue()
         await self._contribute(series_id)

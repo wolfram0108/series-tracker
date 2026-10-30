@@ -86,10 +86,19 @@ class TorrentsRepository:
         (файлы на диске замещены новой раздачей). Ключ — id строки (точная
         строка), как в старой системе (deactivate_torrent_and_clear_files),
         а НЕ ярлык с трекера: иначе можно деактивировать не ту строку."""
-        await self._db.execute(
-            "DELETE FROM torrent_files WHERE torrent_db_id=?", (db_id,))
-        await self._db.execute(
-            "UPDATE torrents SET is_active=0 WHERE id=?", (db_id,))
+        await self._db.execute_many(self._deactivation(db_id))
+
+    @staticmethod
+    def _deactivation(db_id: int) -> list[tuple[str, tuple]]:
+        # One transaction: a reader never sees the files gone while the row is still active.
+        return [("DELETE FROM torrent_files WHERE torrent_db_id=?", (db_id,)),
+                ("UPDATE torrents SET is_active=0 WHERE id=?", (db_id,))]
+
+    async def drop_task_and_row(self, torrent_hash: str, db_id: int | None) -> None:
+        """The task of a vanished torrent ends together with its row, so nobody sees the task gone and the row active."""
+        statements = self._deactivation(db_id) if db_id is not None else []
+        statements.append(("DELETE FROM agent_tasks WHERE torrent_hash=?", (torrent_hash,)))
+        await self._db.execute_many(statements)
 
     async def deactivate_all(self, series_id: int) -> list[str]:
         rows = await self.active_torrents(series_id)
@@ -107,12 +116,7 @@ class TorrentsRepository:
         for row in await self.all_active():
             qh = (row.get("qb_hash") or "").lower()
             if qh and qh not in live_hashes:
-                await self._db.execute(
-                    "DELETE FROM torrent_files WHERE torrent_db_id=?",
-                    (row["id"],))
-                await self._db.execute(
-                    "UPDATE torrents SET is_active=0 WHERE id=?",
-                    (row["id"],))
+                await self.deactivate_and_clear_files(row["id"])
                 affected.append(row["series_id"])
         return affected
 
