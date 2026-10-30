@@ -8,6 +8,7 @@ import pytest
 
 from core.reasons import parse
 from provider_contract import check_release
+from modules.sources.video_providers import ruchime as ruchime_module
 from modules.sources.video_providers.base import StreamUnavailable
 from modules.sources.video_providers.ruchime import RuchimeProvider
 from modules.sources.video_providers.vibix import (Episode, Stream, VibixUnavailable,
@@ -946,3 +947,67 @@ async def test_a_scan_does_not_trust_what_the_coverage_read_long_ago():
     await provider.scan_episodes(PAGE, client, {"name": "Тест"})
 
     assert counts["episode-1"] == read["episode-1"] + 1
+
+
+def refuse(client, marker: str, status: int, text: str, times: int) -> dict[str, int]:
+    """Make the first `times` requests whose address has `marker` come back refused; count the refusals."""
+    answer, served = client.get.side_effect, {"refused": 0}
+
+    async def get(url, headers=None, follow_redirects=True, **kwargs):
+        if marker in url and served["refused"] < times:
+            served["refused"] += 1
+            refused = AsyncMock(spec=httpx.Response)
+            refused.status_code, refused.text = status, text
+            return refused
+        return await answer(url, headers=headers, follow_redirects=follow_redirects, **kwargs)
+
+    client.get.side_effect = get
+    return served
+
+
+REFUSALS = [(403, ""), (200, VK_AMBIGUOUS)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,text", REFUSALS)
+async def test_coverage_does_not_take_one_refusal_of_the_host_for_a_video_it_cannot_play(status, text):
+    client = make_client(SURVEY_ROUTES)
+    refuse(client, "id=101&hash", status, text, times=1)
+
+    vk = (await RuchimeProvider().coverage(PAGE, client))["players"]["vk"]
+
+    assert (vk["present"], vk["available"], vk["ranges"]) == (2, 2, "1-2")
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_that_does_not_go_away_is_asked_again_only_as_often_as_allowed():
+    client = make_client(SURVEY_ROUTES)
+    served = refuse(client, "id=101&hash", 403, "", times=99)
+
+    vk = (await RuchimeProvider().coverage(PAGE, client))["players"]["vk"]
+
+    assert (vk["present"], vk["available"], vk["ranges"]) == (2, 1, "2")
+    assert served["refused"] == ruchime_module.PROBE_ATTEMPTS
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,text", REFUSALS)
+async def test_the_quick_report_does_not_take_one_refusal_of_the_host_for_an_unavailable_player(status, text):
+    players = f'<button data-player="vk" onclick="switchSource(\'{VK_URL}\',this)">VK</button>'
+    client = make_client({"video_ext.php": VK_OPEN, "release/test": release_html([1, 2], players)})
+    refuse(client, "video_ext.php", status, text, times=1)
+
+    result = await RuchimeProvider().parse_release("https://1.ruchime.org/release/test", client)
+
+    assert result["players"]["vk"]["available"] is True and result["players"]["vk"]["resolution"] == 1080
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,text", REFUSALS)
+async def test_a_scan_does_not_take_one_refusal_of_the_host_for_a_missing_source(status, text):
+    client = make_client(SURVEY_ROUTES)
+    refuse(client, "id=101&hash", status, text, times=1)
+
+    scanned = await RuchimeProvider().scan_episodes(PAGE, client, {"name": "Тест"})
+
+    assert scanned["videos"][0]["url"] == "https://vk.com/video-1_101"

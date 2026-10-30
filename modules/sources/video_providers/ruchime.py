@@ -24,7 +24,7 @@ import httpx
 from core.reasons import describe, reason
 
 from .base import BaseVideoProvider, StreamUnavailable
-from .players import (PLAYER_ORDER, AllVideoPlayer, PlayerAdapter, PlayerRef, VibixPlayer)
+from .players import (PLAYER_ORDER, AllVideoPlayer, PlayerAdapter, PlayerProbe, PlayerRef, VibixPlayer)
 from .ranges import episode_ranges
 from .ruchime_address import Choice, address_of, choice_of, parse_vibix_link, vibix_link
 from .vibix import (Episode, KeyStore, Stream, VibixProtocolError,
@@ -38,6 +38,9 @@ MAX_CONCURRENT_PROBES = 4
 PAGE_RETRY_ATTEMPTS = 4
 PAGE_INTERVAL_S = 0.6
 PROBE_INTERVAL_S = 0.12
+# One refusal of the host says nothing about the video, so an unsure probe is asked again after a pause.
+PROBE_ATTEMPTS = 2
+UNSURE_PAUSE_S = 3.0
 PAGE_COOLDOWN_S = 60.0
 PAGE_PAUSE_S = 0.05
 RESOLUTION_CEILING = 2160
@@ -224,6 +227,18 @@ class RuchimeProvider(BaseVideoProvider):
                 await asyncio.sleep(delay)
             self._probe_next_at = time.monotonic() + PROBE_INTERVAL_S
 
+    async def _probe_settled(self, adapter: PlayerAdapter, ref: PlayerRef, http: httpx.AsyncClient,
+                             page_url: str) -> PlayerProbe:
+        """Probe a player; an unsure answer is asked again after a pause, since one refusal of the host proves nothing."""
+        for attempt in range(PROBE_ATTEMPTS):
+            if attempt:
+                await asyncio.sleep(UNSURE_PAUSE_S)
+            await self._wait_probe_slot()
+            probe = await adapter.probe(ref, http, page_url)
+            if probe.available or not probe.transient:
+                break
+        return probe
+
     async def _fetch_episode_page(self, http: httpx.AsyncClient, url: str,
                                   headers: dict,
                                   sem: asyncio.Semaphore) -> httpx.Response | None:
@@ -285,8 +300,7 @@ class RuchimeProvider(BaseVideoProvider):
             if ref is not None:
                 info.refs[adapter.name] = ref
         if first_adapter is not None and first_adapter.name in info.refs:
-            await self._wait_probe_slot()
-            probe = await first_adapter.probe(info.refs[first_adapter.name], http, page_url)
+            probe = await self._probe_settled(first_adapter, info.refs[first_adapter.name], http, page_url)
             if probe.available:
                 info.candidates.append((probe.resolution or 0, first_adapter.name,
                                         probe.ref.url))
@@ -312,8 +326,7 @@ class RuchimeProvider(BaseVideoProvider):
         if not targets:
             return
         async def probe_one(item: _Episode):
-            await self._wait_probe_slot()
-            return await adapter.probe(item.refs[adapter.name], http, item.page_url)
+            return await self._probe_settled(adapter, item.refs[adapter.name], http, item.page_url)
 
         probes = await asyncio.gather(*(probe_one(item) for item in targets),
                                       return_exceptions=True)
@@ -743,7 +756,7 @@ class RuchimeProvider(BaseVideoProvider):
             if adapter.series_scope or refs[adapter.name] is None:
                 continue
             adapters.append(adapter)
-            tasks.append(adapter.probe(refs[adapter.name], http, page_url))
+            tasks.append(self._probe_settled(adapter, refs[adapter.name], http, page_url))
         probes = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
         report: dict[str, dict] = {}

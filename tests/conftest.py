@@ -15,6 +15,13 @@ def stuck_test_guard():
 
 
 @pytest.fixture(autouse=True)
+def no_pause_before_a_repeated_probe(monkeypatch):
+    """A probe the host left unsure is asked again after a pause; tests do not wait for it."""
+    from modules.sources.video_providers import ruchime
+    monkeypatch.setattr(ruchime, "UNSURE_PAUSE_S", 0.0)
+
+
+@pytest.fixture(autouse=True)
 def storage_without_leftovers():
     """What a test's stalled storage call still owns must not reach the next test."""
     from core import storage
