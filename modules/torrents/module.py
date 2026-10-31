@@ -62,12 +62,12 @@ import asyncio
 import base64
 import json
 import os
-import time
 
 from core import BaseModule, BusRequestError
 from core import storage
 from core.db import Database
 from core.envelope import Envelope
+from core.retry import UNTIMED, Budget, retrying
 
 from . import pipeline, selection
 from .infohash import (TorrentParseError, infohash_candidates,
@@ -99,6 +99,9 @@ _ERROR_STATES = {
 # осиротевших раздач при краше между add и delete (зомби-безопасность).
 PREVIEW_CATEGORY = "st-naming-preview"
 
+
+# The torrent of a preview is deleted until qBittorrent confirms it gone: the add is asynchronous and can be cancelled.
+PREVIEW_CLEANUP_BUDGET = Budget(attempts=20, pauses=(0.6,), limit_s=UNTIMED)
 
 class TorrentsModule(BaseModule):
     name = "torrents"
@@ -379,30 +382,32 @@ class TorrentsModule(BaseModule):
     async def _preview_poll_files(self, ih: str, *, timeout: float,
                                   poll: float = 0.5) -> list[dict] | None:
         """Поллинг /torrents/files до появления метаданных. None — таймаут."""
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
+        async def look() -> list[dict] | None:
             files = await self.qbt.torrent_files(ih)
-            if files:
-                return [{"path": f.get("name"), "size": f.get("size")}
-                        for f in files]
-            await asyncio.sleep(poll)
-        return None
+            return [{"path": f.get("name"), "size": f.get("size")} for f in files] if files else None
+
+        found, _attempts, _exhausted = await retrying(
+            look, final=lambda got: got is not None,
+            budget=Budget(attempts=int(timeout / poll) + 1, pauses=(poll,), limit_s=timeout))
+        return found
 
     async def _preview_cleanup(self, ih: str) -> None:
         """Уборка preview-раздачи по ИЗВЕСТНОМУ infohash с подтверждением:
         delete повторяется, пока qBit не подтвердит отсутствие (переживает
         асинхронность add и отмену). deleteFiles=true снимает любые частичные
         (контента ≈0 — метаданные приходят до пирсов, но подстраховка)."""
-        for _ in range(20):
+        async def attempt() -> bool | None:
             try:
                 await self.qbt.delete([ih], delete_files=True)
-                if not await self.qbt.torrents_info([ih]):
-                    return
+                return not await self.qbt.torrents_info([ih])
             except QbtError:
-                return  # qBit недоступен — старт-sweep подметёт по категории
-            await asyncio.sleep(0.6)
-        self.log.warning("preview: раздача %s не убралась за отведённое время",
-                         ih[:8])
+                return None  # qBit недоступен — старт-sweep подметёт по категории
+
+        gone, _attempts, _exhausted = await retrying(attempt, final=lambda got: got is not False,
+                                                     budget=PREVIEW_CLEANUP_BUDGET)
+        if gone is False:
+            self.log.warning("preview: раздача %s не убралась за отведённое время",
+                             ih[:8])
 
     async def _preview_save_path_get(self) -> str:
         if self._preview_save_path is None:
@@ -565,20 +570,25 @@ class TorrentsModule(BaseModule):
         запущенным, поэтому его на это время запускаем и сразу возвращаем
         на паузу — то же исключение из инварианта, что и в конвейере."""
         started = False
+
+        async def look() -> bool | None:
+            nonlocal started
+            infos = await self.qbt.torrents_info([qb_hash])
+            info = next((i for i in infos if i.get("hash") == qb_hash), None)
+            if info is None:
+                return False
+            if info.get("total_size", 0) > 0:
+                return True
+            if not started:
+                await self.qbt.resume([qb_hash])
+                started = True
+            return None
+
         try:
-            for _ in range(attempts):
-                infos = await self.qbt.torrents_info([qb_hash])
-                info = next((i for i in infos
-                             if i.get("hash") == qb_hash), None)
-                if info is None:
-                    return False
-                if info.get("total_size", 0) > 0:
-                    return True
-                if not started:
-                    await self.qbt.resume([qb_hash])
-                    started = True
-                await asyncio.sleep(self._pipeline_poll)
-            return False
+            ready, _attempts, _exhausted = await retrying(
+                look, final=lambda got: got is not None,
+                budget=Budget(attempts=attempts, pauses=(self._pipeline_poll,), limit_s=UNTIMED))
+            return bool(ready)
         except QbtError as exc:
             self.log.warning("[%s] ожидание метаданных прервано: %s",
                              qb_hash[:8], exc)

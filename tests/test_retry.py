@@ -8,7 +8,9 @@ from core.retry import UNTIMED, Budget, retrying
 
 ROOT = Path(__file__).resolve().parent.parent
 # Where asking again is decided by `core.retry`; a loop with its own attempts or its own sleep would be a second place.
-GUARDED = ["modules/downloads", "modules/sources/players", "modules/sources/policy.py", "modules/sources/video_providers/ruchime", "modules/sources/video_providers/dunhuatv.py", "modules/sources/video_providers/table.py", "modules/sources/video_providers/views.py"]
+GUARDED = ["modules/downloads", "modules/sources/players", "modules/sources/policy.py", "modules/sources/video_providers/ruchime", "modules/sources/video_providers/dunhuatv.py", "modules/sources/video_providers/table.py", "modules/sources/video_providers/views.py", "modules/torrents/qbt_client.py"]
+# The torrents module also keeps periodic monitors, which wait on a timer by design; only its loops of attempts are guarded.
+LOOP_GUARDED = GUARDED + ["modules/torrents/module.py"]
 
 
 class FakeTime:
@@ -142,7 +144,7 @@ def _sources(entries):
 
 def test_no_module_keeps_a_loop_of_attempts_of_its_own():
     own_loop = re.compile(r"for\s+\w+\s+in\s+range\(.*(?:ATTEMPT|attempt|RETRIES|retries)")
-    found = [f"{path.relative_to(ROOT)}:{number}" for path in _sources(GUARDED)
+    found = [f"{path.relative_to(ROOT)}:{number}" for path in _sources(LOOP_GUARDED)
              for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1) if own_loop.search(line)]
 
     assert found == []

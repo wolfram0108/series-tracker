@@ -4,8 +4,7 @@
 - сессия эфемерна: логин при старте, на 403 — тихий релогин и повтор
   сорванной операции; SID нигде не персистится (Р-3);
 - 404 = ресурса нет: возвращается None, без ретраев;
-- таймаут long-poll `sync/maindata` — норма, не ретраить;
-- прочие сетевые ошибки — ретраи с паузой;
+- прочие сетевые ошибки — ретраи с паузой по бюджету `core.retry`;
 - у каждого вызова жёсткий таймаут (находка №7: ничто не виснет вечно).
 
 Известная грабля совместимости: в qBittorrent 5.x параметр добавления
@@ -13,12 +12,12 @@
 """
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Optional
 
 import httpx
 
 from core.logging import get_logger
+from core.retry import UNTIMED, Budget, retrying
 
 
 class QbtError(RuntimeError):
@@ -76,44 +75,42 @@ class QbtClient:
         self.log.info("сессия qBittorrent установлена (WebAPI %s)", api)
 
     async def _request(self, method: str, path: str, *,
-                       no_retry_on_timeout: bool = False,
                        conflict_ok: bool = False,
                        timeout: Optional[float] = None,
                        **kwargs: Any) -> Optional[httpx.Response]:
         """Запрос с политиками 403/404/409/таймаут. None — только для 404."""
-        last_error: Exception | None = None
-        for attempt in range(1, self._retries + 1):
+        async def send() -> httpx.Response | httpx.HTTPError:
             try:
-                resp = await self._http.request(
+                return await self._http.request(
                     method, path,
                     timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
                     **kwargs)
-            except httpx.TimeoutException as exc:
-                if no_retry_on_timeout:
-                    return None  # long-poll: тишина — это норма
-                last_error = exc
-                self.log.warning("таймаут %s %s (попытка %d/%d)",
-                                 method, path, attempt, self._retries)
             except httpx.HTTPError as exc:
-                last_error = exc
-                self.log.warning("ошибка %s %s (попытка %d/%d): %s",
-                                 method, path, attempt, self._retries, exc)
-            else:
-                if resp.status_code == 403:
-                    # Сессия протухла — тихий релогин и повтор операции (Р-3).
-                    self.log.info("403 от qBittorrent — обновляю сессию")
-                    await self.login()
-                    continue
-                if resp.status_code == 404:
-                    return None
-                if resp.status_code == 409 and conflict_ok:
-                    return resp  # осмысленный ответ «уже существует» (5.x)
-                resp.raise_for_status()
-                return resp
-            if attempt < self._retries:
-                await asyncio.sleep(self._retry_delay)
-        raise QbtError(f"{method} {path}: не удалось за {self._retries} "
-                       f"попыток ({last_error})")
+                return exc
+
+        async def ask() -> httpx.Response | httpx.HTTPError:
+            got = await send()
+            if isinstance(got, httpx.Response) and got.status_code == 403:
+                # Сессия протухла — тихий релогин и повтор операции (Р-3).
+                self.log.info("403 от qBittorrent — обновляю сессию")
+                await self.login()
+                got = await send()
+            return got
+
+        result, _attempts, _exhausted = await retrying(
+            ask, final=lambda got: isinstance(got, httpx.Response),
+            budget=Budget(attempts=self._retries, pauses=(self._retry_delay,), limit_s=UNTIMED),
+            on_retry=lambda got, attempt, _pause: self.log.warning(
+                "ошибка %s %s (попытка %d/%d): %s", method, path, attempt, self._retries, got))
+        if not isinstance(result, httpx.Response):
+            raise QbtError(f"{method} {path}: не удалось за {self._retries} "
+                           f"попыток ({result})")
+        if result.status_code == 404:
+            return None
+        if result.status_code == 409 and conflict_ok:
+            return result  # осмысленный ответ «уже существует» (5.x)
+        result.raise_for_status()
+        return result
 
     # --- операции ---------------------------------------------------------------
 
@@ -179,13 +176,14 @@ class QbtClient:
         Несколько коротких попыток: торрент появляется в списке почти
         мгновенно, но «почти» — не «строго до ответа API».
         """
-        for _ in range(attempts):
+        async def look() -> Optional[str]:
             known = {t["hash"] for t in await self.torrents_info(candidates)}
-            for candidate in candidates:
-                if candidate in known:
-                    return candidate
-            await asyncio.sleep(delay)
-        return None
+            return next((candidate for candidate in candidates if candidate in known), None)
+
+        found, _attempts, _exhausted = await retrying(
+            look, final=lambda hit: hit is not None,
+            budget=Budget(attempts=attempts, pauses=(delay,), limit_s=UNTIMED))
+        return found
 
     async def torrent_files(self, torrent_hash: str) -> Optional[list[dict]]:
         resp = await self._request("GET", "/api/v2/torrents/files",
@@ -228,9 +226,3 @@ class QbtClient:
     async def set_location(self, torrent_hash: str, location: str) -> None:
         await self._request("POST", "/api/v2/torrents/setLocation",
                             data={"hashes": torrent_hash, "location": location})
-
-    async def sync_maindata(self, rid: int) -> Optional[dict]:
-        resp = await self._request("GET", "/api/v2/sync/maindata",
-                                   params={"rid": rid}, timeout=35.0,
-                                   no_retry_on_timeout=True)
-        return resp.json() if resp else None
