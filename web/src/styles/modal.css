@@ -32,12 +32,15 @@
 
 /* Шапка: заголовок | вкладки (растягиваются) | крестик */
 .modern-header {
+  --header-gap: clamp(0.5rem, 4vw, 1.25rem);
+  --tabs-min: 5rem;
+  --close-size: 36px;
   background: var(--bg-light);
   border-bottom: 1px solid var(--border-color);
   padding: 12px clamp(0.75rem, 5vw, 1.5rem);
   display: flex;
   align-items: center;
-  gap: clamp(0.5rem, 4vw, 1.25rem);
+  gap: var(--header-gap);
 }
 .modern-header .modal-title {
   margin: 0;
@@ -48,8 +51,14 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  /* the tabs (shrink 100) give way first; a title that still does not fit wraps, the close button stays in sight */
+  /* a title that does not fit wraps, the close button stays in sight */
   flex-shrink: 1; min-width: 0; overflow-wrap: anywhere;
+}
+/* With tabs the title keeps its own width (a fractional shrink would wrap it whole) and wraps only when even the tabs
+   at their least and the close button leave it less than that. */
+.modern-header:has(.header-tabs) .modal-title {
+  flex-shrink: 0;
+  max-width: calc(100% - var(--tabs-min) - var(--close-size) - 2 * var(--header-gap));
 }
 /* контейнер вкладок — по содержимому (облегает остров), сжимается при
    нехватке места. БЕЗ container-type: он ломает «размер по содержимому»
@@ -58,7 +67,7 @@
 
 .modern-close {
   flex-shrink: 0; margin-left: auto; /* прижать к правому краю шапки */
-  width: 36px; height: 36px;
+  width: var(--close-size); height: var(--close-size);
   padding: 8px; border: none; background: transparent; cursor: pointer;
   border-radius: 8px; color: var(--text-muted);
   display: inline-flex; align-items: center; justify-content: center;
@@ -113,7 +122,7 @@
 .modern-header.tabs-icons .st-tab .tab-label { max-width: 0; opacity: 0; margin-left: -8px; }
 .modern-header.tabs-measuring .st-tab .tab-label { transition: none; }
 /* Even icons may not fit: the strip scrolls so that it never pushes the close button out. */
-.modern-header .st-tabs { overflow-x: auto; scrollbar-width: none; min-width: 5rem; }
+.modern-header .st-tabs { overflow-x: auto; scrollbar-width: none; min-width: var(--tabs-min); }
 .modern-header .st-tabs::-webkit-scrollbar { display: none; }
 
 /* Тело */

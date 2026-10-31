@@ -114,7 +114,7 @@ const scanTime = computed(() => {
         <span class="series-id unified-text-bg">#{{ series.id }}</span>
         <h3 class="series-title unified-text-bg">{{ series.name }}</h3>
       </div>
-      <div style="display: flex; align-items: center; gap: 8px">
+      <div class="card-meta">
         <span class="series-site unified-text-bg">{{ series.site }}</span>
         <div class="auto-scan-switch unified-text-bg">
           <span>Готовность</span>
