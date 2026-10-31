@@ -48,6 +48,20 @@ describe("sourceRows", () => {
     expect(row(rows, "allvideo")).toMatchObject({ state: "available", count: 14, groups: [{ label: "720p", ranges: "1-14" }] })
   })
 
+  it("names the episodes a player shows but does not give apart from those whose answer was not obtained", () => {
+    const given: SourcesCoverage = {
+      players: {
+        vk: { present: 20, available: 15, count: 15, ranges: "1-12, 15-17", resolutions: [], unavailable: { count: 2, ranges: "13, 20" },
+              not_obtained: { count: 3, ranges: "14, 18-19" } },
+        allvideo: { present: 14, available: 14, count: 14, ranges: "1-14", resolutions: [], unavailable: { count: 0, ranges: "" },
+                    not_obtained: { count: 0, ranges: "" } },
+      },
+    }
+    const rows = sourceRows(state({ coverage: given }))
+    expect(row(rows, "vk").gaps).toEqual([{ kind: "unavailable", ranges: "13, 20" }, { kind: "notObtained", ranges: "14, 18-19" }])
+    expect(row(rows, "allvideo").gaps).toEqual([])
+  })
+
   it("lets the catalog arrive before the episodes are read", () => {
     const rows = sourceRows(state({ layout: catalog(`${PAGE}?vibix=2`), coverage: null, coverageLoading: true }))
     expect(row(rows, "vk").state).toBe("reading")

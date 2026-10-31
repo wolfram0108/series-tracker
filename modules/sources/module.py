@@ -11,9 +11,11 @@ Queries:
   sources.video.layout {url}     → {sources, selected_source, reason} — the sources of a release that a
                                    provider describes apart from the parse because reading them is slow
                                    (`has_layout` in the parse reply tells whether to ask)
-  sources.video.coverage {url}   → {players, reason} — what each page player gives, episode by episode, with
-                                   the resolution of each grouped by ranges; slow, progress goes out as the
-                                   event sources.coverage.progress {url, current, total, phase, active}
+  sources.video.coverage {url}   → {players, reason} — what each page player gives, episode by episode: the
+                                   resolution of each grouped by ranges, the episodes it shows but does not
+                                   play (`unavailable`) and those whose answer was not obtained (`not_obtained`);
+                                   slow, progress goes out as the event
+                                   sources.coverage.progress {url, current, total, phase, active}
 
 Доставка — ТОЛЬКО через `delivery.Delivery` (единственный выход
 наружу): она перебирает хосты-кандидаты (канонический хост ссылки →

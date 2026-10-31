@@ -21,6 +21,8 @@ export const ru = {
   "add.sources.reading": "читается",
   "add.sources.progress": "{current} из {total}",
   "add.sources.count": "{count} сер.",
+  "add.sources.gap.unavailable": "Недоступно",
+  "add.sources.gap.notObtained": "Не получено",
   "add.sources.off": "отключён",
   "add.sources.readingCatalog": "читается каталог",
   "add.sources.choose": "требуется выбор",

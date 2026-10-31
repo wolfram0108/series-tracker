@@ -1608,6 +1608,24 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * EpisodeSpan
+         * @description Episodes as a count and ranges, e.g. "1-10, 13".
+         */
+        EpisodeSpan: {
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /**
+             * Ranges
+             * @default
+             */
+            ranges: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * ErrorOnly
          * @description Тело ошибки вида {error: ...} (без success) — для документации.
          */
@@ -1709,7 +1727,8 @@ export interface components {
         };
         /**
          * PlayerCoverage
-         * @description What one page player gives: episodes that show it, episodes it plays, and their resolution by ranges.
+         * @description What one page player gives: episodes that show it, episodes it plays with their resolution by ranges, episodes it
+         *     shows but does not play, and episodes whose answer was not obtained.
          */
         PlayerCoverage: {
             /** Present */
@@ -1725,6 +1744,20 @@ export interface components {
              * @default []
              */
             resolutions: components["schemas"]["ResolutionGroup"][];
+            /**
+             * @default {
+             *       "count": 0,
+             *       "ranges": ""
+             *     }
+             */
+            unavailable: components["schemas"]["EpisodeSpan"];
+            /**
+             * @default {
+             *       "count": 0,
+             *       "ranges": ""
+             *     }
+             */
+            not_obtained: components["schemas"]["EpisodeSpan"];
         } & {
             [key: string]: unknown;
         };

@@ -73,8 +73,14 @@ def availability_report(rows: Sequence[Row], players: Sequence[Player], off: fro
     }
 
 
+def _span(numbers: Iterable[int]) -> dict:
+    ordered = sorted(set(numbers))
+    return {"count": len(ordered), "ranges": episode_ranges(ordered)}
+
+
 def coverage(rows: Sequence[Row], players: Sequence[Player]) -> dict[str, dict]:
-    """Per player: episodes that show it, episodes it plays, and their resolution grouped by ranges."""
+    """Per player: episodes that show it, episodes it plays with their resolution grouped by ranges, episodes it shows
+    but does not play, and episodes whose answer stayed unsure to the end ("not obtained" is not "no")."""
     result: dict[str, dict] = {}
     for adapter in players:
         by_resolution: dict[int, set[int]] = {}
@@ -83,12 +89,17 @@ def coverage(rows: Sequence[Row], players: Sequence[Player]) -> dict[str, dict]:
                 if source == adapter.name:
                     by_resolution.setdefault(resolution, set()).add(row.number)
         numbers = sorted(set().union(*by_resolution.values())) if by_resolution else []
+        shown = [row for row in rows if adapter.name in row.refs]
+        unsure = [row.number for row in shown if row.cells.get(adapter.name) is None or row.cells[adapter.name].not_obtained]
+        closed = [row.number for row in shown if row.number not in numbers and row.number not in unsure]
         result[adapter.name] = {
-            "present": sum(1 for row in rows if adapter.name in row.refs),
+            "present": len(shown),
             "available": len(numbers), "count": len(numbers), "ranges": episode_ranges(numbers),
             "resolutions": [{"resolution": height, "ranges": episode_ranges(by_resolution[height]),
                              "count": len(by_resolution[height])}
                             for height in sorted(by_resolution, reverse=True)],
+            "unavailable": _span(closed),
+            "not_obtained": _span(unsure),
         }
     return result
 

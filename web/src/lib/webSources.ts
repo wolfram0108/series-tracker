@@ -32,12 +32,21 @@ export interface SourcesLayout {
   reason?: string
 }
 
+export interface EpisodeSpan {
+  count: number
+  ranges: string
+}
+
 export interface PlayerCoverage {
   present: number
   available: number
   count: number
   ranges: string
   resolutions?: ResolutionGroup[]
+  /** Episodes the player shows but does not play. */
+  unavailable?: EpisodeSpan
+  /** Episodes whose answer stayed unsure to the end: not the same as "no". */
+  not_obtained?: EpisodeSpan
 }
 
 /** What the players of a page really give, read from every episode. */
@@ -63,6 +72,13 @@ export interface SeasonOption {
   count: number
 }
 
+export type GapKind = "unavailable" | "notObtained"
+
+export interface SourceGap {
+  kind: GapKind
+  ranges: string
+}
+
 export interface SourceRow {
   key: SourceKey
   enabled: boolean
@@ -73,12 +89,21 @@ export interface SourceRow {
   count: number | null
   /** Resolution of the episodes, grouped by ranges. */
   groups: { label: string; ranges: string }[]
+  /** Episodes the player shows but does not give, and those whose answer was not obtained, each as ranges. */
+  gaps: SourceGap[]
   seasons: SeasonOption[]
   selected: string
 }
 
 const groupsOf = (resolutions: ResolutionGroup[] | undefined) =>
   (resolutions ?? []).map((g) => ({ label: `${g.resolution}p`, ranges: g.ranges }))
+
+function gapsOf(given: PlayerCoverage): SourceGap[] {
+  const gaps: SourceGap[] = []
+  if (given.unavailable?.count) gaps.push({ kind: "unavailable", ranges: given.unavailable.ranges })
+  if (given.not_obtained?.count) gaps.push({ kind: "notObtained", ranges: given.not_obtained.ranges })
+  return gaps
+}
 
 function reasonCode(reason: string | undefined): string {
   try {
@@ -103,8 +128,8 @@ function pageRow(row: SourceRow, report: PlayerReport, state: SourcesState): Sou
   const given = state.coverage?.players[row.key]
   if (given) {
     if (given.present === 0) return { ...row, state: "absent" }
-    if (given.count === 0) return { ...row, state: "unavailable" }
-    return { ...row, state: "available", count: given.count, groups: groupsOf(given.resolutions) }
+    if (given.count === 0) return { ...row, state: "unavailable", gaps: gapsOf(given) }
+    return { ...row, state: "available", count: given.count, groups: groupsOf(given.resolutions), gaps: gapsOf(given) }
   }
   if (!report.present) return { ...row, state: "absent" }
   return { ...row, state: report.available === true ? "available" : report.available === false ? "unavailable" : "pending" }
@@ -114,7 +139,7 @@ export function sourceRows(state: SourcesState): SourceRow[] {
   return SOURCE_ORDER.filter((key) => key in state.players).map((key) => {
     const report = state.players[key]
     const enabled = report.enabled !== false
-    const row: SourceRow = { key, enabled, toggle: report.toggle ?? "", state: "pending", count: null, groups: [], seasons: [], selected: "" }
+    const row: SourceRow = { key, enabled, toggle: report.toggle ?? "", state: "pending", count: null, groups: [], gaps: [], seasons: [], selected: "" }
     if (!enabled) return { ...row, state: "off" }
     return key === "vibix" ? vibixRow(row, state.layout, state.layoutLoading) : pageRow(row, report, state)
   })

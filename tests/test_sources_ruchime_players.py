@@ -804,6 +804,19 @@ async def test_coverage_counts_only_the_episodes_a_player_really_plays():
 
 
 @pytest.mark.asyncio
+async def test_coverage_names_the_episodes_a_player_shows_but_does_not_play_apart_from_those_not_obtained():
+    client = make_client({
+        "episode-1": player_page(vk=101), "episode-2": player_page(vk=102), "episode-3": player_page(vk=103),
+        "id=101&hash": VK_OPEN, "id=102&hash": VK_CLOSED, "id=103&hash": VK_OPEN, "release/test": release_html([1, 2, 3]),
+    })
+
+    vk = (await RuchimeProvider().coverage("https://1.ruchime.org/release/test", client))["players"]["vk"]
+
+    assert (vk["present"], vk["ranges"]) == (3, "1, 3")
+    assert vk["unavailable"] == {"count": 1, "ranges": "2"} and vk["not_obtained"] == {"count": 0, "ranges": ""}
+
+
+@pytest.mark.asyncio
 async def test_coverage_logs_why_a_player_does_not_play(caplog):
     provider = RuchimeProvider()
     client = make_client({
@@ -981,6 +994,7 @@ async def test_a_refusal_that_does_not_go_away_is_asked_again_only_as_often_as_a
 
     assert (vk["present"], vk["available"], vk["ranges"]) == (2, 1, "2")
     assert served["refused"] == policy.DEFAULT.attempts
+    assert vk["not_obtained"] == {"count": 1, "ranges": "1"} and vk["unavailable"] == {"count": 0, "ranges": ""}
 
 
 @pytest.mark.asyncio

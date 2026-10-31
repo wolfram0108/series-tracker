@@ -253,7 +253,8 @@ async def test_the_coverage_of_a_web_release_passes_through(system):
 
         async def coverage(self, url, http, progress=None):
             return {"players": {"vk": {"present": 3, "available": 2, "count": 2, "ranges": "1-2",
-                                       "resolutions": [{"resolution": 1080, "ranges": "1-2", "count": 2}]}},
+                                       "resolutions": [{"resolution": 1080, "ranges": "1-2", "count": 2}],
+                                       "unavailable": {"count": 1, "ranges": "3"}}},
                     "reason": ""}
 
     site = Site()
@@ -263,7 +264,9 @@ async def test_the_coverage_of_a_web_release_passes_through(system):
     finally:
         registry._providers.remove(site)
     assert body["players"]["vk"] == {"present": 3, "available": 2, "count": 2, "ranges": "1-2",
-                                     "resolutions": [{"resolution": 1080, "ranges": "1-2", "count": 2}]}
+                                     "resolutions": [{"resolution": 1080, "ranges": "1-2", "count": 2}],
+                                     "unavailable": {"count": 1, "ranges": "3"},
+                                     "not_obtained": {"count": 0, "ranges": ""}}
     assert body["reason"] == ""
 
 

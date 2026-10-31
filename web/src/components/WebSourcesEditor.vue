@@ -64,6 +64,11 @@ function toggle(event: Event, row: SourceRow) {
           <b>{{ group.label }}</b><span>{{ group.ranges }}</span>
         </span>
       </div>
+      <div v-if="row.gaps.length" class="player-report source-resolution">
+        <span v-for="gap in row.gaps" :key="gap.kind" class="player-report-item" :class="`is-${gap.kind}`">
+          <b>{{ t(`add.sources.gap.${gap.kind}`) }}</b><span>{{ gap.ranges }}</span>
+        </span>
+      </div>
     </div>
     <div v-if="progress" class="scan-progress">{{ t("add.sources.progress", progress) }}</div>
   </div>
@@ -88,6 +93,8 @@ function toggle(event: Event, row: SourceRow) {
 .source-field { display: flex; flex-direction: column; gap: 6px; }
 .source-field-label { font-size: 0.85rem; font-weight: 500; color: var(--color-gray-600); }
 .source-resolution { margin-top: 0; }
+.player-report-item.is-unavailable span { color: #b02a37; }
+.player-report-item.is-notObtained span { color: #8a6500; }
 .spin {
   width: 11px; height: 11px; border: 2px solid currentColor; border-right-color: transparent;
   border-radius: 50%; animation: spin 0.8s linear infinite;

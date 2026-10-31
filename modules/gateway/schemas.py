@@ -103,13 +103,22 @@ class ResolutionGroup(ApiModel):
     count: int
 
 
+class EpisodeSpan(ApiModel):
+    """Episodes as a count and ranges, e.g. "1-10, 13"."""
+    count: int = 0
+    ranges: str = ""
+
+
 class PlayerCoverage(ApiModel):
-    """What one page player gives: episodes that show it, episodes it plays, and their resolution by ranges."""
+    """What one page player gives: episodes that show it, episodes it plays with their resolution by ranges, episodes it
+    shows but does not play, and episodes whose answer was not obtained."""
     present: int
     available: int
     count: int
     ranges: str
     resolutions: list[ResolutionGroup] = []
+    unavailable: EpisodeSpan = EpisodeSpan()
+    not_obtained: EpisodeSpan = EpisodeSpan()
 
 
 class WebVideoCoverage(ApiModel):
