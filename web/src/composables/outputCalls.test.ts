@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const client = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() }))
 vi.mock("../api/client", () => ({ api: client }))
 
-import { fetchComposition, fetchOutput, resetLever, setLever } from "./outputCalls"
+import { fetchComposition, fetchOutput, resetLever, setLever, syncSeries } from "./outputCalls"
 
 beforeEach(() => Object.values(client).forEach((fn) => fn.mockReset()))
 
@@ -33,6 +33,12 @@ describe("the calls to the output of the core", () => {
     client.POST.mockResolvedValueOnce({ data: { success: true } })
     expect(await resetLever(1, body)).toEqual({ ok: true, data: { success: true } })
     expect(client.POST).toHaveBeenCalledWith("/api/series/{series_id}/output/settings/reset", { params: { path: { series_id: 1 } }, body })
+  })
+
+  it("asks for a pass over the series by its path", async () => {
+    client.POST.mockResolvedValueOnce({ data: { success: true } })
+    expect(await syncSeries(1)).toEqual({ ok: true, data: { success: true } })
+    expect(client.POST).toHaveBeenCalledWith("/api/series/{series_id}/scan", { params: { path: { series_id: 1 } } })
   })
 
   it("says only that the action was refused when the refusal has no words", async () => {

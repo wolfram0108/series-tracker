@@ -61,6 +61,7 @@ beforeEach(() => {
   vi.mocked(calls.fetchOutput).mockReset().mockResolvedValue(ok([reference()]))
   vi.mocked(calls.setLever).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.resetLever).mockReset().mockResolvedValue(ok({ success: true }))
+  vi.mocked(calls.syncSeries).mockReset().mockResolvedValue(ok({ success: true }))
 })
 
 afterEach(() => mounted.splice(0).forEach((wrapper) => wrapper.unmount()))
@@ -210,6 +211,27 @@ describe("useSeriesOutput", () => {
     expect(await output.reset({ season: 9 })).toBe("Уровень не найден")
     expect(output.failure.value).toBe("Уровень не найден")
     expect(calls.fetchComposition).toHaveBeenCalledTimes(1)
+  })
+
+  it("holds busy while a lever is on its way and syncing while a pass runs, and words a refused pass", async () => {
+    let finish!: (value: Answer<unknown>) => void
+    vi.mocked(calls.setLever).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    const output = setup()
+    await flushPromises()
+    const pending = output.set({ season: 1 }, LEVER.take, groupTarget("Ruchime"), false)
+    expect(output.busy.value).toBe(true)
+    expect(output.syncing.value).toBe(false)
+    finish(ok({ success: true }))
+    await pending
+    expect(output.busy.value).toBe(false)
+
+    vi.mocked(calls.syncSeries).mockResolvedValueOnce({ ok: false, text: "Проход уже идёт" })
+    const failed = output.sync()
+    expect(output.syncing.value).toBe(true)
+    expect(await failed).toBe("Проход уже идёт")
+    expect(output.syncing.value).toBe(false)
+    expect(output.failure.value).toBe("Проход уже идёт")
+    expect(calls.syncSeries).toHaveBeenCalledWith(1)
   })
 
   it("reads the output again when the connection comes back", async () => {

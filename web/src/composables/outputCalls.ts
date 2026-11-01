@@ -19,6 +19,11 @@ export function fetchOutput(seriesId: number): Promise<Answer<Reference[]>> {
   return call(() => api.GET("/api/series/{series_id}/output", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
 }
 
+/** A pass over the series now; the core answers when the pass is over, and what it changed comes as events. */
+export function syncSeries(seriesId: number): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/series/{series_id}/scan", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
+}
+
 export function setLever(seriesId: number, body: Schemas["OutputSettingsSet"]): Promise<Answer<unknown>> {
   return call(() => api.PUT("/api/series/{series_id}/output/settings", {
     params: { path: { series_id: seriesId } }, body,

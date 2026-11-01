@@ -1,8 +1,8 @@
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onMounted, ref, watch, type Ref } from "vue"
 import { bySeason, joinEpisodes, resetBody, setBody, type Reference, type Scope } from "../lib/output"
 import { useCompositionStore, type ReferencePacket } from "../stores/composition"
 import { useVoicesStore } from "../stores/voices"
-import { fetchComposition, fetchOutput, resetLever, setLever, type Composition } from "./outputCalls"
+import { fetchComposition, fetchOutput, resetLever, setLever, syncSeries, type Composition } from "./outputCalls"
 import type { Answer } from "./sourceCalls"
 import { useSSE } from "./useSSE"
 
@@ -31,6 +31,9 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const references = ref<Reference[]>([])
   const loading = ref(false)
   const failure = ref<string | null>(null)
+  // A lever is on its way to the core / a pass over the series is running: the controls that start them wait.
+  const busy = ref(false)
+  const syncing = ref(false)
 
   const views = computed(() => joinEpisodes(
     composition.value?.rows ?? [],
@@ -64,20 +67,27 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   }
 
   // A refusal stays in `failure` until the next action; the words are also returned for the caller.
-  async function act(send: () => Promise<Answer<unknown>>): Promise<string | null> {
+  async function act(send: () => Promise<Answer<unknown>>, flag: Ref<boolean>): Promise<string | null> {
     failure.value = null
-    const answer = await send()
-    if (answer.ok) return null
-    failure.value = answer.text
-    return answer.text
+    flag.value = true
+    try {
+      const answer = await send()
+      if (answer.ok) return null
+      failure.value = answer.text
+      return answer.text
+    } finally {
+      flag.value = false
+    }
   }
 
   // The new layout comes back as an event, so nothing is read here after an accepted change.
   const set = (scope: Scope, lever: string, target: string | null, value: unknown): Promise<string | null> =>
-    act(() => setLever(seriesId, setBody(scope, lever, target, value)))
+    act(() => setLever(seriesId, setBody(scope, lever, target, value)), busy)
 
   const reset = (scope: Scope, lever?: string, target?: string | null): Promise<string | null> =>
-    act(() => resetLever(seriesId, resetBody(scope, lever, target)))
+    act(() => resetLever(seriesId, resetBody(scope, lever, target)), busy)
+
+  const sync = (): Promise<string | null> => act(() => syncSeries(seriesId), syncing)
 
   if (kind === "video") {
     onMounted(() => void load())
@@ -97,5 +107,5 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     })
   }
 
-  return { composition, references, loading, failure, views, levels, sources, seasons, load, set, reset }
+  return { composition, references, loading, failure, busy, syncing, views, levels, sources, seasons, load, set, reset, sync }
 }
