@@ -17,6 +17,22 @@ Queries:
                                    slow, progress goes out as the event
                                    sources.coverage.progress {url, current, total, phase, active}
 
+Tables of site pages (the one way to read a site page; sites are registered in `sites`, the core is `table.py`):
+  sources.table.get {url}        → TableGetReply {state: ready | reading | failed, table?, reason?}. A complete
+                                   table younger than an hour is `ready`. Otherwise the page is read — by one
+                                   task however many ask — and the reply is `reading` at once, with the last
+                                   complete table when there is one; the end comes as the events below.
+                                   `failed` in the reply means no read began (`site_not_found`: no site for the
+                                   address). The key of a table is the canonical address its site gives.
+  sources.table.read {url}       command: read the page now, term or not, unless a read of it is going
+Events (owner: sources):
+  sources.table.progress {url, phase, current, total}   how far a read is
+  sources.table.ready {url, read_at}                    a complete table is stored and served
+  sources.table.failed {url, reason}                    the read failed; the last complete table still serves
+A failed read is not retried by itself and a consumer does not ask again on `failed`: the next request after a
+failure begins a new read. Only a complete table is ever published. A stop in the middle of a read is no verdict:
+the state `reading` is stored and `on_start` begins the read again.
+
 Доставка — ТОЛЬКО через `delivery.Delivery` (единственный выход
 наружу): она перебирает хосты-кандидаты (канонический хост ссылки →
 зеркала трекера → хост как написан) и проверяет, что приехало ожидаемое.
@@ -35,6 +51,8 @@ import asyncio
 import base64
 import os
 import time
+from datetime import datetime
+from typing import Callable, Iterable
 from urllib.parse import urldefrag
 
 import httpx
@@ -42,7 +60,7 @@ from pydantic import ValidationError
 
 from core import BaseModule, ids
 from core import storage
-from core.contracts import Release
+from core.contracts import Release, TableGetRequest
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
@@ -51,6 +69,8 @@ from . import anilibria, delivery, parsers, vk
 from .delivery import Delivery
 from .parsers import SourceParseError
 from .repository import SourcesRepository
+from .sites import Site, SiteRegistry
+from .table import READ_SAFEGUARD_S, TableReader, utc_now
 from .video_providers import (StreamUnavailable, VideoProviderRegistry,
                               get_default_registry)
 
@@ -68,19 +88,29 @@ class SourcesModule(BaseModule):
 
     def __init__(self, bus, db: Database, *,
                  torrent_cache_dir: str = "torrent_cache",
-                 vk_page_interval: float = 1.0) -> None:
+                 vk_page_interval: float = 1.0,
+                 sites: Iterable[Site] = (),
+                 table_clock: Callable[[], datetime] = utc_now,
+                 table_safeguard_s: float = READ_SAFEGUARD_S) -> None:
         self.repo = SourcesRepository(db)
         self._cache_dir = torrent_cache_dir
         self.vk_page_interval = vk_page_interval
         self._locks: dict[str, asyncio.Lock] = {}
         self._last_request: dict[str, float] = {}
-        self.video_registry = get_default_registry()
-        self.video_registry.configure(
+        wiring = dict(
             browser_getter=self._ensure_browser,
             key_path=os.path.abspath(os.path.join(torrent_cache_dir,
                                                   "vibix-key.json")),
             manifest_dir=os.path.abspath(os.path.join(torrent_cache_dir,
                                                       "manifests")))
+        self.video_registry = get_default_registry()
+        self.video_registry.configure(**wiring)
+        # The sites belong to this instance, not to the process: a site is added by registering it here.
+        self.sites = SiteRegistry(sites)
+        self.sites.configure(**wiring)
+        self.tables = TableReader(
+            self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
+            clock=table_clock, safeguard_s=table_safeguard_s)
         super().__init__(bus)
         # Late binding on purpose: tests replace the transport, not the bus.
         self._delivery = Delivery(
@@ -103,6 +133,8 @@ class SourcesModule(BaseModule):
         self.handle("sources.video.coverage", self.on_video_coverage)
         self.handle("sources.video.stream", self.on_video_stream)
         self.handle("sources.provider.info", self.on_provider_info)
+        self.handle("sources.table.get", self.on_table_get)
+        self.handle("sources.table.read", self.on_table_read)
 
     async def on_start(self) -> None:
         self._http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
@@ -111,8 +143,14 @@ class SourcesModule(BaseModule):
         # запускается (находка 14: один браузер на модуль, а не на скан).
         self._pw = None
         self._browser = None
+        try:
+            await self.tables.resume()
+        except Exception:  # noqa: BLE001 — the other duties of the module do not wait for the table reads
+            # Consumers ask for their tables again when they start; a page left marked "reading" is read at the next ask.
+            self.log.exception("reads of tables interrupted by a stop were not resumed")
 
     async def on_stop(self) -> None:
+        await self.tables.close()
         await self._http.aclose()
         if self._browser is not None:
             await self._browser.close()
@@ -457,6 +495,14 @@ class SourcesModule(BaseModule):
                 self.publish_event("sources.coverage.progress", {
                     "url": key, "current": 0, "total": 0, "phase": "done", "active": False})
         return reply or {"players": {}, "reason": ""}
+
+    async def on_table_get(self, env: Envelope) -> dict:
+        """payload: {url}; reply: TableGetReply. Never waits for a read: the end of it comes as an event."""
+        reply = await self.tables.get(TableGetRequest.model_validate(env.payload).url)
+        return reply.model_dump(mode="json")
+
+    async def on_table_read(self, env: Envelope) -> None:
+        await self.tables.read(TableGetRequest.model_validate(env.payload).url)
 
     async def on_provider_info(self, env: Envelope) -> dict:
         """payload: {url}; reply: {provider: name | None, voices: bool}. No network: what the
