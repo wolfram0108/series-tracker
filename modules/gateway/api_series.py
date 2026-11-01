@@ -105,7 +105,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def active_torrents():
         """Прогресс торрент-загрузок с именами серий (таблица
         «Мониторинг» вкладки агентов; Р-23 — исправление маппинга
-        блока 2: источник download_tasks, не очередь конвейера)."""
+        блока 2: источник — torrent_progress модуля torrents, не очередь конвейера)."""
         try:
             reply = await gw.request("torrents.db.progress.list", {},
                                      timeout=10)

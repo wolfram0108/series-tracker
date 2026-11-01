@@ -504,9 +504,8 @@ async def test_sim_F7_path_unavailable_no_false_missing(system, tmp_path):
         conn.execute("INSERT INTO torrent_files (torrent_db_id, original_path,"
                      " renamed_path, status) VALUES (?, 'o.mkv', "
                      "'Season 01/s01e01.mkv','renamed')", (tid,))
-        conn.execute("INSERT INTO download_tasks (task_key, series_id, "
-                     "task_type, status, progress) VALUES "
-                     "('hf7',1,'torrent','uploading',100)")
+        conn.execute("INSERT INTO torrent_progress (qb_hash, series_id, "
+                     "status, progress) VALUES ('hf7', 1, 'uploading', 100)")
         conn.commit()
     qbt.torrents["hf7"] = {"state": "uploading", "total_size": 9,
                            "progress": 1.0}
@@ -601,8 +600,8 @@ async def test_monitor_progress_and_contribution(system):
 
     def _progress_row():
         with sqlite3.connect(db_path) as conn:
-            return conn.execute("SELECT progress, status FROM download_tasks "
-                                "WHERE task_key='h5'").fetchone()
+            return conn.execute("SELECT progress, status FROM torrent_progress "
+                                "WHERE qb_hash='h5'").fetchone()
 
     assert await _wait(lambda: _progress_row() == (40, "downloading"))
     qbt.torrents["h5"].update(progress=1.0, state="uploading")
@@ -619,6 +618,62 @@ async def test_monitor_progress_and_contribution(system):
             break
         await asyncio.sleep(0.02)
     assert flags["ready"] is True and flags["downloading"] is False
+
+
+@pytest.mark.asyncio
+async def test_progress_lives_in_the_table_of_torrents_and_downloads_never_sees_it(system):
+    """One row per infohash in torrent_progress, announced to the interface; download_tasks of downloads stays empty."""
+    bus, qbt, _, probe, db_path = system
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, is_active, qb_hash) "
+                     "VALUES (1, 't5', 'l', 1, 'h5')")
+        conn.commit()
+    qbt.torrents["h5"] = {"state": "downloading", "progress": 0.4, "dlspeed": 1000, "eta": 60}
+    sub = bus.subscribe("torrents.progress.changed")
+
+    announced = (await asyncio.wait_for(sub.queue.get(), 3)).payload["tasks"]
+    while not announced:  # the first tick may come before the row is written
+        announced = (await asyncio.wait_for(sub.queue.get(), 3)).payload["tasks"]
+    qbt.torrents["h5"].update(progress=0.7, state="uploading")
+    assert await _wait(lambda: _progress_count(db_path) == 1 and _progress_value(db_path, "h5") == 70)
+
+    assert announced[0]["qb_hash"] == "h5" and announced[0]["series_id"] == 1
+    assert announced[0]["status"] == "downloading" and announced[0]["dlspeed"] == 1000
+    assert announced[0]["series_name"] == "Т"
+    assert not {"task_key", "task_type", "video_url", "save_path"} & set(announced[0])
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM download_tasks").fetchone()[0] == 0
+    queue = await probe.request("torrents.db.progress.list", {}, timeout=5)
+    assert [t["qb_hash"] for t in queue["tasks"]] == ["h5"]
+
+
+def _progress_count(db_path):
+    with sqlite3.connect(db_path) as conn:
+        return conn.execute("SELECT COUNT(*) FROM torrent_progress").fetchone()[0]
+
+
+def _progress_value(db_path, qb_hash):
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute("SELECT progress FROM torrent_progress WHERE qb_hash=?", (qb_hash,)).fetchone()
+    return row[0] if row else None
+
+
+@pytest.mark.asyncio
+async def test_progress_of_a_torrent_that_left_qbit_goes_and_a_deleted_series_takes_the_rest(system):
+    bus, qbt, _, probe, db_path = system
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO torrents (series_id, torrent_id, link, is_active, qb_hash) "
+                     "VALUES (1, 'ta', 'l', 1, 'ha'), (1, 'tb', 'l', 1, 'hb')")
+        conn.commit()
+    qbt.torrents["ha"] = {"state": "downloading", "progress": 0.2}
+    qbt.torrents["hb"] = {"state": "downloading", "progress": 0.3}
+    assert await _wait(lambda: _progress_count(db_path) == 2)
+
+    qbt.torrents.pop("hb")
+    assert await _wait(lambda: _progress_count(db_path) == 1 and _progress_value(db_path, "ha") == 20)
+
+    probe.publish_event("series.deleted", {"series_id": 1, "delete_from_qb": False})
+    assert await _wait(lambda: _progress_count(db_path) == 0)
 
 
 @pytest.mark.asyncio
@@ -652,7 +707,7 @@ async def test_sim_P3_P4_P6_states_map_to_flags(system):
 @pytest.mark.asyncio
 async def test_qbit_error_state_is_error_not_downloading(system):
     """Находка 43: qBit-state error → флаг error (не downloading) +
-    текст ошибки в download_tasks для модалки."""
+    текст ошибки в torrent_progress для модалки."""
     bus, qbt, _, probe, db_path = system
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
@@ -676,8 +731,8 @@ async def test_qbit_error_state_is_error_not_downloading(system):
     assert flags["downloading"] is False
     with sqlite3.connect(db_path) as conn:
         status, msg = conn.execute(
-            "SELECT status, error_message FROM download_tasks "
-            "WHERE task_key='h9'").fetchone()
+            "SELECT status, error_message FROM torrent_progress "
+            "WHERE qb_hash='h9'").fetchone()
     assert status == "error"
     assert "путь сохранения" in msg
 
@@ -695,9 +750,8 @@ async def test_fs_verify_marks_missing_and_rechecks(system, tmp_path):
                      "original_path, renamed_path, status) VALUES "
                      "(?, 'orig.mkv', 'Season 01/s01e01.mkv', 'renamed')",
                      (cur.fetchone()[0],))
-        conn.execute("INSERT INTO download_tasks (task_key, series_id, "
-                     "task_type, status, progress) VALUES "
-                     "('h6', 1, 'torrent', 'uploading', 100)")
+        conn.execute("INSERT INTO torrent_progress (qb_hash, series_id, "
+                     "status, progress) VALUES ('h6', 1, 'uploading', 100)")
         conn.commit()
     qbt.torrents["h6"] = {"state": "uploading", "total_size": 9,
                           "progress": 1.0}
@@ -1022,9 +1076,8 @@ async def test_fs_verify_skips_excluded_files(system, tmp_path):
                      (str(save_path),))
         conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
                      "is_active, qb_hash) VALUES (1,'tv','l',1,'hv')")
-        conn.execute("INSERT INTO download_tasks (task_key, series_id, "
-                     "task_type, status, progress, attempts) VALUES "
-                     "('hv', 1, 'torrent', 'pausedUP', 100, 0)")
+        conn.execute("INSERT INTO torrent_progress (qb_hash, series_id, "
+                     "status, progress) VALUES ('hv', 1, 'pausedUP', 100)")
         conn.commit()
     qbt.torrents["hv"] = {"state": "pausedUP", "progress": 1.0}
     qbt.files["hv"] = [_qb_file("raw1.mkv", 0), _qb_file("raw2.mkv", 1)]
@@ -1047,9 +1100,8 @@ async def test_fully_excluded_release_is_not_ready(system):
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO torrents (series_id, torrent_id, link, "
                      "is_active, qb_hash) VALUES (1,'tf','l',1,'hf')")
-        conn.execute("INSERT INTO download_tasks (task_key, series_id, "
-                     "task_type, status, progress, attempts) VALUES "
-                     "('hf', 1, 'torrent', 'pausedUP', 100, 0)")
+        conn.execute("INSERT INTO torrent_progress (qb_hash, series_id, "
+                     "status, progress) VALUES ('hf', 1, 'pausedUP', 100)")
         conn.commit()
     qbt.torrents["hf"] = {"state": "pausedUP", "progress": 1.0}
     qbt.files["hf"] = [_qb_file("raw1.mkv", 0)]
@@ -1087,8 +1139,8 @@ async def composition_system(db_path):
                      "VALUES (10, 1, 'tc', 'l', 1, 'hc')")
         conn.execute("INSERT INTO torrent_files (torrent_db_id, original_path, status, extracted_metadata) "
                      "VALUES (10, 'raw/01.mkv', 'renamed', '{\"episode\": 1}')")
-        conn.execute("INSERT INTO download_tasks (task_key, series_id, task_type, status, progress, attempts) "
-                     "VALUES ('hc', 1, 'torrent', 'pausedUP', 100, 0)")
+        conn.execute("INSERT INTO torrent_progress (qb_hash, series_id, status, progress) "
+                     "VALUES ('hc', 1, 'pausedUP', 100)")
         conn.commit()
     bus = Bus()
     db = Database(db_path)

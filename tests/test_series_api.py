@@ -83,7 +83,7 @@ class Neighbours(BaseModule):
                 {"torrent_hash": "h1", "series_id": 1, "stage": "renaming"}]}
 
         async def progress(env):
-            return {"tasks": [{"task_key": "h1", "series_id": 1,
+            return {"tasks": [{"qb_hash": "h1", "series_id": 1,
                                "series_name": "Тайтл", "status": "downloading",
                                "progress": 55, "dlspeed": 1024, "eta": 60}]}
 
@@ -483,10 +483,10 @@ async def test_small_endpoints(system):
     resp = await client.get("/api/series/1/torrents/history")
     assert resp.json()[0]["torrent_id"] == "abc"
 
-    # прогресс торрентов (Р-23: источник — download_tasks, не конвейер)
+    # the progress of the torrents comes from torrent_progress of the torrents module, not from the pipeline
     resp = await client.get("/api/series/active_torrents")
     body = resp.json()
-    assert body[0]["task_key"] == "h1"
+    assert body[0]["qb_hash"] == "h1"
     assert body[0]["series_name"] == "Тайтл"
     assert body[0]["progress"] == 55
 

@@ -59,6 +59,11 @@ files} / torrents.preview.failed {torrent_id, infohash, reason} (→ SSE:
 изменение памяти (событие series.updated) и на изменение состава
 (torrents.db.files.upsert).
 
+Прогресс раздач для интерфейса — таблица torrent_progress (одна строка на infohash; таблица
+download_tasks принадлежит downloads, торрентов в ней нет): query torrents.db.progress.list и
+событие torrents.progress.changed отдают {tasks: [{id, qb_hash, series_id, series_name, status,
+progress, dlspeed, eta, error_message, created_at, updated_at}]}.
+
 Переименование файлов — query renaming.process_torrent (зона renaming);
 мониторинг прогресса — адаптивный опрос qBit (часто при активности,
 редко в покое), события только при изменениях.
@@ -1225,7 +1230,7 @@ class TorrentsModule(BaseModule):
         for row in await self.repo.torrent_progress(series_id):
             if row["status"] in _ERROR_STATES:
                 flags["error"] = True
-            elif row["task_key"] in fully_excluded:
+            elif row["qb_hash"] in fully_excluded:
                 continue
             elif row["progress"] >= 100:
                 flags["ready"] = True

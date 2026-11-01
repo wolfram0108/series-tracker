@@ -1,5 +1,5 @@
 """Репозиторий torrents: таблицы torrents, torrent_files, agent_tasks
-и торрент-часть download_tasks (прогресс для UI).
+и torrent_progress (прогресс раздач для UI).
 """
 from __future__ import annotations
 
@@ -203,8 +203,7 @@ class TorrentsRepository:
         await self._db.execute(
             "DELETE FROM torrents WHERE series_id=?", (series_id,))
         await self._db.execute(
-            "DELETE FROM download_tasks WHERE series_id=? AND "
-            "task_type='torrent'", (series_id,))
+            "DELETE FROM torrent_progress WHERE series_id=?", (series_id,))
 
     # --- agent_tasks (задачи конвейера) -----------------------------------------------
 
@@ -245,12 +244,11 @@ class TorrentsRepository:
         get_torrent_files_for_series). Только АКТИВНЫЕ раздачи (И4):
         заменённые — история без файлов."""
         rows = await self._db.fetch_all(
-            "SELECT tf.*, t.qb_hash, COALESCE(dt.progress, 0) AS progress "
+            "SELECT tf.*, t.qb_hash, COALESCE(tp.progress, 0) AS progress "
             "FROM torrent_files tf "
             "JOIN torrents t ON t.id = tf.torrent_db_id "
-            "LEFT JOIN download_tasks dt ON dt.task_key = t.qb_hash "
-            "AND dt.task_type='torrent' WHERE t.series_id=? "
-            "AND t.is_active=1", (series_id,))
+            "LEFT JOIN torrent_progress tp ON tp.qb_hash = t.qb_hash "
+            "WHERE t.series_id=? AND t.is_active=1", (series_id,))
         return self._db.coerce_bools(rows, _FILE_BOOLS)
 
     async def files_for_torrent(self, torrent_db_id: int) -> list[dict]:
@@ -346,47 +344,38 @@ class TorrentsRepository:
                      f.get("renamed_path"), f["status"], meta,
                      f.get("qb_file_index")))
 
-    # --- download_tasks: прогресс торрентов для UI -------------------------------------
+    # --- torrent_progress: the progress of the releases for the interface ---------------
 
     async def upsert_progress(self, series_id: int, qb_hash: str,
                               info: dict, error_message: str | None = None
                               ) -> None:
         progress = int(round(info.get("progress", 0) * 100))
-        existing = await self._db.fetch_one(
-            "SELECT id FROM download_tasks WHERE task_key=? AND "
-            "task_type='torrent'", (qb_hash,))
-        if existing:
-            await self._db.execute(
-                "UPDATE download_tasks SET status=?, progress=?, dlspeed=?, "
-                "eta=?, error_message=?, updated_at=? WHERE id=?",
-                (info.get("state"), progress, info.get("dlspeed", 0),
-                 info.get("eta", 0), error_message, _now(), existing["id"]))
-        else:
-            await self._db.execute(
-                "INSERT INTO download_tasks (task_key, series_id, "
-                "task_type, status, progress, dlspeed, eta, error_message, "
-                "attempts, created_at, updated_at) VALUES (?, ?, 'torrent', "
-                "?, ?, ?, ?, ?, 0, ?, ?)",
-                (qb_hash, series_id, info.get("state"), progress,
-                 info.get("dlspeed", 0), info.get("eta", 0), error_message,
-                 _now(), _now()))
+        await self._db.execute(
+            "INSERT INTO torrent_progress (qb_hash, series_id, status, "
+            "progress, dlspeed, eta, error_message, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(qb_hash) DO UPDATE SET series_id=excluded.series_id, "
+            "status=excluded.status, progress=excluded.progress, "
+            "dlspeed=excluded.dlspeed, eta=excluded.eta, "
+            "error_message=excluded.error_message, "
+            "updated_at=excluded.updated_at",
+            (qb_hash, series_id, info.get("state"), progress,
+             info.get("dlspeed", 0), info.get("eta", 0), error_message,
+             _now(), _now()))
 
     async def remove_stale_progress(self, series_id: int,
                                     live_hashes: list[str]) -> None:
         placeholders = ",".join("?" for _ in live_hashes) or "''"
         await self._db.execute(
-            f"DELETE FROM download_tasks WHERE series_id=? AND "
-            f"task_type='torrent' AND task_key NOT IN ({placeholders})",
-            (series_id, *live_hashes))
+            f"DELETE FROM torrent_progress WHERE series_id=? AND "
+            f"qb_hash NOT IN ({placeholders})", (series_id, *live_hashes))
 
     async def torrent_progress(self, series_id: int) -> list[dict]:
         return await self._db.fetch_all(
-            "SELECT * FROM download_tasks WHERE series_id=? AND "
-            "task_type='torrent'", (series_id,))
+            "SELECT * FROM torrent_progress WHERE series_id=?", (series_id,))
 
     async def all_torrent_progress(self) -> list[dict]:
-        """Прогресс всех торрент-загрузок (контракт старого
-        get_all_active_torrent_tasks — таблица мониторинга в UI)."""
+        """Прогресс всех раздач (контракт старого get_all_active_torrent_tasks —
+        таблица мониторинга в UI)."""
         return await self._db.fetch_all(
-            "SELECT * FROM download_tasks WHERE task_type='torrent' "
-            "ORDER BY id")
+            "SELECT * FROM torrent_progress ORDER BY id")
