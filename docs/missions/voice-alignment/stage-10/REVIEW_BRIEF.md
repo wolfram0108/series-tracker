@@ -72,7 +72,7 @@
 | Сторожа | `python3 docs/missions/voice-alignment/stage-10/tools/checks/<имя>.py`; имена: `module_imports`, `table_owners`, `no_wait_no_poll`, `bus_catalog`, `revision_registry`, `comment_language`, `commit_attribution`, `ui_styles` | каждый печатает последней строкой `ИЗМЕРЕНИЕ <имя>: PASS` |
 | Миграции | `ST_DB_URL=sqlite:///<файл> .venv/bin/python -m alembic upgrade head`, затем `downgrade 0024` | без ошибок в обе стороны; прогон на копии рабочей БД выполнен автором (27 сериалов, 3 616 строк плана), копия вам не выдаётся |
 
-Серверные тесты строят соседей модуля поддельными; интеграционные тесты с настоящими соседями — `tests/test_composition_module.py`, `test_scan_video.py`, `test_gateway_*`, `test_stage10_*`. Автор прогонял набор группами по предохранителю 178 секунд; полный набор одним вызовом укладывается во время, указанное выше.
+Серверные тесты в основном строят соседей модуля поддельными (`tests/test_composition_module.py` — модули соседей-подделки, `test_scan_video.py` — настоящие только catalog и scan); на настоящих модулях одной базы — `tests/test_stage10_boundaries.py` (после ревью). Автор прогонял набор группами по предохранителю 178 секунд; полный набор одним вызовом укладывается во время, указанное выше.
 
 ## 4. Карта устройства
 
