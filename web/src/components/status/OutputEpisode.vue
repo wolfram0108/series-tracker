@@ -12,7 +12,9 @@ type Schemas = components["schemas"]
 const props = withDefaults(defineProps<{
   view: EpisodeView
   busy?: boolean
-}>(), { busy: false })
+  /** The names the files of the episode would get; shown when the window asked for them. */
+  fileNames?: string[]
+}>(), { busy: false, fileNames: () => [] })
 
 const emit = defineEmits<{
   (e: "set", scope: Scope, lever: string, target: string | null, value: unknown): void
@@ -120,6 +122,10 @@ function forwardReset(lever: string, target: string | null): void {
       </li>
     </ul>
 
+    <ul v-if="fileNames.length > 0" class="episode-files stack">
+      <li v-for="name in fileNames" :key="name" class="episode-file">{{ t("output.file", { name }) }}</li>
+    </ul>
+
     <section v-if="view.dubs.length > 0" class="episode-voices stack">
       <h4 class="episode-subtitle">{{ t("output.voices") }}</h4>
       <ul class="episode-dubs stack">
@@ -154,7 +160,8 @@ function forwardReset(lever: string, target: string | null): void {
   border-radius: var(--border-radius); background: var(--bg-white);
 }
 .episode-title, .episode-subtitle { margin: 0; font-size: 1em; }
-.episode-marks, .episode-dubs { list-style: none; margin: 0; padding: 0; }
+.episode-marks, .episode-dubs, .episode-files { list-style: none; margin: 0; padding: 0; }
+.episode-file { overflow-wrap: anywhere; color: var(--text-muted); font-size: smaller; }
 .episode-reference, .episode-reason { overflow-wrap: anywhere; }
 .episode-state, .episode-hint, .episode-reason { color: var(--text-muted); font-size: smaller; }
 .episode-toggle {

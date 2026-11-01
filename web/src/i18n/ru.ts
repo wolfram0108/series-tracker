@@ -145,6 +145,8 @@ export const ru = {
   "output.reprocess": "Переприменить правила",
   "output.adopt": "Глубокое усыновление",
   "output.filter.deviations": "Только отклонения",
+  "output.names": "Имена файлов",
+  "output.file": "Имя файла: {name}",
   "output.loading": "Загрузка…",
   "output.empty": "Серий пока нет",
   "output.error.refused": "Не удалось выполнить действие",

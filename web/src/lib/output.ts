@@ -309,6 +309,17 @@ export function isDeviation(view: EpisodeView): boolean {
     || view.dubs.some((dub) => dub.state === "error")
 }
 
+/** The names the files of one episode get, in the order of their parts (the whole episode first), each once. */
+export function fileNamesOf(
+  rows: { season?: number | null; episode?: number | null; part?: number | null; new_filename_preview?: string | null }[],
+  season: number,
+  episode: number,
+): string[] {
+  const own = rows.filter((row) => row.season === season && row.episode === episode && row.new_filename_preview)
+  own.sort((a, b) => Number(a.part != null) - Number(b.part != null) || (a.part ?? 0) - (b.part ?? 0))
+  return [...new Set(own.map((row) => row.new_filename_preview as string))]
+}
+
 /** The reference of one part of the episode; no part names the whole episode, and null when there is none. */
 export function referenceOf(view: EpisodeView, part: number | null = null): Reference | null {
   return view.references.find((reference) => (reference.part ?? null) === part) ?? null

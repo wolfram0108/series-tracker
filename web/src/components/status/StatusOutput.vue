@@ -3,7 +3,7 @@ import { computed, ref } from "vue"
 import Button from "primevue/button"
 import { useSeriesOutput } from "../../composables/useSeriesOutput"
 import { t } from "../../i18n"
-import { isDeviation, type Scope } from "../../lib/output"
+import { fileNamesOf, isDeviation, type Scope } from "../../lib/output"
 import OutputEpisode from "./OutputEpisode.vue"
 import OutputLevel from "./OutputLevel.vue"
 
@@ -38,9 +38,14 @@ const switchSeason = (season: number, off: boolean) => changed(output.switchTo(s
 <template>
   <div class="status-output stack">
     <div class="cluster output-bar">
-      <label class="cluster output-filter">
+      <label class="cluster output-filter output-deviations">
         <input v-model="onlyDeviations" type="checkbox" />
         <span>{{ t("output.filter.deviations") }}</span>
+      </label>
+      <label class="cluster output-filter output-names">
+        <input type="checkbox" :checked="output.namesWanted.value" @change="output.showNames(($event.target as HTMLInputElement).checked)" />
+        <span>{{ t("output.names") }}</span>
+        <i v-if="output.naming.value" class="pi pi-spin pi-spinner" />
       </label>
       <Button
         :label="t('output.sync')" :icon="output.syncing.value ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'"
@@ -71,6 +76,7 @@ const switchSeason = (season: number, off: boolean) => changed(output.switchTo(s
       >
         <OutputEpisode
           v-for="view in season.shown" :key="view.episode" :view="view" :busy="output.busy.value"
+          :file-names="fileNamesOf(output.names.value, view.season, view.episode)"
           @set="setLever" @reset="resetLever" @switch="switchEpisode"
         />
       </OutputLevel>

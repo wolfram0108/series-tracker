@@ -47,6 +47,8 @@ beforeEach(() => {
   vi.mocked(calls.reprocessSeries).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.adoptSeries).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.setLever).mockReset().mockResolvedValue(ok({ success: true }))
+  vi.mocked(calls.fetchRenames).mockReset().mockResolvedValue(ok({
+    preview: [{ unique_id: "u2", season: 1, episode: 2, part: null, new_filename_preview: "Show s01e02.mp4" }] }))
 })
 
 afterEach(() => mounted.splice(0).forEach((wrapper) => wrapper.unmount()))
@@ -75,10 +77,10 @@ describe("StatusOutput", () => {
   it("keeps only the episodes that depart from the norm, and the seasons that have any, when the filter is on", async () => {
     const w = mountOutput()
     await flushPromises()
-    await w.find(".output-filter input").setValue(true)
+    await w.find(".output-deviations input").setValue(true)
     expect(w.findAll("article").map((each) => each.attributes("data-episode"))).toEqual(["2"])
     expect(w.findAll("[data-scope=season]")).toHaveLength(1)
-    await w.find(".output-filter input").setValue(false)
+    await w.find(".output-deviations input").setValue(false)
     expect(w.findAll("article")).toHaveLength(3)
   })
 
@@ -100,6 +102,19 @@ describe("StatusOutput", () => {
     await flushPromises()
     expect(w.find(".output-failure").text()).toBe("Сериал не найден")
     expect(w.find("article").element).not.toBe(before)
+  })
+
+  it("shows the names the files would get under their episodes when the box is checked, and takes them back when it is not", async () => {
+    const w = mountOutput()
+    await flushPromises()
+    expect(calls.fetchRenames).not.toHaveBeenCalled()
+    await w.find(".output-names input").setValue(true)
+    await flushPromises()
+    const named = w.findAll(".output-episode").map((each) => each.find(".episode-file").exists())
+    expect(named).toEqual([false, true, false])
+    expect(w.findAll(".episode-file")[0].text()).toBe(t("output.file", { name: "Show s01e02.mp4" }))
+    await w.find(".output-names input").setValue(false)
+    expect(w.find(".episode-file").exists()).toBe(false)
   })
 
   it("asks for a pass over the series, the renaming and the adoption by their buttons, each waiting for its own answer", async () => {

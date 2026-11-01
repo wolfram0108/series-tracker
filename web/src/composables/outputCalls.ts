@@ -24,6 +24,19 @@ export function syncSeries(seriesId: number): Promise<Answer<unknown>> {
   return call(() => api.POST("/api/series/{series_id}/scan", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
 }
 
+/** The names the files of the series get by the rules as they are now, each with the slot it belongs to. */
+export interface RenameRow {
+  unique_id: string
+  season?: number | null
+  episode?: number | null
+  part?: number | null
+  new_filename_preview?: string | null
+}
+
+export function fetchRenames(seriesId: number): Promise<Answer<{ preview: RenameRow[] }>> {
+  return call(() => api.GET("/api/series/{series_id}/rename_preview", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
+}
+
 /** The renaming of the files of the series is counted again by the rules as they are now. */
 export function reprocessSeries(seriesId: number): Promise<Answer<unknown>> {
   return call(() => api.POST("/api/series/{series_id}/reprocess", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)

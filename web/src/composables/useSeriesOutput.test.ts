@@ -65,6 +65,8 @@ beforeEach(() => {
   vi.mocked(calls.switchOutput).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.reprocessSeries).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.adoptSeries).mockReset().mockResolvedValue(ok({ success: true }))
+  vi.mocked(calls.fetchRenames).mockReset().mockResolvedValue(ok({
+    preview: [{ unique_id: "u1", season: 1, episode: 2, part: null, new_filename_preview: "Show s01e02.mp4" }] }))
 })
 
 afterEach(() => mounted.splice(0).forEach((wrapper) => wrapper.unmount()))
@@ -260,6 +262,33 @@ describe("useSeriesOutput", () => {
     expect(await adopting).toBe("Идёт другой процесс")
     expect([output.reprocessing.value, output.adopting.value]).toEqual([false, false])
     expect(calls.reprocessSeries).toHaveBeenCalledWith(1)
+  })
+
+  it("reads the names of the files only when asked for them, again with the layout while they are shown, and drops them when not", async () => {
+    const output = setup()
+    await flushPromises()
+    expect(calls.fetchRenames).not.toHaveBeenCalled()
+    await output.showNames(true)
+    expect(output.names.value.map((row) => row.new_filename_preview)).toEqual(["Show s01e02.mp4"])
+    useCompositionStore().applyChanged({ series_id: 1, rev: 9, episodes: [], summary_only: false })
+    await flushPromises()
+    expect(calls.fetchRenames).toHaveBeenCalledTimes(2)
+    await output.showNames(false)
+    expect(output.names.value).toEqual([])
+    useCompositionStore().applyChanged({ series_id: 1, rev: 10, episodes: [], summary_only: false })
+    await flushPromises()
+    expect(calls.fetchRenames).toHaveBeenCalledTimes(2)
+  })
+
+  it("shows the words of a refusal of the names and keeps the ones it had", async () => {
+    const output = setup()
+    await flushPromises()
+    await output.showNames(true)
+    vi.mocked(calls.fetchRenames).mockResolvedValueOnce({ ok: false, text: "Нет связи с сервером" })
+    await output.showNames(true)
+    expect(output.failure.value).toBe("Нет связи с сервером")
+    expect(output.names.value).toHaveLength(1)
+    expect(output.naming.value).toBe(false)
   })
 
   it("reads the output again when the connection comes back", async () => {

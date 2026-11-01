@@ -3,8 +3,8 @@ import { bySeason, joinEpisodes, resetBody, setBody, type Reference, type Scope 
 import { useCompositionStore, type ReferencePacket } from "../stores/composition"
 import { useVoicesStore } from "../stores/voices"
 import {
-  adoptSeries, fetchComposition, fetchOutput, reprocessSeries, resetLever, setLever, switchOutput, syncSeries,
-  type Composition,
+  adoptSeries, fetchComposition, fetchOutput, fetchRenames, reprocessSeries, resetLever, setLever, switchOutput, syncSeries,
+  type Composition, type RenameRow,
 } from "./outputCalls"
 import type { Answer } from "./sourceCalls"
 import { useSSE } from "./useSSE"
@@ -40,6 +40,10 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const syncing = ref(false)
   const reprocessing = ref(false)
   const adopting = ref(false)
+  // The names the files would get: asked for by the user, counted by the rules as they are now, so read again with the layout.
+  const names = ref<RenameRow[]>([])
+  const namesWanted = ref(false)
+  const naming = ref(false)
 
   const views = computed(() => joinEpisodes(
     composition.value?.rows ?? [],
@@ -70,6 +74,27 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     const broken = [layout, output].find((answer) => !answer.ok)
     failure.value = broken && !broken.ok ? broken.text : null
     if (packetDuringRead) void load()
+    if (namesWanted.value) void loadNames()
+  }
+
+  let namesAsked = 0
+  async function loadNames(): Promise<void> {
+    const ask = ++namesAsked
+    naming.value = true
+    const answer = await fetchRenames(seriesId)
+    if (ask !== namesAsked) return
+    naming.value = false
+    if (answer.ok) names.value = answer.data.preview ?? []
+    else failure.value = answer.text
+  }
+
+  function showNames(on: boolean): Promise<void> {
+    namesWanted.value = on
+    if (on) return loadNames()
+    namesAsked += 1
+    naming.value = false
+    names.value = []
+    return Promise.resolve()
   }
 
   // A refusal stays in `failure` until the next action; the words are also returned for the caller.
@@ -121,6 +146,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     })
   }
 
-  return { composition, references, loading, failure, busy, syncing, reprocessing, adopting, views, levels, sources, seasons, load, set, reset, switchTo,
-    sync, reprocess, adopt }
+  return { composition, references, loading, failure, busy, syncing, reprocessing, adopting, names, namesWanted, naming, views, levels, sources, seasons, load, set, reset, switchTo,
+    sync, reprocess, adopt, showNames }
 }

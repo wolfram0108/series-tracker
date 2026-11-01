@@ -37,6 +37,15 @@ const viewOf = (over: Partial<EpisodeView> = {}): EpisodeView => ({
 const mountEpisode = (over: Partial<EpisodeView> = {}, busy = false) =>
   mount(OutputEpisode, { props: { view: viewOf(over), busy } })
 
+describe("OutputEpisode file names", () => {
+  it("shows the names the files of the episode get when it is given them, and nothing when it is not", () => {
+    const named = mount(OutputEpisode, { props: { view: viewOf({ references: [refOf({})] }), fileNames: ["Show s01e05.mp4", "Show s01e05 part 2.mp4"] } })
+    expect(named.findAll(".episode-file").map((each) => each.text())).toEqual([
+      t("output.file", { name: "Show s01e05.mp4" }), t("output.file", { name: "Show s01e05 part 2.mp4" })])
+    expect(mountEpisode({ references: [refOf({})] }).find(".episode-files").exists()).toBe(false)
+  })
+})
+
 describe("OutputEpisode switch", () => {
   const offRef = (): Reference => refOf({ mark: "off", source_id: null, row_key: null, player: null, voice_group: null, height: null })
 

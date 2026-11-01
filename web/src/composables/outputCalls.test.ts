@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const client = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() }))
 vi.mock("../api/client", () => ({ api: client }))
 
-import { adoptSeries, fetchComposition, fetchOutput, reprocessSeries, resetLever, setLever, switchOutput, syncSeries } from "./outputCalls"
+import { adoptSeries, fetchComposition, fetchOutput, fetchRenames, reprocessSeries, resetLever, setLever, switchOutput, syncSeries } from "./outputCalls"
 
 beforeEach(() => Object.values(client).forEach((fn) => fn.mockReset()))
 
@@ -50,6 +50,13 @@ describe("the calls to the output of the core", () => {
       ["/api/series/{series_id}/reprocess", { params: { path: { series_id: 1 } } }],
       ["/api/series/{series_id}/deep-adoption", { params: { path: { series_id: 1 } } }],
     ])
+  })
+
+  it("reads the names the files would get by the path of the series", async () => {
+    const reply = { preview: [{ unique_id: "u1", season: 1, episode: 2, part: null, new_filename_preview: "Show s01e02.mp4" }] }
+    client.GET.mockResolvedValueOnce({ data: reply })
+    expect(await fetchRenames(1)).toEqual({ ok: true, data: reply })
+    expect(client.GET).toHaveBeenCalledWith("/api/series/{series_id}/rename_preview", { params: { path: { series_id: 1 } } })
   })
 
   it("asks for a pass over the series by its path", async () => {

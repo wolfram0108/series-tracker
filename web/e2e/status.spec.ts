@@ -46,8 +46,8 @@ test.describe("Статус-окно", () => {
     expect(titles).toContain("Выход")
     expect(titles).not.toContain("Композиция")
     await page.locator(".st-tab[title='Выход']").click()
-    // the "Output" section shows a placeholder for now: the tab must open
-    await expect(page.locator(".st-tabs")).toBeVisible()
+    // the "Output" section opens with its bar of actions
+    await expect(page.locator(".status-output .output-bar")).toBeVisible()
     await page.locator(".modern-close").last().click()
   })
 })

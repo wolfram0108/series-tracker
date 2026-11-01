@@ -35,8 +35,10 @@ PY = sys.executable
 class Stand:
     """An instance on a free port with a new database; leaves nothing behind but the journal in `raw/`."""
 
-    def __init__(self, credentials_from: str | None = None, whole_db_from: str | None = None) -> None:
+    def __init__(self, credentials_from: str | None = None, whole_db_from: str | None = None,
+                 profiles: list[dict] | None = None) -> None:
         self.whole_db_from = whole_db_from
+        self.profiles = profiles or []
         if whole_db_from and not credentials_from:
             credentials_from = whole_db_from
         self.work = Path(tempfile.mkdtemp(prefix="stage10-stand-"))
@@ -61,6 +63,8 @@ class Stand:
             raise RuntimeError(f"migrations failed: {migrated.stderr[-300:]}")
         if self.credentials_from and not self.whole_db_from:
             self._copy_credentials()
+        if self.profiles:
+            self._seed_profiles()
         if self.whole_db_from:
             self._silence_the_schedule()
         probe = socket.socket()
@@ -94,8 +98,13 @@ class Stand:
             except subprocess.TimeoutExpired:
                 self.proc.kill()
         RAW.mkdir(parents=True, exist_ok=True)
+        stamp = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S}"
         if self.journal.exists():
-            shutil.copy(self.journal, RAW / f"stand__{datetime.now(timezone.utc):%Y%m%dT%H%M%S}.log")
+            shutil.copy(self.journal, RAW / f"stand__{stamp}.log")
+        # The logs of the modules, one file per group: what a failed step says is there and nowhere else.
+        for path in self.work.glob("*.log"):
+            if path != self.journal:
+                shutil.copy(path, RAW / f"stand__{stamp}__{path.name}")
         shutil.rmtree(self.work, ignore_errors=True)
 
     def _keys_of_the_source(self) -> dict[str, str]:
@@ -125,6 +134,23 @@ class Stand:
         conn.execute("UPDATE settings SET value='false' WHERE key='scanner_agent_enabled'")
         conn.commit()
         conn.close()
+
+    def _seed_profiles(self) -> None:
+        """Parser profiles written straight into the new database: {"name", "rules": [{"name", "conditions": [blocks],
+        "actions": [{"action_type", "action_pattern"}]}]}, a rule per entry in the order given."""
+        target = sqlite3.connect(self.db)
+        for profile in self.profiles:
+            profile_id = target.execute("INSERT INTO parser_profiles (name) VALUES (?)", (profile["name"],)).lastrowid
+            for priority, rule in enumerate(profile["rules"]):
+                rule_id = target.execute(
+                    "INSERT INTO parser_rules (profile_id, name, priority, action_pattern, continue_after_match) "
+                    "VALUES (?, ?, ?, ?, 0)", (profile_id, rule["name"], priority, json.dumps(rule["actions"]))).lastrowid
+                for blocks in rule["conditions"]:
+                    target.execute(
+                        "INSERT INTO parser_rule_conditions (rule_id, condition_type, pattern, logical_operator) "
+                        "VALUES (?, 'contains', ?, 'AND')", (rule_id, json.dumps(blocks)))
+        target.commit()
+        target.close()
 
     def _copy_credentials(self) -> None:
         """The token of VK lives in the table `auth` (module trackerauth); the stand takes a copy of the rows."""

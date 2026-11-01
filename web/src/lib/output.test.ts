@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { components } from "../api/schema"
 import type { VoiceDub } from "../stores/voices"
 import {
-  LEVER, allOff, bySeason, groupTarget, isDeviation, isOff, isOwn, joinEpisodes, leverState, parseGroupTarget, parsePlayerTarget,
+  LEVER, allOff, bySeason, fileNamesOf, groupTarget, isDeviation, isOff, isOwn, joinEpisodes, leverState, parseGroupTarget, parsePlayerTarget,
   playerOptions, playerTarget, referenceOf, referenceOptions, resetBody, scopeView, setBody, sourcePlayers, voiceGroups,
   type EpisodeView, type Lever, type LeverState, type Reference, type Row,
 } from "./output"
@@ -256,6 +256,18 @@ describe("isOff", () => {
     expect(allOff([switched, episodeOf({ references: [ref(1, 2, { mark: "off" })] })])).toBe(true)
     expect(allOff([switched, episodeOf({ references: [ref(1, 2)] })])).toBe(false)
     expect(allOff([])).toBe(false)
+  })
+})
+
+describe("fileNamesOf", () => {
+  it("gives the names of the files of one episode, the whole one first, each once, and none for another episode", () => {
+    const rows = [
+      { season: 1, episode: 2, part: 2, new_filename_preview: "b" }, { season: 1, episode: 2, part: null, new_filename_preview: "a" },
+      { season: 1, episode: 2, part: 1, new_filename_preview: "b" }, { season: 1, episode: 3, part: null, new_filename_preview: "c" },
+      { season: 2, episode: 2, part: null, new_filename_preview: "d" }, { season: 1, episode: 2, part: null, new_filename_preview: null },
+    ]
+    expect(fileNamesOf(rows, 1, 2)).toEqual(["a", "b"])
+    expect(fileNamesOf(rows, 9, 9)).toEqual([])
   })
 })
 
