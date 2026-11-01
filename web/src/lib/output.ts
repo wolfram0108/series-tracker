@@ -1,5 +1,6 @@
 // The output of a series as the window reads it: episodes joined from the layout, references, levers and voice-overs.
 // Pure functions only: no network, no interface and no texts, so the window words everything it shows.
+import { compareNames } from "./collate"
 import type { components } from "../api/schema"
 import type { VoiceDub } from "../stores/voices"
 
@@ -180,7 +181,7 @@ function labelOf(rows: Row[], sourceId: number, player: string): string {
 }
 
 const byPlayer = (a: PlayerOption, b: PlayerOption): number =>
-  a.sourceId - b.sourceId || a.player.localeCompare(b.player)
+  a.sourceId - b.sourceId || compareNames(a.player, b.player)
 
 function playersOf(view: EpisodeView, rows: Row[]): PlayerOption[] {
   const pairs = new Map<string, PlayerOption>()
@@ -203,7 +204,7 @@ export function sourcePlayers(view: EpisodeView): PlayerOption[] {
 
 /** The voice-over labels of the episode, alphabetically. */
 export function voiceGroups(view: EpisodeView): string[] {
-  return [...new Set(view.rows.map((row) => row.voice_label))].sort((a, b) => a.localeCompare(b))
+  return [...new Set(view.rows.map((row) => row.voice_label))].sort(compareNames)
 }
 
 /** The players that carry the voice-over of the given label. */
@@ -227,7 +228,7 @@ export function referenceOptions(view: EpisodeView): ReferenceOption[] {
       playerLabel: labelOf(view.rows, pair.sourceId, pair.player),
       height: heights.length > 0 ? Math.max(...heights) : null,
     }))
-    .sort((a, b) => a.group.localeCompare(b.group) || byPlayer(a, b))
+    .sort((a, b) => compareNames(a.group, b.group) || byPlayer(a, b))
 }
 
 // --- the values of the levers ----------------------------------------------------------------------------------------
@@ -299,4 +300,20 @@ export function isDeviation(view: EpisodeView): boolean {
 /** The reference of one part of the episode; no part names the whole episode, and null when there is none. */
 export function referenceOf(view: EpisodeView, part: number | null = null): Reference | null {
   return view.references.find((reference) => (reference.part ?? null) === part) ?? null
+}
+
+/** One view for a set of episodes (a season, a whole series): the rows of all of them once each, so that the choices of
+ *  a lever offered on a level are those any episode of the level could take. */
+export function scopeView(views: EpisodeView[]): EpisodeView {
+  const seen = new Set<string>()
+  const rows: Row[] = []
+  for (const view of views) {
+    for (const row of view.rows) {
+      const key = `${row.source_id}/${row.row_key}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      rows.push(row)
+    }
+  }
+  return { season: 0, episode: 0, references: [], rows, levers: [], dubs: [] }
 }

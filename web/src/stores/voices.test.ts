@@ -31,6 +31,19 @@ describe("voices store", () => {
     expect(store.forEpisode(8, 1, 2)).toHaveLength(1)
   })
 
+  it("gives the voice-overs of one series only, of all its episodes", () => {
+    const store = useVoicesStore()
+    store.snapshot(snapshot(10, [
+      dub(), dub({ episode: 3 }), dub({ voice_key: "red", voice_label: "RedHeadSound" }),
+      dub({ series_id: 8 } as never), dub({ series_id: 17 } as never),
+    ]))
+    expect(store.forSeries(7).map((v) => `${v.episode}:${v.voice_label}`).sort())
+      .toEqual(["2:BlackCat", "2:RedHeadSound", "3:BlackCat"])
+    expect(store.forSeries(8)).toHaveLength(1)
+    expect(store.forSeries(1)).toEqual([])
+    expect(store.forSeries(9)).toEqual([])
+  })
+
   it("replaces what it knew by the next snapshot", () => {
     const store = useVoicesStore()
     store.snapshot(snapshot(10, [dub(), dub({ episode: 3 })]))

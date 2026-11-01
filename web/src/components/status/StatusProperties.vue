@@ -13,6 +13,7 @@ import { fetchProfiles } from "../../composables/sourceCalls"
 import { useSeriesSources } from "../../composables/useSeriesSources"
 import { t } from "../../i18n"
 import type { Series } from "../../stores/series"
+import { compareNames } from "../../lib/collate"
 
 // "Properties" tab of the status window. Saving is POST /api/series/{id}; the fields of the sources are not in it:
 // a source changes at once by its own request (the "Sources" block). save() is called from the footer of
@@ -60,7 +61,7 @@ function sortEpisodeKeys(keys: string[]): string[] {
   return [...keys].sort((a, b) => {
     const na = firstNum(a)
     const nb = firstNum(b)
-    return na === nb ? a.localeCompare(b) : na - nb
+    return na === nb ? compareNames(a, b) : na - nb
   })
 }
 const sortedQualityOptionsKeys = computed(() => (site.includes("astar") ? sortEpisodeKeys(Object.keys(astarQ)) : []))

@@ -3,7 +3,7 @@ import type { components } from "../api/schema"
 import type { VoiceDub } from "../stores/voices"
 import {
   LEVER, bySeason, groupTarget, isDeviation, isOwn, joinEpisodes, leverState, parseGroupTarget, parsePlayerTarget,
-  playerOptions, playerTarget, referenceOf, referenceOptions, resetBody, setBody, sourcePlayers, voiceGroups,
+  playerOptions, playerTarget, referenceOf, referenceOptions, resetBody, scopeView, setBody, sourcePlayers, voiceGroups,
   type EpisodeView, type Lever, type LeverState, type Reference, type Row,
 } from "./output"
 
@@ -277,5 +277,18 @@ describe("targets", () => {
     expect(parsePlayerTarget("")).toBeNull()
     expect(parseGroupTarget("source:7/player:vibix")).toBeNull()
     expect(parseGroupTarget("")).toBeNull()
+  })
+})
+
+describe("scopeView", () => {
+  it("gathers the rows of the episodes of a level once each, so options are those of any episode", () => {
+    const shared = row()
+    const one = episodeOf({ season: 1, episode: 1, rows: [shared] })
+    const two = episodeOf({ season: 1, episode: 2, rows: [shared, { ...row(), row_key: "other", player: "kodik" }] })
+    const merged = scopeView([one, two])
+    expect(merged.rows).toHaveLength(2)
+    expect(sourcePlayers(merged).map((each) => each.player).sort()).toEqual(["kodik", row().player].sort())
+    expect(merged.references).toEqual([])
+    expect(merged.levers).toEqual([])
   })
 })

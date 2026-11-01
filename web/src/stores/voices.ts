@@ -1,6 +1,7 @@
 import { defineStore } from "pinia"
 import { ref } from "vue"
 import type { components } from "../api/schema"
+import { compareNames } from "../lib/collate"
 
 type Schemas = components["schemas"]
 
@@ -33,7 +34,7 @@ export const useVoicesStore = defineStore("voices", () => {
   // The latest start of the core heard from; whatever an earlier start sent is history.
   let epoch = 0
 
-  const byLabel = (a: VoiceDub, b: VoiceDub) => a.voice_label.localeCompare(b.voice_label)
+  const byLabel = (a: VoiceDub, b: VoiceDub) => compareNames(a.voice_label, b.voice_label)
 
   function apply(event: VoiceDubEvent): void {
     const key = slot(event.series_id, event.season, event.episode)
@@ -103,6 +104,14 @@ export const useVoicesStore = defineStore("voices", () => {
     return bySlot.value[slot(seriesId, season, episode)] ?? []
   }
 
+  // The separator after the id keeps series 1 from matching the keys of series 17.
+  function forSeries(seriesId: number): VoiceDub[] {
+    const prefix = `${seriesId}:`
+    return Object.entries(bySlot.value)
+      .filter(([key]) => key.startsWith(prefix))
+      .flatMap(([, list]) => list)
+  }
+
   /** The name of a voice-over in the alignment queue: the job that aligns it and the file it was sent as; the file
    *  without its extension while the core holds no such voice-over any more. */
   function dubName(jobId: string, file: string): string {
@@ -117,5 +126,5 @@ export const useVoicesStore = defineStore("voices", () => {
     settings.value = next
   }
 
-  return { bySlot, settings, apply, snapshot, forEpisode, dubName, applySettings }
+  return { bySlot, settings, apply, snapshot, forEpisode, forSeries, dubName, applySettings }
 })

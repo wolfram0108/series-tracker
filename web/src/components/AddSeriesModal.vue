@@ -18,6 +18,7 @@ import { useApi } from "../composables/useApi"
 import { useSSE } from "../composables/useSSE"
 import { useSourceDrafts } from "../composables/useSourceDrafts"
 import { fetchProfiles, resolveAddress } from "../composables/sourceCalls"
+import { compareNames } from "../lib/collate"
 
 // Add-series window. An address is told by POST /api/sources/resolve: a site reads it, so it is a video source
 // and goes into the list; otherwise it is a tracker page (POST /api/parse_url). The series is created by
@@ -93,7 +94,7 @@ function sortEpisodeKeys(keys: string[]): string[] {
   return [...keys].sort((a, b) => {
     const na = firstNum(a)
     const nb = firstNum(b)
-    return na === nb ? a.localeCompare(b) : na - nb
+    return na === nb ? compareNames(a, b) : na - nb
   })
 }
 

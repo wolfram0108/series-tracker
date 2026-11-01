@@ -8,7 +8,7 @@ export type LayoutChanged = Schemas["CompositionChanged"]
 export type LayoutFailed = Schemas["CompositionFailed"]
 export type ReferencePacket = Schemas["ReferenceChanged"]
 
-const slot = (season: number, episode: number) => `${season}:${episode}`
+const slot = (season: number, episode: number, part: number | null | undefined) => `${season}:${episode}:${part ?? ""}`
 
 /** The newest packets of the layout and of the references, per series. A packet is kept as the core sent it:
  *  a screen that shows the output reads from here or asks the API again when `layoutChanged` moves. */
@@ -41,7 +41,7 @@ export const useCompositionStore = defineStore("composition", () => {
     const own = references.value[packet.series_id] ?? {}
     references.value = {
       ...references.value,
-      [packet.series_id]: { ...own, [slot(packet.season, packet.episode)]: packet },
+      [packet.series_id]: { ...own, [slot(packet.season, packet.episode, packet.part)]: packet },
     }
   }
 
@@ -49,8 +49,8 @@ export const useCompositionStore = defineStore("composition", () => {
     sourcesChanged.value = { ...sourcesChanged.value, [packet.series_id]: (sourcesChanged.value[packet.series_id] ?? 0) + 1 }
   }
 
-  function referenceOf(seriesId: number, season: number, episode: number): ReferencePacket | null {
-    return references.value[seriesId]?.[slot(season, episode)] ?? null
+  function referenceOf(seriesId: number, season: number, episode: number, part: number | null = null): ReferencePacket | null {
+    return references.value[seriesId]?.[slot(season, episode, part)] ?? null
   }
 
   return {

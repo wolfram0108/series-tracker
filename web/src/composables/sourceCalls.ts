@@ -1,24 +1,36 @@
 import { api } from "../api/client"
-import { t } from "../i18n"
+import { t, type MessageKey } from "../i18n"
 import { reasonText } from "../lib/reason"
 import type { PreviewReply, ResolveReply, SeriesSource, SourceDraft, SourceSummary } from "../lib/sources"
 
 /** The answer of a call to the core: the data, or the words for the refusal (the reason worded by the catalog). */
 export type Answer<T> = { ok: true; data: T } | { ok: false; text: string }
 
-function refusal(error: unknown): string {
-  const body = error as { error?: unknown } | null | undefined
-  const text = typeof body?.error === "string" ? reasonText(body.error) : ""
-  return text || t("sources.error.refused")
+/** The catalog keys of the words a call gives when the core refuses it or cannot be reached; each window names its own. */
+export interface CallWords {
+  refused: MessageKey
+  network: MessageKey
 }
 
-async function call<T>(send: () => Promise<{ data?: unknown; error?: unknown }>): Promise<Answer<T>> {
+const SOURCE_WORDS: CallWords = { refused: "sources.error.refused", network: "sources.error.network" }
+
+function refusal(error: unknown, words: CallWords): string {
+  const body = error as { error?: unknown } | null | undefined
+  const text = typeof body?.error === "string" ? reasonText(body.error) : ""
+  return text || t(words.refused)
+}
+
+/** One call to the core. The words default to those of the sources; a window of another area passes its own. */
+export async function call<T>(
+  send: () => Promise<{ data?: unknown; error?: unknown }>,
+  words: CallWords = SOURCE_WORDS,
+): Promise<Answer<T>> {
   try {
     const { data, error } = await send()
-    if (error || data === undefined) return { ok: false, text: refusal(error) }
+    if (error || data === undefined) return { ok: false, text: refusal(error, words) }
     return { ok: true, data: data as T }
   } catch {
-    return { ok: false, text: t("sources.error.network") }
+    return { ok: false, text: t(words.network) }
   }
 }
 

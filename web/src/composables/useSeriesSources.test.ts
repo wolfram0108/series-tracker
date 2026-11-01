@@ -48,6 +48,20 @@ describe("useSeriesSources", () => {
     expect(sources.items.value[0].view).toMatchObject({ state: "reading", progress: { current: 2, total: 9 } })
   })
 
+  it("keeps the newer reading when an older one answers late", async () => {
+    let release!: (value: ReturnType<typeof ok<SeriesSource[]>>) => void
+    vi.mocked(calls.fetchSources).mockReset()
+      .mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+      .mockResolvedValue(ok([source()]))
+    const sources = setup()
+    await flushPromises()
+    useCompositionStore().applyChanged({ series_id: 1, rev: 5, episodes: [], summary_only: true })
+    await flushPromises()
+    release(ok([source(), source({ id: 9, position: 1, url: "https://1.ruchime.org/release/old" })]))
+    await flushPromises()
+    expect(sources.items.value).toHaveLength(1)
+  })
+
   it("reads no layout for a torrent series: it has no table", async () => {
     setup("torrent", [source({ source_type: "torrent", url: "https://kinozal.tv/details.php?id=1" })])
     await flushPromises()

@@ -33,11 +33,16 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     if (answer.ok && answer.data.canonical_url) canonical.value = { ...canonical.value, [source.id]: answer.data.canonical_url }
   }
 
+  // Only the newest read may write: an older reply that comes late would show sources the core already changed.
+  let asked = 0
   async function load(): Promise<void> {
+    const ask = ++asked
     const listed = await fetchSources(seriesId)
+    if (ask !== asked) return
     if (listed.ok) sources.value = listed.data
     if (kind !== "video") return
     const summary = await fetchSummaries(seriesId)
+    if (ask !== asked) return
     if (summary.ok) summaries.value = summary.data
     await Promise.all(sources.value.filter((source) => !(source.id in canonical.value)).map(nameThePage))
   }

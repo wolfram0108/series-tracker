@@ -38,4 +38,14 @@ describe("composition store", () => {
     expect(store.referenceOf(1, 1, 4)).toBeNull()
     expect(store.layoutChanged[1]).toBeUndefined()
   })
+
+  it("keeps the parts of one episode apart", () => {
+    const store = useCompositionStore()
+    store.applyReference(reference({ part: 1, mark: "own" }))
+    store.applyReference(reference({ part: 2, mark: "none" }))
+    store.applyReference(reference({ part: null, mark: "by_level" }))
+    expect(store.referenceOf(1, 1, 2, 1)?.mark).toBe("own")
+    expect(store.referenceOf(1, 1, 2, 2)?.mark).toBe("none")
+    expect(store.referenceOf(1, 1, 2)?.mark).toBe("by_level")
+  })
 })
