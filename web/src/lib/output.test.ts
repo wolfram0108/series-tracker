@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { components } from "../api/schema"
 import type { VoiceDub } from "../stores/voices"
 import {
-  LEVER, bySeason, groupTarget, isDeviation, isOwn, joinEpisodes, leverState, parseGroupTarget, parsePlayerTarget,
+  LEVER, allOff, bySeason, groupTarget, isDeviation, isOff, isOwn, joinEpisodes, leverState, parseGroupTarget, parsePlayerTarget,
   playerOptions, playerTarget, referenceOf, referenceOptions, resetBody, scopeView, setBody, sourcePlayers, voiceGroups,
   type EpisodeView, type Lever, type LeverState, type Reference, type Row,
 } from "./output"
@@ -235,6 +235,27 @@ describe("isDeviation", () => {
   it("is true for a voice-over in error, and not for one still running", () => {
     expect(isDeviation(episodeOf({ dubs: [dub(1, 1, "error")] }))).toBe(true)
     expect(isDeviation(episodeOf({ dubs: [dub(1, 1, "running")] }))).toBe(false)
+  })
+})
+
+describe("isOff", () => {
+  const switched = episodeOf({ rows: [row()], references: [ref(1, 1, { mark: "off", source_id: null })] })
+
+  it("is true when every slot of the episode is off, and not when one of its parts is taken or it has no reference", () => {
+    expect(isOff(switched)).toBe(true)
+    const parts = [ref(1, 1, { part: 1, mark: "off" }), ref(1, 1, { part: 2 })]
+    expect(isOff(episodeOf({ rows: [row()], references: parts }))).toBe(false)
+    expect(isOff(episodeOf({ rows: [row()] }))).toBe(false)
+  })
+
+  it("is not a departure from the norm: the user chose it", () => {
+    expect(isDeviation(switched)).toBe(false)
+  })
+
+  it("tells a whole level switched off: it has episodes and every one is off", () => {
+    expect(allOff([switched, episodeOf({ references: [ref(1, 2, { mark: "off" })] })])).toBe(true)
+    expect(allOff([switched, episodeOf({ references: [ref(1, 2)] })])).toBe(false)
+    expect(allOff([])).toBe(false)
   })
 })
 

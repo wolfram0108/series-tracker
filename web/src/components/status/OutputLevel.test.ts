@@ -32,6 +32,7 @@ interface Mounting {
   title?: string
   season?: number
   levers?: Lever[]
+  busy?: boolean
 }
 
 const mountLevel = (over: Mounting = {}) => mount(OutputLevel, {
@@ -47,7 +48,33 @@ const takeBox = (w: Mounted, group: string) => {
   return item.find("input")
 }
 
+// An episode of season 2 that the user switched off: every slot of it carries the mark off.
+const offView = (episode: number): EpisodeView => ({
+  ...viewOf(episode, { row_key: `o${episode}` }),
+  references: [{ season: 2, episode, part: null, mark: "off", source_id: null, row_key: null, player: null, voice_group: null, height: null, reason: null }],
+})
+
 describe("OutputLevel", () => {
+  it("offers to switch a season off, and on once every episode of it is off, and says which season", async () => {
+    const w = mountLevel({ scope: "season", season: 2 })
+    const button = () => w.find(".level-switch")
+    expect(button().text()).toBe(t("output.season.disable"))
+    await button().trigger("click")
+    expect(w.emitted("switch")).toEqual([[2, true]])
+    await w.setProps({ views: [offView(1), offView(2)] })
+    expect(button().text()).toBe(t("output.season.enable"))
+    await button().trigger("click")
+    expect(w.emitted("switch")![1]).toEqual([2, false])
+    await w.setProps({ views: [offView(1), VIEWS[1]] })
+    expect(button().text()).toBe(t("output.season.disable"))
+  })
+
+  it("does not offer to switch the series level, and waits while a change is on its way", async () => {
+    expect(mountLevel({ scope: "series" }).find(".level-switch").exists()).toBe(false)
+    const busy = mountLevel({ scope: "season", season: 2, busy: true })
+    expect(busy.find(".level-switch").attributes("disabled")).toBeDefined()
+  })
+
   it("shows its title, the number of its episodes, and its season as data of the root", () => {
     const w = mountLevel({ scope: "season", season: 2, title: "Season 2" })
     expect(w.find(".level-title").text()).toBe("Season 2")

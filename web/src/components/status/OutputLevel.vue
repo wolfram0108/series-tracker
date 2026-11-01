@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import { t } from "../../i18n"
-import { scopeView, type EpisodeView, type Lever, type Scope } from "../../lib/output"
+import { allOff, scopeView, type EpisodeView, type Lever, type Scope } from "../../lib/output"
 import OutputLevers from "./OutputLevers.vue"
 
 // A header of one level, with its episodes in the slot; the levers and the folding are local, since they change no data.
@@ -17,12 +17,15 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: "set", scope: Scope, lever: string, target: string | null, value: unknown): void
   (e: "reset", scope: Scope, lever: string, target: string | null): void
+  (e: "switch", season: number, off: boolean): void
 }>()
 
 // Named apart from the levers prop, which a ref of the same name would shadow.
 const leversOpen = ref(false)
 const folded = ref(false)
 const pooled = computed(() => scopeView(props.views))
+// A season is off when it has episodes and every one of them is; the series as a whole is not switched here.
+const seasonOff = computed(() => allOff(props.views))
 
 // A season is named by its number; the whole series is named by no field at all.
 function levelScope(): Scope {
@@ -51,6 +54,10 @@ function forwardReset(lever: string, target: string | null): void {
         type="button" class="level-toggle level-fold" :aria-expanded="!folded"
         @click="folded = !folded"
       >{{ t(folded ? "output.unfold" : "output.fold") }}</button>
+      <button
+        v-if="scope === 'season' && season !== undefined" type="button" class="level-toggle level-switch" :disabled="busy"
+        @click="emit('switch', season, !seasonOff)"
+      >{{ t(seasonOff ? "output.season.enable" : "output.season.disable") }}</button>
     </header>
 
     <OutputLevers
@@ -71,4 +78,5 @@ function forwardReset(lever: string, target: string | null): void {
   padding: 0; border: none; background: none; cursor: pointer;
   color: var(--color-blue); text-decoration: underline;
 }
+.level-toggle:disabled { cursor: default; opacity: 0.5; }
 </style>

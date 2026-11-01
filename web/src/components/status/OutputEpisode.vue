@@ -3,7 +3,7 @@ import { computed, ref } from "vue"
 import type { components } from "../../api/schema"
 import { t, type MessageKey } from "../../i18n"
 import { reasonText } from "../../lib/reason"
-import { isDeviation, sourcePlayers, type EpisodeView, type Reference, type Scope } from "../../lib/output"
+import { isDeviation, isOff, sourcePlayers, type EpisodeView, type Reference, type Scope } from "../../lib/output"
 import OutputLevers from "./OutputLevers.vue"
 
 type Schemas = components["schemas"]
@@ -17,6 +17,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: "set", scope: Scope, lever: string, target: string | null, value: unknown): void
   (e: "reset", scope: Scope, lever: string, target: string | null): void
+  (e: "switch", season: number, episode: number, off: boolean): void
 }>()
 
 // The keys are written out, never built from a value, so every text stays findable in the catalog.
@@ -26,6 +27,7 @@ const MARK: Record<Schemas["ReferenceMark"], MessageKey> = {
   other_player: "output.mark.other_player",
   none: "output.mark.none",
   unfit: "output.mark.unfit",
+  off: "output.mark.off",
 }
 
 const STATE: Record<Schemas["DubState"], MessageKey> = {
@@ -53,6 +55,7 @@ const HINT: Record<Schemas["DubHint"], MessageKey> = {
 const open = ref(false)
 const players = computed(() => sourcePlayers(props.view))
 const deviation = computed(() => isDeviation(props.view))
+const off = computed(() => isOff(props.view))
 
 const episodeScope = (): Scope => ({ season: props.view.season, episode: props.view.episode })
 
@@ -96,7 +99,7 @@ function forwardReset(lever: string, target: string | null): void {
 <template>
   <article
     class="output-episode stack" :data-season="view.season" :data-episode="view.episode"
-    :class="{ 'is-deviation': deviation }"
+    :class="{ 'is-deviation': deviation, 'is-off': off }"
   >
     <header class="cluster">
       <h3 class="episode-title">{{ t("output.episode", { n: view.episode }) }}</h3>
@@ -129,9 +132,15 @@ function forwardReset(lever: string, target: string | null): void {
       </ul>
     </section>
 
-    <button type="button" class="episode-toggle" :aria-expanded="open" @click="open = !open">
-      {{ t(open ? "output.levers.hide" : "output.levers.show") }}
-    </button>
+    <div class="cluster">
+      <button type="button" class="episode-toggle" :aria-expanded="open" @click="open = !open">
+        {{ t(open ? "output.levers.hide" : "output.levers.show") }}
+      </button>
+      <button
+        type="button" class="episode-toggle episode-switch" :disabled="busy"
+        @click="emit('switch', view.season, view.episode, !off)"
+      >{{ t(off ? "output.episode.enable" : "output.episode.disable") }}</button>
+    </div>
     <OutputLevers
       v-if="open" scope="episode" :view="view" :levers="view.levers" :busy="busy"
       @set="forwardSet" @reset="forwardReset"
@@ -152,4 +161,5 @@ function forwardReset(lever: string, target: string | null): void {
   padding: 0; border: none; background: none; cursor: pointer;
   color: var(--color-blue); text-decoration: underline;
 }
+.episode-toggle:disabled { cursor: default; opacity: 0.5; }
 </style>

@@ -24,6 +24,23 @@ export function syncSeries(seriesId: number): Promise<Answer<unknown>> {
   return call(() => api.POST("/api/series/{series_id}/scan", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
 }
 
+/** The renaming of the files of the series is counted again by the rules as they are now. */
+export function reprocessSeries(seriesId: number): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/series/{series_id}/reprocess", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
+}
+
+/** The files already in the library are looked for and adopted into the plan. */
+export function adoptSeries(seriesId: number): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/series/{series_id}/deep-adoption", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
+}
+
+/** Switches an episode (without `episode`, a whole season) off or on; the references that follow come as events. */
+export function switchOutput(seriesId: number, body: Schemas["OutputSwitchBody"]): Promise<Answer<unknown>> {
+  return call(() => api.PUT("/api/series/{series_id}/output/switch", {
+    params: { path: { series_id: seriesId } }, body,
+  }), OUTPUT_WORDS)
+}
+
 export function setLever(seriesId: number, body: Schemas["OutputSettingsSet"]): Promise<Answer<unknown>> {
   return call(() => api.PUT("/api/series/{series_id}/output/settings", {
     params: { path: { series_id: seriesId } }, body,

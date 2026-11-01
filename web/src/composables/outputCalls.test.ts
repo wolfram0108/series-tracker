@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const client = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() }))
 vi.mock("../api/client", () => ({ api: client }))
 
-import { fetchComposition, fetchOutput, resetLever, setLever, syncSeries } from "./outputCalls"
+import { adoptSeries, fetchComposition, fetchOutput, reprocessSeries, resetLever, setLever, switchOutput, syncSeries } from "./outputCalls"
 
 beforeEach(() => Object.values(client).forEach((fn) => fn.mockReset()))
 
@@ -33,6 +33,23 @@ describe("the calls to the output of the core", () => {
     client.POST.mockResolvedValueOnce({ data: { success: true } })
     expect(await resetLever(1, body)).toEqual({ ok: true, data: { success: true } })
     expect(client.POST).toHaveBeenCalledWith("/api/series/{series_id}/output/settings/reset", { params: { path: { series_id: 1 } }, body })
+  })
+
+  it("switches an episode or a season by the path of the series with its body as it is", async () => {
+    const body = { season: 2, episode: 5, off: true }
+    client.PUT.mockResolvedValueOnce({ data: { success: true } })
+    expect(await switchOutput(1, body)).toEqual({ ok: true, data: { success: true } })
+    expect(client.PUT).toHaveBeenCalledWith("/api/series/{series_id}/output/switch", { params: { path: { series_id: 1 } }, body })
+  })
+
+  it("asks for the renaming to be counted again and for the files of the library to be adopted, by the path of the series", async () => {
+    client.POST.mockResolvedValue({ data: { success: true } })
+    expect(await reprocessSeries(1)).toEqual({ ok: true, data: { success: true } })
+    expect(await adoptSeries(1)).toEqual({ ok: true, data: { success: true } })
+    expect(client.POST.mock.calls).toEqual([
+      ["/api/series/{series_id}/reprocess", { params: { path: { series_id: 1 } } }],
+      ["/api/series/{series_id}/deep-adoption", { params: { path: { series_id: 1 } } }],
+    ])
   })
 
   it("asks for a pass over the series by its path", async () => {

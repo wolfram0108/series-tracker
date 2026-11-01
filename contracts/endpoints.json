@@ -660,7 +660,7 @@
   "path": "/api/series/{series_id}/composition",
   "func": "composition",
   "file": "modules/gateway/api_output.py",
-  "line": 41,
+  "line": 42,
   "access": "session",
   "conditional": null,
   "summary": "Композиция: раскладка видео-сериала (composition) либо состав торрента (torrents)",
@@ -679,7 +679,9 @@
   "access": "session",
   "conditional": null,
   "summary": "Глубокое усыновление (фон)",
-  "panel_sites": []
+  "panel_sites": [
+   "composables/outputCalls.ts:34"
+  ]
  },
  {
   "method": "PUT",
@@ -737,7 +739,7 @@
   "path": "/api/series/{series_id}/output",
   "func": "output",
   "file": "modules/gateway/api_output.py",
-  "line": 71,
+  "line": 72,
   "access": "session",
   "conditional": null,
   "summary": "Референс каждой серии и отметка (scan)",
@@ -750,12 +752,12 @@
   "path": "/api/series/{series_id}/output/settings",
   "func": "set_output_setting",
   "file": "modules/gateway/api_output.py",
-  "line": 79,
+  "line": 92,
   "access": "session",
   "conditional": null,
   "summary": "Значение рычага выхода на уровне сериала, сезона или серии",
   "panel_sites": [
-   "composables/outputCalls.ts:28"
+   "composables/outputCalls.ts:45"
   ]
  },
  {
@@ -763,12 +765,25 @@
   "path": "/api/series/{series_id}/output/settings/reset",
   "func": "reset_output_settings",
   "file": "modules/gateway/api_output.py",
-  "line": 91,
+  "line": 104,
   "access": "session",
   "conditional": null,
   "summary": "Возврат рычагов уровня в наследование",
   "panel_sites": [
-   "composables/outputCalls.ts:34"
+   "composables/outputCalls.ts:51"
+  ]
+ },
+ {
+  "method": "PUT",
+  "path": "/api/series/{series_id}/output/switch",
+  "func": "switch_output",
+  "file": "modules/gateway/api_output.py",
+  "line": 80,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
+  "panel_sites": [
+   "composables/outputCalls.ts:39"
   ]
  },
  {
@@ -792,7 +807,8 @@
   "conditional": null,
   "summary": "Переобработка имён файлов (вид сериала решает renaming)",
   "panel_sites": [
-   "components/status/StatusComposition.vue:257"
+   "components/status/StatusComposition.vue:257",
+   "composables/outputCalls.ts:29"
   ]
  },
  {

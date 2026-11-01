@@ -2,7 +2,10 @@ import { computed, onMounted, ref, watch, type Ref } from "vue"
 import { bySeason, joinEpisodes, resetBody, setBody, type Reference, type Scope } from "../lib/output"
 import { useCompositionStore, type ReferencePacket } from "../stores/composition"
 import { useVoicesStore } from "../stores/voices"
-import { fetchComposition, fetchOutput, resetLever, setLever, syncSeries, type Composition } from "./outputCalls"
+import {
+  adoptSeries, fetchComposition, fetchOutput, reprocessSeries, resetLever, setLever, switchOutput, syncSeries,
+  type Composition,
+} from "./outputCalls"
 import type { Answer } from "./sourceCalls"
 import { useSSE } from "./useSSE"
 
@@ -29,11 +32,14 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const voices = useVoicesStore()
   const composition = ref<Composition | null>(null)
   const references = ref<Reference[]>([])
-  const loading = ref(false)
+  // A video series has not been read yet when it is shown first: the window must not say "nothing here" for that moment.
+  const loading = ref(kind === "video")
   const failure = ref<string | null>(null)
   // A lever is on its way to the core / a pass over the series is running: the controls that start them wait.
   const busy = ref(false)
   const syncing = ref(false)
+  const reprocessing = ref(false)
+  const adopting = ref(false)
 
   const views = computed(() => joinEpisodes(
     composition.value?.rows ?? [],
@@ -87,6 +93,14 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const reset = (scope: Scope, lever?: string, target?: string | null): Promise<string | null> =>
     act(() => resetLever(seriesId, resetBody(scope, lever, target)), busy)
 
+  // An episode, or a whole season (no episode in the scope), off or on; the references that follow come as events.
+  const switchTo = (season: number, episode: number | null, off: boolean): Promise<string | null> =>
+    act(() => switchOutput(seriesId, { season, ...(episode === null ? {} : { episode }), off }), busy)
+
+  const reprocess = (): Promise<string | null> => act(() => reprocessSeries(seriesId), reprocessing)
+
+  const adopt = (): Promise<string | null> => act(() => adoptSeries(seriesId), adopting)
+
   const sync = (): Promise<string | null> => act(() => syncSeries(seriesId), syncing)
 
   if (kind === "video") {
@@ -107,5 +121,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     })
   }
 
-  return { composition, references, loading, failure, busy, syncing, views, levels, sources, seasons, load, set, reset, sync }
+  return { composition, references, loading, failure, busy, syncing, reprocessing, adopting, views, levels, sources, seasons, load, set, reset, switchTo,
+    sync, reprocess, adopt }
 }

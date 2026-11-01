@@ -37,6 +37,28 @@ const viewOf = (over: Partial<EpisodeView> = {}): EpisodeView => ({
 const mountEpisode = (over: Partial<EpisodeView> = {}, busy = false) =>
   mount(OutputEpisode, { props: { view: viewOf(over), busy } })
 
+describe("OutputEpisode switch", () => {
+  const offRef = (): Reference => refOf({ mark: "off", source_id: null, row_key: null, player: null, voice_group: null, height: null })
+
+  it("offers to switch the episode off, says which one, and is no departure once it is off", async () => {
+    const w = mountEpisode({ references: [refOf({})] })
+    expect(w.find(".episode-switch").text()).toBe(t("output.episode.disable"))
+    await w.find(".episode-switch").trigger("click")
+    expect(w.emitted("switch")).toEqual([[1, 5, true]])
+    const off = mountEpisode({ references: [offRef()] })
+    expect(off.classes()).toContain("is-off")
+    expect(off.classes()).not.toContain("is-deviation")
+    expect(off.find(".episode-marks").text()).toContain(t("output.mark.off"))
+    expect(off.find(".episode-switch").text()).toBe(t("output.episode.enable"))
+    await off.find(".episode-switch").trigger("click")
+    expect(off.emitted("switch")).toEqual([[1, 5, false]])
+  })
+
+  it("waits while a change is on its way", () => {
+    expect(mountEpisode({ references: [refOf({})] }, true).find(".episode-switch").attributes("disabled")).toBeDefined()
+  })
+})
+
 describe("OutputEpisode", () => {
   it("names the episode and its reference by group, player and height, and carries its season and number", () => {
     const w = mountEpisode({ references: [refOf({})] })

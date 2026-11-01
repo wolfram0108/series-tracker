@@ -286,11 +286,23 @@ export function resetBody(scope: Scope, lever?: string, target?: string | null):
 
 // --- deviations ------------------------------------------------------------------------------------------------------
 
+/** Whether the user switched the episode off: every slot of it carries the mark `off`. */
+export function isOff(view: EpisodeView): boolean {
+  return view.references.length > 0 && view.references.every((reference) => reference.mark === "off")
+}
+
+/** Whether a whole level is switched off: it has episodes and every one of them is off. */
+export function allOff(views: EpisodeView[]): boolean {
+  return views.length > 0 && views.every(isOff)
+}
+
 /**
  * Whether the episode departs from the norm: lines without any reference, a reference not taken from its level,
- * a lever set on the episode itself, or a voice-over in error.
+ * a lever set on the episode itself, or a voice-over in error. An episode the user switched off is their choice,
+ * not a departure.
  */
 export function isDeviation(view: EpisodeView): boolean {
+  if (isOff(view)) return false
   if (view.rows.length > 0 && view.references.length === 0) return true
   return view.references.some((ref) => ref.mark !== "by_level")
     || view.levers.some((lever) => lever.level === "episode")
