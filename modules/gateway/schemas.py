@@ -245,6 +245,13 @@ class OutputSettingsReset(RequestModel):
 
 # --- the test of rules on a page (api_sources) -------------------------------
 
+class TableReadRequest(RequestModel):
+    """Read the page of an address now; `options` are the choices of the source that change what is read."""
+
+    url: str
+    options: dict[str, str] = Field(default_factory=dict)
+
+
 class RulesTestRequest(RequestModel):
     """The test of a profile on a page: the rows of the page as the constructor gets them, each with its answer."""
     url: str

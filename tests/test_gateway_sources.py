@@ -1,6 +1,8 @@
 """The gateway points of the sources: the sources of a series, the pages that are no source yet, the test of rules
 and the parse of a torrent page. Each point carries the exact body to the owner, carries a refusal back with its
 code, and knows no site: what an address is, is the answer of the owners."""
+import asyncio
+
 import pytest
 
 from core.contracts import SeriesSource
@@ -176,6 +178,15 @@ async def test_an_address_no_site_reads_is_resolved_to_nothing(tmp_path):
                        ) as (client, _, _, _):
         response = await client.post("/api/sources/resolve", json={"url": "http://kinozal.tv/details.php?id=1"})
     assert response.json() == {"site": None, "canonical_url": None, "source_type": None}
+
+
+async def test_a_page_is_read_now_by_one_command_to_sources_with_the_options_given(tmp_path):
+    async with serving(tmp_path, {}) as (client, owners, _, spy):
+        response = await client.post("/api/sources/read", json={"url": "https://x.test/p", "options": {"a": "b"}})
+        await asyncio.sleep(0)
+    assert response.status_code == 200 and response.json()["success"] is True
+    sent = [env for env in published(spy) if env.topic == "sources.table.read"]
+    assert [env.payload for env in sent] == [{"url": "https://x.test/p", "options": {"a": "b"}}]
 
 
 # --- the test of rules ---------------------------------------------------------------------------

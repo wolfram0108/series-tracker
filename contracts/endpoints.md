@@ -195,6 +195,8 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | PUT | `/api/series/{series_id}/sources/{source_id}` | Изменить поля источника: адрес, профиль, режим поиска VK, сезон Vibix, отключённые плееры, место (`catalog.sources.update`) | — |
 | DELETE | `/api/series/{series_id}/sources/{source_id}` | Удалить источник; единственный источник — отказ `last_source` (`catalog.sources.remove`) | — |
 | POST | `/api/sources/preview` | Что показать окну об адресе, который ещё не источник сериала: состояние таблицы, сводка, строки для конструктора (`composition.preview`) | — |
+| POST | `/api/sources/read` | Прочитать страницу сейчас, не дожидаясь срока таблицы (команда `sources.table.read`; тело `{url, options?}`) | `SourceCard.vue` |
+| POST | `/api/sources/read` | Прочитать страницу сейчас, не дожидаясь срока таблицы (команда `sources.table.read`; тело `{url, options?}`) | `SourceCard.vue` |
 | POST | `/api/sources/resolve` | Какой сайт читает адрес и его канонический вид, без сети (`sources.site.resolve`) | — |
 
 ### 3.8 Выход — `api_output.py`

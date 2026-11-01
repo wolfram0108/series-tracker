@@ -14,7 +14,7 @@ from core.contracts import (CompositionPreviewReply, CompositionPreviewRequest, 
 
 from .routing import refusal
 from .schemas import (ChangedSource, CreatedSource, ErrorOnly, ErrorResponse, OkResponse, RulesTestRequest,
-                      SourceAdd, SourceChange)
+                      SourceAdd, SourceChange, TableReadRequest)
 
 _ERR = {code: {"model": ErrorResponse} for code in (400, 404, 500, 503)}
 _ERR1 = {code: {"model": ErrorOnly} for code in (400, 500, 503)}
@@ -84,6 +84,12 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return await gw.request("sources.site.resolve", body.model_dump(mode="json"), timeout=10)
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
+
+    @r.post("/api/sources/read", response_model=OkResponse, responses=_ERR1)
+    async def read_source(body: TableReadRequest):
+        """Read the page now, whatever the age of its table (the hour of a table is the term of a sync, not of a user)."""
+        gw.send_command("sources.table.read", body.model_dump(mode="json"))
+        return {"success": True}
 
     @r.post("/api/parser-profiles/test", response_model=CompositionPreviewReply, responses=_ERR1)
     async def rules_test(body: RulesTestRequest):
