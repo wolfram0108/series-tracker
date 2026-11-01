@@ -272,7 +272,7 @@ async def test_add_series_does_not_take_the_fields_that_left_the_series(system, 
     resp = await client.post("/api/series", json=body)
     assert resp.status_code == 422
     assert next(iter(removed)) in json.dumps(resp.json(), ensure_ascii=False)
-    assert len((await client.get("/api/series")).json()) == 2  # серия не создана
+    assert len((await client.get("/api/series")).json()) == 2  # the series is not created
 
 
 @pytest.mark.asyncio

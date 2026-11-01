@@ -291,7 +291,7 @@ class SourcesModule(BaseModule):
             accept=lambda html, attempt_url: parse(html, attempt_url))
         return {**delivered.value, "url": delivered.url}
 
-    # --- VK API for the sites (находка 15: the token lives in trackerauth) -------------------
+    # --- VK API for the sites (finding 15: the token lives in trackerauth) -------------------
 
     async def _vk_call(self, method: str, params: dict) -> dict:
         """One call of the VK API through the delivery: the answer, or a `SiteError` with the reason the site reports."""

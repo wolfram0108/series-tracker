@@ -312,7 +312,7 @@ class ScanModule(BaseModule):
     async def _debug_force_replace(self) -> bool:
         return await self._setting("debug_force_replace", "false") == "true"
 
-    # --- сигналы соседей ---------------------------------------------------------------
+    # --- signals of the neighbours ---------------------------------------------------------------
 
     def on_table_ready(self, env: Envelope) -> None:
         self._signals.ready(env.payload["url"])
@@ -474,15 +474,15 @@ class ScanModule(BaseModule):
             else:
                 raise
 
-    # --- видео-ветка: синхронизация и план референсов ----------------------------------
+    # --- video branch: synchronisation and the plan of references ----------------------------------
 
     async def _sync_video(self, series: dict, download: bool) -> dict:
         """Tables of all sources -> layout -> references and plan -> (with download) the download and the voice-overs.
 
         Each step starts on the signal that the one before it ended, and any step that fails fails the scan."""
         series_id = series["id"]
-        # Сверка диска перед сканом (R4, ситуации VF1/VF3/VC1): пропавший скачанный файл → сброс completed→pending,
-        # чтобы dispatch перекачал. Недоступный путь (F7/VF7) гасится внутри downloads.on_fs_sync.
+        # Disk check before the scan: a downloaded file that is gone is reset from completed to pending so that dispatch
+        # fetches it again; an unreachable path is absorbed inside downloads.on_fs_sync.
         try:
             await self.request("downloads.fs.sync", {"series_id": series_id}, timeout=120)
         except BusRequestError as exc:
@@ -499,8 +499,8 @@ class ScanModule(BaseModule):
         self._alive(series_id)
         refreshed = await self._refresh(series, announce=True)
         changed = before != await self._fingerprint(series_id)
-        # Явный скан — ЕДИНСТВЕННЫЙ путь к загрузке: после плана приказываем downloads докачать недостающее, а
-        # voices — взять озвучки тех же серий. «Сохранить» (download=False) и пересчёт по событию этого НЕ делают.
+        # An explicit scan is the only way to a download: after the plan, downloads is told to fetch what is missing and
+        # voices to take the voice-overs of the same episodes; a plain save (download=False) and a recount on an event do not.
         if download:
             self.send_command("downloads.dispatch", {"series_id": series_id})
             self.send_command("voices.dispatch", {"series_id": series_id})

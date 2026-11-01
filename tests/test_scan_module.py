@@ -133,7 +133,7 @@ def db_path(tmp_path):
                      "VALUES (1, 'профиль')")
         insert_series(conn, id=1, name="Т1", name_en="T1", site="kinozal.me", save_path="/media/t1",
                       url=TORRENT_URL, source_type="torrent", parser_profile_id=1)
-        # Торрент-сериал без профиля: скан должен отказаться.
+        # A torrent series without a profile: the scan must refuse.
         insert_series(conn, id=2, name="Т2", name_en="T2", site="kinozal.me", save_path="/media/t2",
                       url="https://kinozal.me/details.php?id=8", source_type="torrent", parser_profile_id=None)
         conn.commit()

@@ -79,7 +79,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 
 from core import BaseModule, sanitize_name, sanitize_path
 from core.contracts import SourceEvent
@@ -131,6 +130,7 @@ class CatalogModule(BaseModule):
         self._busy: dict[int, set[str]] = {}
         # Отчёты владельцев о чистке удалённой серии: series_id -> owners.
         self._purged: dict[int, set[str]] = {}
+        self._purge_waiters: dict[int, asyncio.Event] = {}
         super().__init__(bus)
 
     def register(self) -> None:
@@ -282,7 +282,7 @@ class CatalogModule(BaseModule):
         self._spawn(self._await_purge_reports(series_id))
         return {"ok": True}
 
-    # --- sources of a series (Д-38) -------------------------------------------
+    # --- sources of a series (decision D-38) -------------------------------------------
 
     async def on_sources_list(self, env: Envelope) -> list[dict]:
         series_id = env.payload["series_id"]
@@ -354,17 +354,24 @@ class CatalogModule(BaseModule):
                            SourceEvent(series_id=series_id, source_id=source_id).model_dump())
 
     def on_series_purged(self, env: Envelope) -> None:
-        """Отчёт владельца: его таблицы вычищены."""
+        """Отчёт владельца: его таблицы вычищены; последний отчёт будит ожидающего каскад."""
         p = env.payload
-        self._purged.setdefault(p["series_id"], set()).add(p["owner"])
+        reported = self._purged.setdefault(p["series_id"], set())
+        reported.add(p["owner"])
+        if set(PURGE_OWNERS) <= reported and p["series_id"] in self._purge_waiters:
+            self._purge_waiters[p["series_id"]].set()
 
     async def _await_purge_reports(self, series_id: int) -> None:
-        """Ждём отчёты владельцев о чистке: молчание — обрыв каскада."""
-        deadline = time.monotonic() + PURGE_REPORT_TIMEOUT
-        while time.monotonic() < deadline:
-            if set(PURGE_OWNERS) <= self._purged.get(series_id, set()):
-                break
-            await asyncio.sleep(0.2)
+        """Ждём отчёты владельцев о чистке сигналом, а не опросом; молчание дольше срока — обрыв каскада."""
+        done = self._purge_waiters.setdefault(series_id, asyncio.Event())
+        if set(PURGE_OWNERS) <= self._purged.get(series_id, set()):
+            done.set()
+        try:
+            await asyncio.wait_for(done.wait(), PURGE_REPORT_TIMEOUT)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            self._purge_waiters.pop(series_id, None)
         missing = set(PURGE_OWNERS) - self._purged.get(series_id, set())
         self._purged.pop(series_id, None)
         if missing:

@@ -413,15 +413,15 @@ class DownloadsModule(BaseModule):
             runner.cancel()
             try:
                 await runner
-            except BaseException:  # noqa: BLE001 — ждём завершения отмены
+            except BaseException:  # noqa: BLE001 - wait for the cancellation to finish
                 pass
 
     async def _stop_task(self, task: dict) -> None:
         """Stops a task and removes what its download left half-written; a finished file stays."""
         await self._cancel_runner(task["id"])
         path = task.get("save_path")
-        # final отсутствует → загрузка не закончена → снести полуфайлы;
-        # если final на месте — это законченный файл, не трогаем.
+        # No final file means the download did not finish: remove the half-written files;
+        # a final file in place is a finished one and stays.
         if path and not await storage.call(os.path.exists, path):
             await storage.call(self._remove_partial, path, timeout=storage.REMOVE_TIMEOUT_S, owns=path)
 

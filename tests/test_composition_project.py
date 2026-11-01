@@ -94,7 +94,7 @@ def test_a_compilation_stays_one_row_with_the_range_the_constructor_gave():
 
 
 def test_a_single_row_named_by_a_compilation_text_stays_a_single_episode():
-    # CVH writes "110 серия" on a file of episodes 109-110: the text is all the constructor can read.
+    # CVH writes "110 episode" on a file of episodes 109-110: the text is all the constructor can read.
     only = one(item(source(), table(row("x", "110 серия", player="cvh")), {"x": {"season": 1, "episode": 110}}))[0]
     assert (only.episode_start, only.episode_end, only.is_compilation) == (110, 110, False)
 
@@ -253,8 +253,8 @@ def test_the_lines_are_those_of_line_of_with_the_key_of_the_row():
 
 
 def test_the_lines_and_the_layout_of_real_values_of_ruchime_dunhuatv_kodik_and_cvh():
-    # Values as the snapshots in raw/ have them: ruchime "Серия 2" of a Vibix season, a Kodik compilation "1-3 серия",
-    # a CVH row "5 серия" of AniStar with the type "Многоголосый".
+    # Values as the snapshots in raw/ have them: a ruchime row of a Vibix season, a Kodik compilation text of three episodes,
+    # a CVH row of AniStar with its multi-voice type.
     ruchime = table(
         row("2:1", "Серия 1", player="vibix", label="Vibix", voice="Ruchime", group="Сезон 2", heights=(480, 720, 1080)),
         row("2:2", "Серия 2", player="vibix", label="Vibix", voice="Ruchime", group="Сезон 2", heights=(480, 720, 1080)),
