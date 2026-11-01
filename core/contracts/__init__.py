@@ -4,7 +4,8 @@ A producer builds its payload with one of these models and a consumer reads it w
 so the two cannot drift apart unnoticed. Modules import their contracts from here, never from each other.
 """
 from .alignment import AlignmentJob, DubResult, JobStatus, SubmitOutcome, SubmitReply
-from .composition import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionReply,
+from .composition import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
+                          CompositionPreviewRequest, CompositionReply, PreviewLine,
                           CompositionRow, EpisodeRef, Exclusion, PlayerSummary, SourceStatus, SourceSummary,
                           VoiceSummary)
 from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
@@ -30,7 +31,8 @@ __all__ = ["AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitRep
            "TableProgress", "TableReady", "TableRow", "TableState", "line_of",
            "RuleLine", "RuleResult", "RulesApplyReply", "RulesApplyRequest", "RulesProfileChanged",
            "SeriesKind", "SeriesSource", "SourceEvent", "SourceType",
-           "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionReply", "CompositionRow",
+           "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
+           "CompositionReply", "CompositionRow", "PreviewLine",
            "EpisodeRef", "Exclusion", "PlayerSummary", "SourceStatus", "SourceSummary", "VoiceSummary",
            "REFERENCE_ALLOW", "REFERENCE_CHOICE", "VOICE_PLAYER", "VOICE_TAKE", "EffectiveLever", "EpisodeSettings", "Level", "LevelSettings", "PlayerPick", "ReferenceChoice", "SettingRecord", "SettingsReset", "SettingsSet",
            "group_target", "parse_group_target", "parse_player_target", "player_target",

@@ -6,7 +6,8 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 from .output_settings import EpisodeSettings, LevelSettings
-from .release_table import RowState
+from .release_table import RowState, TableState
+from .rules import RuleResult
 
 
 class Exclusion(StrEnum):
@@ -83,7 +84,9 @@ class PlayerSummary(BaseModel):
 
 
 class SourceSummary(BaseModel):
-    source_id: int
+    """`source_id` is 0 for an address that is not yet a source of a series (the add window, the test of rules)."""
+
+    source_id: int = 0
     url: str
     status: SourceStatus
     reason: str | None = None
@@ -127,3 +130,31 @@ class CompositionChanged(BaseModel):
 class CompositionFailed(BaseModel):
     series_id: int
     reason: str
+
+
+class PreviewLine(BaseModel):
+    """A row of a page as the constructor gets it (`line` is `line_of`), with its answer when a profile is given."""
+
+    key: str
+    line: str
+    result: RuleResult | None = None
+
+
+class CompositionPreviewRequest(BaseModel):
+    """What a window shows of an address before it belongs to a series. `refresh` False reads nothing."""
+
+    url: str
+    options: dict[str, str] = Field(default_factory=dict)
+    profile_id: int | None = None
+    series_season: str | int | None = None
+    refresh: bool = True
+
+
+class CompositionPreviewReply(BaseModel):
+    """`state` is the state of the table of the page; `summary` and `lines` come from the last complete table."""
+
+    url: str
+    state: TableState
+    reason: str | None = None
+    summary: SourceSummary | None = None
+    lines: list[PreviewLine] = Field(default_factory=list)
