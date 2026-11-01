@@ -206,6 +206,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | GET | `/api/series/{series_id}/composition` | Видео-сериал — раскладка (`composition.get`, query `include_excluded`, `sources_only` — только сводки источников); торрент — состав раздач (`torrents.composition`, query `refresh`) | `StatusComposition.vue` (торрент), `StatusOutput.vue`, `SourcesEditor.vue` (видео) |
 | GET | `/api/series/{series_id}/output` | Референс каждой серии и отметка (`scan.output.get`) | — |
 | PUT | `/api/series/{series_id}/output/settings` | Значение рычага на уровне сериала, сезона или серии (`composition.settings.set`) | — |
+| PUT | `/api/series/{series_id}/output/switch` | Отключить или включить серию, а сезон целиком — без `episode` (`scan.output.switch`) | — |
 | POST | `/api/series/{series_id}/output/settings/reset` | Вернуть рычаги уровня в наследование (`composition.settings.reset`) | — |
 
 ---
@@ -320,12 +321,6 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | GET | `/api/directories` | `legacy_frontend` (выбор каталога) | то же |
 | POST | `/api/downloads/queue/clear` | только тесты | админ-инструмент, в панели нет кнопки |
 | GET | `/api/me` | только тесты | панель определяет вход по `/api/auth/status` |
-| GET, POST | `/api/series/{series_id}/sources` | пока никто | эндпоинт этапа 10, интерфейс — П-9 |
-| PUT, DELETE | `/api/series/{series_id}/sources/{source_id}` | пока никто | то же |
-| POST | `/api/sources/preview`, `/api/sources/resolve` | пока никто | то же |
-| GET | `/api/series/{series_id}/output` | пока никто | то же |
-| PUT | `/api/series/{series_id}/output/settings` | пока никто | то же |
-| POST | `/api/series/{series_id}/output/settings/reset` | пока никто | то же |
 
 ---
 
@@ -789,8 +784,14 @@ settings}` (query `include_excluded` — вернуть и строки, кот�
 раздач, query `refresh` сначала выполняет `scan.series.prepare`. 404 — сериал не найден.
 
 **GET `/api/series/{series_id}/output`** — список `Reference` `{season, episode, part, mark, source_id, row_key, player,
-voice_group, height, reason}`; `mark` — `by_level` | `own` | `other_player` | `none` | `unfit`. Сведения раскладки и
+voice_group, height, reason}`; `mark` — `by_level` | `own` | `other_player` | `none` | `unfit` | `off` (серию отключил пользователь:
+сезон, номер серии или строка плана; референса и озвучек у неё нет). Сведения раскладки и
 озвучек (`/composition`, `/voices`) шлюз не склеивает: интерфейс сопоставляет их по (сезон, серия).
+
+**PUT `/api/series/{series_id}/output/switch`** — тело `{season, episode?, off}`; без `episode` — сезон целиком. Память
+сериала (`ignored_seasons`, `ignored_episodes`) и строки плана меняются вместе; включение сезона включает в нём всё.
+Ответ `{success}`; изменение приходит событиями `reference_changed`. 404 — сериал не найден; 422 — нет `season` или
+`off`, либо неизвестное поле.
 
 **PUT `/api/series/{series_id}/output/settings`** — тело `{season?, episode?, lever, target?, value}`; уровень — сериал
 (без сезона), сезон или серия (сезон и серия). Ответ `{success}`. 400 с кодом: `unknown_lever`, `bad_target`,

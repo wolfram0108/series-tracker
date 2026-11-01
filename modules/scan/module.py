@@ -22,10 +22,15 @@ Queries:
   scan.series.prepare {series_id} → the summary of a torrent scan without a download: the torrent is added to
       qBittorrent, split into its files (torrent_files) and left paused — the user picks the episodes in the
       composition, the next scan starts the download.
-  scan.output.get {series_id} → [Reference]: the reference of every slot of the series that the user has not
-      switched off (an episode or a season switched off, or a row of the plan switched off, is not offered). One
-      Reference per slot: an episode with parts has one per part. Marks: by_level, own, other_player, none, unfit
-      (core/contracts/reference.py).
+  scan.output.get {series_id} → [Reference]: every slot of the series. One Reference per slot: an episode with
+      parts has one per part. Marks: by_level, own, other_player, none, unfit, and `off` for a slot the user switched
+      off (an episode or a season switched off, or a row of the plan switched off): it takes nothing and plans no
+      voice-over (core/contracts/reference.py).
+  scan.output.switch {series_id, season, episode?, off} → {success}: switches an episode (without `episode`, a whole
+      season) off or on. The memory of the series (ignored_seasons, ignored_episodes) and the rows of the plan change
+      together, so the choice holds for the rows that exist and for those a new release brings; switching a season on
+      switches on all of it. What changed goes out as scan.reference.changed. A series the catalog does not have is
+      refused with the catalog's own answer.
 
 Commands:
   scan.all.start {} — a pass over all series with auto_scan_enabled (what the internal scheduler does by the
@@ -35,7 +40,8 @@ Events (outgoing):
   scan.plan.updated {series_id} — the plan was counted again; downloads only adopts finished files on it (it does NOT
       download). The download is started by an explicit scan alone (downloads.dispatch).
   scan.reference.changed (ReferenceChanged: series_id and the whole Reference) — the reference or the mark of a slot
-      differs from the stored one (a slot that left the output reports `none` with the reason `reference_none`); sent
+      differs from the stored one (a slot whose row left the layout reports `none` with the reason `reference_none`; a
+      slot the user switched off reports `off` with the reason `reference_off`); sent
       after the write. Voices follow it, a window shows it without a second request.
   scan.status.changed {scanner_enabled, scan_interval, is_scanning, is_awaiting_tasks, next_scan_time} — the state
       of the scheduler (the contract of the old scanner_status_update).
@@ -67,7 +73,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from core import BaseModule, BusRequestError, ids, torrent_source
-from core.contracts import CompositionReply, Reference, ReferenceChanged, SeriesSource, VoiceSettingsView
+from core.contracts import CompositionReply, OutputSwitch, Reference, ReferenceChanged, SeriesSource, VoiceSettingsView
 from core.db import Database
 from core.envelope import Envelope
 from core.voice_names import Groups
@@ -152,6 +158,7 @@ class ScanModule(BaseModule):
         self.handle("scan.seasons", self.on_seasons)
         self.handle("scan.item.set_ignored", self.on_set_ignored)
         self.handle("scan.items.set_ignored_bulk", self.on_set_ignored_bulk)
+        self.handle("scan.output.switch", self.on_output_switch)
         self.handle("scan.output.get", self.on_output_get)
         self.handle("scan.status.get", self.on_status_get)
         self.handle("composition.changed", self.on_composition_changed)
@@ -222,6 +229,35 @@ class ScanModule(BaseModule):
         self.publish_event("scan.plan.updated", {"series_id": series_id})
         return {"updated": n}
 
+    async def on_output_switch(self, env: Envelope) -> dict:
+        """An episode, or a whole season, is switched off or on by the user. The memory of the series and the rows of
+        the plan change together, so that the choice holds for the rows that are there and for those that come with a
+        new release; what the output shows of it goes out as references. Switching a season on switches on all of it."""
+        request = OutputSwitch.model_validate(env.payload)
+        series_id = request.series_id
+
+        async def apply() -> None:
+            series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=STEP_TIMEOUT_S)
+            seasons, memory = self._ignored_seasons(series), self._ignored_episodes(series)
+            if request.episode is None:
+                seasons = seasons | {request.season} if request.off else seasons - {request.season}
+                if not request.off:
+                    memory.pop(request.season, None)
+                    await self.repo.set_ignored_bulk_for_season(series_id, request.season, False)
+            else:
+                numbers = memory.get(request.season, set())
+                numbers = numbers | {request.episode} if request.off else numbers - {request.episode}
+                memory[request.season] = numbers
+                await self.repo.set_ignored_for_episode(series_id, request.season, request.episode, request.off)
+            await self.request("catalog.series.update", {"series_id": series_id, "fields": {
+                "ignored_seasons": json.dumps(sorted(seasons)),
+                "ignored_episodes": json.dumps({str(season): sorted(numbers) for season, numbers in memory.items() if numbers}),
+            }}, timeout=STEP_TIMEOUT_S)
+
+        await self._announcing(series_id, apply())
+        self.publish_event("scan.plan.updated", {"series_id": series_id})
+        return {"success": True}
+
     async def on_output_get(self, env: Envelope) -> list[dict]:
         """The references of the series that are wanted, in the order of season, episode, part."""
         series_id = int(env.payload["series_id"])
@@ -231,8 +267,8 @@ class ScanModule(BaseModule):
 
     async def _output_of(self, series: dict) -> list[dict]:
         items = {each["unique_id"]: each for each in await self.repo.items_for_series(series["id"])}
-        return output.visible(await self.repo.references(series["id"]), items, self._ignored_episodes(series),
-                              self._ignored_seasons(series))
+        return output.shown(await self.repo.references(series["id"]), items, self._ignored_episodes(series),
+                            self._ignored_seasons(series))
 
     async def _announcing(self, series_id: int, action):
         """Awaits `action` (a change of the rows that may switch a reference off) and announces what changed in the
@@ -243,7 +279,13 @@ class ScanModule(BaseModule):
         except (BusRequestError, asyncio.TimeoutError):
             return await action
         result = await action
-        for each in output.changes(before, await self._output_of(series)):
+        # The action may have changed the memory of the series: the output after it is read with the series as it is now.
+        try:
+            series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=STEP_TIMEOUT_S)
+            after = await self._output_of(series)
+        except (BusRequestError, asyncio.TimeoutError):
+            return result
+        for each in output.changes(before, after):
             self._announce(series_id, each)
         return result
 
@@ -543,8 +585,8 @@ class ScanModule(BaseModule):
             statuses, superseded = planner.plan_with_supersession(rows, winners, seasons)
             records = [{**each.reference.model_dump(mode="json"), "unique_id": winners.get(each.slot)}
                        for each in chosen]
-            shown_before = output.visible(stored, by_id, memory, seasons)
-            shown_after = output.visible(records, {each["unique_id"]: each for each in rows}, memory, seasons)
+            shown_before = output.shown(stored, by_id, memory, seasons)
+            shown_after = output.shown(records, {each["unique_id"]: each for each in rows}, memory, seasons)
             plan_changed = bool(inserts or updates or deletes) or any(
                 (by_id[unique_id].get("plan_status"), by_id[unique_id].get("superseded_by"))
                 != (statuses.get(unique_id, "candidate"), superseded.get(unique_id))

@@ -128,6 +128,12 @@ class ScanRepository:
             "WHERE series_id=? AND season=?",
             (1 if ignored else 0, series_id, season))
 
+    async def set_ignored_for_episode(self, series_id: int, season: int, episode: int, ignored: bool) -> int:
+        """All rows of one episode of a season (its parts and its versions): the user's choice is about the episode."""
+        return await self._db.execute(
+            "UPDATE media_items SET is_ignored_by_user=? WHERE series_id=? AND season=? AND episode_start=?",
+            (1 if ignored else 0, series_id, season, episode))
+
     async def get_item(self, unique_id: str) -> dict | None:
         return await self._db.fetch_one(
             "SELECT * FROM media_items WHERE unique_id=?", (unique_id,))

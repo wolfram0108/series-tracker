@@ -107,6 +107,12 @@ def gone(rig: "Rig", season: int, episode: int, part=None) -> ReferenceChanged:
                             reason=reason("reference_none"))
 
 
+def off(rig: "Rig", season: int, episode: int, part=None) -> ReferenceChanged:
+    """The event of a slot the user switched off: nothing taken, and the reason that says so."""
+    return ReferenceChanged(series_id=rig.series_id, season=season, episode=episode, part=part, mark=MARK.OFF,
+                            reason=reason("reference_off"))
+
+
 def changes_of(events: list[dict]) -> list[ReferenceChanged]:
     return [ReferenceChanged.model_validate(each) for each in events]
 
@@ -329,7 +335,7 @@ async def test_a_synchronization_chooses_the_reference_of_every_episode_and_make
     result = await rig.run()
 
     assert (result["kind"], result["changed"], result["in_plan"]) == ("video", True, 1)
-    assert result["references"] == {"by_level": 1, "own": 0, "other_player": 0, "none": 1, "unfit": 2}
+    assert result["references"] == {"by_level": 1, "own": 0, "other_player": 0, "none": 1, "unfit": 2, "off": 0}
     shown = await rig.output()
     assert [(each.season, each.episode, each.mark) for each in shown] == [
         (1, 1, MARK.BY_LEVEL), (1, 2, MARK.UNFIT), (1, 3, MARK.UNFIT), (1, 4, MARK.NONE)]
@@ -622,7 +628,7 @@ async def test_a_player_left_out_of_the_choice_is_not_the_reference(rig):
 
 # --- what the user switched off ---------------------------------------------------------------------------------------------
 
-async def test_an_episode_switched_off_in_advance_is_created_switched_off_and_is_neither_planned_nor_offered(rig):
+async def test_an_episode_switched_off_in_advance_is_created_switched_off_and_is_neither_planned_nor_taken(rig):
     rig.sql("UPDATE series SET ignored_episodes='{\"1\": [2, 3]}' WHERE id=?", (rig.series_id,))
     rig.world.rows = [rig.row(f"e{n}", 1, n) for n in (1, 2, 3)]
     changes = rig.bus.subscribe("scan.reference.changed")
@@ -631,30 +637,85 @@ async def test_an_episode_switched_off_in_advance_is_created_switched_off_and_is
     assert media["e1"]["is_ignored_by_user"] == 0 and media["e1"]["plan_status"] == "in_plan_single"
     for key in ("e2", "e3"):
         assert media[key]["is_ignored_by_user"] == 1 and media[key]["plan_status"] == "candidate"
-    assert [each.episode for each in await rig.output()] == [1]
-    assert marks(drain(changes)) == [(1, 1, "by_level")]
+    assert [(each.episode, each.mark) for each in await rig.output()] == [(1, MARK.BY_LEVEL), (2, MARK.OFF), (3, MARK.OFF)]
+    assert marks(drain(changes)) == [(1, 1, "by_level"), (1, 2, "off"), (1, 3, "off")]
 
 
-async def test_a_season_switched_off_is_neither_planned_nor_offered(rig):
+async def test_a_season_switched_off_is_neither_planned_nor_taken(rig):
     rig.sql("UPDATE series SET ignored_seasons='[2]' WHERE id=?", (rig.series_id,))
     rig.world.rows = [rig.row("s1", 1, 1), rig.row("s2", 2, 5)]
     await rig.run()
     assert {key: each["plan_status"] for key, each in rig.media().items()} == {
         "s1": "in_plan_single", "s2": "candidate"}
-    assert [(each.season, each.episode) for each in await rig.output()] == [(1, 1)]
+    assert [(each.season, each.episode, each.mark) for each in await rig.output()] == [
+        (1, 1, MARK.BY_LEVEL), (2, 5, MARK.OFF)]
 
 
-async def test_a_row_of_the_plan_the_user_switches_off_leaves_the_output_and_returns_with_it(rig):
+async def test_a_row_of_the_plan_the_user_switches_off_turns_its_slot_off_and_returns_with_it(rig):
     rig.world.rows = [rig.row("a", 1, 1)]
     await rig.run()
     unique_id = rig.media()["a"]["unique_id"]
     changes = rig.bus.subscribe("scan.reference.changed")
     await rig.probe.request("scan.item.set_ignored", {"unique_id": unique_id, "is_ignored": True}, timeout=STUCK_S)
-    assert changes_of(drain(changes)) == [gone(rig, 1, 1)]
-    assert await rig.output() == []
+    assert changes_of(drain(changes)) == [off(rig, 1, 1)]
+    assert [(each.mark, each.source_id) for each in await rig.output()] == [(MARK.OFF, None)]
     await rig.probe.request("scan.item.set_ignored", {"unique_id": unique_id, "is_ignored": False}, timeout=STUCK_S)
     assert changes_of(drain(changes)) == [change(rig, "a", 1, 1)]
-    assert len(await rig.output()) == 1
+    assert [each.mark for each in await rig.output()] == [MARK.BY_LEVEL]
+
+
+async def switch(rig: "Rig", season: int, episode: int | None, switched: bool) -> dict:
+    return await rig.probe.request("scan.output.switch", {
+        "series_id": rig.series_id, "season": season, "episode": episode, "off": switched}, timeout=STUCK_S)
+
+
+def memory_of(rig: "Rig") -> tuple[str, str]:
+    [row] = rig.query("SELECT ignored_seasons, ignored_episodes FROM series WHERE id=?", (rig.series_id,))
+    return row["ignored_seasons"], row["ignored_episodes"]
+
+
+async def test_an_episode_switched_off_by_the_user_is_remembered_by_number_and_its_rows_are_switched_off(rig):
+    rig.world.rows = [rig.row("a", 1, 1), rig.row("b", 1, 2)]
+    await rig.run()
+    changes = rig.bus.subscribe("scan.reference.changed")
+    assert await switch(rig, 1, 2, True) == {"success": True}
+    assert changes_of(drain(changes)) == [off(rig, 1, 2)]
+    assert [each.mark for each in await rig.output()] == [MARK.BY_LEVEL, MARK.OFF]
+    assert memory_of(rig) == ("[]", '{"1": [2]}')
+    assert rig.media()["b"]["is_ignored_by_user"] == 1 and rig.media()["a"]["is_ignored_by_user"] == 0
+    assert await switch(rig, 1, 2, False) == {"success": True}
+    assert changes_of(drain(changes)) == [change(rig, "b", 1, 2)]
+    assert memory_of(rig) == ("[]", "{}") and rig.media()["b"]["is_ignored_by_user"] == 0
+
+
+async def test_an_episode_switched_off_in_advance_comes_back_when_the_user_switches_it_on(rig):
+    rig.sql("UPDATE series SET ignored_episodes='{\"1\": [2]}' WHERE id=?", (rig.series_id,))
+    rig.world.rows = [rig.row("a", 1, 1), rig.row("b", 1, 2)]
+    await rig.run()
+    assert [each.mark for each in await rig.output()] == [MARK.BY_LEVEL, MARK.OFF]
+    await switch(rig, 1, 2, False)
+    assert [each.mark for each in await rig.output()] == [MARK.BY_LEVEL, MARK.BY_LEVEL]
+    assert memory_of(rig)[1] == "{}" and rig.media()["b"]["is_ignored_by_user"] == 0
+
+
+async def test_a_season_is_switched_off_by_the_list_of_the_series_and_switched_on_with_all_of_it(rig):
+    rig.world.rows = [rig.row("a", 1, 1), rig.row("b", 1, 2), rig.row("c", 2, 1)]
+    await rig.run()
+    await switch(rig, 1, 2, True)
+    changes = rig.bus.subscribe("scan.reference.changed")
+    await switch(rig, 1, None, True)
+    assert marks(drain(changes)) == [(1, 1, "off")]
+    assert memory_of(rig)[0] == "[1]"
+    assert [(each.season, each.mark) for each in await rig.output()] == [(1, MARK.OFF), (1, MARK.OFF), (2, MARK.BY_LEVEL)]
+    await switch(rig, 1, None, False)
+    assert marks(drain(changes)) == [(1, 1, "by_level"), (1, 2, "by_level")]
+    assert memory_of(rig) == ("[]", "{}")
+    assert {key: each["is_ignored_by_user"] for key, each in rig.media().items()} == {"a": 0, "b": 0, "c": 0}
+
+
+async def test_a_series_the_catalog_does_not_have_cannot_be_switched(rig):
+    with pytest.raises(BusRequestError):
+        await rig.probe.request("scan.output.switch", {"series_id": 999, "season": 1, "off": True}, timeout=STUCK_S)
 
 
 # --- the state is the database's -------------------------------------------------------------------------------------------

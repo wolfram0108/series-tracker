@@ -2,10 +2,10 @@
 Each answer is one owner's answer as it is; the gateway merges nothing and knows nothing of sites or players."""
 import pytest
 
-from core.contracts import CompositionReply, Reference, SettingsReset, SettingsSet
+from core.contracts import CompositionReply, OutputSwitch, Reference, SettingsReset, SettingsSet
 from core.reasons import parse, reason
 from gateway_fakes import published, serving
-from modules.gateway.schemas import OutputSettingsReset, OutputSettingsSet
+from modules.gateway.schemas import OutputSettingsReset, OutputSettingsSet, OutputSwitchBody
 
 VIDEO = {"id": 1, "kind": "video", "sources": []}
 TORRENT = {"id": 2, "kind": "torrent", "sources": []}
@@ -166,6 +166,33 @@ async def test_a_reset_the_registry_refuses_is_a_400_with_the_code(tmp_path):
     assert response.status_code == 400 and parse(response.json()["error"])["code"] == "unknown_lever"
 
 
+# --- the switch of an episode or a season -------------------------------------------------------------
+
+
+async def test_an_episode_and_a_season_are_switched_with_the_series_of_the_path(tmp_path):
+    async with serving(tmp_path, {"scan.output.switch": {"success": True}}) as (client, owners, _, _):
+        episode = await client.put("/api/series/1/output/switch", json={"season": 2, "episode": 3, "off": True})
+        await client.put("/api/series/1/output/switch", json={"season": 2, "off": False})
+    assert episode.status_code == 200 and episode.json() == {"success": True}
+    assert owners.asked("scan.output.switch") == [
+        {"series_id": 1, "season": 2, "episode": 3, "off": True},
+        {"series_id": 1, "season": 2, "episode": None, "off": False}]
+
+
+async def test_a_switch_without_its_answer_or_with_a_foreign_field_is_a_malformed_request_and_asks_nobody(tmp_path):
+    async with serving(tmp_path, {"scan.output.switch": {"success": True}}) as (client, owners, _, _):
+        for body in ({"season": 1}, {"off": True}, {"season": 1, "off": True, "series_id": 2}):
+            assert (await client.put("/api/series/1/output/switch", json=body)).status_code == 422
+    assert owners.asked("scan.output.switch") == []
+
+
+async def test_a_series_scan_does_not_have_is_a_404_for_a_switch(tmp_path):
+    answers = {"scan.output.switch": LookupError("сериал 9 не найден")}
+    async with serving(tmp_path, answers) as (client, _, _, _):
+        response = await client.put("/api/series/9/output/switch", json={"season": 1, "off": True})
+    assert response.status_code == 404
+
+
 async def test_a_command_to_a_module_that_is_not_there_is_a_503(tmp_path):
     async with serving(tmp_path, {}, watch=False) as (client, _, _, _):
         response = await client.put("/api/series/1/output/settings", json={"lever": "voice.take", "value": True})
@@ -178,6 +205,7 @@ async def test_a_command_to_a_module_that_is_not_there_is_a_503(tmp_path):
 def test_the_body_of_a_lever_has_the_fields_of_the_command_but_the_series():
     assert set(OutputSettingsSet.model_fields) == set(SettingsSet.model_fields) - {"series_id"}
     assert set(OutputSettingsReset.model_fields) == set(SettingsReset.model_fields) - {"series_id"}
+    assert set(OutputSwitchBody.model_fields) == set(OutputSwitch.model_fields) - {"series_id"}
 
 
 async def test_a_request_for_the_sources_only_reaches_composition_as_it_is(tmp_path):

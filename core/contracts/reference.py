@@ -7,11 +7,15 @@ from pydantic import BaseModel
 
 
 class ReferenceMark(StrEnum):
+    """`off`: the user switched the episode off (its season, its number, or its line of the plan); it has no
+    reference and plans no voice-over, and the window shows it as switched off, not as an episode with no reference."""
+
     BY_LEVEL = "by_level"
     OWN = "own"
     OTHER_PLAYER = "other_player"
     NONE = "none"
     UNFIT = "unfit"
+    OFF = "off"
 
 
 class Reference(BaseModel):
@@ -27,6 +31,16 @@ class Reference(BaseModel):
     voice_group: str | None = None
     height: int | None = None
     reason: str | None = None
+
+
+class OutputSwitch(BaseModel):
+    """The command `scan.output.switch`: an episode (or, without `episode`, a whole season) is switched off or on.
+    Switching a season on switches on everything of it, the episodes switched off one by one included."""
+
+    series_id: int
+    season: int
+    episode: int | None = None
+    off: bool
 
 
 class ReferenceChanged(Reference):

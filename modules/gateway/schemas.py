@@ -243,6 +243,13 @@ class OutputSettingsReset(RequestModel):
     target: str | None = None
 
 
+class OutputSwitchBody(RequestModel):
+    """The body of the command `scan.output.switch` without the series: an episode, or a whole season, off or on."""
+    season: int
+    episode: int | None = None
+    off: bool
+
+
 # --- the test of rules on a page (api_sources) -------------------------------
 
 class TableReadRequest(RequestModel):

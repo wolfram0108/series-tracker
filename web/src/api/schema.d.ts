@@ -506,6 +506,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/series/{series_id}/output/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Switch Output
+         * @description Switches an episode (or, without `episode`, a whole season) off or on. What the output shows of it comes
+         *     as references: the episode gets the mark `off`, or its reference back.
+         */
+        put: operations["switch_output_api_series__series_id__output_switch_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/series/{series_id}/output/settings": {
         parameters: {
             query?: never;
@@ -1970,6 +1991,18 @@ export interface components {
             /** Value */
             value?: unknown;
         };
+        /**
+         * OutputSwitchBody
+         * @description The body of the command `scan.output.switch` without the series: an episode, or a whole season, off or on.
+         */
+        OutputSwitchBody: {
+            /** Season */
+            season: number;
+            /** Episode */
+            episode?: number | null;
+            /** Off */
+            off: boolean;
+        };
         /** ParseUrlRequest */
         ParseUrlRequest: {
             /** Url */
@@ -2088,9 +2121,11 @@ export interface components {
         };
         /**
          * ReferenceMark
+         * @description `off`: the user switched the episode off (its season, its number, or its line of the plan); it has no
+         *     reference and plans no voice-over, and the window shows it as switched off, not as an episode with no reference.
          * @enum {string}
          */
-        ReferenceMark: "by_level" | "own" | "other_player" | "none" | "unfit";
+        ReferenceMark: "by_level" | "own" | "other_player" | "none" | "unfit" | "off";
         /**
          * RowState
          * @description `not_obtained` is not `absent`: the answer stayed unsure to the end, the player may still have the video.
@@ -4172,6 +4207,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    switch_output_api_series__series_id__output_switch_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutputSwitchBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

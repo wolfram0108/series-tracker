@@ -12,11 +12,12 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from core import BusRequestError
-from core.contracts import (CompositionGetRequest, CompositionReply, Reference, SeriesKind, SettingsReset,
+from core.contracts import (CompositionGetRequest, CompositionReply, OutputSwitch, Reference, SeriesKind, SettingsReset,
                             SettingsSet)
 
 from .routing import refusal
-from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, OkResponse, OutputSettingsReset, OutputSettingsSet)
+from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, OkResponse, OutputSettingsReset, OutputSettingsSet,
+                      OutputSwitchBody)
 
 _ERR = {code: {"model": ErrorResponse} for code in (400, 404, 500, 503)}
 _ERR1 = {code: {"model": ErrorOnly} for code in (404, 500)}
@@ -75,6 +76,18 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return await gw.request("scan.output.get", {"series_id": series_id}, timeout=30)
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
+
+    @r.put("/api/series/{series_id}/output/switch", response_model=OkResponse, response_model_exclude_none=True,
+           responses=_ERR)
+    async def switch_output(series_id: int, body: OutputSwitchBody):
+        """Switches an episode (or, without `episode`, a whole season) off or on. What the output shows of it comes
+        as references: the episode gets the mark `off`, or its reference back."""
+        command = _contract(OutputSwitch, series_id=series_id, **body.model_dump())
+        try:
+            await gw.request("scan.output.switch", command.model_dump(mode="json"), timeout=30)
+        except BusRequestError as exc:
+            return refusal(exc)
+        return {"success": True}
 
     @r.put("/api/series/{series_id}/output/settings", response_model=OkResponse, response_model_exclude_none=True,
            responses=_ERR)
