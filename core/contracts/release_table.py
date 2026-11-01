@@ -120,6 +120,8 @@ class SiteResolveReply(BaseModel):
 
     site: str | None = None
     canonical_url: str | None = None
+    # What kind of source a page of this site makes (`vk_video` or `web_video`); the window does not guess it.
+    source_type: str | None = None
 
 
 class TableProgress(BaseModel):

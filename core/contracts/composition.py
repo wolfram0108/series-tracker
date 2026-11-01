@@ -79,6 +79,8 @@ class PlayerSummary(BaseModel):
     player_label: str = ""
     rows: int = 0
     groups: int = 0
+    # The groups of the player as it names them, in the order of the table (a season of a catalog is one).
+    group_names: list[str] = Field(default_factory=list)
     heights: list[int] = Field(default_factory=list)
     voices: list[VoiceSummary] = Field(default_factory=list)
 
@@ -88,6 +90,8 @@ class SourceSummary(BaseModel):
 
     source_id: int = 0
     url: str
+    # The address the events about the table carry: the one a window waits for.
+    canonical_url: str | None = None
     status: SourceStatus
     reason: str | None = None
     read_at: str | None = None
@@ -99,6 +103,8 @@ class CompositionGetRequest(BaseModel):
 
     series_id: int
     include_excluded: bool = False
+    # Only the summaries of the sources: no rows, levels or settings (a window that lists the sources needs no more).
+    sources_only: bool = False
 
 
 class CompositionReply(BaseModel):
@@ -156,5 +162,7 @@ class CompositionPreviewReply(BaseModel):
     url: str
     state: TableState
     reason: str | None = None
+    # The names of the release as the site writes them (the series gets its own from them).
+    names: list[str] = Field(default_factory=list)
     summary: SourceSummary | None = None
     lines: list[PreviewLine] = Field(default_factory=list)

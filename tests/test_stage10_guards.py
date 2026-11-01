@@ -44,6 +44,14 @@ def write_tree(root: Path, files: dict[str, str]) -> Path:
     return root
 
 
+def check_owners(root, tables, owners, dynamic_allowed=None, **kw):
+    """The ledger check on a synthetic tree: no column-level tables unless the test asks for them."""
+    kw.setdefault("column_owners", {})
+    kw.setdefault("plan_readers", {})
+    kw.setdefault("dynamic_columns", [])
+    return table_owners.check_table_owners(root, tables, owners, dynamic_allowed, **kw)
+
+
 def places(outcome: Outcome) -> set[tuple[str, int]]:
     return {(v.path, v.line) for v in outcome.violations}
 
@@ -259,7 +267,7 @@ OWN_SQL = {
 
 def test_tables_mentioned_only_by_their_owners_pass(tmp_path):
     root = write_tree(tmp_path, OWN_SQL)
-    assert table_owners.check_table_owners(root, TABLES, OWNERS).violations == []
+    assert check_owners(root, TABLES, OWNERS).violations == []
 
 
 @pytest.mark.parametrize("sql", [
@@ -276,7 +284,7 @@ def test_tables_mentioned_only_by_their_owners_pass(tmp_path):
 ])
 def test_a_mention_of_a_foreign_table_in_any_sql_form_is_a_violation(tmp_path, sql):
     root = write_tree(tmp_path, {**OWN_SQL, "modules/m2/leak.py": f'Q = "{sql}"\n'})
-    outcome = table_owners.check_table_owners(root, TABLES, OWNERS)
+    outcome = check_owners(root, TABLES, OWNERS)
     assert places(outcome) == {("modules/m2/leak.py", 1)}
     assert "alpha" in outcome.violations[0].reason and "m1" in outcome.violations[0].reason
 
@@ -284,7 +292,7 @@ def test_a_mention_of_a_foreign_table_in_any_sql_form_is_a_violation(tmp_path, s
 def test_a_multi_line_statement_is_reported_at_the_line_of_the_table(tmp_path):
     code = 'Q = ("SELECT id "\n     "FROM beta "\n     "JOIN alpha ON 1")\n'
     root = write_tree(tmp_path, {**OWN_SQL, "modules/m2/leak.py": code})
-    assert places(table_owners.check_table_owners(root, TABLES, OWNERS)) == {("modules/m2/leak.py", 3)}
+    assert places(check_owners(root, TABLES, OWNERS)) == {("modules/m2/leak.py", 3)}
 
 
 def test_an_f_string_with_a_known_part_is_read_and_prose_is_not_sql(tmp_path):
@@ -293,45 +301,106 @@ def test_an_f_string_with_a_known_part_is_read_and_prose_is_not_sql(tmp_path):
             'MESSAGE = "update the alpha table from the file"\n'
             'def f():\n    """DELETE FROM alpha"""\n')
     root = write_tree(tmp_path, {**OWN_SQL, "modules/m2/leak.py": code})
-    assert places(table_owners.check_table_owners(root, TABLES, OWNERS)) == {("modules/m2/leak.py", 2)}
+    assert places(check_owners(root, TABLES, OWNERS)) == {("modules/m2/leak.py", 2)}
 
 
 def test_a_loop_over_literal_table_names_counts_as_a_mention_of_each(tmp_path):
     code = ('def purge(conn):\n    for table in ("alpha", "beta"):\n'
             '        conn.execute(f"DELETE FROM {table} WHERE series_id = ?")\n')
     root = write_tree(tmp_path, {**OWN_SQL, "modules/m2/purge.py": code})
-    outcome = table_owners.check_table_owners(root, TABLES, OWNERS)
+    outcome = check_owners(root, TABLES, OWNERS)
     assert places(outcome) == {("modules/m2/purge.py", 3)} and "alpha" in outcome.violations[0].reason
 
 
 def test_a_table_name_that_cannot_be_known_is_a_violation_unless_the_place_is_permitted(tmp_path):
     code = 'def read(name):\n    return f\'SELECT * FROM "{name}"\'\n'
     root = write_tree(tmp_path, {**OWN_SQL, "modules/m2/dyn.py": code})
-    assert places(table_owners.check_table_owners(root, TABLES, OWNERS)) == {("modules/m2/dyn.py", 2)}
-    outcome = table_owners.check_table_owners(root, TABLES, OWNERS, [("modules/m2/dyn.py", "read", "debug tool")])
+    assert places(check_owners(root, TABLES, OWNERS)) == {("modules/m2/dyn.py", 2)}
+    outcome = check_owners(root, TABLES, OWNERS, [("modules/m2/dyn.py", "read", "debug tool")])
     assert outcome.violations == [] and [v.line for v in outcome.allowed] == [2]
 
 
 def test_the_ledger_must_be_complete_and_alive(tmp_path):
     root = write_tree(tmp_path, OWN_SQL)
-    outcome = table_owners.check_table_owners(root, TABLES | {"gamma"}, {**OWNERS, "delta": ("m1", "g")})
+    outcome = check_owners(root, TABLES | {"gamma"}, {**OWNERS, "delta": ("m1", "g")})
     reasons = " | ".join(v.reason for v in outcome.violations)
     assert "«gamma»" in reasons and "владелец не назначен" in reasons
     assert "«delta»" in reasons and "нет в миграциях" in reasons
-    outcome = table_owners.check_table_owners(root, TABLES, {**OWNERS, "beta": ("m3", "g")})
+    outcome = check_owners(root, TABLES, {**OWNERS, "beta": ("m3", "g")})
     assert any("модуля-владельца m3" in v.reason for v in outcome.violations)
 
 
 def test_a_table_that_no_migration_makes_is_a_violation(tmp_path):
     root = write_tree(tmp_path, {**OWN_SQL, "modules/m2/ghost.py": 'Q = "SELECT * FROM ghost"\n'})
-    outcome = table_owners.check_table_owners(root, TABLES, OWNERS)
+    outcome = check_owners(root, TABLES, OWNERS)
     assert places(outcome) == {("modules/m2/ghost.py", 1)} and "не создаётся миграциями" in outcome.violations[0].reason
 
 
 def test_system_tables_and_table_functions_are_not_application_tables(tmp_path):
     code = 'Q1 = "SELECT name FROM sqlite_master"\nQ2 = "SELECT value FROM json_each(?)"\n'
     root = write_tree(tmp_path, {**OWN_SQL, "modules/m2/sys.py": code})
-    assert table_owners.check_table_owners(root, TABLES, OWNERS).violations == []
+    assert check_owners(root, TABLES, OWNERS).violations == []
+
+
+COLUMN_OWNERS = {"items": {"qty": ("m2", "m2 counts the items")}}
+PLAN_READERS = {("items", "m2"): "m2 executes the plan"}
+COLUMN_BASE = {"modules/m1/repository.py": 'READ = "SELECT * FROM items"\n'}
+ITEM_OWNERS = {"items": ("m1", "ground")}
+
+
+def check_columns(root, **kw):
+    kw.setdefault("column_owners", COLUMN_OWNERS)
+    kw.setdefault("plan_readers", PLAN_READERS)
+    kw.setdefault("dynamic_columns", [])
+    return table_owners.check_table_owners(root, {"items"}, ITEM_OWNERS, [], **kw)
+
+
+@pytest.mark.parametrize("module, sql, fragments", [
+    ("m2", "UPDATE items SET qty = ? WHERE id = ?", []),
+    ("m2", "UPDATE items SET qty = qty + 1 WHERE id = ?", []),
+    ("m2", "UPDATE items SET qty = ?, name = ? WHERE id = ?", ["items.name"]),
+    ("m2", "UPDATE items SET name = ? WHERE id = ?", ["items.name"]),
+    ("m2", "UPDATE items SET qty = (SELECT MAX(x, y) FROM items), name = 1", ["items.name"]),
+    ("m2", "DELETE FROM items WHERE id = ?", ["строки удаляет"]),
+    ("m2", "INSERT INTO items (id, qty) VALUES (?, ?)", ["строки создаёт"]),
+    ("m3", "SELECT * FROM items", ["чтение её строк"]),
+    ("m3", "UPDATE items SET qty = 1", ["items.qty"]),
+    ("m1", "UPDATE items SET name = ? WHERE id = ?", []),
+    ("m1", "UPDATE items SET qty = 0 WHERE id = ?", ["items.qty"]),
+    ("m1", "DELETE FROM items WHERE id = ?", []),
+    ("m1", "INSERT INTO items (id, name) VALUES (1, 'x') ON CONFLICT (id) DO UPDATE SET name = excluded.name", []),
+])
+def test_a_column_is_written_only_by_its_owner(tmp_path, module, sql, fragments):
+    root = write_tree(tmp_path, {**COLUMN_BASE, f"modules/{module}/other.py": f'Q = "{sql}"\n'})
+    outcome = check_columns(root)
+    assert len(outcome.violations) == len(fragments), outcome.violations
+    for fragment in fragments:
+        assert fragment in " ".join(v.reason for v in outcome.violations)
+
+
+def test_reading_by_the_permitted_reader_and_creating_a_row_with_initial_values_are_printed_not_hidden(tmp_path):
+    files = {**COLUMN_BASE, "modules/m2/r.py": 'Q = "SELECT * FROM items"\n',
+             "modules/m1/create.py": 'Q = "INSERT INTO items (id, name, qty) VALUES (?, ?, 0)"\n'}
+    outcome = check_columns(write_tree(tmp_path, files))
+    assert outcome.violations == []
+    reasons = sorted(v.reason for v in outcome.allowed)
+    assert any("m2 executes the plan" in r for r in reasons) and any("(qty)" in r for r in reasons)
+
+
+def test_a_write_with_columns_that_are_not_known_is_a_violation_unless_the_owner_has_a_permit(tmp_path):
+    code = 'def save(sets):\n    return f"UPDATE items SET {sets} WHERE id = ?"\n'
+    root = write_tree(tmp_path, {**COLUMN_BASE, "modules/m1/save.py": code})
+    assert places(check_columns(root)) == {("modules/m1/save.py", 2)}
+    permit = [("modules/m1/save.py", "save", "the keys come from the plan")]
+    outcome = check_columns(root, dynamic_columns=permit)
+    assert outcome.violations == [] and [v.line for v in outcome.allowed] == [2]
+    other = write_tree(tmp_path / "second", {**COLUMN_BASE, "modules/m2/save.py": code})
+    assert places(check_columns(other, dynamic_columns=[("modules/m2/save.py", "save", "x")])) == {("modules/m2/save.py", 2)}
+
+
+def test_a_table_that_is_owned_by_the_table_rule_still_forbids_every_foreign_mention(tmp_path):
+    files = {**COLUMN_BASE, "modules/m3/x.py": 'Q = "UPDATE items SET qty = 1"\n'}
+    assert places(check_columns(write_tree(tmp_path, files), column_owners={}, plan_readers={})) == {("modules/m3/x.py", 1)}
 
 
 def test_the_tables_come_from_the_real_alembic_run(tmp_path):
@@ -395,19 +464,38 @@ def test_every_pause_or_timed_wait_outside_the_permitted_places_is_a_violation(t
 
 def test_a_permitted_function_is_listed_and_never_a_violation(tmp_path):
     root = write_tree(tmp_path, {"modules/m/module.py": WAITS})
-    allowed = [("modules/m/module.py", "Mod.poll", "schedule"), ("modules/m/module.py", "Mod.guarded", "safeguard"),
-               ("modules/m/module.py", "Mod.blocking", "pace"), ("modules/m/module.py", "Mod.aliased", "pace")]
+    allowed = [("modules/m/module.py", "Mod.poll", no_wait_no_poll.SUBJECT, "schedule"),
+               ("modules/m/module.py", "Mod.guarded", no_wait_no_poll.SAFEGUARD, "safeguard"),
+               ("modules/m/module.py", "Mod.blocking", no_wait_no_poll.BACKOFF, "pace"),
+               ("modules/m/module.py", "Mod.aliased", no_wait_no_poll.POLL, "pace")]
     outcome = no_wait_no_poll.check_waits(root, allowed, [])
     assert outcome.violations == [] and sorted(v.line for v in outcome.allowed) == [7, 10, 16, 19]
+    assert [v.reason.split("[")[1].split("]")[0] for v in sorted(outcome.allowed)][:2] == [
+        no_wait_no_poll.SUBJECT, no_wait_no_poll.SAFEGUARD]
 
 
 def test_a_whole_file_can_be_permitted_and_a_stale_permit_is_a_violation(tmp_path):
     root = write_tree(tmp_path, {"modules/m/module.py": WAITS, "modules/m/policy.py": WAITS})
-    allowed = [("modules/m/policy.py", "*", "the policy"), ("modules/m/module.py", "Mod.poll", "x"),
-               ("modules/m/module.py", "Mod.guarded", "x"), ("modules/m/module.py", "Mod.blocking", "x"),
-               ("modules/m/module.py", "Mod.aliased", "x"), ("modules/m/module.py", "Mod.gone", "x")]
+    cat = no_wait_no_poll.RETRY
+    allowed = [("modules/m/policy.py", "*", cat, "the policy"), ("modules/m/module.py", "Mod.poll", cat, "x"),
+               ("modules/m/module.py", "Mod.guarded", cat, "x"), ("modules/m/module.py", "Mod.blocking", cat, "x"),
+               ("modules/m/module.py", "Mod.aliased", cat, "x"), ("modules/m/module.py", "Mod.gone", cat, "x")]
     outcome = no_wait_no_poll.check_waits(root, allowed, [])
     assert places(outcome) == {("modules/m/module.py", 0)} and "Mod.gone" in outcome.violations[0].reason
+
+
+def test_a_permit_with_a_category_outside_the_list_is_a_violation(tmp_path):
+    root = write_tree(tmp_path, {"modules/m/module.py": "x = 1\n"})
+    outcome = no_wait_no_poll.check_waits(root, [("modules/m/module.py", "*", "just because", "x")], [])
+    assert "категория" in outcome.violations[0].reason
+
+
+def test_core_is_searched_too(tmp_path):
+    root = write_tree(tmp_path, {"core/x.py": "import asyncio\nasync def f():\n    await asyncio.sleep(1)\n"})
+    assert places(no_wait_no_poll.check_waits(root, [], [])) == {("core/x.py", 3)}
+    allowed = [("core/x.py", "f", no_wait_no_poll.RETRY, "the policy")]
+    outcome = no_wait_no_poll.check_waits(root, allowed, [])
+    assert outcome.violations == [] and [v.path for v in outcome.allowed] == ["core/x.py"]
 
 
 WEB = '''
@@ -475,6 +563,10 @@ BUS_CODE = {
 
             def changed(self):
                 self.publish_event("b.changed", {})
+
+            async def poke(self):
+                self.send_command("a.queue.clear", {})
+                return await self.request("a.get", {})
     ''',
 }
 BUS_DOC = '''
@@ -520,11 +612,11 @@ def test_a_record_without_code_is_a_violation_at_its_line(tmp_path):
     assert "a.ghost" in outcome.violations[0].reason
 
 
-def test_the_two_readings_of_a_leading_dot_are_both_tried():
-    doc = "| Модуль | Топики |\n|---|---|\n| a | `a.queue.get`; `.queue.clear`; `.drop`; `a.x.y/z` |\n"
+def test_a_leading_dot_has_one_reading_the_sibling():
+    doc = "| Модуль | Топики |\n|---|---|\n| a | `a.queue.get`; `.drop`; `.queue.clear`; `a.x.y/z` |\n"
     entries, _ = bus_catalog.doc_topics(doc, {"a"})
-    assert [e.readings for e in entries] == [("a.queue.get",), ("a.queue.clear", "a.queue.queue.clear"),
-                                             ("a.queue.drop", "a.drop"), ("a.x.y",), ("a.x.z",)]
+    assert [e.readings for e in entries] == [("a.queue.get",), ("a.queue.drop",), ("a.queue.queue.clear",),
+                                             ("a.x.y",), ("a.x.z",)]
 
 
 def test_an_escaped_pipe_does_not_split_a_cell():
@@ -549,6 +641,57 @@ def test_an_unresolvable_topic_is_a_note_not_a_violation(tmp_path):
     root = write_tree(tmp_path, {**code, "contracts/bus_topics.md": BUS_DOC})
     outcome = bus_catalog.check_bus_catalog(root)
     assert outcome.violations == [] and any("modules/b/dyn.py:2" in note for note in outcome.notes)
+
+
+ORPHAN = {
+    "modules/c/module.py": "from core.module import BaseModule\nclass C(BaseModule):\n    def register(self):\n"
+                           "        self.handle('c.orphan', self.f)\n",
+    "tests/test_c.py": "x = 'c.orphan'\n",
+}
+ORPHAN_DOC = BUS_DOC + "\n| Модуль | Топики |\n|---|---|\n| c | `c.orphan` |\n"
+
+
+def orphan_tree(tmp_path, **extra):
+    return write_tree(tmp_path, {**BUS_CODE, **ORPHAN, "contracts/bus_topics.md": ORPHAN_DOC, **extra})
+
+
+def test_a_handler_that_nobody_sends_is_a_dead_topic_and_the_tests_that_name_it_are_counted(tmp_path):
+    outcome = bus_catalog.check_bus_catalog(orphan_tree(tmp_path))
+    assert places(outcome) == {("modules/c/module.py", 4)}
+    assert "c.orphan" in outcome.violations[0].reason and "в 1 файлах" in outcome.violations[0].reason
+
+
+@pytest.mark.parametrize("name, code", [
+    ("modules/d/module.py", "async def f(self):\n    await self.request('c.orphan', {})\n"),
+    ("modules/d/module.py", "async def f(self):\n    await self._request('c.orphan', {})\n"),
+    ("modules/d/module.py", "def f(self):\n    self.send_command('c.orphan', {})\n"),
+    ("modules/d/module.py", "def f(self):\n    self.publish_event('c.orphan', {})\n"),
+    ("run.py", "from core.envelope import Envelope\nbus.publish(Envelope(topic='c.orphan', kind='event'))\n"),
+    ("core/x.py", "def f(bus):\n    bus.publish(Envelope(topic='c.orphan', kind='command'))\n"),
+    ("modules/d/module.py", "def f(self, what):\n    self.publish_event(f'c.{what}', {})\nf(self, 'orphan')\n"),
+])
+def test_a_sender_in_any_form_keeps_a_handler_alive(tmp_path, name, code):
+    assert bus_catalog.check_bus_catalog(orphan_tree(tmp_path, **{name: code})).violations == []
+
+
+def test_a_kept_dead_topic_is_printed_with_its_ground_and_a_stale_permit_is_a_violation(tmp_path):
+    root = orphan_tree(tmp_path)
+    outcome = bus_catalog.check_bus_catalog(root, unsent_allowed=[("c.*", "called from outside by HTTP")])
+    assert outcome.violations == [] and "called from outside by HTTP" in outcome.allowed[0].reason
+    stale = bus_catalog.check_bus_catalog(root, unsent_allowed=[("c.*", "x"), ("z.gone", "y")])
+    assert [v.line for v in stale.violations] == [0] and "z.gone" in stale.violations[0].reason
+
+
+def test_a_key_of_sse_map_without_a_publisher_is_a_violation_in_both_spellings(tmp_path):
+    plain = "SSE_MAP = {\n    'a.changed': ('x', None),\n    'a.ghost': ('y', None),\n}\n"
+    typed = "SSE_MAP: dict[str, tuple] = {\n    'a.changed': ('x', None),\n    'a.ghost': ('y', None),\n}\n"
+    for number, text in enumerate((plain, typed)):
+        root = write_tree(tmp_path / str(number), {**BUS_CODE, "modules/gateway/module.py": text,
+                                                   "contracts/bus_topics.md": BUS_DOC})
+        outcome = bus_catalog.check_bus_catalog(root)
+        assert places(outcome) == {("modules/gateway/module.py", 3)} and "a.ghost" in outcome.violations[0].reason
+        kept = bus_catalog.check_bus_catalog(root, unsent_allowed=[("a.ghost", "published by an external tool")])
+        assert kept.violations == [] and "external tool" in kept.allowed[0].reason
 
 
 ARCHITECTURE = '''

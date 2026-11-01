@@ -1,10 +1,16 @@
-"""Guard: every table made by the alembic migrations is named in the SQL of exactly one module, its owner.
+"""Guard: every table made by the alembic migrations is named in the SQL of exactly one module, its owner; the
+columns of a shared table belong to one module each.
 
 The tables are read from a database that the real `alembic upgrade head` builds in a temporary directory. The
 owner of each table is fixed in OWNERS with the ground for the choice. SQL is found in the string literals and
 f-strings of modules/ (docstrings are not SQL): `FROM`, `INTO`, `UPDATE`, `JOIN` (so `DELETE FROM`,
 `INSERT OR ... INTO` and `REPLACE INTO` too) followed by a table name. A mention in a module that is not the
 owner is a violation and is never excused here: the guard shows the state of the code as it is.
+
+One table is owned by columns (project rule: a table or a column belongs to exactly one module): media_items, see
+COLUMN_OWNERS. Its rows belong to the owner of the table, so creating and deleting rows is the owner's; a write of
+a column goes to the owner of that column; a foreign write is a violation. Reading rows is permitted only to the
+modules in PLAN_READERS and is printed as ДОПУЩЕНО with its ground.
 """
 from __future__ import annotations
 
@@ -33,6 +39,7 @@ OWNERS: dict[str, tuple[str, str]] = {
     "torrents": ("torrents", "docstring of modules/torrents/repository.py"),
     "torrent_files": ("torrents", "docstring of modules/torrents/module.py: 'torrent_files is ours'"),
     "agent_tasks": ("torrents", "docstring of modules/torrents/module.py: the pipeline machine over agent_tasks"),
+    "torrent_progress": ("torrents", "migration 0031: 'owned by torrents alone'; docstring of modules/torrents/repository.py"),
     "media_items": ("scan", "ARCHITECTURE.md section 3 and docstring of modules/scan/repository.py: the rows belong to scan"),
     "download_tasks": ("downloads", "docstring of modules/downloads/module.py: 'Владение: download_tasks'"),
     "slicing_tasks": ("slicing", "docstring of modules/slicing/module.py: 'Владение: slicing_tasks, sliced_files'"),
@@ -64,6 +71,29 @@ OWNERS: dict[str, tuple[str, str]] = {
     "output_settings": ("composition", "migration 0027 (composition)"),
 }
 
+# table -> {column: (owner module, ground)}: columns whose owner is not the owner of the table.
+COLUMN_OWNERS: dict[str, dict[str, tuple[str, str]]] = {
+    "media_items": {
+        "status": ("downloads", "docstring of modules/downloads/repository.py: media_items.status / final_filename"),
+        "final_filename": ("downloads", "docstring of modules/downloads/repository.py: media_items.status / final_filename"),
+        "slicing_status": ("slicing", "docstring of modules/slicing/repository.py: media_items.slicing_status / chapters / chapters_filtered"),
+        "chapters": ("slicing", "docstring of modules/slicing/repository.py: media_items.slicing_status / chapters / chapters_filtered"),
+        "chapters_filtered": ("slicing", "docstring of modules/slicing/repository.py: media_items.slicing_status / chapters / chapters_filtered"),
+    },
+}
+
+# (table, module) -> ground: a module that is not the owner but may read the rows of the table.
+PLAN_READERS: dict[tuple[str, str], str] = {
+    ("media_items", "downloads"): "docstring of modules/downloads/repository.py: the executor of the plan reads the rows of the plan, which are scan's",
+    ("media_items", "slicing"): "docstring of modules/slicing/repository.py: the other columns are read; slicing is outside the architecture of stage 10 (D-34: the code is not touched)",
+}
+
+# (file, function, ground): a write whose columns are not known statically, by the owner of the table.
+DYNAMIC_COLUMNS_ALLOWED: list[tuple[str, str, str]] = [
+    ("modules/scan/repository.py", "ScanRepository.save_outcome",
+     "the columns are the keys of the plan row fields built by scan; the docstring says the columns of other modules are never written (not provable statically)"),
+]
+
 # Names that follow FROM/INTO/UPDATE/JOIN but are not tables of the application.
 NOT_APPLICATION_TABLES = frozenset({"sqlite_master", "sqlite_schema", "sqlite_sequence", "sqlite_temp_master"})
 
@@ -89,19 +119,87 @@ class Mention:
     line: int
     function: str
     dynamic: bool
+    access: str = "read"  # read, insert, update or delete
+    columns: tuple[str, ...] | None = None  # columns written; None when they are not known statically
 
 
-def _mentions_in_text(text: str) -> list[str]:
+def _access_of(text: str, match: re.Match) -> str:
+    word = match.group(0).split()[0].upper()
+    if word == "FROM":
+        return "delete" if re.search(r"DELETE\s*$", text[:match.start()], re.I) else "read"
+    return {"JOIN": "read", "INTO": "insert", "UPDATE": "update"}[word]
+
+
+def _split_top(text: str) -> list[str]:
+    """Split at commas outside parentheses and quotes."""
+    parts, current, depth, quote = [], [], 0, ""
+    for char in text:
+        if quote:
+            quote = "" if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    parts.append("".join(current))
+    return parts
+
+
+def _written_columns(text: str, match: re.Match, access: str) -> tuple[str, ...] | None:
+    tail = text[match.end():].lstrip("\"`]")
+    if access == "insert":
+        listed = re.match(r"\s*\(([^)]*)\)", tail)
+        return tuple(c.strip().strip('"`[]') for c in listed.group(1).split(",")) if listed else None
+    if access == "update":
+        opening = re.match(r"\s*(?:AS\s+\w+\s+)?SET\s+", tail, re.I)
+        if not opening:
+            return None
+        names = []
+        for part in _split_top(_set_clause(tail[opening.end():])):
+            one = re.match(r'\s*["`\[]?(\w+)["`\]]?\s*=', part)
+            if not one:
+                return None
+            names.append(one.group(1))
+        return tuple(names)
+    return None
+
+
+def _set_clause(text: str) -> str:
+    """The assignments of a SET clause: up to WHERE, RETURNING or FROM outside parentheses and quotes."""
+    depth, quote = 0, ""
+    for index, char in enumerate(text):
+        if quote:
+            quote = "" if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif depth == 0 and char.isspace() and re.match(r"\s+(?:WHERE|RETURNING|FROM)\b", text[index:], re.I):
+            return text[:index]
+    return text
+
+
+def _mentions_in_text(text: str) -> list[tuple[str, str, tuple[str, ...] | None]]:
+    """(table, access, written columns) for every table named in one SQL text."""
     found = [m for m in _UPPER.finditer(text)]
     if _LOWERCASE_STATEMENT.match(text):
         found += [m for m in _ANY_CASE.finditer(text) if m.start() not in {f.start() for f in found}]
-    names = []
+    result = []
     for match in found:
         name = match.group(1)
         if text[match.end():match.end() + 1] == "(" or name.upper() in _KEYWORDS:
             continue  # a table function such as json_each(...), or a keyword
-        names.append(name)
-    return names
+        access = _access_of(text, match)
+        result.append((name, access, _written_columns(text, match, access)))
+    return result
 
 
 def _line_of(source_lines: list[str], node: ast.AST, name: str) -> int:
@@ -130,13 +228,14 @@ def sql_mentions(tree: ast.Module, source: str, known: dict[str, set[str]] | Non
         else:
             continue
         variants = evaluator.values(node, unresolved=UNKNOWN) or set()
-        seen: set[str] = set()
+        seen: set[tuple] = set()
         for text in variants:
-            for name in _mentions_in_text(text):
-                if name in seen:
+            for name, access, columns in _mentions_in_text(text):
+                if (name, access, columns) in seen:
                     continue
-                seen.add(name)
-                mentions.append(Mention(name, _line_of(lines, node, name), qualname_of(node), UNKNOWN in name))
+                seen.add((name, access, columns))
+                mentions.append(Mention(name, _line_of(lines, node, name), qualname_of(node), UNKNOWN in name,
+                                        access, columns))
     return mentions
 
 
@@ -163,13 +262,59 @@ def _creation_site(root: Path, table: str) -> tuple[str, int]:
     return "alembic/versions", 0
 
 
+def _check_columns(outcome: Outcome, table: str, owner: str, module: str, where: str, mention: Mention,
+                   columns: dict[str, tuple[str, str]], readers: dict[tuple[str, str], str],
+                   dynamic_columns: list[tuple[str, str, str]]) -> None:
+    """The rules of a table owned by columns, for one mention of it in a module."""
+    def violate(reason: str) -> None:
+        outcome.violations.append(Violation(where, mention.line, reason))
+
+    def permit(reason: str) -> None:
+        outcome.allowed.append(Violation(where, mention.line, reason))
+
+    owner_of = lambda column: columns.get(column, (owner, ""))[0]  # noqa: E731
+    if mention.access == "read":
+        if module == owner:
+            return
+        if (table, module) in readers:
+            permit(f"чтение строк «{table}» модулем {module}: {readers[(table, module)]}")
+        else:
+            violate(f"таблица «{table}» принадлежит модулю {owner}; чтение её строк модулем {module} не допущено")
+    elif mention.access == "delete":
+        if module != owner:
+            violate(f"таблица «{table}»: строки удаляет модуль {owner}, а не {module}")
+    elif mention.access == "insert":
+        if module != owner:
+            violate(f"таблица «{table}»: строки создаёт модуль {owner}, а не {module}")
+        elif mention.columns and any(owner_of(c) != module for c in mention.columns):
+            foreign = ", ".join(c for c in mention.columns if owner_of(c) != module)
+            permit(f"создание строки «{table}» модулем {module} задаёт начальные значения колонок других модулей ({foreign}): "
+                   "строка принадлежит владельцу таблицы, дальше колонки пишут их владельцы")
+    elif mention.columns is None:
+        ground = next((g for f, fn, g in dynamic_columns if f == where and fn == mention.function), None)
+        if module == owner and ground is not None:
+            permit(f"запись «{table}» с колонками, не заданными статически, в {mention.function}: {ground}")
+        else:
+            violate(f"запись «{table}» в {mention.function or 'модуле'}: колонки не определены статически")
+    else:
+        for column in mention.columns:
+            if owner_of(column) != module:
+                violate(f"запись чужой колонки «{table}.{column}»: владелец {owner_of(column)}, пишет модуль {module}")
+
+
 def check_table_owners(root: Path, tables: set[str], owners: dict[str, tuple[str, str]] | None = None,
-                       dynamic_allowed: list[tuple[str, str, str]] | None = None) -> Outcome:
+                       dynamic_allowed: list[tuple[str, str, str]] | None = None,
+                       column_owners: dict[str, dict[str, tuple[str, str]]] | None = None,
+                       plan_readers: dict[tuple[str, str], str] | None = None,
+                       dynamic_columns: list[tuple[str, str, str]] | None = None) -> Outcome:
     owners = OWNERS if owners is None else owners
     dynamic_allowed = DYNAMIC_ALLOWED if dynamic_allowed is None else dynamic_allowed
+    column_owners = COLUMN_OWNERS if column_owners is None else column_owners
+    plan_readers = PLAN_READERS if plan_readers is None else plan_readers
+    dynamic_columns = DYNAMIC_COLUMNS_ALLOWED if dynamic_columns is None else dynamic_columns
     outcome = Outcome()
     known = global_constants(root)
-    mentioned_by: dict[str, dict[str, list[tuple[str, int]]]] = {}
+    mentioned_by: dict[str, dict[str, list[tuple[str, Mention]]]] = {}
     for path in python_files(root / "modules"):
         parts = path.relative_to(root).parts
         if len(parts) < 3:
@@ -193,11 +338,11 @@ def check_table_owners(root: Path, tables: set[str], owners: dict[str, tuple[str
                 continue
             if mention.table in NOT_APPLICATION_TABLES:
                 continue
-            mentioned_by.setdefault(mention.table, {}).setdefault(module, []).append((where, mention.line))
+            mentioned_by.setdefault(mention.table, {}).setdefault(module, []).append((where, mention))
     for table in sorted(set(mentioned_by) - tables):
         for module, places in mentioned_by[table].items():
-            for where, line in places:
-                outcome.violations.append(Violation(where, line, f"таблица «{table}» не создаётся миграциями (модуль {module})"))
+            for where, mention in places:
+                outcome.violations.append(Violation(where, mention.line, f"таблица «{table}» не создаётся миграциями (модуль {module})"))
     for table in sorted(tables):
         if table not in owners:
             where, line = _creation_site(root, table)
@@ -208,12 +353,16 @@ def check_table_owners(root: Path, tables: set[str], owners: dict[str, tuple[str
         if owner not in by_module:
             outcome.violations.append(Violation(f"modules/{owner}", 0, f"таблица «{table}»: в SQL модуля-владельца {owner} её нет"))
         for module, places in sorted(by_module.items()):
-            if module == owner:
-                continue
-            for where, line in places:
-                outcome.violations.append(Violation(where, line, f"таблица «{table}» принадлежит модулю {owner}; SQL модуля {module} её называет"))
+            for where, mention in places:
+                if table in column_owners:
+                    _check_columns(outcome, table, owner, module, where, mention, column_owners[table], plan_readers,
+                                   dynamic_columns)
+                elif module != owner:
+                    outcome.violations.append(Violation(where, mention.line, f"таблица «{table}» принадлежит модулю {owner}; SQL модуля {module} её называет"))
     for table in sorted(set(owners) - tables):
         outcome.violations.append(Violation(GUARD_PATH, 0, f"владелец назначен таблице «{table}», которой нет в миграциях"))
+    for table in sorted(set(column_owners) - set(owners)):
+        outcome.violations.append(Violation(GUARD_PATH, 0, f"колонки таблицы «{table}» заданы, а таблицы нет в словаре владельцев"))
     return outcome
 
 

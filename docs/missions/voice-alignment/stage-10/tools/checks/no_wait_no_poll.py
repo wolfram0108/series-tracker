@@ -1,7 +1,8 @@
 """Guard: no pause or polling as a way to wait for another module (ARCHITECTURE.md of stage 10, section 7).
 
-In modules/: a call of `asyncio.sleep`, `time.sleep` or `wait_for` outside ALLOWED_WAITS is a violation; `sleep(0)`
-is a yield to the loop, not a pause. In web/src: `setInterval`, `setTimeout` and the VueUse polling helpers outside
+In modules/ and core/: a call of `asyncio.sleep`, `time.sleep` or `wait_for` outside ALLOWED_WAITS is a violation;
+`sleep(0)` is a yield to the loop, not a pause. Every permit names its category (SUBJECT, RETRY, BACKOFF, POLL, SAFEGUARD,
+PROCESS, PROTOCOL below). In web/src: `setInterval`, `setTimeout` and the VueUse polling helpers outside
 ALLOWED_TIMERS are violations (the interface has no timers, law law-ui). The permitted places are listed below with
 the ground of each; everything else is a violation, and permitted places are printed on every run.
 """
@@ -17,26 +18,58 @@ from guard_common import (Outcome, Violation, blank_comments, callee_name, dotte
 NAME = "no_wait_no_poll"
 SECTION_7 = "ARCHITECTURE.md (stage 10), section 7"
 
-# (file, function qualname, ground). '*' as the function allows the whole file.
-ALLOWED_WAITS: list[tuple[str, str, str]] = [
-    ("modules/scan/module.py", "ScanModule._scheduler_loop",
-     f"schedule of the auto scan: time is the subject of the task ({SECTION_7}, 'Расписание автоскана')"),
-    ("modules/sources/module.py", "SourcesModule._polite",
-     f"pace of requests to a host, 0.6 s (R-33): time is the subject of the task ({SECTION_7})"),
-    ("modules/sources/policy.py", "*",
+# Categories of a permitted wait. A wait that fits none of them is a violation.
+SUBJECT = "предмет задачи"  # the time itself is what the task is about: a schedule, the pace of requests to a host
+RETRY = "политика повторов"  # the pause between attempts, counted by core.retry
+BACKOFF = "пауза/бэкофф к внешней системе"  # the other side is not ours; the growing pause is the safeguard
+POLL = "опрос внешней системы без push"  # the other side offers no notification, so it is asked on a timer
+SAFEGUARD = "предохранитель на ожидание сигнала"  # a signal ends the wait; the time only stops waiting for ever
+PROCESS = "ожидание процесса"  # a child process is awaited with a safeguard
+PROTOCOL = "интервал протокола"  # the interval is a part of a wire protocol
+
+CATEGORIES = frozenset({SUBJECT, RETRY, BACKOFF, POLL, SAFEGUARD, PROCESS, PROTOCOL})
+
+# (file, function qualname, category, ground). '*' as the function allows the whole file. Searched in modules/ and core/.
+ALLOWED_WAITS: list[tuple[str, str, str, str]] = [
+    ("modules/scan/module.py", "ScanModule._scheduler_loop", SUBJECT,
+     f"schedule of the auto scan ({SECTION_7}, 'Расписание автоскана')"),
+    ("modules/sources/module.py", "SourcesModule._polite", SUBJECT,
+     f"pace of requests to a host, 0.6 s (R-33) ({SECTION_7})"),
+    ("modules/sources/policy.py", "*", RETRY,
      f"the retry policy and the pace of requests to sites and players ({SECTION_7}); it sleeps through core.retry"),
-    ("modules/voices/recovery.py", "Recovery._rest",
-     f"rest of the cleanup and retry journal; a signal (wake) ends it early, the delay is the safeguard ({SECTION_7})"),
-    ("modules/scan/sync.py", "TableSignals.verdict",
-     f"wait for the signal of a table with a safeguard of twice the measured read ({SECTION_7}, last row)"),
-    ("modules/slicing/module.py", "_cut",
+    ("modules/voices/recovery.py", "Recovery._rest", SAFEGUARD,
+     f"rest of the cleanup and retry journal; the signal (wake) ends it early, the delay is the safeguard ({SECTION_7})"),
+    ("modules/scan/sync.py", "TableSignals.verdict", SAFEGUARD,
+     f"wait for the signal of a table, safeguard of twice the measured read ({SECTION_7}, last row)"),
+    ("modules/catalog/module.py", "CatalogModule._await_purge_reports", SAFEGUARD,
+     "the event of the last owner's report ends the wait; silence longer than PURGE_REPORT_TIMEOUT is a broken cascade"),
+    ("modules/slicing/module.py", "_cut", PROCESS,
      f"wait for the ffmpeg process with a safeguard ({SECTION_7}, 'Таймауты')"),
-    ("modules/downloads/ytdlp.py", "_next_line",
-     f"wait for a line of the yt-dlp process; silence longer than STALL_TIMEOUT_S is a safeguard ({SECTION_7})"),
-    ("modules/sources/players/vibix_protocol.py", "capture_with_browser",
-     f"wait for the response signal of the browser page with a safeguard ({SECTION_7}, 'Таймауты запросов к плеерам')"),
-    ("modules/sources/players/vibix_protocol.py", "_manifest",
-     f"wait for the manifest response signal with a safeguard ({SECTION_7}, 'Таймауты запросов к плеерам')"),
+    ("modules/downloads/ytdlp.py", "_next_line", PROCESS,
+     f"wait for a line of the yt-dlp process; silence longer than STALL_TIMEOUT_S is the safeguard ({SECTION_7})"),
+    ("modules/sources/players/vibix_protocol.py", "capture_with_browser", SAFEGUARD,
+     f"response signal of the browser page with a safeguard ({SECTION_7}, 'Таймауты запросов к плеерам')"),
+    ("modules/sources/players/vibix_protocol.py", "_manifest", SAFEGUARD,
+     f"manifest response signal with a safeguard ({SECTION_7}, 'Таймауты запросов к плеерам')"),
+    ("modules/conform/module.py", "ConformModule._run", BACKOFF,
+     "reconnect to the alignment daemon, an external system, with a growing pause up to BACKOFF_MAX_S"),
+    ("modules/downloads/module.py", "DownloadsModule._run_download", RETRY,
+     "pause before a repeated download; the length comes from the Budget of core.retry"),
+    ("modules/gateway/module.py", "GatewayModule._sse_stream", PROTOCOL,
+     "the keepalive interval of the SSE stream: a comment line keeps the connection alive through proxies"),
+    ("modules/torrents/module.py", "TorrentsModule._pipeline_loop", POLL,
+     "qBittorrent, an external system, has no push: the state of the torrents is asked on a timer"),
+    ("modules/torrents/module.py", "TorrentsModule._monitor_loop", POLL,
+     "qBittorrent, an external system, has no push: the progress is asked on a timer"),
+    ("core/module.py", "BaseModule.request", SAFEGUARD,
+     "the reply of a query ends the wait; the timeout is the safeguard of the caller"),
+    ("core/retry.py", "retrying", RETRY, "the retry policy itself: the pause between attempts"),
+    ("core/proc.py", "run_capture", PROCESS, "wait for a finished program with a deadline"),
+    ("core/proc.py", "_reap", PROCESS, "wait for a killed program to be reaped, with a safeguard"),
+    ("core/storage.py", "call", SAFEGUARD,
+     "the end of a storage call ends the wait; the timeout stops waiting for a stuck call"),
+    ("core/db.py", "Database._ensure_wal", BACKOFF,
+     "PRAGMA journal_mode does not wait for the busy timeout: the lock of the database file is retried until _WAL_TIMEOUT"),
 ]
 
 # (file, mark, ground). The mark is a text that must stand on the line of the call (a variable or function name).
@@ -92,14 +125,17 @@ def is_test_file(path: str) -> bool:
     return bool(re.search(r"\.(test|spec)\.[jt]sx?$", path))
 
 
-def check_waits(root: Path, allowed_waits: list[tuple[str, str, str]] | None = None,
+def check_waits(root: Path, allowed_waits: list[tuple[str, str, str, str]] | None = None,
                 allowed_timers: list[tuple[str, str, str]] | None = None) -> Outcome:
     allowed_waits = ALLOWED_WAITS if allowed_waits is None else allowed_waits
     allowed_timers = ALLOWED_TIMERS if allowed_timers is None else allowed_timers
     outcome = Outcome()
     used: set[tuple[str, str]] = set()
     used_timers: set[tuple[str, str] | None] = set()
-    for path in python_files(root / "modules"):
+    for file, function, category, _ground in allowed_waits:
+        if category not in CATEGORIES:
+            outcome.violations.append(Violation(file, 0, f"допуск «{function}»: категория «{category}» не из списка категорий сторожа"))
+    for path in [*python_files(root / "modules"), *python_files(root / "core")]:
         where = rel(root, path)
         try:
             tree = parse_python(path.read_text(encoding="utf-8"), str(path))
@@ -107,13 +143,13 @@ def check_waits(root: Path, allowed_waits: list[tuple[str, str, str]] | None = N
             outcome.violations.append(Violation(where, error.lineno or 0, f"файл не разобран: {error.msg}"))
             continue
         for line, function, call in find_waits(tree):
-            entry = next(((f, fn, g) for f, fn, g in allowed_waits if f == where and fn in {function, "*"}), None)
+            entry = next((e for e in allowed_waits if e[0] == where and e[1] in {function, "*"}), None)
             if entry is None:
                 outcome.violations.append(Violation(where, line, f"{call} в {function or 'модуле'}: пауза или ожидание по времени вне допущенных мест"))
             else:
                 used.add((entry[0], entry[1]))
-                outcome.allowed.append(Violation(where, line, f"{call} в {function}: {entry[2]}"))
-    for file, function, _ground in allowed_waits:
+                outcome.allowed.append(Violation(where, line, f"{call} в {function}: [{entry[2]}] {entry[3]}"))
+    for file, function, _category, _ground in allowed_waits:
         if function != "*" and (file, function) not in used:
             outcome.violations.append(Violation(file, 0, f"допуск «{function}» не используется: в сторожe устаревшая запись"))
     web = root / "web" / "src"
