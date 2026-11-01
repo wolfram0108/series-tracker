@@ -9,15 +9,16 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Callable
+from typing import Callable, Mapping
 
 import httpx
 
-from core.contracts import ReleaseTable, TableFailed, TableGetReply, TableProgress, TableReady, TableState
+from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGetReply, TableGetRequest, TableProgress,
+                            TableReady, TableState)
 from core.logging import get_logger
 from core.reasons import describe, reason
 
-from .repository import SourcesRepository
+from .repository import SourcesRepository, Stored
 from .sites import ReadContext, Site, SiteError, SiteRegistry
 
 PROGRESS_TOPIC = "sources.table.progress"
@@ -51,34 +52,55 @@ class TableReader:
 
     # --- requests -----------------------------------------------------------------------
 
-    async def get(self, url: str) -> TableGetReply:
-        found = self._resolve(url)
+    async def get(self, request: TableGetRequest) -> TableGetReply:
+        found = self._resolve(request.url, request.options)
         if found is None:
-            return TableGetReply(url=url, state=TableState.FAILED, reason=reason("site_not_found"))
+            return TableGetReply(url=request.url, state=TableState.FAILED, reason=reason("site_not_found"))
         site, key = found
         async with self._gate:
-            table = await self._repo.last_table(key)
+            stored = await self._repo.stored(key)
+            table = stored.table
+            if not request.refresh:
+                return self._as_it_is(key, stored)
             if table is not None and self._fresh(table):
                 return TableGetReply(url=key, state=TableState.READY, table=table)
             if key not in self._reading:
                 self._launch(site, key)
             return TableGetReply(url=key, state=TableState.READING, table=table)
 
-    async def read(self, url: str) -> None:
+    def _as_it_is(self, key: str, stored: Stored) -> TableGetReply:
+        """The page as it stands, with no read: a recount of a layout must not cost a read of the site. A read that goes
+        is `reading`, a last read that failed is `failed` with its reason, any other complete table is `ready` however old,
+        and a page nothing was read of is `absent`. All of it with the last complete table, when there is one."""
+        if key in self._reading:
+            return TableGetReply(url=key, state=TableState.READING, table=stored.table)
+        if stored.state == "failed":
+            return TableGetReply(url=key, state=TableState.FAILED, table=stored.table, reason=stored.reason)
+        if stored.table is not None:
+            return TableGetReply(url=key, state=TableState.READY, table=stored.table)
+        return TableGetReply(url=key, state=TableState.ABSENT)
+
+    async def read(self, request: TableGetRequest) -> None:
         """Read the page now, term or not, unless a read of it is already going."""
-        found = self._resolve(url)
+        found = self._resolve(request.url, request.options)
         if found is None:
-            self._publish(FAILED_TOPIC, TableFailed(url=url, reason=reason("site_not_found")).model_dump(mode="json"))
+            self._publish(FAILED_TOPIC, TableFailed(url=request.url, reason=reason("site_not_found"))
+                          .model_dump(mode="json"))
             return
         site, key = found
         if key not in self._reading:
             self._launch(site, key)
 
+    def resolve(self, url: str, options: Mapping[str, str]) -> SiteResolveReply:
+        """Which site reads the address and its canonical form, with no network."""
+        found = self._resolve(url, options)
+        return SiteResolveReply(site=found[0].name, canonical_url=found[1]) if found else SiteResolveReply()
+
     async def resume(self) -> None:
         """Begin again the reads that a stop interrupted; their consumers ask again by themselves when they start."""
         async with self._gate:
             for page in await self._repo.pages_being_read():
-                found = self._resolve(page["url"])
+                found = self._resolve(page["url"], {})
                 if found is None:
                     await self._conclude_unreadable(page["url"], page["site"])
                 elif found[1] not in self._reading:
@@ -93,9 +115,9 @@ class TableReader:
 
     # --- the read -----------------------------------------------------------------------
 
-    def _resolve(self, url: str) -> tuple[Site, str] | None:
+    def _resolve(self, url: str, options: Mapping[str, str]) -> tuple[Site, str] | None:
         site = self._sites.find(url)
-        return (site, site.canonical_url(url)) if site is not None else None
+        return (site, site.canonical_url(url, options)) if site is not None else None
 
     def _fresh(self, table: ReleaseTable) -> bool:
         try:

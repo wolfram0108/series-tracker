@@ -6,7 +6,7 @@ read per page, the storage, the events) belongs to the core in `table.py`; addin
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Iterable, Protocol
+from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Protocol
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,8 +16,16 @@ from core.contracts import TableRow
 if TYPE_CHECKING:
     import httpx
 
-# (phase, current, total): `phase` is a code the interface words, the counts are those of the phase.
+# (phase, current, total): `phase` is one of the codes below, the counts are those of the phase.
 Progress = Callable[[str, int, int], None]
+
+# The phases of a read, as `progress` reports them; the interface words each as `sources.phase.<code>`.
+PHASE_RELEASE = "release"    # the page of the release and the list of its episodes
+PHASE_EPISODES = "episodes"  # the page of each episode
+PHASE_PLAYERS = "players"    # the asks of the players on the rows
+PHASE_CATALOG = "catalog"    # the catalog of a player that describes the whole series (Vibix)
+PHASE_VIDEOS = "videos"      # the videos of a channel
+PHASES = (PHASE_RELEASE, PHASE_EPISODES, PHASE_PLAYERS, PHASE_CATALOG, PHASE_VIDEOS)
 
 
 class SiteError(Exception):
@@ -46,7 +54,12 @@ class TableDraft(BaseModel):
 
 
 class Site(Protocol):
-    """A site in the registry. `canonical_url` is idempotent and is the key of the page's table; `read` accepts it."""
+    """A site in the registry. `canonical_url` is the key of the page's table; `read` accepts it.
+
+    `options` are the choices of a source that change what is read; a site takes those it knows and ignores the rest.
+    The canonical address carries everything `read` needs, so the table is read the same way whoever asks. A site may
+    also have `configure(**options)` for the wiring of the module (browser pool, cache paths, players, the VK API);
+    it ignores the wiring it does not know."""
 
     name: str
     domains: tuple[str, ...]
@@ -55,8 +68,9 @@ class Site(Protocol):
         """Whether the address is a page this site reads (the domain is already known to be the site's)."""
         ...
 
-    def canonical_url(self, url: str) -> str:
-        """The one spelling of the page's address: two addresses of one page give one table."""
+    def canonical_url(self, url: str, options: Mapping[str, str] = {}) -> str:
+        """The one spelling of the page's address: two addresses of one page give one table. Idempotent: the canonical
+        address given back as `url`, with no options, is itself."""
         ...
 
     async def read(self, url: str, ctx: ReadContext) -> TableDraft:

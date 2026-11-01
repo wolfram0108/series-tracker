@@ -181,7 +181,7 @@ def test_match_only_title_pages(provider):
 def test_default_registry_routes_by_host():
     registry = get_default_registry()
     assert registry.find_provider(PAGE_URL).name == "dunhuatv"
-    assert registry.find_provider("https://1.ruchime.org/release/x").name == "ruchime"
+    assert registry.find_provider("https://1.ruchime.org/release/x") is None
 
 
 
@@ -647,7 +647,7 @@ async def test_resolve_failures_are_stream_unavailable(site, provider):
 
 
 @pytest.mark.asyncio
-async def test_registry_resolves_dunhuatv_links_and_leaves_ruchime_alone(site):
+async def test_registry_resolves_dunhuatv_links_and_leaves_other_addresses_alone(site):
     registry = get_default_registry()
     async with site.client() as http:
         stream = await registry.resolve_stream(f"{PAGE_URL}#cvh=v1", http)
@@ -717,13 +717,13 @@ async def test_sources_carry_the_link_of_every_episode(site, provider):
 
 
 @pytest.mark.asyncio
-async def test_provider_info_tells_which_provider_has_a_voice_catalog_without_the_network():
+async def test_provider_info_tells_which_provider_has_a_voice_catalog_without_the_network(tmp_path):
     from core import Bus
     from core.db import Database
     from modules.sources import SourcesModule
 
     bus = Bus()
-    sources = SourcesModule(bus, Database(":memory:"))
+    sources = SourcesModule(bus, Database(str(tmp_path / "sources.db")))
     asked = {}
 
     class Env:
@@ -731,9 +731,9 @@ async def test_provider_info_tells_which_provider_has_a_voice_catalog_without_th
             self.payload = {"url": url}
 
     dunhua = await sources.on_provider_info(Env("https://dunhuatv.ru/500-stat-pobeditelem.html?player=cvh"))
-    ruchime = await sources.on_provider_info(Env("https://1.ruchime.org/release/some-title"))
+    ruchime = await sources.on_provider_info(Env("https://1.ruchime.org/release/some-title"))  # a site of the tables
     unknown = await sources.on_provider_info(Env("https://example.org/x"))
     assert dunhua == {"provider": "dunhuatv", "voices": True}
-    assert ruchime == {"provider": "ruchime", "voices": False}
+    assert ruchime == {"provider": None, "voices": False}
     assert unknown == {"provider": None, "voices": False}
     assert asked == {}

@@ -13,22 +13,22 @@
 | `sources.video.layout` (`on_video_layout`, `RuchimeProvider.layout`) | сезоны каталога Vibix отдельным чтением | удалена | каталог Vibix — строки таблицы ruchime | `gateway /api/web_video/layout`, `web/useWebSources` |
 | `sources.video.coverage` (`on_video_coverage`, `RuchimeProvider.coverage`, событие `sources.coverage.progress`) | обход всех серий для окна добавления | удалена | полное чтение таблицы с событием `sources.table.progress` | `gateway /api/web_video/coverage`, `SSE coverage_progress`, `web/useWebSources` |
 | `sources.video.scan` (`on_video_scan`, `scan_episodes` провайдеров, событие `sources.video.progress`) | опрос серий под скан; у ruchime младшие плееры спрашиваются, только если ещё можно найти разрешение выше | удалена | таблица полная (З-2); кандидаты — из раскладки | `scan._scan_web_video`, `gateway.scrape_titles`, `SSE video_scan_progress` |
-| `sources.vk.scan` (`on_vk_scan`, `sources/vk.py`) | поиск видео канала, `video_to_fact` | перепроектирована | сайт `vk_channel` таблицы; запрос и режим поиска — поля источника | `scan._scan_vk`, `gateway.scrape_titles` |
+| `sources.vk.scan` (`on_vk_scan`, `sources/vk.py`) | поиск видео канала, `video_to_fact` | перепроектирована | сайт `vk_channel` таблицы; запрос и режим поиска — поля источника | `scan._scan_vk`, `gateway.scrape_titles` — сделано (П-3): сайт `vk_channel`, топик и `sources/vk.py` удалены; вызовы меняют П-6, П-8 |
 | `sources.provider.info` | есть ли у провайдера каталог озвучек | удалена | у всех сайтов одна форма таблицы | `voices._dispatch` |
 | `video_providers/base.py::BaseVideoProvider` (`parse_release`, `scan_episodes`, `layout`, `coverage`, `has_voice_catalog`, `has_layout`) | контракт провайдера с разными формами по сайтам | перепроектирована | контракт сайта: «прочитать страницу → строки таблицы» | все провайдеры, `registry.py` |
 | `video_providers/table.py::Row.number`, `ReleaseTable` | строка таблицы с номером серии от парсера; таблица в памяти на 15 минут | перепроектирована | строка без номера (`ARCHITECTURE.md`, 4.1); таблица в БД со сроком 1 час | провайдеры |
 | `video_providers/views.py` (`pick`, `facts`, `availability_report`, `coverage`, `played`, `causes`) | выбор лучшего потока, факты скана, отчёт о плеерах, охват диапазонами | удалена | выбор референса — `scan`; сводка источника — `composition` | провайдеры, `scan.save_availability` |
 | `video_providers/ranges.py::episode_ranges` | диапазоны серий у парсеров | удалена из `sources` | диапазоны появляются только из ответа конструктора (З-3); форматирование для окна — `web/src/lib` | `dunhuatv._describe`, `ruchime._vibix_sources`, `views.coverage` |
-| `video_providers/players.py::PLAYER_ORDER` | порядок плееров ruchime: VK, AllVideo, Vibix | перепроектирована | плееры страницы читаются все, включая Kodik; порядок выбора — приоритет источников `voices` | `ruchime` |
-| `ruchime/provider.py` (`_needs_lower_source`, `_apply_vibix`, `_quick_report`, `_survey`, `_rows_for`, `SURVEY_TTL_S`) | частичный опрос под скан, отдельный обход для окна, кэш на 15 минут | перепроектирована | сайт `ruchime`: все строки списка, все плееры, каталог Vibix | — |
-| `ruchime/site.py::episode_title` | заголовок «<название сериала> - N серия» из номера | удалена | текст строки — `title` списка серий сайта | `site.read_episode`, `ruchime._rows_for` |
-| `ruchime/address.py` (`Choice`, `choice_of`, `address_of`: `?vibix=`, `?off=`) | выбор сезона Vibix и отключённых плееров в адресе сериала | перепроектирована | поля источника сериала (`catalog`) | `ruchime`, `vibix.link_of`, `web/webSources` |
+| `video_providers/players.py::PLAYER_ORDER` | порядок плееров ruchime: VK, AllVideo, Vibix | перепроектирована | плееры страницы читаются все, включая Kodik; порядок выбора — приоритет источников `voices` | `ruchime` — сделано (П-3): файл удалён, плееры — реестр `players/registry.py`; Kodik страницы ruchime — ступень 3 |
+| `ruchime/provider.py` (`_needs_lower_source`, `_apply_vibix`, `_quick_report`, `_survey`, `_rows_for`, `SURVEY_TTL_S`) | частичный опрос под скан, отдельный обход для окна, кэш на 15 минут | перепроектирована | сайт `ruchime`: все строки списка, все плееры, каталог Vibix | — сделано (П-3): `sites/ruchime/` |
+| `ruchime/site.py::episode_title` | заголовок «<название сериала> - N серия» из номера | удалена | текст строки — `title` списка серий сайта | `site.read_episode`, `ruchime._rows_for` — сделано (П-3) |
+| `ruchime/address.py` (`Choice`, `choice_of`, `address_of`: `?vibix=`, `?off=`) | выбор сезона Vibix и отключённых плееров в адресе сериала | перепроектирована | поля источника сериала (`catalog`) | `ruchime`, `vibix.link_of`, `web/webSources` — сделано (П-3): выбор применяет проекция `composition`, сайт читает всё; `web` — П-9 |
 | `dunhuatv.py` (`split_address`, `Choice`, `_LEGACY_PLAYER`, `_choose`, `_catalog(everything=…)`) | сериал берёт один плеер и одну озвучку, выбор в адресе | перепроектирована | сайт `dunhuatv`: все плееры и все озвучки; выбор референса — `scan` | `voices`, `web/AddSeriesModal` |
 | `dunhuatv.py::_seasons_of` и отказ `season_clash` | сезон CVH отбрасывается; совпавшие номера двух сезонов — отказ всего каталога | удалена | группа плеера в строке; номера — конструктор | тесты `test_sources_dunhuatv` о `season_clash` |
 | `dunhuatv.py::_episode_title` | заголовок «<название> - N серия» | удалена | текст строки сайта; для CVH — `line_of` | — |
 | `players/cdnvideohub.py::read_playlist` (`season or 1`, ключ `(studio, voice_type, season, episode)`) | подставляет сезон 1; озвучка = студия + тип | перепроектирована | сезон — как отдал плеер; имя озвучки — открытый вопрос `../ROADMAP.md` | `dunhuatv` |
 | `players/kodik.py::parse_episodes` | номер серии = `value` пункта | перепроектирована | строка = пункт: `data-id`, текст пункта, сезон из списка сезонов | `dunhuatv`, `KodikPlayer.fetch` |
-| `players/kodik.py::parse_voices`, `players/vibix_protocol.py::parse_playlist` (номер из заголовка регуляркой) | имя озвучки Kodik читается; номер Vibix извлекается регуляркой | перепроектирована | номер Vibix не извлекается: текст «Серия N» уходит конструктору; озвучка потока `{…}` — в строку | `vibix.py`, `ruchime` |
+| `players/kodik.py::parse_voices`, `players/vibix_protocol.py::parse_playlist` (номер из заголовка регуляркой) | имя озвучки Kodik читается; номер Vibix извлекается регуляркой | перепроектирована | номер Vibix не извлекается: текст «Серия N» уходит конструктору; озвучка потока `{…}` — в строку | `vibix.py`, `ruchime` — Vibix сделано (П-3): у записи каталога место (`position`) и озвучка потока; `kodik.py` — ступень 3 |
 | `players/*` контракт `find / fetch / read`, `policy.py`, `core/retry.py` | общий контракт плееров, одна политика повторов | подтверждена | соответствует З-5 и Р-61; меняется только состав строки | — |
 | `sources.video.stream` и `resolve_stream` провайдеров | поток кандидата перед загрузкой | подтверждена | поток живёт недолго, разрешается перед загрузкой | `downloads` |
 | `core/contracts/release.py` (`Release`, `ReleaseSource`) | ответ `parse_release`; источник с `first/last/ranges/episodes/links` | удалена | `core/contracts/release_table.py` | `voices.layout`, `gateway.schemas`, `tests/provider_contract.py` |
@@ -46,13 +46,13 @@
 
 | Точка | Сейчас | Статус | Новое место / причина | Вызовы, которые меняются |
 |---|---|---|---|---|
-| `rules.apply` (список заголовков, ответ по порядку) | применение профиля | перепроектирована | строки с ключами, ответ по ключу | `composition` (единственный вызов) |
-| `rules.test` | тот же разбор для окна теста | удалена | `rules.apply` уже отдаёт события правил; один разбор | `gateway.rules_test`, `web/ParserTest` |
-| `rules.format_filename` (правила применяются к `source_title` ещё раз) | имя файла VK-элемента | перепроектирована | имя по номерам раскладки, без повторного применения | `downloads`, `renaming` |
+| `rules.apply` (список заголовков, ответ по порядку) | применение профиля | перепроектирована | строки с ключами, ответ по ключу | `composition` (единственный вызов) — сделано (П-2) |
+| `rules.test` | тот же разбор для окна теста | удалена | `rules.apply` уже отдаёт события правил; один разбор | `gateway.rules_test`, `web/ParserTest` — сделано (П-2) |
+| `rules.format_filename` (правила применяются к `source_title` ещё раз) | имя файла VK-элемента | перепроектирована | имя по номерам раскладки, без повторного применения | `downloads`, `renaming` — сделано (П-2) |
 | `rules.format_torrent_file` | имя файла торрента | подтверждена | торренты вне этапа | — |
-| движок `engine.py`, блоки и действия | язык правил | подтверждена; добавление действия «назначить диапазон» — открытый вопрос | — | — |
+| движок `engine.py`, блоки и действия | язык правил | подтверждена; добавление действия «назначить диапазон» — открытый вопрос | — | обратный диапазон («10-5») не извлекается, причина в `errors` — сделано (П-2) |
 | действие `assign_voiceover` (сейчас пишет только тег имени файла `voiceover_tag`) | тег в имени файла | перепроектирована | имя озвучки строки, главнее имени от плеера и сайта (Д-37); дальше проходит через группы озвучек | `scan._vk_candidates`, `rules/formatter.py` |
-| сброс кэша вызовами CRUD | кэш скомпилированных профилей | подтверждена; добавляется событие `rules.profile.changed` | раскладка пересчитывается сама (Т-14) | — |
+| сброс кэша вызовами CRUD | кэш скомпилированных профилей | подтверждена; добавляется событие `rules.profile.changed` | раскладка пересчитывается сама (Т-14) | — сделано (П-2) |
 
 ## 4. Раскладка и скан (`modules/scan`, новый `modules/composition`)
 
@@ -61,7 +61,7 @@
 | `scan._included_episodes` | правила к быстрому списку, ответ сопоставляется с номером парсера | удалена | раскладка | `scan._scan_web_video` |
 | `scan._scan_web_video`, `scan._scan_vk` | отдельные ветки скана по виду источника | перепроектирована | синхронизация: таблицы источников → раскладка → план | `scan._run_series`, `scan.on_composition` |
 | `scan._process_video_candidates`, `_vk_candidates` (вызов `rules.apply`) | правила к заголовкам кандидатов | перепроектирована | кандидаты — строки раскладки одиночных серий | — |
-| `scan._resolve_part_ones` и повтор той же логики в `scan._reconstruct` | «часть 1» для серии, у которой есть части — в двух местах | перепроектирована | одно место: `composition/project.py` | `scan` |
+| `scan._resolve_part_ones` и повтор той же логики в `scan._reconstruct` | «часть 1» для серии, у которой есть части — в двух местах | перепроектирована | одно место: `composition/project.py` | `scan` — сделано (П-4) |
 | `scan._reconstruct` (`rules.apply` по сохранённым заголовкам) | номера для окна композиции вычисляются заново | удалена | `composition.get` | `scan.on_composition`, `gateway /composition` |
 | `scan.on_composition` (`refresh` запускает скан) | окно композиции и скан в одном запросе | перепроектирована | окно читает раскладку и план; синхронизация — отдельная команда | `web/StatusComposition`, `web/StatusVkComposition` |
 | `scan.save_availability`, `scan.availability`, таблица `video_availability` | отчёт о плеерах после скана | удалена | состояния строк таблицы, сводка `composition` | `gateway api_series`, `web` |
@@ -130,20 +130,20 @@
 | Точка | Сейчас | Статус | Новое место / причина | Вызовы, которые меняются |
 |---|---|---|---|---|
 | `downloads/ytdlp.py` (`is_allvideo_url`, `_resolve_allvideo_stream`, `_extract_best_stream_from_playerjs`, ветка в `download_video`) | собственный разбор плеера AllVideo с заголовком Referer ruchime — копия `sources/players/allvideo.py` | удалена | поток кандидата разрешает только `sources.video.stream` (З-5) | `ytdlp.download_video`, тесты `test_downloads_module.py` (`test_is_allvideo_url` и тест с `_resolve_allvideo_stream`) |
-| `RuchimeProvider.vibix` и `PLAYER_ORDER[2]` | два экземпляра плеера Vibix; браузер настроен только у одного | перепроектирована | один экземпляр плеера в реестре плееров `sources` | `ruchime`, `players.py` |
+| `RuchimeProvider.vibix` и `PLAYER_ORDER[2]` | два экземпляра плеера Vibix; браузер настроен только у одного | перепроектирована | один экземпляр плеера в реестре плееров `sources` | `ruchime`, `players.py` — сделано (П-3): `PlayerRegistry` модуля |
 | `video_providers/table.py::ReleaseTable.fill` (исключение пробы → `Cell(False)` без `transient`), `ruchime/provider.py` (`_quick_report`), `views.py` (ячейка без ответа) | исключение пробы даёт «нет», хотя Т-5 требует «не получено» | перепроектирована | исключение пробы → состояние «не получено» с причиной | `ruchime`, `views` |
 | `video_providers/__init__.py::_DEFAULT_REGISTRY`, `players.py::PLAYER_ORDER` | глобальные реестры сайтов и плееров | перепроектирована | реестры принадлежат модулю `sources`; регистрация по `ARCHITECTURE.md`, раздел 12 | `run.py`, `tests/conftest.py`, `tests/test_contracts.py` |
-| `RuchimeProvider._tables`, `_table_locks`, `SURVEY_TTL_S`, `ReleaseTable.expires_at` | кэш таблицы в памяти по slug без учёта выбора в адресе | удалена | таблица в БД, срок 1 час, замок страницы (Т-2, Т-4) | `test_sources_ruchime_players.py` (проверка `_tables["test"].expires_at`) |
+| `RuchimeProvider._tables`, `_table_locks`, `SURVEY_TTL_S`, `ReleaseTable.expires_at` | кэш таблицы в памяти по slug без учёта выбора в адресе | удалена | таблица в БД, срок 1 час, замок страницы (Т-2, Т-4) | `test_sources_ruchime_players.py` (проверка `_tables["test"].expires_at`) — сделано (П-3) у ruchime; `ReleaseTable.expires_at` в `video_providers/table.py` уйдёт со ступенью 3 |
 | `gateway/api_settings.py` (регулярное выражение ссылки VK, подстроки `vk.com`, `vkvideo.ru`, `@`), `web/src/lib/webSources.ts::SOURCE_ORDER`, `AddSeriesModal.vue` (метки плееров) | знание сайтов и плееров вне `sources` | перепроектирована | вид сайта по адресу — реестр сайтов `sources`; метка плеера — поле строки таблицы `player_label`; порядок плееров — настройка `voices.source_priority` | `scrape_titles`, `web` |
-| `tests/test_retry.py` (три сторожа, читающие исходники по жёсткому списку путей) | ломаются при переименовании файлов | перепроектирована | список путей приводится к новой файловой раскладке | `tests/test_retry.py` |
+| `tests/test_retry.py` (три сторожа, читающие исходники по жёсткому списку путей) | ломаются при переименовании файлов | перепроектирована | список путей приводится к новой файловой раскладке | `tests/test_retry.py` — сделано (П-3) |
 
 ### 9.2. Конструктор (`rules`)
 
 | Точка | Сейчас | Статус | Новое место / причина | Вызовы, которые меняются |
 |---|---|---|---|---|
-| `rules/repository.py` (чтение таблицы `series`) | модуль читает таблицу другого модуля | удалена | профиль приходит параметром запроса (`profile_id`), у торрентов — из источника сериала | `rules.format_torrent_file`, `rules.format_filename` |
-| `rules.format_filename` — вызывающие | `renaming` (4 вызова), `downloads` (1), `slicing/module.py:379` (1) | перепроектирована | единый контракт «по готовым номерам»; поля запроса `series`, `media_item`, `episode_override` сохраняются, `slicing` вызывает без правки (Д-34) | `renaming`, `downloads` |
-| `rules.cache.invalidate` | топик без единого вызывающего | удалена | событие `rules.profile.changed` | — |
+| `rules/repository.py` (чтение таблицы `series`) | модуль читает таблицу другого модуля | удалена | профиль приходит параметром запроса (`profile_id`), у торрентов — из источника сериала | `rules.format_torrent_file`, `rules.format_filename` — сделано (П-2) |
+| `rules.format_filename` — вызывающие | `renaming` (4 вызова), `downloads` (1), `slicing/module.py:379` (1) | перепроектирована | единый контракт «по готовым номерам»; поля запроса `series`, `media_item`, `episode_override` сохраняются, `slicing` вызывает без правки (Д-34) | `renaming`, `downloads` — сделано (П-2) |
+| `rules.cache.invalidate` | топик без единого вызывающего | удалена | событие `rules.profile.changed` | — сделано (П-2) |
 
 ### 9.3. Потребители вида и профиля сериала
 

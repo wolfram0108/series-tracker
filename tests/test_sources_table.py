@@ -4,7 +4,6 @@ The site here is a fake that the module knows through the registry alone (M-34);
 real. Time comes from a clock the test moves, and the order of events from the signals of the fake site, never from waits.
 """
 import asyncio
-import importlib.util
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -12,39 +11,23 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
-from alembic.operations import Operations
-from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine, inspect
 
 from core import BaseModule, Bus
-from core.contracts import ReleaseTable, RowState, RowVoice, TableRow
+from core.contracts import ReleaseTable, RowState, RowVoice, TableGetRequest, TableRow
 from core.db import Database
 from core.reasons import parse, reason
 from modules.sources.module import SourcesModule
 from modules.sources.repository import SourcesRepository
 from modules.sources.sites import ReadContext, SiteError, SiteRegistry, TableDraft, on_domain
+from sources_support import migrate
 
-ROOT = Path(__file__).resolve().parent.parent
-MIGRATION = ROOT / "alembic" / "versions" / "0026_sources_release_tables.py"
 PAGE = "https://fake.test/p/1"
 OTHER_PAGE = "https://fake.test/p/2"
 # A test that waits longer than this for an event is stuck: the event is a signal, the number only ends a broken test.
 STUCK_S = 5.0
 # How long the absence of a second read is watched while the first is held open: it ends the watch, nothing waits for it.
 ABSENCE_WINDOW_S = 0.3
-
-
-# --- the schema: the migration of this package alone, so that other packages' migrations cannot break these tests ------
-
-def migrate(path: Path, direction: str) -> None:
-    spec = importlib.util.spec_from_file_location("migration_0026", MIGRATION)
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
-    engine = create_engine(f"sqlite:///{path}")
-    with engine.begin() as connection:
-        with Operations.context(MigrationContext.configure(connection)):
-            getattr(migration, direction)()
-    engine.dispose()
 
 
 @pytest.fixture
@@ -81,9 +64,11 @@ class FakeSite:
     def match_url(self, url: str) -> bool:
         return urlparse(url).path.startswith("/p/")
 
-    def canonical_url(self, url: str) -> str:
+    def canonical_url(self, url: str, options: dict | None = None) -> str:
         parts = urlparse(url)
-        return f"https://{parts.hostname}{parts.path}"
+        # The only choice this fake site knows changes the address: a mode is part of what is read.
+        mode = (options or {}).get("mode")
+        return f"https://{parts.hostname}{parts.path}" + (f"?mode={mode}" if mode else "")
 
     async def read(self, url: str, ctx: ReadContext) -> TableDraft:
         self.reads.append(url)
@@ -132,8 +117,8 @@ class System:
     failed: object
     progress: object
 
-    async def get(self, url: str = PAGE) -> dict:
-        return await self.probe.request("sources.table.get", {"url": url}, timeout=STUCK_S)
+    async def get(self, url: str = PAGE, **request) -> dict:
+        return await self.probe.request("sources.table.get", {"url": url, **request}, timeout=STUCK_S)
 
     async def next(self, subscription) -> dict:
         return (await asyncio.wait_for(subscription.queue.get(), STUCK_S)).payload
@@ -259,7 +244,7 @@ async def test_reading_now_does_not_start_a_second_read_while_one_goes(system):
     await system.get()
     await entry(system.site)
 
-    await system.sources.tables.read(PAGE)
+    await system.sources.tables.read(TableGetRequest(url=PAGE))
 
     await assert_no_second_read(system.site)
     system.site.go.set()
@@ -523,6 +508,111 @@ async def test_progress_of_a_read_goes_out_under_the_address_of_the_page(system)
 
     assert await system.next(system.progress) == {"url": PAGE, "phase": "players", "current": 1, "total": 4}
     assert await system.next(system.progress) == {"url": PAGE, "phase": "rows", "current": 23, "total": 23}
+
+
+# --- the parameters of a request: choices of a source, a table as it is, the site of an address ------------------------------
+
+async def test_a_choice_of_the_source_that_changes_what_is_read_gives_its_own_table(system):
+    plain = await system.get()
+    await system.next(system.ready)
+    moded = await system.get(options={"mode": "all"})
+
+    assert plain["url"] == PAGE and moded["url"] == PAGE + "?mode=all"
+    assert moded["state"] == "reading" and moded["table"] is None
+    assert (await system.next(system.ready))["url"] == PAGE + "?mode=all"
+    assert system.site.reads == [PAGE, PAGE + "?mode=all"]
+
+
+async def test_a_table_asked_for_as_it_is_costs_no_read_whatever_its_age(system):
+    assert await system.get(refresh=False) == {"url": PAGE, "state": "absent", "table": None, "reason": None}
+    assert system.site.reads == []
+    await system.warm()
+    system.clock.advance(days=3)
+
+    old = await system.get(refresh=False)
+
+    assert old["state"] == "ready" and old["table"]["read_at"] == "2026-11-01T12:00:00+00:00"
+    assert len(system.site.reads) == 1
+    await assert_no_second_read(system.site)
+
+
+async def test_a_table_asked_for_as_it_is_while_a_read_goes_says_reading_and_has_the_last_complete_one(system):
+    await system.warm()
+    system.clock.advance(hours=2)
+    system.site.go.clear()
+    await system.get()
+    await entry(system.site)
+
+    held = await system.get(refresh=False)
+
+    assert held["state"] == "reading" and [each["text"] for each in held["table"]["rows"]][0].endswith("(чтение 1)")
+    system.site.go.set()
+    await system.next(system.ready)
+
+
+async def test_a_table_asked_for_as_it_is_says_failed_with_the_reason_and_keeps_the_last_complete_table(system):
+    await system.warm()
+    system.clock.advance(hours=2)
+    system.site.failure = SiteError(reason("site_down", status=503))
+    await system.get()
+    await entry(system.site)
+    await system.next(system.failed)
+
+    verdict = await system.get(refresh=False)
+
+    assert verdict["state"] == "failed" and verdict["reason"] == reason("site_down", status=503)
+    assert [each["text"] for each in verdict["table"]["rows"]][0].endswith("(чтение 1)")
+    assert len(system.site.reads) == 2
+    await assert_no_second_read(system.site)
+
+
+async def test_a_page_whose_first_read_failed_is_failed_with_no_table_and_not_absent(system):
+    system.site.failure = SiteError(reason("site_down"))
+    await system.get()
+    await system.next(system.failed)
+
+    verdict = await system.get(refresh=False)
+
+    assert verdict["state"] == "failed" and verdict["table"] is None and verdict["reason"] == reason("site_down")
+
+
+async def test_a_read_that_succeeds_after_a_failed_one_takes_the_verdict_away(system):
+    await system.warm()
+    system.clock.advance(hours=2)
+    system.site.failure = SiteError(reason("site_down"))
+    await system.get()
+    await system.next(system.failed)
+    assert (await system.get(refresh=False))["state"] == "failed"
+
+    system.site.failure = None
+    await system.get()
+    await system.next(system.ready)
+    after = await system.get(refresh=False)
+
+    assert after["state"] == "ready" and after["reason"] is None
+    assert [each["text"] for each in after["table"]["rows"]][0].endswith("(чтение 3)")
+
+
+async def test_the_verdict_of_a_forced_read_that_failed_is_seen_as_it_is_while_the_table_is_still_fresh(system):
+    await system.warm()
+    system.site.failure = SiteError(reason("site_down"))
+    system.probe.send_command("sources.table.read", {"url": PAGE})
+    await entry(system.site)
+    await system.next(system.failed)
+
+    assert (await system.get(refresh=False))["state"] == "failed"
+    # The term is the other question: a table younger than the hour is the table, whatever the last forced read said.
+    assert (await system.get())["state"] == "ready"
+
+
+async def test_the_site_of_an_address_and_its_canonical_form_are_told_with_no_read(system):
+    found = await system.probe.request("sources.site.resolve", {"url": PAGE + "?utm=1#top", "options": {"mode": "all"}},
+                                       timeout=STUCK_S)
+    nowhere = await system.probe.request("sources.site.resolve", {"url": "https://nowhere.test/p/1"}, timeout=STUCK_S)
+
+    assert found == {"site": "fake", "canonical_url": PAGE + "?mode=all"}
+    assert nowhere == {"site": None, "canonical_url": None}
+    assert system.site.reads == []
 
 
 # --- a site is added by registering it (M-34, T-42) -------------------------------------------------------------------

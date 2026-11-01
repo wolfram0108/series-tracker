@@ -4,17 +4,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
+from ..players.contract import StreamUnavailable  # noqa: F401 - re-exported: the error is the players' contract
+
 if TYPE_CHECKING:
     import httpx
-
-
-class StreamUnavailable(RuntimeError):
-    """The provider owns the URL but cannot produce a stream for it now."""
-
-    def __init__(self, reason: str, transient: bool = False) -> None:
-        super().__init__(reason)
-        self.reason = reason
-        self.transient = transient
 
 
 class BaseVideoProvider(ABC):

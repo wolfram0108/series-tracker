@@ -7,6 +7,7 @@ transaction.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from core.contracts import ReleaseTable, RowState, RowVoice, TableRow
@@ -16,7 +17,7 @@ from . import hosts
 
 # One statement is one snapshot: the head and the rows of a page cannot come from two different tables.
 _LAST_TABLE = (
-    'SELECT t.site, t.names, t.site_voice, t.read_at, t.complete, r.seq, r."key" AS row_key, r.player, r.player_label,'
+    'SELECT t.site, t.names, t.site_voice, t.read_at, t.complete, t.state AS read_state, t.reason AS read_reason, r.seq, r."key" AS row_key, r.player, r.player_label,'
     " r.grp, r.text, r.voice_name, r.voice_kind, r.heights, r.state AS row_state, r.reason AS row_reason,"
     " r.duration_s, r.published, r.link, r.site_fields"
     " FROM release_tables t LEFT JOIN release_rows r ON r.url = t.url WHERE t.url = ? ORDER BY r.seq")
@@ -31,6 +32,15 @@ _SAVE_ROW = (
     'INSERT INTO release_rows (url, seq, "key", player, player_label, grp, text, voice_name, voice_kind, heights,'
     " state, reason, duration_s, published, link, site_fields)"
     " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+
+
+@dataclass(frozen=True)
+class Stored:
+    """What the page has: the last complete table (None while there is none) and how the last read ended.
+    `state` is `reading`, `ready` or `failed` (None for a page never asked for); `reason` is the failure of the last read."""
+    table: ReleaseTable | None
+    state: str | None
+    reason: str | None
 
 
 def _row_of(record: dict) -> TableRow:
@@ -73,16 +83,21 @@ class SourcesRepository:
 
     # --- tables of site pages ----------------------------------------------------------
 
-    async def last_table(self, url: str) -> ReleaseTable | None:
-        """The last complete table of the page; None while the page has never been read completely."""
+    async def stored(self, url: str) -> Stored:
+        """The last complete table of the page and the end of the last read, from one snapshot of the database."""
         records = await self._db.fetch_all(_LAST_TABLE, (url,))
-        if not records or not records[0]["complete"]:
-            return None
+        if not records:
+            return Stored(None, None, None)
         head = records[0]
-        return ReleaseTable(
+        table = ReleaseTable(
             url=url, site=head["site"], names=json.loads(head["names"]), site_voice=head["site_voice"],
             read_at=head["read_at"], complete=True,
-            rows=[_row_of(record) for record in records if record["seq"] is not None])
+            rows=[_row_of(record) for record in records if record["seq"] is not None]) if head["complete"] else None
+        return Stored(table, head["read_state"], head["read_reason"])
+
+    async def last_table(self, url: str) -> ReleaseTable | None:
+        """The last complete table of the page; None while the page has never been read completely."""
+        return (await self.stored(url)).table
 
     async def save_table(self, table: ReleaseTable) -> None:
         """Replace the page's table in one transaction: a reader sees the old table or the new one, never a part."""

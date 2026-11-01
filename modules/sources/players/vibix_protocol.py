@@ -34,8 +34,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_KEY_PATH = Path(os.environ.get(
     "VIBIX_KEY_STORE", str(_REPO_ROOT / "torrent_cache" / "vibix-key.json")))
 
-_QUALITY_CHUNK = re.compile(r"^\[(\d+p|4k)\]\{[^}]*\}(https?://.+)$", re.IGNORECASE)
-_EPISODE_NUMBER = re.compile(r"\d+")
+_QUALITY_CHUNK = re.compile(r"^\[(\d+p|4k)\]\{([^}]*)\}(https?://.+)$", re.IGNORECASE)
 _HLS_HEADER = ("#EXTM3U\n#EXT-X-TARGETDURATION:{duration}\n{blank}"
                "#EXT-X-ALLOW-CACHE:YES\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-VERSION:3\n")
 _BLOCKED_HOSTS = (
@@ -60,16 +59,25 @@ class VibixUnavailable(RuntimeError):
 class Stream:
     quality: int
     url: str
+    # The name the catalog gives the voice-over of the stream (`{RuChiMe}`); empty when it names none.
+    voice: str = ""
 
 
 @dataclass(frozen=True)
 class Episode:
-    number: int
+    """An entry of the catalog. It has no number of its own: the title is the text of the site, and the place of the
+    entry (position in its season, season position in the catalog) is all that tells it from the others."""
+
+    position: int
     title: str
     season: str
     streams: tuple[Stream, ...]
-    # 1-based position of the season in the catalog: numbers repeat from season to season, positions do not.
+    # 1-based position of the season in the catalog.
     season_index: int = 1
+
+    @property
+    def voice(self) -> str:
+        return next((stream.voice for stream in self.streams if stream.voice), "")
 
     def pick_stream(self, preferred: int | None = 1080) -> Stream:
         return pick_stream(self.streams, preferred)
@@ -222,10 +230,8 @@ def parse_playlist(payload: Any) -> list[Episode]:
             if not isinstance(item, dict):
                 continue
             title = str(item.get("title") or f"Серия {item_index}")
-            match = _EPISODE_NUMBER.search(title)
-            number = int(match.group()) if match else item_index
             streams = _parse_streams(str(item.get("file") or ""))
-            episodes.append(Episode(number=number, title=title, season=season_title,
+            episodes.append(Episode(position=item_index, title=title, season=season_title,
                                     streams=streams, season_index=season_index))
     return episodes
 
@@ -240,7 +246,7 @@ def _parse_streams(file_value: str) -> tuple[Stream, ...]:
         if match:
             label = match.group(1).lower()
             quality = 2160 if label == "4k" else int(label[:-1])
-            streams[quality] = Stream(quality=quality, url=match.group(2))
+            streams[quality] = Stream(quality=quality, url=match.group(3), voice=match.group(2).strip())
         elif chunk.startswith("http"):
             streams[0] = Stream(quality=0, url=chunk)
     return tuple(sorted(streams.values(), key=lambda item: item.quality, reverse=True))

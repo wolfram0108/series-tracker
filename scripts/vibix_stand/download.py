@@ -66,11 +66,11 @@ class PlaylistSession:
 
     @property
     def numbers(self) -> list[int]:
-        return [episode.number for episode in self.episodes]
+        return [episode.position for episode in self.episodes]
 
     def by_number(self, number: int) -> Episode:
         for episode in self.episodes:
-            if episode.number == number:
+            if episode.position == number:
                 return episode
         raise KeyError(f"серии {number} нет в плейлисте Vibix")
 

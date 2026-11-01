@@ -15,6 +15,7 @@ import httpx
 
 from core.reasons import reason
 
+from ..players.asking import read_batch as batch_of
 from ..players.contract import Player, PlayerRef
 from ..policy import Pacer, PlayerProbe, Verdict, probe_from, settle
 
@@ -96,17 +97,9 @@ async def probe(adapter: Player, ref: PlayerRef, http: httpx.AsyncClient, page_u
 
 async def read_batch(adapter: Player, rows: list[Row], http: httpx.AsyncClient) -> dict:
     """What a player that can answer for many videos at once settles; the rest is asked one by one."""
-    batch = getattr(adapter, "read_batch", None)
-    if batch is None or len(rows) < 2:
+    if not rows:
         return {}
-    try:
-        settled = await batch([row.refs[adapter.name] for row in rows], http, rows[0].page_url)
-    except httpx.HTTPError as exc:
-        logger.warning("%s batch failed: %s", adapter.name, type(exc).__name__)
-        return {}
-    logger.info("%s batch: %d of %d players settled, %d asked one by one", adapter.name, len(settled), len(rows),
-                len(rows) - len(settled))
-    return settled
+    return await batch_of(adapter, [row.refs[adapter.name] for row in rows], http, rows[0].page_url)
 
 
 class ReleaseTable:

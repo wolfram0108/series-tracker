@@ -74,7 +74,7 @@ def command_probe(args: argparse.Namespace) -> int:
         print(f"Качества: {', '.join(f'{quality}p' for quality in qualities)}")
         for episode in (first, last):
             stream = episode.pick_stream(args.quality)
-            print(f"  {episode.number}: {stream.quality}p {stream.url}")
+            print(f"  {episode.position}: {stream.quality}p {stream.url}")
     if args.save_dir:
         directory = Path(args.save_dir)
         directory.mkdir(parents=True, exist_ok=True)
@@ -82,7 +82,7 @@ def command_probe(args: argparse.Namespace) -> int:
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         (directory / "episodes.json").write_text(
-            json.dumps([{"number": episode.number, "title": episode.title,
+            json.dumps([{"position": episode.position, "title": episode.title,
                          "season": episode.season,
                          "streams": [{"quality": stream.quality, "url": stream.url}
                                      for stream in episode.streams]}

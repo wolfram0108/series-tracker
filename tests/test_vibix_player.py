@@ -1,13 +1,18 @@
 """The Vibix player: the catalog is captured once for a series, an episode reads from its best live manifest."""
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 import pytest
 
+from core import storage
+from core.reasons import parse
 from modules.sources.players import vibix
 from modules.sources.players.contract import Kind, PlayerRef
-from modules.sources.players.vibix import VibixPlayer, link_of, parse_link, pick_season
-from modules.sources.players.vibix_protocol import Episode, Stream, encode_envelope
+from modules.sources.players.vibix import VibixFailure, VibixPlayer, link_of, parse_link
+from modules.sources.players.vibix_protocol import (Episode, Stream, VibixUnavailable, encode_envelope,
+                                                    parse_playlist)
 
 KEY = b"K" * 32
 MANIFEST = b"#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.000,\nseg.ts\n#EXT-X-ENDLIST\n"
@@ -42,11 +47,16 @@ def test_the_link_names_the_season_and_the_episode_and_nothing_else_parses():
     assert parse_link(PAGE) is None and parse_link(PAGE + "#cvh=1") is None
 
 
-def test_several_seasons_need_a_choice_and_a_missing_season_is_refused():
-    both = [episode(1, season=1), episode(1, season=2)]
-    assert pick_season([episode(1)], None) == (1, "")
-    assert pick_season(both, 2) == (2, "")
-    assert pick_season(both, None)[0] is None and pick_season(both, 3)[0] is None
+def test_an_entry_of_the_catalog_has_a_position_and_the_voice_the_catalog_names_and_no_number_of_its_own():
+    folder = [{"title": "Серия 14", "file": "[480p]{RuChiMe}https://cdn.test/a.m3u8,[1080p]{RuChiMe}https://cdn.test/b.m3u8"},
+              {"title": "Фильм", "file": "[720p]https://cdn.test/c.m3u8"}]
+    first, second = parse_playlist({"data": {"playlist": [{"title": "Сезон 2", "folder": folder}]}})
+
+    assert (first.position, first.season_index, first.title, first.season) == (1, 1, "Серия 14", "Сезон 2")
+    assert [(stream.quality, stream.voice) for stream in first.streams] == [(1080, "RuChiMe"), (480, "RuChiMe")]
+    assert first.voice == "RuChiMe" and second.voice == ""
+    assert (second.position, second.title) == (2, "Фильм")
+    assert not hasattr(first, "number")
 
 
 @pytest.mark.asyncio
@@ -91,8 +101,115 @@ async def test_the_catalog_is_captured_once_for_all_the_episodes_of_a_series(mon
     monkeypatch.setattr(vibix, "decode_playlist",
                         lambda body, key: [episode(n, Stream(720, "https://cdn.test/live.m3u8")) for n in (1, 2, 3)])
     player = VibixPlayer(browser_getter=browser)
-    monkeypatch.setattr(player, "_key_store", SimpleNamespace(resolve=lambda **_: (KEY, None)))
+    monkeypatch.setattr(player, "_key_store", SimpleNamespace(resolve=lambda **_: (KEY, None), path=Path("key.json")))
     async with client({"live.m3u8": 200}) as http:
         for number in (1, 2, 3):
             assert (await read(player, http, link_of(PAGE, 1, number))).kind is Kind.PLAYABLE
     assert captures == [PAGE]
+
+
+def test_a_link_is_a_vibix_link_by_the_entry_it_names():
+    assert VibixPlayer.owns(link_of(PAGE, 1, 3)) and not VibixPlayer.owns(PAGE)
+
+
+# --- the disk is reached through the storage helper: a stalled disk ends the wait instead of holding the event loop --------
+
+class Calls:
+    """Spy over `storage.call`: what was sent to the storage and what it was told to own."""
+
+    def __init__(self, monkeypatch, fail: Exception | None = None):
+        self.sent: list[tuple[str, tuple]] = []
+        self._real, self._fail = storage.call, fail
+        monkeypatch.setattr(storage, "call", self)
+
+    async def __call__(self, fn, *args, **kwargs):
+        self.sent.append((getattr(fn, "__name__", "?"), (kwargs.get("owns"),)))
+        if self._fail is not None:
+            raise self._fail
+        return await self._real(fn, *args, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_the_key_file_is_read_and_written_through_the_storage_helper(monkeypatch, tmp_path):
+    calls = Calls(monkeypatch)
+    api = encode_envelope(json.dumps({"data": {"playlist": [{"title": "Сезон 1", "folder": [
+        {"title": "Серия 1", "file": "[720p]{RuChiMe}https://cdn.test/1.m3u8?expires=9999999999"}]}]}}).encode(), KEY)
+
+    async def capture(browser, page_url):
+        return SimpleNamespace(body=api, manifest_body=None)
+
+    async def browser():
+        return object()
+
+    monkeypatch.setattr(vibix, "capture_with_browser", capture)
+    key_path = tmp_path / "keys" / "vibix-key.json"
+    player = VibixPlayer(browser_getter=browser, key_path=key_path)
+    player._key_store.save(KEY, 2_000_000_000)  # a key younger than its life: the capture takes it from the file
+
+    playlist, key = await player.playlist(PAGE)
+
+    assert key == KEY and playlist[0].voice == "RuChiMe"
+    assert calls.sent == [("resolve", (str(key_path),))]
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_key_file_makes_the_capture_unavailable_with_a_reason(monkeypatch, tmp_path):
+    Calls(monkeypatch, fail=storage.StorageTimeout("хранилище не ответило"))
+
+    async def capture(browser, page_url):
+        return SimpleNamespace(body=b"api", manifest_body=None)
+
+    async def browser():
+        return object()
+
+    monkeypatch.setattr(vibix, "capture_with_browser", capture)
+    player = VibixPlayer(browser_getter=browser, key_path=tmp_path / "key.json")
+
+    with pytest.raises(VibixUnavailable) as raised:
+        await player.playlist(PAGE)
+
+    assert parse(str(raised.value))["code"] == "storage_failed"
+
+
+@pytest.mark.asyncio
+async def test_a_manifest_is_written_through_the_storage_helper_to_the_path_it_owns(monkeypatch, tmp_path):
+    calls = Calls(monkeypatch)
+    player = VibixPlayer(manifest_dir=tmp_path / "manifests")
+    catalog(player, monkeypatch, episode(2, Stream(720, "https://cdn.test/hls/live.m3u8")))
+    async with client({"live.m3u8": 200}) as http:
+        resolved = await player.resolve(link_of(PAGE, 1, 2), http)
+
+    path = Path(resolved["stream_url"].removeprefix("file://"))
+    assert path == (tmp_path / "manifests" / "vibix" / "test-s1-0002-720.m3u8").absolute()
+    assert path.read_text(encoding="utf-8").startswith("#EXTM3U") and "https://cdn.test/hls/seg.ts" in path.read_text()
+    assert calls.sent == [("_write_manifest", (str(path),))]
+
+
+@pytest.mark.asyncio
+async def test_a_manifest_the_disk_does_not_take_is_a_transient_failure_with_a_reason(monkeypatch, tmp_path):
+    Calls(monkeypatch, fail=storage.StorageBusy("занято"))
+    player = VibixPlayer(manifest_dir=tmp_path)
+    catalog(player, monkeypatch, episode(1, Stream(720, "https://cdn.test/live.m3u8")))
+    async with client({"live.m3u8": 200}) as http:
+        with pytest.raises(VibixFailure) as raised:
+            await player.resolve(link_of(PAGE, 1, 1), http)
+
+    assert raised.value.transient and parse(parse(raised.value.reason)["params"]["cause"])["code"] == "storage_failed"
+
+
+@pytest.mark.asyncio
+async def test_the_entry_the_link_names_is_the_entry_that_resolves_and_a_missing_one_is_never_swapped(monkeypatch, tmp_path):
+    player = VibixPlayer(manifest_dir=tmp_path)
+    catalog(player, monkeypatch,
+            episode(1, Stream(720, "https://cdn.test/s1.m3u8"), season=1),
+            episode(1, Stream(480, "https://cdn.test/s2.m3u8"), season=2))
+    async with client({"s1.m3u8": 200, "s2.m3u8": 200}) as http:
+        second = await player.resolve(link_of(PAGE, 2, 1), http)
+        with pytest.raises(VibixFailure) as missing:
+            await player.resolve(link_of(PAGE, 3, 1), http)
+        with pytest.raises(VibixFailure) as foreign:
+            await player.resolve(PAGE, http)
+
+    assert second["stream_url"].endswith("-s2-0001-480.m3u8")
+    assert parse(parse(missing.value.reason)["params"]["cause"])["code"] == "vibix_no_episode"
+    assert parse(parse(foreign.value.reason)["params"]["cause"])["code"] == "link_no_episode"

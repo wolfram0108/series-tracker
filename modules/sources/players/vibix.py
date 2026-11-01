@@ -17,6 +17,7 @@ from urllib.parse import urldefrag, urljoin
 
 import httpx
 
+from core import storage
 from core.reasons import reason
 
 from .contract import Answer, Kind, PlayerRef, Reading
@@ -40,26 +41,19 @@ class VibixFailure(RuntimeError):
         self.transient = transient
 
 
-def link_of(page_url: str, season: int, number: int) -> str:
-    """Candidate link of one episode: the catalog entry the scan checked is the one that gets downloaded."""
-    return f"{page_url}#vibix={season}/{number}"
+def link_of(page_url: str, season: int, position: int) -> str:
+    """Candidate link of one catalog entry: the entry the table lists is the one that gets downloaded."""
+    return f"{page_url}#vibix={season}/{position}"
 
 
 def parse_link(url: str) -> tuple[int, int] | None:
+    """(season position, entry position) of a candidate link; None for any other address."""
     found = _LINK.match(urldefrag(url).fragment)
     return (int(found.group(1)), int(found.group(2))) if found else None
 
 
-def pick_season(playlist: list[Episode], wanted: int | None) -> tuple[int | None, str]:
-    """Position of the season the series takes from, or a coded refusal: several seasons need a choice."""
-    seasons = sorted({episode.season_index for episode in playlist})
-    if wanted is not None:
-        if wanted in seasons:
-            return wanted, ""
-        return None, reason("vibix_season_missing", season=wanted)
-    if len(seasons) == 1:
-        return seasons[0], ""
-    return None, reason("vibix_season_required", seasons=len(seasons))
+def entry_of(playlist: list[Episode], season: int, position: int) -> Episode | None:
+    return next((item for item in playlist if item.season_index == season and item.position == position), None)
 
 
 def _failed(label: str, reading: Reading) -> VibixFailure:
@@ -90,9 +84,11 @@ class VibixPlayer:
                  manifest_dir: str | Path | None = None) -> None:
         self._browser_getter = browser_getter
         self._key_store = KeyStore(Path(key_path) if key_path else None)
-        self._manifest_dir = Path(manifest_dir) if manifest_dir else None
+        self._manifest_dir = Path(manifest_dir) if manifest_dir else Path(tempfile.gettempdir())
         self._cache: dict[str, tuple[int, list[Episode], bytes]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        # The key file is changed by one capture at a time: a storage hold refuses a second claim on the path.
+        self._key_lock = asyncio.Lock()
 
     def configure(self, *, browser_getter=None, key_path: str | Path | None = None,
                   manifest_dir: str | Path | None = None) -> None:
@@ -124,7 +120,7 @@ class VibixPlayer:
                 raise VibixUnavailable(reason("vibix_no_browser_pool"))
             browser = await self._browser_getter()
             capture = await capture_with_browser(browser, page_url)
-            key, _ = self._key_store.resolve(api_body=capture.body, manifest_body=capture.manifest_body)
+            key = await self._key_of(capture)
             episodes = decode_playlist(capture.body, key)
             if not episodes:
                 raise VibixProtocolError("Vibix API returned an empty playlist")
@@ -134,20 +130,32 @@ class VibixPlayer:
             self._cache[slug] = (expires, episodes, key)
             return episodes, key
 
+    async def _key_of(self, capture) -> bytes:
+        """The decoder key, from the shared key file or recovered from the capture; the file is read and written as a
+        storage call, so a stalled disk ends the capture instead of holding it."""
+        async with self._key_lock:
+            try:
+                key, _refreshed = await storage.call(
+                    self._key_store.resolve, api_body=capture.body, manifest_body=capture.manifest_body,
+                    owns=str(self._key_store.path))
+            except OSError as exc:
+                raise VibixUnavailable(reason("storage_failed", cause=str(exc))) from exc
+        return key
+
     async def fetch(self, ref: PlayerRef, http: httpx.AsyncClient, page_url: str) -> Answer:
         target = parse_link(ref.url)
         if target is None:
             return Answer(200, reading=Reading(Kind.NOT_PLAYER, 200, message="not a Vibix link"))
-        position, number = target
+        season, position = target
         try:
             playlist, key = await self.playlist(page_url)
         except VibixUnavailable as exc:
             return Answer(None, error=str(exc), reading=Reading(Kind.NO_ANSWER, message=str(exc)))
         except VibixProtocolError as exc:
             return Answer(200, reading=Reading(Kind.NOT_PLAYER, 200, message=str(exc)))
-        episode = next((item for item in playlist if item.season_index == position and item.number == number), None)
+        episode = entry_of(playlist, season, position)
         if episode is None or not episode.streams:
-            return Answer(200, reading=Reading(Kind.NOT_FOUND, 200, message=f"episode {number}"))
+            return Answer(200, reading=Reading(Kind.NOT_FOUND, 200, message=f"entry {season}/{position}"))
         last = Reading(Kind.NO_FILE, message="no streams")
         for stream in sorted(episode.streams, key=lambda item: item.quality, reverse=True):
             reading, _text = await self._manifest(stream, key, http)
@@ -176,8 +184,19 @@ class VibixPlayer:
             return Reading(Kind.NOT_PLAYER, 200, message=str(exc)), None
         return Reading(Kind.PLAYABLE, 200, (stream.quality,), files=((stream.quality, stream.url),)), text
 
-    async def resolve(self, url: str, http: httpx.AsyncClient, *, slug: str, number: int) -> dict:
+    @staticmethod
+    def owns(url: str) -> bool:
+        """A candidate link of this player: a page address with the catalog entry named in its fragment."""
+        return parse_link(url) is not None
+
+    async def resolve(self, url: str, http: httpx.AsyncClient) -> dict:
         """Candidate link -> a local manifest with absolute addresses; a page is no stream, so a failure is explicit."""
+        target = parse_link(url)
+        if target is None:
+            raise VibixFailure(reason("player_failed", player="Vibix", cause=reason("link_no_episode")))
+        season, position = target
+        found = re.search(r"/release/([^/?#]+)", url)
+        slug = found.group(1) if found else "vibix"
         try:
             playlist, key = await self.playlist(url)
         except VibixUnavailable as exc:
@@ -186,32 +205,33 @@ class VibixPlayer:
         except VibixProtocolError as exc:
             logger.warning("Vibix playlist unavailable for %s: %s", url, exc)
             raise VibixFailure(reason("player_failed", player="Vibix", cause=str(exc))) from exc
-        target = parse_link(url)
-        if target is not None:
-            position, number = target
-        else:
-            # A link from before the choice existed: only a single-season catalog leaves no doubt.
-            position, refusal = pick_season(playlist, None)
-            if position is None:
-                raise VibixFailure(reason("player_failed", player="Vibix", cause=refusal))
-        episode = next((item for item in playlist if item.season_index == position and item.number == number), None)
+        episode = entry_of(playlist, season, position)
         if episode is None or not episode.streams:
-            logger.warning("Episode %s of season %s is missing from the Vibix playlist", number, position)
+            logger.warning("Entry %s of season %s is missing from the Vibix playlist", position, season)
             raise VibixFailure(reason("player_failed", player="Vibix", cause=reason("vibix_no_episode")))
         failure: VibixFailure | None = None
         for stream in sorted(episode.streams, key=lambda item: item.quality, reverse=True):
             reading, text = await self._manifest(stream, key, http)
             if text is not None:
-                path = self._write_manifest(text, stream.url, slug, number, stream.quality).resolve()
+                path = self._manifest_path(slug, season, position, stream.quality)
+                try:
+                    await storage.call(self._write_manifest, path, text, stream.url, owns=str(path))
+                except OSError as exc:
+                    logger.warning("Vibix manifest %s was not written: %s", path, exc)
+                    raise VibixFailure(reason("player_failed", player="Vibix",
+                                              cause=reason("storage_failed", cause=str(exc))), transient=True) from exc
                 return {"stream_url": f"file://{path}", "headers": {"Referer": "https://1.ruchime.org/"}}
             failure = _failed(f"Vibix {stream.quality}p", reading)
         raise failure or VibixFailure(reason("vibix_no_streams"))
 
-    def _write_manifest(self, text: str, base_url: str, slug: str, number: int, quality: int) -> Path:
-        """Decode segment references to absolute URLs so ffmpeg reads a local file."""
-        directory = (self._manifest_dir or Path(tempfile.gettempdir())) / "vibix"
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{slug}-{number:04d}-{quality}.m3u8"
+    def _manifest_path(self, slug: str, season: int, position: int, quality: int) -> Path:
+        """An absolute path: ffmpeg is given the manifest as `file://`, whatever its working directory is."""
+        return self._manifest_dir.absolute() / "vibix" / f"{slug}-s{season}-{position:04d}-{quality}.m3u8"
+
+    @staticmethod
+    def _write_manifest(path: Path, text: str, base_url: str) -> None:
+        """Decode segment references to absolute URLs so ffmpeg reads a local file; blocking, so a storage call."""
+        path.parent.mkdir(parents=True, exist_ok=True)
         lines: list[str] = []
         for line in text.splitlines():
             stripped = line.strip()
@@ -222,4 +242,3 @@ class VibixPlayer:
             else:
                 lines.append(line)
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        return path

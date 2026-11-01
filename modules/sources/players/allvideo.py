@@ -78,11 +78,18 @@ def best_stream_url(file_val: str) -> str | None:
 
 class AllVideoPlayer:
     name = "allvideo"
+    label = "AllVideo"
     series_scope = False
 
+    HOSTS = ("fsst.online", "incvideo1.online")
     _SOURCE = re.compile(
         r"switchSource\(['\"](https?://(?:fsst\.online|incvideo1\.online)/"
         r"embed/\d+/?)")
+
+    @classmethod
+    def owns(cls, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return any(host == known or host.endswith("." + known) for known in cls.HOSTS)
 
     def find(self, text: str, page_url: str) -> PlayerRef | None:
         match = self._SOURCE.search(text)

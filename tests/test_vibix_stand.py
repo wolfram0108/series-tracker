@@ -49,7 +49,7 @@ def test_parse_playlist_flattens_seasons() -> None:
         }
     }
     episodes = parse_playlist(payload)
-    assert [episode.number for episode in episodes] == [1, 2]
+    assert [episode.position for episode in episodes] == [1, 2]
     assert [stream.quality for stream in episodes[0].streams] == [1080, 480]
     assert episodes[0].pick_stream(1080).url.endswith("1_1080.m3u8?expires=100")
     assert episodes[0].pick_stream(720).quality == 480
@@ -92,7 +92,7 @@ def test_decode_playlist_from_envelope() -> None:
     ]}]}}
     raw = encode_envelope(json.dumps(payload).encode(), TEST_KEY)
     assert decode_payload(raw, TEST_KEY) == payload
-    assert [episode.number for episode in decode_playlist(raw, TEST_KEY)] == [1]
+    assert [episode.position for episode in decode_playlist(raw, TEST_KEY)] == [1]
 
 
 def test_decode_playlist_rejects_invalid_json() -> None:
@@ -139,4 +139,4 @@ def test_parse_playlist_numbers_the_seasons_apart_from_the_episodes() -> None:
 
     episodes = parse_playlist({"data": {"playlist": [season("Сезон 1"), season("Сезон 2")]}})
 
-    assert [(e.season_index, e.number) for e in episodes] == [(1, 1), (1, 2), (2, 1), (2, 2)]
+    assert [(e.season_index, e.position) for e in episodes] == [(1, 1), (1, 2), (2, 1), (2, 2)]

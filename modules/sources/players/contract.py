@@ -62,3 +62,13 @@ class Player(Protocol):
         ...
 
     def read(self, answer: Answer) -> Reading: ...
+
+
+class StreamUnavailable(RuntimeError):
+    """The address belongs to a player (or its site) that cannot produce a stream for it now; `transient` marks causes
+    that may pass."""
+
+    def __init__(self, reason: str, transient: bool = False) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.transient = transient

@@ -18,13 +18,25 @@ Queries:
                                    sources.coverage.progress {url, current, total, phase, active}
 
 Tables of site pages (the one way to read a site page; sites are registered in `sites`, the core is `table.py`):
-  sources.table.get {url}        → TableGetReply {state: ready | reading | failed, table?, reason?}. A complete
+  sources.table.get {url, options?, refresh?} → TableGetReply {url, state: ready | reading | failed | absent,
+                                   table?, reason?}. `options` are the choices of a source that change what is
+                                   read (`vk_search_mode`); a site ignores those it does not know. A complete
                                    table younger than an hour is `ready`. Otherwise the page is read — by one
                                    task however many ask — and the reply is `reading` at once, with the last
                                    complete table when there is one; the end comes as the events below.
                                    `failed` in the reply means no read began (`site_not_found`: no site for the
-                                   address). The key of a table is the canonical address its site gives.
-  sources.table.read {url}       command: read the page now, term or not, unless a read of it is going
+                                   address). `url` of the reply is the canonical address the site gives: the key
+                                   of the table and the `url` of the events. `refresh` false reads nothing and
+                                   says how the page stands: `reading` while a read goes, `failed` (with the
+                                   reason) when the last read failed, `ready` for a complete table however old,
+                                   `absent` when nothing was read; with the last complete table when there is one.
+  sources.table.read {url, options?} command: read the page now, term or not, unless a read of it is going
+  sources.site.resolve {url, options?} → {site, canonical_url}: which site reads the address and the canonical
+                                   form of it (no network); both null when no site does
+  sources.video.stream {url, max_height?} → {handled, stream_url, headers, progressive} | {handled, error,
+                                   transient}: the stream of a candidate link, asked for right before the download.
+                                   The player that owns the link (a VK player link with its key, an AllVideo embed,
+                                   a Vibix entry) resolves it; any other address is not handled
 Events (owner: sources):
   sources.table.progress {url, phase, current, total}   how far a read is
   sources.table.ready {url, read_at}                    a complete table is stored and served
@@ -60,21 +72,25 @@ from pydantic import ValidationError
 
 from core import BaseModule, ids
 from core import storage
-from core.contracts import Release, TableGetRequest
+from core.contracts import Release, SiteResolveRequest, TableGetRequest
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
 
-from . import anilibria, delivery, parsers, vk
+from . import anilibria, delivery, parsers
 from .delivery import Delivery
 from .parsers import SourceParseError
 from .repository import SourcesRepository
-from .sites import Site, SiteRegistry
+from .players.registry import PlayerRegistry
+from .players.streams import resolve_stream
+from .sites import Site, SiteError, SiteRegistry
+from .sites.builtin import builtin_sites
 from .table import READ_SAFEGUARD_S, TableReader, utc_now
 from .video_providers import (StreamUnavailable, VideoProviderRegistry,
                               get_default_registry)
 
 REQUEST_MIN_INTERVAL = 3.0  # секунд между запросами к одному трекеру
+VK_API_BASE = "https://api.vk.com/method/"
 
 
 class SourcesModule(BaseModule):
@@ -88,13 +104,11 @@ class SourcesModule(BaseModule):
 
     def __init__(self, bus, db: Database, *,
                  torrent_cache_dir: str = "torrent_cache",
-                 vk_page_interval: float = 1.0,
-                 sites: Iterable[Site] = (),
+                 sites: Iterable[Site] | None = None,
                  table_clock: Callable[[], datetime] = utc_now,
                  table_safeguard_s: float = READ_SAFEGUARD_S) -> None:
         self.repo = SourcesRepository(db)
         self._cache_dir = torrent_cache_dir
-        self.vk_page_interval = vk_page_interval
         self._locks: dict[str, asyncio.Lock] = {}
         self._last_request: dict[str, float] = {}
         wiring = dict(
@@ -105,9 +119,11 @@ class SourcesModule(BaseModule):
                                                       "manifests")))
         self.video_registry = get_default_registry()
         self.video_registry.configure(**wiring)
-        # The sites belong to this instance, not to the process: a site is added by registering it here.
-        self.sites = SiteRegistry(sites)
-        self.sites.configure(**wiring)
+        # One object per player for the whole module: the sites read with them and the streams are resolved by them.
+        self.players = PlayerRegistry.standard(**wiring)
+        # The sites belong to this instance, not to the process: a site is added by registering it (builtin.py).
+        self.sites = SiteRegistry(builtin_sites() if sites is None else sites)
+        self.sites.configure(players=self.players, vk_call=self._vk_call)
         self.tables = TableReader(
             self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
             clock=table_clock, safeguard_s=table_safeguard_s)
@@ -127,7 +143,6 @@ class SourcesModule(BaseModule):
         self.handle("sources.trackers.list", self.on_trackers_list)
         self.handle("sources.tracker.resolve", self.on_tracker_resolve)
         self.handle("sources.tracker.set_mirrors", self.on_set_mirrors)
-        self.handle("sources.vk.scan", self.on_vk_scan)
         self.handle("sources.video.scan", self.on_video_scan)
         self.handle("sources.video.layout", self.on_video_layout)
         self.handle("sources.video.coverage", self.on_video_coverage)
@@ -135,6 +150,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.provider.info", self.on_provider_info)
         self.handle("sources.table.get", self.on_table_get)
         self.handle("sources.table.read", self.on_table_read)
+        self.handle("sources.site.resolve", self.on_site_resolve)
 
     async def on_start(self) -> None:
         self._http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
@@ -327,93 +343,21 @@ class SourcesModule(BaseModule):
             accept=lambda html, attempt_url: parse(html, attempt_url))
         return {**delivered.value, "url": delivered.url}
 
-    # --- VK (находка 15: официальный API, токен живёт в trackerauth) -------------------
+    # --- VK API for the sites (находка 15: the token lives in trackerauth) -------------------
 
     async def _vk_call(self, method: str, params: dict) -> dict:
+        """One call of the VK API through the delivery: the answer, or a `SiteError` with the reason the site reports."""
         try:
             delivered = await self._delivery.fetch(
-                "vk", f"{vk.API_BASE}{method}", expect="json",
+                "vk", f"{VK_API_BASE}{method}", expect="json",
                 transport="auth", params=params, bus_timeout=60)
         except SourceParseError as exc:
-            raise vk.VkScanError(f"VK {method}: {exc}") from exc
+            raise SiteError(reason("vk_call_failed", method=method, cause=str(exc))) from exc
         data = delivered.value
         if "error" in data:
-            raise vk.VkScanError(
-                f"VK {method}: {data['error'].get('error_msg')} "
-                f"(код {data['error'].get('error_code')})")
+            raise SiteError(reason("vk_api_error", method=method, message=data["error"].get("error_msg"),
+                                   error_code=data["error"].get("error_code")))
         return data
-
-    async def _vk_paginate(self, method: str, params: dict,
-                           *, max_pages: int = 50, progress=None) -> list[dict]:
-        items, offset, total = [], 0, 0
-        for page in range(max_pages):
-            data = await self._vk_call(method, {
-                **params, "offset": offset, "count": vk.PAGE_SIZE})
-            response = data.get("response") or {}
-            page_items = response.get("items", [])
-            if page == 0:
-                total = int(response.get("count") or 0)
-            if not page_items:
-                break
-            items.extend(page_items)
-            offset += vk.PAGE_SIZE
-            if progress is not None:
-                progress(len(items), max(total, len(items)), "videos")
-            await asyncio.sleep(self.vk_page_interval)  # pause respects the API
-        else:
-            self.log.warning("VK %s: достигнут предел %d страниц", method,
-                             max_pages)
-        return items
-
-    async def on_vk_scan(self, env: Envelope) -> dict:
-        """payload: {channel_url, query, search_mode: 'search'|'get_all'}
-        reply:   {videos: [{title, url, publication_date, resolution}]}"""
-        p = env.payload
-        series_id = p.get("series_id")
-        started = time.monotonic()
-        state = {"current": 0, "total": 0}
-
-        def report(current: int, total: int, phase: str) -> None:
-            state["current"] = current
-            state["total"] = total
-            elapsed = time.monotonic() - started
-            self.publish_event("sources.video.progress", {
-                "series_id": series_id, "current": current,
-                "total": total,
-                "rate": round(elapsed / current, 2) if current else 0.0,
-                "phase": phase, "active": phase not in ("done", "error"),
-                "kind": "videos"})
-
-        screen_name = vk.screen_name_from_url(p["channel_url"])
-        resolve = await self._vk_call("utils.resolveScreenName",
-                                      {"screen_name": screen_name})
-        owner_id = vk.owner_id_from_resolve(resolve)
-        base = {"owner_id": owner_id, "fields": "files"}
-        terms = [t.strip() for t in (p.get("query") or "").split("/")
-                 if t.strip()]
-
-        try:
-            if p.get("search_mode", "search") == "search":
-                raw: list[dict] = []
-                for term in terms:
-                    raw.extend(await self._vk_paginate(
-                        "video.search", {**base, "q": term},
-                        progress=report))
-                raw = vk.dedupe_by_id(raw)
-            else:  # get_all: весь канал + локальный фильтр
-                raw = vk.filter_by_terms(
-                    await self._vk_paginate("video.get", base,
-                                            progress=report), terms)
-        except Exception:
-            report(state["current"], state["total"], "error")
-            raise
-
-        facts = [f for f in (vk.video_to_fact(v) for v in raw) if f]
-        facts.sort(key=lambda f: f["publication_date"], reverse=True)
-        report(state["current"], state["total"], "done")
-        self.log.info("VK-скан %s: видео %d (сырых %d)", screen_name,
-                      len(facts), len(raw))
-        return {"videos": facts}
 
     async def on_video_scan(self, env: Envelope) -> dict:
         """payload: {url, series: dict}
@@ -497,12 +441,17 @@ class SourcesModule(BaseModule):
         return reply or {"players": {}, "reason": ""}
 
     async def on_table_get(self, env: Envelope) -> dict:
-        """payload: {url}; reply: TableGetReply. Never waits for a read: the end of it comes as an event."""
-        reply = await self.tables.get(TableGetRequest.model_validate(env.payload).url)
+        """payload: TableGetRequest; reply: TableGetReply. Never waits for a read: the end of it comes as an event."""
+        reply = await self.tables.get(TableGetRequest.model_validate(env.payload))
         return reply.model_dump(mode="json")
 
     async def on_table_read(self, env: Envelope) -> None:
-        await self.tables.read(TableGetRequest.model_validate(env.payload).url)
+        await self.tables.read(TableGetRequest.model_validate(env.payload))
+
+    async def on_site_resolve(self, env: Envelope) -> dict:
+        """payload: SiteResolveRequest; reply: SiteResolveReply. No network."""
+        request = SiteResolveRequest.model_validate(env.payload)
+        return self.tables.resolve(request.url, request.options).model_dump(mode="json")
 
     async def on_provider_info(self, env: Envelope) -> dict:
         """payload: {url}; reply: {provider: name | None, voices: bool}. No network: what the
@@ -518,10 +467,10 @@ class SourcesModule(BaseModule):
 
         `error` means the URL belongs to a provider that has no stream for it:
         the caller must not hand the page to a generic downloader."""
-        url = env.payload["url"]
+        url, max_height = env.payload["url"], env.payload.get("max_height")
         try:
-            stream_info = await self.video_registry.resolve_stream(
-                url, self._http, env.payload.get("max_height"))
+            stream_info = (await resolve_stream(self.players, url, self._http, max_height)
+                           or await self.video_registry.resolve_stream(url, self._http, max_height))
         except StreamUnavailable as exc:
             return {"handled": True, "error": exc.reason,
                     "transient": exc.transient}
