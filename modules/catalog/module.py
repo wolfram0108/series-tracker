@@ -57,7 +57,7 @@ Queries:
       профилем правил (конструктор по нему отказывает в удалении профиля)
   catalog.sources.add {series_id, source} → {id}  — в конец списка, если
       position не задан (+ событие series.source.added)
-  catalog.sources.update {source_id, fields} → {applied: {...}}  — только
+  catalog.sources.update {source_id, fields, series_id?} → {applied: {...}}  — только
       изменившиеся поля; без изменений событие не публикуется
       (+ событие series.source.updated)
   catalog.sources.remove {source_id} → {ok}  — единственный источник
@@ -309,6 +309,7 @@ class CatalogModule(BaseModule):
     async def on_source_update(self, env: Envelope) -> dict:
         source_id = env.payload["source_id"]
         stored = await self._require_source(source_id)
+        await self._require_own(stored, env.payload.get("series_id"))
         values = checked_fields(env.payload["fields"], stored)
         if "source_type" in values:
             others = [each["source_type"] for each in await self.repo.list_sources(stored["series_id"])
@@ -324,6 +325,7 @@ class CatalogModule(BaseModule):
     async def on_source_remove(self, env: Envelope) -> dict:
         source_id = env.payload["source_id"]
         stored = await self._require_source(source_id)
+        await self._require_own(stored, env.payload.get("series_id"))
         if not await self.repo.remove_source(source_id):
             # Either the last source, or the series took it along between the read and the delete.
             await self._require_source(source_id)
@@ -335,6 +337,11 @@ class CatalogModule(BaseModule):
     async def _require_series(self, series_id: int) -> None:
         if not await self.repo.series_exists(series_id):
             raise LookupError(f"сериал {series_id} не найден")
+
+    async def _require_own(self, stored: dict, series_id: int | None) -> None:
+        """A caller that names the series it works in must not reach a source of another one."""
+        if series_id is not None and stored["series_id"] != series_id:
+            raise LookupError(f"источник {stored['id']} не найден у сериала {series_id}")
 
     async def _require_source(self, source_id: int) -> dict:
         source = await self.repo.get_source(source_id)

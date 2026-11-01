@@ -286,6 +286,26 @@ async def test_the_type_of_a_source_cannot_make_its_series_mixed(system):
 
 
 @pytest.mark.asyncio
+async def test_a_caller_that_names_its_series_cannot_reach_a_source_of_another(system):
+    _, probe = system
+    mine = await create_series(probe, name="1", sources=[source(url=RUCHIME, source_type="web_video"),
+                                                         source(url=VK, source_type="vk_video")])
+    other = await create_series(probe, name="2", sources=[source(url=RUCHIME, source_type="web_video")])
+    foreign = other.source_ids[0]
+    with pytest.raises(BusRequestError, match="не найден"):
+        await probe.request("catalog.sources.update", {"source_id": foreign, "series_id": mine.series_id,
+                                                       "fields": {"vibix_season": 2}}, timeout=5)
+    with pytest.raises(BusRequestError, match="не найден"):
+        await probe.request("catalog.sources.remove", {"source_id": foreign, "series_id": mine.series_id}, timeout=5)
+    assert len(await probe.request("catalog.sources.list", {"series_id": other.series_id}, timeout=5)) == 1
+    done = await probe.request("catalog.sources.update", {"source_id": mine.source_ids[0], "series_id": mine.series_id,
+                                                          "fields": {"vibix_season": 2}}, timeout=5)
+    assert done["applied"] == {"vibix_season": 2}
+    assert (await probe.request("catalog.sources.remove", {"source_id": mine.source_ids[1],
+                                                           "series_id": mine.series_id}, timeout=5))["ok"]
+
+
+@pytest.mark.asyncio
 async def test_the_sources_of_a_missing_series_are_an_error_not_an_empty_list(system):
     _, probe = system
     with pytest.raises(BusRequestError, match="не найден"):

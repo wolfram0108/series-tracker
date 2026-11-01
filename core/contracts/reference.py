@@ -29,9 +29,8 @@ class Reference(BaseModel):
     reason: str | None = None
 
 
-class ReferenceChanged(BaseModel):
+class ReferenceChanged(Reference):
+    """The event `scan.reference.changed`: the reference as it stands now, whole, so that a window needs no second
+    request to show it."""
+
     series_id: int
-    season: int
-    episode: int
-    part: int | None = None
-    mark: ReferenceMark
