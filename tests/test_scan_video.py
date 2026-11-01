@@ -713,6 +713,32 @@ async def test_a_season_is_switched_off_by_the_list_of_the_series_and_switched_o
     assert {key: each["is_ignored_by_user"] for key, each in rig.media().items()} == {"a": 0, "b": 0, "c": 0}
 
 
+async def test_switching_off_takes_the_rows_out_of_the_plan_and_switching_on_puts_them_back(rig):
+    rig.world.rows = [rig.row("a", 1, 1), rig.row("b", 1, 2), rig.row("c", 2, 1)]
+    await rig.run()
+    updates = rig.bus.subscribe("scan.plan.updated")
+    plan = lambda: {key: each["plan_status"] for key, each in rig.media().items()}  # noqa: E731
+    assert plan() == {"a": "in_plan_single", "b": "in_plan_single", "c": "in_plan_single"}
+    await switch(rig, 1, 2, True)
+    assert plan() == {"a": "in_plan_single", "b": "candidate", "c": "in_plan_single"} and drain(updates)
+    await switch(rig, 1, 2, False)
+    assert plan()["b"] == "in_plan_single" and drain(updates)
+    await switch(rig, 1, None, True)
+    assert plan() == {"a": "candidate", "b": "candidate", "c": "in_plan_single"}
+    await switch(rig, 1, None, False)
+    assert set(plan().values()) == {"in_plan_single"}
+
+
+async def test_a_row_the_user_switches_off_leaves_the_plan_at_once(rig):
+    rig.world.rows = [rig.row("a", 1, 1)]
+    await rig.run()
+    unique_id = rig.media()["a"]["unique_id"]
+    await rig.probe.request("scan.item.set_ignored", {"unique_id": unique_id, "is_ignored": True}, timeout=STUCK_S)
+    assert rig.media()["a"]["plan_status"] == "candidate"
+    await rig.probe.request("scan.item.set_ignored", {"unique_id": unique_id, "is_ignored": False}, timeout=STUCK_S)
+    assert rig.media()["a"]["plan_status"] == "in_plan_single"
+
+
 async def test_a_series_the_catalog_does_not_have_cannot_be_switched(rig):
     with pytest.raises(BusRequestError):
         await rig.probe.request("scan.output.switch", {"series_id": 999, "season": 1, "off": True}, timeout=STUCK_S)

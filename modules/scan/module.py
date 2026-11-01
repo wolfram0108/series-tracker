@@ -213,7 +213,12 @@ class ScanModule(BaseModule):
         if item is None:
             return
         ignored = bool(env.payload["is_ignored"])
-        await self._announcing(item["series_id"], self.repo.set_ignored(item["unique_id"], ignored))
+
+        async def apply() -> None:
+            await self.repo.set_ignored(item["unique_id"], ignored)
+            await self._recount(item["series_id"])
+
+        await self._announcing(item["series_id"], apply())
         self.publish_event("scan.plan.updated", {"series_id": item["series_id"]})
 
     async def on_output_switch(self, env: Envelope) -> dict:
@@ -240,6 +245,7 @@ class ScanModule(BaseModule):
                 "ignored_seasons": json.dumps(sorted(seasons)),
                 "ignored_episodes": json.dumps({str(season): sorted(numbers) for season, numbers in memory.items() if numbers}),
             }}, timeout=STEP_TIMEOUT_S)
+            await self._recount(series_id)
 
         await self._announcing(series_id, apply())
         self.publish_event("scan.plan.updated", {"series_id": series_id})
@@ -256,6 +262,19 @@ class ScanModule(BaseModule):
         items = {each["unique_id"]: each for each in await self.repo.items_for_series(series["id"])}
         return output.shown(await self.repo.references(series["id"]), items, self._ignored_episodes(series),
                             self._ignored_seasons(series))
+
+    async def _recount(self, series_id: int) -> None:
+        """The plan follows the choice of the user: the rows of a video series are counted again, so that the rows
+        that left the plan lose their place in it and downloads drops the tasks that wait for them, and the rows that
+        came back have theirs. A torrent series has no plan of references."""
+        try:
+            series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=STEP_TIMEOUT_S)
+        except BusRequestError as exc:
+            if "LookupError" in str(exc):
+                return
+            raise
+        if series.get("kind") == "video":
+            await self._refresh(series, announce=True)
 
     async def _announcing(self, series_id: int, action):
         """Awaits `action` (a change of the rows that may switch a reference off) and announces what changed in the
