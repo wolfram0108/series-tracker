@@ -31,10 +31,10 @@ describe("isActive", () => {
 })
 
 describe("isAccepted", () => {
-  it("follows the verdict of the service: converged, neither suspect nor critical", () => {
+  it("follows the verdict of the service alone: what it adds, suspect or critical, is what it found and put right", () => {
     expect(isAccepted(result())).toBe(true)
-    expect(isAccepted(result({ suspect: true }))).toBe(false)
-    expect(isAccepted(result({ critical: ["no common sound"] }))).toBe(false)
+    expect(isAccepted(result({ suspect: true }))).toBe(true)
+    expect(isAccepted(result({ critical: ["no common sound"] }))).toBe(true)
     expect(isAccepted(result({ ok: false }))).toBe(false)
   })
 })

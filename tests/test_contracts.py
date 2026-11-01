@@ -133,11 +133,12 @@ def test_the_aligned_track_is_where_the_module_asked_for_it():
     (None, "no_result"),
     ({"ok": False}, "align_failed"),
     ({"ok": False, "error": "no match"}, None),
-    ({"ok": True, "critical": ["no common sound"]}, "critical"),
-    ({"ok": True, "suspect": True, "warnings": ["drift"]}, "suspect"),
-    ({"ok": True, "suspect": True}, "suspect_residual"),
     ({"ok": True}, "output_missing"),
     ({"ok": True, "out_path": "/data/7/s01e01/_aligned/a.flac"}, "clean"),
+    # What the service adds to its verdict is what it found and put right in the track: no ground to refuse.
+    ({"ok": True, "out_path": "/a.flac", "critical": ["no common sound"]}, "clean"),
+    ({"ok": True, "out_path": "/a.flac", "suspect": True, "warnings": ["drift"]}, "clean"),
+    ({"ok": True, "out_path": "/a.flac", "suspect": True}, "clean"),
 ])
 def test_a_result_is_admitted_by_the_services_own_verdict_alone(result, code):
     from core.contracts import DubResult

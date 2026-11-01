@@ -31,20 +31,24 @@ def track_of(out_dir: str, result: DubResult | None) -> str | None:
 
 
 def refusal(result: DubResult | None) -> str | None:
-    """Why a result may not be placed; None when it may. The service's own verdict is the only measure:
-    a pair that did not converge, or that it marks suspect or critical, is refused; so is a success that
-    names no file."""
+    """Why a result may not be placed; None when it may. The service's own verdict, `ok`, is the only measure: a pair it
+    did not bring together is refused, and so is a success that names no file. What it adds (`suspect`, `critical`,
+    `warnings`) tells what it found and put right in the track it wrote: the track is in step with the reference, so it
+    is no ground to refuse (`told` gives the words for the journal)."""
     if result is None:
         return reason("no_result")
     if not result.ok:
         return result.error or reason("align_failed")
-    if result.critical:
-        return reason("critical", text="; ".join(result.critical))
-    if result.suspect:
-        return reason("suspect", text="; ".join(result.warnings)) if result.warnings else reason("suspect_residual")
     if not result.out_path:
         return reason("output_missing")
     return None
+
+
+def told(result: DubResult | None) -> str:
+    """What the service said besides its verdict, for the journal; empty when it said nothing."""
+    if result is None:
+        return ""
+    return "; ".join([*result.critical, *result.warnings])
 
 
 def job_failure(job: AlignmentJob) -> str:

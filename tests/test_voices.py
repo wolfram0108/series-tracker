@@ -742,17 +742,18 @@ async def test_a_voice_that_could_not_be_downloaded_does_not_hold_the_episode_ba
 
 
 @pytest.mark.asyncio
-async def test_a_result_that_is_not_clean_is_rejected_and_never_placed(dubs, caplog):
+async def test_a_result_the_service_did_not_call_ok_or_gave_no_track_for_is_rejected_and_never_placed(dubs, caplog):
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     settled_sub = bus.subscribe("voices.episode.settled")
     caplog.set_level("WARNING")
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={
-        "suspect": True, "warnings": ["остаток вне допуска"]}, RedHeadSound={"critical": ["нет общего звука"]}))
+    # Two videos that share no frame: the service says it did not bring them together, and gives no audio.
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={"ok": False},
+                                                         RedHeadSound={"out_path": None}))
     await statuses_until(sub, ["rejected", "rejected"])
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["BlackCat"]["status"] == "rejected" and code_of(by_voice["BlackCat"]["outcome"]) == "suspect"
-    assert code_of(by_voice["RedHeadSound"]["outcome"]) == "critical"
+    assert by_voice["BlackCat"]["status"] == "rejected" and code_of(by_voice["BlackCat"]["outcome"]) == "align_failed"
+    assert code_of(by_voice["RedHeadSound"]["outcome"]) == "output_missing"
     stem = os.path.splitext(ref)[0]
     assert not any(name.startswith(os.path.basename(stem) + ".") and name.endswith(".flac")
                    for name in os.listdir(neighbours.library))
@@ -1143,22 +1144,39 @@ async def test_a_failed_relocation_is_not_a_reason_to_look_at_the_tracks(dubs):
 
 
 @pytest.mark.asyncio
+async def test_what_the_service_adds_to_an_ok_verdict_is_no_ground_to_refuse_the_track(dubs, caplog):
+    """`suspect`, `critical` and `warnings` say what the service found and put right: the track it wrote is in step with the
+    reference, so it is placed; the words go to the journal."""
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    caplog.set_level("INFO")
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={
+        "suspect": True, "warnings": ["сопоставлено лишь 79% кадров"]}, RedHeadSound={"critical": ["нет общего звука"]}))
+    await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
+    stem = os.path.splitext(ref)[0]
+    assert os.path.isfile(f"{stem}.BlackCat.ru.flac") and os.path.isfile(f"{stem}.RedHeadSound.ru.flac")
+    assert {r["status"] for r in await rows(probe)} == {"placed"}
+    said = [record.getMessage() for record in caplog.records if "сервис сообщил" in record.getMessage()]
+    assert any("79% кадров" in text for text in said) and any("нет общего звука" in text for text in said)
+    assert not any("отклонена" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.asyncio
 async def test_an_event_carries_the_voice_and_the_reason_so_the_interface_asks_nothing(dubs):
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     changes = bus.subscribe("voices.dub.changed")
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={
-        "suspect": True, "warnings": ["остаток вне допуска"]}))
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={"ok": False}))
     await statuses_until(sub, ["aligned", "placed", "rejected"])
     seen = {}
     while not changes.queue.empty():
         event = changes.queue.get_nowait().payload
         seen[(event["voice_key"], event["status"])] = event
     rejected = seen[("BlackCat", "rejected")]
-    assert rejected["voice_label"] == "BlackCat" and rejected["detail"]["code"] == "suspect"
+    assert rejected["voice_label"] == "BlackCat" and rejected["detail"]["code"] == "align_failed"
     assert seen[("RedHeadSound", "aligned")]["detail"] is None
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["BlackCat"]["detail"]["code"] == "suspect" and by_voice["RedHeadSound"]["detail"] is None
+    assert by_voice["BlackCat"]["detail"]["code"] == "align_failed" and by_voice["RedHeadSound"]["detail"] is None
 
 
 def test_every_step_of_a_voice_over_shows_as_one_of_seven_states():
@@ -1215,8 +1233,7 @@ async def test_the_end_of_a_job_shows_done_and_error_without_any_other_word(dubs
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     changes = bus.subscribe("voices.dub.changed")
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", RedHeadSound={
-        "critical": ["нет общего звука"]}))
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", RedHeadSound={"ok": False}))
     await statuses_until(sub, ["aligned", "placed", "rejected"])
     states = {}
     while not changes.queue.empty():
@@ -2764,7 +2781,7 @@ async def settled_with_a_record(dubs, **per_dub):
 
 @pytest.mark.asyncio
 async def test_the_folder_a_job_wrote_in_stays_while_its_record_is_in_the_history_and_goes_with_the_record(dubs):
-    probe, neighbours, voices, submit = await settled_with_a_record(dubs, RedHeadSound={"suspect": True, "warnings": ["w"]})
+    probe, neighbours, voices, submit = await settled_with_a_record(dubs, RedHeadSound={"ok": False})
     out_dir, episode = submit["out_dir"], os.path.dirname(os.path.dirname(submit["out_dir"]))
     assert sorted(os.listdir(out_dir)) == ["7_s01e01_RedHeadSound.flac"]  # the refused track stays, the placed one moved
     assert not os.path.exists(os.path.join(episode, "_ref")) and not os.path.exists(os.path.join(downloads(neighbours), "7", "s01e01"))

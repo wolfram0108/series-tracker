@@ -104,8 +104,9 @@ is on disk; rows left `downloading` by a restart are sent again on start.
 Alignment (stage 7). An episode goes to the alignment service as one job once its reference video
 is on disk and none of its voice-overs is still being downloaded or aligned: the `ready` ones are
 sent (conform.submit). A voice-over that was not downloaded does not hold the episode back, and one
-that arrives later makes a job of its own. When a job ends, a voice-over that converged and raised
-neither `suspect` nor `critical` becomes `aligned`; any other is `rejected` with the reason and a
+that arrives later makes a job of its own. When a job ends, a voice-over that the service
+calls `ok` becomes `aligned` (what it adds, `suspect` or `warnings`, is what it found and put right: it goes to the
+journal); any other is `rejected` with the reason and a
 job that failed makes its voice-overs `failed` (the next scan offers them again). An `aligned`
 track is moved next to the reference video as `<video name>.<voice title>.<lang>.<ext>` and the row
 becomes `placed` with the track's path; the series stays playable at every step. When every
@@ -185,7 +186,7 @@ from core.envelope import Envelope
 from core.reasons import describe, parse as parse_reason, reason
 
 from . import editor, planning
-from .alignment import ENDED, job_failure, refusal, result_for, track_of
+from .alignment import ENDED, job_failure, refusal, result_for, told, track_of
 from .lifecycle import FINAL, WORKING
 from .outputs import Output, SidecarOutput
 from .recovery import Recovery
@@ -1433,6 +1434,9 @@ class VoicesModule(BaseModule):
             verdict = reason("output_missing")
         if verdict is None:
             await self.repo.mark_aligned(row["id"], track)
+            if told(result):
+                self.log.info("сериал %d, s%02de%02d: озвучка %s выровнена, сервис сообщил: %s", row["series_id"],
+                              row["season"], row["episode"], row["voice_label"], told(result))
         else:
             await self.repo.mark_rejected(row["id"], verdict)
             self.log.warning("сериал %d, s%02de%02d: озвучка %s отклонена: %s", row["series_id"],

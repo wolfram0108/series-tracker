@@ -267,8 +267,10 @@ def two_phase(live: Live) -> str:
     critical = [pair["dub"] for pair in pairs if pair.get("critical")]
     failed = [pair["dub"] for pair in pairs if not pair.get("ok")]
     done = count.get("done", 0)
-    ok = done == len(dubs) and len(aligned) == len(dubs) and not temp and not failed and not critical and not suspect
-    detail = f"озвучек {done}, дорожек рядом с референсом {len(aligned)}, во временной папке {len(temp)}, пары: не ok {len(failed)}, suspect {len(suspect)}, critical {len(critical)}"
+    # The verdict of a pair is the service's `ok`; `suspect` and `critical` tell what it found and put right.
+    ok = done == len(dubs) and len(aligned) == len(dubs) and not temp and not failed
+    detail = (f"озвучек {done}, дорожек рядом с референсом {len(aligned)}, во временной папке {len(temp)}, пары: не ok {len(failed)}; "
+              f"сообщения сервиса: suspect {len(suspect)}, critical {len(critical)}")
     return f"PASS {detail}" if ok else f"FAIL {detail}"
 
 

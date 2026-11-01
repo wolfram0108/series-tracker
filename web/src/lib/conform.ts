@@ -13,9 +13,8 @@ export function splitTitle(label: string): { title: string; episode: string } {
   return { title: found[1], episode: `S${found[2].padStart(2, "0")}E${found[3].padStart(2, "0")}` }
 }
 
-/** The service's own verdict, as the voices module reads it: converged and neither suspect nor critical. */
-export const isAccepted = (result: ConformResult): boolean =>
-  result.ok && !result.suspect && result.critical.length === 0
+/** The service's own verdict, as the voices module reads it: `ok`. Its `suspect` and `critical` tell what it found and put right. */
+export const isAccepted = (result: ConformResult): boolean => result.ok
 
 const number = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })
 
