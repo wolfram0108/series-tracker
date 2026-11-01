@@ -107,6 +107,21 @@ def project(inputs: Sequence[SourceInput], groups: Mapping[str, str | None],
     return Projection(rows, summaries, numbering)
 
 
+def group_renames(before: Sequence[CompositionRow], after: Sequence[CompositionRow]) -> dict[str, str]:
+    """{label: label} of the voice-overs that kept their names and changed their group: one made from an unknown
+    voice-over, one renamed, one dissolved. A label that still stands in the new layout is not renamed, and a label
+    that turned into several is not told from itself, so neither is in the answer."""
+    was = {(row.source_id, row.row_key): row for row in before}
+    standing = {row.voice_label for row in after}
+    became: dict[str, set[str]] = {}
+    for row in after:
+        old = was.get((row.source_id, row.row_key))
+        if old is None or old.voice_label == row.voice_label or old.voice_name != row.voice_name:
+            continue
+        became.setdefault(old.voice_label, set()).add(row.voice_label)
+    return {old: next(iter(new)) for old, new in became.items() if len(new) == 1 and old not in standing}
+
+
 def layout_episodes(rows: Iterable[CompositionRow]) -> set[tuple[int, int]]:
     """The (season, episode) pairs the layout covers; a compilation covers every episode of its range.
 

@@ -5,6 +5,7 @@ The neighbours are modules too (`composition_fakes`); what a test waits for is a
 time. The one number below (STUCK_S) only ends a test that is stuck.
 """
 import asyncio
+import json
 import importlib.util
 import sqlite3
 from contextlib import closing
@@ -432,6 +433,36 @@ async def test_voice_overs_are_in_groups_or_unknown_with_a_number_that_holds(sys
     assert [r.voice_unknown for r in (await s.get(series_id)).rows] == [1, 2, 1]
     assert s.sql("SELECT name_key, number FROM unknown_voices WHERE series_id = ? ORDER BY number", series_id) == [
         ("anistar", 1), ("animy", 2)]
+
+
+def records_of(s: System, series_id: int) -> list[tuple]:
+    return [(lever, target, json.loads(value)) for lever, target, value in s.sql(
+        "SELECT lever, target, value FROM output_settings WHERE series_id = ?", series_id)]
+
+
+@pytest.mark.asyncio
+async def test_what_was_set_for_a_voice_over_follows_it_into_the_group_the_user_makes_and_back_out_of_it(system):
+    s = system
+    series_id = await laid_out(s, page(row("a", "Серия 1", voice="AniStar"), row("b", "Серия 2", voice="Animy")))
+    unknown = "Неизвестная озвучка 1"
+    source_id = only_source(s, series_id)
+    await s.set(series_id, "voice.take", False, season=1, target=group_target(unknown))
+    await s.set(series_id, "variant.allow", False, season=1, target=variant_target(unknown, source_id, "vk"))
+    await s.set(series_id, "reference.choice", {"group": unknown, "source_id": source_id, "player": "vk"})
+    await s.set(series_id, "voice.take", False, season=1, target=group_target("Неизвестная озвучка 2"))
+
+    await s.counted(lambda: s.voices.set_groups({"Стар": ["AniStar"]}))
+    made = {(lever, target) for lever, target, _ in records_of(s, series_id)}
+    assert ("voice.take", group_target("Стар")) in made and ("variant.allow", variant_target("Стар", source_id, "vk")) in made
+    assert ("voice.take", group_target("Неизвестная озвучка 2")) in made  # another voice-over keeps its own
+    assert not any(unknown in (target or "") for _, target in made)
+    assert [value for lever, _, value in records_of(s, series_id) if lever == "reference.choice"] == [
+        {"group": "Стар", "source_id": source_id, "player": "vk"}]
+
+    await s.counted(lambda: s.voices.set_groups({}))
+    back = {(lever, target) for lever, target, _ in records_of(s, series_id)}
+    assert ("voice.take", group_target(unknown)) in back and ("variant.allow", variant_target(unknown, source_id, "vk")) in back
+    assert [value["group"] for lever, _, value in records_of(s, series_id) if lever == "reference.choice"] == [unknown]
 
 
 @pytest.mark.asyncio

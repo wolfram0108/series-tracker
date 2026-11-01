@@ -7,9 +7,10 @@ is the absence of a record, so it is asked for by a reset of the lever, never by
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Collection, Iterable, Sequence
+from typing import Any, Collection, Iterable, Mapping, Sequence
 
-from core.contracts import EffectiveLever, Level, LevelSettings, SettingRecord, SettingsReset
+from core.contracts import (EffectiveLever, Level, LevelSettings, SettingRecord, SettingsReset, ValueShape, group_target,
+                            parse_group_target, parse_variant_target, variant_target)
 from core.reasons import reason
 
 from . import levers
@@ -81,6 +82,36 @@ def without_source(records: Sequence[SettingRecord], source_id: int) -> list[Set
         return lever is not None and source_id in lever.sources_of(each.target, each.value)
 
     return canonical([each for each in records if not points_at(each)])
+
+
+def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str]) -> list[SettingRecord]:
+    """The records after voice-over groups changed their names: what was set for a group (or for a variant of it, or as
+    the group of the reference) is set for the group it became. A record that would meet one the new name has already
+    set at the same level gives way to it."""
+    if not renames:
+        return list(records)
+
+    def moved(record: SettingRecord) -> SettingRecord:
+        lever = levers.get(record.lever)
+        target, value = record.target, record.value
+        if isinstance(target, str) and (found := parse_group_target(target)) is not None and found in renames:
+            target = group_target(renames[found])
+        elif isinstance(target, str) and (variant := parse_variant_target(target)) is not None and variant[0] in renames:
+            target = variant_target(renames[variant[0]], variant[1], variant[2])
+        if (lever is not None and lever.shape == ValueShape.REFERENCE_PICK and isinstance(value, dict)
+                and value.get("group") in renames):
+            value = {**value, "group": renames[value["group"]]}
+        return record if (target, value) == (record.target, record.value) else record.model_copy(
+            update={"target": target, "value": value})
+
+    own = {_slot(each) for each in records}
+    kept: list[SettingRecord] = []
+    for record in records:
+        shifted = moved(record)
+        if shifted is not record and _slot(shifted) in own and shifted.target != record.target:
+            continue  # the new name has this record already: its own stands
+        kept.append(shifted)
+    return canonical(kept)
 
 
 def within_episodes(records: Sequence[SettingRecord], episodes: Collection[tuple[int, int]]) -> list[SettingRecord]:

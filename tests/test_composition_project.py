@@ -9,8 +9,8 @@ import pytest
 from core.contracts import (CompositionRow, PlayerSummary, ReleaseTable, RowState, RowVoice, RuleLine, RuleResult,
                             RulesApplyReply, SeriesSource, SourceStatus, SourceType, TableRow, VoiceSummary, line_of)
 from core.voice_names import fold_name
-from modules.composition.project import (UNKNOWN_VOICE_LABEL, SourceInput, layout_episodes, lines_for, project,
-                                         selected_rows, touched_episodes, voice_name_of, voice_names)
+from modules.composition.project import (UNKNOWN_VOICE_LABEL, SourceInput, group_renames, layout_episodes, lines_for,
+                                         project, selected_rows, touched_episodes, voice_name_of, voice_names)
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "docs" / "missions" / "voice-alignment" / "stage-10" / "raw"
@@ -594,3 +594,34 @@ def test_the_summary_carries_the_canonical_address_of_the_page_before_and_after_
     read = project([item(source(), table(row("a", "1")))], {}, {}).sources[0]
     assert read.canonical_url == "https://example.org/page"
 
+
+
+# ---- the groups of voice-overs that changed ------------------------------------------------------------------------------
+
+
+def labelled(*pairs) -> list[CompositionRow]:
+    """Rows a, b, c… with the voice-over name and the label given."""
+    return [CompositionRow(series_id=5, source_id=1, row_key=key, voice_name=name, voice_label=label, player="vk",
+                           state=RowState.PLAYABLE) for key, name, label in pairs]
+
+
+def test_a_voice_over_that_kept_its_name_and_changed_its_group_is_a_rename_and_one_that_changed_its_name_is_not():
+    before = labelled(("a", "AniStar", "Неизвестная озвучка 1"), ("b", "Animy", "Неизвестная озвучка 2"),
+                      ("c", "Old", "Неизвестная озвучка 3"))
+    after = labelled(("a", "AniStar", "Стар"), ("b", "Animy", "Неизвестная озвучка 2"), ("c", "New", "Неизвестная озвучка 4"))
+    assert group_renames(before, after) == {"Неизвестная озвучка 1": "Стар"}
+
+
+def test_a_label_that_still_stands_or_became_two_is_not_a_rename():
+    before = labelled(("a", "AniStar", "Неизвестная озвучка 1"), ("b", "Animy", "Неизвестная озвучка 1"))
+    split = labelled(("a", "AniStar", "Стар"), ("b", "Animy", "Ани"))
+    assert group_renames(before, split) == {}
+    partly = labelled(("a", "AniStar", "Стар"), ("b", "Animy", "Неизвестная озвучка 1"))
+    assert group_renames(before, partly) == {}
+    assert group_renames([], split) == {} and group_renames(before, []) == {}
+
+
+def test_two_groups_dissolved_into_the_unknown_ones_are_renames_back():
+    before = labelled(("a", "AniStar", "Стар"))
+    after = labelled(("a", "AniStar", "Неизвестная озвучка 1"))
+    assert group_renames(before, after) == {"Стар": "Неизвестная озвучка 1"}

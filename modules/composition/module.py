@@ -485,7 +485,8 @@ class CompositionModule(BaseModule):
             result = project.project(inputs, groups, stored.numbering)
             gone = [each.source_id for each in stored.sources if each.source_id not in {i.source.id for i in inputs}]
             before = settings.canonical(stored.records)
-            records = before
+            # What was set for a voice-over group follows the voice-over when the user names it, renames it or dissolves its group.
+            records = settings.retarget(before, project.group_renames(stored.rows, result.rows))
             for source_id in gone:
                 records = settings.without_source(records, source_id)
             layout = project.layout_episodes(result.rows)

@@ -10,8 +10,8 @@ from core.contracts import (EffectiveLever, Level, SettingRecord, SettingsReset,
 from core.reasons import parse
 from modules.composition import levers
 from modules.composition.levers import Lever, _picked_source
-from modules.composition.settings import (affected, apply_reset, apply_set, effective, levels, validate, validate_reset,
-                                          without_source, within_episodes)
+from modules.composition.settings import (affected, apply_reset, apply_set, effective, levels, retarget, validate,
+                                          validate_reset, without_source, within_episodes)
 
 VK = variant_target("Ruchime", 1, "vk")
 KODIK = variant_target("Ruchime", 2, "kodik")
@@ -431,3 +431,40 @@ def test_the_headers_show_the_series_and_each_season_by_the_value_of_the_level_i
 
 def test_the_headers_of_a_series_with_no_season_are_the_series_alone():
     assert [each.season for each in levels([], [])] == [None]
+
+
+# ---- a voice-over changes its group: what was set for it follows ---------------------------------------------------------
+
+
+def test_what_was_set_for_a_group_a_variant_of_it_and_the_reference_of_it_is_set_for_the_group_it_became():
+    unknown, made = "Неизвестная озвучка 1", "Стар"
+    records = [rec(TAKE, False, season=1, target=group_target(unknown)),
+               rec(ALLOW, False, season=1, episode=2, target=variant_target(unknown, 1, "vk")),
+               rec(CHOICE, {"group": unknown, "source_id": 1, "player": "vk"}, season=1),
+               rec(PLAYER, {"source_id": 2, "player": "kodik"}, target=group_target(unknown)),
+               rec(TAKE, False, target=group_target("Другая"))]
+    after = retarget(records, {unknown: made})
+    assert sorted((each.lever, each.target) for each in after) == sorted([
+        (TAKE, group_target(made)), (ALLOW, variant_target(made, 1, "vk")), (CHOICE, None),
+        (PLAYER, group_target(made)), (TAKE, group_target("Другая"))])
+    assert [each.value for each in after if each.lever == CHOICE] == [{"group": made, "source_id": 1, "player": "vk"}]
+    assert retarget(after, {made: unknown}) == canonical_of(records)
+
+
+def canonical_of(records):
+    return sorted(records, key=lambda each: (each.series_id, -1 if each.season is None else each.season,
+                                              -1 if each.episode is None else each.episode, each.lever, each.target or ""))
+
+
+def test_a_record_the_new_name_already_has_at_the_same_level_stands_and_the_moved_one_gives_way():
+    records = [rec(TAKE, False, season=1, target=group_target("Неизвестная озвучка 1")),
+               rec(TAKE, True, season=1, target=group_target("Стар")),
+               rec(TAKE, False, season=2, target=group_target("Неизвестная озвучка 1"))]
+    after = retarget(records, {"Неизвестная озвучка 1": "Стар"})
+    assert [(each.season, each.target, each.value) for each in after] == [
+        (1, group_target("Стар"), True), (2, group_target("Стар"), False)]
+
+
+def test_no_renames_leave_the_records_as_they_are():
+    records = [rec(TAKE, False, target=GROUP)]
+    assert retarget(records, {}) == records
