@@ -74,6 +74,7 @@ def parse_range_spec(raw: str | None) -> list[tuple[int, int]]:
         m_dash = _RANGE_DASH_PAT.match(part)
         if m_dash:
             a, b = int(m_dash.group(1)), int(m_dash.group(2))
+            # The user types this spec, so bounds in any order mean one interval; site data like "10-5" is refused.
             intervals.append((min(a, b), max(a, b)))
             continue
         m_single = _RANGE_SINGLE_PAT.match(part)
@@ -426,6 +427,12 @@ def _run_actions(title: str, rule: CompiledRule,
                 _apply_modifier(int(match.group(i + 1)), action.modifiers[i])
                 for i in range(len(action.modifiers))]
             if a_type == "extract_range":
+                if len(numbers) > 1 and numbers[1] < numbers[0]:
+                    # Swapping the bounds would hide a wrong template; the line stays without a range.
+                    errors.append(f"правило «{rule.name}»: обратный диапазон "
+                                  f"{numbers[0]}-{numbers[1]} (конец меньше "
+                                  "начала) не извлечён")
+                    continue
                 if numbers and put_extracted("start", numbers[0]):
                     produced = True
                 if len(numbers) > 1:

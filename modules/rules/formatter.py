@@ -1,9 +1,7 @@
 """Форматирование имён файлов медиатеки — чистые функции (Р-15).
 
-Имя файла — итоговый артефакт системы; поведение воспроизводит старые
-FilenameFormatter + build_final_metadata + сезонную логику
-renaming_processor 1:1 (дифф-верификация на реальных именах фикстуры —
-tests/test_rules_format_diff.py).
+Numbers arrive ready-made (from the constructor via the layout, or from the torrent card);
+the name never applies the rules a second time.
 
 Формат: "Name_EN sNNeMM [озвучка] качество 1080p.ext"
 """
@@ -12,8 +10,8 @@ from __future__ import annotations
 import os
 import re
 
-from core import is_video_source
 from core import season as season_rule
+from core.contracts import SeriesKind
 from core.fsnames import sanitize_name as sanitize
 
 
@@ -34,23 +32,22 @@ def merge_series_defaults(series: dict, metadata: dict,
     return metadata
 
 
-def build_metadata(series: dict, media_item: dict, extracted: dict) -> dict:
-    """Иерархия: правила > значения карточки > факты БД."""
+def build_metadata(series: dict, media_item: dict) -> dict:
+    """Numbers and facts of the stored item, then the series card as a default."""
+    first, last = media_item.get("episode_start"), media_item.get("episode_end")
+    # The layout stores a single episode with end == start, other rows keep NULL: both mean no range.
+    if last is not None and first is not None and last <= first:
+        last = None
     metadata = {
         "season": media_item.get("season"),
-        "episode": (media_item.get("episode_start")
-                    if not media_item.get("episode_end") else None),
-        "start": (media_item.get("episode_start")
-                  if media_item.get("episode_end") else None),
-        "end": media_item.get("episode_end"),
+        "episode": first if last is None else None,
+        "start": first if last is not None else None,
+        "end": last,
         "part": media_item.get("part"),
         "resolution": media_item.get("resolution"),
         "voiceover": media_item.get("voiceover_tag"),
     }
-    for key, value in (extracted or {}).items():
-        if value is not None:
-            metadata[key] = value
-    return merge_series_defaults(series, metadata, extracted)
+    return merge_series_defaults(series, metadata)
 
 
 def _season_number(series: dict, metadata: dict) -> int:
@@ -80,7 +77,7 @@ def format_name(series: dict, metadata: dict,
     episode_part = ""
     if episode is not None:
         episode_part = f"e{str(episode).zfill(2)}{part_suffix}"
-    elif start is not None and end is not None:
+    elif start is not None and end is not None and end > start:
         episode_part = f"e{str(start).zfill(2)}-e{str(end).zfill(2)}{part_suffix}"
     elif start is not None:
         episode_part = f"e{str(start).zfill(2)}{part_suffix}"
@@ -100,7 +97,7 @@ def format_name(series: dict, metadata: dict,
                      else sanitize(resolution_str))
 
     extension = ".mkv"
-    if is_video_source(series.get("source_type")):
+    if series.get("kind") == SeriesKind.VIDEO:
         extension = ".mp4"
     elif original_filename:
         ext = os.path.splitext(original_filename)[1]

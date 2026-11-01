@@ -7,8 +7,8 @@ import sqlite3
 
 import pytest
 
+from core import is_video_source
 from modules.rules import formatter
-from modules.rules.engine import compile_profile, process_title
 
 FIXTURE = "tests/fixtures/app.fixture.db"
 
@@ -16,7 +16,7 @@ FIXTURE = "tests/fixtures/app.fixture.db"
 # --- юнит-кейсы формата --------------------------------------------------------------
 
 def test_format_basic_and_sanitize():
-    series = {"name_en": 'Bad: "Name"?', "source_type": "vk_video"}
+    series = {"name_en": 'Bad: "Name"?', "kind": "video"}
     name = formatter.format_name(series, {"season": 2, "episode": 7,
                                           "voiceover": "AniLibria",
                                           "resolution": 1080})
@@ -24,7 +24,7 @@ def test_format_basic_and_sanitize():
 
 
 def test_format_compilation_range_and_subdir():
-    series = {"name_en": "Show", "source_type": "vk_video"}
+    series = {"name_en": "Show", "kind": "video"}
     name = formatter.format_name(series, {"season": 1, "start": 1, "end": 3},
                                  original_filename="sub/old.mp4")
     assert name == "sub/Show s01e01-e03.mp4"
@@ -32,7 +32,7 @@ def test_format_compilation_range_and_subdir():
 
 def test_series_season_is_default_not_override():
     """Сезон карточки заполняет пропуск, но не спорит с распознанным."""
-    series = {"name_en": "Show", "season": "s03", "source_type": "torrent"}
+    series = {"name_en": "Show", "season": "s03", "kind": "torrent"}
     name = formatter.format_name(series, {"episode": 5},
                                  original_filename="x.mkv")
     assert name == "Show s03e05.mkv"
@@ -63,34 +63,18 @@ def test_all_production_filenames_reproduced():
     conn = sqlite3.connect(FIXTURE)
     conn.row_factory = sqlite3.Row
 
-    def load_rules(profile_id):
-        rules = []
-        for r in conn.execute("SELECT * FROM parser_rules WHERE "
-                              "profile_id=? ORDER BY priority",
-                              (profile_id,)):
-            conds = [dict(c) for c in conn.execute(
-                "SELECT * FROM parser_rule_conditions WHERE rule_id=? "
-                "ORDER BY id", (r["id"],))]
-            rules.append({**dict(r), "conditions": conds})
-        return rules
-
-    series_map = {r["id"]: dict(r)
+    # The fixture is the old base: the kind of a series comes from its old source type.
+    series_map = {r["id"]: {**dict(r), "kind": "video" if is_video_source(r["source_type"]) else "torrent"}
                   for r in conn.execute("SELECT * FROM series")}
     items = [dict(r) for r in conn.execute(
         "SELECT * FROM media_items WHERE status='completed' AND "
         "final_filename IS NOT NULL")]
     assert len(items) > 300  # фикстура реальная
 
-    profiles: dict = {}
     mismatches = []
     for item in items:
         series = series_map[item["series_id"]]
-        pid = series["parser_profile_id"]
-        if pid not in profiles:
-            profiles[pid] = compile_profile(pid, load_rules(pid))
-        extracted = process_title(
-            profiles[pid], item["source_title"] or "").get("extracted") or {}
-        metadata = formatter.build_metadata(series, item, extracted)
+        metadata = formatter.build_metadata(series, item)
         name = formatter.format_name(
             series, metadata, original_filename=item["final_filename"])
         if name != item["final_filename"]:

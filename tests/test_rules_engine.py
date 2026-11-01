@@ -187,7 +187,7 @@ def test_extract_part():
 
 def test_formatter_part_suffix():
     from modules.rules.formatter import format_name
-    series = {"name_en": "Show", "source_type": "vk_video"}
+    series = {"name_en": "Show", "kind": "video"}
     # Без части -> Show s01e08.mp4
     assert format_name(series, {"season": 1, "episode": 8}) == "Show s01e08.mp4"
     # С частью 1 -> Show s01e08 Part 1.mp4
@@ -203,6 +203,7 @@ def test_parse_range_spec_valid():
     assert parse_range_spec("1-180") == [(1, 180)]
     assert parse_range_spec("1, 3-10") == [(1, 1), (3, 10)]
     assert parse_range_spec(" 1 - 5 , 6 - 10 ") == [(1, 10)]  # объединение смежных
+    # The user types this spec, so bounds in any order mean one interval; site data like "10-5" is refused instead.
     assert parse_range_spec("10-1") == [(1, 10)]  # нормализация инвертированных
     assert parse_range_spec("1–5, 8—12") == [(1, 5), (8, 12)]  # разные дефисы
 
@@ -357,6 +358,49 @@ def test_range_foolproofing_validations():
                                    conditions=[_cond(b_broken)])])
     assert len(p4.invalid_rules) == 1
     assert "некорректный элемент диапазона" in p4.invalid_rules[0]["error"]
+
+
+# --- reversed range: not extracted, the reason goes to errors -----------------------
+
+def _range_profile(*extra_actions):
+    first = _extract("extract_range", "N", "-", "N")
+    return compile_profile(1, [_rule(1, "диапазон", [first, *extra_actions])])
+
+
+def test_ascending_range_is_extracted():
+    result = process_title(_range_profile(), "Тайтл 5-10 серия")
+    assert result["extracted"] == {"start": 5, "end": 10}
+    assert not result["errors"]
+
+
+def test_reversed_range_is_not_extracted_and_says_why():
+    result = process_title(_range_profile(), "Тайтл 10-5 серия")
+    assert result["extracted"] == {}, "bounds must not be swapped silently"
+    assert result["events"] == []
+    assert len(result["errors"]) == 1
+    assert "обратный диапазон 10-5" in result["errors"][0] and "«диапазон»" in result["errors"][0]
+
+
+def test_equal_bounds_are_a_range_of_one_episode():
+    assert process_title(_range_profile(), "Тайтл 7-7 серия")["extracted"] == {"start": 7, "end": 7}
+
+
+def test_reversed_range_lets_the_next_variant_of_the_rule_win():
+    # the failed variant must not count as the winner of start/end
+    second = _extract("extract_range", "N", " по ", "N")
+    result = process_title(_range_profile(second), "Тайтл 10-5 и 3 по 8")
+    assert result["extracted"] == {"start": 3, "end": 8}
+    assert len(result["errors"]) == 1
+
+
+def test_reversed_range_does_not_stop_the_cascade():
+    profile = compile_profile(1, [
+        _rule(1, "диапазон", [_extract("extract_range", "N", "-", "N")]),
+        _rule(2, "серия", [_extract("extract_single", "серия ", "N")]),
+    ])
+    result = process_title(profile, "10-5 серия 4")
+    assert result["extracted"] == {"episode": 4}
+    assert len(result["errors"]) == 1
 
 
 # --- тесты блоков «+»/«−» (модификаторов числа) ---------------------------------
@@ -598,10 +642,10 @@ def test_unknown_action_type_disables_rule_not_profile():
 
 
 
-# --- приоритет: правила важнее карточки сериала -----------------------------------
+# --- file name from ready-made numbers: no rule is applied to it --------------------
 
 def _series(**kw):
-    base = {"name_en": "Show", "source_type": "torrent", "season": "1"}
+    base = {"name_en": "Show", "kind": "torrent", "season": "1"}
     base.update(kw)
     return base
 
@@ -613,26 +657,59 @@ def _item(**kw):
     return base
 
 
-def _name(series, item, extracted):
+def _name(series, item):
     from modules.rules import formatter
-    metadata = formatter.build_metadata(series, item, extracted)
+    metadata = formatter.build_metadata(series, item)
     return formatter.format_name(series, metadata, original_filename="x.mkv")
 
 
-def test_rules_beat_series_card_overrides():
+def test_series_card_is_default_for_quality_and_resolution():
     series = _series(quality_override="BDRip", resolution_override="2160p")
-    name = _name(series, _item(), {"quality": "WEB-DL", "resolution": "1080p"})
-    assert name == "Show s01e05 WEB-DL 1080p.mkv"
+    assert _name(series, _item()) == "Show s01e05 BDRip 2160p.mkv"
 
 
-def test_series_card_is_default_when_rules_silent():
-    series = _series(quality_override="BDRip", resolution_override="2160p")
-    assert _name(series, _item(), {}) == "Show s01e05 BDRip 2160p.mkv"
+def test_database_facts_used_without_card_overrides():
+    assert _name(_series(), _item()) == "Show s01e05 1080p.mkv"
 
 
-def test_database_facts_used_without_rules_and_card():
-    assert _name(_series(), _item(), {}) == "Show s01e05 1080p.mkv"
+def test_season_of_the_item_beats_series_season():
+    assert _name(_series(), _item(season=2)) == "Show s02e05 1080p.mkv"
 
 
-def test_extracted_season_beats_series_season():
-    assert _name(_series(), _item(), {"season": 2}) == "Show s02e05 1080p.mkv"
+def test_series_season_fills_an_item_without_season():
+    assert _name(_series(season="Season 3"), _item()) == "Show s03e05 1080p.mkv"
+
+
+def test_end_equal_to_start_or_empty_is_a_single_episode_but_a_later_end_is_a_range():
+    from modules.rules import formatter
+    for end in (None, 5, 4):
+        metadata = formatter.build_metadata(_series(), _item(episode_end=end))
+        assert (metadata["episode"], metadata["start"], metadata["end"]) == (5, None, None), end
+    metadata = formatter.build_metadata(_series(), _item(episode_end=7))
+    assert (metadata["episode"], metadata["start"], metadata["end"]) == (None, 5, 7)
+
+
+def test_a_range_of_equal_bounds_is_printed_as_one_episode():
+    from modules.rules import formatter
+    series = _series()
+    assert formatter.format_name(series, {"season": 1, "start": 5, "end": 5}) == "Show s01e05.mkv"
+    assert formatter.format_name(series, {"season": 1, "start": 5, "end": 6}) == "Show s01e05-e06.mkv"
+
+
+def test_range_and_part_and_voiceover_of_the_item_reach_the_name():
+    item = _item(episode_start=3, episode_end=5, part=2, voiceover_tag="AniLibria")
+    assert _name(_series(), item) == "Show s01e03-e05 Part 2 [AniLibria] 1080p.mkv"
+
+
+def test_extension_follows_the_kind_of_the_series_not_a_source_type():
+    from modules.rules import formatter
+    item = _item()
+    video = _series(kind="video")
+    torrent = _series(kind="torrent")
+    metadata = formatter.build_metadata(video, item)
+    assert formatter.format_name(video, metadata, original_filename="x.mkv").endswith(".mp4")
+    # a leftover source_type must not decide anything any more
+    legacy = _series(kind="torrent", source_type="vk_video")
+    assert formatter.format_name(legacy, formatter.build_metadata(legacy, item),
+                                 original_filename="x.avi").endswith(".avi")
+    assert formatter.format_name(torrent, formatter.build_metadata(torrent, item)).endswith(".mkv")

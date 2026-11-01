@@ -1,23 +1,95 @@
-"""Модуль rules — владелец профилей правил (Р-8).
+"""Модуль rules — владелец профилей правил и конструктора номеров (Р-8, этап 10).
 
-Этап 3: применение правил (query rules.apply) с кэшем скомпилированных
-профилей. CRUD профилей/правил и тестирование из конструктора UI —
-этап 5 (gateway).
+Конструктор — единственный источник номера серии, сезона, диапазона и части (З-3):
+раскладка отправляет ему строки с ключами и получает ответ по ключу. Имя файла
+номеров не вычисляет и правил второй раз не применяет. Профиль назначен
+источнику сериала в catalog; модуль таблиц других модулей не читает — профиль
+приходит параметром запроса, использование профиля спрашивается у catalog.
 
-Неисправные правила (решение Б): при компиляции профиля попадают в
-invalid_rules, не применяются, пишутся в лог ошибкой и возвращаются
-в каждом ответе rules.apply — проблема видна, а не замолчана.
+Queries:
+  rules.apply {profile_id, lines: [{key, text}], series_season?}
+      → {results: {key: {excluded, season, episode, start, end, part,
+                         voiceover, events, errors, <прочие извлечённые>}},
+         invalid_rules: [...]}
+      — модели RulesApplyRequest / RulesApplyReply. series_season — сезон
+      карточки сериала, запасной, когда правило сезон не извлекло
+      (core.season.resolve); у исключённой строки номеров нет. voiceover —
+      результат действия «назначить озвучку». Повторяющиеся ключи в запросе —
+      отказ ValueError; пустой список строк — пустой ответ.
+      Неисправные правила (решение Б) не применяются и возвращаются в
+      invalid_rules каждого ответа и пишутся в лог ошибкой.
+  rules.format_filename {series, media_item, episode_override?, original_filename?}
+      → {filename}
+      — имя по готовым номерам media_item (season, episode_start/end, part,
+      resolution, voiceover_tag) и карточке сериала; профиль не читается.
+      series.kind == 'video' даёт расширение .mp4.
+  rules.format_torrent_file {series, profile_id, file_basename, original_path}
+      → {filename, extracted}
+      — имя файла торрента с сезонной папкой; правила профиля profile_id
+      (обязателен, иначе ValueError) применяются к имени файла.
+      filename=None — сезон не определить, файл пропускается.
+  rules.profiles.list → [profile]
+  rules.profiles.create {name} → {id}
+  rules.profiles.update {profile_id, data} → {ok}
+  rules.profiles.delete {profile_id} → {ok}
+      — профиль и его правила удаляются одной транзакцией; профиль, назначенный
+      источникам (catalog.sources.by_profile), удалить нельзя: ValueError с
+      кодом `profile_in_use` (core/reasons). Источник, занявший профиль между
+      вопросом и удалением, ловится внешним ключом: транзакция откатывается,
+      catalog спрашивается снова и отказ тот же; нет источников — ошибка БД как есть.
+      Удаление уже отсутствующего профиля не ошибка: ничего не изменилось, события нет.
+  rules.rules.list {profile_id} → [rule]  (с признаками valid / error)
+  rules.rules.add {profile_id, data} → {id}
+  rules.rules.update {rule_id, data} → {ok}
+  rules.rules.delete {rule_id} → {ok}
+  rules.rules.reorder {ordered_ids} → {ok}
+
+Отказы по профилю: несуществующий profile_id в rules.apply, rules.format_torrent_file,
+rules.profiles.update, rules.rules.list и rules.rules.add — ValueError с кодом
+`profile_not_found`; пустой профиль в кэш не попадает.
+
+Events (исходящие):
+  rules.profile.changed {profile_id} — модель RulesProfileChanged. После
+      записи в БД и сброса кэша на каждом изменении профиля: обновление и
+      удаление профиля, добавление, изменение и удаление правила,
+      переупорядочивание (по событию на каждый затронутый профиль). Раскладка
+      пересчитывается по нему сама (Т-14). Создание профиля события не даёт:
+      пустой профиль ни у какого источника не назначен.
+
+Кэш скомпилированных профилей — внутреннее дело CRUD; снаружи его не сбросить.
 """
 from __future__ import annotations
 
+import sqlite3
+from collections import Counter
+
 from core import BaseModule
 from core import season as season_rule
+from core.contracts import (RuleResult, RulesApplyReply, RulesApplyRequest,
+                            RulesProfileChanged)
 from core.db import Database
 from core.envelope import Envelope
+from core.reasons import reason
 
 from . import formatter
 from .engine import CompiledProfile, compile_profile, process_title, validate_rule
 from .repository import RulesRepository
+
+# The numbers the answer names itself; every other extracted key rides along as an extra field.
+_NUMBER_KEYS = ("episode", "start", "end", "part")
+
+
+def result_of(outcome: dict, series_season) -> RuleResult:
+    """The constructor's answer for one line, built from the engine's outcome."""
+    events, errors = outcome.get("events") or [], outcome.get("errors") or []
+    if outcome.get("excluded"):
+        return RuleResult(excluded=True, events=events, errors=errors)
+    extracted = dict(outcome.get("extracted") or {})
+    season = season_rule.resolve(series_season, extracted.pop("season", None))
+    voiceover = extracted.pop("voiceover", None)
+    numbers = {key: extracted.pop(key, None) for key in _NUMBER_KEYS}
+    return RuleResult(season=season, voiceover=voiceover, events=events,
+                      errors=errors, **numbers, **extracted)
 
 
 class RulesModule(BaseModule):
@@ -26,12 +98,13 @@ class RulesModule(BaseModule):
     def __init__(self, bus, db: Database) -> None:
         self.repo = RulesRepository(db)
         self._cache: dict[int, CompiledProfile] = {}
+        # Bumped on every change of a profile: a compile that read the rules before the change is not cached.
+        self._version: dict[int, int] = {}
         super().__init__(bus)
 
     def register(self) -> None:
         self.handle("rules.apply", self.on_apply)
         self.handle("rules.profiles.list", self.on_profiles_list)
-        self.handle("rules.cache.invalidate", self.on_cache_invalidate)
         self.handle("rules.format_filename", self.on_format_filename)
         self.handle("rules.format_torrent_file", self.on_format_torrent_file)
         self.handle("rules.profiles.create", self.on_profile_create)
@@ -42,44 +115,54 @@ class RulesModule(BaseModule):
         self.handle("rules.rules.update", self.on_rule_update)
         self.handle("rules.rules.delete", self.on_rule_delete)
         self.handle("rules.rules.reorder", self.on_rules_reorder)
-        self.handle("rules.test", self.on_test)
+
+    async def _require_profile(self, profile_id: int) -> None:
+        """The single refusal for an operation on a profile that is not there."""
+        if not await self.repo.profile_exists(profile_id):
+            raise ValueError(reason("profile_not_found", profile_id=profile_id))
 
     async def _profile(self, profile_id: int) -> CompiledProfile:
-        if profile_id not in self._cache:
-            raw_rules = await self.repo.get_rules(profile_id)
-            profile = compile_profile(profile_id, raw_rules)
-            for bad in profile.invalid_rules:
-                self.log.error(
-                    "профиль %d: правило «%s» (id=%s) неисправно и "
-                    "отключено: %s", profile_id, bad["name"],
-                    bad["rule_id"], bad["error"])
+        if profile_id in self._cache:
+            return self._cache[profile_id]
+        await self._require_profile(profile_id)
+        version = self._version.get(profile_id, 0)
+        raw_rules = await self.repo.get_rules(profile_id)
+        profile = compile_profile(profile_id, raw_rules)
+        for bad in profile.invalid_rules:
+            self.log.error(
+                "профиль %d: правило «%s» (id=%s) неисправно и "
+                "отключено: %s", profile_id, bad["name"],
+                bad["rule_id"], bad["error"])
+        if self._version.get(profile_id, 0) == version:
             self._cache[profile_id] = profile
-        return self._cache[profile_id]
+        return profile
+
+    def _profile_changed(self, profile_id: int) -> None:
+        """Forgets the compiled profile, then announces the change; called after the write."""
+        self._version[profile_id] = self._version.get(profile_id, 0) + 1
+        self._cache.pop(profile_id, None)
+        self.publish_event("rules.profile.changed",
+                           RulesProfileChanged(profile_id=profile_id).model_dump())
 
     # --- queries -------------------------------------------------------------
 
     async def on_apply(self, env: Envelope) -> dict:
-        """payload: {profile_id, titles: [str, ...], series_season?}
-        series_season — карточка сериала (односезонник), бьёт извлечённый
-        из заголовка сезон (core.season, единая точка резолва).
-        reply:   {results: [{title, excluded, extracted, events, errors}],
-                  invalid_rules: [...]}"""
-        profile = await self._profile(int(env.payload["profile_id"]))
-        series_season = env.payload.get("series_season")
-        results = []
-        for title in env.payload["titles"]:
-            outcome = process_title(profile, title)
-            outcome["title"] = title
-            if not outcome.get("excluded"):
-                outcome["extracted"]["season"] = season_rule.resolve(
-                    series_season, outcome["extracted"].get("season"))
-            results.append(outcome)
-        return {"results": results, "invalid_rules": profile.invalid_rules}
+        request = RulesApplyRequest.model_validate(env.payload)
+        repeated = sorted(key for key, n in Counter(
+            line.key for line in request.lines).items() if n > 1)
+        if repeated:
+            raise ValueError(f"Ключи строк повторяются в одном запросе: {repeated}")
+        profile = await self._profile(request.profile_id)
+        results = {line.key: result_of(process_title(profile, line.text),
+                                       request.series_season)
+                   for line in request.lines}
+        return RulesApplyReply(
+            results=results, invalid_rules=profile.invalid_rules).model_dump()
 
     async def on_profiles_list(self, env: Envelope) -> list[dict]:
         return await self.repo.list_profiles()
 
-    # --- CRUD конструктора (Р-22); кэш инвалидируется сам ----------------------
+    # --- constructor CRUD: each write resets the cache and announces the change ---
 
     async def on_profile_create(self, env: Envelope) -> dict:
         profile_id = await self.repo.create_profile(env.payload["name"])
@@ -87,20 +170,36 @@ class RulesModule(BaseModule):
 
     async def on_profile_update(self, env: Envelope) -> dict:
         profile_id = env.payload["profile_id"]
+        await self._require_profile(profile_id)
         await self.repo.update_profile(profile_id, env.payload["data"])
-        self._cache.pop(profile_id, None)
+        self._profile_changed(profile_id)
         return {"ok": True}
 
     async def on_profile_delete(self, env: Envelope) -> dict:
-        profile_id = env.payload["profile_id"]
-        await self.repo.delete_profile(profile_id)
-        self._cache.pop(profile_id, None)
+        profile_id = int(env.payload["profile_id"])
+        used = await self.request("catalog.sources.by_profile",
+                                  {"profile_id": profile_id}, timeout=10)
+        if used:
+            raise ValueError(reason("profile_in_use", profile_id=profile_id,
+                                    sources=len(used)))
+        try:
+            deleted = await self.repo.delete_profile(profile_id)
+        except sqlite3.IntegrityError:
+            # A source took the profile after the question: the transaction is rolled back, so ask again.
+            used = await self.request("catalog.sources.by_profile",
+                                      {"profile_id": profile_id}, timeout=10)
+            if not used:
+                raise
+            raise ValueError(reason("profile_in_use", profile_id=profile_id,
+                                    sources=len(used))) from None
+        if deleted:
+            self._profile_changed(profile_id)
         return {"ok": True}
 
     async def on_rules_list(self, env: Envelope) -> list[dict]:
         profile_id = int(env.payload["profile_id"])
-        rules = await self.repo.get_rules(profile_id)
         profile = await self._profile(profile_id)
+        rules = await self.repo.get_rules(profile_id)
         errors = {bad["rule_id"]: bad["error"] for bad in profile.invalid_rules}
         for rule in rules:
             error = errors.get(rule.get("id"))
@@ -110,9 +209,10 @@ class RulesModule(BaseModule):
 
     async def on_rule_add(self, env: Envelope) -> dict:
         profile_id = env.payload["profile_id"]
+        await self._require_profile(profile_id)
         validate_rule(env.payload.get("data") or {})
         rule_id = await self.repo.add_rule(profile_id, env.payload["data"])
-        self._cache.pop(profile_id, None)
+        self._profile_changed(profile_id)
         return {"id": rule_id}
 
     async def on_rule_update(self, env: Envelope) -> dict:
@@ -120,48 +220,32 @@ class RulesModule(BaseModule):
         validate_rule(env.payload.get("data") or {})
         profile_id = await self.repo.profile_id_of_rule(rule_id)
         await self.repo.update_rule(rule_id, env.payload["data"])
-        self._cache.pop(profile_id, None)
+        if profile_id is not None:
+            self._profile_changed(profile_id)
         return {"ok": True}
 
     async def on_rule_delete(self, env: Envelope) -> dict:
         rule_id = env.payload["rule_id"]
         profile_id = await self.repo.profile_id_of_rule(rule_id)
         await self.repo.delete_rule(rule_id)
-        self._cache.pop(profile_id, None)
+        if profile_id is not None:
+            self._profile_changed(profile_id)
         return {"ok": True}
 
     async def on_rules_reorder(self, env: Envelope) -> dict:
-        await self.repo.reorder_rules(env.payload["ordered_ids"])
-        self._cache.clear()  # порядок мог затронуть несколько профилей
+        ordered_ids = env.payload["ordered_ids"]
+        await self.repo.reorder_rules(ordered_ids)
+        for profile_id in await self.repo.profile_ids_of_rules(ordered_ids):
+            self._profile_changed(profile_id)
         return {"ok": True}
 
-    async def on_test(self, env: Envelope) -> list[dict]:
-        """Тест конструктора (контракт старого POST /test): полные
-        video-объекты → [{source_data, match_events, result}]."""
-        profile = await self._profile(int(env.payload["profile_id"]))
-        results = []
-        for video in env.payload["videos"]:
-            outcome = process_title(profile, video.get("title") or "")
-            results.append({
-                "source_data": video,
-                "match_events": outcome.get("events") or [],
-                "result": {"extracted": outcome.get("extracted") or {},
-                           "excluded": outcome.get("excluded", False)},
-            })
-        return results
+    # --- file names ----------------------------------------------------------------
 
     async def on_format_filename(self, env: Envelope) -> dict:
-        """payload: {series, media_item, episode_override?, original_filename?}
-        Полная цепочка имени VK-элемента: правила по source_title →
-        метаданные (иерархия приоритетов) → формат (Р-15)."""
+        """The name comes from the numbers of media_item and the series card; no rule is applied, no profile read."""
         p = env.payload
         series, item = p["series"], p["media_item"]
-        extracted: dict = {}
-        title = item.get("source_title")
-        if title and series.get("parser_profile_id"):
-            profile = await self._profile(int(series["parser_profile_id"]))
-            extracted = process_title(profile, title).get("extracted") or {}
-        metadata = formatter.build_metadata(series, item, extracted)
+        metadata = formatter.build_metadata(series, item)
         if (override := p.get("episode_override")) is not None:
             metadata["episode"] = override
             metadata.pop("start", None)
@@ -170,13 +254,13 @@ class RulesModule(BaseModule):
             series, metadata, original_filename=p.get("original_filename"))}
 
     async def on_format_torrent_file(self, env: Envelope) -> dict:
-        """payload: {series, file_basename, original_path}
-        Имя файла торрента с сезонной папкой (логика renaming_processor):
-        правила по имени файла → 'Season NN/строгое имя.ext'.
-        filename=None — сезон не определить, файл пропускается."""
+        """Torrent file name in its 'Season NN' folder; the profile comes from the request, not from the series."""
         p = env.payload
         series = p["series"]
-        profile = await self._profile(int(series["parser_profile_id"]))
+        if p.get("profile_id") is None:
+            raise ValueError("Не указан profile_id: профиль торрента "
+                             "берётся из его источника, не из сериала.")
+        profile = await self._profile(int(p["profile_id"]))
         extracted = process_title(profile,
                                   p["file_basename"]).get("extracted") or {}
         season = formatter.torrent_season_folder(series, extracted,
@@ -192,12 +276,3 @@ class RulesModule(BaseModule):
             series, extracted, original_filename=p["file_basename"],
             target_directory=f"Season {season:02d}")
         return {"filename": name, "extracted": extracted}
-
-    async def on_cache_invalidate(self, env: Envelope) -> dict:
-        """Сброс кэша (после CRUD правил — этап 5 будет звать сам)."""
-        profile_id = (env.payload or {}).get("profile_id")
-        if profile_id is None:
-            self._cache.clear()
-        else:
-            self._cache.pop(int(profile_id), None)
-        return {"ok": True}
