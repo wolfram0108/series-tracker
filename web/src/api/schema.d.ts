@@ -1637,6 +1637,8 @@ export interface components {
             levels?: components["schemas"]["LevelSettings"][];
             /** Settings */
             settings?: components["schemas"]["EpisodeSettings"][];
+            /** Levers */
+            levers?: components["schemas"]["LeverSpec"][];
         };
         /**
          * CompositionRow
@@ -1779,12 +1781,17 @@ export interface components {
          * @enum {string}
          */
         DubHint: "planned" | "download_queued" | "downloading" | "ready" | "awaiting_answer" | "aligning_wait" | "aligning_run" | "aligned" | "done";
-        /** DubItem */
+        /**
+         * DubItem
+         * @description `part` is None for an episode without parts: a voice-over belongs to one part of an episode.
+         */
         DubItem: {
             /** Season */
             season: number;
             /** Episode */
             episode: number;
+            /** Part */
+            part?: number | null;
             /** Voice Key */
             voice_key: string;
             /** Voice Label */
@@ -1889,6 +1896,21 @@ export interface components {
             season?: number | null;
             /** Levers */
             levers?: components["schemas"]["EffectiveLever"][];
+        };
+        /**
+         * LeverSpec
+         * @description What a lever is, as the registry of the composition module has it: its name, what its value is about, the
+         *     shape of its value, its default and the module that acts on it. A window needs nothing else to draw it.
+         */
+        LeverSpec: {
+            /** Name */
+            name: string;
+            target: components["schemas"]["TargetKind"];
+            shape: components["schemas"]["ValueShape"];
+            /** Default */
+            default?: unknown;
+            /** Consumer */
+            consumer: string;
         };
         /** NamingPreviewAccepted */
         NamingPreviewAccepted: {
@@ -2464,6 +2486,12 @@ export interface components {
          */
         TableState: "ready" | "reading" | "failed" | "absent";
         /**
+         * TargetKind
+         * @description What a lever's value is about: nothing in particular, a voice-over group, or a variant of one.
+         * @enum {string}
+         */
+        TargetKind: "none" | "group" | "variant";
+        /**
          * TmdbInfo
          * @description TMDB-маппинг серии; поля динамические (tmdb_id, series_name, year,
          *     poster_path, last_updated, ...).
@@ -2480,6 +2508,13 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * ValueShape
+         * @description The shape of the value of a lever: a flag, the pick of a variant of a group (or auto), or the pick of a
+         *     reference (a variant with its group, or auto). A window draws a lever by its target and its shape.
+         * @enum {string}
+         */
+        ValueShape: "flag" | "variant_pick" | "reference_pick";
         /**
          * VoiceDubs
          * @description The voice-overs of a series; the shape of a record is the contract model core.contracts.DubItem.
@@ -2570,6 +2605,11 @@ export interface components {
             season: number;
             /** Episode */
             episode: number;
+            /**
+             * Part
+             * @default null
+             */
+            part: number | null;
             /** Voice Key */
             voice_key: string;
             /** Voice Label */
@@ -2599,6 +2639,11 @@ export interface components {
             season: number;
             /** Episode */
             episode: number;
+            /**
+             * Part
+             * @default null
+             */
+            part: number | null;
             /** Voice Key */
             voice_key: string;
             /** Voice Label */

@@ -53,6 +53,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   ))
   const levels = computed(() => composition.value?.levels ?? [])
   const sources = computed(() => composition.value?.sources ?? [])
+  const specs = computed(() => composition.value?.levers ?? [])
   const seasons = computed(() => bySeason(views.value))
 
   // Of several reads in flight only the one asked last may write: a late reply to an older ask must not roll back.
@@ -146,6 +147,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     })
   }
 
-  return { composition, references, loading, failure, busy, syncing, reprocessing, adopting, names, namesWanted, naming, views, levels, sources, seasons, load, set, reset, switchTo,
+  return { composition, references, loading, failure, busy, syncing, reprocessing, adopting, names, namesWanted, naming, views, levels, sources, specs, seasons, load, set, reset, switchTo,
     sync, reprocess, adopt, showNames }
 }

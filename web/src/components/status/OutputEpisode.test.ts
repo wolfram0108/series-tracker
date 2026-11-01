@@ -4,7 +4,8 @@ import { mount } from "@vue/test-utils"
 import OutputEpisode from "./OutputEpisode.vue"
 import OutputLevers from "./OutputLevers.vue"
 import { t } from "../../i18n"
-import { LEVER, groupTarget, type EpisodeView, type Lever, type Reference, type Row } from "../../lib/output"
+import { groupTarget, type EpisodeView, type Lever, type Reference, type Row } from "../../lib/output"
+import { SPECS } from "../../lib/output.fixtures"
 import type { VoiceDub } from "../../stores/voices"
 
 // A playable single-episode line of the VK player; each test changes only the fields it is about.
@@ -25,7 +26,7 @@ const dubOf = (over: Partial<VoiceDub>): VoiceDub => ({
   hint: null, detail: null, ...over,
 })
 
-const leverOf = (over: Partial<Lever>): Lever => ({ lever: LEVER.take, target: null, value: null, level: "default", ...over })
+const leverOf = (over: Partial<Lever>): Lever => ({ lever: "voice.take", target: null, value: null, level: "default", ...over })
 
 // A reason as the core sends it: a code, without facts.
 const reason = (code: string): string => JSON.stringify({ code })
@@ -35,11 +36,11 @@ const viewOf = (over: Partial<EpisodeView> = {}): EpisodeView => ({
 })
 
 const mountEpisode = (over: Partial<EpisodeView> = {}, busy = false) =>
-  mount(OutputEpisode, { props: { view: viewOf(over), busy } })
+  mount(OutputEpisode, { props: { view: viewOf(over), specs: SPECS, busy } })
 
 describe("OutputEpisode file names", () => {
   it("shows the names the files of the episode get when it is given them, and nothing when it is not", () => {
-    const named = mount(OutputEpisode, { props: { view: viewOf({ references: [refOf({})] }), fileNames: ["Show s01e05.mp4", "Show s01e05 part 2.mp4"] } })
+    const named = mount(OutputEpisode, { props: { view: viewOf({ references: [refOf({})] }), specs: SPECS, fileNames: ["Show s01e05.mp4", "Show s01e05 part 2.mp4"] } })
     expect(named.findAll(".episode-file").map((each) => each.text())).toEqual([
       t("output.file", { name: "Show s01e05.mp4" }), t("output.file", { name: "Show s01e05 part 2.mp4" })])
     expect(mountEpisode({ references: [refOf({})] }).find(".episode-files").exists()).toBe(false)
@@ -170,20 +171,20 @@ describe("OutputEpisode", () => {
   it("sends a set of its levers up with the scope of the episode", async () => {
     const w = mountEpisode({})
     await w.find(".episode-toggle").trigger("click")
-    await w.find(".lever-take input").setValue(false)
-    expect(w.emitted("set")).toEqual([[{ season: 1, episode: 5 }, LEVER.take, groupTarget("Ruchime"), false]])
+    await w.find('.voice-column[data-group="Ruchime"] .voice-head input').setValue(false)
+    expect(w.emitted("set")).toEqual([[{ season: 1, episode: 5 }, "voice.take", groupTarget("Ruchime"), false]])
   })
 
   it("sends a reset of its levers up with the scope of the episode", async () => {
     const w = mountEpisode({ levers: [leverOf({ target: groupTarget("Ruchime"), value: false, level: "episode" })] })
     await w.find(".episode-toggle").trigger("click")
-    await w.find(".lever-take .lever-reset").trigger("click")
-    expect(w.emitted("reset")).toEqual([[{ season: 1, episode: 5 }, LEVER.take, groupTarget("Ruchime")]])
+    await w.find('.voice-column[data-group="Ruchime"] .voice-head .lever-reset').trigger("click")
+    expect(w.emitted("reset")).toEqual([[{ season: 1, episode: 5 }, "voice.take", groupTarget("Ruchime")]])
   })
 
   it("passes busy to its levers, which then block their controls", async () => {
     const w = mountEpisode({}, true)
     await w.find(".episode-toggle").trigger("click")
-    expect((w.find(".lever-take input").element as HTMLInputElement).disabled).toBe(true)
+    expect((w.find('.voice-column[data-group="Ruchime"] .voice-head input').element as HTMLInputElement).disabled).toBe(true)
   })
 })

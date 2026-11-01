@@ -5,7 +5,8 @@ import { h } from "vue"
 import OutputLevel from "./OutputLevel.vue"
 import OutputLevers from "./OutputLevers.vue"
 import { t } from "../../i18n"
-import { LEVER, groupTarget, type EpisodeView, type Lever, type Row } from "../../lib/output"
+import { groupTarget, type EpisodeView, type Lever, type Row } from "../../lib/output"
+import { SPECS } from "../../lib/output.fixtures"
 
 // A playable line of one episode of season 2; each test changes only the fields it is about.
 const rowOf = (over: Partial<Row>): Row => ({
@@ -25,7 +26,7 @@ const VIEWS: EpisodeView[] = [
   viewOf(2, { row_key: "b", voice_label: "Студия", source_id: 9, player: "kodik", player_label: "Kodik", heights: [720] }),
 ]
 
-const leverOf = (over: Partial<Lever>): Lever => ({ lever: LEVER.take, target: null, value: null, level: "default", ...over })
+const leverOf = (over: Partial<Lever>): Lever => ({ lever: "voice.take", target: null, value: null, level: "default", ...over })
 
 interface Mounting {
   scope?: "series" | "season"
@@ -36,16 +37,16 @@ interface Mounting {
 }
 
 const mountLevel = (over: Mounting = {}) => mount(OutputLevel, {
-  props: { scope: "series" as const, title: "Series", views: VIEWS, levers: [], ...over },
+  props: { scope: "series" as const, title: "Series", views: VIEWS, levers: [], specs: SPECS, ...over },
   slots: { default: () => h("div", { class: "episode-stub" }, "episode") },
 })
 type Mounted = ReturnType<typeof mountLevel>
 
 // The voice-over groups follow the locale, so a group is found by its name.
 const takeBox = (w: Mounted, group: string) => {
-  const item = w.findAll(".lever-take li").find((each) => each.find("span").text() === group)
-  if (!item) throw new Error(`no group ${group} in the levers`)
-  return item.find("input")
+  const column = w.findAll(".voice-column").find((each) => each.attributes("data-group") === group)
+  if (!column) throw new Error(`no group ${group} in the levers`)
+  return column.find(".voice-head input")
 }
 
 // An episode of season 2 that the user switched off: every slot of it carries the mark off.
@@ -117,21 +118,21 @@ describe("OutputLevel", () => {
   it("offers in its levers the choices of all its episodes", async () => {
     const w = mountLevel()
     await w.find(".level-levers").trigger("click")
-    expect(w.findAll(".lever-choice option")).toHaveLength(3)
+    expect(w.findAll(".variant-reference")).toHaveLength(2)
   })
 
   it("sends a set of the series level with an empty scope", async () => {
     const w = mountLevel()
     await w.find(".level-levers").trigger("click")
     await takeBox(w, "Ruchime").setValue(false)
-    expect(w.emitted("set")).toEqual([[{}, LEVER.take, groupTarget("Ruchime"), false]])
+    expect(w.emitted("set")).toEqual([[{}, "voice.take", groupTarget("Ruchime"), false]])
   })
 
   it("sends a set of the season level with the number of the season as its scope", async () => {
     const w = mountLevel({ scope: "season", season: 2, title: "Season 2" })
     await w.find(".level-levers").trigger("click")
     await takeBox(w, "Ruchime").setValue(false)
-    expect(w.emitted("set")).toEqual([[{ season: 2 }, LEVER.take, groupTarget("Ruchime"), false]])
+    expect(w.emitted("set")).toEqual([[{ season: 2 }, "voice.take", groupTarget("Ruchime"), false]])
   })
 
   it("sends a reset of the season level with the number of the season as its scope", async () => {
@@ -140,7 +141,7 @@ describe("OutputLevel", () => {
       levers: [leverOf({ target: groupTarget("Ruchime"), value: false, level: "season" })],
     })
     await w.find(".level-levers").trigger("click")
-    await w.find(".lever-take .lever-reset").trigger("click")
-    expect(w.emitted("reset")).toEqual([[{ season: 2 }, LEVER.take, groupTarget("Ruchime")]])
+    await w.find('.voice-column[data-group="Ruchime"] .voice-head .lever-reset').trigger("click")
+    expect(w.emitted("reset")).toEqual([[{ season: 2 }, "voice.take", groupTarget("Ruchime")]])
   })
 })

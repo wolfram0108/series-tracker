@@ -67,15 +67,15 @@ const switchSeason = (season: number, off: boolean) => changed(output.switchTo(s
     <div v-else-if="seriesViews.length === 0" class="empty-state">{{ t("output.empty") }}</div>
     <OutputLevel
       v-else :key="renders" scope="series" :title="seriesName" :views="seriesViews" :levers="levelLevers(null)"
-      :busy="output.busy.value" @set="setLever" @reset="resetLever"
+      :specs="output.specs.value" :busy="output.busy.value" @set="setLever" @reset="resetLever"
     >
       <OutputLevel
         v-for="season in shownSeasons" :key="season.season" scope="season" :season="season.season"
         :title="t('output.season', { n: season.season })" :views="season.episodes" :levers="levelLevers(season.season)"
-        :busy="output.busy.value" @set="setLever" @reset="resetLever" @switch="switchSeason"
+        :specs="output.specs.value" :busy="output.busy.value" @set="setLever" @reset="resetLever" @switch="switchSeason"
       >
         <OutputEpisode
-          v-for="view in season.shown" :key="view.episode" :view="view" :busy="output.busy.value"
+          v-for="view in season.shown" :key="view.episode" :view="view" :specs="output.specs.value" :busy="output.busy.value"
           :file-names="fileNamesOf(output.names.value, view.season, view.episode)"
           @set="setLever" @reset="resetLever" @switch="switchEpisode"
         />

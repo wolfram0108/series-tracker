@@ -9,41 +9,41 @@ type Schemas = components["schemas"]
 export type Reference = Schemas["Reference"]
 export type Row = Schemas["CompositionRow"]
 export type Lever = Schemas["EffectiveLever"]
+export type LeverSpec = Schemas["LeverSpec"]
 
-// --- the levers and their targets ------------------------------------------------------------------------------------
-
-/** The levers by the names the core keeps them under; a window and a command spell a lever only through these. */
-export const LEVER = {
-  choice: "reference.choice",
-  allow: "reference.allow",
-  take: "voice.take",
-  player: "voice.player",
-} as const
-
-/** The target of a lever that concerns one player of one source. */
-export function playerTarget(sourceId: number, player: string): string {
-  return `source:${sourceId}/player:${player}`
-}
+// --- the targets of the levers --------------------------------------------------------------------------------------
 
 /** The target of a lever that concerns one voice-over group. */
 export function groupTarget(name: string): string {
   return `group:${name}`
 }
 
-// Only canonical ids parse: "007" must not read back as 7, or the target would not be the one it was made from.
-const PLAYER_TARGET = /^source:(0|-?[1-9]\d*)\/player:([\s\S]*)$/
-const GROUP_TARGET = /^group:([\s\S]*)$/
-
-/** The source and the player a player target names, or null for a target of another kind. */
-export function parsePlayerTarget(target: string): { sourceId: number; player: string } | null {
-  const match = PLAYER_TARGET.exec(target)
-  return match ? { sourceId: Number(match[1]), player: match[2] } : null
+/** The target of a lever that concerns one variant: a voice-over group at a player of a source. A JSON array, as the
+ *  core makes it, so that no name can be taken for a part of another. */
+export function variantTarget(group: string, sourceId: number, player: string): string {
+  return `variant:${JSON.stringify([group, sourceId, player])}`
 }
+
+const GROUP_TARGET = /^group:([\s\S]*)$/
 
 /** The group a group target names, or null for a target of another kind. */
 export function parseGroupTarget(target: string): string | null {
   const match = GROUP_TARGET.exec(target)
   return match ? match[1] : null
+}
+
+/** The group, the source and the player a variant target names, or null for a target of another kind. */
+export function parseVariantTarget(target: string): { group: string; sourceId: number; player: string } | null {
+  if (!target.startsWith("variant:")) return null
+  try {
+    const found: unknown = JSON.parse(target.slice("variant:".length))
+    if (!Array.isArray(found) || found.length !== 3) return null
+    const [group, sourceId, player] = found
+    if (typeof group !== "string" || !Number.isInteger(sourceId) || typeof player !== "string") return null
+    return variantTarget(group, sourceId as number, player) === target ? { group, sourceId: sourceId as number, player } : null
+  } catch {
+    return null
+  }
 }
 
 // --- episodes --------------------------------------------------------------------------------------------------------
@@ -161,7 +161,7 @@ export function bySeason(views: EpisodeView[]): { season: number; episodes: Epis
     .map(([season, episodes]) => ({ season, episodes: episodes.sort(byEpisode) }))
 }
 
-// --- the choices a window offers for an episode ----------------------------------------------------------------------
+// --- the variants a window offers for a level ------------------------------------------------------------------------
 
 export interface PlayerOption {
   sourceId: number
@@ -169,12 +169,23 @@ export interface PlayerOption {
   playerLabel: string
 }
 
-export interface ReferenceOption extends PlayerOption {
+/** A place a voice-over can be had from: a voice-over group at a player of a source, with the best height it has. */
+export interface Variant extends PlayerOption {
   group: string
   height: number | null
+  /** A line of it plays. */
+  playable: boolean
+  /** A line of it is one episode that plays: it may be the reference (a compilation is no file of one episode). */
+  referable: boolean
 }
 
-// A label belongs to the player, not to one line, so the first non-empty one of the whole episode is taken.
+/** One voice-over group and its variants: a column of the output. */
+export interface VoiceColumn {
+  group: string
+  variants: Variant[]
+}
+
+// A label belongs to the player, not to one line, so the first non-empty one of the whole level is taken.
 function labelOf(rows: Row[], sourceId: number, player: string): string {
   const named = rows.find((row) => row.source_id === sourceId && row.player === player && row.player_label)
   return named?.player_label || player
@@ -183,52 +194,47 @@ function labelOf(rows: Row[], sourceId: number, player: string): string {
 const byPlayer = (a: PlayerOption, b: PlayerOption): number =>
   a.sourceId - b.sourceId || compareNames(a.player, b.player)
 
-function playersOf(view: EpisodeView, rows: Row[]): PlayerOption[] {
+/** The distinct source and player pairs the view has lines for. */
+export function sourcePlayers(view: EpisodeView): PlayerOption[] {
   const pairs = new Map<string, PlayerOption>()
-  for (const row of rows) {
+  for (const row of view.rows) {
     const key = keyOf(row.source_id, row.player)
-    if (pairs.has(key)) continue
-    pairs.set(key, {
-      sourceId: row.source_id,
-      player: row.player,
-      playerLabel: labelOf(view.rows, row.source_id, row.player),
-    })
+    if (!pairs.has(key)) {
+      pairs.set(key, { sourceId: row.source_id, player: row.player, playerLabel: labelOf(view.rows, row.source_id, row.player) })
+    }
   }
   return [...pairs.values()].sort(byPlayer)
 }
 
-/** The distinct source and player pairs the episode has lines for. */
-export function sourcePlayers(view: EpisodeView): PlayerOption[] {
-  return playersOf(view, view.rows)
-}
-
-/** The voice-over labels of the episode, alphabetically. */
-export function voiceGroups(view: EpisodeView): string[] {
-  return [...new Set(view.rows.map((row) => row.voice_label))].sort(compareNames)
-}
-
-/** The players that carry the voice-over of the given label. */
-export function playerOptions(view: EpisodeView, group: string): PlayerOption[] {
-  return playersOf(view, view.rows.filter((row) => row.voice_label === group))
-}
-
-// A compilation is no file of one episode, and a line that is not playable cannot be referenced.
-export function referenceOptions(view: EpisodeView): ReferenceOption[] {
-  const found = new Map<string, { group: string; sourceId: number; player: string; heights: number[] }>()
+/** The voice-over groups of the view with the variants of each: one column per group, alphabetically, the variants
+ *  by source and player. */
+export function voiceColumns(view: EpisodeView): VoiceColumn[] {
+  const found = new Map<string, { group: string; sourceId: number; player: string; heights: number[]; playable: boolean; referable: boolean }>()
   for (const row of view.rows) {
-    if (row.state !== "playable" || !isSingle(row)) continue
     const key = keyOf(row.voice_label, row.source_id, row.player)
-    const option = found.get(key) ?? { group: row.voice_label, sourceId: row.source_id, player: row.player, heights: [] }
-    option.heights.push(...(row.heights ?? []))
-    found.set(key, option)
+    const variant = found.get(key)
+      ?? { group: row.voice_label, sourceId: row.source_id, player: row.player, heights: [], playable: false, referable: false }
+    if (row.state === "playable") {
+      variant.playable = true
+      variant.heights.push(...(row.heights ?? []))
+      if (isSingle(row)) variant.referable = true
+    }
+    found.set(key, variant)
   }
-  return [...found.values()]
-    .map(({ heights, ...pair }) => ({
+  const columns = new Map<string, VoiceColumn>()
+  for (const { heights, ...pair } of found.values()) {
+    const variant: Variant = {
       ...pair,
       playerLabel: labelOf(view.rows, pair.sourceId, pair.player),
       height: heights.length > 0 ? Math.max(...heights) : null,
-    }))
-    .sort((a, b) => compareNames(a.group, b.group) || byPlayer(a, b))
+    }
+    const column = columns.get(variant.group)
+    if (column) column.variants.push(variant)
+    else columns.set(variant.group, { group: variant.group, variants: [variant] })
+  }
+  return [...columns.values()]
+    .sort((a, b) => compareNames(a.group, b.group))
+    .map((column) => ({ ...column, variants: column.variants.sort(byPlayer) }))
 }
 
 // --- the values of the levers ----------------------------------------------------------------------------------------
@@ -238,16 +244,14 @@ export interface LeverState {
   level: Schemas["Level"]
 }
 
-// The core's defaults: a reference may be used and a voice-over is taken until a level says otherwise.
-function defaultValue(lever: string): unknown {
-  return lever === LEVER.allow || lever === LEVER.take ? true : null
-}
-
-/** The value of a lever for a target and the level it comes from; no record means the default of the lever. */
-export function leverState(levers: Lever[], lever: string, target: string | null | undefined): LeverState {
+/** The value of a lever for a target and the level it comes from; no record means the default the core gave the lever. */
+export function leverState(
+  levers: Lever[], specs: LeverSpec[], lever: string, target: string | null | undefined,
+): LeverState {
   const wanted = target ?? null
   const found = levers.find((each) => each.lever === lever && (each.target ?? null) === wanted)
-  return found ? { value: found.value, level: found.level } : { value: defaultValue(lever), level: "default" }
+  if (found) return { value: found.value, level: found.level }
+  return { value: specs.find((spec) => spec.name === lever)?.default ?? null, level: "default" }
 }
 
 /** Whether the level itself sets the lever, not merely inherits it from the level above. */

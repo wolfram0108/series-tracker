@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest"
 import { mount, type DOMWrapper } from "@vue/test-utils"
 import OutputLevers from "./OutputLevers.vue"
 import { t } from "../../i18n"
-import { LEVER, groupTarget, playerTarget, type EpisodeView, type Lever, type Row } from "../../lib/output"
+import { groupTarget, variantTarget, type EpisodeView, type Lever, type LeverSpec, type Row } from "../../lib/output"
+import { SPECS } from "../../lib/output.fixtures"
 
 // A playable single-episode line; each test changes only the fields it is about.
 const rowOf = (over: Partial<Row>): Row => ({
@@ -12,201 +13,164 @@ const rowOf = (over: Partial<Row>): Row => ({
   state: "playable", heights: [1080], ...over,
 })
 
-// Source 7 has two players of one group; source 9 has a voice-over of its own and a line without group that is absent.
+// Source 7 has two players of one group; source 9 has a voice-over of its own, a compilation of it, and a line absent.
 const ROWS: Row[] = [
   rowOf({ row_key: "a", source_id: 7, player: "vk", player_label: "VK", heights: [720, 1080] }),
   rowOf({ row_key: "b", source_id: 7, player: "vibix", player_label: "Vibix", heights: [1080] }),
   rowOf({ row_key: "c", source_id: 9, player: "kodik", player_label: "", voice_label: "Студия", heights: [720] }),
   rowOf({ row_key: "d", source_id: 9, player: "kodik", player_label: "", voice_label: "", state: "absent", heights: [] }),
+  rowOf({ row_key: "e", source_id: 9, player: "cvh", player_label: "CVH", voice_label: "Студия", episode_start: 4, episode_end: 6, heights: [1080] }),
 ]
 
 const viewOf = (rows: Row[] = ROWS): EpisodeView => ({ season: 1, episode: 5, references: [], rows, levers: [], dubs: [] })
 
-const leverOf = (over: Partial<Lever>): Lever => ({ lever: LEVER.take, target: null, value: null, level: "default", ...over })
+const leverOf = (over: Partial<Lever>): Lever => ({ lever: "voice.take", target: null, value: null, level: "default", ...over })
 
 interface Mounting {
   scope?: "series" | "season" | "episode"
   view?: EpisodeView
   levers?: Lever[]
+  specs?: LeverSpec[]
   busy?: boolean
 }
 
 const mountLevers = (over: Mounting = {}) =>
-  mount(OutputLevers, { props: { scope: "season" as const, view: viewOf(), levers: [], busy: false, ...over } })
+  mount(OutputLevers, { props: { scope: "season" as const, view: viewOf(), levers: [], specs: SPECS, busy: false, ...over } })
 type Mounted = ReturnType<typeof mountLevers>
 
-const CHOSEN = { group: "Ruchime", source_id: 7, player: "vk" }
-const selectedOf = (select: DOMWrapper<Element>): string => (select.element as HTMLSelectElement).value
 const checkedOf = (box: DOMWrapper<Element>): boolean => (box.element as HTMLInputElement).checked
-const valuesOf = (select: DOMWrapper<Element>): string[] =>
-  select.findAll("option").map((option) => (option.element as HTMLOptionElement).value)
-
-// The order of voice-over groups follows the locale of the environment, so a group is found by its name.
-const groupItem = (w: Mounted, block: string, group: string): DOMWrapper<Element> => {
-  const found = w.findAll(`${block} li`).find((item) => item.find("span").text() === group)
-  if (!found) throw new Error(`no group ${group} in ${block}`)
+// The order of columns follows the locale of the environment, so a column is found by its group.
+const columnOf = (w: Mounted, group: string): DOMWrapper<Element> => {
+  const found = w.findAll(".voice-column").find((column) => column.attributes("data-group") === group)
+  if (!found) throw new Error(`no column ${group}`)
   return found
 }
+const variantOf = (w: Mounted, group: string, text: string): DOMWrapper<Element> => {
+  const found = columnOf(w, group).findAll(".variant").find((item) => item.find(".variant-name").text() === text)
+  if (!found) throw new Error(`no variant ${text} in ${group}`)
+  return found
+}
+const VK = t("output.variant.labelHeight", { player: "VK", source: t("output.lever.source", { id: 7 }), height: 1080 })
+const VIBIX = t("output.variant.labelHeight", { player: "Vibix", source: t("output.lever.source", { id: 7 }), height: 1080 })
+const KODIK = t("output.variant.labelHeight", { player: "kodik", source: t("output.lever.source", { id: 9 }), height: 720 })
+const mark = (item: DOMWrapper<Element>, kind: "reference" | "prefer"): DOMWrapper<HTMLButtonElement> =>
+  item.find(`.variant-${kind}`) as DOMWrapper<HTMLButtonElement>
 
 describe("OutputLevers", () => {
-  it("offers auto and every playable reference of the episode", () => {
-    const values = valuesOf(mountLevers().find(".lever-choice select"))
-    expect(values[0]).toBe("")
-    expect(values.slice(1).sort()).toEqual(["Ruchime|7|vibix", "Ruchime|7|vk", "Студия|9|kodik"])
-  })
-
-  it("names each reference by its group, its player and the highest height", () => {
-    const labels = mountLevers().findAll(".lever-choice option").map((option) => option.text()).slice(1)
-    expect(labels.sort()).toEqual([
-      t("output.lever.referenceLabelHeight", { group: "Ruchime", player: "Vibix", height: 1080 }),
-      t("output.lever.referenceLabelHeight", { group: "Ruchime", player: "VK", height: 1080 }),
-      t("output.lever.referenceLabelHeight", { group: "Студия", player: "kodik", height: 720 }),
-    ].sort())
-  })
-
-  it("shows the chosen reference as selected", () => {
-    const w = mountLevers({ levers: [leverOf({ lever: LEVER.choice, value: CHOSEN, level: "series" })] })
-    expect(selectedOf(w.find(".lever-choice select"))).toBe("Ruchime|7|vk")
-  })
-
-  it("shows auto when no reference is chosen", () => {
-    expect(selectedOf(mountLevers().find(".lever-choice select"))).toBe("")
-  })
-
-  it("sends a chosen reference as its object", async () => {
+  it("makes a column of every voice-over group of the view, with the variants it can be had from", () => {
     const w = mountLevers()
-    await w.find(".lever-choice select").setValue("Студия|9|kodik")
-    expect(w.emitted("set")?.[0]).toEqual([LEVER.choice, null, { group: "Студия", source_id: 9, player: "kodik" }])
+    expect(w.findAll(".voice-column").map((column) => column.attributes("data-group")).sort()).toEqual(["Ruchime", "Студия", ""].sort())
+    expect(columnOf(w, "Ruchime").findAll(".variant-name").map((each) => each.text()).sort()).toEqual([VIBIX, VK].sort())
+    expect(columnOf(w, "").find("h4").text()).toBe(t("output.lever.noGroup"))
   })
 
-  it("sends auto as null", async () => {
-    const w = mountLevers({ levers: [leverOf({ lever: LEVER.choice, value: CHOSEN, level: "season" })] })
-    await w.find(".lever-choice select").setValue("")
-    expect(w.emitted("set")?.[0]).toEqual([LEVER.choice, null, null])
-  })
-
-  it("keeps a chosen reference that the rows no longer offer as its own marked option", () => {
-    const gone = { group: "Gone", source_id: 3, player: "vk" }
-    const select = mountLevers({ levers: [leverOf({ lever: LEVER.choice, value: gone, level: "season" })] }).find(".lever-choice select")
-    expect(valuesOf(select)).toHaveLength(5)
-    expect(selectedOf(select)).toBe("Gone|3|vk")
-    expect(select.findAll("option")[4].text()).toBe(
-      t("output.lever.missing", { label: t("output.lever.referenceLabel", { group: "Gone", player: "vk" }) }),
-    )
-  })
-
-  it("draws a participation switch per source player, on unless a level turns it off", () => {
-    const w = mountLevers({ levers: [leverOf({ lever: LEVER.allow, target: playerTarget(7, "vk"), value: false, level: "season" })] })
-    const boxes = w.findAll(".lever-allow input[type=checkbox]")
-    expect(boxes.map(checkedOf)).toEqual([true, false, true])
-    expect(w.findAll(".lever-allow li")[0].text()).toContain(
-      t("output.lever.playerSource", { player: "Vibix", source: t("output.lever.source", { id: 7 }) }),
-    )
-  })
-
-  it("sends the target and the new value of a participation switch", async () => {
-    const w = mountLevers({ levers: [leverOf({ lever: LEVER.allow, target: playerTarget(7, "vk"), value: false, level: "season" })] })
-    const boxes = w.findAll(".lever-allow input[type=checkbox]")
-    await boxes[0].setValue(false)
-    await boxes[1].setValue(true)
-    expect(w.emitted("set")).toEqual([
-      [LEVER.allow, playerTarget(7, "vibix"), false],
-      [LEVER.allow, playerTarget(7, "vk"), true],
-    ])
-  })
-
-  it("draws a take switch per voice-over group, on by default, and sends its group target", async () => {
+  it("names a variant by its player, its source and the highest height of its lines", () => {
     const w = mountLevers()
-    expect(w.findAll(".lever-take input[type=checkbox]").map(checkedOf)).toEqual([true, true, true])
-    await groupItem(w, ".lever-take", "Ruchime").find("input").setValue(false)
-    expect(w.emitted("set")?.[0]).toEqual([LEVER.take, groupTarget("Ruchime"), false])
+    expect(variantOf(w, "Ruchime", VK).exists()).toBe(true)
+    expect(variantOf(w, "Студия", KODIK).exists()).toBe(true)
   })
 
-  it("names the voice-over without a group by the catalog", () => {
-    expect(mountLevers().find(".lever-take li").text()).toContain(t("output.lever.noGroup"))
-  })
-
-  it("draws a player choice per voice-over group with auto and the players of that group", () => {
+  it("lets only a variant with a playable single episode be the reference, and the compilation's variant not", () => {
     const w = mountLevers()
-    expect(w.findAll(".lever-player select")).toHaveLength(3)
-    expect(valuesOf(groupItem(w, ".lever-player", "Ruchime").find("select"))).toEqual(["", "7|vibix", "7|vk"])
-    expect(valuesOf(groupItem(w, ".lever-player", "Студия").find("select"))).toEqual(["", "9|kodik"])
+    expect(mark(variantOf(w, "Ruchime", VK), "reference").attributes("disabled")).toBeUndefined()
+    const cvh = variantOf(w, "Студия", t("output.variant.labelHeight", { player: "CVH", source: t("output.lever.source", { id: 9 }), height: 1080 }))
+    expect(mark(cvh, "reference").attributes("disabled")).toBeDefined()
+    expect(mark(cvh, "prefer").attributes("disabled")).toBeUndefined()
   })
 
-  it("shows the player chosen for a group as selected", () => {
-    const w = mountLevers({
-      levers: [leverOf({ lever: LEVER.player, target: groupTarget("Студия"), value: { source_id: 9, player: "kodik" }, level: "episode" })],
-    })
-    expect(selectedOf(groupItem(w, ".lever-player", "Студия").find("select"))).toBe("9|kodik")
-  })
-
-  it("sends a chosen player as its object and auto as null", async () => {
+  it("sets the reference to the group, the source and the player of the variant, and is pressed on the one it is", () => {
     const w = mountLevers()
-    const select = groupItem(w, ".lever-player", "Ruchime").find("select")
-    await select.setValue("7|vk")
-    await select.setValue("")
-    expect(w.emitted("set")).toEqual([
-      [LEVER.player, groupTarget("Ruchime"), { source_id: 7, player: "vk" }],
-      [LEVER.player, groupTarget("Ruchime"), null],
-    ])
+    void mark(variantOf(w, "Ruchime", VIBIX), "reference").trigger("click")
+    expect(w.emitted("set")?.[0]).toEqual(["reference.choice", null, { group: "Ruchime", source_id: 7, player: "vibix" }])
+    const chosen = mountLevers({ levers: [leverOf({ lever: "reference.choice", value: { group: "Ruchime", source_id: 7, player: "vk" }, level: "series" })] })
+    expect(mark(variantOf(chosen, "Ruchime", VK), "reference").attributes("aria-pressed")).toBe("true")
+    expect(mark(variantOf(chosen, "Ruchime", VIBIX), "reference").attributes("aria-pressed")).toBe("false")
+    expect(mark(variantOf(chosen, "Студия", KODIK), "reference").attributes("aria-pressed")).toBe("false")
   })
 
-  it("keeps a chosen player that the group no longer offers as its own marked option", () => {
-    const w = mountLevers({
-      levers: [leverOf({ lever: LEVER.player, target: groupTarget("Ruchime"), value: { source_id: 7, player: "kodik" }, level: "series" })],
-    })
-    const select = groupItem(w, ".lever-player", "Ruchime").find("select")
-    expect(selectedOf(select)).toBe("7|kodik")
-    expect(select.findAll("option")[3].text()).toBe(
-      t("output.lever.missing", { label: t("output.lever.playerSource", { player: "kodik", source: t("output.lever.source", { id: 7 }) }) }),
-    )
+  it("says auto for the reference no level picked, and sets auto or resets it on request", async () => {
+    const w = mountLevers()
+    expect(w.find(".lever-reference .lever-value").text()).toBe(t("output.lever.auto"))
+    expect(w.find(".lever-reference .lever-auto").exists()).toBe(false)
+    const picked = mountLevers({ levers: [leverOf({ lever: "reference.choice", value: { group: "Ruchime", source_id: 7, player: "vk" }, level: "season" })] })
+    expect(picked.find(".lever-reference .lever-value").text()).toBe(t("output.lever.referenceLabel", { group: "Ruchime", player: VK }))
+    await picked.find(".lever-reference .lever-auto").trigger("click")
+    await picked.find(".lever-reference .lever-reset").trigger("click")
+    expect(picked.emitted("set")?.[0]).toEqual(["reference.choice", null, null])
+    expect(picked.emitted("reset")?.[0]).toEqual(["reference.choice", null])
   })
 
-  it("names where each value comes from by its level", () => {
-    const w = mountLevers({ levers: [leverOf({ lever: LEVER.allow, target: playerTarget(7, "vk"), value: false, level: "season" })] })
-    const items = w.findAll(".lever-allow li")
-    expect(items[1].find(".lever-level").text()).toBe(t("output.level.season"))
-    expect(items[0].find(".lever-level").text()).toBe(t("output.level.default"))
+  it("keeps a reference the view no longer offers listed and marked", () => {
+    const w = mountLevers({ levers: [leverOf({ lever: "reference.choice", value: { group: "Ruchime", source_id: 99, player: "vk" }, level: "series" })] })
+    expect(w.find(".lever-reference .lever-value").text()).toBe(t("output.lever.missing", { label: "Ruchime — vk" }))
   })
 
-  it("offers the reset only for a value set on this level and sends its lever and target", async () => {
-    const w = mountLevers({
-      scope: "season",
-      levers: [
-        leverOf({ lever: LEVER.allow, target: playerTarget(7, "vk"), value: false, level: "season" }),
-        leverOf({ lever: LEVER.allow, target: playerTarget(7, "vibix"), value: false, level: "series" }),
-      ],
-    })
-    const items = w.findAll(".lever-allow li")
-    expect(items[0].find("button").exists()).toBe(false)
-    expect(items[1].find("button").exists()).toBe(true)
-    await items[1].find("button").trigger("click")
-    expect(w.emitted("reset")?.[0]).toEqual([LEVER.allow, playerTarget(7, "vk")])
+  it("lets every variant take part until a level says otherwise, and sends the choice with the target of the variant", async () => {
+    const w = mountLevers()
+    const box = variantOf(w, "Ruchime", VK).find("input")
+    expect(checkedOf(box)).toBe(true)
+    await box.setValue(false)
+    expect(w.emitted("set")?.[0]).toEqual(["variant.allow", variantTarget("Ruchime", 7, "vk"), false])
   })
 
-  it("resets the reference only when the level itself sets it", async () => {
-    const withChoice = (level: "series" | "season") => mountLevers({
-      scope: "season", levers: [leverOf({ lever: LEVER.choice, value: CHOSEN, level })],
-    })
-    expect(withChoice("series").find(".lever-choice button").exists()).toBe(false)
-    const own = withChoice("season")
-    await own.find(".lever-choice button").trigger("click")
-    expect(own.emitted("reset")?.[0]).toEqual([LEVER.choice, null])
+  it("shows a variant left out by a level, with the level, and a reset only where this level set it", async () => {
+    const levers = [
+      leverOf({ lever: "variant.allow", target: variantTarget("Ruchime", 7, "vk"), value: false, level: "season" }),
+      leverOf({ lever: "variant.allow", target: variantTarget("Ruchime", 7, "vibix"), value: false, level: "series" }),
+    ]
+    const w = mountLevers({ levers })
+    const vk = variantOf(w, "Ruchime", VK)
+    expect(checkedOf(vk.find("input"))).toBe(false)
+    expect(vk.find(".lever-level").text()).toBe(t("output.level.season"))
+    expect(vk.find(".lever-reset").exists()).toBe(true)
+    expect(variantOf(w, "Ruchime", VIBIX).find(".lever-reset").exists()).toBe(false)
+    await vk.find(".lever-reset").trigger("click")
+    expect(w.emitted("reset")?.[0]).toEqual(["variant.allow", variantTarget("Ruchime", 7, "vk")])
   })
 
-  it("blocks every control while busy", () => {
-    const controls = mountLevers({ busy: true }).findAll("select, input, button")
-    expect(controls.length).toBeGreaterThan(0)
-    expect(controls.every((control) => (control.element as HTMLInputElement).disabled)).toBe(true)
+  it("takes every group until a level says otherwise, with the choice sent for the target of the group", async () => {
+    const w = mountLevers()
+    const box = columnOf(w, "Студия").find(".voice-head input")
+    expect(checkedOf(box)).toBe(true)
+    await box.setValue(false)
+    expect(w.emitted("set")?.[0]).toEqual(["voice.take", groupTarget("Студия"), false])
   })
 
-  it("hides every block that has no choices", () => {
-    expect(mountLevers({ view: viewOf([]) }).findAll("section")).toHaveLength(0)
+  it("prefers a variant of a group by setting the pick of the group, and shows auto when none is picked", async () => {
+    const w = mountLevers()
+    expect(columnOf(w, "Ruchime").find(".voice-head").text()).toContain(t("output.lever.auto"))
+    await mark(variantOf(w, "Ruchime", VIBIX), "prefer").trigger("click")
+    expect(w.emitted("set")?.[0]).toEqual(["voice.player", groupTarget("Ruchime"), { source_id: 7, player: "vibix" }])
+    const picked = mountLevers({ levers: [leverOf({ lever: "voice.player", target: groupTarget("Ruchime"), value: { source_id: 7, player: "vk" }, level: "episode" })], scope: "episode" })
+    expect(mark(variantOf(picked, "Ruchime", VK), "prefer").attributes("aria-pressed")).toBe("true")
+    expect(mark(variantOf(picked, "Ruchime", VIBIX), "prefer").attributes("aria-pressed")).toBe("false")
+    expect(columnOf(picked, "Ruchime").find(".voice-head").text()).toContain(VK)
+    await columnOf(picked, "Ruchime").find(".voice-head .lever-auto").trigger("click")
+    await columnOf(picked, "Ruchime").find(".voice-head .lever-reset").trigger("click")
+    expect(picked.emitted("set")?.[0]).toEqual(["voice.player", groupTarget("Ruchime"), null])
+    expect(picked.emitted("reset")?.[0]).toEqual(["voice.player", groupTarget("Ruchime")])
   })
 
-  it("keeps the reference block when only a chosen reference is left", () => {
-    const w = mountLevers({ view: viewOf([]), levers: [leverOf({ lever: LEVER.choice, value: CHOSEN, level: "series" })] })
-    expect(w.findAll("section")).toHaveLength(1)
-    expect(w.find(".lever-choice").exists()).toBe(true)
+  it("draws a lever registered later from its description alone, titled by its own name until the catalog has a title", () => {
+    const later: LeverSpec = { name: "variant.mute", target: "variant", shape: "flag", default: false, consumer: "voices" }
+    const w = mountLevers({ specs: [...SPECS, later] })
+    const vk = variantOf(w, "Ruchime", VK)
+    expect(vk.findAll("input").length).toBe(2)
+    expect(vk.text()).toContain("variant.mute")
+    expect(checkedOf(vk.findAll("input")[1])).toBe(false)
+  })
+
+  it("disables every control while a change is on its way", () => {
+    const w = mountLevers({ busy: true })
+    for (const control of [...w.findAll("input"), ...w.findAll(".variant-mark")]) {
+      expect(control.attributes("disabled")).toBeDefined()
+    }
+  })
+
+  it("draws nothing for the levers of a kind it cannot draw, and nothing at all for a view without lines", () => {
+    const odd: LeverSpec = { name: "odd.lever", target: "group", shape: "reference_pick", default: null, consumer: "scan" }
+    const w = mountLevers({ specs: [odd], view: viewOf([]) })
+    expect(w.findAll(".voice-column").length).toBe(0)
+    expect(w.findAll("input, button").length).toBe(0)
   })
 })

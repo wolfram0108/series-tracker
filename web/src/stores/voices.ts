@@ -20,7 +20,10 @@ const NEVER: Stamp = { epoch: 0, rev: 0 }
 const newer = (a: Stamp, b: Stamp) => a.epoch > b.epoch || (a.epoch === b.epoch && a.rev > b.rev)
 
 const slot = (seriesId: number, season: number, episode: number) => `${seriesId}:${season}:${episode}`
-const identity = (slotKey: string, voiceKey: string) => `${slotKey}:${voiceKey}`
+// A voice-over belongs to one part of an episode: the parts of one voice-over are voice-overs of their own.
+const identity = (slotKey: string, part: number | null | undefined, voiceKey: string) => `${slotKey}:${part ?? 0}:${voiceKey}`
+const sameDub = (dub: VoiceDub, part: number | null | undefined, voiceKey: string) =>
+  dub.voice_key === voiceKey && (dub.part ?? null) === (part ?? null)
 
 /** Voice-overs per episode of every series, fed only by the core's pushes (snapshot, then updates). */
 export const useVoicesStore = defineStore("voices", () => {
@@ -38,16 +41,17 @@ export const useVoicesStore = defineStore("voices", () => {
 
   function apply(event: VoiceDubEvent): void {
     const key = slot(event.series_id, event.season, event.episode)
-    const id = identity(key, event.voice_key)
+    const id = identity(key, event.part, event.voice_key)
     const stamp = { epoch: event.epoch, rev: event.rev }
     if (stamp.epoch < epoch || !newer(stamp, whole) || !newer(stamp, stamps.get(id) ?? NEVER)) return
     epoch = stamp.epoch
     stamps.set(id, stamp)
-    const list = (bySlot.value[key] ?? []).filter((v) => v.voice_key !== event.voice_key)
+    const list = (bySlot.value[key] ?? []).filter((v) => !sameDub(v, event.part, event.voice_key))
     if (event.status !== "removed") {
       list.push({
         season: event.season,
         episode: event.episode,
+        part: event.part ?? null,
         voice_key: event.voice_key,
         voice_label: event.voice_label,
         job_id: event.job_id ?? undefined,
@@ -71,12 +75,13 @@ export const useVoicesStore = defineStore("voices", () => {
     const next: Record<string, VoiceDub[]> = {}
     for (const item of packet.items) {
       const key = slot(item.series_id, item.season, item.episode)
-      const id = identity(key, item.voice_key)
+      const id = identity(key, item.part, item.voice_key)
       if (newer(stamps.get(id) ?? NEVER, stamp)) continue
       stamps.set(id, stamp)
       ;(next[key] ??= []).push({
         season: item.season,
         episode: item.episode,
+        part: item.part ?? null,
         voice_key: item.voice_key,
         voice_label: item.voice_label,
         job_id: item.job_id ?? undefined,
@@ -89,7 +94,7 @@ export const useVoicesStore = defineStore("voices", () => {
     }
     for (const [key, list] of Object.entries(bySlot.value)) {
       for (const dub of list) {
-        if (newer(stamps.get(identity(key, dub.voice_key)) ?? NEVER, stamp)) (next[key] ??= []).push(dub)
+        if (newer(stamps.get(identity(key, dub.part, dub.voice_key)) ?? NEVER, stamp)) (next[key] ??= []).push(dub)
       }
     }
     // What the picture covers needs no mark of its own: `whole` rejects anything that is not newer than it.

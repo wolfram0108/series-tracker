@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import { t } from "../../i18n"
-import { allOff, scopeView, type EpisodeView, type Lever, type Scope } from "../../lib/output"
+import { allOff, scopeView, type EpisodeView, type Lever, type LeverSpec, type Scope } from "../../lib/output"
 import OutputLevers from "./OutputLevers.vue"
 
 // A header of one level, with its episodes in the slot; the levers and the folding are local, since they change no data.
@@ -10,6 +10,8 @@ const props = withDefaults(defineProps<{
   title: string
   views: EpisodeView[]
   levers: Lever[]
+  /** The levers there are, as the core describes them. */
+  specs: LeverSpec[]
   season?: number
   busy?: boolean
 }>(), { busy: false })
@@ -61,7 +63,7 @@ function forwardReset(lever: string, target: string | null): void {
     </header>
 
     <OutputLevers
-      v-if="leversOpen" :scope="scope" :view="pooled" :levers="levers" :busy="busy"
+      v-if="leversOpen" :scope="scope" :view="pooled" :levers="levers" :specs="specs" :busy="busy"
       @set="forwardSet" @reset="forwardReset"
     />
 

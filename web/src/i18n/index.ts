@@ -7,6 +7,11 @@ export function t(key: MessageKey, params: Record<string, string | number> = {})
   return ru[key].replace(/\{(\w+)\}/g, (_, name: string) => String(params[name] ?? ""))
 }
 
+/** Whether the catalog has the text of a key built at run time (a lever registered later has none until it is added). */
+export function hasMessage(key: string): key is MessageKey {
+  return Object.hasOwn(ru, key)
+}
+
 /** The base of a key that has the forms `<base>.one`, `<base>.few` and `<base>.many`. */
 export type PluralBase = MessageKey extends infer K ? (K extends `${infer B}.one` ? B : never) : never
 

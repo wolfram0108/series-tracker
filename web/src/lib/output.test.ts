@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest"
 import type { components } from "../api/schema"
 import type { VoiceDub } from "../stores/voices"
 import {
-  LEVER, allOff, bySeason, fileNamesOf, groupTarget, isDeviation, isOff, isOwn, joinEpisodes, leverState, parseGroupTarget, parsePlayerTarget,
-  playerOptions, playerTarget, referenceOf, referenceOptions, resetBody, scopeView, setBody, sourcePlayers, voiceGroups,
+  allOff, bySeason, fileNamesOf, groupTarget, isDeviation, isOff, isOwn, joinEpisodes, leverState, parseGroupTarget,
+  parseVariantTarget, referenceOf, resetBody, scopeView, setBody, sourcePlayers, variantTarget, voiceColumns,
   type EpisodeView, type Lever, type LeverState, type Reference, type Row,
 } from "./output"
+import { SPECS } from "./output.fixtures"
 
 type Schemas = components["schemas"]
 
@@ -22,7 +23,7 @@ const lever = (name: string, target: string | null | undefined, value: unknown, 
 const settings = (season: number, episode: number, levers: Lever[] = []): Schemas["EpisodeSettings"] =>
   ({ season, episode, levers })
 const dub = (season: number, episode: number, state: VoiceDub["state"] = "done"): VoiceDub => ({
-  season, episode, voice_key: "ruchime", voice_label: "Ruchime", status: "placed", state, hint: null, detail: null,
+  season, episode, part: null, voice_key: "ruchime", voice_label: "Ruchime", status: "placed", state, hint: null, detail: null,
 })
 const episodeOf = (over: Partial<EpisodeView> = {}): EpisodeView => ({
   season: 1, episode: 1, references: [], rows: [], levers: [], dubs: [], ...over,
@@ -53,7 +54,7 @@ describe("joinEpisodes", () => {
   })
 
   it("keeps an episode that only the settings name, with its levers and no rows", () => {
-    const levers = [lever(LEVER.take, groupTarget("AniStar"), false, "episode")]
+    const levers = [lever("voice.take", groupTarget("AniStar"), false, "episode")]
     expect(joinEpisodes([], [], [settings(1, 5, levers)], [])).toEqual([episodeOf({ episode: 5, levers })])
   })
 
@@ -121,61 +122,64 @@ describe("the choices of an episode", () => {
     ])
   })
 
-  it("lists the voice-over labels of the episode in alphabetical order", () => {
-    expect(voiceGroups(view)).toEqual(["AniStar", "Ruchime"])
-  })
-
-  it("lists the players that carry one voice-over label, whatever the state of their lines", () => {
-    expect(playerOptions(view, "AniStar")).toEqual([
-      { sourceId: 7, player: "vibix", playerLabel: "Vibix" },
-      { sourceId: 8, player: "kodik", playerLabel: "Kodik" },
-    ])
-    expect(playerOptions(view, "Ruchime").map((option) => option.player)).toEqual(["vibix", "vk", "kodik", "astar"])
-    expect(playerOptions(view, "Missing")).toEqual([])
-  })
-
-  it("offers single playable lines by label and player, with the highest step of each", () => {
-    expect(referenceOptions(view)).toEqual([
-      { group: "AniStar", sourceId: 7, player: "vibix", playerLabel: "Vibix", height: 480 },
-      { group: "AniStar", sourceId: 8, player: "kodik", playerLabel: "Kodik", height: 1080 },
-      { group: "Ruchime", sourceId: 7, player: "vibix", playerLabel: "Vibix", height: 1080 },
-      { group: "Ruchime", sourceId: 8, player: "kodik", playerLabel: "Kodik", height: 1080 },
-      { group: "Ruchime", sourceId: 9, player: "astar", playerLabel: "astar", height: null },
+  it("makes a column of every voice-over label of the episode, alphabetically, with the variants of each by source and player", () => {
+    expect(voiceColumns(view).map((column) => [column.group, column.variants.map((each) => `${each.sourceId}/${each.player}`)])).toEqual([
+      ["AniStar", ["7/vibix", "8/kodik"]],
+      ["Ruchime", ["7/vibix", "7/vk", "8/kodik", "9/astar"]],
     ])
   })
 
-  it("offers no reference when no single line is playable", () => {
-    expect(referenceOptions(episodeOf({ rows: [lines[2]] }))).toEqual([])
+  it("gives a variant the highest step of its lines and says whether it plays and whether it can be the reference", () => {
+    const columns = voiceColumns(view)
+    const found = (group: string, sourceId: number, player: string) =>
+      columns.find((column) => column.group === group)?.variants.find((each) => each.sourceId === sourceId && each.player === player)
+    expect(found("AniStar", 7, "vibix")).toMatchObject({ height: 480, playable: true, referable: true, playerLabel: "Vibix" })
+    expect(found("AniStar", 8, "kodik")).toMatchObject({ height: 1080, playable: true, referable: true, playerLabel: "Kodik" })
+    // A compilation is no file of one episode: its step counts for the variant, but the variant is no reference by it alone.
+    expect(found("Ruchime", 7, "vibix")).toMatchObject({ height: 2160, playable: true, referable: true })
+    expect(found("Ruchime", 7, "vk")).toMatchObject({ height: null, playable: false, referable: false })
+    expect(found("Ruchime", 9, "astar")).toMatchObject({ height: null, playable: true, referable: true })
+  })
+
+  it("offers a variant that plays only as a compilation for the preference but not for the reference", () => {
+    const only = episodeOf({ rows: [row({ episode_end: 2 })] })
+    expect(voiceColumns(only)[0].variants[0]).toMatchObject({ playable: true, referable: false })
+  })
+
+  it("makes no column for no lines", () => {
+    expect(voiceColumns(episodeOf({ rows: [] }))).toEqual([])
   })
 })
 
 describe("leverState", () => {
+  const target = variantTarget("AniStar", 7, "vibix")
   const levers = [
-    lever(LEVER.choice, playerTarget(7, "vibix"), 2, "series"),
-    lever(LEVER.take, groupTarget("AniStar"), false, "episode"),
-    lever(LEVER.allow, undefined, false, "season"),
+    lever("reference.choice", null, { group: "AniStar", source_id: 7, player: "vibix" }, "series"),
+    lever("voice.take", groupTarget("AniStar"), false, "episode"),
+    lever("variant.allow", target, false, "season"),
   ]
 
   it("takes the value and the level of the record with this lever and target", () => {
-    expect(leverState(levers, LEVER.choice, playerTarget(7, "vibix"))).toEqual({ value: 2, level: "series" })
-    expect(leverState(levers, LEVER.take, groupTarget("AniStar"))).toEqual({ value: false, level: "episode" })
+    expect(leverState(levers, SPECS, "variant.allow", target)).toEqual({ value: false, level: "season" })
+    expect(leverState(levers, SPECS, "voice.take", groupTarget("AniStar"))).toEqual({ value: false, level: "episode" })
   })
 
   it("reads a record without a target as the target null", () => {
-    expect(leverState(levers, LEVER.allow, null)).toEqual({ value: false, level: "season" })
-    expect(leverState(levers, LEVER.allow, undefined)).toEqual({ value: false, level: "season" })
+    expect(leverState(levers, SPECS, "reference.choice", null).level).toBe("series")
+    expect(leverState(levers, SPECS, "reference.choice", undefined).level).toBe("series")
   })
 
-  it("gives the default of the lever when no record sets it", () => {
-    expect(leverState(levers, LEVER.choice, playerTarget(8, "kodik"))).toEqual({ value: null, level: "default" })
-    expect(leverState(levers, LEVER.allow, groupTarget("Ruchime"))).toEqual({ value: true, level: "default" })
-    expect(leverState(levers, LEVER.take, groupTarget("Ruchime"))).toEqual({ value: true, level: "default" })
-    expect(leverState(levers, LEVER.player, null)).toEqual({ value: null, level: "default" })
+  it("gives the default the core described for the lever when no record sets it", () => {
+    expect(leverState(levers, SPECS, "variant.allow", variantTarget("Ruchime", 8, "kodik"))).toEqual({ value: true, level: "default" })
+    expect(leverState(levers, SPECS, "voice.take", groupTarget("Ruchime"))).toEqual({ value: true, level: "default" })
+    expect(leverState([], SPECS, "voice.player", groupTarget("AniStar"))).toEqual({ value: null, level: "default" })
+    const later = [...SPECS, { name: "variant.mute", target: "variant" as const, shape: "flag" as const, default: false, consumer: "voices" }]
+    expect(leverState([], later, "variant.mute", target)).toEqual({ value: false, level: "default" })
   })
 
-  it("gives null at the default level for a lever the registry does not know", () => {
-    expect(leverState([], "unknown.lever", null)).toEqual({ value: null, level: "default" })
-    expect(leverState([], "constructor", null)).toEqual({ value: null, level: "default" })
+  it("gives null at the default level for a lever the core does not describe", () => {
+    expect(leverState([], SPECS, "unknown.lever", null)).toEqual({ value: null, level: "default" })
+    expect(leverState([], SPECS, "constructor", null)).toEqual({ value: null, level: "default" })
   })
 })
 
@@ -191,21 +195,21 @@ describe("isOwn", () => {
 
 describe("the bodies of the commands", () => {
   it("sends the scope with the lever, its target and the value of the setting", () => {
-    expect(setBody({ season: 2, episode: 5 }, LEVER.choice, playerTarget(7, "vibix"), 2)).toStrictEqual({
-      season: 2, episode: 5, lever: "reference.choice", target: "source:7/player:vibix", value: 2,
+    expect(setBody({ season: 2, episode: 5 }, "variant.allow", variantTarget("AniStar", 7, "vibix"), false)).toStrictEqual({
+      season: 2, episode: 5, lever: "variant.allow", target: 'variant:["AniStar",7,"vibix"]', value: false,
     })
   })
 
   it("keeps a null target and leaves out the scope fields that are not set", () => {
-    expect(setBody({}, LEVER.allow, null, false)).toStrictEqual({ lever: "reference.allow", target: null, value: false })
-    expect(setBody({ season: undefined, episode: 3 }, LEVER.take, null, true))
+    expect(setBody({}, "reference.choice", null, null)).toStrictEqual({ lever: "reference.choice", target: null, value: null })
+    expect(setBody({ season: undefined, episode: 3 }, "voice.take", null, true))
       .toStrictEqual({ episode: 3, lever: "voice.take", target: null, value: true })
   })
 
   it("resets the scope and names a lever or a target only when they are given", () => {
     expect(resetBody({ season: 2 })).toStrictEqual({ season: 2 })
-    expect(resetBody({ season: 2, episode: 5 }, LEVER.take)).toStrictEqual({ season: 2, episode: 5, lever: "voice.take" })
-    expect(resetBody({}, LEVER.take, null)).toStrictEqual({ lever: "voice.take", target: null })
+    expect(resetBody({ season: 2, episode: 5 }, "voice.take")).toStrictEqual({ season: 2, episode: 5, lever: "voice.take" })
+    expect(resetBody({}, "voice.take", null)).toStrictEqual({ lever: "voice.take", target: null })
   })
 })
 
@@ -228,8 +232,8 @@ describe("isDeviation", () => {
   })
 
   it("is true for a lever set on the episode itself, and not for one set on the season", () => {
-    expect(isDeviation(episodeOf({ levers: [lever(LEVER.take, null, false, "episode")] }))).toBe(true)
-    expect(isDeviation(episodeOf({ levers: [lever(LEVER.take, null, false, "season")] }))).toBe(false)
+    expect(isDeviation(episodeOf({ levers: [lever("voice.take", null, false, "episode")] }))).toBe(true)
+    expect(isDeviation(episodeOf({ levers: [lever("voice.take", null, false, "season")] }))).toBe(false)
   })
 
   it("is true for a voice-over in error, and not for one still running", () => {
@@ -291,9 +295,15 @@ describe("referenceOf", () => {
 })
 
 describe("targets", () => {
-  it("reads back the source and the player a player target was made from", () => {
-    expect(parsePlayerTarget(playerTarget(7, "vibix"))).toEqual({ sourceId: 7, player: "vibix" })
-    expect(parsePlayerTarget(playerTarget(0, "a/b:c"))).toEqual({ sourceId: 0, player: "a/b:c" })
+  it("reads back the group, the source and the player a variant target was made from", () => {
+    expect(parseVariantTarget(variantTarget("AniStar", 7, "vibix"))).toEqual({ group: "AniStar", sourceId: 7, player: "vibix" })
+    expect(parseVariantTarget(variantTarget("A / B", 0, "a/b:c"))).toEqual({ group: "A / B", sourceId: 0, player: "a/b:c" })
+    expect(parseVariantTarget(variantTarget('Q"uote', 1, "variant:x"))).toEqual({ group: 'Q"uote', sourceId: 1, player: "variant:x" })
+  })
+
+  it("makes the target as the core does: a compact JSON array", () => {
+    expect(variantTarget("Ruchime", 3, "vibix")).toBe('variant:["Ruchime",3,"vibix"]')
+    expect(variantTarget("Ё", 2, "я")).toBe('variant:["Ё",2,"я"]')
   })
 
   it("reads back the group a group target was made from, a name with its own colon included", () => {
@@ -303,12 +313,13 @@ describe("targets", () => {
   })
 
   it("gives null for any text of another kind", () => {
-    expect(parsePlayerTarget("group:AniStar")).toBeNull()
-    expect(parsePlayerTarget("source:7")).toBeNull()
-    expect(parsePlayerTarget("source:007/player:vibix")).toBeNull()
-    expect(parsePlayerTarget("source:x/player:vibix")).toBeNull()
-    expect(parsePlayerTarget("")).toBeNull()
-    expect(parseGroupTarget("source:7/player:vibix")).toBeNull()
+    expect(parseVariantTarget("group:AniStar")).toBeNull()
+    expect(parseVariantTarget("variant:")).toBeNull()
+    expect(parseVariantTarget('variant:["Ruchime",3]')).toBeNull()
+    expect(parseVariantTarget('variant:["Ruchime","3","vk"]')).toBeNull()
+    expect(parseVariantTarget('variant: ["Ruchime", 3, "vk"]')).toBeNull()
+    expect(parseVariantTarget("")).toBeNull()
+    expect(parseGroupTarget("variant:[\"Ruchime\",3,\"vk\"]")).toBeNull()
     expect(parseGroupTarget("")).toBeNull()
   })
 })

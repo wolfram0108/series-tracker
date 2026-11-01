@@ -3,7 +3,7 @@ import { computed, ref } from "vue"
 import type { components } from "../../api/schema"
 import { t, type MessageKey } from "../../i18n"
 import { reasonText } from "../../lib/reason"
-import { isDeviation, isOff, sourcePlayers, type EpisodeView, type Reference, type Scope } from "../../lib/output"
+import { isDeviation, isOff, sourcePlayers, type EpisodeView, type LeverSpec, type Reference, type Scope } from "../../lib/output"
 import OutputLevers from "./OutputLevers.vue"
 
 type Schemas = components["schemas"]
@@ -11,6 +11,8 @@ type Schemas = components["schemas"]
 // A compact card: what the episode takes and why; its levers open on demand so the list of episodes stays short.
 const props = withDefaults(defineProps<{
   view: EpisodeView
+  /** The levers there are, as the core describes them. */
+  specs: LeverSpec[]
   busy?: boolean
   /** The names the files of the episode would get; shown when the window asked for them. */
   fileNames?: string[]
@@ -129,8 +131,9 @@ function forwardReset(lever: string, target: string | null): void {
     <section v-if="view.dubs.length > 0" class="episode-voices stack">
       <h4 class="episode-subtitle">{{ t("output.voices") }}</h4>
       <ul class="episode-dubs stack">
-        <li v-for="dub in view.dubs" :key="dub.voice_key" class="cluster" :class="`dub-${dub.state}`">
+        <li v-for="dub in view.dubs" :key="`${dub.part ?? 0}:${dub.voice_key}`" class="cluster" :class="`dub-${dub.state}`">
           <span>{{ dub.voice_label }}</span>
+          <span v-if="dub.part" class="episode-part">{{ t("output.part", { n: dub.part }) }}</span>
           <span class="episode-state">{{ t(STATE[dub.state]) }}</span>
           <span v-if="dub.hint" class="episode-hint">{{ t(HINT[dub.hint]) }}</span>
           <span v-if="dub.detail" class="episode-reason">{{ reasonText(dub.detail) }}</span>
@@ -148,7 +151,7 @@ function forwardReset(lever: string, target: string | null): void {
       >{{ t(off ? "output.episode.enable" : "output.episode.disable") }}</button>
     </div>
     <OutputLevers
-      v-if="open" scope="episode" :view="view" :levers="view.levers" :busy="busy"
+      v-if="open" scope="episode" :view="view" :levers="view.levers" :specs="specs" :busy="busy"
       @set="forwardSet" @reset="forwardReset"
     />
   </article>

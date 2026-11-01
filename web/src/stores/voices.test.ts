@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { createPinia, setActivePinia } from "pinia"
 import { useVoicesStore, type VoiceDub, type VoiceDubEvent, type VoiceDubsSnapshot, type VoiceSettingsView } from "./voices"
 
-const dub = (over: Partial<VoiceDub> = {}): VoiceDub => ({
+const dub = (over: Partial<VoiceDub> = {}): VoiceDub & { part: number | null } => ({
   season: 1, episode: 2, voice_key: "blackcat", voice_label: "BlackCat", status: "ready", state: "align_queued", hint: "ready", detail: null, ...over,
+  part: over.part ?? null,
 })
 const event = (rev: number, over: Partial<VoiceDubEvent> = {}): VoiceDubEvent => ({ series_id: 7, job_id: null, file: null, ...dub(), epoch: 1, rev, ...over })
-const snapshot = (rev: number, items: (VoiceDub & { series_id?: number })[], epoch = 1): VoiceDubsSnapshot => ({
+const snapshot = (rev: number, items: (VoiceDub & { part: number | null; series_id?: number })[], epoch = 1): VoiceDubsSnapshot => ({
   epoch,
   rev,
   items: items.map((item) => ({ series_id: 7, job_id: null, file: null, ...item })),
@@ -21,6 +22,17 @@ describe("voices store", () => {
     expect(store.dubName("cf1", "blackcat.mp4")).toBe("BlackCat")
     expect(store.dubName("cf2", "blackcat.mp4")).toBe("blackcat")
     expect(store.dubName("cf1", "other.mp4")).toBe("other")
+  })
+
+  it("keeps the parts of one voice-over of an episode apart and removes only the part that was removed", () => {
+    const store = useVoicesStore()
+    store.apply(event(1, { part: 1 }))
+    store.apply(event(2, { part: 2 }))
+    expect(store.forEpisode(7, 1, 2).map((v) => v.part)).toEqual([1, 2])
+    store.apply(event(3, { part: 1, status: "removed" }))
+    expect(store.forEpisode(7, 1, 2).map((v) => v.part)).toEqual([2])
+    store.snapshot(snapshot(10, [dub({ part: 1 }), dub({ part: 2 })]))
+    expect(store.forEpisode(7, 1, 2).map((v) => v.part)).toEqual([1, 2])
   })
 
   it("takes a snapshot as every voice-over of every series, grouped by episode", () => {

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import StatusOutput from "./StatusOutput.vue"
+import { SPECS } from "../../lib/output.fixtures"
 import * as calls from "../../composables/outputCalls"
 import type { Composition } from "../../composables/outputCalls"
 import type { Answer } from "../../composables/sourceCalls"
@@ -27,6 +28,7 @@ const composition = (): Composition => ({
   series_id: 1, rev: 1, sources: [], settings: [],
   rows: [row(1, 1), row(1, 2), row(2, 1)],
   levels: [{ season: null, levers: [] }, { season: 1, levers: [] }, { season: 2, levers: [] }],
+  levers: SPECS,
 })
 
 let mounted: VueWrapper[] = []

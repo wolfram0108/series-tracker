@@ -10,7 +10,8 @@ import type { Answer } from "./sourceCalls"
 import { useSSE } from "./useSSE"
 import { useCompositionStore, type ReferencePacket } from "../stores/composition"
 import { useVoicesStore, type VoiceDubEvent } from "../stores/voices"
-import { groupTarget, LEVER, resetBody, setBody, type Reference, type Row } from "../lib/output"
+import { groupTarget, resetBody, setBody, type Reference, type Row } from "../lib/output"
+import { SPECS } from "../lib/output.fixtures"
 import type { SourceSummary } from "../lib/sources"
 
 vi.mock("./outputCalls")
@@ -37,12 +38,13 @@ const summary: SourceSummary = {
 }
 const composition = (over: Partial<Composition> = {}): Composition => ({
   series_id: 1, rev: 1, rows: [row()], sources: [summary],
-  levels: [{ season: 1, levers: [{ lever: LEVER.take, target: groupTarget("Ruchime"), value: false, level: "season" }] }],
-  settings: [{ season: 1, episode: 2, levers: [{ lever: LEVER.take, target: groupTarget("Ruchime"), value: true, level: "episode" }] }],
+  levels: [{ season: 1, levers: [{ lever: "voice.take", target: groupTarget("Ruchime"), value: false, level: "season" }] }],
+  settings: [{ season: 1, episode: 2, levers: [{ lever: "voice.take", target: groupTarget("Ruchime"), value: true, level: "episode" }] }],
+  levers: SPECS,
   ...over,
 })
 const dubEvent = (over: Partial<VoiceDubEvent> = {}): VoiceDubEvent => ({
-  series_id: 1, job_id: null, file: null, season: 1, episode: 2, voice_key: "ruchime", voice_label: "Ruchime",
+  series_id: 1, job_id: null, file: null, season: 1, episode: 2, part: null, voice_key: "ruchime", voice_label: "Ruchime",
   status: "ready", state: "align_queued", hint: "ready", detail: null, epoch: 1, rev: 1, ...over,
 })
 
@@ -80,7 +82,7 @@ describe("useSeriesOutput", () => {
     expect(calls.fetchOutput).toHaveBeenCalledWith(1)
     expect(output.views.value).toEqual([{
       season: 1, episode: 2, references: [reference()], rows: [row()],
-      levers: [{ lever: LEVER.take, target: groupTarget("Ruchime"), value: true, level: "episode" }],
+      levers: [{ lever: "voice.take", target: groupTarget("Ruchime"), value: true, level: "episode" }],
       dubs: [expect.objectContaining({ voice_label: "Ruchime", state: "align_queued" })],
     }])
     expect(output.levels.value).toEqual(composition().levels)
@@ -202,14 +204,14 @@ describe("useSeriesOutput", () => {
     const output = setup()
     await flushPromises()
     const target = groupTarget("Ruchime")
-    expect(await output.set({ season: 1, episode: 2 }, LEVER.take, target, false)).toBeNull()
-    expect(calls.setLever).toHaveBeenCalledWith(1, setBody({ season: 1, episode: 2 }, LEVER.take, target, false))
+    expect(await output.set({ season: 1, episode: 2 }, "voice.take", target, false)).toBeNull()
+    expect(calls.setLever).toHaveBeenCalledWith(1, setBody({ season: 1, episode: 2 }, "voice.take", target, false))
     expect(vi.mocked(calls.setLever).mock.calls[0][1]).toStrictEqual({
       season: 1, episode: 2, lever: "voice.take", target: "group:Ruchime", value: false,
     })
 
-    expect(await output.reset({ season: 1 }, LEVER.take)).toBeNull()
-    expect(vi.mocked(calls.resetLever).mock.calls[0][1]).toStrictEqual(resetBody({ season: 1 }, LEVER.take))
+    expect(await output.reset({ season: 1 }, "voice.take")).toBeNull()
+    expect(vi.mocked(calls.resetLever).mock.calls[0][1]).toStrictEqual(resetBody({ season: 1 }, "voice.take"))
     expect(vi.mocked(calls.resetLever).mock.calls[0][1]).toStrictEqual({ season: 1, lever: "voice.take" })
 
     vi.mocked(calls.resetLever).mockResolvedValueOnce({ ok: false, text: "Уровень не найден" })
@@ -223,7 +225,7 @@ describe("useSeriesOutput", () => {
     vi.mocked(calls.setLever).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
     const output = setup()
     await flushPromises()
-    const pending = output.set({ season: 1 }, LEVER.take, groupTarget("Ruchime"), false)
+    const pending = output.set({ season: 1 }, "voice.take", groupTarget("Ruchime"), false)
     expect(output.busy.value).toBe(true)
     expect(output.syncing.value).toBe(false)
     finish(ok({ success: true }))
