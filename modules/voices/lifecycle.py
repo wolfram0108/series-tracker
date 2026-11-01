@@ -46,3 +46,6 @@ FINAL = frozenset({S.PLACED, S.REJECTED, S.FAILED})
 HOLDS_FILES = frozenset({S.DOWNLOADING, S.READY, S.ALIGNING, S.ALIGNED})
 # Steps that wait for the reference video and the other voice-overs of the episode.
 WAITS_FOR_REFERENCE = frozenset({S.READY, S.ALIGNED})
+# Steps in which a voice-over still reads the file of a source row it is linked to (a waiting one is linked while the
+# file serves the episodes that wait for their turn).
+READS_FILE = frozenset({S.PENDING, S.DOWNLOADING, S.READY, S.ALIGNING})

@@ -144,7 +144,8 @@ class Neighbours(BaseModule):
         self.levers = {}  # (season, episode) -> [EffectiveLever] of the output levers
         self.settings = {}
         self.fetches = []
-        self.cancels = []
+        self.cancels = []  # series whose downloads were all cancelled
+        self.cancelled_keys = []  # downloads cancelled one by one, by key
         self.submits = []
         self.submit_reply = None
         self.jobs = {}  # job id -> reply of conform.job.get
@@ -252,7 +253,10 @@ class Neighbours(BaseModule):
         self.fetches.append(dict(env.payload))
 
     async def on_cancel(self, env):
-        self.cancels.append(env.payload["series_id"])
+        if env.payload.get("key"):  # one job by its key
+            self.cancelled_keys.append(env.payload["key"])
+        else:
+            self.cancels.append(env.payload["series_id"])
 
     async def on_submit(self, env):
         if self.lost_before_arrival:
@@ -1695,8 +1699,11 @@ async def test_a_failed_removal_hands_the_file_to_the_cleanup_journal_and_is_tri
     assert all(os.path.exists(path) for path in paths)  # the tracks are still there...
     assert {entry["path"] for entry in await voices.repo.cleanup_list()} == set(paths)  # ...and not forgotten
     assert all(row["output_path"] is None for row in await voices.repo.for_series(7))
-    await voices._sweep_cleanup()
-    assert not any(os.path.exists(path) for path in paths) and await voices.repo.cleanup_list() == []
+    async def swept():  # a name another attempt still owns is answered "not now": the sweep is made again
+        await voices._sweep_cleanup()
+        return not any(os.path.exists(path) for path in paths) and await voices.repo.cleanup_list() == []
+
+    await until_true(swept, "the journal was not carried out")
 
 
 @pytest.mark.asyncio
@@ -2150,22 +2157,6 @@ async def test_the_aligned_track_is_found_where_the_module_asked_for_it_whatever
     probe.publish_event("conform.job.finished", view)
     await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
     assert all(os.path.isfile(r["output_path"]) for r in await rows(probe))
-
-
-@pytest.mark.asyncio
-async def test_a_label_the_layout_gives_later_is_a_voice_of_its_own_and_the_recorded_key_lives_on(dubs):
-    probe, neighbours, voices, bus = dubs
-    neighbours.sources.append(linked("kodik", "RedHeadSound", range(1, 4)))
-    neighbours.plan[:] = [(1, 1)]
-    probe.send_command("voices.dispatch", {"series_id": 7})
-    await settled(neighbours, 2)
-    assert {r["voice_key"] for r in await rows(probe)} == {"BlackCat", "RedHeadSound"}
-    # The user made a group for that voice-over: the layout now calls it by the name of the group.
-    neighbours.sources[-1]["studio"] = "Red Group"
-    probe.send_command("voices.dispatch", {"series_id": 7})
-    await settled(neighbours, 3)
-    assert {r["voice_key"] for r in await rows(probe)} == {"BlackCat", "RedHeadSound", "Red Group"}
-    assert len(neighbours.fetches) == 3
 
 
 class FolderOutput:
@@ -2736,14 +2727,6 @@ def test_the_file_a_voice_over_is_sent_as_is_named_in_one_place():
     assert dub_file(7, 1, 2, "BlackCat") != dub_file(8, 1, 1, "BlackCat") != dub_file(7, 1, 1, "BlackCat")
 
 
-@pytest.mark.asyncio
-async def test_without_a_work_folder_no_voice_over_is_recorded_or_downloaded(dubs):
-    probe, neighbours, voices, _ = dubs
-    neighbours.settings["conform.work_dir"] = ""
-    await voices._dispatch(7)
-    assert await rows(probe) == [] and neighbours.fetches == []
-
-
 async def settled_with_a_record(dubs, **per_dub):
     """One episode aligned and settled while the record of its job is still in the service's history."""
     probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
@@ -2868,18 +2851,6 @@ async def test_a_change_of_the_layout_plans_the_voice_overs_but_downloads_nothin
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
     assert {r["status"] for r in await rows(probe)} == {"downloading"}
-
-
-@pytest.mark.asyncio
-async def test_once_a_sync_was_asked_for_a_series_what_a_change_of_the_layout_adds_goes_on_to_download(dubs):
-    probe, neighbours, voices, bus = dubs
-    probe.send_command("voices.dispatch", {"series_id": 7})
-    await settled(neighbours, 3)
-    neighbours.sources.append(linked("kodik", "RedHeadSound", range(1, 4)))
-    layout_changed(probe)
-    await settled(neighbours, 6)
-    assert {f["url"] for f in neighbours.fetches[3:]} == {
-        f"https://site/title.html#kodik-RedHeadSound-{n}" for n in (1, 2, 3)}
 
 
 @pytest.mark.asyncio
@@ -3090,21 +3061,6 @@ async def test_the_levers_choose_which_voice_overs_an_episode_gets_and_where_fro
     assert [r["episode"] for r in await rows(probe)] == [2, 3]
     assert {f["url"] for f in neighbours.fetches} == {
         "https://site/title.html#kodik-BlackCat-2", "https://site/title.html#kodik-BlackCat-3"}
-
-
-@pytest.mark.asyncio
-async def test_a_compilation_is_noted_in_the_log_once_and_makes_no_voice_over(dubs, caplog):
-    caplog.set_level("INFO")
-    probe, neighbours, voices, bus = dubs
-    neighbours.extra_rows = [CompositionRow(
-        series_id=7, source_id=1, row_key="kodik:Red:1-3", season=1, episode_start=1, episode_end=3,
-        voice_label="Red", player="kodik", state=RowState.PLAYABLE, link="https://site/title.html#kodik-Red-1-3")]
-    probe.send_command("voices.dispatch", {"series_id": 7})
-    await settled(neighbours, 3)
-    layout_changed(probe)
-    await pass_over(voices, neighbours, 2)
-    assert {r["voice_key"] for r in await rows(probe)} == {"BlackCat"}
-    assert len([record for record in caplog.records if "склейки озвучек" in record.getMessage()]) == 1
 
 
 @pytest.mark.asyncio

@@ -24,13 +24,13 @@ Command:
       read of the settings uses the new values, no restart. Rows keep the key they were recorded under.
   voices.dispatch {series_id} — the explicit sync of a series, sent by scan once the references are loaded: plans the
       voice-overs of the series (composition.get for the rows and the levers, scan.output.get for the reference of
-      every episode), records a voice_dubs row per planned voice-over, offers the rows that failed again, allows the
-      downloads of the series (kept in voice_series, so that a restart does not forget it) and downloads what is not
-      on disk yet into the temporary downloads folder of the work folder (named by the owner in the settings of the
-      alignment server and asked of its bridge; not named: nothing is recorded or downloaded and the log says so).
-      Before a job is sent the reference video is copied into the service's folder of the episode, so that the service
-      reads and writes only inside the work folder; the copy goes with the other temporary files of the episode.
-      Only a series of kind `video` is planned (catalog.series.get).
+      every episode), records a voice_dubs row per planned voice-over, ADMITS every planned row to download (a row that
+      a change of the layout recorded is not admitted until a sync), offers the rows that failed again and downloads
+      what is not on disk yet into the temporary downloads folder of the work folder (named by the owner in the
+      settings of the alignment server and asked of its bridge; not named: the rows are recorded and wait, and they
+      begin when conform.settings.changed says it was named). Before a job is sent the reference video is copied into
+      the service's folder of the episode, so that the service reads and writes only inside the work folder; the copy
+      goes with the other temporary files of the episode. Only a series of kind `video` is planned (catalog.series.get).
 Commands out: downloads.fetch, downloads.fetch.cancel. Queries to conform: workspace (the folders of the service
             for a place, asked of the bridge: this module does not know its layout), submit (with a key that
             finds the job again; the reply is a SubmitReply: accepted, rejected, unavailable (not sent) or
@@ -42,9 +42,10 @@ Events in:  composition.changed {series_id, rev, episodes, summary_only} and sca
             episode, mark}: the layout or a reference changed. They do not start a download: the rows are brought in line with
             the plan (a voice-over that left the plan before any work on it is removed with an event, a new one is
             recorded as planned, an episode whose reference is none or unfit loses its downloaded temporary files to
-            the cleanup journal), and the downloads go on only for a series that was sent voices.dispatch. An event
-            that says only the summaries of the sources changed is not acted on. Nothing is asked of composition or
-            scan at start: the first event or dispatch of a series makes the whole plan of that series;
+            the cleanup journal). A row they record is not admitted: it waits, planned, for a sync. An event that says
+            only the summaries of the sources changed is not acted on. Nothing is asked of composition or scan at start:
+            the first event or dispatch of a series makes the whole plan of that series; conform.settings.changed (the
+            work folder may be named now);
             downloads.fetch.started and .finished (our keys `dub:<id>`), conform.queue.changed (waiting or running
             jobs of the service), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished, conform.job.removed,
@@ -77,9 +78,20 @@ what is known of the alignment service (alignment.py), the form in which a finis
 (outputs.py, injected as `output=`), the shape of every message (core/contracts).
 
 The key of a voice-over is its label in the layout: the name of its user group, or "Неизвестная озвучка N". A row keeps
-the key it was recorded under for good; a label that changes later (a group was made for a voice-over that had none) is
-a voice-over of its own for the plan, and the rows of the old key finish where they are.
-Compilation rows (one video for several episodes) are not taken yet: they are noted in the log, once per change.
+the key it was recorded under for good. When the layout calls a recorded voice-over by another name (a group was made
+or renamed) the plan finds it by a link: a planned voice-over that has a candidate with the link of a row of the same
+episode under another key is that row (planning.adopt); the row keeps its key and its work, and takes the new label
+(a placed track follows it).
+
+A row of the layout that covers several episodes (a compilation: one video) is a candidate like a single one. Its video
+is one file, a row of voice_files, downloaded once (downloads.fetch with the key `file:<id>`) and read by the voice-overs
+of every episode it covers that has a reference: each goes to the service with the reference of its own episode. The
+file belongs to its row in voice_files; it goes to the cleanup journal, with its row deleted in the same transaction,
+when no voice-over reads it (all placed, rejected, failed or gone from the plan); a transfer under way is cancelled
+(downloads.fetch.cancel with the key of the file), and an ending that comes anyway puts the folder on the journal again. A
+file that cannot be downloaded sends every voice-over that waited on it to its next candidate; the new row of a changed
+compilation is a new file, and the old one stays while a voice-over still reads it. A series that is deleted loses its
+downloads, its files and its rows.
 Paths of the working files are taken from the rows (folder of `temp_path`), never from the settings of the
 moment or from the service's path map.
 
@@ -187,6 +199,8 @@ PLAN_TIMEOUT_S = 30
 SUBMIT_TIMEOUT_S = 60
 # A reference video is some gigabytes: this is only the fuse of its copy.
 COPY_TIMEOUT_S = 1800.0
+# The keys of downloads.fetch: a voice-over of its own, a file read by several voice-overs.
+DUB_KEY, FILE_KEY = "dub:", "file:"
 # The folder of an episode where each job keeps the copy of the reference it reads.
 REF_DIR = "_ref"
 # The first pause before an obligation is tried again, the number of failures after which the owner is told,
@@ -215,6 +229,19 @@ def dub_file(series_id: int, season: int, episode: int, voice_key: str) -> str:
     return f"{series_id}_s{season:02d}e{episode:02d}_{_safe(voice_key)}.mp4"
 
 
+def file_path(root: str, series_id: int, file_id: int, studio: str) -> str:
+    """Where the file of a source row that covers several episodes is downloaded: a folder of its own, so that the
+    folder goes to the journal with the file whatever the episodes that read it do."""
+    return os.path.join(root, str(series_id), f"f{file_id}", f"{series_id}_f{file_id}_{_safe(studio)}.mp4")
+
+
+def sent_as(row: dict) -> str:
+    """The name a voice-over is sent to the service under: the name of the file it reads."""
+    if row.get("file_id") is not None and row.get("temp_path"):
+        return os.path.basename(row["temp_path"])
+    return dub_file(row["series_id"], row["season"], row["episode"], row["voice_key"])
+
+
 def reference_file(series_id: int, season: int, episode: int, reference: str) -> str:
     """The name the copy of a reference video is given for the service."""
     return f"{series_id}_s{season:02d}e{episode:02d}_ref{os.path.splitext(reference)[1]}"
@@ -232,12 +259,13 @@ class VoicesModule(BaseModule):
     name = "voices"
 
     def __init__(self, bus, db: Database | None = None, *, output: Output | None = None) -> None:
-        self.repo = VoicesRepository(db) if db is not None else None
+        self.repo = VoicesRepository(db, on_idle_transfer=self._cancel_transfer) if db is not None else None
         self._output = output or SidecarOutput()
         self._locks: dict[int, asyncio.Lock] = {}
         self._kicked: set[int] = set()
         self._job_status: dict[str, str] = {}
         self._fetching: set[int] = set()
+        self._file_fetching: set[int] = set()
         self._admit_lock = asyncio.Lock()
         # The number of a job and its ending arrive in any order; each looks for the other under this lock.
         self._claim_lock = asyncio.Lock()
@@ -249,13 +277,12 @@ class VoicesModule(BaseModule):
         self._epoch_lock = asyncio.Lock()
         self._rev = 0
         self._reported: set[str] = set()
-        # Series with a planning pass asked for and not begun (asks merge into one), series that were deleted, and the
-        # compilations last noted in the log per series (a pass notes them again only when they change).
+        # Series with a planning pass asked for and not begun (asks merge into one), and series that were deleted.
         self._planning: set[int] = set()
         self._deleted: set[int] = set()
-        # Series with an episode that has no reference and a download still under way: its end asks for the plan again.
+        # Series with an episode that has no reference and a download or the work folder to wait for: the end of the
+        # download, or the naming of the folder, asks for the plan again.
         self._deferred: set[int] = set()
-        self._noted: dict[int, frozenset] = {}
         super().__init__(bus)
         self._recovery = Recovery(self.log, pause=_pause, report_after=lambda: SUBMIT_RETRIES)
 
@@ -267,6 +294,7 @@ class VoicesModule(BaseModule):
         self.handle("voices.dispatch", self.on_dispatch, concurrent=True)
         self.handle("composition.changed", self.on_composition_changed)
         self.handle("scan.reference.changed", self.on_reference_changed)
+        self.handle("conform.settings.changed", self.on_conform_settings_changed)
         self.handle("downloads.fetch.started", self.on_fetch_started)
         self.handle("downloads.fetch.finished", self.on_fetch_finished)
         self.handle("series.downloaded.changed", self.on_downloaded)
@@ -284,6 +312,7 @@ class VoicesModule(BaseModule):
             return
         await self._generation()
         requeued = await self.repo.requeue_interrupted()
+        await self._release_files()
         pending = await self.repo.pending()
         if requeued or pending:
             self.log.info("озвучки: к докачке %d (прерванных %d)", len(pending), requeued)
@@ -403,9 +432,8 @@ class VoicesModule(BaseModule):
         if series_id in self._deleted or not await self._is_video(series_id):
             return
         if not await self._downloads_root():
-            self.log.warning("сериал %d: озвучки не начаты: рабочая папка не задана в настройках сервера выравнивания", series_id)
-            return
-        await self.repo.allow_series(series_id)
+            self.log.warning("сериал %d: озвучки записаны, но не скачиваются: рабочая папка не задана в настройках "
+                             "сервера выравнивания", series_id)
         await self._plan_series(series_id, offer=True)
         for row in await self.repo.for_series(series_id):
             if row["status"] == S.FAILED:
@@ -420,6 +448,12 @@ class VoicesModule(BaseModule):
 
     async def on_reference_changed(self, env: Envelope) -> None:
         self._want_plan(ReferenceChanged.model_validate(env.payload).series_id)
+
+    async def on_conform_settings_changed(self, env: Envelope) -> None:
+        """The work folder may have been named: what waited for it begins, and the episodes that waited to be looked at are."""
+        for series_id in list(self._deferred):
+            self._replan_deferred(series_id)
+        await self._admit()
 
     def _want_plan(self, series_id: int) -> None:
         """Bring the rows of the series in line with the plan once more; asks that come while one is waiting merge."""
@@ -440,7 +474,7 @@ class VoicesModule(BaseModule):
             if series_id in self._deleted:
                 return True
             try:
-                if await self._is_video(series_id) and await self._downloads_root():
+                if await self._is_video(series_id):
                     await self._plan_series(series_id, offer=False)
                 return True
             except (BusRequestError, LookupError, ValueError, OSError, asyncio.TimeoutError) as exc:
@@ -467,16 +501,21 @@ class VoicesModule(BaseModule):
         plan = planning.plan(layout.rows, references, layout.settings, settings.priority, settings.players)
         self.log.info("сериал %d: озвучки — раскладка %d, серий с референсом %d, озвучек к плану %d", series_id,
                       layout.rev, len(plan.with_reference), len(plan.dubs))
-        self._note_compilations(series_id, plan.compilations)
         before = await self.repo.for_series(series_id)
+        keys = planning.adopt(plan.dubs, before)
         planned: set[tuple[int, int, str]] = set()
         touched: set[tuple[int, int, str]] = set()
+        relabeled: set[tuple[int, int, str]] = set()
         for dub in plan.dubs:
-            key = (dub.season, dub.episode, dub.voice_key)
+            key = (dub.season, dub.episode, keys[(dub.season, dub.episode, dub.voice_key)])
             planned.add(key)
-            if await self.repo.upsert(series_id, dub.season, dub.episode, dub.voice_key, dub.voice_label,
-                                      [each.as_json() for each in dub.chain], retry_failed=offer):
+            if await self.repo.relabel(series_id, *key, dub.voice_label):
+                relabeled.add(key)
+            if await self.repo.upsert(series_id, *key, dub.voice_label, [each.as_json() for each in dub.chain],
+                                      offer=offer):
                 touched.add(key)
+        if offer:
+            await self.repo.admit(series_id, planned)
         for gone in await self.repo.drop_unplanned(series_id, planned, plan.undecided):
             self.log.info("сериал %d: озвучка %s серии %d вышла из плана", series_id, gone["voice_label"], gone["episode"])
             await self._announce(gone, E.REMOVED)
@@ -485,29 +524,29 @@ class VoicesModule(BaseModule):
         after = await self.repo.for_series(series_id)
         await self._announce_difference(before, [row for row in after
                                                  if (row["season"], row["episode"], row["voice_key"]) in touched])
+        for row in after:
+            if (row["season"], row["episode"], row["voice_key"]) in relabeled:
+                await self._announce(row)
+        if relabeled:
+            self._kick(series_id)  # a track that is placed follows the name of its voice-over
         if series_id in self._deleted:  # the series went while the pass was writing: what it wrote goes too
             await self._forget(series_id)
             return
         await self._recheck_ready(series_id)
+        await self._release_files()
         await self._admit()
 
     async def _drop_without_reference(self, series_id: int, plan: planning.Plan, rows: list[dict]) -> None:
         """An episode that has no reference loses the voice-overs it had begun, as an episode that left the plan does."""
         root = await self._downloads_root()
         episodes = {(row["season"], row["episode"]) for row in rows} - plan.with_reference - plan.undecided
+        if episodes and not root:  # nowhere to look for what they hold: the naming of the folder brings them back
+            self._deferred.add(series_id)
+            return
         for season, episode in sorted(episodes):
             group = await self.repo.for_episode(series_id, season, episode)
             if group and not await self._drop_orphans(series_id, season, episode, group, root):
                 self._deferred.add(series_id)
-
-    def _note_compilations(self, series_id: int, compilations: tuple[planning.Compilation, ...]) -> None:
-        """A compilation covers episodes of a voice-over but its shared file is not made yet: say so once per change."""
-        found = frozenset(compilations)
-        if found and found != self._noted.get(series_id):
-            self.log.info("сериал %d: склейки озвучек пока не берутся (строк %d, серий %d, озвучек %d)", series_id,
-                          len({(each.source_id, each.row_key) for each in found}),
-                          len({(each.season, each.episode) for each in found}), len({each.voice_label for each in found}))
-        self._noted[series_id] = found
 
     async def _forget(self, series_id: int) -> None:
         """Remove every row of a series that is gone, announcing each."""
@@ -520,6 +559,8 @@ class VoicesModule(BaseModule):
         """A ready dub whose file vanished from the temporary directory is downloaded again."""
         for row in await self.repo.for_series(series_id):
             if row["status"] == S.READY and not await self._io(os.path.exists, row["temp_path"]):
+                if row["file_id"] is not None:
+                    await self.repo.file_lost(row["file_id"])
                 await self.repo.mark_pending(row["id"], reason("file_vanished"))
                 await self._announce({**row, "status": S.PENDING}, E.STALE)
 
@@ -557,6 +598,9 @@ class VoicesModule(BaseModule):
         root = root or await self._downloads_root()
         if not root:
             return
+        if chain[row["attempt"]].get("file"):
+            await self._start_on_file(row, chain[row["attempt"]], root)
+            return
         path = temp_path(root, row["series_id"], row["season"], row["episode"], row["voice_key"])
         if storage.busy(path):  # an earlier removal of this name has not ended: a file written now could be lost
             self._when_free(path, row["series_id"])
@@ -567,13 +611,43 @@ class VoicesModule(BaseModule):
         # Announced before the command goes out: a quick download could end first and this event would repeat its end.
         await self._announce(row)
         self.send_command("downloads.fetch", {
-            "key": f"dub:{row['id']}", "url": chain[row["attempt"]]["url"], "path": path,
+            "key": f"{DUB_KEY}{row['id']}", "url": chain[row["attempt"]]["url"], "path": path,
             "max_height": DUB_MAX_HEIGHT, "series_id": row["series_id"]})
+
+    async def _start_on_file(self, row: dict, candidate: dict, root: str) -> None:
+        """The candidate is a row that covers several episodes: its video is one file, downloaded once and read by the
+        voice-overs of all the episodes it covers. The first to come sends the download; the others only link to it."""
+        key = (candidate["file"]["source_id"], candidate["file"]["row_key"], candidate["url"])
+        known = next((file for file in await self.repo.files_of(row["series_id"])
+                      if (file["source_id"], file["row_key"], file["url"]) == key), None)
+        if known is not None and known["temp_path"] and storage.busy(known["temp_path"]):
+            self._when_free(known["temp_path"], row["series_id"])
+            return
+        file = await self.repo.join_file(
+            row["id"], row["series_id"], key[0], key[1], key[2],
+            lambda file_id: file_path(root, row["series_id"], file_id, candidate["studio"]))
+        if file is None:
+            return
+        self._fetching.discard(row["id"])
+        await self._announce(row)  # before the command goes out, as for a download of its own
+        if file["claimed"]:
+            self.send_command("downloads.fetch", {
+                "key": f"{FILE_KEY}{file['id']}", "url": candidate["url"], "path": file["temp_path"],
+                "max_height": DUB_MAX_HEIGHT, "series_id": row["series_id"]})
+        elif file["status"] == S.READY:
+            self._kick(row["series_id"])
 
     async def on_fetch_started(self, env: Envelope) -> None:
         """The download left the queue of downloads and began: only now it is a download."""
         key = str(env.payload.get("key") or "")
-        if not key.startswith("dub:"):
+        if key.startswith(FILE_KEY):
+            file_id = int(key[len(FILE_KEY):])
+            self._file_fetching.add(file_id)
+            for row in await self.repo.by_file(file_id):
+                if row["status"] == S.DOWNLOADING:
+                    await self._announce(row)
+            return
+        if not key.startswith(DUB_KEY):
             return
         row = await self.repo.get(int(key[4:]))
         if row is not None and row["status"] == S.DOWNLOADING:
@@ -583,7 +657,10 @@ class VoicesModule(BaseModule):
     async def on_fetch_finished(self, env: Envelope) -> None:
         payload = env.payload
         key = str(payload.get("key") or "")
-        if not key.startswith("dub:"):
+        if key.startswith(FILE_KEY):
+            await self._on_file_finished(int(key[len(FILE_KEY):]), payload)
+            return
+        if not key.startswith(DUB_KEY):
             return
         self._fetching.discard(int(key[4:]))
         row = await self.repo.get(int(key[4:]))
@@ -607,6 +684,53 @@ class VoicesModule(BaseModule):
             await self._start(await self.repo.get(row["id"]))
         else:
             await self._fail(row, error)
+
+    async def _on_file_finished(self, file_id: int, payload: dict) -> None:
+        """The transfer of a file ended: the voice-overs that waited on it are ready, or each goes on to its next candidate."""
+        self._file_fetching.discard(file_id)
+        ok = bool(payload.get("ok"))
+        error = str(payload.get("error") or reason("download_failed"))
+        dependents = await self.repo.finish_file(file_id, ok, None if ok else error)
+        if dependents is None:
+            # An ending of a download that nothing waits for. When the file was released meanwhile, the cancel came too
+            # late and the video is on the disk with no owner: its folder goes to the journal again.
+            if ok and payload.get("path") and await self.repo.file(file_id) is None:
+                await self._discard(os.path.dirname(payload["path"]), kind=TREE)
+            return
+        file = await self.repo.file(file_id)
+        if ok:
+            self.log.info("сериал %d: файл склейки %d скачан, озвучек, ждавших его: %d", file["series_id"], file_id,
+                          len(dependents))
+            for row in dependents:
+                await self._announce(row)
+            self._kick(file["series_id"])
+        else:
+            for row in dependents:
+                self.log.info("сериал %d, s%02de%02d: озвучка %s не скачана из %s: %s", row["series_id"], row["season"],
+                              row["episode"], row["voice_label"], row["chain"][row["attempt"]]["player"], error)
+                if row["attempt"] + 1 < len(row["chain"]):
+                    await self.repo.advance(row["id"], error)
+                    await self._start(await self.repo.get(row["id"]))
+                else:
+                    await self._fail(row, error)
+        await self._release_files()
+        self._replan_deferred(file["series_id"])
+
+    def _cancel_transfer(self, file: dict) -> None:
+        """No voice-over reads the file whose transfer is under way: the transfer is cancelled, the file is free at once
+        and its folder is on the journal. A transfer that ends before the cancel arrives is met in `_on_file_finished`."""
+        self._file_fetching.discard(file["id"])
+        self.log.info("сериал %d: загрузка файла склейки %d отменена, он больше не нужен озвучкам", file["series_id"],
+                      file["id"])
+        self.send_command("downloads.fetch.cancel", {"key": f"{FILE_KEY}{file['id']}", "series_id": file["series_id"]})
+
+    async def _release_files(self) -> None:
+        """Files that no voice-over reads any more go to the cleanup journal, and are carried out."""
+        released = await self.repo.release_idle_files()
+        for file in released:
+            self.log.info("сериал %d: файл склейки %d больше не нужен озвучкам", file["series_id"], file["id"])
+        if released:
+            await self._work_off()
 
     async def _fail(self, row: dict, error: str) -> None:
         await self.repo.mark_failed(row["id"], error)
@@ -650,14 +774,18 @@ class VoicesModule(BaseModule):
             status = event
         self._publish_event(current, status, current["outcome"] or current["error"], epoch, rev)
 
+    def _is_fetching(self, row: dict) -> bool:
+        """Whether the download behind a voice-over has begun: its own, or the one of the file it reads."""
+        return row.get("id") in self._fetching or row.get("file_id") in self._file_fetching
+
     def _publish_event(self, row: dict, status: E, detail: str | None, epoch: int, rev: int) -> None:
-        state = public_state(status, self._job_status.get(row.get("job_id")), row.get("id") in self._fetching)
+        state = public_state(status, self._job_status.get(row.get("job_id")), self._is_fetching(row))
         self.publish_event("voices.dub.changed", DubEvent(
             series_id=row["series_id"], season=row["season"], episode=row["episode"],
             voice_key=row["voice_key"], voice_label=row["voice_label"], status=status, state=state,
             hint=public_hint(status, state, row.get("job_id")), detail=parse_reason(detail), epoch=epoch,
             rev=rev, job_id=row.get("job_id"),
-            file=dub_file(row["series_id"], row["season"], row["episode"], row["voice_key"])).model_dump(mode="json"))
+            file=sent_as(row)).model_dump(mode="json"))
 
     async def _announce_difference(self, before: list[dict], after: list[dict]) -> None:
         """Rows that the planner created or took over are news for the interface like any other change."""
@@ -669,7 +797,7 @@ class VoicesModule(BaseModule):
                 await self._announce(row)
 
     def _record(self, row: dict) -> DubRecord:
-        state = public_state(row["status"], self._job_status.get(row["job_id"]), row["id"] in self._fetching)
+        state = public_state(row["status"], self._job_status.get(row["job_id"]), self._is_fetching(row))
         return DubRecord(**{field: row[field] for field in DubRecord.model_fields
                             if field in row and field not in ("state", "hint", "detail")},
                          state=state, hint=public_hint(row["status"], state, row["job_id"]),
@@ -682,7 +810,7 @@ class VoicesModule(BaseModule):
         epoch = await self._generation()
         rev = self._next_rev()
         items = [SnapshotItem(series_id=row["series_id"], job_id=row.get("job_id"),
-                              file=dub_file(row["series_id"], row["season"], row["episode"], row["voice_key"]),
+                              file=sent_as(row),
                               **self._record(row).model_dump(include=set(DubItem.model_fields)))
                  for row in await self.repo.all_rows()]
         self.publish_event("voices.dubs.snapshot", DubsSnapshot(epoch=epoch, rev=rev, items=items).model_dump(mode="json"))
@@ -777,6 +905,7 @@ class VoicesModule(BaseModule):
             await self._tidy(series_id, season, episode, root)
         await self._admit()
         await self._work_off()
+        await self._release_files()
         if restart:  # the reset voice-overs start over: their chains are read from the layout once more
             self._want_plan(series_id)
         if all(row["status"] in FINAL for row in await self.repo.for_series(series_id)):
@@ -1076,7 +1205,7 @@ class VoicesModule(BaseModule):
     @staticmethod
     def _folders_of(group: list[dict], fallback: str) -> list[str]:
         """Episode folders of voice-overs as they were made, not as the settings say now."""
-        found = {os.path.dirname(row["temp_path"]) for row in group if row["temp_path"]}
+        found = {os.path.dirname(row["temp_path"]) for row in group if row["temp_path"] and row["file_id"] is None}
         return sorted(found) or [fallback]
 
     async def _finish_move(self, row: dict, reference: str | None = None) -> bool:
@@ -1230,6 +1359,8 @@ class VoicesModule(BaseModule):
                 continue
             self.log.warning("%s: файла озвучки %s нет на месте (%s), скачивается заново", label,
                              row["voice_label"], row["temp_path"])
+            if row["file_id"] is not None:
+                await self.repo.file_lost(row["file_id"])
             await self.repo.mark_pending(row["id"], reason("file_vanished"))
             await self._announce({**row, "status": S.PENDING}, E.STALE)
         return present
@@ -1346,6 +1477,7 @@ class VoicesModule(BaseModule):
     async def on_series_deleted(self, env: Envelope) -> None:
         series_id = env.payload["series_id"]
         self._deleted.add(series_id)
+        self._file_fetching -= {file["id"] for file in await self.repo.files_of(series_id)}
         self.send_command("downloads.fetch.cancel", {"series_id": series_id})
         rows = await self.repo.for_series(series_id)
         folders = {os.path.dirname(folder) for folder in self._folders_of(rows, "")} - {""}

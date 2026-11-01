@@ -1,10 +1,8 @@
-"""What the voices module tells the rest of the system: statuses, states, events, snapshot, layout."""
+"""What the voices module tells the rest of the system: statuses, states, events, snapshot."""
 from __future__ import annotations
 
 from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
-
-from .release import ReleaseSource
 
 
 class DubStatus(StrEnum):
@@ -123,40 +121,6 @@ class DubsSnapshot(BaseModel):
     epoch: int
     rev: int
     items: list[SnapshotItem]
-
-
-class LayoutRole(StrEnum):
-    REFERENCE = "reference"
-    DUB = "dub"
-
-
-class LayoutVoice(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    key: str
-    label: str
-    role: LayoutRole
-    source: ReleaseSource
-    fallbacks: list[ReleaseSource] = Field(default_factory=list)
-
-
-class SkippedSource(ReleaseSource):
-    """A source that is not downloaded, and why (its voice is already in the reference)."""
-
-    label: str
-    reason: str
-
-
-class Layout(BaseModel):
-    """The reply of `voices.layout`: which source gives the reference and where every other voice comes from."""
-
-    model_config = ConfigDict(extra="allow")
-
-    mode: str
-    reference: ReleaseSource | None = None
-    voices: list[LayoutVoice]
-    skipped: list[SkippedSource] = Field(default_factory=list)
-    priority: list[str] = Field(default_factory=list)
 
 
 class VoiceSettingsDraft(BaseModel):

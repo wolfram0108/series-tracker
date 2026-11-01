@@ -5,11 +5,13 @@ their voice-over group is `voice_label`), the reference of every episode (`scan`
 episode (`composition`). The voice-overs of an episode are every voice of the layout but the one already in the
 reference video, except the voices the levers turn off; the candidates of a voice are its rows that cover the episode
 and play, the player of the lever first, then by the order of players in the settings, then by the order of sources.
+A row that covers several episodes (a compilation) is a candidate like any other; its video is one file for every
+episode it covers.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, NamedTuple, Sequence
+from typing import Any, Iterable, NamedTuple, Sequence
 
 from core.contracts import (VOICE_PLAYER, VOICE_TAKE, CompositionRow, EffectiveLever, EpisodeSettings, Reference,
                             ReferenceMark, RowState, group_target)
@@ -22,14 +24,20 @@ Slot = tuple[int, int]  # (season, episode)
 
 
 class Candidate(NamedTuple):
-    """One place a voice-over of an episode can be downloaded from: the form of a link of `voice_dubs.chain`."""
+    """One place a voice-over of an episode can be downloaded from: the form of a link of `voice_dubs.chain`.
+
+    `file` is (source id, row key) of a row that covers several episodes: its video is downloaded once for all of them."""
 
     player: str
     studio: str
     url: str
+    file: tuple[int, str] | None = None
 
-    def as_json(self) -> dict[str, str]:
-        return {"player": self.player, "studio": self.studio, "url": self.url}
+    def as_json(self) -> dict[str, Any]:
+        found: dict[str, Any] = {"player": self.player, "studio": self.studio, "url": self.url}
+        if self.file is not None:
+            found["file"] = {"source_id": self.file[0], "row_key": self.file[1]}
+        return found
 
 
 @dataclass(frozen=True)
@@ -43,16 +51,6 @@ class PlannedDub:
     chain: tuple[Candidate, ...]
 
 
-class Compilation(NamedTuple):
-    """A compilation row that covers an episode of a voice-over; it is not taken until its file is shared."""
-
-    season: int
-    episode: int
-    voice_label: str
-    source_id: int
-    row_key: str
-
-
 @dataclass(frozen=True)
 class Plan:
     """`with_reference`: episodes whose reference is a row of the layout. `undecided`: episodes whose reference row the
@@ -62,7 +60,6 @@ class Plan:
     dubs: tuple[PlannedDub, ...] = ()
     with_reference: frozenset[Slot] = frozenset()
     undecided: frozenset[Slot] = frozenset()
-    compilations: tuple[Compilation, ...] = ()
 
 
 def rank(player: str, priority: Sequence[str], players) -> int:
@@ -89,7 +86,6 @@ def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settin
     dubs: list[PlannedDub] = []
     with_reference: set[Slot] = set()
     undecided: set[Slot] = set()
-    compilations: list[Compilation] = []
     for ref in sorted(references, key=lambda each: (each.season, each.episode)):
         slot = (ref.season, ref.episode)
         if ref.mark not in _REFERENCED or ref.source_id is None or ref.row_key is None:
@@ -104,14 +100,9 @@ def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settin
             if label == ref_row.voice_label or group_target(label) in take_off:
                 continue
             covering = [row for row in by_voice.get((ref.season, label), ()) if _covers(row, ref.episode, ref_row.part)]
-            singles = [row for row in covering if not row.is_compilation]
-            compilations.extend(Compilation(ref.season, ref.episode, label, row.source_id, row.row_key)
-                                for row in covering if row.is_compilation)
-            if covering and not singles:
-                continue
             dubs.append(PlannedDub(ref.season, ref.episode, label, label,
-                                   _chain(singles, picks.get(group_target(label)), priority, players)))
-    return Plan(tuple(dubs), frozenset(with_reference), frozenset(undecided), tuple(compilations))
+                                   _chain(covering, picks.get(group_target(label)), priority, players)))
+    return Plan(tuple(dubs), frozenset(with_reference), frozenset(undecided))
 
 
 def _levers(levers: Iterable[EffectiveLever]) -> tuple[set[str], dict[str, tuple[int, str]]]:
@@ -129,10 +120,8 @@ def _levers(levers: Iterable[EffectiveLever]) -> tuple[set[str], dict[str, tuple
 
 
 def _covers(row: CompositionRow, episode: int, part: int | None) -> bool:
-    """A compilation covers the episodes of its range; a single row covers its episode, in the part of the reference."""
-    if row.is_compilation:
-        return row.episode_start <= episode <= row.episode_end
-    return row.episode_start == episode and row.part == part
+    """A row covers the episode when the episode is in its range, and its part is the part of the reference."""
+    return row.episode_start <= episode <= row.episode_end and row.part == part
 
 
 def _chain(rows: Sequence[CompositionRow], pick: tuple[int, str] | None, priority: Sequence[str],
@@ -143,5 +132,33 @@ def _chain(rows: Sequence[CompositionRow], pick: tuple[int, str] | None, priorit
         0 if pick == (item[1].source_id, item[1].player) else 1, rank(item[1].player, priority, players), item[0]))
     chain: dict[str, Candidate] = {}
     for _, row in ordered:
-        chain.setdefault(row.link, Candidate(row.player, row.voice_label, row.link))
+        chain.setdefault(row.link, Candidate(row.player, row.voice_label, row.link,
+                                             (row.source_id, row.row_key) if row.is_compilation else None))
     return tuple(chain.values())
+
+
+def adopt(dubs: Iterable[PlannedDub], rows: Iterable[dict[str, Any]]) -> dict[tuple[int, int, str], str]:
+    """The key each planned voice-over is recorded under: its own, unless a row of the same episode under another key
+    holds a link of its chain. That is the same voice-over called by another name (a group was made or renamed), so the
+    row keeps its key and what it has downloaded. A row whose key another planned voice-over has is that voice-over."""
+    dubs = list(dubs)
+    planned = {(each.season, each.episode, each.voice_key) for each in dubs}
+    by_episode: dict[Slot, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_episode.setdefault((row["season"], row["episode"]), []).append(row)
+    taken: set[tuple[int, int, str]] = set()
+    keys: dict[tuple[int, int, str], str] = {}
+    for dub in dubs:
+        slot = (dub.season, dub.episode)
+        recorded = by_episode.get(slot, ())
+        key = dub.voice_key
+        if not any(row["voice_key"] == key for row in recorded):
+            links = {each.url for each in dub.chain}
+            same = next((row for row in sorted(recorded, key=lambda each: each["id"])
+                         if (*slot, row["voice_key"]) not in planned | taken
+                         and links & {each["url"] for each in row["chain"]}), None)
+            if same is not None:
+                key = same["voice_key"]
+                taken.add((*slot, key))
+        keys[(*slot, dub.voice_key)] = key
+    return keys

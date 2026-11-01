@@ -1,5 +1,5 @@
-"""Migration 0029 of the voices: `voice_dubs` loses `site_episode` and keeps every other column and row, and the series
-that already have voice-overs are entered among those a sync was asked for, so that what was waiting goes on."""
+"""Migration 0029 of the voices: `voice_dubs` loses `site_episode` and keeps every other column and row; the rows that
+exist are admitted to download; the files of source rows that cover several episodes get their table."""
 import json
 import sqlite3
 import subprocess
@@ -68,28 +68,50 @@ def test_the_column_goes_and_every_row_keeps_every_other_value(at_0028):
     names = [name for name in columns(at_0028) if name != "site_episode"]
     before = dubs(at_0028, *names)
     alembic(at_0028, "upgrade", "0029")
-    assert columns(at_0028) == names
+    assert columns(at_0028) == [*names, "admitted", "file_id"]
     assert dubs(at_0028, *names) == before and len(before) == len(ROWS)
     assert before[3]["job_id"] == "job-9" and before[4]["output_path"].endswith("BlackCat.ru.flac")
 
 
-def test_a_series_with_voice_overs_may_download_and_one_without_waits_for_its_sync(at_0028):
+def test_the_rows_that_exist_are_admitted_and_have_no_file(at_0028):
+    alembic(at_0028, "upgrade", "0029")
+    rows = dubs(at_0028, "admitted", "file_id")
+    assert rows and {(row["admitted"], row["file_id"]) for row in rows} == {(1, None)}
+    with sqlite3.connect(at_0028) as conn:
+        assert conn.execute("SELECT count(*) FROM voice_files").fetchone()[0] == 0
+
+
+def test_a_file_is_one_row_per_source_row_and_address(at_0028):
     alembic(at_0028, "upgrade", "0029")
     with sqlite3.connect(at_0028) as conn:
-        assert [row[0] for row in conn.execute("SELECT series_id FROM voice_series")] == [7]
-        assert conn.execute("SELECT count(*) FROM voice_series WHERE allowed_at IS NULL").fetchone()[0] == 0
+        add = ("INSERT INTO voice_files (series_id, source_id, row_key, url, updated_at) VALUES (7, ?, ?, ?, 'now')")
+        conn.execute(add, (1, "k", "https://site/a"))
+        conn.execute(add, (1, "k", "https://site/b"))  # the row changed its video: a file of its own
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(add, (1, "k", "https://site/a"))
+        assert conn.execute("SELECT status, attempt FROM voice_files").fetchall() == [("pending", 0)] * 2
 
 
-def test_the_rows_survive_the_way_back_and_the_unique_key_still_holds(at_0028):
+def test_the_rows_survive_the_way_back_the_files_are_journaled_and_the_unique_key_still_holds(at_0028):
     names = [name for name in columns(at_0028) if name != "site_episode"]
     alembic(at_0028, "upgrade", "0029")
-    before = dubs(at_0028, *names)
-    alembic(at_0028, "downgrade", "0028")
-    assert "site_episode" in columns(at_0028) and dubs(at_0028, *names) == before
     with sqlite3.connect(at_0028) as conn:
-        assert conn.execute("SELECT count(*) FROM sqlite_master WHERE name='voice_series'").fetchone()[0] == 0
+        conn.execute("INSERT INTO voice_files (series_id, source_id, row_key, url, status, temp_path, updated_at) "
+                     "VALUES (7, 1, 'k', 'https://site/a', 'ready', '/w/downloads/7/f1/x.mp4', 'now')")
+        conn.execute("UPDATE voice_dubs SET file_id=1 WHERE id=2")
+        conn.commit()
+    before = dubs(at_0028, *[name for name in names if name not in ("file_id", "admitted")])
+    alembic(at_0028, "downgrade", "0028")
+    after = dubs(at_0028, *[name for name in names if name not in ("file_id", "admitted", "status", "attempt")])
+    assert after == [{key: value for key, value in row.items() if key not in ("status", "attempt")} for row in before]
+    assert "site_episode" in columns(at_0028) and "file_id" not in columns(at_0028)
+    with sqlite3.connect(at_0028) as conn:
+        assert conn.execute("SELECT count(*) FROM sqlite_master WHERE name='voice_files'").fetchone()[0] == 0
+        assert conn.execute("SELECT path, kind FROM voice_cleanup").fetchall() == [("/w/downloads/7/f1/x.mp4", "path")]
+        assert conn.execute("SELECT status, attempt FROM voice_dubs WHERE id=2").fetchone() == ("pending", 0)
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("INSERT INTO voice_dubs (series_id, season, episode, site_episode, voice_key, voice_label, "
                          "chain, updated_at) VALUES (7, 1, 1, 0, 'blackcat', 'BlackCat', '[]', 'now')")
     alembic(at_0028, "upgrade", "0029")
-    assert dubs(at_0028, *names) == before
+    assert dubs(at_0028, *[name for name in names if name not in ("file_id", "admitted")]) == [
+        {**row, **({"status": "pending", "attempt": 0} if row["id"] == 2 else {})} for row in before]

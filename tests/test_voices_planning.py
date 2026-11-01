@@ -2,7 +2,7 @@
 from core.contracts import (CompositionRow, EffectiveLever, EpisodeSettings, Level, Reference, ReferenceMark,
                             RowState, group_target)
 from modules.voices.identity import NO_GROUPS, Groups
-from modules.voices.planning import plan, rank
+from modules.voices.planning import Candidate, PlannedDub, adopt, plan, rank
 from modules.voices.settings import DEFAULT_PRIORITY
 
 PRIORITY = ("cvh", "kodik")
@@ -146,21 +146,38 @@ def test_voices_the_layout_could_not_group_are_voices_of_their_own():
         (1, 1, "Group"), (1, 1, "Неизвестная озвучка 1")]
 
 
-def test_a_compilation_is_not_taken_noted_and_does_not_make_the_voice_fail():
+def test_a_compilation_row_is_a_candidate_of_every_episode_it_covers_and_marks_its_file():
     rows = [row(1, "cvh", "Ref", 1), row(1, "cvh", "Ref", 2), row(1, "cvh", "Ref", 3),
             row(1, "kodik", "A", 1, end=3), row(1, "kodik", "B", 1), row(1, "kodik", "B", 2, end=3)]
     references = [reference_of(rows, "Ref", number) for number in (1, 2, 3)]
     result = planned(rows, references)
-    # A has only the compilation: no voice-over at all for now. B has episode 1 alone and 2-3 in a compilation.
-    assert sorted(chains(result)) == [(1, 1, "B")]
-    assert {(each.voice_label, each.episode) for each in result.compilations} == {
-        ("A", 1), ("A", 2), ("A", 3), ("B", 2), ("B", 3)}
+    assert chains(result) == {
+        (1, 1, "A"): [("kodik", "kodik:A:1-3")], (1, 2, "A"): [("kodik", "kodik:A:1-3")],
+        (1, 3, "A"): [("kodik", "kodik:A:1-3")], (1, 1, "B"): [("kodik", "kodik:B:1")],
+        (1, 2, "B"): [("kodik", "kodik:B:2-3")], (1, 3, "B"): [("kodik", "kodik:B:2-3")]}
+    chain = {(dub.episode, dub.voice_key): dub.chain for dub in result.dubs}
+    assert chain[(2, "A")][0].file == (1, "kodik:A:1-3") and chain[(1, "B")][0].file is None
+    assert chain[(2, "A")][0].as_json()["file"] == {"source_id": 1, "row_key": "kodik:A:1-3"}
+    assert "file" not in chain[(1, "B")][0].as_json()
 
 
-def test_a_single_row_is_taken_where_a_compilation_covers_the_episode_too():
-    rows = [row(1, "cvh", "Ref", 2), row(1, "kodik", "A", 2), row(2, "vibix", "A", 1, end=3)]
-    result = planned(rows, [reference_of(rows, "Ref", 2)])
-    assert chains(result) == {(1, 2, "A"): [("kodik", "kodik:A:2")]} and len(result.compilations) == 1
+def test_a_compilation_serves_only_the_episodes_that_have_a_reference_and_in_the_part_of_it():
+    rows = [row(1, "cvh", "Ref", 1), row(1, "cvh", "Ref", 3, part=2), row(1, "kodik", "A", 1, end=3),
+            row(1, "kodik", "B", 1, end=3, part=2)]
+    references = [reference_of(rows, "Ref", 1), reference_of(rows, "Ref", 3)]
+    result = chains(planned(rows, references))
+    # Episode 2 has no reference, so nothing is planned for it; the reference of episode 3 is a second part.
+    assert result == {(1, 1, "A"): [("kodik", "kodik:A:1-3")], (1, 1, "B"): [], (1, 3, "A"): [],
+                      (1, 3, "B"): [("kodik", "kodik:B:1-3:p2")]}
+
+
+def test_the_order_of_the_chain_is_the_same_for_a_compilation_and_a_single_row():
+    rows = [row(1, "cvh", "Ref", 2), row(1, "kodik", "A", 2), row(2, "cvh", "A", 1, end=3)]
+    chain = chains(planned(rows, [reference_of(rows, "Ref", 2)]))[(1, 2, "A")]
+    assert chain == [("cvh", "cvh:A:1-3"), ("kodik", "kodik:A:2")]
+    pick = EpisodeSettings(season=1, episode=2, levers=[lever("voice.player", "A", {"source_id": 1, "player": "kodik"})])
+    assert chains(planned(rows, [reference_of(rows, "Ref", 2)], [pick]))[(1, 2, "A")] == [
+        ("kodik", "kodik:A:2"), ("cvh", "cvh:A:1-3")]
 
 
 def test_a_reference_is_never_a_compilation_row_of_the_plan_but_its_row_is_found_by_its_key():
@@ -195,3 +212,37 @@ def test_players_the_user_called_the_same_take_one_place_in_the_order_and_an_unk
     chain = chains(planned(rows, [reference_of(rows, "Ref", 1)], priority=("kodik", "cvh"),
                            players=Groups.of({"kodik": ["vk"]})))[(1, 1, "A")]
     assert [each[0] for each in chain] == ["kodik", "vk"]
+
+
+def recorded(id, episode, key, *urls, season=1):
+    return {"id": id, "season": season, "episode": episode, "voice_key": key, "chain": [{"url": url} for url in urls]}
+
+
+def dub_of(episode, label, *urls, season=1):
+    return PlannedDub(season, episode, label, label, tuple(Candidate("kodik", label, url) for url in urls))
+
+
+def test_a_planned_voice_over_that_has_the_link_of_a_recorded_row_under_another_name_is_that_row():
+    rows = [recorded(1, 1, "Неизвестная озвучка 2", "https://site/b1"), recorded(2, 1, "Неизвестная озвучка 3", "https://site/c1")]
+    keys = adopt([dub_of(1, "Group", "https://site/b1")], rows)
+    assert keys == {(1, 1, "Group"): "Неизвестная озвучка 2"}
+
+
+def test_two_voice_overs_with_different_links_stay_different_whatever_their_names():
+    rows = [recorded(1, 1, "Неизвестная озвучка 2", "https://site/b1")]
+    keys = adopt([dub_of(1, "Group", "https://site/other"), dub_of(1, "Неизвестная озвучка 3", "https://site/c1")], rows)
+    assert keys == {(1, 1, "Group"): "Group", (1, 1, "Неизвестная озвучка 3"): "Неизвестная озвучка 3"}
+
+
+def test_a_row_is_adopted_by_one_voice_over_and_not_by_one_that_has_a_row_of_its_own_key():
+    rows = [recorded(1, 1, "Old", "https://site/x"), recorded(2, 1, "New", "https://site/y")]
+    keys = adopt([dub_of(1, "New", "https://site/x"), dub_of(1, "Other", "https://site/x")], rows)
+    assert keys == {(1, 1, "New"): "New", (1, 1, "Other"): "Old"}
+    twice = adopt([dub_of(1, "A", "https://site/x"), dub_of(1, "B", "https://site/x")], [recorded(1, 1, "Old", "https://site/x")])
+    assert twice == {(1, 1, "A"): "Old", (1, 1, "B"): "B"}
+
+
+def test_a_row_of_another_episode_is_not_adopted_and_a_voice_over_with_no_link_adopts_nothing():
+    rows = [recorded(1, 2, "Old", "https://site/x")]
+    assert adopt([dub_of(1, "New", "https://site/x"), dub_of(2, "Empty")], rows) == {
+        (1, 1, "New"): "New", (1, 2, "Empty"): "Empty"}

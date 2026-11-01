@@ -1,10 +1,18 @@
-"""SQL of the voices module: the table voice_dubs (additional voice-overs of an episode)."""
+"""SQL of the voices module: voice_dubs (additional voice-overs of an episode) and voice_files (the video of a source
+row that covers several episodes, downloaded once and shared by the voice-overs of its episodes).
+
+A file is owned by its row in voice_files: its path is in no voice-over's own `temp_path`, a voice-over that reads it
+carries `file_id` and the rows are returned with the path of the file as their `temp_path`. A file goes to the cleanup
+journal, in the same transaction that deletes its row, when no voice-over still waits for it; a transfer that is under
+way at that moment is handed to the module to cancel (`on_idle_transfer`), so a file is never held for a transfer."""
 from __future__ import annotations
 
 import json
 import logging
+import os
+import sqlite3
 from datetime import datetime, timezone
-from typing import Any, Collection, Iterable
+from typing import Any, Callable, Collection, Iterable
 
 from core.contracts import DubStatus as S
 from core.db import Database
@@ -14,6 +22,11 @@ from . import lifecycle
 from .lifecycle import Transition
 
 log = logging.getLogger("voices")
+
+
+# Steps in which a voice-over still reads the file it is linked to.
+_READING = lifecycle.READS_FILE
+_ROWS = "SELECT *, (SELECT temp_path FROM voice_files WHERE id = voice_dubs.file_id) AS file_path FROM voice_dubs"
 
 
 def _now() -> str:
@@ -67,9 +80,39 @@ def _folders(folders: Iterable[str]) -> list[tuple[str, tuple]]:
              (folder, "tree", HANDED_OVER, _now())) for folder in folders]
 
 
+def _journal_file(conn: sqlite3.Connection, temp_path: str | None) -> None:
+    """The folder of a file (one folder per file) goes to the journal."""
+    if temp_path:
+        conn.execute("INSERT INTO voice_cleanup (path, kind, error, updated_at) VALUES (?,?,?,?) " + _UPSERT,
+                     (os.path.dirname(temp_path), "tree", HANDED_OVER, _now()))
+
+
+def _release_idle(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Journal and delete the files that no voice-over reads, and cut the links of the voice-overs that still point
+    at them (they are done with the file). Runs inside the caller's transaction; a file that was downloading is
+    returned with that status for the caller to cancel its transfer."""
+    marks, steps = _in(_READING)
+    idle = [dict(row) for row in conn.execute(
+        f"SELECT * FROM voice_files WHERE NOT EXISTS (SELECT 1 FROM voice_dubs WHERE file_id = voice_files.id "
+        f"AND status {marks})", steps)]
+    for file in idle:
+        _journal_file(conn, file["temp_path"])
+        conn.execute("UPDATE voice_dubs SET file_id=NULL WHERE file_id=?", (file["id"],))
+        conn.execute("DELETE FROM voice_files WHERE id=?", (file["id"],))
+    return idle
+
+
 class VoicesRepository:
-    def __init__(self, db: Database) -> None:
+    def __init__(self, db: Database, *, on_idle_transfer: Callable[[dict[str, Any]], None] | None = None) -> None:
         self._db = db
+        self._on_idle_transfer = on_idle_transfer
+
+    def _cancel_transfers(self, released: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The files released while their transfer was under way: the module is told, after the transaction has ended."""
+        for file in released:
+            if file["status"] == S.DOWNLOADING.value and self._on_idle_transfer is not None:
+                self._on_idle_transfer(file)
+        return released
 
     async def _move(self, transition: Transition, assignments: str, args: tuple, where: str,
                     where_args: tuple, expected: int | None = 1, before: list | None = None) -> bool:
@@ -92,38 +135,42 @@ class VoicesRepository:
     def _row(row: dict | None) -> dict | None:
         if row is not None:
             row["chain"] = json.loads(row["chain"])
+            file_path = row.pop("file_path", None)
+            if row.get("file_id") is not None and file_path:
+                row["temp_path"] = file_path
         return row
 
     async def for_series(self, series_id: int) -> list[dict[str, Any]]:
         rows = await self._db.fetch_all(
-            "SELECT * FROM voice_dubs WHERE series_id=? ORDER BY season, episode, voice_key", (series_id,))
+            f"{_ROWS} WHERE series_id=? ORDER BY season, episode, voice_key", (series_id,))
         return [self._row(row) for row in rows]
 
     async def all_rows(self) -> list[dict[str, Any]]:
-        rows = await self._db.fetch_all("SELECT * FROM voice_dubs ORDER BY series_id, season, episode, voice_key")
+        rows = await self._db.fetch_all(f"{_ROWS} ORDER BY series_id, season, episode, voice_key")
         return [self._row(row) for row in rows]
 
     async def for_episode(self, series_id: int, season: int, episode: int) -> list[dict[str, Any]]:
         rows = await self._db.fetch_all(
-            "SELECT * FROM voice_dubs WHERE series_id=? AND season=? AND episode=? ORDER BY voice_key",
+            f"{_ROWS} WHERE series_id=? AND season=? AND episode=? ORDER BY voice_key",
             (series_id, season, episode))
         return [self._row(row) for row in rows]
 
     async def get(self, dub_id: int) -> dict[str, Any] | None:
-        return self._row(await self._db.fetch_one("SELECT * FROM voice_dubs WHERE id=?", (dub_id,)))
+        return self._row(await self._db.fetch_one(f"{_ROWS} WHERE id=?", (dub_id,)))
 
     async def upsert(self, series_id: int, season: int, episode: int, voice_key: str, label: str,
-                     chain: list[dict[str, str]], *, retry_failed: bool) -> bool:
+                     chain: list[dict[str, Any]], *, offer: bool) -> bool:
         """Plan a voice-over: a new row is created; an existing one takes the fresh chain only where nothing was done
         yet. A row that is downloading, ready or further is left alone. An empty chain is a failure.
 
-        With `retry_failed` (an explicit sync) a row that failed or waits is offered again from its main source. Without
-        it a failed row is left alone, except one that failed for want of any source and now has one: nothing was
-        tried, so nothing is retried. True when the row was created or taken over."""
+        A new row is not admitted to download: a sync of the series admits it (`admit`). With `offer` (that sync) a row
+        that failed or waits is offered again from its main candidate. Without it a failed row is left alone, except one
+        that failed for want of any source and now has one: nothing was tried, so nothing is retried. A waiting row
+        keeps the file it was linked to only while its chain is the same. True when the row was created or taken over."""
         status = S.PENDING.value if chain else S.FAILED.value
         error = None if chain else NOT_IN_ANY_SOURCE
         marks, steps = _in(lifecycle.OFFER.sources)
-        if retry_failed:
+        if offer:
             where, extra = f"voice_dubs.status {marks}", steps
         else:
             where = ("((voice_dubs.status = ? AND voice_dubs.attempt = 0 AND (voice_dubs.chain IS NOT excluded.chain "
@@ -133,27 +180,35 @@ class VoicesRepository:
             extra = (S.PENDING.value, S.FAILED.value, NOT_IN_ANY_SOURCE, S.PENDING.value)
         return bool(await self._db.execute(
             "INSERT INTO voice_dubs (series_id, season, episode, voice_key, "
-            "voice_label, chain, status, error, updated_at) VALUES (?,?,?,?,?,?,?,?,?) "
+            "voice_label, chain, status, error, updated_at, admitted) VALUES (?,?,?,?,?,?,?,?,?,0) "
             "ON CONFLICT (series_id, season, episode, voice_key) DO UPDATE SET "
             "voice_label=excluded.voice_label, "
             "chain=excluded.chain, attempt=0, status=excluded.status, error=excluded.error, "
+            "file_id=CASE WHEN voice_dubs.status = ? AND voice_dubs.chain = excluded.chain "
+            "THEN voice_dubs.file_id END, "
             f"updated_at=excluded.updated_at WHERE {where}",
             (series_id, season, episode, voice_key, label,
-             json.dumps(chain, ensure_ascii=False), status, error, _now(), *extra)))
+             json.dumps(chain, ensure_ascii=False), status, error, _now(), S.PENDING.value, *extra)))
+
+    async def admit(self, series_id: int, planned: Iterable[tuple[int, int, str]]) -> None:
+        """A sync of the series was asked for: the voice-overs it plans may be downloaded."""
+        await self._db.execute_many([(
+            "UPDATE voice_dubs SET admitted=1 WHERE series_id=? AND season=? AND episode=? AND voice_key=? "
+            "AND admitted=0", (series_id, season, episode, key)) for season, episode, key in planned])
+
+    async def relabel(self, series_id: int, season: int, episode: int, voice_key: str, label: str) -> bool:
+        """The layout calls a recorded voice-over by another name (a group was made or renamed): the key stays."""
+        return bool(await self._db.execute(
+            "UPDATE voice_dubs SET voice_label=?, updated_at=? WHERE series_id=? AND season=? AND episode=? "
+            "AND voice_key=? AND voice_label != ?", (label, _now(), series_id, season, episode, voice_key, label)))
 
     async def pending(self, series_id: int | None = None) -> list[dict[str, Any]]:
-        """Waiting voice-overs of the series a sync was asked for: a planned row of any other waits for it."""
-        where, args = ("WHERE status=?", (S.PENDING.value,))
+        """Waiting voice-overs that a sync admitted; a planned row that was not admitted waits for one."""
+        where, args = ("WHERE status=? AND admitted=1", (S.PENDING.value,))
         if series_id is not None:
-            where, args = ("WHERE status=? AND series_id=?", (S.PENDING.value, series_id))
-        rows = await self._db.fetch_all(
-            f"SELECT * FROM voice_dubs {where} AND series_id IN (SELECT series_id FROM voice_series) ORDER BY id", args)
+            where, args = ("WHERE status=? AND admitted=1 AND series_id=?", (S.PENDING.value, series_id))
+        rows = await self._db.fetch_all(f"{_ROWS} {where} ORDER BY id", args)
         return [self._row(row) for row in rows]
-
-    async def allow_series(self, series_id: int) -> None:
-        """A sync of the series was asked for: its waiting voice-overs may be downloaded, from now on and after a restart."""
-        await self._db.execute("INSERT INTO voice_series (series_id, allowed_at) VALUES (?, ?) "
-                               "ON CONFLICT (series_id) DO NOTHING", (series_id, _now()))
 
     async def claim_download(self, dub_id: int, temp_path: str) -> bool:
         """Take a waiting voice-over for download; False when someone else has already taken it."""
@@ -172,38 +227,59 @@ class VoicesRepository:
 
     async def advance(self, dub_id: int, error: str) -> bool:
         """The current source failed: the next one of the chain is tried."""
-        return await self._move(lifecycle.RETRY, "attempt=attempt+1, error=?", (error,), "id=?", (dub_id,))
+        return await self._move(lifecycle.RETRY, "attempt=attempt+1, error=?, file_id=NULL", (error,), "id=?",
+                                (dub_id,))
 
     async def mark_failed(self, dub_id: int, error: str) -> bool:
         return await self._move(lifecycle.FAIL, "move_from=NULL, error=?", (error,), "id=?", (dub_id,))
 
     async def requeue_interrupted(self) -> int:
+        """After a restart no download is under way: voice-overs and files that were downloading wait again."""
         marks, steps = _in(lifecycle.RETRY.sources)
+        await self._db.execute("UPDATE voice_files SET status=? WHERE status=?", (S.PENDING.value, S.DOWNLOADING.value))
         return await self._db.execute(
             f"UPDATE voice_dubs SET status=? WHERE status {marks}", (lifecycle.RETRY.target.value, *steps))
+
+    async def _atomically(self, statements: list[tuple[str, tuple]], *, files: bool = True) -> None:
+        """The statements in one transaction, and with them the release of the files they leave without a reader."""
+        def work(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+            conn.execute("BEGIN IMMEDIATE")
+            for query, params in statements:
+                conn.execute(query, tuple(params))
+            return _release_idle(conn) if files else []
+        self._cancel_transfers(await self._db.transaction(work))
 
     async def drop_unplanned(self, series_id: int, planned: set[tuple[int, int, str]],
                              keep: Collection[tuple[int, int]] = ()) -> list[dict[str, Any]]:
         """Rows of voice-overs that left the plan before any work was done on them, or after it failed; returns
         what was removed. Whatever such a row still points at goes to the cleanup journal with it. The rows of the
-        episodes in `keep` stay: their plan is not known at the moment."""
+        episodes in `keep` stay: their plan is not known at the moment. A row that waits on a file whose transfer is
+        under way leaves too: the transfer belongs to the file, which is released when it ends."""
         gone = [row for row in await self.for_series(series_id)
                 if (row["season"], row["episode"], row["voice_key"]) not in planned
                 and (row["season"], row["episode"]) not in keep
-                and row["status"] in lifecycle.OFFER.sources]
+                and (row["status"] in lifecycle.OFFER.sources
+                     or (row["status"] == S.DOWNLOADING and row["file_id"] is not None))]
         for row in gone:
-            await self._db.execute_many([*_hand_over("id=?", (row["id"],)),
-                                         ("DELETE FROM voice_dubs WHERE id=?", (row["id"],))])
+            await self._atomically([*_hand_over("id=?", (row["id"],)),
+                                    ("DELETE FROM voice_dubs WHERE id=?", (row["id"],))])
         return gone
 
     async def mark_pending(self, dub_id: int, error: str) -> bool:
         return await self._move(lifecycle.FILE_LOST, "attempt=0, error=?", (error,), "id=?", (dub_id,))
 
     async def delete_for_series(self, series_id: int, folders: Iterable[str] = ()) -> None:
-        """The series is gone: its rows, with the jobs they wait for and the `folders` to remove, go to the journal."""
-        await self._db.execute_many([*_hand_over("series_id=?", (series_id,), files=False), *_folders(folders),
-                                     ("DELETE FROM voice_dubs WHERE series_id=?", (series_id,)),
-                                     ("DELETE FROM voice_series WHERE series_id=?", (series_id,))])
+        """The series is gone: its rows, with the jobs they wait for, its files and the `folders` to remove, go to
+        the journal."""
+        def work(conn: sqlite3.Connection) -> None:
+            conn.execute("BEGIN IMMEDIATE")
+            for query, params in [*_hand_over("series_id=?", (series_id,), files=False), *_folders(folders)]:
+                conn.execute(query, tuple(params))
+            for file in conn.execute("SELECT id, temp_path FROM voice_files WHERE series_id=?", (series_id,)).fetchall():
+                _journal_file(conn, file["temp_path"])
+            conn.execute("DELETE FROM voice_dubs WHERE series_id=?", (series_id,))
+            conn.execute("DELETE FROM voice_files WHERE series_id=?", (series_id,))
+        await self._db.transaction(work)
 
     async def next_epoch(self) -> int:
         """The number of this run of the module: kept in the database and raised at every start."""
@@ -220,7 +296,7 @@ class VoicesRepository:
         return [row["series_id"] for row in rows]
 
     async def by_job(self, job_id: str) -> list[dict[str, Any]]:
-        rows = await self._db.fetch_all("SELECT * FROM voice_dubs WHERE job_id=? ORDER BY id", (job_id,))
+        rows = await self._db.fetch_all(f"{_ROWS} WHERE job_id=? ORDER BY id", (job_id,))
         return [self._row(row) for row in rows]
 
     async def aligning_jobs(self) -> list[str]:
@@ -256,7 +332,7 @@ class VoicesRepository:
         return [row["submit_key"] for row in rows]
 
     async def by_key(self, key: str) -> list[dict[str, Any]]:
-        rows = await self._db.fetch_all("SELECT * FROM voice_dubs WHERE submit_key=? ORDER BY id", (key,))
+        rows = await self._db.fetch_all(f"{_ROWS} WHERE submit_key=? ORDER BY id", (key,))
         return [self._row(row) for row in rows]
 
     async def mark_aligned(self, dub_id: int, aligned_path: str) -> bool:
@@ -287,7 +363,7 @@ class VoicesRepository:
         marks, steps = _in(lifecycle.RESTART.sources)
         return await self._move(
             lifecycle.RESTART, "attempt=0, job_id=NULL, submit_key=NULL, out_dir=NULL, ref_uid=NULL, ref_path=NULL, "
-            "aligned_path=NULL, output_path=NULL, move_from=NULL, temp_path=NULL, outcome=NULL, error=?",
+            "aligned_path=NULL, output_path=NULL, move_from=NULL, temp_path=NULL, file_id=NULL, outcome=NULL, error=?",
             (reason,), "id=?", (dub_id,), before=_hand_over(f"id=? AND status {marks}", (dub_id, *steps)))
 
     async def set_output(self, dub_id: int, output_path: str, ref_path: str) -> None:
@@ -320,8 +396,8 @@ class VoicesRepository:
     async def drop_episode(self, series_id: int, season: int, episode: int, folders: Iterable[str]) -> None:
         """An episode left the plan: its rows go, and everything they owned, with the `folders`, to the journal."""
         where, args = "series_id=? AND season=? AND episode=?", (series_id, season, episode)
-        await self._db.execute_many([*_hand_over(where, args), *_folders(folders),
-                                     (f"DELETE FROM voice_dubs WHERE {where}", args)])
+        await self._atomically([*_hand_over(where, args), *_folders(folders),
+                                (f"DELETE FROM voice_dubs WHERE {where}", args)])
 
     async def hand_over_jobs(self, series_id: int, season: int, episode: int) -> None:
         """The jobs of an episode that is settled go to the journal: the service drops their records and the
@@ -330,6 +406,88 @@ class VoicesRepository:
 
     async def settle_episode(self, series_id: int, season: int, episode: int, folders: Iterable[str]) -> None:
         """The episode is done: its temporary `folders` go to the journal as its rows let go of their files."""
-        await self._db.execute_many([*_folders(folders), (
-            "UPDATE voice_dubs SET temp_path=NULL, aligned_path=NULL "
+        await self._atomically([*_folders(folders), (
+            "UPDATE voice_dubs SET temp_path=NULL, aligned_path=NULL, file_id=NULL "
             "WHERE series_id=? AND season=? AND episode=?", (series_id, season, episode))])
+
+    # --- the files of source rows that cover several episodes -------------------------------------------------------
+
+    async def by_file(self, file_id: int) -> list[dict[str, Any]]:
+        rows = await self._db.fetch_all(f"{_ROWS} WHERE file_id=? ORDER BY id", (file_id,))
+        return [self._row(row) for row in rows]
+
+    async def file(self, file_id: int) -> dict[str, Any] | None:
+        return await self._db.fetch_one("SELECT * FROM voice_files WHERE id=?", (file_id,))
+
+    async def files_of(self, series_id: int) -> list[dict[str, Any]]:
+        return await self._db.fetch_all("SELECT * FROM voice_files WHERE series_id=? ORDER BY id", (series_id,))
+
+    async def join_file(self, dub_id: int, series_id: int, source_id: int, row_key: str, url: str,
+                        path_of: Callable[[int], str]) -> dict[str, Any] | None:
+        """The waiting voice-over takes the file of a source row for its download: the file is made if there is none,
+        the voice-over is linked to it (downloading, or ready when the file is on disk already) and the file is claimed
+        for download when nobody has it. The waiting voice-overs of the series whose current candidate is this file are
+        linked too, so that the file stays until the last of them is done. None when the voice-over is not waiting any more;
+        else the file, with `claimed` true for the caller that has to send the download."""
+        def work(conn: sqlite3.Connection) -> dict[str, Any] | None:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("SELECT 1 FROM voice_dubs WHERE id=? AND status=?", (dub_id, S.PENDING.value)).fetchone() is None:
+                return None  # the voice-over is gone or taken: no file is made for nobody
+            where = "WHERE series_id=? AND source_id=? AND row_key=? AND url=?"
+            found = conn.execute(f"SELECT * FROM voice_files {where}", (series_id, source_id, row_key, url)).fetchone()
+            if found is None:
+                conn.execute("INSERT INTO voice_files (series_id, source_id, row_key, url, status, updated_at) "
+                             "VALUES (?,?,?,?,?,?)", (series_id, source_id, row_key, url, S.PENDING.value, _now()))
+                found = conn.execute(f"SELECT * FROM voice_files {where}", (series_id, source_id, row_key, url)).fetchone()
+            file = dict(found)
+            target = S.READY.value if file["status"] == S.READY.value else S.DOWNLOADING.value
+            if not conn.execute("UPDATE voice_dubs SET status=?, file_id=?, error=NULL, updated_at=? "
+                                "WHERE id=? AND status=?", (target, file["id"], _now(), dub_id,
+                                                            S.PENDING.value)).rowcount:
+                return None
+            file["claimed"] = file["status"] in (S.PENDING.value, S.FAILED.value)
+            if file["claimed"]:
+                file["temp_path"] = file["temp_path"] or path_of(file["id"])
+                conn.execute("UPDATE voice_files SET status=?, attempt=attempt+1, error=NULL, temp_path=?, "
+                             "updated_at=? WHERE id=?", (S.DOWNLOADING.value, file["temp_path"], _now(), file["id"]))
+                file["status"] = S.DOWNLOADING.value
+            conn.execute(
+                "UPDATE voice_dubs SET file_id=? WHERE series_id=? AND status=? AND file_id IS NULL AND id != ? "
+                "AND json_extract(chain, '$[' || attempt || '].file.source_id') = ? "
+                "AND json_extract(chain, '$[' || attempt || '].file.row_key') = ? "
+                "AND json_extract(chain, '$[' || attempt || '].url') = ?",
+                (file["id"], series_id, S.PENDING.value, dub_id, source_id, row_key, url))
+            return file
+        return await self._db.transaction(work)
+
+    async def finish_file(self, file_id: int, ok: bool, error: str | None) -> list[dict[str, Any]] | None:
+        """The transfer of a file ended. The file becomes ready, or failed with the error; the voice-overs that waited
+        on its transfer are returned (ready now, or still downloading for the caller to move to their next candidate).
+        None when the file is not downloading: a late or repeated ending."""
+        def work(conn: sqlite3.Connection) -> list[dict[str, Any]] | None:
+            conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute("UPDATE voice_files SET status=?, error=?, updated_at=? WHERE id=? AND status=?",
+                                (S.READY.value if ok else S.FAILED.value, None if ok else error, _now(), file_id,
+                                 S.DOWNLOADING.value)).rowcount:
+                return None
+            if ok:
+                conn.execute("UPDATE voice_dubs SET status=?, error=NULL, updated_at=? WHERE file_id=? AND status=?",
+                             (S.READY.value, _now(), file_id, S.DOWNLOADING.value))
+            ids = [row["id"] for row in conn.execute("SELECT id FROM voice_dubs WHERE file_id=? AND status=?", (
+                file_id, S.READY.value if ok else S.DOWNLOADING.value))]
+            return ids
+        ids = await self._db.transaction(work)
+        return None if ids is None else [await self.get(each) for each in ids]
+
+    async def file_lost(self, file_id: int) -> None:
+        """The file is gone from the disk: it is downloaded again by the voice-overs that read it."""
+        await self._db.execute("UPDATE voice_files SET status=?, updated_at=? WHERE id=? AND status=?",
+                               (S.PENDING.value, _now(), file_id, S.READY.value))
+
+    async def release_idle_files(self) -> list[dict[str, Any]]:
+        """Files no voice-over reads any more go to the cleanup journal, each with its row deleted in the same
+        transaction; the transfer of one that is downloading is cancelled. Returns what was released."""
+        def work(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+            conn.execute("BEGIN IMMEDIATE")
+            return _release_idle(conn)
+        return self._cancel_transfers(await self._db.transaction(work))

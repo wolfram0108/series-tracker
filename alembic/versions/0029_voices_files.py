@@ -1,12 +1,14 @@
-"""voices: voice-overs are planned from the layout, which has no site episode; a sync of a series is remembered.
+"""voices: voice-overs are planned from the layout; the video of a source row that covers several episodes is a file.
 
-Step one of the package: `voice_dubs.site_episode` goes (the episode of a voice-over is the layout's, in `season` and
-`episode`; the other columns and every row stay as they are), and `voice_series` keeps the series a sync was asked for,
-the only ones whose waiting voice-overs are downloaded. A series that already has voice-overs is entered in it, so
-that what was waiting before the migration goes on. Step two adds `voice_files` (the file of a source row shared by
-the episodes of a compilation).
+`voice_dubs.site_episode` goes (the episode of a voice-over is the layout's, in `season` and `episode`). `admitted` says
+that a sync of the series released the row to download; the rows that exist are admitted, they were downloading under
+the old rule. `file_id` links a voice-over to a row of `voice_files`: the video of a source row that covers several
+episodes (a compilation), downloaded once and read by the voice-overs of all of them. A file is one row per
+(series, source, row key, address); its folder is journaled when no voice-over reads it any more.
 
-downgrade brings `site_episode` back as 0: the numbers it held cannot come back.
+The other columns and every row stay as they are. downgrade drops the file rows and journals the files they held; a
+voice-over that was downloading or waiting on such a file goes back to waiting. `site_episode` comes back as 0: the
+numbers it held cannot come back.
 """
 from alembic import op
 
@@ -19,14 +21,33 @@ depends_on = None
 def upgrade() -> None:
     op.execute("ALTER TABLE voice_dubs DROP COLUMN site_episode")
     op.execute(
-        "CREATE TABLE voice_series ("
-        " series_id INTEGER PRIMARY KEY REFERENCES series (id),"
-        " allowed_at DATETIME NOT NULL)")
-    op.execute(
-        "INSERT INTO voice_series (series_id, allowed_at) "
-        "SELECT DISTINCT series_id, strftime('%Y-%m-%d %H:%M:%f', 'now') FROM voice_dubs")
+        "CREATE TABLE voice_files ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " series_id INTEGER NOT NULL REFERENCES series (id),"
+        " source_id INTEGER NOT NULL,"
+        " row_key TEXT NOT NULL,"
+        " url TEXT NOT NULL,"
+        " status TEXT NOT NULL DEFAULT 'pending',"
+        " attempt INTEGER NOT NULL DEFAULT 0,"
+        " temp_path TEXT,"
+        " error TEXT,"
+        " updated_at DATETIME NOT NULL,"
+        " UNIQUE (series_id, source_id, row_key, url))")
+    op.execute("CREATE INDEX ix_voice_files_series ON voice_files (series_id)")
+    op.execute("ALTER TABLE voice_dubs ADD COLUMN admitted INTEGER NOT NULL DEFAULT 1")
+    op.execute("ALTER TABLE voice_dubs ADD COLUMN file_id INTEGER")
+    op.execute("CREATE INDEX ix_voice_dubs_file ON voice_dubs (file_id)")
 
 
 def downgrade() -> None:
-    op.execute("DROP TABLE voice_series")
+    op.execute(
+        "INSERT OR IGNORE INTO voice_cleanup (path, kind, error, updated_at) "
+        "SELECT temp_path, 'path', 'handed over', strftime('%Y-%m-%d %H:%M:%f', 'now') "
+        "FROM voice_files WHERE temp_path IS NOT NULL")
+    op.execute("UPDATE voice_dubs SET status='pending', attempt=0 "
+               "WHERE file_id IS NOT NULL AND status IN ('downloading', 'ready')")
+    op.execute("DROP INDEX ix_voice_dubs_file")
+    op.execute("ALTER TABLE voice_dubs DROP COLUMN file_id")
+    op.execute("ALTER TABLE voice_dubs DROP COLUMN admitted")
+    op.execute("DROP TABLE voice_files")
     op.execute("ALTER TABLE voice_dubs ADD COLUMN site_episode INTEGER NOT NULL DEFAULT 0")
