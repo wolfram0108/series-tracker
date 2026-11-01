@@ -21,3 +21,14 @@
 | `run3_players/vibix__{praktikuia-ci-sto-tysiac-let,asura-bezumnyi-korol-2}__api_envelope.json`, `__api_decoded.json` | каталог Vibix: ответ API как пришёл и расшифрованный | браузер firefox (Playwright), `capture_with_browser`, ключ `torrent_cache/vibix-key.json` (не изменён) |
 | `run4_kodik_durations.jsonl` | длительность потоков пунктов Kodik «1 серия», «108 серия», «109-110 серия», «1-3 серия», «49-55 серия» | `KodikPlayer.fetch` + `ffprobe` потока 360p |
 | `run5_cvh_durations.jsonl` | длительность видео CVH серий 108–110 озвучек AniMy и AniStar | `GET …/player/sv/video/<vkId>` |
+
+## Результаты измерений на стенде (2026-11-01 и 2026-11-02)
+
+| Файл | Что | Как снято |
+|---|---|---|
+| `measurements/M-7__*.jsonl`, `M-8__*.jsonl`, `M-9__*.jsonl` | чтение страницы источника: время до сигнала конца, состояние, плееры, строки, группы, озвучки | `tools/collectors/stand.py table` |
+| `measurements/M-20__*.jsonl` | сериалы копии прода после миграций: вид, источники, удаление видео-сериала | `stand.py series` |
+| `measurements/M-27__*.jsonl`, `M-27__*.png` | шаги пути в браузере; снимок экрана при сбое | `tools/collectors/ui_journey.py` |
+| `measurements/M-29__*.jsonl` | находки шкалы ширин: окно, вид находки, элемент, диапазон ширин | `tools/collectors/ui_layout_scale.py` |
+| `measurements/stand__*.log`, `stand__*__<группа>.log` | журнал подпроцесса стенда и журналы модулей по группам | `Stand.__exit__` |
+

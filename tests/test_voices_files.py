@@ -203,7 +203,12 @@ async def test_a_file_that_cannot_be_downloaded_sends_every_voice_over_to_its_ne
     by_episode = {r["episode"]: r for r in await rows(probe)}
     assert by_episode[1]["status"] == by_episode[2]["status"] == "downloading" and by_episode[1]["attempt"] == 1
     assert by_episode[3]["status"] == "failed" and by_episode[3]["error"] == "gone"
-    assert await files(voices) == []  # nobody reads the failed file: it went with the last that gave it up
+
+    async def freed():
+        return await files(voices) == []
+
+    # Nobody reads the failed file: it goes with the last that gave it up, a step after that voice-over is marked failed.
+    await until_true(freed, "the failed file was not freed")
 
 
 @pytest.mark.asyncio
