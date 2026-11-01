@@ -136,13 +136,14 @@ class Journey:
         buttons = first.locator("button").all_inner_texts()
         assert text_of("output.levers.show") in buttons[0], f"buttons of the first episode: {buttons}"
         first.locator("button").first.click()
-        select = first.locator(".lever-choice select")
-        options = select.locator("option").count()
-        assert options >= 3, f"reference options {options}"
+        # The levers are a grid: a column per voice-over group, in it the variants (source and player) with the mark "реф".
+        variants = first.locator(".voice-column .variant-reference:not(:disabled)")
+        options = variants.count()
+        assert options >= 2, f"variants that can be the reference {options}"
         self.open_output(second, SERIES_NAME, base)
         second.wait_for_selector(".output-episode .episode-marks li", timeout=30000)
         second.on("request", lambda request: self.requests_of_second_window.append(f"{request.method} {request.url}"))
-        select.select_option(index=2)
+        variants.nth(1).click()
         second.locator(".output-episode").first.locator(".episode-marks li", has_text=text_of("output.mark.own")).wait_for(timeout=20000)
         page.locator(".output-episode").first.locator(".episode-marks li", has_text=text_of("output.mark.own")).wait_for(timeout=20000)
         self.step("Ж-8 ручной выбор референса серии; второе окно увидело его событием", options=options)
