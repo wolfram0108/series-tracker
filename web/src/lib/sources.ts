@@ -169,6 +169,12 @@ export function sourceTypeOf(reply: ResolveReply): SourceType | null {
   return reply.site === CHANNEL_SITE ? "vk_video" : "web_video"
 }
 
+/** Whether the reading of a page ended after the answer in hand was taken: that answer said `reading`, and the news of
+ *  the page is a result later than the one the answer already knew. Such news asks the core again, reading nothing. */
+export function readEnded(asked: { state: TableState } | null, news: PageStatus | null, handled: PageStatus | null): boolean {
+  return asked?.state === "reading" && news !== null && news !== handled && news.state !== "reading"
+}
+
 export function vkModeOf(value: string | null | undefined): VkMode {
   return VK_MODES.find((mode) => mode === value) ?? "search"
 }

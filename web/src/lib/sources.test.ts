@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   draftBody, heightText, itemOfSource, joinVkAddress, phaseText, playerCaption, profileOptions, progressText,
-  readOptions, seasonPositions, siteOf, sourceCaption, sourceTypeOf, splitVkAddress, stepsText, summaryOf, togglePlayer,
+  readEnded, readOptions, seasonPositions, siteOf, sourceCaption, sourceTypeOf, splitVkAddress, stepsText, summaryOf, togglePlayer,
   viewOf, vkModeOf, type PlayerSummary, type SeriesSource, type SourceSummary,
 } from "./sources"
 import type { PageStatus } from "../stores/sourceTables"
@@ -200,5 +200,23 @@ describe("the sources of a stored series", () => {
 
   it("makes an item of a source whose table is not in yet", () => {
     expect(itemOfSource({ ...stored, players_off: undefined }, null, null).view).toMatchObject({ state: "waiting", players: [] })
+  })
+})
+
+describe("readEnded", () => {
+  const was: PageStatus = { state: "reading", progress: null, reason: null, readAt: null }
+  const done: PageStatus = { state: "ready", progress: null, reason: null, readAt: "2026-11-01T10:00:00Z" }
+
+  it("asks again only for a page that was being read when the answer was taken and whose read has a later result", () => {
+    expect(readEnded({ state: "reading" }, done, null)).toBe(true)
+    expect(readEnded({ state: "reading" }, { ...done, state: "failed" }, was)).toBe(true)
+  })
+
+  it("does not ask for news the answer already knew, for a read still going on, or for an answer that was not reading", () => {
+    expect(readEnded({ state: "reading" }, done, done)).toBe(false)
+    expect(readEnded({ state: "reading" }, was, null)).toBe(false)
+    expect(readEnded({ state: "reading" }, null, null)).toBe(false)
+    expect(readEnded({ state: "ready" }, done, null)).toBe(false)
+    expect(readEnded(null, done, null)).toBe(false)
   })
 })

@@ -1,7 +1,7 @@
 {
   "App.vue": 10,
   "Gallery.vue": 161,
-  "components/AddSeriesModal.vue": 54,
+  "components/AddSeriesModal.vue": 53,
   "components/AppHeader.vue": 7,
   "components/ConfirmDialog.vue": 2,
   "components/LoginModal.vue": 7,
@@ -18,7 +18,6 @@
   "components/settings/DatabaseViewerModal.vue": 7,
   "components/settings/ParserPatternEditor.vue": 17,
   "components/settings/ParserRuleCard.vue": 37,
-  "components/settings/ParserTest.vue": 27,
   "components/settings/SettingsAccount.vue": 12,
   "components/settings/SettingsAgents.vue": 11,
   "components/settings/SettingsAuth.vue": 9,

@@ -4,7 +4,7 @@
   "path": "/",
   "func": "index",
   "file": "modules/gateway/module.py",
-  "line": 348,
+  "line": 351,
   "access": "public",
   "conditional": null,
   "summary": "Боевой фронт панели (web/dist/index.html)",
@@ -15,7 +15,7 @@
   "path": "/api/_diag/echo",
   "func": "diag_echo",
   "file": "modules/gateway/module.py",
-  "line": 314,
+  "line": 317,
   "access": "session",
   "conditional": "diag",
   "summary": "Диагностический прокси к шине (только при diag=True)",
@@ -81,7 +81,7 @@
   "conditional": null,
   "summary": "Статус онбординга: настроен ли админ, вошёл ли клиент",
   "panel_sites": [
-   "main.ts:71"
+   "main.ts:73"
   ]
  },
  {
@@ -342,9 +342,7 @@
   "access": "session",
   "conditional": null,
   "summary": "Игнор одного медиа-элемента",
-  "panel_sites": [
-   "components/status/StatusVkComposition.vue:403"
-  ]
+  "panel_sites": []
  },
  {
   "method": "POST",
@@ -393,10 +391,8 @@
   "conditional": null,
   "summary": "Разбор страницы торрент-трекера: заголовок, раздачи, трекер; страница сайта — отказ not_a_torrent_page",
   "panel_sites": [
-   "components/AddSeriesModal.vue:348",
-   "components/AddSeriesModal.vue:374",
-   "components/status/StatusProperties.vue:126",
-   "composables/useWebSources.ts:103"
+   "components/AddSeriesModal.vue:272",
+   "components/status/StatusProperties.vue:122"
   ]
  },
  {
@@ -409,9 +405,8 @@
   "conditional": null,
   "summary": "Список профилей парсера",
   "panel_sites": [
-   "components/AddSeriesModal.vue:572",
    "components/settings/SettingsParser.vue:81",
-   "components/status/StatusProperties.vue:230"
+   "composables/sourceCalls.ts:53"
   ]
  },
  {
@@ -432,12 +427,12 @@
   "path": "/api/parser-profiles/test",
   "func": "rules_test",
   "file": "modules/gateway/api_sources.py",
-  "line": 88,
+  "line": 94,
   "access": "session",
   "conditional": null,
   "summary": "Тест профиля правил на странице: строки для конструктора и ответ на каждую (composition.preview)",
   "panel_sites": [
-   "components/settings/ParserTest.vue:212"
+   "composables/rulesTestCalls.ts:14"
   ]
  },
  {
@@ -541,7 +536,7 @@
   "conditional": null,
   "summary": "Предпросмотр нейминга: команда torrents.preview.fetch, ответ сразу",
   "panel_sites": [
-   "components/AddSeriesModal.vue:445"
+   "components/AddSeriesModal.vue:332"
   ]
  },
  {
@@ -593,7 +588,7 @@
   "conditional": null,
   "summary": "Список сериалов",
   "panel_sites": [
-   "stores/series.ts:34"
+   "stores/series.ts:38"
   ]
  },
  {
@@ -606,7 +601,7 @@
   "conditional": null,
   "summary": "Создание серии",
   "panel_sites": [
-   "components/AddSeriesModal.vue:558"
+   "components/AddSeriesModal.vue:441"
   ]
  },
  {
@@ -643,10 +638,8 @@
   "conditional": null,
   "summary": "Карточка серии",
   "panel_sites": [
-   "components/StatusModal.vue:46",
-   "components/status/StatusComposition.vue:219",
-   "components/status/StatusVkComposition.vue:313",
-   "components/status/StatusVkComposition.vue:352"
+   "components/StatusModal.vue:45",
+   "components/status/StatusComposition.vue:220"
   ]
  },
  {
@@ -659,7 +652,7 @@
   "conditional": null,
   "summary": "Сохранение свойств серии",
   "panel_sites": [
-   "components/status/StatusProperties.vue:349"
+   "components/status/StatusProperties.vue:301"
   ]
  },
  {
@@ -672,8 +665,9 @@
   "conditional": null,
   "summary": "Композиция: раскладка видео-сериала (composition) либо состав торрента (torrents)",
   "panel_sites": [
-   "components/status/StatusComposition.vue:230",
-   "components/status/StatusVkComposition.vue:298"
+   "components/status/StatusComposition.vue:231",
+   "composables/outputCalls.ts:14",
+   "composables/sourceCalls.ts:64"
   ]
  },
  {
@@ -685,9 +679,7 @@
   "access": "session",
   "conditional": null,
   "summary": "Глубокое усыновление (фон)",
-  "panel_sites": [
-   "components/status/StatusVkComposition.vue:470"
-  ]
+  "panel_sites": []
  },
  {
   "method": "PUT",
@@ -699,7 +691,7 @@
   "conditional": null,
   "summary": "Память отключённых серий",
   "panel_sites": [
-   "components/status/StatusComposition.vue:129"
+   "components/status/StatusComposition.vue:130"
   ]
  },
  {
@@ -712,8 +704,7 @@
   "conditional": null,
   "summary": "Список игнорируемых сезонов",
   "panel_sites": [
-   "components/status/StatusComposition.vue:178",
-   "components/status/StatusVkComposition.vue:441"
+   "components/status/StatusComposition.vue:179"
   ]
  },
  {
@@ -739,42 +730,46 @@
   "access": "session",
   "conditional": null,
   "summary": "Массовый игнор сезона",
-  "panel_sites": [
-   "components/status/StatusVkComposition.vue:426"
-  ]
+  "panel_sites": []
  },
  {
   "method": "GET",
   "path": "/api/series/{series_id}/output",
   "func": "output",
   "file": "modules/gateway/api_output.py",
-  "line": 68,
+  "line": 71,
   "access": "session",
   "conditional": null,
   "summary": "Референс каждой серии и отметка (scan)",
-  "panel_sites": []
+  "panel_sites": [
+   "composables/outputCalls.ts:19"
+  ]
  },
  {
   "method": "PUT",
   "path": "/api/series/{series_id}/output/settings",
   "func": "set_output_setting",
   "file": "modules/gateway/api_output.py",
-  "line": 76,
+  "line": 79,
   "access": "session",
   "conditional": null,
   "summary": "Значение рычага выхода на уровне сериала, сезона или серии",
-  "panel_sites": []
+  "panel_sites": [
+   "composables/outputCalls.ts:28"
+  ]
  },
  {
   "method": "POST",
   "path": "/api/series/{series_id}/output/settings/reset",
   "func": "reset_output_settings",
   "file": "modules/gateway/api_output.py",
-  "line": 88,
+  "line": 91,
   "access": "session",
   "conditional": null,
   "summary": "Возврат рычагов уровня в наследование",
-  "panel_sites": []
+  "panel_sites": [
+   "composables/outputCalls.ts:34"
+  ]
  },
  {
   "method": "GET",
@@ -785,9 +780,7 @@
   "access": "session",
   "conditional": null,
   "summary": "Предпросмотр новых имён файлов",
-  "panel_sites": [
-   "components/status/StatusVkComposition.vue:305"
-  ]
+  "panel_sites": []
  },
  {
   "method": "POST",
@@ -799,7 +792,7 @@
   "conditional": null,
   "summary": "Переобработка имён файлов (вид сериала решает renaming)",
   "panel_sites": [
-   "components/status/StatusComposition.vue:256"
+   "components/status/StatusComposition.vue:257"
   ]
  },
  {
@@ -812,7 +805,8 @@
   "conditional": null,
   "summary": "Синхронный скан одной серии",
   "panel_sites": [
-   "App.vue:58"
+   "App.vue:58",
+   "composables/outputCalls.ts:24"
   ]
  },
  {
@@ -825,7 +819,7 @@
   "conditional": null,
   "summary": "Имена файлов раздач сериала для теста правил торрента",
   "panel_sites": [
-   "components/settings/ParserTest.vue:154"
+   "composables/rulesTestCalls.ts:19"
   ]
  },
  {
@@ -837,7 +831,9 @@
   "access": "session",
   "conditional": null,
   "summary": "Источники сериала по порядку",
-  "panel_sites": []
+  "panel_sites": [
+   "composables/sourceCalls.ts:58"
+  ]
  },
  {
   "method": "POST",
@@ -848,7 +844,9 @@
   "access": "session",
   "conditional": null,
   "summary": "Добавление источника сериалу (ответ {id})",
-  "panel_sites": []
+  "panel_sites": [
+   "composables/sourceCalls.ts:69"
+  ]
  },
  {
   "method": "DELETE",
@@ -859,7 +857,9 @@
   "access": "session",
   "conditional": null,
   "summary": "Удаление источника (единственный не удаляется: last_source)",
-  "panel_sites": []
+  "panel_sites": [
+   "composables/sourceCalls.ts:79"
+  ]
  },
  {
   "method": "PUT",
@@ -870,7 +870,9 @@
   "access": "session",
   "conditional": null,
   "summary": "Изменение полей источника: адрес, профиль, режим поиска, сезон Vibix, отключённые плееры, место",
-  "panel_sites": []
+  "panel_sites": [
+   "composables/sourceCalls.ts:73"
+  ]
  },
  {
   "method": "POST",
@@ -909,7 +911,7 @@
   "summary": "История раздач серии",
   "panel_sites": [
    "components/status/StatusHistory.vue:76",
-   "components/status/StatusProperties.vue:120"
+   "components/status/StatusProperties.vue:116"
   ]
  },
  {
@@ -991,7 +993,7 @@
   "conditional": null,
   "summary": "Структура логирования с флагами отладки",
   "panel_sites": [
-   "components/LogsLoggingTab.vue:25"
+   "components/LogsLoggingTab.vue:20"
   ]
  },
  {
@@ -1004,7 +1006,7 @@
   "conditional": null,
   "summary": "Включение/выключение отладочного логирования",
   "panel_sites": [
-   "components/LogsLoggingTab.vue:41"
+   "components/LogsLoggingTab.vue:35"
   ]
  },
  {
@@ -1185,6 +1187,19 @@
   "access": "session",
   "conditional": null,
   "summary": "Что показать окну об адресе, который ещё не источник: состояние таблицы, сводка, строки для конструктора",
+  "panel_sites": [
+   "composables/sourceCalls.ts:49"
+  ]
+ },
+ {
+  "method": "POST",
+  "path": "/api/sources/read",
+  "func": "read_source",
+  "file": "modules/gateway/api_sources.py",
+  "line": 88,
+  "access": "session",
+  "conditional": null,
+  "summary": "",
   "panel_sites": []
  },
  {
@@ -1196,19 +1211,21 @@
   "access": "session",
   "conditional": null,
   "summary": "Какой сайт читает адрес и его канонический вид (без сети)",
-  "panel_sites": []
+  "panel_sites": [
+   "composables/sourceCalls.ts:39"
+  ]
  },
  {
   "method": "GET",
   "path": "/api/stream",
   "func": "stream",
   "file": "modules/gateway/module.py",
-  "line": 308,
+  "line": 311,
   "access": "session",
   "conditional": null,
   "summary": "SSE-поток событий шины",
   "panel_sites": [
-   "composables/useSSE.ts:51"
+   "composables/useSSE.ts:55"
   ]
  },
  {
@@ -1221,8 +1238,8 @@
   "conditional": null,
   "summary": "Детали сериала TMDB",
   "panel_sites": [
-   "components/AddSeriesModal.vue:468",
-   "components/status/StatusProperties.vue:250"
+   "components/AddSeriesModal.vue:355",
+   "components/status/StatusProperties.vue:222"
   ]
  },
  {
@@ -1235,8 +1252,8 @@
   "conditional": null,
   "summary": "Поиск сериала в TMDB",
   "panel_sites": [
-   "components/AddSeriesModal.vue:455",
-   "components/status/StatusProperties.vue:240"
+   "components/AddSeriesModal.vue:342",
+   "components/status/StatusProperties.vue:212"
   ]
  },
  {
@@ -1296,7 +1313,7 @@
   "path": "/favicon.svg",
   "func": "favicon",
   "file": "modules/gateway/module.py",
-  "line": 374,
+  "line": 377,
   "access": "public",
   "conditional": null,
   "summary": "Фавикон",
@@ -1307,7 +1324,7 @@
   "path": "/legacy",
   "func": "legacy",
   "file": "modules/gateway/module.py",
-  "line": 353,
+  "line": 356,
   "access": "public",
   "conditional": null,
   "summary": "Старый фронт (откат), ассеты по /static",
@@ -1318,7 +1335,7 @@
   "path": "/v2",
   "func": "v2_redirect",
   "file": "modules/gateway/module.py",
-  "line": 362,
+  "line": 365,
   "access": "public",
   "conditional": null,
   "summary": "Редирект 307 на корень",
@@ -1329,7 +1346,7 @@
   "path": "/v2/",
   "func": "v2_redirect",
   "file": "modules/gateway/module.py",
-  "line": 362,
+  "line": 365,
   "access": "public",
   "conditional": null,
   "summary": "Редирект 307 на корень",

@@ -1,13 +1,14 @@
 import { computed, onMounted, ref, watch } from "vue"
 import { t } from "../i18n"
 import {
-  draftBody, itemOfSource, joinVkAddress, readOptions, sourceTypeOf, splitVkAddress, summaryOf, vkModeOf,
+  draftBody, itemOfSource, readOptions, summaryOf, vkModeOf,
   type SeriesSource, type SourceItem, type SourceSummary,
 } from "../lib/sources"
 import { useCompositionStore } from "../stores/composition"
 import { useSourceTablesStore } from "../stores/sourceTables"
 import { useSSE } from "./useSSE"
 import { changeSource, createSource, fetchSources, fetchSummaries, removeSource, resolveAddress } from "./sourceCalls"
+import { typeAddress } from "./sourceAddress"
 import type { DraftPatch } from "./useSourceDrafts"
 
 /**
@@ -67,12 +68,10 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     const address = raw.trim()
     if (!address) return false
     error.value = ""
-    const resolved = await resolveAddress(address)
-    if (!resolved.ok) return refused(resolved.text)
-    const sourceType = sourceTypeOf(resolved.data)
-    if (sourceType === null) return refused(t("sources.add.notSite"))
-    const vk = sourceType === "vk_video" ? splitVkAddress(address) : null
-    const url = vk ? joinVkAddress(vk.channel, vk.query) : (resolved.data.canonical_url ?? address)
+    const typed = await typeAddress(address)
+    if (typed.kind === "refused") return refused(typed.text)
+    if (typed.kind === "other") return refused(t("sources.add.notSite"))
+    const { sourceType, url } = typed
     const done = await act(() => createSource(seriesId, draftBody({
       url, sourceType, profileId: null, vkSearchMode: vkModeOf(null), vibixSeason: null, playersOff: [],
     })))

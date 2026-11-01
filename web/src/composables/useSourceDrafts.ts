@@ -1,11 +1,12 @@
 import { computed, ref, watch } from "vue"
 import { t } from "../i18n"
 import {
-  draftBody, joinVkAddress, readOptions, sourceTypeOf, splitVkAddress, viewOf, vkModeOf,
+  draftBody, readOptions, readEnded, viewOf, vkModeOf,
   type PreviewReply, type SourceDraft, type SourceItem, type SourceSummary, type SourceType,
 } from "../lib/sources"
 import { useSourceTablesStore, type PageStatus } from "../stores/sourceTables"
-import { previewAddress, resolveAddress } from "./sourceCalls"
+import { previewAddress } from "./sourceCalls"
+import { typeAddress } from "./sourceAddress"
 import { useSSE } from "./useSSE"
 
 interface Draft {
@@ -79,9 +80,7 @@ export function useSourceDrafts() {
 
   /** A read that ended while the answer was on its way, or after it, asks the preview again once. */
   async function settle(draft: Draft): Promise<void> {
-    const news = tables.forUrl(draft.canonical)
-    if (draft.asked?.state !== "reading" || !news || news === draft.handled || news.state === "reading") return
-    await ask(draft, false)
+    if (readEnded(draft.asked, tables.forUrl(draft.canonical), draft.handled)) await ask(draft, false)
   }
 
   watch(() => tables.pages, () => {
@@ -101,12 +100,9 @@ export function useSourceDrafts() {
     if (!address) return { kind: "refused", text: "" }
     busy.value = true
     try {
-      const answer = await resolveAddress(address)
-      if (!answer.ok) return { kind: "refused", text: answer.text }
-      const sourceType = sourceTypeOf(answer.data)
-      if (sourceType === null) return { kind: "other" }
-      const vk = sourceType === "vk_video" ? splitVkAddress(address) : null
-      const url = vk ? joinVkAddress(vk.channel, vk.query) : (answer.data.canonical_url ?? address)
+      const typed = await typeAddress(address)
+      if (typed.kind !== "site") return typed
+      const { sourceType, url } = typed
       if (drafts.value.some((draft) => draft.url === url)) {
         return { kind: "refused", text: t("sources.add.duplicate") }
       }
