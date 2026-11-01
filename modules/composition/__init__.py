@@ -1,4 +1,4 @@
-"""The layout of a series with several sources: pure projection, lever registry and settings inheritance.
+"""The layout of a series with several sources: pure projection, lever registry, settings inheritance and the bus module."""
+from .module import CompositionModule
 
-These parts import nothing but `core`, so they run and are tested without a bus or a database.
-"""
+__all__ = ["CompositionModule"]

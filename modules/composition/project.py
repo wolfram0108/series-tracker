@@ -5,23 +5,19 @@ comes from the constructor's answer to the line of that row; this module never c
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
-from typing import Iterator, Mapping, Sequence
+from typing import Iterable, Iterator, Mapping, Sequence
 
-from core.contracts import (CompositionRow, PlayerSummary, ReleaseTable, RowState, RuleLine, RuleResult,
-                            RulesApplyReply, SeriesSource, SourceStatus, SourceSummary, TableRow, line_of)
+from core.contracts import (CompositionRow, Exclusion, PlayerSummary, ReleaseTable, RowState, RuleLine, RuleResult,
+                            RulesApplyReply, SeriesSource, SourceStatus, SourceSummary, TableRow, VoiceSummary,
+                            line_of)
+from core.voice_names import fold_name
 
 # One template for the name of a voice-over that belongs to no user group.
 UNKNOWN_VOICE_LABEL = "Неизвестная озвучка {number}"
 
-EXCLUDED_BY_RULE = "rule"
-EXCLUDED_NO_NUMBER = "no_number"
-
 # The only player whose list holds several seasons of a catalog, one of which the user may pick for the source.
 CATALOG_PLAYER = "vibix"
-
-_NOISE = re.compile(r"[\W_]+", re.UNICODE)
 
 
 @dataclass(frozen=True)
@@ -44,11 +40,6 @@ class Projection:
     rows: list[CompositionRow]
     sources: list[SourceSummary]
     unknown_voices: dict[str, int]
-
-
-def fold_name(name: str) -> str:
-    """The form in which two spellings of a voice-over name are the same name: no case, no spaces, no punctuation."""
-    return _NOISE.sub("", name.casefold())
 
 
 def selected_rows(source: SeriesSource, table: ReleaseTable) -> list[TableRow]:
@@ -81,13 +72,15 @@ def voice_name_of(row: TableRow, result: RuleResult | None) -> str:
 
 
 def voice_names(inputs: Sequence[SourceInput]) -> list[str]:
-    """The distinct voice-over names of the rows in the layout, in order of appearance: what to ask the groups about."""
+    """The distinct voice-over names to ask the groups about: those of every table, with or without a profile,
+    and those the constructors assigned. A window shows the voices of a source before any profile is set."""
     names: dict[str, None] = {}
     for item in _ordered(inputs):
-        for row, result in _answered_rows(item):
-            name = voice_name_of(row, result)
-            if name.strip():
-                names.setdefault(name)
+        if item.table is None:
+            continue
+        names.update((row.voice.name, None) for row in item.table.rows if row.voice.name.strip())
+        names.update((result.voiceover, None) for result in _results_of(item).values()
+                     if result.voiceover and result.voiceover.strip())
     return list(names)
 
 
@@ -100,15 +93,55 @@ def project(inputs: Sequence[SourceInput], groups: Mapping[str, str | None],
     built: list[tuple[CompositionRow, str]] = []
     summaries: list[SourceSummary] = []
     for item in _ordered(inputs):
-        summaries.append(_summary(item))
+        summaries.append(_summary(item, groups))
         for row, result in _answered_rows(item):
             name = voice_name_of(row, result)
             built.append((_row_of(item.source, row, result, name, groups, numbering), fold_name(name)))
     return Projection(_with_part_one(built), summaries, numbering)
 
 
+def layout_episodes(rows: Iterable[CompositionRow]) -> set[tuple[int, int]]:
+    """The (season, episode) pairs the layout covers; a compilation covers every episode of its range.
+
+    A row without a season names no episode that a setting could be about, so it covers none."""
+    covered: set[tuple[int, int]] = set()
+    for row in rows:
+        covered |= _covered(row)
+    return covered
+
+
+def touched_episodes(before: Sequence[CompositionRow], after: Sequence[CompositionRow]) -> set[tuple[int, int]] | None:
+    """The episodes whose rows are not the same in the two layouts; None when the difference cannot be told as
+    episodes (a numbered row without a season changed). An excluded row covers no episode."""
+    old = {(row.source_id, row.row_key): row for row in before}
+    new = {(row.source_id, row.row_key): row for row in after}
+    changed = [row for key, row in old.items() if new.get(key) != row] + [
+        row for key, row in new.items() if old.get(key) != row]
+    touched: set[tuple[int, int]] = set()
+    for row in changed:
+        covered = _covered(row)
+        if not covered and not row.excluded:
+            return None
+        touched |= covered
+    return touched
+
+
+def _covered(row: CompositionRow) -> set[tuple[int, int]]:
+    if row.excluded or row.season is None or row.episode_start is None:
+        return set()
+    end = row.episode_end if row.episode_end is not None else row.episode_start
+    return {(row.season, number) for number in range(row.episode_start, max(end, row.episode_start) + 1)}
+
+
 def _ordered(inputs: Sequence[SourceInput]) -> list[SourceInput]:
     return sorted(inputs, key=lambda item: (item.source.position, item.source.id))
+
+
+def _results_of(item: SourceInput) -> dict[str, RuleResult]:
+    """The answers of the constructor that count: none while the source has no profile, whatever was answered before."""
+    if item.reply is None or item.source.parser_profile_id is None:
+        return {}
+    return item.reply.results
 
 
 def _answered_rows(item: SourceInput) -> Iterator[tuple[TableRow, RuleResult]]:
@@ -133,14 +166,14 @@ def _row_of(source: SeriesSource, row: TableRow, result: RuleResult, name: str, 
 def _numbers_of(result: RuleResult) -> dict:
     """A single episode wins over a range, as it has always done; a range without an end ends where it starts."""
     if result.excluded:
-        return {"excluded": True, "exclusion": EXCLUDED_BY_RULE}
+        return {"excluded": True, "exclusion": Exclusion.RULE}
     numbers = {"season": result.season, "part": result.part}
     if result.episode is not None:
         return {**numbers, "episode_start": result.episode, "episode_end": result.episode}
     if result.start is not None:
         return {**numbers, "episode_start": result.start,
                 "episode_end": result.end if result.end is not None else result.start}
-    return {**numbers, "excluded": True, "exclusion": EXCLUDED_NO_NUMBER}
+    return {**numbers, "excluded": True, "exclusion": Exclusion.NO_NUMBER}
 
 
 def _voice_of(name: str, groups: Mapping[str, str | None], numbering: dict[str, int]
@@ -168,12 +201,12 @@ def _with_part_one(built: list[tuple[CompositionRow, str]]) -> list[CompositionR
             else row for row, voice in built]
 
 
-def _summary(item: SourceInput) -> SourceSummary:
+def _summary(item: SourceInput, groups: Mapping[str, str | None]) -> SourceSummary:
     table = item.table
     return SourceSummary(
         source_id=item.source.id, url=item.source.url, status=_status_of(item),
         reason=item.failure or None, read_at=table.read_at if table else None,
-        players=_players_of(table) if table else [])
+        players=_players_of(table, _results_of(item), groups) if table else [])
 
 
 def _status_of(item: SourceInput) -> SourceStatus:
@@ -186,13 +219,26 @@ def _status_of(item: SourceInput) -> SourceStatus:
     return SourceStatus.READY if item.reply is not None else SourceStatus.WAITING
 
 
-def _players_of(table: ReleaseTable) -> list[PlayerSummary]:
-    """What a window shows before any number exists: per player the rows, the seasons it keeps and its resolutions."""
+def _players_of(table: ReleaseTable, results: Mapping[str, RuleResult],
+                groups: Mapping[str, str | None]) -> list[PlayerSummary]:
+    """What a window shows before any number exists: per player the rows, the seasons it keeps, its resolutions and
+    its voice-overs with their groups. A voice-over the constructor assigned is shown as soon as it answered."""
     by_player: dict[str, list[TableRow]] = {}
     for row in table.rows:
         by_player.setdefault(row.player, []).append(row)
     return [PlayerSummary(
         player=player, player_label=next((row.player_label for row in rows if row.player_label), ""),
         rows=len(rows), groups=len({row.group for row in rows if row.group}),
-        heights=sorted({height for row in rows if row.state == RowState.PLAYABLE for height in row.heights}))
+        heights=sorted({height for row in rows if row.state == RowState.PLAYABLE for height in row.heights}),
+        voices=_voices_of(rows, results, groups))
         for player, rows in by_player.items()]
+
+
+def _voices_of(rows: Sequence[TableRow], results: Mapping[str, RuleResult],
+               groups: Mapping[str, str | None]) -> list[VoiceSummary]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        name = voice_name_of(row, results.get(row.key))
+        if name.strip():
+            counts[name] = counts.get(name, 0) + 1
+    return [VoiceSummary(name=name, group=groups.get(name) or None, rows=count) for name, count in counts.items()]

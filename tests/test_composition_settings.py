@@ -9,7 +9,8 @@ from core.contracts import EffectiveLever, Level, SettingRecord, SettingsReset, 
 from core.reasons import parse
 from modules.composition import levers
 from modules.composition.levers import Lever, TargetKind
-from modules.composition.settings import AS_ABOVE, affected, apply_reset, apply_set, effective, validate
+from modules.composition.settings import (affected, apply_reset, apply_set, effective, levels, validate, validate_reset,
+                                          without_source, within_episodes)
 
 VK = player_target(1, "vk")
 KODIK = player_target(2, "kodik")
@@ -111,7 +112,7 @@ def test_an_episode_without_a_season_is_refused():
 
 def test_a_record_the_registry_no_longer_accepts_is_ignored():
     records = [rec(CHOICE, "garbage"), rec("gone.lever", 1), rec(ALLOW, False, target="not-a-target"),
-               rec(ALLOW, "no", target=VK), rec(TAKE, False, target=None), rec(TAKE, AS_ABOVE, target=GROUP)]
+               rec(ALLOW, "no", target=VK), rec(TAKE, False, target=None)]
     assert effective(records, 1, 1) == [EffectiveLever(lever=CHOICE, target=None, value=None, level=Level.DEFAULT)]
 
 
@@ -142,8 +143,9 @@ def test_resetting_an_episode_back_to_its_season_touches_that_episode_alone():
     assert levers_of(after, 1, 34)[(CHOICE, None)] == (CHOICE_VK, Level.SEASON)
     assert (ALLOW, VK) not in levers_of(after, 1, 34)
     assert affected(before, after, EPISODES) == {(1, 34)}
-    assert after == apply_set(apply_set(before, rec(CHOICE, AS_ABOVE, season=1, episode=34)),
-                              rec(ALLOW, AS_ABOVE, season=1, episode=34, target=VK))
+    one_by_one = apply_reset(before, SettingsReset(series_id=1, season=1, episode=34, lever=CHOICE))
+    one_by_one = apply_reset(one_by_one, SettingsReset(series_id=1, season=1, episode=34, lever=ALLOW, target=VK))
+    assert after == one_by_one
 
 
 def test_a_voice_off_on_the_season_and_on_for_one_episode_is_taken_for_that_episode_only():
@@ -175,7 +177,8 @@ def test_a_series_value_touches_every_episode_that_does_not_have_its_own_and_not
 def test_a_change_that_changes_nothing_touches_nothing():
     records = [rec(CHOICE, CHOICE_VK, season=1)]
     assert affected(records, apply_set(records, rec(CHOICE, CHOICE_VK, season=1)), EPISODES) == set()
-    assert affected(records, apply_set(records, rec(CHOICE, AS_ABOVE, season=2)), EPISODES) == set()
+    assert affected(records, apply_reset(records, SettingsReset(series_id=1, season=2, lever=CHOICE)),
+                    EPISODES) == set()
     assert affected(records, apply_reset(records, SettingsReset(series_id=1, season=2)), EPISODES) == set()
     assert affected(records, apply_set(records, rec(TAKE, True, season=3, target=GROUP)), []) == set()
 
@@ -188,7 +191,7 @@ SEASON_2 = {(2, episode) for episode in range(1, 41)}
     (lambda r: apply_set(r, rec(CHOICE, CHOICE_KODIK, season=2)), SEASON_2),
     (lambda r: apply_set(r, rec(ALLOW, True, season=1, target=VK)), SEASON_1),
     (lambda r: apply_set(r, rec(TAKE, True, season=1, target=GROUP)), SEASON_1 - {(1, 2)}),
-    (lambda r: apply_set(r, rec(TAKE, AS_ABOVE, season=1, episode=2, target=GROUP)), {(1, 2)}),
+    (lambda r: apply_reset(r, SettingsReset(series_id=1, season=1, episode=2, lever=TAKE, target=GROUP)), {(1, 2)}),
     (lambda r: apply_set(r, rec(PLAYER, {"source_id": 2, "player": "kodik"}, season=2, episode=7, target=GROUP)),
      {(2, 7)}),
     (lambda r: apply_reset(r, SettingsReset(series_id=1, season=1)), SEASON_1),
@@ -211,8 +214,8 @@ def test_resetting_the_series_leaves_the_seasons_and_episodes_their_own_values()
 
 
 @pytest.mark.parametrize("record", [
-    rec(CHOICE, None), rec(CHOICE, CHOICE_VK, season=1), rec(CHOICE, AS_ABOVE, season=1, episode=2),
-    rec(ALLOW, False, target=VK), rec(ALLOW, AS_ABOVE, target=VK), rec(TAKE, True, season=1, target=GROUP),
+    rec(CHOICE, None), rec(CHOICE, CHOICE_VK, season=1), rec(CHOICE, None, season=1, episode=2),
+    rec(ALLOW, False, target=VK), rec(TAKE, True, season=1, target=GROUP),
     rec(PLAYER, None, target=GROUP), rec(PLAYER, {"source_id": 2, "player": "kodik"}, season=1, episode=1, target=GROUP),
 ])
 def test_a_record_in_the_terms_of_the_registry_is_accepted(record):
@@ -221,13 +224,14 @@ def test_a_record_in_the_terms_of_the_registry_is_accepted(record):
 
 @pytest.mark.parametrize("record, code", [
     (rec("no.such", True), "unknown_lever"),
-    (rec("no.such", AS_ABOVE, target=GROUP), "unknown_lever"),
+    (rec("no.such", None, target=GROUP), "unknown_lever"),
     (rec(CHOICE, None, target=GROUP), "bad_target"),
     (rec(ALLOW, True), "bad_target"),
     (rec(ALLOW, True, target=GROUP), "bad_target"),
     (rec(ALLOW, True, target="source:1"), "bad_target"),
     (rec(TAKE, True, target=VK), "bad_target"),
-    (rec(TAKE, AS_ABOVE), "bad_target"),
+    (rec(TAKE, True), "bad_target"),
+    (rec(TAKE, "as_above", target=GROUP), "bad_value"),
     (rec(PLAYER, None, target="Ruchime"), "bad_target"),
     (rec(CHOICE, "auto"), "bad_value"),
     (rec(CHOICE, {"group": "Ruchime", "source_id": 1}), "bad_value"),
@@ -252,10 +256,43 @@ def test_setting_a_value_adds_a_record_and_setting_it_again_replaces_it():
     assert len(third) == 2
 
 
-def test_setting_as_above_takes_the_record_away_and_a_record_that_is_not_there_stays_not_there():
-    records = [rec(ALLOW, False, season=1, target=VK), rec(CHOICE, CHOICE_VK)]
-    assert apply_set(records, rec(ALLOW, AS_ABOVE, season=1, target=VK)) == [rec(CHOICE, CHOICE_VK)]
-    assert apply_set(records, rec(ALLOW, AS_ABOVE, season=2, target=VK)) == apply_set(records, rec(CHOICE, CHOICE_VK))
+def test_an_own_value_of_none_is_a_value_and_the_way_back_to_the_level_above_is_a_reset_of_the_lever():
+    records = [rec(CHOICE, CHOICE_VK), rec(CHOICE, None, season=1), rec(ALLOW, False, season=1, target=VK)]
+    assert levers_of(records, 1, 1)[(CHOICE, None)] == (None, Level.SEASON)
+    back = apply_reset(records, SettingsReset(series_id=1, season=1, lever=CHOICE))
+    assert back == [rec(CHOICE, CHOICE_VK), rec(ALLOW, False, season=1, target=VK)]
+    assert levers_of(back, 1, 1)[(CHOICE, None)] == (CHOICE_VK, Level.SERIES)
+
+
+def test_a_reset_of_a_lever_with_a_target_takes_that_target_only():
+    records = [rec(ALLOW, False, season=1, target=VK), rec(ALLOW, False, season=1, target=KODIK),
+               rec(ALLOW, True, season=2, target=VK), rec(TAKE, False, season=1, target=GROUP)]
+    after = apply_reset(records, SettingsReset(series_id=1, season=1, lever=ALLOW, target=VK))
+    assert after == [rec(ALLOW, False, season=1, target=KODIK), rec(TAKE, False, season=1, target=GROUP),
+                     rec(ALLOW, True, season=2, target=VK)]
+    assert apply_reset(records, SettingsReset(series_id=1, season=3, lever=ALLOW, target=VK)) == apply_set(
+        records, rec(TAKE, False, season=1, target=GROUP))
+
+
+@pytest.mark.parametrize("scope, code", [
+    (SettingsReset(series_id=1, season=1, lever="no.such"), "unknown_lever"),
+    (SettingsReset(series_id=1, season=1, lever=ALLOW), "bad_target"),
+    (SettingsReset(series_id=1, season=1, lever=ALLOW, target=GROUP), "bad_target"),
+    (SettingsReset(series_id=1, season=1, lever=CHOICE, target=VK), "bad_target"),
+    (SettingsReset(series_id=1, season=1, target=VK), "bad_target"),
+])
+def test_a_reset_that_names_a_lever_or_a_target_the_registry_does_not_know_is_refused(scope, code):
+    assert parse(validate_reset(scope))["code"] == code
+    with pytest.raises(ValueError) as caught:
+        apply_reset([rec(CHOICE, CHOICE_VK)], scope)
+    assert parse(str(caught.value))["code"] == code
+
+
+@pytest.mark.parametrize("scope", [SettingsReset(series_id=1), SettingsReset(series_id=1, season=1, episode=2),
+                                   SettingsReset(series_id=1, lever=CHOICE),
+                                   SettingsReset(series_id=1, season=1, lever=TAKE, target=GROUP)])
+def test_a_reset_of_a_level_or_of_a_known_lever_is_accepted(scope):
+    assert validate_reset(scope) is None
 
 
 def test_the_records_given_are_not_changed_and_what_is_stored_does_not_share_the_callers_value():
@@ -295,7 +332,48 @@ def test_a_reset_takes_the_records_of_that_level_only():
         rec(CHOICE, CHOICE_KODIK, season=2))
     assert apply_reset(records, SettingsReset(series_id=1, season=1, episode=3)) != records
     assert len(apply_reset(records, SettingsReset(series_id=1, season=1, episode=3))) == 4
-    assert apply_reset(records, SettingsReset(series_id=1, season=3)) == apply_set(records, rec(CHOICE, AS_ABOVE, season=3))
+    assert apply_reset(records, SettingsReset(series_id=1, season=3)) == apply_set(records, rec(CHOICE, CHOICE_VK))
+
+
+# ---- records that outlive their sources and episodes (C-16, C-17, I-24) -------------------------------------------
+
+
+def test_a_source_that_leaves_takes_every_record_that_points_at_it_by_target_or_by_value():
+    """C-16."""
+    records = [rec(ALLOW, False, target=VK), rec(ALLOW, False, season=1, target=KODIK),
+               rec(CHOICE, CHOICE_VK, season=1), rec(CHOICE, CHOICE_KODIK, season=2),
+               rec(PLAYER, {"source_id": 1, "player": "vk"}, season=1, target=GROUP),
+               rec(PLAYER, {"source_id": 2, "player": "kodik"}, season=1, target=OTHER_GROUP),
+               rec(TAKE, False, season=1, target=GROUP), rec(CHOICE, None, season=3)]
+    after = without_source(records, 1)
+    assert {(each.lever, each.target, each.season) for each in after} == {
+        (ALLOW, KODIK, 1), (CHOICE, None, 2), (PLAYER, OTHER_GROUP, 1), (TAKE, GROUP, 1), (CHOICE, None, 3)}
+    assert levers_of(after, 1, 5)[(CHOICE, None)] == (None, Level.DEFAULT)
+    assert without_source(records, 9) == apply_set(records, rec(CHOICE, None, season=3))
+
+
+def test_a_source_that_leaves_takes_the_records_of_a_lever_registered_later_that_points_at_it(volume):
+    pointing = Lever("fake.pin", TargetKind.NONE, lambda value: isinstance(value, dict), None, "scan",
+                     lambda value: frozenset(value.get("sources", [])) if isinstance(value, dict) else frozenset())
+    levers.register(pointing)
+    try:
+        records = [rec("fake.pin", {"sources": [1, 4]}), rec("fake.pin", {"sources": [4]}, season=1),
+                   rec("fake.volume", 10, target=GROUP)]
+        assert {(each.lever, each.season) for each in without_source(records, 1)} == {
+            ("fake.pin", 1), ("fake.volume", None)}
+    finally:
+        levers.unregister("fake.pin")
+
+
+def test_an_episode_that_leaves_the_layout_takes_its_own_records_and_the_levels_above_stay():
+    """C-17."""
+    records = [rec(CHOICE, CHOICE_VK), rec(TAKE, False, season=1, target=GROUP),
+               rec(CHOICE, CHOICE_KODIK, season=1, episode=34), rec(CHOICE, CHOICE_KODIK, season=1, episode=35),
+               rec(ALLOW, False, season=2, episode=1, target=VK)]
+    after = within_episodes(records, {(1, 35), (2, 2)})
+    assert {(each.lever, each.season, each.episode) for each in after} == {
+        (CHOICE, None, None), (TAKE, 1, None), (CHOICE, 1, 35)}
+    assert within_episodes(records, set(EPISODES)) == apply_set(records, rec(CHOICE, CHOICE_VK))
 
 
 # ---- a lever nobody wrote code for (a part of M-34) --------------------------------------------------------------
@@ -336,3 +414,21 @@ def test_records_of_a_lever_that_left_the_registry_wait_unseen_and_come_back_whe
     assert parse(validate(records[0]))["code"] == "unknown_lever"
     levers.register(volume)
     assert levers_of(records, 1, 1)[("fake.volume", GROUP)] == (80, Level.SERIES)
+
+
+# ---- the headers of the levels ------------------------------------------------------------------------------------
+
+
+def test_the_headers_show_the_series_and_each_season_by_the_value_of_the_level_itself():
+    records = [rec(TAKE, False, target=GROUP), rec(TAKE, True, season=1, target=GROUP),
+               rec(CHOICE, CHOICE_VK, season=1, episode=3), rec(CHOICE, CHOICE_KODIK, season=2)]
+    shown = levels(records, [2, 1, 1])
+    assert [each.season for each in shown] == [None, 1, 2]
+    by_level = {each.season: {(x.lever, x.target): (x.value, x.level) for x in each.levers} for each in shown}
+    assert by_level[None] == {(CHOICE, None): (None, Level.DEFAULT), (TAKE, GROUP): (False, Level.SERIES)}
+    assert by_level[1] == {(CHOICE, None): (None, Level.DEFAULT), (TAKE, GROUP): (True, Level.SEASON)}
+    assert by_level[2] == {(CHOICE, None): (CHOICE_KODIK, Level.SEASON), (TAKE, GROUP): (False, Level.SERIES)}
+
+
+def test_the_headers_of_a_series_with_no_season_are_the_series_alone():
+    assert [each.season for each in levels([], [])] == [None]

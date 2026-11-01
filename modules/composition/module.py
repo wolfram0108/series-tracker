@@ -1,0 +1,513 @@
+"""Module composition — the layout of a series with several sources, and the output settings that go with it (stage 10).
+
+The layout is the rows of the tables of all sources of a series, each with the numbers the constructor of rules gave it
+and the group of its voice-over; the pure rules are in `project.py`, the levers in `levers.py`, their inheritance in
+`settings.py`. The module owns the tables `composition_rows`, `composition_state`, `composition_sources`,
+`composition_failures`, `unknown_voices` and `output_settings`. It reads no site, picks no reference and downloads
+nothing. Torrent sources of a series are not its business.
+
+Queries:
+  composition.get {series_id, include_excluded?} → CompositionReply: the rows of the layout in the order of the sources
+      (rows the constructor excluded, or gave no episode number, only with include_excluded), the summary of every
+      source (status waiting / no_profile / ready / failed, players with rows, seasons, resolutions and voice-overs
+      with their groups), the levers of the series and of each season of the layout as the headers of those levels
+      show them (`levels`, the series first), and the levers of every episode of the layout with the level each comes
+      from. A series not counted yet has revision 0 and nothing else.
+  composition.recompute {series_id} → {rev, changed}: counts the series now, with the tables as they are stored (no
+      read of a site), and answers when a count that began no earlier than the request has ended, its record is
+      written and its event is out. `changed` tells whether that count published. A count already running is
+      not the answer: the request sets the flag and waits for the next one. Refused with ValueError(reason) when a
+      neighbour did not answer (the same reason goes out as composition.failed), with LookupError for a series the
+      catalog no longer has.
+  composition.settings.set {series_id, season?, episode?, lever, target?, value} → {ok}: sets the value of a lever
+      at a level. Refused with ValueError(reason) — `unknown_lever`, `bad_target` or `bad_value` — and nothing is stored.
+  composition.settings.reset {series_id, season?, episode?, lever?, target?} → {ok}: the levers of the level (or the
+      one named) go back to the level above. Refused the same way when the lever or the target is not the registry's.
+
+Events (outgoing):
+  composition.changed {series_id, rev, episodes, summary_only} — the layout, its summaries or the settings changed.
+      `rev` grows with every publication; a consumer acts on the latest. `episodes` are the episodes touched (by the
+      rows that differ, by the settings that came out differently); empty means the whole series. `summary_only` is
+      set when no row and no lever of any episode changed, only what a window shows (the summaries of the sources —
+      their time of reading alone is no change —, the headers of the levels): a consumer of rows and levers skips it,
+      a window refreshes. A recount that changes nothing publishes nothing.
+  composition.failed {series_id, reason} — a recount could not be done (a neighbour did not answer): the previous layout
+      stays in force. Reasons: `composition_request_failed` {topic}, `composition_error`.
+  series.purged {series_id, owner: composition} — the report to catalog after series.deleted.
+
+Events (incoming) — every one of them only asks for a recount of the series it concerns:
+  series.source.added / .updated / .removed {series_id, source_id} — the source began, changed or ended; the table of
+      an added or changed source is asked for with a read (the site is not read again within the term of the table)
+  sources.table.ready {url, read_at} / sources.table.failed {url, reason} — the sources of ours that read that page,
+      found by the canonical address `sources.table.get` returned for them; the verdict of a failed read is kept
+      until the page is read again
+  rules.profile.changed {profile_id} — the series whose sources are read by that profile
+  voices.settings.changed — the groups of voice-overs may have changed: every series is counted again
+  series.updated {series_id, season?} — the season of the card is the constructor's fallback season
+  series.added {id} — a series came; series.deleted {series_id} — everything of the series goes, then series.purged
+  Whatever the cause, a recount is the same one function over the whole series, and recounting twice with the same
+  inputs changes nothing. A cause that comes while the series is being counted sets a flag and the series is counted
+  once more when the running count ends; series are counted independently of each other.
+
+Neighbours (all over the bus): catalog.series.get / .list, catalog.sources.by_profile, sources.table.get,
+rules.apply (one request per source with a profile, all lines of its table at once), voices.groups.resolve (all
+names in one request). A source without a table or without a profile does not stop the others. Start this module
+after the modules it asks; a request that gets no answer fails the recount, not the start.
+
+Resumability: the layout, the numbers of unknown voice-overs, the settings and the verdicts of failed reads are in the
+database before an event goes out. At start every series is counted again, a series the catalog no longer has is
+purged, and a failure there is logged, not raised.
+"""
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass, field
+from typing import Iterable
+
+from core import BaseModule
+from core.contracts import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionReply,
+                            EpisodeRef, EpisodeSettings, GroupsResolveReply, GroupsResolveRequest,
+                            ReleaseTable, RulesApplyReply, RulesApplyRequest, RulesProfileChanged, SeriesSource,
+                            SettingsReset, SettingsSet, SourceStatus, SourceType, TableGetReply, TableGetRequest,
+                            TableState)
+from core.db import Database
+from core.envelope import Envelope
+from core.reasons import reason
+
+from . import project, settings
+from .project import SourceInput
+from .repository import CompositionRepository, StoredSource
+
+OWNER = "composition"
+
+# Safeguards, not syncs: an answer that is not there by then fails the recount, it does not count as an answer.
+REQUEST_TIMEOUT_S = 30.0
+RULES_TIMEOUT_S = 300.0
+
+
+class _Unavailable(Exception):
+    """A neighbour did not answer a request, or answered what the contract does not allow."""
+
+    def __init__(self, topic: str) -> None:
+        self.reason = reason("composition_request_failed", topic=topic)
+        super().__init__(self.reason)
+
+
+@dataclass
+class _Outcome:
+    """How a count of a series ended: the revision in force, whether the count published, or why it failed."""
+
+    rev: int = 0
+    changed: bool = False
+    failure: str | None = None
+
+
+@dataclass
+class _Flight:
+    """A series being counted. `dirty` asks for one more count after this one; `refresh` are the sources whose
+    page is to be read; `pending` is the number of table requests sent whose answer is not yet noted; `started` is
+    the number of counts begun, and a waiter is answered by the first count whose number is at least its own."""
+
+    refresh: set[int]
+    dirty: bool = False
+    pending: int = 0
+    started: int = 0
+    waiters: list[tuple[int, asyncio.Future]] = field(default_factory=list, repr=False)
+    task: asyncio.Task | None = field(default=None, repr=False)
+
+
+class CompositionModule(BaseModule):
+    name = "composition"
+
+    def __init__(self, bus, db: Database) -> None:
+        self.repo = CompositionRepository(db)
+        self._flights: dict[int, _Flight] = {}
+        self._locks: dict[int, asyncio.Lock] = {}
+        self._deleted: set[int] = set()
+        # The pages of our sources by canonical address, so that an event of `sources` finds them without a query.
+        self._pages: dict[str, dict[int, int]] = {}
+        self._page_of: dict[int, str] = {}
+        super().__init__(bus)
+
+    def register(self) -> None:
+        self.handle("composition.get", self.on_get)
+        # Waits for a whole count, so the requests for different series must not queue behind each other.
+        self.handle("composition.recompute", self.on_recompute, concurrent=True)
+        self.handle("composition.settings.set", self.on_settings_set)
+        self.handle("composition.settings.reset", self.on_settings_reset)
+        self.handle("series.added", self.on_series_added)
+        self.handle("series.updated", self.on_series_updated)
+        self.handle("series.deleted", self.on_series_deleted)
+        self.handle("series.source.added", self.on_source_changed)
+        self.handle("series.source.updated", self.on_source_changed)
+        self.handle("series.source.removed", self.on_source_changed)
+        self.handle("sources.table.ready", self.on_table_ready)
+        self.handle("sources.table.failed", self.on_table_failed)
+        self.handle("rules.profile.changed", self.on_profile_changed)
+        self.handle("voices.settings.changed", self.on_groups_changed)
+
+    # --- start ------------------------------------------------------------------------------
+
+    async def on_start(self) -> None:
+        try:
+            await self.repo.forget_unreferenced_failures()
+            for series_id, source_id, url in await self.repo.pages():
+                self._remember(source_id, series_id, url)
+            await self._resume()
+        except Exception:  # noqa: BLE001 — the other duties of the module do not wait for the recounts
+            self.log.exception("пересчёт раскладок при старте не начат")
+
+    async def _resume(self) -> None:
+        listing = await self._ask("catalog.series.list", {})
+        known = set(await self.repo.series_ids())
+        present = {each["id"] for each in listing}
+        for each in listing:
+            if each["id"] in known or any(source.get("source_type") != SourceType.TORRENT
+                                          for source in each.get("sources", [])):
+                self._schedule(each["id"])
+        for series_id in known - present:
+            await self._purge(series_id)
+
+    async def idle(self) -> None:
+        """Returns when no series is being counted; the signal of completion for whoever stops or checks the module."""
+        while self._flights:
+            await asyncio.gather(*(flight.task for flight in list(self._flights.values()) if flight.task),
+                                 return_exceptions=True)
+
+    # --- queries and commands ------------------------------------------------------------------
+
+    async def on_get(self, env: Envelope) -> dict:
+        request = CompositionGetRequest.model_validate(env.payload)
+        stored = await self.repo.stored(request.series_id)
+        records = settings.canonical(stored.records)
+        episodes = project.layout_episodes(stored.rows)
+        reply = CompositionReply(
+            series_id=request.series_id, rev=stored.rev,
+            rows=[row for row in stored.rows if request.include_excluded or not row.excluded],
+            sources=[each.summary for each in stored.sources],
+            levels=settings.levels(records, {season for season, _ in episodes}),
+            settings=[EpisodeSettings(season=season, episode=episode,
+                                      levers=settings.effective(records, season, episode))
+                      for season, episode in sorted(episodes)])
+        return reply.model_dump(mode="json")
+
+    async def on_recompute(self, env: Envelope) -> dict:
+        series_id = env.payload["series_id"]
+        if series_id in self._deleted:
+            raise LookupError(f"сериал {series_id} не найден")
+        self._schedule(series_id)
+        flight = self._flights[series_id]
+        answer: asyncio.Future = asyncio.get_running_loop().create_future()
+        # The count that is running began before this request; the one it is made to run again is the first to begin after.
+        flight.waiters.append((flight.started + 1, answer))
+        outcome: _Outcome = await answer
+        if series_id in self._deleted:
+            raise LookupError(f"сериал {series_id} не найден")
+        if outcome.failure is not None:
+            raise ValueError(outcome.failure)
+        return {"rev": outcome.rev, "changed": outcome.changed}
+
+    async def on_settings_set(self, env: Envelope) -> dict:
+        record = SettingsSet.model_validate(env.payload)
+        problem = settings.validate(record)
+        if problem is not None:
+            raise ValueError(problem)
+        return await self._edit(record.series_id, lambda records: settings.apply_set(records, record))
+
+    async def on_settings_reset(self, env: Envelope) -> dict:
+        scope = SettingsReset.model_validate(env.payload)
+        problem = settings.validate_reset(scope)
+        if problem is not None:
+            raise ValueError(problem)
+        return await self._edit(scope.series_id, lambda records: settings.apply_reset(records, scope))
+
+    async def _edit(self, series_id: int, change) -> dict:
+        # A command about a series the catalog does not have is refused with the catalog's own answer.
+        await self.request("catalog.series.get", {"series_id": series_id}, timeout=REQUEST_TIMEOUT_S)
+        async with self._lock(series_id):
+            if series_id in self._deleted:
+                raise LookupError(f"сериал {series_id} не найден")
+            stored = await self.repo.stored(series_id)
+            before = settings.canonical(stored.records)
+            after = change(before)
+            if after == before:
+                return {"ok": True}
+            episodes = project.layout_episodes(stored.rows)
+            touched = settings.affected(before, after, episodes)
+            # A header that no episode follows still changes on the screen: that is told to windows, not to consumers.
+            seasons = {season for season, _ in episodes}
+            shown = bool(touched) or settings.levels(before, seasons) != settings.levels(after, seasons)
+            rev = stored.rev + 1 if shown else None
+            await self.repo.write(series_id, records=after, rev=rev)
+            if shown:
+                self._publish_changed(series_id, rev, touched, summary_only=not touched)
+        return {"ok": True}
+
+    # --- events -----------------------------------------------------------------------------
+
+    def on_series_added(self, env: Envelope) -> None:
+        # A series number is never given twice, but a test or a restored database may; an earlier delete must not stick.
+        self._deleted.discard(env.payload["id"])
+
+    def on_series_updated(self, env: Envelope) -> None:
+        if "season" in env.payload:
+            self._schedule(env.payload["series_id"])
+
+    async def on_series_deleted(self, env: Envelope) -> None:
+        series_id = env.payload["series_id"]
+        self._deleted.add(series_id)
+        await self._purge(series_id)
+        self.publish_event("series.purged", {"series_id": series_id, "owner": OWNER})
+
+    def on_source_changed(self, env: Envelope) -> None:
+        refresh = () if env.topic.endswith(".removed") else (env.payload["source_id"],)
+        self._schedule(env.payload["series_id"], refresh)
+
+    async def on_table_ready(self, env: Envelope) -> None:
+        await self.repo.clear_failure(env.payload["url"])
+        self._wake(env.payload["url"])
+
+    async def on_table_failed(self, env: Envelope) -> None:
+        await self.repo.set_failure(env.payload["url"], env.payload["reason"])
+        self._wake(env.payload["url"])
+
+    async def on_profile_changed(self, env: Envelope) -> None:
+        profile_id = RulesProfileChanged.model_validate(env.payload).profile_id
+        try:
+            sources = await self._ask("catalog.sources.by_profile", {"profile_id": profile_id})
+        except _Unavailable:
+            return  # logged by the request; no series is known to tell the failure about
+        for series_id in sorted({each["series_id"] for each in sources}):
+            self._schedule(series_id)
+
+    async def on_groups_changed(self, env: Envelope) -> None:
+        for series_id in await self.repo.series_ids():
+            self._schedule(series_id)
+
+    def _wake(self, url: str) -> None:
+        """A page was read or failed: count the series of ours that read it. An event of a page nobody has noted
+        yet belongs to a count that has asked for it and not yet been answered, so that count is made to run again."""
+        for series_id in sorted(set(self._pages.get(url, {}).values())):
+            self._schedule(series_id)
+        for flight in self._flights.values():
+            if flight.pending:
+                flight.dirty = True
+
+    # --- the count of a series -----------------------------------------------------------------
+
+    def _schedule(self, series_id: int, refresh: Iterable[int] = ()) -> None:
+        if series_id in self._deleted:
+            return
+        flight = self._flights.get(series_id)
+        if flight is not None:
+            flight.dirty = True
+            flight.refresh.update(refresh)
+            return
+        flight = _Flight(refresh=set(refresh))
+        self._flights[series_id] = flight
+        flight.task = asyncio.create_task(self._run(series_id, flight), name=f"composition:{series_id}")
+        self._bg.add(flight.task)
+        flight.task.add_done_callback(self._bg.discard)
+
+    async def _run(self, series_id: int, flight: _Flight) -> None:
+        try:
+            while True:
+                flight.dirty = False
+                refresh, flight.refresh = flight.refresh, set()
+                flight.started += 1
+                self._answer_waiters(flight, await self._recount(series_id, flight, refresh))
+                if not flight.dirty or series_id in self._deleted:
+                    return
+        finally:
+            if self._flights.get(series_id) is flight:
+                del self._flights[series_id]
+            # Whoever is still waiting asked for a count that will not come: the series is gone or the module stops.
+            for _, answer in flight.waiters:
+                if answer.done():
+                    continue
+                if series_id in self._deleted:
+                    answer.set_exception(LookupError(f"сериал {series_id} не найден"))
+                else:
+                    answer.cancel()
+            flight.waiters.clear()
+
+    @staticmethod
+    def _answer_waiters(flight: _Flight, outcome: _Outcome) -> None:
+        """A count has ended: those who asked before it began are answered, the rest wait for a later one."""
+        waiting = []
+        for number, answer in flight.waiters:
+            if number <= flight.started:
+                if not answer.done():
+                    answer.set_result(outcome)
+            else:
+                waiting.append((number, answer))
+        flight.waiters[:] = waiting
+
+    async def _recount(self, series_id: int, flight: _Flight, refresh: set[int]) -> _Outcome:
+        try:
+            inputs, groups = await self._gather(series_id, flight, refresh)
+            return await self._settle(series_id, inputs, groups)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — a failed count is a signal, not the end of the module
+            if series_id in self._deleted:
+                return _Outcome()
+            if isinstance(exc, _Unavailable):
+                failure = exc.reason
+            else:
+                self.log.exception("пересчёт раскладки сериала %d не удался", series_id)
+                failure = reason("composition_error")
+            self.publish_event("composition.failed",
+                               CompositionFailed(series_id=series_id, reason=failure).model_dump(mode="json"))
+            return _Outcome(failure=failure)
+
+    async def _gather(self, series_id: int, flight: _Flight, refresh: set[int]
+                      ) -> tuple[list[SourceInput], dict[str, str | None]]:
+        """What the neighbours say about the series; nothing is written here."""
+        card = await self._ask("catalog.series.get", {"series_id": series_id})
+        sources = [SeriesSource.model_validate(each) for each in card.get("sources", [])
+                   if each.get("source_type") != SourceType.TORRENT]
+        inputs = []
+        for source in sources:
+            table, failure = await self._table(series_id, flight, source, source.id in refresh)
+            answer = None
+            if table is not None and source.parser_profile_id is not None:
+                answer = await self._answer(source, table, card.get("season"))
+            inputs.append(SourceInput(source, table, answer, failure))
+        names = project.voice_names(inputs)
+        return inputs, await self._groups(names) if names else {}
+
+    async def _table(self, series_id: int, flight: _Flight, source: SeriesSource, begin: bool
+                     ) -> tuple[ReleaseTable | None, str | None]:
+        flight.pending += 1
+        try:
+            reply = await self._table_reply(source, begin)
+            self._remember(source.id, series_id, reply.url)
+            failure = reply.reason if reply.state == TableState.FAILED else (
+                await self.repo.failures([reply.url])).get(reply.url)
+            if reply.state == TableState.ABSENT and not begin and failure is None:
+                # Nothing was ever read for the page: the one read is begun here, then the events carry it on.
+                # A page whose last read failed is not asked for again by a recount, whatever the cause of it.
+                begin = True
+                reply = await self._table_reply(source, True)
+                self._remember(source.id, series_id, reply.url)
+        finally:
+            flight.pending -= 1
+        if reply.state == TableState.FAILED:
+            failure = reply.reason
+        elif begin and reply.state == TableState.READING:
+            # A read of the page is on again, so the verdict of the one before is no longer the state of the page.
+            await self.repo.clear_failure(reply.url)
+            failure = None
+        table = reply.table if reply.table is not None and reply.table.complete else None
+        return table, failure
+
+    async def _table_reply(self, source: SeriesSource, begin: bool) -> TableGetReply:
+        request = TableGetRequest(url=source.url, options=source.read_options(), refresh=begin)
+        return await self._ask("sources.table.get", request.model_dump(mode="json"), model=TableGetReply)
+
+    async def _answer(self, source: SeriesSource, table: ReleaseTable, season) -> RulesApplyReply:
+        lines = project.lines_for(source, table)
+        if not lines:
+            return RulesApplyReply(results={})
+        request = RulesApplyRequest(profile_id=source.parser_profile_id, lines=lines, series_season=season)
+        return await self._ask("rules.apply", request.model_dump(mode="json"), model=RulesApplyReply,
+                               timeout=RULES_TIMEOUT_S)
+
+    async def _groups(self, names: list[str]) -> dict[str, str | None]:
+        reply = await self._ask("voices.groups.resolve", GroupsResolveRequest(names=names).model_dump(),
+                                model=GroupsResolveReply)
+        return reply.groups
+
+    async def _settle(self, series_id: int, inputs: list[SourceInput], groups: dict[str, str | None]) -> _Outcome:
+        """Projects, compares with what is stored, writes in one transaction and tells what changed."""
+        async with self._lock(series_id):
+            if series_id in self._deleted:
+                return _Outcome()
+            stored = await self.repo.stored(series_id)
+            if not inputs and not stored.sources and not stored.rows and not stored.records:
+                return _Outcome(rev=stored.rev)
+            result = project.project(inputs, groups, stored.numbering)
+            gone = [each.source_id for each in stored.sources if each.source_id not in {i.source.id for i in inputs}]
+            before = settings.canonical(stored.records)
+            records = before
+            for source_id in gone:
+                records = settings.without_source(records, source_id)
+            layout = project.layout_episodes(result.rows)
+            if any(summary.status == SourceStatus.READY for summary in result.sources):
+                # Without an answered source the layout says nothing of which episodes exist, so nothing is taken away.
+                records = settings.within_episodes(records, layout)
+            records_changed = records != before
+            moved = settings.affected(before, records, layout) if records_changed else set()
+            seasons = {season for season, _ in layout}
+            headers_changed = records_changed and settings.levels(before, seasons) != settings.levels(records, seasons)
+
+            sources = [StoredSource(item.source.id, item.source.position, self._page_of.get(item.source.id), summary)
+                       for item, summary in zip(sorted(inputs, key=lambda i: (i.source.position, i.source.id)),
+                                                result.sources)]
+            for source_id in gone:
+                self._unmap(source_id)
+            rows_changed = result.rows != stored.rows
+            # The time of a reading is stored with the summary but is no change of it: a page read again is no news.
+            shown = [summary.model_copy(update={"read_at": None}) for summary in result.sources]
+            summaries_changed = shown != [each.summary.model_copy(update={"read_at": None}) for each in stored.sources]
+            layout_changed = rows_changed or bool(moved)
+            publish = layout_changed or summaries_changed or headers_changed
+            rev = stored.rev + 1 if publish else None
+            parts = dict(
+                rows=result.rows if rows_changed else None,
+                sources=sources if sources != stored.sources else None,
+                numbering=result.unknown_voices if result.unknown_voices != stored.numbering else None,
+                records=records if records_changed else None, rev=rev)
+            if any(value is not None for value in parts.values()):
+                await self.repo.write(series_id, **parts)
+            if not publish:
+                return _Outcome(rev=stored.rev)
+            if layout_changed:
+                touched = project.touched_episodes(stored.rows, result.rows) if rows_changed else set()
+                whole = touched is None or not (touched | moved)
+                self._publish_changed(series_id, rev, set() if whole else touched | moved)
+            else:
+                self._publish_changed(series_id, rev, set(), summary_only=True)
+            return _Outcome(rev=rev, changed=True)
+
+    def _publish_changed(self, series_id: int, rev: int, episodes: set[tuple[int, int]], *,
+                         summary_only: bool = False) -> None:
+        changed = CompositionChanged(series_id=series_id, rev=rev, summary_only=summary_only, episodes=[
+            EpisodeRef(season=season, episode=episode) for season, episode in sorted(episodes)])
+        self.publish_event("composition.changed", changed.model_dump(mode="json"))
+
+    async def _purge(self, series_id: int) -> None:
+        """Takes the series away after the count that may be running for it has ended."""
+        flight = self._flights.get(series_id)
+        if flight is not None and flight.task is not None:
+            await asyncio.gather(flight.task, return_exceptions=True)
+        async with self._lock(series_id):
+            for source_id in await self.repo.purge(series_id):
+                self._unmap(source_id)
+        self._locks.pop(series_id, None)
+
+    # --- helpers ----------------------------------------------------------------------------
+
+    def _lock(self, series_id: int) -> asyncio.Lock:
+        return self._locks.setdefault(series_id, asyncio.Lock())
+
+    def _remember(self, source_id: int, series_id: int, url: str) -> None:
+        old = self._page_of.get(source_id)
+        if old is not None and old != url:
+            self._pages.get(old, {}).pop(source_id, None)
+        self._page_of[source_id] = url
+        self._pages.setdefault(url, {})[source_id] = series_id
+
+    def _unmap(self, source_id: int) -> None:
+        url = self._page_of.pop(source_id, None)
+        if url is not None:
+            self._pages.get(url, {}).pop(source_id, None)
+
+    async def _ask(self, topic: str, payload, *, model=None, timeout: float = REQUEST_TIMEOUT_S):
+        try:
+            answer = await self.request(topic, payload, timeout=timeout)
+            return model.model_validate(answer) if model is not None else answer
+        except Exception as exc:  # noqa: BLE001 — any failure of a neighbour is one signal: the recount did not happen
+            self.log.error("запрос %s не выполнен: %s: %s", topic, type(exc).__name__, exc)
+            raise _Unavailable(topic) from exc

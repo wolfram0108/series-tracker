@@ -1,20 +1,18 @@
 """Output settings of one series: the value of every lever for an episode, and the edits of the records behind it.
 
 Pure functions over the records of one series. A record exists only where the user set a value of its own; the
-value of an episode is its own, else its season's, else the series', else the lever's default.
+value of an episode is its own, else its season's, else the series', else the lever's default. "As the level above"
+is the absence of a record, so it is asked for by a reset of the lever, never by a value.
 """
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Iterable, Sequence
+from typing import Any, Collection, Iterable, Sequence
 
-from core.contracts import EffectiveLever, Level, SettingRecord, SettingsReset
+from core.contracts import EffectiveLever, Level, LevelSettings, SettingRecord, SettingsReset, parse_player_target
 from core.reasons import reason
 
 from . import levers
-
-# The value that takes a record away: the level goes back to what the level above says.
-AS_ABOVE = "as_above"
 
 _Index = dict[str, dict[str | None, dict[tuple[int | None, int | None], Any]]]
 
@@ -26,9 +24,19 @@ def validate(record: SettingRecord) -> str | None:
         return reason("unknown_lever", lever=record.lever)
     if not lever.accepts_target(record.target):
         return reason("bad_target", lever=record.lever)
-    if record.value != AS_ABOVE and not lever.accepts(record.value):
+    if not lever.accepts(record.value):
         return reason("bad_value", lever=record.lever)
     return None
+
+
+def validate_reset(scope: SettingsReset) -> str | None:
+    """None when a reset names no lever, or a lever of the registry with the target it points at."""
+    if scope.lever is None:
+        return reason("bad_target", lever="") if scope.target is not None else None
+    lever = levers.get(scope.lever)
+    if lever is None:
+        return reason("unknown_lever", lever=scope.lever)
+    return None if lever.accepts_target(scope.target) else reason("bad_target", lever=scope.lever)
 
 
 def effective(records: Sequence[SettingRecord], season: int | None, episode: int | None) -> list[EffectiveLever]:
@@ -40,21 +48,56 @@ def effective(records: Sequence[SettingRecord], season: int | None, episode: int
 
 
 def apply_set(records: Sequence[SettingRecord], record: SettingRecord) -> list[SettingRecord]:
-    """The records after setting a lever's value at a level; `AS_ABOVE` takes the record away. Raises on a refused one."""
+    """The records after setting a lever's value at a level. Raises ValueError with the reason on a refused one."""
     problem = validate(record)
     if problem is not None:
         raise ValueError(problem)
     kept = [each for each in records if _slot(each) != _slot(record)]
-    if record.value != AS_ABOVE:
-        kept.append(SettingRecord(series_id=record.series_id, season=record.season, episode=record.episode,
-                                  lever=record.lever, target=record.target, value=deepcopy(record.value)))
-    return _canonical(kept)
+    kept.append(SettingRecord(series_id=record.series_id, season=record.season, episode=record.episode,
+                              lever=record.lever, target=record.target, value=deepcopy(record.value)))
+    return canonical(kept)
 
 
-def apply_reset(records: Sequence[SettingRecord], scope: SettingsReset | SettingRecord) -> list[SettingRecord]:
-    """The records after one level goes back to inheritance; the levels below it keep their own values."""
-    return _canonical([each for each in records
-                       if (each.series_id, each.season, each.episode) != (scope.series_id, scope.season, scope.episode)])
+def apply_reset(records: Sequence[SettingRecord], scope: SettingsReset) -> list[SettingRecord]:
+    """The records after a level, or one lever of it, goes back to inheritance; the levels below keep their values.
+
+    Raises ValueError with the reason when the reset names a lever or a target the registry does not know."""
+    problem = validate_reset(scope)
+    if problem is not None:
+        raise ValueError(problem)
+    level = (scope.series_id, scope.season, scope.episode)
+
+    def gone(each: SettingRecord) -> bool:
+        return (each.series_id, each.season, each.episode) == level and (
+            scope.lever is None or (each.lever, each.target) == (scope.lever, scope.target))
+
+    return canonical([each for each in records if not gone(each)])
+
+
+def without_source(records: Sequence[SettingRecord], source_id: int) -> list[SettingRecord]:
+    """The records after a source has left the series: those that point at it, by target or by value, are gone."""
+    def points_at(each: SettingRecord) -> bool:
+        lever = levers.get(each.lever)
+        target = parse_player_target(each.target) if isinstance(each.target, str) else None
+        return (target is not None and target[0] == source_id) or (
+            lever is not None and source_id in lever.sources_of(each.target, each.value))
+
+    return canonical([each for each in records if not points_at(each)])
+
+
+def within_episodes(records: Sequence[SettingRecord], episodes: Collection[tuple[int, int]]) -> list[SettingRecord]:
+    """The records after episodes have left the layout: an episode's own records go with it, the levels above stay."""
+    return canonical([each for each in records
+                       if each.episode is None or (each.season, each.episode) in episodes])
+
+
+def levels(records: Sequence[SettingRecord], seasons: Iterable[int]) -> list[LevelSettings]:
+    """The levers of the series, then of each of the seasons given: what the headers of the levels show.
+
+    A header is the value of the level itself, so an episode with a value of its own leaves it as it is."""
+    index = _index(records)
+    return [LevelSettings(season=None, levers=_resolve(index, None, None)),
+            *(LevelSettings(season=season, levers=_resolve(index, season, None)) for season in sorted(set(seasons)))]
 
 
 def affected(before: Sequence[SettingRecord], after: Sequence[SettingRecord],
@@ -71,7 +114,7 @@ def _slot(record: SettingRecord) -> tuple:
     return record.series_id, record.season, record.episode, record.lever, record.target
 
 
-def _canonical(records: list[SettingRecord]) -> list[SettingRecord]:
+def canonical(records: Sequence[SettingRecord]) -> list[SettingRecord]:
     """One order for equal sets of records, so that independent edits commute."""
     return sorted(records, key=lambda each: (each.series_id, -1 if each.season is None else each.season,
                                               -1 if each.episode is None else each.episode, each.lever,
@@ -82,7 +125,7 @@ def _index(records: Sequence[SettingRecord]) -> _Index:
     """lever -> target -> (season, episode) -> value, over the records the registry still accepts."""
     index: _Index = {}
     for record in records:
-        if record.value != AS_ABOVE and validate(record) is None:
+        if validate(record) is None:
             index.setdefault(record.lever, {}).setdefault(record.target, {})[(record.season, record.episode)] = record.value
     return index
 

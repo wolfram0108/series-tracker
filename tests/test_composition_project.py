@@ -7,9 +7,10 @@ from pathlib import Path
 import pytest
 
 from core.contracts import (CompositionRow, PlayerSummary, ReleaseTable, RowState, RowVoice, RuleLine, RuleResult,
-                            RulesApplyReply, SeriesSource, SourceStatus, SourceType, TableRow, line_of)
-from modules.composition.project import (UNKNOWN_VOICE_LABEL, SourceInput, fold_name, lines_for, project,
-                                         selected_rows, voice_name_of, voice_names)
+                            RulesApplyReply, SeriesSource, SourceStatus, SourceType, TableRow, VoiceSummary, line_of)
+from core.voice_names import fold_name
+from modules.composition.project import (UNKNOWN_VOICE_LABEL, SourceInput, layout_episodes, lines_for, project,
+                                         selected_rows, touched_episodes, voice_name_of, voice_names)
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "docs" / "missions" / "voice-alignment" / "stage-10" / "raw"
@@ -353,14 +354,30 @@ def test_an_excluded_row_names_its_voice_like_any_other():
     assert (out.rows[0].voice_unknown, out.unknown_voices) == (1, {"чужая": 1})
 
 
-def test_the_names_to_ask_the_groups_about_are_the_ones_of_the_rows_in_the_layout():
+def test_the_names_to_ask_the_groups_about_are_those_of_every_table_and_those_the_constructors_assigned():
     first = item(source(id=1, position=0, players_off=["allvideo"]),
                  table(row("a", voice="AniStar"), row("b", voice="Animy", player="allvideo"), row("c", voice=""),
                        row("d", voice="AniStar", kind="x"), row("e", voice="Table name")),
                  {"a": {"episode": 1}, "b": {"episode": 1}, "c": {"episode": 2}, "d": {"episode": 3},
                   "e": {"episode": 4, "voiceover": "Assigned"}})
-    bare = item(source(id=2, position=1, profile=None), table(row("f", voice="Никто")))
-    assert voice_names([bare, first]) == ["AniStar", "Assigned"]
+    bare = item(source(id=2, position=1, profile=None), table(row("f", voice="Никто")),
+                {"f": {"episode": 1, "voiceover": "Stale"}})
+    waiting = item(source(id=3, position=2))
+    assert voice_names([waiting, bare, first]) == ["AniStar", "Animy", "Table name", "Assigned", "Никто"]
+
+
+def test_a_player_lists_its_voices_with_their_groups_before_a_profile_and_the_assigned_ones_after():
+    tbl = table(row("a", voice="Animy", player="cvh"), row("b", voice="animy", player="cvh"),
+                row("c", voice="AniStar", player="cvh"), row("d", player="vk"), row("e", player="vk"))
+    before = project([item(source(profile=None), tbl)], {"Animy": "Ани", "animy": "Ани"}, {}).sources[0].players
+    assert before[0].voices == [VoiceSummary(name="Animy", group="Ани", rows=1),
+                                VoiceSummary(name="animy", group="Ани", rows=1),
+                                VoiceSummary(name="AniStar", group=None, rows=1)]
+    assert before[1].voices == []
+    after = project([item(source(), tbl, {"d": {"episode": 1, "voiceover": "Мой"},
+                                          "e": {"episode": 2, "voiceover": "Мой"}})], {"Мой": "Моя"}, {})
+    assert after.sources[0].players[1].voices == [VoiceSummary(name="Мой", group="Моя", rows=2)]
+    assert [voice.name for voice in after.sources[0].players[0].voices] == ["Animy", "animy", "AniStar"]
 
 
 def test_the_name_of_a_voice_is_the_assigned_one_or_the_one_of_the_row():
@@ -445,6 +462,46 @@ def test_equal_inputs_give_equal_projections_and_the_inputs_are_left_as_they_wer
     assert first.unknown_voices == {"anistar": 4, "новая": 5, "": 6}
     again = project(inputs, groups, first.unknown_voices)
     assert (again.rows, again.unknown_voices) == (first.rows, first.unknown_voices)
+
+
+# ---- the episodes of a layout and the episodes two layouts differ in --------------------------------------------------
+
+
+def crow(key, season, start, end=None, *, source_id=1, excluded=False, **fields) -> CompositionRow:
+    return CompositionRow(series_id=5, source_id=source_id, row_key=key, season=season, episode_start=start,
+                          episode_end=end if end is not None else start, excluded=excluded, player="vk",
+                          state=RowState.PLAYABLE, **fields)
+
+
+def test_a_layout_covers_the_episodes_of_its_rows_and_a_compilation_covers_its_whole_range():
+    rows = [crow("a", 1, 1), crow("b", 1, 2, 4), crow("c", 2, 1), crow("x", 1, 9, excluded=True),
+            crow("n", None, 7), crow("r", 1, 6, 5)]
+    assert layout_episodes(rows) == {(1, 1), (1, 2), (1, 3), (1, 4), (2, 1), (1, 6)}
+    assert layout_episodes([]) == set()
+
+
+def test_two_layouts_differ_in_the_episodes_of_the_rows_that_are_not_the_same_in_both():
+    base = [crow("a", 1, 1), crow("b", 1, 2), crow("c", 1, 3, 5)]
+    assert touched_episodes(base, [row.model_copy() for row in base]) == set()
+    assert touched_episodes(base, [*base[:2], crow("c", 1, 3, 5, link="https://cdn.test/new")]) == {
+        (1, 3), (1, 4), (1, 5)}
+    assert touched_episodes(base, [crow("a", 1, 7), *base[1:]]) == {(1, 1), (1, 7)}
+    assert touched_episodes(base, base[1:]) == {(1, 1)}
+    assert touched_episodes(base[:2], base) == {(1, 3), (1, 4), (1, 5)}
+    assert touched_episodes([], base) == {(1, 1), (1, 2), (1, 3), (1, 4), (1, 5)}
+
+
+def test_rows_with_the_same_key_in_two_sources_are_two_rows():
+    assert touched_episodes([crow("a", 1, 1, source_id=1), crow("a", 1, 2, source_id=2)],
+                            [crow("a", 1, 1, source_id=1)]) == {(1, 2)}
+
+
+def test_a_difference_that_names_no_episode_is_an_empty_set_and_one_that_cannot_be_named_is_none():
+    base = [crow("a", 1, 1), crow("b", 1, 2)]
+    assert touched_episodes(base, list(reversed(base))) == set()
+    assert touched_episodes(base, [*base, crow("t", 1, 1, excluded=True, exclusion="rule")]) == set()
+    assert touched_episodes(base, [*base, crow("n", None, 3)]) is None
+    assert touched_episodes([crow("n", None, 3)], []) is None
 
 
 # ---- snapshots of real answers -----------------------------------------------------------------------------------

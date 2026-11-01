@@ -4,7 +4,7 @@ import pytest
 
 from core.contracts import group_target, player_target
 from modules.composition import levers
-from modules.composition.levers import Lever, TargetKind, parse_group_target, parse_player_target
+from modules.composition.levers import Lever, TargetKind
 
 CHOICE = {"group": "Ruchime", "source_id": 3, "player": "vibix"}
 PICK = {"source_id": 2, "player": "kodik"}
@@ -92,11 +92,16 @@ def test_a_lever_points_only_at_the_kind_of_thing_it_is_about(name, target, acce
     assert levers.get(name).accepts_target(target) is accepted
 
 
-def test_a_target_is_read_back_into_the_domain_things_it_was_made_of():
-    assert parse_player_target(player_target(12, "cvh")) == (12, "cvh")
-    assert parse_player_target(player_target(12, "a/b")) == (12, "a/b")
-    assert parse_group_target(group_target("AniMy / RuChiMe")) == "AniMy / RuChiMe"
-    assert parse_player_target(group_target("x")) is None and parse_group_target(player_target(1, "vk")) is None
+@pytest.mark.parametrize("name, target, value, expected", [
+    ("reference.choice", None, CHOICE, {3}),
+    ("reference.choice", None, None, set()),
+    ("reference.allow", player_target(3, "vibix"), False, {3}),
+    ("voice.take", group_target("Ruchime"), False, set()),
+    ("voice.player", group_target("Ruchime"), PICK, {2}),
+    ("voice.player", group_target("Ruchime"), None, set()),
+])
+def test_a_record_names_the_sources_it_points_at_by_its_target_and_by_its_value(name, target, value, expected):
+    assert levers.get(name).sources_of(target, value) == expected
 
 
 def test_a_new_lever_is_one_registration_and_is_found_in_the_registry(registered):
