@@ -52,7 +52,7 @@ A general "stream to file" download (voice-over mission):
       the link to an absolute path without a record in media_items or download_tasks
       (the voice-overs of a series go to a temporary directory). The executor keeps no state:
       the owner of the queue (voices) sends the command again after a restart.
-  downloads.fetch.cancel {series_id} — drop the queue and the running downloads of a series
+  downloads.fetch.cancel {series_id?, key?} — drop the queue and the running downloads of a series, or one job by its key
 events downloads.fetch.started {key, series_id, path} (the download left the queue and began) and
 downloads.fetch.finished {key, ok, error, transient, path, series_id}.
 It has a limit of its own, the setting max_parallel_dub_downloads (2 by default),
@@ -621,10 +621,17 @@ class DownloadsModule(BaseModule):
         self._fetch_pump()
 
     async def on_fetch_cancel(self, env: Envelope) -> None:
-        series_id = env.payload["series_id"]
-        self._fetch_queue = [job for job in self._fetch_queue if job["series_id"] != series_id]
-        for runner, owner in list(self._fetch_active.values()):
-            if owner == series_id:
+        """payload: {series_id?, key?}: the jobs of a series, one job by its key, or the job of that key in that series."""
+        series_id, key = env.payload.get("series_id"), env.payload.get("key")
+        if series_id is None and key is None:
+            raise ValueError("отмена загрузки: нужен series_id или key")
+
+        def wanted(job_key: str, owner: int) -> bool:
+            return (key is None or job_key == key) and (series_id is None or owner == series_id)
+
+        self._fetch_queue = [job for job in self._fetch_queue if not wanted(job["key"], job["series_id"])]
+        for job_key, (runner, owner) in list(self._fetch_active.items()):
+            if wanted(job_key, owner):
                 runner.cancel()
 
     def _fetch_pump(self) -> None:

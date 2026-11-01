@@ -17,7 +17,7 @@ from modules.sources.players.cdnvideohub import Rung
 from modules.sources.players.registry import PlayerRegistry
 from modules.sources.sites import (PHASE_CATALOG, PHASE_PLAYERS, PHASE_RELEASE, ReadContext, SiteError, SiteRegistry)
 from modules.sources.sites.dunhuatv import DunhuaTvSite
-from sources_support import Web, json_of, text_of
+from sources_support import READ_LIMIT_S, Web, json_of, text_of, within
 
 PAGE = "https://dunhuatv.ru/28-praktikuja-ci-sto-tysjach-let-smotret-onlajn.html"
 KODIK_IFRAMES = {"50228": "run1/dunhuatv__kodik_voice0.html", "49002": "run1/dunhuatv__kodik_voice1.html",
@@ -62,7 +62,8 @@ class Run:
 
     async def read(self, site: DunhuaTvSite, web: Web, url: str = PAGE):
         async with web.client() as http:
-            return await site.read(url, ReadContext(http, lambda *step: self.progress.append(step)))
+            return await within(site.read(url, ReadContext(http, lambda *step: self.progress.append(step))),
+                                READ_LIMIT_S, "the read of the title")
 
 
 _READ: list = []

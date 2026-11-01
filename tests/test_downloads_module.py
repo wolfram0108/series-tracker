@@ -1193,6 +1193,23 @@ async def test_fetch_cancel_drops_the_queue_and_active_jobs_of_a_series(system, 
 
 
 @pytest.mark.asyncio
+async def test_fetch_cancel_by_key_drops_only_that_job(system, tmp_path):
+    bus, fake, dl, probe, _, _ = system
+    dl.gate = asyncio.Event()
+    for i in range(3):
+        probe.send_command("downloads.fetch", {
+            "key": f"file:{i}", "url": f"https://site/#cvh={i}",
+            "path": str(tmp_path / f"{i}.mp4"), "series_id": 3})
+    assert await _wait(lambda: dl.started == ["https://site/#cvh=0", "https://site/#cvh=1"])
+    probe.send_command("downloads.fetch.cancel", {"key": "file:0"})
+    # The slot of the cancelled job goes to the queued one; the other running job is untouched.
+    assert await _wait(lambda: "https://site/#cvh=2" in dl.started)
+    dl.gate.set()
+    assert await _wait(lambda: os.path.isfile(tmp_path / "1.mp4") and os.path.isfile(tmp_path / "2.mp4"))
+    assert not os.path.exists(tmp_path / "0.mp4")
+
+
+@pytest.mark.asyncio
 async def test_fetch_rejects_a_relative_path(system):
     bus, _, dl, probe, _, _ = system
     (done,) = await _fetch(probe, bus, 1, jobs=[

@@ -1,7 +1,9 @@
 """The stream of a candidate, asked for right before the download: the addresses of the files expire, so they are not kept.
 
-A candidate link names its player: a VK player link with its key, an AllVideo embed, a Vibix catalog entry. The player that
-owns the link resolves it; an address no player owns is not handled here.
+A candidate link names its player: a VK player link with its key, an AllVideo embed, a Vibix catalog entry, an item of
+CDN VideoHub or of Kodik. The player that owns the link resolves it; an address no player owns is not handled here. A
+link a player owns is never "not handled": when the player cannot give the stream, the answer is `StreamUnavailable`, so
+that a page of a player is not handed to a generic downloader.
 """
 from __future__ import annotations
 
@@ -29,7 +31,7 @@ async def resolve_stream(players: PlayerRegistry, url: str, http: httpx.AsyncCli
     if "vk" in players and players.get("vk").owns(url):
         return await _resolve_vk(players, url, http, max_height)
     if "allvideo" in players and players.get("allvideo").owns(url):
-        return await players.get("allvideo").resolve(url, http)
+        return await _resolve_allvideo(players, url, http, max_height)
     if "vibix" in players and players.get("vibix").owns(url):
         try:
             return await players.get("vibix").resolve(url, http)
@@ -39,6 +41,18 @@ async def resolve_stream(players: PlayerRegistry, url: str, http: httpx.AsyncCli
         if name in players and players.get(name).owns(url):
             return await _resolve_listed(players, name, url, http, max_height)
     return None
+
+
+async def _resolve_allvideo(players: PlayerRegistry, url: str, http: httpx.AsyncClient, max_height: int | None) -> dict:
+    """An embed -> its best stream within the cap now, asked with the origin the embed answered from."""
+    player = players.get("allvideo")
+    asked, ref = player.resolving(), PlayerRef(player.name, url)
+    verdict = await settle(asked, ref, http, EMBED_PAGE, pacer=players.pacer)
+    picked = pick_file(verdict.reading.files, max_height) if verdict.reading.kind is Kind.PLAYABLE else None
+    if picked is None:
+        probe = probe_from(verdict, ref, player.label)
+        raise StreamUnavailable(reason("player_failed", player=player.label, cause=probe.reason), probe.transient)
+    return {"stream_url": picked[1], "headers": {"Referer": asked.origin} if asked.origin else {}}
 
 
 async def _resolve_listed(players: PlayerRegistry, name: str, url: str, http: httpx.AsyncClient,

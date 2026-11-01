@@ -6,7 +6,6 @@ episode, not the stream, and was seen to say 4K over a list that stops at 1080p.
 from __future__ import annotations
 
 import html
-import logging
 import re
 from urllib.parse import urlparse
 
@@ -14,8 +13,6 @@ import httpx
 
 from .contract import Answer, Kind, PlayerRef, Reading
 from .http import get_answer, read_answer
-
-logger = logging.getLogger("sources")
 
 # AllVideo answers a missing embed with status 404 and a Playerjs that plays this placeholder file.
 ERROR_FILE = "video_error"
@@ -44,7 +41,7 @@ def read_playerjs(status: int, text: str) -> Reading:
         return Reading(Kind.NOT_FOUND, status, message=ERROR_FILE)
     heights = set().union(*(_heights(value) for value in values)) if values else set()
     if heights:
-        return Reading(Kind.PLAYABLE, status, tuple(sorted(heights)))
+        return Reading(Kind.PLAYABLE, status, tuple(sorted(heights)), files=_files(values))
     found = _TITLE.search(text)
     title = " ".join(found.group(1).split()) if found else ""
     if _PLAYERJS in text.lower():
@@ -52,28 +49,17 @@ def read_playerjs(status: int, text: str) -> Reading:
     return Reading(Kind.NOT_PLAYER, status, title=title)
 
 
-def best_stream_url(file_val: str) -> str | None:
-    """Best stream URL from the comma-separated Playerjs quality list."""
-    streams: list[tuple[int, str]] = []
-    for chunk in file_val.split(","):
-        chunk = chunk.strip()
-        if not chunk:
-            continue
-        match = re.search(r"\[(?:(\d+)p?|(4k))\]", chunk, re.IGNORECASE)
-        if match:
-            quality = 2160 if match.group(2) else int(match.group(1))
-            stream_url = re.sub(r"\[[^\]]+\]", "", chunk).strip()
-            if stream_url:
-                streams.append((quality, stream_url))
-        else:
-            cleaned = re.sub(r"\[[^\]]+\]", "", chunk).strip()
-            if cleaned:
-                streams.append((0, cleaned))
-    if streams:
-        streams.sort(key=lambda item: item[0], reverse=True)
-        return streams[0][1]
-    cleaned = re.sub(r"\[[^\]]+\]", "", file_val).strip()
-    return cleaned if cleaned else None
+def _files(values: list[str]) -> tuple[tuple[int, str], ...]:
+    """The streams of the file lists by height: `[720p]https://host/a.mp4/` is the stream of 720p, a bare address with a
+    height in its name is the stream of that height, and one with neither is left out (nothing says what it is)."""
+    found: dict[int, str] = {}
+    for value in values:
+        for chunk in value.split(","):
+            heights = _heights(chunk)
+            stream = re.sub(r"\[[^\]]+\]", "", chunk).strip()
+            if heights and stream:
+                found[max(heights)] = stream
+    return tuple(sorted(found.items()))
 
 
 class AllVideoPlayer:
@@ -103,26 +89,24 @@ class AllVideoPlayer:
     def read(self, answer: Answer) -> Reading:
         return read_answer(answer, read_playerjs)
 
-    async def resolve(self, url: str, http: httpx.AsyncClient) -> dict | None:
-        try:
-            response = await http.get(url, headers={"Referer": "https://1.ruchime.org/"},
-                                      follow_redirects=True)
-            if response.status_code != 200:
-                return None
-            match = _FILE.search(response.text)
-            if not match:
-                return None
-            stream_url = best_stream_url(match.group(1))
-            if not stream_url:
-                return None
-            final_url = str(getattr(response, "url", "") or url)
-            parsed = urlparse(final_url)
-            if not parsed.scheme or not parsed.netloc:
-                parsed = urlparse(url)
-            origin = (f"{parsed.scheme}://{parsed.netloc}/"
-                      if parsed.scheme and parsed.netloc else "")
-            return {"stream_url": stream_url,
-                    "headers": {"Referer": origin} if origin else {}}
-        except Exception as exc:  # noqa: BLE001 - resolution is retried by download
-            logger.warning("Failed resolving AllVideo stream for %s: %s", url, exc)
-            return None
+    def resolving(self) -> "_Resolving":
+        """The same player asked for the files of an embed, which says where the embed finally answered from."""
+        return _Resolving(self)
+
+
+class _Resolving:
+    """A player asked under the one policy, remembering the origin the embed answered from: the stream is asked with it."""
+
+    series_scope = False
+
+    def __init__(self, player: AllVideoPlayer) -> None:
+        self._player, self.name, self.origin = player, player.name, ""
+
+    async def fetch(self, ref: PlayerRef, http: httpx.AsyncClient, page_url: str) -> Answer:
+        answer = await self._player.fetch(ref, http, page_url)
+        parts = urlparse(answer.final_url or ref.url)
+        self.origin = f"{parts.scheme}://{parts.netloc}/" if parts.scheme and parts.netloc else ""
+        return answer
+
+    def read(self, answer: Answer) -> Reading:
+        return self._player.read(answer)

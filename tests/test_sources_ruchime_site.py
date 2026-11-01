@@ -17,7 +17,7 @@ from modules.sources.players.vibix_protocol import VibixUnavailable, encode_enve
 from modules.sources.sites import (PHASE_CATALOG, PHASE_EPISODES, PHASE_PLAYERS, PHASE_RELEASE, ReadContext, SiteError,
                                    SiteRegistry)
 from modules.sources.sites.ruchime import RuchimeSite
-from sources_support import Web, json_of, text_of
+from sources_support import READ_LIMIT_S, Web, json_of, text_of, within
 
 SLUG = "praktikuia-ci-sto-tysiac-let"
 RELEASE = f"https://1.ruchime.org/release/{SLUG}"
@@ -104,7 +104,8 @@ class Run:
 
     async def read(self, site: RuchimeSite, web: Web):
         async with web.client() as http:
-            return await site.read(RELEASE, ReadContext(http, lambda *step: self.progress.append(step)))
+            return await within(site.read(RELEASE, ReadContext(http, lambda *step: self.progress.append(step))),
+                                READ_LIMIT_S, "the read of the release")
 
 
 # --- the whole page: the full list by every player and the catalog (M-7) ---------------------------------------------------
@@ -398,3 +399,15 @@ async def test_a_kodik_iframe_that_cannot_be_opened_refuses_the_table_with_the_r
         await Run().read(a_site(), web)
 
     assert parse(refused.value.reason) == {"code": "player_status", "params": {"player": "Kodik", "status": 500}}
+
+
+async def test_the_catalog_of_a_player_is_read_once_however_many_pages_show_it():
+    site = RuchimeSite(PlayerRegistry.standard())
+    pages = catalog_of(site, "asura-bezumnyi-korol-2")
+    web = web_of(release_with([entry(number) for number in range(1, 7)]))
+
+    draft = await Run().read(site, web)
+
+    # Six pages show both players; each catalog is read through the first of them and no other.
+    assert web.count("kodikplayer.com/serial/") == 1 and set(pages) == {f"{RELEASE}/episode-1"}
+    assert sum(1 for row in draft.rows if row.player == "vibix") == 23

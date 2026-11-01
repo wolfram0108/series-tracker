@@ -11,6 +11,7 @@ from core.reasons import parse
 from modules.sources.players import vibix
 from modules.sources.players.contract import Kind, PlayerRef
 from modules.sources.players.vibix import VibixFailure, VibixPlayer, link_of, parse_link
+from sources_support import STEP_LIMIT_S, within
 from modules.sources.players.vibix_protocol import (Episode, Stream, VibixUnavailable, encode_envelope,
                                                     parse_playlist)
 
@@ -39,7 +40,11 @@ def episode(number: int, *streams: Stream, season: int = 1) -> Episode:
 
 
 async def read(player: VibixPlayer, http: httpx.AsyncClient, link: str):
-    return player.read(await player.fetch(PlayerRef("vibix", link), http, PAGE))
+    return player.read(await within(player.fetch(PlayerRef("vibix", link), http, PAGE), STEP_LIMIT_S, "the ask of Vibix"))
+
+
+async def resolve(player: VibixPlayer, url: str, http: httpx.AsyncClient) -> dict:
+    return await within(player.resolve(url, http), STEP_LIMIT_S, "the resolution of a Vibix link")
 
 
 def test_the_link_names_the_season_and_the_episode_and_nothing_else_parses():
@@ -146,7 +151,7 @@ async def test_the_key_file_is_read_and_written_through_the_storage_helper(monke
     player = VibixPlayer(browser_getter=browser, key_path=key_path)
     player._key_store.save(KEY, 2_000_000_000)  # a key younger than its life: the capture takes it from the file
 
-    playlist, key = await player.playlist(PAGE)
+    playlist, key = await within(player.playlist(PAGE), STEP_LIMIT_S, "the capture of the catalog")
 
     assert key == KEY and playlist[0].voice == "RuChiMe"
     assert calls.sent == [("resolve", (str(key_path),))]
@@ -166,7 +171,7 @@ async def test_a_stalled_key_file_makes_the_capture_unavailable_with_a_reason(mo
     player = VibixPlayer(browser_getter=browser, key_path=tmp_path / "key.json")
 
     with pytest.raises(VibixUnavailable) as raised:
-        await player.playlist(PAGE)
+        await within(player.playlist(PAGE), STEP_LIMIT_S, "the capture of the catalog")
 
     assert parse(str(raised.value))["code"] == "storage_failed"
 
@@ -177,7 +182,7 @@ async def test_a_manifest_is_written_through_the_storage_helper_to_the_path_it_o
     player = VibixPlayer(manifest_dir=tmp_path / "manifests")
     catalog(player, monkeypatch, episode(2, Stream(720, "https://cdn.test/hls/live.m3u8")))
     async with client({"live.m3u8": 200}) as http:
-        resolved = await player.resolve(link_of(PAGE, 1, 2), http)
+        resolved = await resolve(player, link_of(PAGE, 1, 2), http)
 
     path = Path(resolved["stream_url"].removeprefix("file://"))
     assert path == (tmp_path / "manifests" / "vibix" / "test-s1-0002-720.m3u8").absolute()
@@ -192,7 +197,7 @@ async def test_a_manifest_the_disk_does_not_take_is_a_transient_failure_with_a_r
     catalog(player, monkeypatch, episode(1, Stream(720, "https://cdn.test/live.m3u8")))
     async with client({"live.m3u8": 200}) as http:
         with pytest.raises(VibixFailure) as raised:
-            await player.resolve(link_of(PAGE, 1, 1), http)
+            await resolve(player, link_of(PAGE, 1, 1), http)
 
     assert raised.value.transient and parse(parse(raised.value.reason)["params"]["cause"])["code"] == "storage_failed"
 
@@ -204,11 +209,11 @@ async def test_the_entry_the_link_names_is_the_entry_that_resolves_and_a_missing
             episode(1, Stream(720, "https://cdn.test/s1.m3u8"), season=1),
             episode(1, Stream(480, "https://cdn.test/s2.m3u8"), season=2))
     async with client({"s1.m3u8": 200, "s2.m3u8": 200}) as http:
-        second = await player.resolve(link_of(PAGE, 2, 1), http)
+        second = await resolve(player, link_of(PAGE, 2, 1), http)
         with pytest.raises(VibixFailure) as missing:
-            await player.resolve(link_of(PAGE, 3, 1), http)
+            await resolve(player, link_of(PAGE, 3, 1), http)
         with pytest.raises(VibixFailure) as foreign:
-            await player.resolve(PAGE, http)
+            await resolve(player, PAGE, http)
 
     assert second["stream_url"].endswith("-s2-0001-480.m3u8")
     assert parse(parse(missing.value.reason)["params"]["cause"])["code"] == "vibix_no_episode"

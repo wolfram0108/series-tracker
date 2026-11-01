@@ -29,7 +29,7 @@ async def get_answer(http: httpx.AsyncClient, url: str, referer: str, agent: str
                                   follow_redirects=True, timeout=timeout)
     except httpx.HTTPError as exc:
         return Answer(None, error=type(exc).__name__)
-    return Answer(response.status_code, response.text, _retry_after(response))
+    return Answer(response.status_code, response.text, _retry_after(response), final_url=str(response.url))
 
 
 async def post_answer(http: httpx.AsyncClient, url: str, data: dict, headers: dict, *,

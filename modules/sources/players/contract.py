@@ -38,6 +38,8 @@ class Answer:
     error: str = ""
     # A player that has to look through several entries states its own reading instead of one text to read.
     reading: "Reading | None" = None
+    # Where the request finally got its answer from (after redirects); not a part of what the answer says.
+    final_url: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)

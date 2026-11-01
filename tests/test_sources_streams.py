@@ -12,7 +12,7 @@ from modules.sources.players.registry import PlayerRegistry
 from modules.sources.players.streams import resolve_stream
 from modules.sources.players.vibix import link_of
 from modules.sources.players.vibix_protocol import Episode, Stream, VibixProtocolError, VibixUnavailable, encode_envelope
-from sources_support import Web
+from sources_support import OWNED, STEP_LIMIT_S, TRANSIENT, Web, host_that, within
 
 ALLVIDEO = "https://fsst.online/embed/77/"
 EMBED_100 = "https://vkvideo.ru/video_ext.php?oid=-1&id=100&hash=abc"
@@ -32,7 +32,8 @@ def vk_web(page: str) -> Web:
 
 async def resolved(url: str, web: Web, max_height: int | None = None, players: PlayerRegistry | None = None):
     async with web.client() as http:
-        return await resolve_stream(players or PlayerRegistry.standard(), url, http, max_height)
+        return await within(resolve_stream(players or PlayerRegistry.standard(), url, http, max_height), STEP_LIMIT_S,
+                            f"the stream of {url}")
 
 
 # --- AllVideo -----------------------------------------------------------------------------------------------------------------
@@ -264,3 +265,26 @@ async def test_the_old_name_of_the_cvh_player_in_a_link_is_not_a_link_and_a_page
 
     assert await resolved(f"{DUNHUA}#vk=v1s", web) is None
     assert await resolved(DUNHUA, web) is None
+
+
+# --- a link a player owns is never "not handled" ---------------------------------------------------------------------------------
+
+def test_every_player_of_the_registry_has_a_link_here_and_each_link_has_exactly_one_owner():
+    registry = PlayerRegistry.standard()
+
+    assert set(OWNED) == {player.name for player in registry}
+    for name, link in OWNED.items():
+        assert [player.name for player in registry if player.owns(link)] == [name]
+
+
+@pytest.mark.parametrize("mode", ["gone", "busy", "silent", "garbage"])
+@pytest.mark.parametrize("name", list(OWNED))
+async def test_a_player_that_owns_the_link_and_cannot_give_the_stream_says_so_and_never_leaves_it_unhandled(
+        name, mode, tmp_path):
+    registry = PlayerRegistry.standard(manifest_dir=tmp_path)
+    catalog(registry, Episode(1, "Серия 1", "Сезон 1", (Stream(720, "https://cdn.test/dead.m3u8"),)))
+
+    with pytest.raises(StreamUnavailable) as raised:
+        await resolved(OWNED[name], host_that(mode), players=registry)
+
+    assert raised.value.transient is TRANSIENT[mode][name] and parse(raised.value.reason)["code"]

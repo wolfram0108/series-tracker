@@ -4,6 +4,7 @@ of pages in a database file (the database of a test is a real file: every operat
 so an in-memory one would be empty each time)."""
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 from pathlib import Path
@@ -17,6 +18,20 @@ from sqlalchemy import create_engine
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "docs" / "missions" / "voice-alignment" / "stage-10" / "raw"
+
+
+# How long a test waits for what the code under test should end by itself. A read of a whole release is some seconds of
+# work; what waits longer waits for an answer that no fake will give, and that is a failure of the test, not a hang.
+READ_LIMIT_S = 60.0
+STEP_LIMIT_S = 10.0
+
+
+async def within(awaited, seconds: float, what: str):
+    """Await with a limit: the code that waits for ever is a red test with a name, not a suite that hangs until the guard."""
+    try:
+        return await asyncio.wait_for(awaited, seconds)
+    except asyncio.TimeoutError:
+        pytest.fail(f"{what} did not end in {seconds:g} s: it waits for something no fake of the test gives")
 
 
 def sample(relative: str) -> Path:
@@ -90,3 +105,26 @@ class Web:
 
     def client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(transport=httpx.MockTransport(self._handle))
+
+
+# --- a link each player owns, and a host that cannot give it ----------------------------------------------------------------------
+
+PAGE = "https://1.ruchime.org/release/test/episode-1"
+DUNHUA = "https://dunhuatv.ru/28-x-smotret-onlajn.html"
+OWNED = {"vk": "https://vkvideo.ru/video_ext.php?oid=-1&id=100&hash=abc", "allvideo": "https://fsst.online/embed/77/",
+         "vibix": f"{PAGE}#vibix=1/1", "cvh": f"{DUNHUA}#cvh=missing", "kodik": f"{DUNHUA}#kodik=50228/7bbb4c6b/101"}
+# Whether asking again may help, by what the host did: a video it says is gone is gone, a host that is busy or silent may
+# recover, a page that is no player is not confirmed (the manifests of Vibix that do not decode are a final refusal).
+TRANSIENT = {mode: {name: expected for name in OWNED}
+             for mode, expected in (("gone", False), ("busy", True), ("silent", True), ("garbage", True))}
+TRANSIENT["garbage"]["vibix"] = False
+
+
+def host_that(mode: str) -> Web:
+    """A web where everything answers the way a host does that cannot give the video: gone, busy, silent or not a player."""
+    def silent(request):
+        raise httpx.ConnectError("no route")
+
+    answer = {"gone": (404, ""), "busy": (503, "busy"), "silent": silent,
+              "garbage": (200, "<html><body>not a player</body></html>")}[mode]
+    return Web().route("", answer).route("", answer, method="POST")

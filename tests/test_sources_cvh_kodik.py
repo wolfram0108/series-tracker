@@ -15,7 +15,7 @@ from modules.sources.players import cdnvideohub, kodik
 from modules.sources.players.catalog import CatalogError, read_catalog
 from modules.sources.players.cdnvideohub import CdnVideoHubError, CdnVideoHubPlayer, Rung
 from modules.sources.players.contract import Kind, PlayerRef
-from sources_support import Web
+from sources_support import STEP_LIMIT_S, Web, within
 
 PAGE = "https://dunhuatv.ru/28-x-smotret-onlajn.html"
 WIDGET = '<video-player id="myplayer" data-title-id="54437" data-publisher-id="1110"></video-player>'
@@ -94,10 +94,16 @@ def kodik_web(iframes: dict[str, str] | None = None) -> Web:
     return web
 
 
+async def ask(player, ref, http):
+    """What the player reads of one ask; the ask has a limit like every wait of these tests."""
+    return player.read(await within(player.fetch(ref, http, PAGE), STEP_LIMIT_S, "the ask of the player"))
+
+
 async def entries_of(source_url: str, web: Web | None = None):
     player, web = kodik.KodikPlayer(), web or kodik_web()
     async with web.client() as http:
-        return await read_catalog(player, PlayerRef("kodik", source_url), http, PAGE), web
+        return await within(read_catalog(player, PlayerRef("kodik", source_url), http, PAGE), STEP_LIMIT_S,
+                            "the catalog of the iframe"), web
 
 
 # --- Kodik: the list of an iframe ---------------------------------------------------------------------------------------------
@@ -172,9 +178,9 @@ async def test_an_iframe_that_does_not_open_is_a_catalog_that_cannot_be_read(pag
 async def test_an_item_reads_by_its_id_and_the_iframe_is_opened_once_for_all_the_items_of_it():
     player, web = kodik.KodikPlayer(), kodik_web()
     async with web.client() as http:
-        readings = [player.read(await player.fetch(player.ref_of(PAGE, "50228", "7bbb4c6b", item), http, PAGE))
+        readings = [await ask(player, player.ref_of(PAGE, "50228", "7bbb4c6b", item), http)
                     for item in ("101", "102", "103")]
-        absent = player.read(await player.fetch(player.ref_of(PAGE, "50228", "7bbb4c6b", "999"), http, PAGE))
+        absent = await ask(player, player.ref_of(PAGE, "50228", "7bbb4c6b", "999"), http)
 
     assert [dict(r.files) for r in readings] == [{360: "https://cloud.kodik.test/360.mp4:hls:manifest.m3u8",
                                                   720: "https://cloud.kodik.test/720.mp4:hls:manifest.m3u8"}] * 3
@@ -213,7 +219,7 @@ async def cvh_entries(playlist: dict | int):
     player, web = CdnVideoHubPlayer(measured), playlist_web(playlist)
     ref = player.find(WIDGET, PAGE)
     async with web.client() as http:
-        return await read_catalog(player, ref, http, PAGE)
+        return await within(read_catalog(player, ref, http, PAGE), STEP_LIMIT_S, "the playlist")
 
 
 def test_the_widget_of_a_page_is_the_title_and_the_publisher_the_player_is_embedded_with():
@@ -268,9 +274,9 @@ async def test_a_video_reads_with_the_measured_height_and_every_known_file_and_a
     web = playlist_web({"items": []})
     web.route("/video/empty", json.dumps({"sources": {}}), first=True)
     async with web.client() as http:
-        playable = player.read(await player.fetch(player.ref_of(PAGE, "v4k"), http, PAGE))
-        empty = player.read(await player.fetch(player.ref_of(PAGE, "empty"), http, PAGE))
-        missing = player.read(await player.fetch(player.ref_of(PAGE, "missing"), http, PAGE))
+        playable = await ask(player, player.ref_of(PAGE, "v4k"), http)
+        empty = await ask(player, player.ref_of(PAGE, "empty"), http)
+        missing = await ask(player, player.ref_of(PAGE, "missing"), http)
 
     assert playable.kind is Kind.PLAYABLE and dict(playable.files) == {720: "https://okcdn.test/v4k/720",
                                                                        1440: "https://okcdn.test/v4k/4k"}

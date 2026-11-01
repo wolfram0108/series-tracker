@@ -11,7 +11,7 @@ from modules.sources.module import SourcesModule
 from modules.sources.players.vibix import link_of
 from modules.sources.sites import PHASES
 from modules.sources.sites.builtin import builtin_sites
-from sources_support import ROOT, Web, migrate
+from sources_support import OWNED, ROOT, STEP_LIMIT_S, Web, host_that, migrate
 
 DOLLS = "https://dunhuatv.ru/28-praktikuja-ci-sto-tysjach-let-smotret-onlajn.html"
 
@@ -64,15 +64,16 @@ async def test_the_module_resolves_the_stream_of_a_link_a_player_owns_and_leaves
     assert other == {"handled": False}
 
 
-async def test_a_vibix_link_the_module_cannot_resolve_is_an_error_and_never_a_page_for_a_generic_downloader(stand):
+@pytest.mark.parametrize("name", ["vk", "allvideo", "vibix", "cvh", "kodik"])
+async def test_a_link_a_player_owns_that_it_cannot_resolve_is_an_error_and_never_a_page_for_a_generic_downloader(stand, name):
     sources, probe = stand
-    # No browser pool: the catalog cannot be captured (and no test opens a real browser).
+    await sources._http.aclose()
+    sources._http = host_that("busy").client()
+    # No browser pool, so the catalog of Vibix cannot be captured (and no test opens a real browser).
     sources.players.get("vibix")._browser_getter = None
 
-    reply = await probe.request("sources.video.stream", {"url": link_of("https://1.ruchime.org/release/x/episode-1", 1, 2)},
-                                timeout=5)
+    reply = await probe.request("sources.video.stream", {"url": OWNED[name]}, timeout=STEP_LIMIT_S)
 
-    # Without the pool the player is unavailable, which may pass.
     assert reply["handled"] is True and reply["transient"] is True and reply["error"]
 
 

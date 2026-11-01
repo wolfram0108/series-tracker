@@ -16,7 +16,7 @@ from modules.sources.players.registry import PlayerRegistry
 from modules.sources.sites import PHASE_PLAYERS, PHASE_VIDEOS, ReadContext, SiteError
 from modules.sources.sites.vk_channel import VkChannelSite
 from modules.sources.sites.vk_channel.api import PAGE_SIZE, dedupe, heights_of, is_external, keep_by_terms, parse_address
-from sources_support import Web, json_of, migrate, text_of
+from sources_support import READ_LIMIT_S, Web, json_of, migrate, text_of, within
 
 OWNER = -170515668
 CHANNEL = "https://vkvideo.ru/@ruchime"
@@ -60,7 +60,8 @@ class Run:
     async def read(self, address: str):
         site = VkChannelSite(PlayerRegistry.standard(), self.api)
         async with self.web.client() as http:
-            return await site.read(address, ReadContext(http, lambda *step: self.progress.append(step)))
+            return await within(site.read(address, ReadContext(http, lambda *step: self.progress.append(step))),
+                                READ_LIMIT_S, "the read of the channel")
 
 
 # --- the address of a channel ------------------------------------------------------------------------------------------------

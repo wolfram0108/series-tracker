@@ -1,6 +1,6 @@
 import pytest
 
-from modules.sources.players.allvideo import best_stream_url, read_playerjs
+from modules.sources.players.allvideo import read_playerjs
 from modules.sources.players.contract import Kind
 
 # The shapes below are the ones AllVideo was seen to answer: the player with its file list, and the placeholder
@@ -59,6 +59,12 @@ def test_every_answer_is_exactly_one_kind_and_reads_the_same_each_time(status, t
     assert first == second and isinstance(first.kind, Kind)
 
 
-def test_the_best_stream_is_the_highest_tagged_one():
-    assert best_stream_url("[360p]https://h/a.mp4,[1080p]https://h/b.mp4,[720p]https://h/c.mp4") == "https://h/b.mp4"
-    assert best_stream_url("[720p]u,[4k]https://h/4k.mp4") == "https://h/4k.mp4"
+def test_the_streams_of_the_file_list_are_told_by_their_heights_the_way_the_player_tags_them():
+    assert dict(read_playerjs(200, PLAYER).files) == {360: "https://h/360.mp4/", 720: "https://h/720.mp4/",
+                                                      1080: "https://h/1080.mp4/"}
+    assert dict(read_playerjs(200, PLAYER_4K).files) == {720: "u", 1080: "u", 2160: "u"}
+    assert dict(read_playerjs(200, BY_NAME).files) == {720: "https://video.host/stream_720p.mp4"}
+
+
+def test_a_player_that_is_not_playable_has_no_streams():
+    assert read_playerjs(200, NO_FILE).files == () and read_playerjs(404, PLACEHOLDER).files == ()
