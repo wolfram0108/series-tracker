@@ -99,3 +99,11 @@ class EpisodeSettings(BaseModel):
     season: int
     episode: int
     levers: list[EffectiveLever] = Field(default_factory=list)
+
+
+class LevelSettings(BaseModel):
+    """The levers as they stand on the series (season None) or on one season: what the header of the level shows
+    and what its episodes inherit."""
+
+    season: int | None = None
+    levers: list[EffectiveLever] = Field(default_factory=list)

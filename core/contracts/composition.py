@@ -5,7 +5,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-from .output_settings import EpisodeSettings
+from .output_settings import EpisodeSettings, LevelSettings
 from .release_table import RowState
 
 
@@ -101,6 +101,7 @@ class CompositionReply(BaseModel):
     rev: int
     rows: list[CompositionRow] = Field(default_factory=list)
     sources: list[SourceSummary] = Field(default_factory=list)
+    levels: list[LevelSettings] = Field(default_factory=list)
     settings: list[EpisodeSettings] = Field(default_factory=list)
 
 
@@ -110,11 +111,15 @@ class EpisodeRef(BaseModel):
 
 
 class CompositionChanged(BaseModel):
-    """`episodes` are the episodes the change touched; empty means the whole series."""
+    """`episodes` are the episodes the change touched; empty means the whole series.
+
+    `summary_only` says that no row and no lever changed, only the summaries of the sources (state, reason, time
+    of reading): a consumer that works from rows and levers has nothing to do, a window refreshes."""
 
     series_id: int
     rev: int
     episodes: list[EpisodeRef] = Field(default_factory=list)
+    summary_only: bool = False
 
 
 class CompositionFailed(BaseModel):

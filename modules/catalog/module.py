@@ -99,7 +99,7 @@ _NAME_FIELDS = ("name_en", "quality_override", "resolution_override")
 # Владельцы серийных таблиц: после series.deleted каждый чистит своё и
 # отчитывается series.purged. Молчание — обрыв каскада.
 PURGE_OWNERS = ("scan", "torrents", "downloads", "slicing", "renaming",
-                 "library", "metadata", "voices")
+                 "library", "metadata", "voices", "composition")
 
 # Сколько ждём отчёты владельцев, прежде чем считать каскад оборванным.
 PURGE_REPORT_TIMEOUT = 15.0

@@ -44,6 +44,8 @@ class TableRow(BaseModel):
     reason: str | None = None
     duration_s: float | None = None
     published: str | None = None
+    # The stable address of the candidate (a page of the video); a signed stream address never goes here: it changes
+    # with every reading and would make every reading a change of the layout. The stream is resolved before download.
     link: str = ""
     # The site's own numbers and marks, for a human and for debugging; no decision reads them.
     site_fields: dict[str, Any] = Field(default_factory=dict)

@@ -8,7 +8,7 @@ from .composition import (CompositionChanged, CompositionFailed, CompositionGetR
                           CompositionRow, EpisodeRef, Exclusion, PlayerSummary, SourceStatus, SourceSummary,
                           VoiceSummary)
 from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
-from .output_settings import (EffectiveLever, EpisodeSettings, Level, SettingRecord, SettingsReset, SettingsSet,
+from .output_settings import (EffectiveLever, EpisodeSettings, Level, LevelSettings, SettingRecord, SettingsReset, SettingsSet,
                               group_target, parse_group_target, parse_player_target, player_target)
 from .reference import Reference, ReferenceChanged, ReferenceMark
 from .release import Release, ReleaseSource, ReleaseTitle
@@ -32,7 +32,7 @@ __all__ = ["AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitRep
            "SeriesKind", "SeriesSource", "SourceEvent", "SourceType",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionReply", "CompositionRow",
            "EpisodeRef", "Exclusion", "PlayerSummary", "SourceStatus", "SourceSummary", "VoiceSummary",
-           "EffectiveLever", "EpisodeSettings", "Level", "SettingRecord", "SettingsReset", "SettingsSet",
+           "EffectiveLever", "EpisodeSettings", "Level", "LevelSettings", "SettingRecord", "SettingsReset", "SettingsSet",
            "group_target", "parse_group_target", "parse_player_target", "player_target",
            "Reference", "ReferenceChanged", "ReferenceMark",
            "GroupsResolveReply", "GroupsResolveRequest"]
