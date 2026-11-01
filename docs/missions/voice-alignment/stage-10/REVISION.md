@@ -120,3 +120,40 @@
 | Р-35 «исключённые серии не опрашиваются» | удалена | З-2 |
 | Р-60 «выбор в адресе сериала» | перепроектирована | Т-9 |
 | Р-37 «один файл на слот», Р-40 … Р-59 | подтверждена | см. разделы 4 и 5 |
+
+## 9. Дополнения после сверки с кодом (перед реализацией)
+
+Сверка по коду нашла точки, которых разделы 1–8 не называли. Статусы и правила те же.
+
+### 9.1. Знание сайтов вне `sources` и дубли внутри
+
+| Точка | Сейчас | Статус | Новое место / причина | Вызовы, которые меняются |
+|---|---|---|---|---|
+| `downloads/ytdlp.py` (`is_allvideo_url`, `_resolve_allvideo_stream`, `_extract_best_stream_from_playerjs`, ветка в `download_video`) | собственный разбор плеера AllVideo с заголовком Referer ruchime — копия `sources/players/allvideo.py` | удалена | поток кандидата разрешает только `sources.video.stream` (З-5) | `ytdlp.download_video`, тесты `test_downloads_module.py` (`test_is_allvideo_url` и тест с `_resolve_allvideo_stream`) |
+| `RuchimeProvider.vibix` и `PLAYER_ORDER[2]` | два экземпляра плеера Vibix; браузер настроен только у одного | перепроектирована | один экземпляр плеера в реестре плееров `sources` | `ruchime`, `players.py` |
+| `video_providers/table.py::ReleaseTable.fill` (исключение пробы → `Cell(False)` без `transient`), `ruchime/provider.py` (`_quick_report`), `views.py` (ячейка без ответа) | исключение пробы даёт «нет», хотя Т-5 требует «не получено» | перепроектирована | исключение пробы → состояние «не получено» с причиной | `ruchime`, `views` |
+| `video_providers/__init__.py::_DEFAULT_REGISTRY`, `players.py::PLAYER_ORDER` | глобальные реестры сайтов и плееров | перепроектирована | реестры принадлежат модулю `sources`; регистрация по `ARCHITECTURE.md`, раздел 12 | `run.py`, `tests/conftest.py`, `tests/test_contracts.py` |
+| `RuchimeProvider._tables`, `_table_locks`, `SURVEY_TTL_S`, `ReleaseTable.expires_at` | кэш таблицы в памяти по slug без учёта выбора в адресе | удалена | таблица в БД, срок 1 час, замок страницы (Т-2, Т-4) | `test_sources_ruchime_players.py` (проверка `_tables["test"].expires_at`) |
+| `gateway/api_settings.py` (регулярное выражение ссылки VK, подстроки `vk.com`, `vkvideo.ru`, `@`), `web/src/lib/webSources.ts::SOURCE_ORDER`, `AddSeriesModal.vue` (метки плееров) | знание сайтов и плееров вне `sources` | перепроектирована | вид сайта по адресу — реестр сайтов `sources`; метка плеера — поле строки таблицы `player_label`; порядок плееров — настройка `voices.source_priority` | `scrape_titles`, `web` |
+| `tests/test_retry.py` (три сторожа, читающие исходники по жёсткому списку путей) | ломаются при переименовании файлов | перепроектирована | список путей приводится к новой файловой раскладке | `tests/test_retry.py` |
+
+### 9.2. Конструктор (`rules`)
+
+| Точка | Сейчас | Статус | Новое место / причина | Вызовы, которые меняются |
+|---|---|---|---|---|
+| `rules/repository.py` (чтение таблицы `series`) | модуль читает таблицу другого модуля | удалена | профиль приходит параметром запроса (`profile_id`), у торрентов — из источника сериала | `rules.format_torrent_file`, `rules.format_filename` |
+| `rules.format_filename` — вызывающие | `renaming` (4 вызова), `downloads` (1), `slicing/module.py:379` (1) | перепроектирована | единый контракт «по готовым номерам»; поля запроса `series`, `media_item`, `episode_override` сохраняются, `slicing` вызывает без правки (Д-34) | `renaming`, `downloads` |
+| `rules.cache.invalidate` | топик без единого вызывающего | удалена | событие `rules.profile.changed` | — |
+
+### 9.3. Потребители вида и профиля сериала
+
+Поля `series.source_type` и `series.parser_profile_id` читают, кроме перечисленных в разделах 4–6, модули ниже. Все они переходят на `catalog.series.get`: `kind` (`torrent` либо `video`) и `sources` (список источников).
+
+| Точка | Сейчас | Статус | Новое место / причина | Вызовы, которые меняются |
+|---|---|---|---|---|
+| `renaming/module.py` (108, 167, 174, 179) | вид и профиль сериала | перепроектирована | `kind`, профиль источника | — |
+| `library/module.py` (147), `metadata/module.py` (175) | ветка «видео или торрент» по `source_type` | перепроектирована | `kind` | — |
+| `downloads/module.py` (144, 654) | `source_type` решает, есть ли запасной путь yt-dlp, для всей серии | перепроектирована | решение по плееру кандидата, не по сериалу: в серии с несколькими источниками виды смешаны | `ytdlp`, тесты `test_downloads_module.py` |
+| `torrents/module.py` (788), `rules/formatter.py` (103) | профиль торрента, расширение `.mp4` по виду | перепроектирована | профиль из источника; расширение по кандидату | — |
+| `voices/module.py` (383) | пропуск не-web серий | перепроектирована | вход озвучек — раскладка | — |
+| `gateway/api_series.py` (`list_series`, `add_series`, `series_details`, `update_series`, `set_state`), `api_media.py` (`composition`, `source_filenames`) | ветвление по виду, сборка ответов из нескольких модулей | перепроектирована | тело запросов с источниками; сборка ответов — в модулях-владельцах | `web`, `schema.d.ts` |
