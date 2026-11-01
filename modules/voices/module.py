@@ -9,10 +9,9 @@ voices.max_temp_episodes. They are read together (settings.py): a wrong value is
 is used.
 
 Query:
-  voices.layout {sources: [{url, player, studio, kind, episodes, links?}], mode?, reference?}
-      -> {mode, reference, voices: [{key, label, role, source, fallbacks}], skipped, priority}
-      The source priority is the setting `voices.source_priority` (JSON list of player kinds);
-      layout.DEFAULT_PRIORITY when unset.
+  voices.groups.resolve GroupsResolveRequest -> GroupsResolveReply: the user group of every name (None for a name no group
+      holds), by the folded name or trigger of the group (identity.py); asked by `composition` for the names of the
+      voice-overs of its rows. A combined credit "A / B" is one name.
   voices.settings.get {} -> VoiceSettingsView: the groups of voice-overs and the order of sources as they apply, the
       order to return to and the fields whose stored value was refused
   voices.dubs.get {series_id} -> {items: [{season, episode, voice_key, voice_label, status,
@@ -23,13 +22,15 @@ Command:
   voices.settings.set VoiceSettingsDraft -> VoiceSettingsSaved: groups and order are checked (editor.check) and written
       in one step through settings.values.set_many, or refused with coded problems and nothing written; the next
       read of the settings uses the new values, no restart. Rows keep the key they were recorded under.
-  voices.dispatch {series_id} — sent by scan after an explicit scan: read the catalog of the site,
-      lay the voices out around the selected reference, record a voice_dubs row per planned
-      reference episode and voice, and download what is not on disk yet into the temporary
-      downloads folder of the work folder (named by the owner in the settings of the alignment server and asked of
-      its bridge; not named: nothing is recorded or downloaded and the log says so). Before a job is sent the
-      reference video is copied into the service's folder of the episode, so that the service reads and writes
-      only inside the work folder; the copy goes with the other temporary files of the episode.
+  voices.dispatch {series_id} — the explicit sync of a series, sent by scan once the references are loaded: plans the
+      voice-overs of the series (composition.get for the rows and the levers, scan.output.get for the reference of
+      every episode), records a voice_dubs row per planned voice-over, offers the rows that failed again, allows the
+      downloads of the series (kept in voice_series, so that a restart does not forget it) and downloads what is not
+      on disk yet into the temporary downloads folder of the work folder (named by the owner in the settings of the
+      alignment server and asked of its bridge; not named: nothing is recorded or downloaded and the log says so).
+      Before a job is sent the reference video is copied into the service's folder of the episode, so that the service
+      reads and writes only inside the work folder; the copy goes with the other temporary files of the episode.
+      Only a series of kind `video` is planned (catalog.series.get).
 Commands out: downloads.fetch, downloads.fetch.cancel. Queries to conform: workspace (the folders of the service
             for a place, asked of the bridge: this module does not know its layout), submit (with a key that
             finds the job again; the reply is a SubmitReply: accepted, rejected, unavailable (not sent) or
@@ -37,7 +38,14 @@ Commands out: downloads.fetch, downloads.fetch.cancel. Queries to conform: works
             key), job.find, job.get, cancel (a job whose reference was replaced or whose series was deleted; what
             could not be cancelled is retried from the cleanup journal).
 
-Events in:  downloads.fetch.started and .finished (our keys `dub:<id>`), conform.queue.changed (waiting or running
+Events in:  composition.changed {series_id, rev, episodes, summary_only} and scan.reference.changed {series_id, season,
+            episode, mark}: the layout or a reference changed. They do not start a download: the rows are brought in line with
+            the plan (a voice-over that left the plan before any work on it is removed with an event, a new one is
+            recorded as planned, an episode whose reference is none or unfit loses its downloaded temporary files to
+            the cleanup journal), and the downloads go on only for a series that was sent voices.dispatch. An event
+            that says only the summaries of the sources changed is not acted on. Nothing is asked of composition or
+            scan at start: the first event or dispatch of a series makes the whole plan of that series;
+            downloads.fetch.started and .finished (our keys `dub:<id>`), conform.queue.changed (waiting or running
             jobs of the service), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished, conform.job.removed,
             conform.daemon.up, series.deleted.
@@ -68,13 +76,17 @@ Where each policy lives: the steps a row may take and the sets of steps (lifecyc
 what is known of the alignment service (alignment.py), the form in which a finished voice-over reaches the library
 (outputs.py, injected as `output=`), the shape of every message (core/contracts).
 
-A voice keeps the key under which its rows were recorded when changed rules would give it another one.
+The key of a voice-over is its label in the layout: the name of its user group, or "Неизвестная озвучка N". A row keeps
+the key it was recorded under for good; a label that changes later (a group was made for a voice-over that had none) is
+a voice-over of its own for the plan, and the rows of the old key finish where they are.
+Compilation rows (one video for several episodes) are not taken yet: they are noted in the log, once per change.
 Paths of the working files are taken from the rows (folder of `temp_path`), never from the settings of the
 moment or from the service's path map.
 
-Downloading is delegated to downloads.fetch. A dub tries its main source first, then the other
-sources of the same voice by priority; when none gives the file the row is `failed`, a warning is
-logged, and the next dispatch offers it again from the main source. A dub is `ready` once its file
+Downloading is delegated to downloads.fetch. A dub tries its main candidate first (the player of the lever
+`voice.player`, else by the order of players in the settings), then the other rows of the same voice that cover the
+episode; when none gives the file the row is `failed`, a warning is logged, and the next dispatch offers it again from
+the main candidate. A dub is `ready` once its file
 is on disk; rows left `downloading` by a restart are sent again on start.
 
 Alignment (stage 7). An episode goes to the alignment service as one job once its reference video
@@ -147,21 +159,21 @@ import shutil
 import uuid
 from collections import OrderedDict, defaultdict
 
-from core import BaseModule, BusRequestError, is_video_source
+from core import BaseModule, BusRequestError
 from pydantic import ValidationError
 
-from core.contracts import (AlignmentJob, JobStatus, Layout, DubEvent, DubEventStatus as E, DubItem, DubRecord, DubsSnapshot, DubStatus as S,
-                            SnapshotItem, SubmitOutcome, SubmitReply, VoiceSettingsDraft, VoiceSettingsSaved)
+from core.contracts import (AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
+                            DubRecord, DubsSnapshot, DubStatus as S, GroupsResolveReply, GroupsResolveRequest,
+                            JobStatus, Reference, ReferenceChanged, SnapshotItem, SubmitOutcome, SubmitReply,
+                            VoiceSettingsDraft, VoiceSettingsSaved)
 from core import storage
 from core.storage import DEFAULT_TIMEOUT_S as IO_TIMEOUT_S, MOVE_TIMEOUT_S, REMOVE_TIMEOUT_S
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import describe, parse as parse_reason, reason
 
-from . import editor
-from .identity import Equivalence, same_voice
+from . import editor, planning
 from .alignment import ENDED, job_failure, refusal, result_for, track_of
-from .layout import download_chain, plan_layout
 from .lifecycle import FINAL, WORKING
 from .outputs import Output, SidecarOutput
 from .recovery import Recovery
@@ -170,7 +182,8 @@ from .settings import PREFIX, VoiceSettings, parse
 from .states import public_hint, public_state
 
 DUB_MAX_HEIGHT = 720
-PARSE_TIMEOUT_S = 180
+# Fuse of a question to a neighbour that makes the plan: an answer that is not there fails the pass, not the module.
+PLAN_TIMEOUT_S = 30
 SUBMIT_TIMEOUT_S = 60
 # A reference video is some gigabytes: this is only the fuse of its copy.
 COPY_TIMEOUT_S = 1800.0
@@ -236,15 +249,24 @@ class VoicesModule(BaseModule):
         self._epoch_lock = asyncio.Lock()
         self._rev = 0
         self._reported: set[str] = set()
+        # Series with a planning pass asked for and not begun (asks merge into one), series that were deleted, and the
+        # compilations last noted in the log per series (a pass notes them again only when they change).
+        self._planning: set[int] = set()
+        self._deleted: set[int] = set()
+        # Series with an episode that has no reference and a download still under way: its end asks for the plan again.
+        self._deferred: set[int] = set()
+        self._noted: dict[int, frozenset] = {}
         super().__init__(bus)
         self._recovery = Recovery(self.log, pause=_pause, report_after=lambda: SUBMIT_RETRIES)
 
     def register(self) -> None:
-        self.handle("voices.layout", self.on_layout)
+        self.handle("voices.groups.resolve", self.on_groups_resolve)
         self.handle("voices.dubs.get", self.on_dubs_get)
         self.handle("voices.settings.get", self.on_settings_get)
         self.handle("voices.settings.set", self.on_settings_set)
         self.handle("voices.dispatch", self.on_dispatch, concurrent=True)
+        self.handle("composition.changed", self.on_composition_changed)
+        self.handle("scan.reference.changed", self.on_reference_changed)
         self.handle("downloads.fetch.started", self.on_fetch_started)
         self.handle("downloads.fetch.finished", self.on_fetch_finished)
         self.handle("series.downloaded.changed", self.on_downloaded)
@@ -344,12 +366,10 @@ class VoicesModule(BaseModule):
         return episode_dir(root, series_id, season, episode) if root else ""
 
 
-    async def on_layout(self, env: Envelope) -> dict:
-        payload = env.payload
-        settings = await self._settings()
-        return Layout.model_validate(plan_layout(
-            payload["sources"], payload.get("mode") or "manual", payload.get("reference"),
-            list(settings.priority), settings.rules)).model_dump(mode="json", exclude_unset=True)
+    async def on_groups_resolve(self, env: Envelope) -> dict:
+        names = GroupsResolveRequest.model_validate(env.payload).names
+        groups = (await self._settings()).voices
+        return GroupsResolveReply(groups={name: groups.group_of(name) for name in names}).model_dump(mode="json")
 
     async def on_dubs_get(self, env: Envelope) -> dict:
         rows = await self.repo.for_series(int(env.payload["series_id"]))
@@ -379,98 +399,122 @@ class VoicesModule(BaseModule):
                 self.log.warning("сериал %d: озвучки не подготовлены: %s", series_id, exc)
 
     async def _dispatch(self, series_id: int) -> None:
-        series = await self.request("catalog.series.get", {"series_id": series_id})
-        if not is_video_source(series["source_type"]) or series["source_type"] == "vk_video":
+        """The explicit sync: the series may download from now on, and what failed is offered again."""
+        if series_id in self._deleted or not await self._is_video(series_id):
             return
         if not await self._downloads_root():
             self.log.warning("сериал %d: озвучки не начаты: рабочая папка не задана в настройках сервера выравнивания", series_id)
             return
-        info = await self.request("sources.provider.info", {"url": series["url"]}, timeout=10)
-        if not info.get("voices"):
-            return
-        parsed = await self.request("sources.parse", {"url": series["url"], "with_links": True},
-                                    timeout=PARSE_TIMEOUT_S)
-        sources = parsed.get("sources") or []
-        if not sources:
-            return
-        settings = await self._settings()
-        layout = plan_layout(sources, "manual", parsed.get("selected_source"), list(settings.priority),
-                             settings.rules)
-        dubs = [voice for voice in layout["voices"] if voice["role"] == "dub"]
-        reference = layout["reference"]
-        if not dubs or reference is None:
-            await self._forget_all(series_id)
-            return
-        episodes = await self._reference_episodes(series_id, reference)
-        self.log.info("сериал %d: озвучки — референс %s, дополнительных %d, серий плана на сайте %d",
-                      series_id, reference["studio"], len(dubs), len(episodes))
-        before = await self.repo.for_series(series_id)
-        keys = self._adopted_keys(dubs, before, settings.rules)
-        planned: set[tuple[int, int, str]] = set()
-        touched: set[tuple[int, int, str]] = set()
-        for season, episode, site_episode in episodes:
-            for voice in dubs:
-                chain = [{"player": source["player"], "studio": source["studio"],
-                          "url": source["links"][str(site_episode)]}
-                         for source in download_chain(voice, site_episode)
-                         if str(site_episode) in source.get("links", {})]
-                planned.add((season, episode, keys[voice["key"]]))
-                if await self.repo.upsert(series_id, season, episode, site_episode,
-                                          keys[voice["key"]], voice["label"], chain):
-                    touched.add((season, episode, keys[voice["key"]]))
-        for gone in await self.repo.drop_unplanned(series_id, planned):
-            self.log.info("сериал %d: озвучка %s серии %d вышла из плана", series_id,
-                          gone["voice_label"], gone["episode"])
-            await self._announce(gone, E.REMOVED)
-        await self._work_off()
-        after = await self.repo.for_series(series_id)
-        await self._announce_difference(before, [row for row in after
-                                                 if (row["season"], row["episode"], row["voice_key"]) in touched])
-        await self._recheck_ready(series_id)
-        await self._admit()
-        for row in after:
+        await self.repo.allow_series(series_id)
+        await self._plan_series(series_id, offer=True)
+        for row in await self.repo.for_series(series_id):
             if row["status"] == S.FAILED:
                 self.log.warning("сериал %d, s%02de%02d: озвучка %s недоступна: %s", series_id,
                                  row["season"], row["episode"], row["voice_label"], row["error"])
         self._kick(series_id)
 
-    @staticmethod
-    def _adopted_keys(dubs: list[dict], rows: list[dict], rules: Equivalence) -> dict[str, str]:
-        """A voice keeps the key its rows were recorded under when changed rules gave it another key."""
-        recorded = {row["voice_key"] for row in rows}
-        taken = {voice["key"] for voice in dubs if voice["key"] in recorded}
-        keys: dict[str, str] = {}
-        for voice in dubs:
-            keys[voice["key"]] = voice["key"]
-            if voice["key"] in recorded:
-                continue
-            same = [row for row in rows if same_voice(row["voice_label"], voice["label"], rules)
-                    and row["voice_key"] not in taken]
-            if same:
-                keys[voice["key"]] = min(same, key=lambda row: row["id"])["voice_key"]
-                taken.add(keys[voice["key"]])
-        return keys
+    async def on_composition_changed(self, env: Envelope) -> None:
+        changed = CompositionChanged.model_validate(env.payload)
+        if not changed.summary_only:  # only the summaries of the sources moved: no row and no lever did
+            self._want_plan(changed.series_id)
 
-    async def _reference_episodes(self, series_id: int, reference: dict) -> list[tuple[int, int, int]]:
-        """(season, episode, site episode) of every planned reference episode that the site lists."""
-        by_link = {link: int(number) for number, link in (reference.get("links") or {}).items()}
-        reply = await self.request("downloads.episodes.get", {"series_id": series_id}, timeout=30)
-        found, lost = [], []
-        for item in reply["items"]:
-            site_episode = by_link.get(item["source_url"])
-            if site_episode is None:
-                lost.append(item["episode_start"])
-            else:
-                found.append((item["season"], item["episode_start"], site_episode))
-        if lost:
-            self.log.warning("сериал %d: серии плана не найдены в каталоге референса, озвучки не "
-                             "скачиваются: %s", series_id, ", ".join(map(str, lost)))
-        return found
+    async def on_reference_changed(self, env: Envelope) -> None:
+        self._want_plan(ReferenceChanged.model_validate(env.payload).series_id)
 
-    async def _forget_all(self, series_id: int) -> None:
-        for gone in await self.repo.drop_unplanned(series_id, set()):
+    def _want_plan(self, series_id: int) -> None:
+        """Bring the rows of the series in line with the plan once more; asks that come while one is waiting merge."""
+        if series_id in self._planning or series_id in self._deleted:
+            return
+        self._planning.add(series_id)
+        self._spawn(self._plan_or_await(series_id), f"voices:plan:{series_id}")
+
+    async def _plan_or_await(self, series_id: int) -> None:
+        if not await self._plan_locked(series_id):
+            self._recovery.want(f"plan:{series_id}", lambda: self._plan_locked(series_id))
+
+    async def _plan_locked(self, series_id: int) -> bool:
+        """One pass that records the plan without offering the failed again; False when a neighbour did not answer
+        and the pass is owed (the recovery carries it)."""
+        async with self._locks.setdefault(series_id, asyncio.Lock()):
+            self._planning.discard(series_id)
+            if series_id in self._deleted:
+                return True
+            try:
+                if await self._is_video(series_id) and await self._downloads_root():
+                    await self._plan_series(series_id, offer=False)
+                return True
+            except (BusRequestError, LookupError, ValueError, OSError, asyncio.TimeoutError) as exc:
+                self.log.warning("сериал %d: озвучки не приведены к плану, повторим: %s", series_id, exc)
+                return False
+
+    async def _is_video(self, series_id: int) -> bool:
+        """Voice-overs are planned for a series of kind `video`; a series the catalog no longer has is no one's."""
+        try:
+            series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=PLAN_TIMEOUT_S)
+        except BusRequestError as exc:
+            if "LookupError" in str(exc):
+                return False
+            raise
+        return series.get("kind") == "video"
+
+    async def _plan_series(self, series_id: int, *, offer: bool) -> None:
+        """Read the layout and the references, plan the voice-overs, bring the rows in line, and begin what is allowed."""
+        layout = CompositionReply.model_validate(
+            await self.request("composition.get", {"series_id": series_id}, timeout=PLAN_TIMEOUT_S))
+        references = [Reference.model_validate(item) for item in
+                      await self.request("scan.output.get", {"series_id": series_id}, timeout=PLAN_TIMEOUT_S)]
+        settings = await self._settings()
+        plan = planning.plan(layout.rows, references, layout.settings, settings.priority, settings.players)
+        self.log.info("сериал %d: озвучки — раскладка %d, серий с референсом %d, озвучек к плану %d", series_id,
+                      layout.rev, len(plan.with_reference), len(plan.dubs))
+        self._note_compilations(series_id, plan.compilations)
+        before = await self.repo.for_series(series_id)
+        planned: set[tuple[int, int, str]] = set()
+        touched: set[tuple[int, int, str]] = set()
+        for dub in plan.dubs:
+            key = (dub.season, dub.episode, dub.voice_key)
+            planned.add(key)
+            if await self.repo.upsert(series_id, dub.season, dub.episode, dub.voice_key, dub.voice_label,
+                                      [each.as_json() for each in dub.chain], retry_failed=offer):
+                touched.add(key)
+        for gone in await self.repo.drop_unplanned(series_id, planned, plan.undecided):
+            self.log.info("сериал %d: озвучка %s серии %d вышла из плана", series_id, gone["voice_label"], gone["episode"])
             await self._announce(gone, E.REMOVED)
+        await self._drop_without_reference(series_id, plan, before)
         await self._work_off()
+        after = await self.repo.for_series(series_id)
+        await self._announce_difference(before, [row for row in after
+                                                 if (row["season"], row["episode"], row["voice_key"]) in touched])
+        if series_id in self._deleted:  # the series went while the pass was writing: what it wrote goes too
+            await self._forget(series_id)
+            return
+        await self._recheck_ready(series_id)
+        await self._admit()
+
+    async def _drop_without_reference(self, series_id: int, plan: planning.Plan, rows: list[dict]) -> None:
+        """An episode that has no reference loses the voice-overs it had begun, as an episode that left the plan does."""
+        root = await self._downloads_root()
+        episodes = {(row["season"], row["episode"]) for row in rows} - plan.with_reference - plan.undecided
+        for season, episode in sorted(episodes):
+            group = await self.repo.for_episode(series_id, season, episode)
+            if group and not await self._drop_orphans(series_id, season, episode, group, root):
+                self._deferred.add(series_id)
+
+    def _note_compilations(self, series_id: int, compilations: tuple[planning.Compilation, ...]) -> None:
+        """A compilation covers episodes of a voice-over but its shared file is not made yet: say so once per change."""
+        found = frozenset(compilations)
+        if found and found != self._noted.get(series_id):
+            self.log.info("сериал %d: склейки озвучек пока не берутся (строк %d, серий %d, озвучек %d)", series_id,
+                          len({(each.source_id, each.row_key) for each in found}),
+                          len({(each.season, each.episode) for each in found}), len({each.voice_label for each in found}))
+        self._noted[series_id] = found
+
+    async def _forget(self, series_id: int) -> None:
+        """Remove every row of a series that is gone, announcing each."""
+        rows = await self.repo.for_series(series_id)
+        await self.repo.delete_for_series(series_id)
+        for row in rows:
+            await self._announce(row, E.REMOVED)
 
     async def _recheck_ready(self, series_id: int) -> None:
         """A ready dub whose file vanished from the temporary directory is downloaded again."""
@@ -552,6 +596,7 @@ class VoicesModule(BaseModule):
                           row["chain"][row["attempt"]]["player"])
             await self._announce(row)
             self._kick(row["series_id"])
+            self._replan_deferred(row["series_id"])
             return
         error = str(payload.get("error") or reason("download_failed"))
         source = row["chain"][row["attempt"]]
@@ -569,6 +614,13 @@ class VoicesModule(BaseModule):
                          row["series_id"], row["season"], row["episode"], row["voice_label"], error)
         await self._announce(row)
         self._kick(row["series_id"])
+        self._replan_deferred(row["series_id"])
+
+    def _replan_deferred(self, series_id: int) -> None:
+        """A download ended where an episode with no reference waited for it: its voice-overs can go now."""
+        if series_id in self._deferred:
+            self._deferred.discard(series_id)
+            self._want_plan(series_id)
 
     async def _generation(self) -> int:
         """The epoch of this run: kept in the database and raised at every start, so that the packets of a later
@@ -725,8 +777,8 @@ class VoicesModule(BaseModule):
             await self._tidy(series_id, season, episode, root)
         await self._admit()
         await self._work_off()
-        if restart:
-            self.send_command("voices.dispatch", {"series_id": series_id})
+        if restart:  # the reset voice-overs start over: their chains are read from the layout once more
+            self._want_plan(series_id)
         if all(row["status"] in FINAL for row in await self.repo.for_series(series_id)):
             for base in (root, (await self._folders())["conform"]):
                 if base:
@@ -804,13 +856,14 @@ class VoicesModule(BaseModule):
         await self._announce(row, E.MOVED)
 
     async def _drop_orphans(self, series_id: int, season: int, episode: int, group: list[dict],
-                            root: str) -> None:
-        """An episode left the plan: with its video gone, its set of tracks goes too."""
+                            root: str) -> bool:
+        """An episode left the plan: with its video gone, its set of tracks goes too. False when a download is under
+        way: the episode is looked at again when it ends."""
         if any(row["status"] == S.DOWNLOADING for row in group):
-            return
+            return False
         for row in group:
             if row["ref_path"] and await self._io(os.path.isfile, row["ref_path"]):
-                return
+                return True
         folders = await self._episode_folders(group, root, series_id, season, episode)
         await self.repo.drop_episode(series_id, season, episode, folders)
         await self._work_off()
@@ -818,6 +871,7 @@ class VoicesModule(BaseModule):
             await self._announce(row, E.REMOVED)
         self.log.info("сериал %d, s%02de%02d: серии нет в плане и видео нет — дорожки удалены",
                       series_id, season, episode)
+        return True
 
     def _unlink(self, path: str, kind: str) -> None:
         """Remove what the kind says and confirm it: success is the name being free, not the absence of an error."""
@@ -1178,8 +1232,6 @@ class VoicesModule(BaseModule):
                              row["voice_label"], row["temp_path"])
             await self.repo.mark_pending(row["id"], reason("file_vanished"))
             await self._announce({**row, "status": S.PENDING}, E.STALE)
-        if len(present) != len(ready):
-            self.send_command("voices.dispatch", {"series_id": ready[0]["series_id"]})
         return present
 
     async def on_job_finished(self, env: Envelope) -> None:
@@ -1293,6 +1345,7 @@ class VoicesModule(BaseModule):
 
     async def on_series_deleted(self, env: Envelope) -> None:
         series_id = env.payload["series_id"]
+        self._deleted.add(series_id)
         self.send_command("downloads.fetch.cancel", {"series_id": series_id})
         rows = await self.repo.for_series(series_id)
         folders = {os.path.dirname(folder) for folder in self._folders_of(rows, "")} - {""}

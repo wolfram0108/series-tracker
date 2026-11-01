@@ -5,8 +5,10 @@ import json
 from dataclasses import dataclass, field
 from typing import Mapping
 
-from .identity import Equivalence, aliases_of, usable_groups
-from .layout import DEFAULT_PRIORITY
+from .identity import NO_GROUPS, Groups, usable_groups
+
+# Source priority, most preferred first; empirical, by bitrate. The first one wins a resolution tie.
+DEFAULT_PRIORITY = ("alloha", "vk", "cvh", "allvideo", "vibix", "kodik")
 
 PREFIX = "voices."
 PRIORITY_KEY = "voices.source_priority"
@@ -18,11 +20,12 @@ MAX_TEMP_KEY = "voices.max_temp_episodes"
 @dataclass(frozen=True)
 class VoiceSettings:
     priority: tuple[str, ...] = tuple(DEFAULT_PRIORITY)
-    rules: Equivalence = Equivalence()
+    voices: Groups = NO_GROUPS
+    players: Groups = NO_GROUPS
     max_temp_episodes: int = 0
     problems: tuple[str, ...] = ()
-    # The groups as spelled by the user ({group: [names that put a voice-over or a player into it]}; the rules
-    # hold them folded) and the keys whose stored value was refused.
+    # The groups as spelled by the user ({group: [names that put a voice-over or a player into it]}) and the
+    # keys whose stored value was refused.
     voice_groups: Mapping[str, list[str]] = field(default_factory=dict)
     player_groups: Mapping[str, list[str]] = field(default_factory=dict)
     rejected: tuple[str, ...] = ()
@@ -80,6 +83,6 @@ def parse(values: Mapping[str, str | None]) -> VoiceSettings:
     players = _groups(values.get(PLAYER_GROUPS_KEY), PLAYER_GROUPS_KEY, problems, rejected) or {}
     return VoiceSettings(
         priority=tuple(priority) if priority else tuple(DEFAULT_PRIORITY),
-        rules=Equivalence.of(aliases_of(voices), aliases_of(players)),
+        voices=Groups.of(voices), players=Groups.of(players),
         max_temp_episodes=cap, problems=tuple(problems),
         voice_groups=voices, player_groups=players, rejected=tuple(rejected))

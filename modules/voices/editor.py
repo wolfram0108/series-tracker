@@ -11,10 +11,9 @@ from typing import Mapping
 
 from core.contracts import Reason, SettingProblem, VoiceSettingsDraft, VoiceSettingsView
 from core.reasons import parse as parse_reason, reason
+from core.voice_names import fold_name
 
-from .identity import folded_name
-from .layout import DEFAULT_PRIORITY
-from .settings import PRIORITY_KEY, VOICE_GROUPS_KEY, VoiceSettings
+from .settings import DEFAULT_PRIORITY, PRIORITY_KEY, VOICE_GROUPS_KEY, VoiceSettings
 
 # The field of the screen behind each stored key, for naming the stored value that was refused.
 _FIELD_OF_KEY = {PRIORITY_KEY: "priority", VOICE_GROUPS_KEY: "voice_groups"}
@@ -30,8 +29,8 @@ def _cleaned(groups: Mapping[str, list[str]]) -> dict[str, list[str]]:
     for name, triggers in groups.items():
         kept: dict[str, str] = {}
         for trigger in triggers:
-            if folded_name(trigger):
-                kept.setdefault(folded_name(trigger), trigger.strip())
+            if fold_name(trigger):
+                kept.setdefault(fold_name(trigger), trigger.strip())
         if name.strip() or kept:
             cleaned[name.strip()] = list(kept.values())
     return cleaned
@@ -43,17 +42,17 @@ def _group_problems(groups: Mapping[str, list[str]]) -> list[SettingProblem]:
     names: dict[str, str] = {}
     cleaned = _cleaned(groups)
     for name in cleaned:
-        if not folded_name(name):
+        if not fold_name(name):
             problems.append(_problem(field, reason("group_name_empty")))
-        elif folded_name(name) in names:
-            problems.append(_problem(field, reason("group_duplicate", name=name, other=names[folded_name(name)])))
+        elif fold_name(name) in names:
+            problems.append(_problem(field, reason("group_duplicate", name=name, other=names[fold_name(name)])))
         else:
-            names[folded_name(name)] = name
+            names[fold_name(name)] = name
     owner: dict[str, str] = {}
     for name, triggers in cleaned.items():
         for trigger in triggers:
-            key = folded_name(trigger)
-            if key == folded_name(name):
+            key = fold_name(trigger)
+            if key == fold_name(name):
                 problems.append(_problem(field, reason("trigger_is_group", trigger=trigger, group=name)))
             elif key in names:
                 problems.append(_problem(field, reason("trigger_is_other_group", trigger=trigger, group=name,
@@ -68,8 +67,8 @@ def player_names(player_groups: Mapping[str, list[str]]) -> list[str]:
     """Players the order of sources may name: the built-in kinds and every name the stored player groups mention."""
     named: dict[str, str] = {}
     for name in [*DEFAULT_PRIORITY, *(each for group, triggers in player_groups.items() for each in (group, *triggers))]:
-        if folded_name(name):
-            named.setdefault(folded_name(name), name)
+        if fold_name(name):
+            named.setdefault(fold_name(name), name)
     return list(named.values())
 
 
@@ -80,13 +79,13 @@ def check(draft: VoiceSettingsDraft, player_groups: Mapping[str, list[str]]) -> 
     if not names:
         problems.append(_problem("priority", reason("priority_empty")))
     seen: set[str] = set()
-    known = {folded_name(name) for name in player_names(player_groups)}
+    known = {fold_name(name) for name in player_names(player_groups)}
     for name in names:
-        if folded_name(name) in seen:
+        if fold_name(name) in seen:
             problems.append(_problem("priority", reason("priority_duplicate", player=name)))
-        elif folded_name(name) not in known:
+        elif fold_name(name) not in known:
             problems.append(_problem("priority", reason("priority_unknown_player", player=name)))
-        seen.add(folded_name(name))
+        seen.add(fold_name(name))
     return problems + _group_problems(draft.voice_groups)
 
 

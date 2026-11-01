@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Collection, Iterable
 
 from core.contracts import DubStatus as S
 from core.db import Database
@@ -29,6 +29,8 @@ def _in(steps: Iterable[S]) -> tuple[str, tuple[str, ...]]:
 # What a row points at and how each kind of pointer is removed.
 POINTERS = (("output_path", "artifact"), ("move_from", "artifact"), ("aligned_path", "path"), ("temp_path", "path"))
 HANDED_OVER = "handed over"
+# Stored as it is written, so that a failure for want of any source can be told from the others by equality.
+NOT_IN_ANY_SOURCE = reason("not_in_any_source")
 _UPSERT = ("ON CONFLICT (path) DO UPDATE SET kind=excluded.kind, error=excluded.error, "
            "scope=COALESCE(excluded.scope, voice_cleanup.scope), version=voice_cleanup.version + 1, "
            "updated_at=excluded.updated_at")
@@ -110,29 +112,48 @@ class VoicesRepository:
     async def get(self, dub_id: int) -> dict[str, Any] | None:
         return self._row(await self._db.fetch_one("SELECT * FROM voice_dubs WHERE id=?", (dub_id,)))
 
-    async def upsert(self, series_id: int, season: int, episode: int, site_episode: int,
-                     voice_key: str, label: str, chain: list[dict[str, str]]) -> bool:
-        """Offer the voice-over again: an untouched row takes the fresh chain and starts from its
-        main source; a row that is downloading or ready is left alone. An empty chain is a failure.
-        True when the row was created or taken over."""
+    async def upsert(self, series_id: int, season: int, episode: int, voice_key: str, label: str,
+                     chain: list[dict[str, str]], *, retry_failed: bool) -> bool:
+        """Plan a voice-over: a new row is created; an existing one takes the fresh chain only where nothing was done
+        yet. A row that is downloading, ready or further is left alone. An empty chain is a failure.
+
+        With `retry_failed` (an explicit sync) a row that failed or waits is offered again from its main source. Without
+        it a failed row is left alone, except one that failed for want of any source and now has one: nothing was
+        tried, so nothing is retried. True when the row was created or taken over."""
         status = S.PENDING.value if chain else S.FAILED.value
-        error = None if chain else reason("not_in_any_source")
+        error = None if chain else NOT_IN_ANY_SOURCE
+        marks, steps = _in(lifecycle.OFFER.sources)
+        if retry_failed:
+            where, extra = f"voice_dubs.status {marks}", steps
+        else:
+            where = ("((voice_dubs.status = ? AND voice_dubs.attempt = 0 AND (voice_dubs.chain IS NOT excluded.chain "
+                     "OR voice_dubs.voice_label IS NOT excluded.voice_label OR voice_dubs.status IS NOT excluded.status "
+                     "OR voice_dubs.error IS NOT excluded.error)) "
+                     "OR (voice_dubs.status = ? AND voice_dubs.error = ? AND excluded.status = ?))")
+            extra = (S.PENDING.value, S.FAILED.value, NOT_IN_ANY_SOURCE, S.PENDING.value)
         return bool(await self._db.execute(
-            "INSERT INTO voice_dubs (series_id, season, episode, site_episode, voice_key, "
-            "voice_label, chain, status, error, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) "
+            "INSERT INTO voice_dubs (series_id, season, episode, voice_key, "
+            "voice_label, chain, status, error, updated_at) VALUES (?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT (series_id, season, episode, voice_key) DO UPDATE SET "
-            "site_episode=excluded.site_episode, voice_label=excluded.voice_label, "
+            "voice_label=excluded.voice_label, "
             "chain=excluded.chain, attempt=0, status=excluded.status, error=excluded.error, "
-            f"updated_at=excluded.updated_at WHERE voice_dubs.status {_in(lifecycle.OFFER.sources)[0]}",
-            (series_id, season, episode, site_episode, voice_key, label,
-             json.dumps(chain, ensure_ascii=False), status, error, _now(), *_in(lifecycle.OFFER.sources)[1])))
+            f"updated_at=excluded.updated_at WHERE {where}",
+            (series_id, season, episode, voice_key, label,
+             json.dumps(chain, ensure_ascii=False), status, error, _now(), *extra)))
 
     async def pending(self, series_id: int | None = None) -> list[dict[str, Any]]:
+        """Waiting voice-overs of the series a sync was asked for: a planned row of any other waits for it."""
         where, args = ("WHERE status=?", (S.PENDING.value,))
         if series_id is not None:
             where, args = ("WHERE status=? AND series_id=?", (S.PENDING.value, series_id))
-        rows = await self._db.fetch_all(f"SELECT * FROM voice_dubs {where} ORDER BY id", args)
+        rows = await self._db.fetch_all(
+            f"SELECT * FROM voice_dubs {where} AND series_id IN (SELECT series_id FROM voice_series) ORDER BY id", args)
         return [self._row(row) for row in rows]
+
+    async def allow_series(self, series_id: int) -> None:
+        """A sync of the series was asked for: its waiting voice-overs may be downloaded, from now on and after a restart."""
+        await self._db.execute("INSERT INTO voice_series (series_id, allowed_at) VALUES (?, ?) "
+                               "ON CONFLICT (series_id) DO NOTHING", (series_id, _now()))
 
     async def claim_download(self, dub_id: int, temp_path: str) -> bool:
         """Take a waiting voice-over for download; False when someone else has already taken it."""
@@ -161,12 +182,14 @@ class VoicesRepository:
         return await self._db.execute(
             f"UPDATE voice_dubs SET status=? WHERE status {marks}", (lifecycle.RETRY.target.value, *steps))
 
-    async def drop_unplanned(self, series_id: int,
-                             planned: set[tuple[int, int, str]]) -> list[dict[str, Any]]:
+    async def drop_unplanned(self, series_id: int, planned: set[tuple[int, int, str]],
+                             keep: Collection[tuple[int, int]] = ()) -> list[dict[str, Any]]:
         """Rows of voice-overs that left the plan before any work was done on them, or after it failed; returns
-        what was removed. Whatever such a row still points at goes to the cleanup journal with it."""
+        what was removed. Whatever such a row still points at goes to the cleanup journal with it. The rows of the
+        episodes in `keep` stay: their plan is not known at the moment."""
         gone = [row for row in await self.for_series(series_id)
                 if (row["season"], row["episode"], row["voice_key"]) not in planned
+                and (row["season"], row["episode"]) not in keep
                 and row["status"] in lifecycle.OFFER.sources]
         for row in gone:
             await self._db.execute_many([*_hand_over("id=?", (row["id"],)),
@@ -179,7 +202,8 @@ class VoicesRepository:
     async def delete_for_series(self, series_id: int, folders: Iterable[str] = ()) -> None:
         """The series is gone: its rows, with the jobs they wait for and the `folders` to remove, go to the journal."""
         await self._db.execute_many([*_hand_over("series_id=?", (series_id,), files=False), *_folders(folders),
-                                     ("DELETE FROM voice_dubs WHERE series_id=?", (series_id,))])
+                                     ("DELETE FROM voice_dubs WHERE series_id=?", (series_id,)),
+                                     ("DELETE FROM voice_series WHERE series_id=?", (series_id,))])
 
     async def next_epoch(self) -> int:
         """The number of this run of the module: kept in the database and raised at every start."""

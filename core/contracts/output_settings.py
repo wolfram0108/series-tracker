@@ -12,6 +12,13 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 
+# The levers every consumer reads by name; the registry that gives them meaning is the composition module's.
+REFERENCE_CHOICE = "reference.choice"
+REFERENCE_ALLOW = "reference.allow"
+VOICE_TAKE = "voice.take"
+VOICE_PLAYER = "voice.player"
+
+
 class Level(StrEnum):
     DEFAULT = "default"
     SERIES = "series"
@@ -64,6 +71,19 @@ class _Scope(BaseModel):
         if self.episode is not None:
             return Level.EPISODE
         return Level.SEASON if self.season is not None else Level.SERIES
+
+
+class PlayerPick(BaseModel):
+    """The value of `voice.player`: one player of one source."""
+
+    source_id: int
+    player: str
+
+
+class ReferenceChoice(PlayerPick):
+    """The value of `reference.choice`: a voice-over group (its `voice_label`) at one player of one source."""
+
+    group: str
 
 
 class SettingRecord(_Scope):

@@ -1,32 +1,15 @@
-"""Voice-over identity: which names mean the same voice across players.
+"""Which names mean the same voice-over (or the same player): only what the user wrote down in a group.
 
-A studio is spelled differently by every player ("RedHeadSound", "Red Head Sound") and a
-combined credit ("AniMy / RuChiMe") names several studios at once. Two names are the same voice
-when a token of one equals a token of the other after normalising and applying the rules.
-The rules are data (`Equivalence`: synonyms of voice-overs and of players), read from settings by
-the module and handed to these pure functions; the constructor of rules edits that data.
+A group is a name with a list of triggers. A name belongs to a group when, folded (`core.voice_names.fold_name`: no
+case, no spaces, no punctuation), it equals the folded name of the group or one of its triggers. A combined credit
+"A / B" is one name: it is not split, so it joins neither the group of "A" nor the group of "B" (law Z-6).
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Mapping
 
-# Credits that name several studios at once are split on these.
-_SEPARATORS = re.compile(r"[/&+,]|\sи\s|\sand\s", re.IGNORECASE)
-_NOISE = re.compile(r"[\W_]+", re.UNICODE)
-
-# Built-in synonyms: normalised token -> normalised canonical token. Data, not logic.
-ALIASES: dict[str, str] = {}
-
-
-def _fold(name: str) -> str:
-    return _NOISE.sub("", name.casefold())
-
-
-def folded_name(name: str) -> str:
-    """The form in which two spellings of a name are compared."""
-    return _fold(name)
+from core.voice_names import fold_name
 
 
 def usable_groups(raw: object) -> dict[str, list[str]]:
@@ -35,88 +18,39 @@ def usable_groups(raw: object) -> dict[str, list[str]]:
         return {}
     groups = {}
     for name, triggers in raw.items():
-        if isinstance(name, str) and _fold(name) and isinstance(triggers, list):
-            groups[name] = [trigger for trigger in triggers if isinstance(trigger, str) and _fold(trigger)]
+        if isinstance(name, str) and fold_name(name) and isinstance(triggers, list):
+            groups[name] = [trigger for trigger in triggers if isinstance(trigger, str) and fold_name(trigger)]
     return groups
 
 
-def aliases_of(groups: Mapping[str, list[str]]) -> dict[str, str]:
-    """{trigger: group}: the form in which the rules match a name; a group's own name needs no entry."""
-    return {trigger: group for group, triggers in groups.items() for trigger in triggers}
-
-
-def usable_aliases(raw: object) -> dict[str, str]:
-    """The entries of user data that pair two non-empty names; anything else is not trusted."""
-    if not isinstance(raw, dict):
-        return {}
-    return {alias: canonical for alias, canonical in raw.items()
-            if isinstance(alias, str) and isinstance(canonical, str) and _fold(alias) and _fold(canonical)}
-
-
-def _folded(raw: object) -> dict[str, str]:
-    """{alias: canonical} in the folded form the matching works with."""
-    return {_fold(alias): _fold(canonical) for alias, canonical in usable_aliases(raw).items()}
-
-
 @dataclass(frozen=True)
-class Equivalence:
-    """Which names mean the same: synonyms of voice-over studios and of player kinds."""
+class Groups:
+    """The user groups in the form the matching works with: folded name or trigger -> group.
 
-    voices: Mapping[str, str] = field(default_factory=dict)
-    players: Mapping[str, str] = field(default_factory=dict)
+    A group's own name outranks the trigger of another group; of two groups with the same trigger the one written
+    first wins, so a stored value that the editor would have refused still answers one way."""
+
+    index: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
-    def of(cls, voices: object = None, players: object = None) -> "Equivalence":
-        return cls(_folded(voices), _folded(players))
+    def of(cls, groups: Mapping[str, list[str]]) -> "Groups":
+        index: dict[str, str] = {}
+        for name in groups:
+            index.setdefault(fold_name(name), name)
+        for name, triggers in groups.items():
+            for trigger in triggers:
+                index.setdefault(fold_name(trigger), name)
+        return cls(index)
 
-    def player(self, kind: str) -> str:
-        return self.players.get(_fold(kind), _fold(kind))
+    def group_of(self, name: str) -> str | None:
+        """The group the name belongs to; None for a name nobody grouped (and for a name with nothing to compare)."""
+        key = fold_name(name)
+        return self.index.get(key) if key else None
 
-
-NO_RULES = Equivalence()
-
-
-def tokens(name: str, rules: Equivalence = NO_RULES) -> frozenset[str]:
-    """Normalised, synonym-resolved studio tokens of one credit."""
-    synonyms = {**ALIASES, **rules.voices}
-    found = set()
-    for part in _SEPARATORS.split(name):
-        token = _fold(part)
-        if token:
-            found.add(synonyms.get(token, token))
-    return frozenset(found)
-
-
-def same_voice(first: str, second: str, rules: Equivalence = NO_RULES) -> bool:
-    return not tokens(first, rules).isdisjoint(tokens(second, rules))
+    def canonical(self, name: str) -> str:
+        """The folded form that stands for the name when two names are compared: its group's, else its own."""
+        group = self.group_of(name)
+        return fold_name(group if group is not None else name)
 
 
-def voice_groups(names: list[str], rules: Equivalence = NO_RULES) -> list[list[int]]:
-    """Indices of `names` grouped by voice; a group lists its members in the given order.
-
-    Matching is transitive: "A / B" joins a group named "A" and a group named "B"."""
-    parent = list(range(len(names)))
-
-    def find(index: int) -> int:
-        while parent[index] != index:
-            parent[index] = parent[parent[index]]
-            index = parent[index]
-        return index
-
-    owner: dict[str, int] = {}
-    for index, name in enumerate(names):
-        for token in tokens(name, rules):
-            if token in owner:
-                parent[find(index)] = find(owner[token])
-            else:
-                owner[token] = index
-    groups: dict[int, list[int]] = {}
-    for index in range(len(names)):
-        groups.setdefault(find(index), []).append(index)
-    return sorted(groups.values(), key=lambda members: members[0])
-
-
-def group_key(names: list[str], rules: Equivalence = NO_RULES) -> str:
-    """Stable key of a voice: the smallest token of any spelling, so it survives a changed listing order."""
-    found = set().union(*(tokens(name, rules) for name in names)) if names else set()
-    return min(found) if found else ""
+NO_GROUPS = Groups()

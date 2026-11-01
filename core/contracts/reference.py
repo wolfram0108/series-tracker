@@ -19,6 +19,7 @@ class Reference(BaseModel):
 
     season: int
     episode: int
+    part: int | None = None
     mark: ReferenceMark
     source_id: int | None = None
     row_key: str | None = None

@@ -1,4 +1,4 @@
-"""Tests of the voices module: voice identity, reference choice, layout of a series."""
+"""Tests of the voices module: the plan of voice-overs from the layout, their downloads, alignment and aftermath."""
 import asyncio
 import os
 import shutil
@@ -10,18 +10,18 @@ import pytest
 
 from conform_fakes import FakeClient
 from core import BaseModule, Bus, Runner
-from core.contracts import SubmitReply
+from core.contracts import (CompositionReply, CompositionRow, EffectiveLever, EpisodeSettings,
+                            Level, Reference, ReferenceMark, RowState, SubmitReply, group_target)
 from core.db import Database
 from core.envelope import Envelope
 from modules.conform import ConformModule
 from modules.conform.paths import roots, workspace
 from modules.settings import SettingsModule
 from modules.voices import VoicesModule
-from modules.voices.identity import Equivalence, group_key, same_voice, tokens, voice_groups
-from modules.voices.layout import (DEFAULT_PRIORITY, choose_reference, download_chain,
-                                   plan_layout, rank)
 from modules.voices.module import dub_file, temp_path
+from modules.voices.settings import DEFAULT_PRIORITY
 from modules.voices.states import public_state
+from series_factory import insert_series
 
 
 def code_of(stored):
@@ -32,155 +32,9 @@ def code_of(stored):
 
 
 def src(player, studio, episodes, kind="", url=None):
+    """A voice-over of a player as a page lists it: the rows it has, one per episode."""
     return {"url": url or f"https://site/?player={player}&voice={studio}", "player": player,
             "studio": studio, "kind": kind, "episodes": list(episodes)}
-
-
-# The real "Стать победителем" catalog: three voices in CVH, the same three in Kodik.
-WINNER = [
-    src("cvh", "BlackCat", [*range(1, 11), 13], "Дубляж"),
-    src("cvh", "RedHeadSound", range(1, 5), "Многоголосый"),
-    src("cvh", "FumoDub", range(1, 16), "Одноголосый"),
-    src("kodik", "FumoDub", range(1, 16), "voice"),
-    src("kodik", "Red Head Sound", range(1, 16), "voice"),
-    src("kodik", "BlackCat", range(1, 16), "voice"),
-]
-FUMODUB_CVH = WINNER[2]["url"]
-
-
-def test_names_differing_in_case_and_spaces_are_one_voice():
-    assert same_voice("RedHeadSound", "Red Head Sound")
-    assert same_voice("BLACKCAT", "blackcat")
-    assert not same_voice("BlackCat", "FumoDub")
-
-
-def test_a_combined_credit_names_every_studio_in_it():
-    assert tokens("AniMy / RuChiMe") == {"animy", "ruchime"}
-    assert same_voice("AniMy / RuChiMe", "Animy")
-    assert same_voice("AniMy / RuChiMe", "RuChiMe")
-
-
-def test_groups_are_transitive_and_keep_listing_order():
-    names = ["AniMy / RuChiMe", "AniStar", "Animy", "RuChiMe", "AniStar & Other"]
-    assert voice_groups(names) == [[0, 2, 3], [1, 4]]
-
-
-def test_an_alias_joins_two_spellings(monkeypatch):
-    monkeypatch.setattr("modules.voices.identity.ALIASES", {"aniliberty": "anilibria"})
-    assert same_voice("AniLiberty", "AniLibria")
-
-
-def test_rules_given_as_data_join_two_spellings_without_touching_the_built_in_table():
-    rules = Equivalence.of({"AniLiberty": "AniLibria", " Red-Head ": "Red Head Sound"})
-    assert same_voice("AniLiberty", "AniLibria", rules) and same_voice("Red Head", "RedHeadSound", rules)
-    assert not same_voice("AniLiberty", "AniLibria")
-    assert group_key(["AniLiberty", "AniLibria"], rules) == "anilibria"
-
-
-def test_rules_that_are_not_names_are_ignored():
-    assert Equivalence.of(["not", "a", "mapping"]).voices == {}
-    assert Equivalence.of({"a": 1, 2: "b", "": "c", "d": "   ", "ok": "fine"}).voices == {"ok": "fine"}
-    assert Equivalence.of(None, "text").players == {}
-
-
-def test_reference_is_the_biggest_resolution():
-    chosen = choose_reference([
-        {"player": "alloha", "resolution": 720}, {"player": "kodik", "resolution": 1080}])
-    assert chosen["player"] == "kodik"
-
-
-def test_equal_resolution_goes_to_the_higher_priority_source():
-    candidates = [{"player": "kodik", "resolution": 720}, {"player": "cvh", "resolution": 720},
-                  {"player": "allvideo", "resolution": 720}]
-    assert choose_reference(candidates)["player"] == "cvh"
-    assert [rank(p) for p in ("alloha", "vk", "cvh", "allvideo", "vibix", "kodik")] == list(range(6))
-    assert rank("unknown") == len(DEFAULT_PRIORITY)
-
-
-def test_full_tie_keeps_the_first_listed_and_a_custom_order_wins():
-    first, second = {"player": "cvh", "resolution": 720, "id": 1}, {"player": "cvh", "resolution": 720, "id": 2}
-    assert choose_reference([first, second])["id"] == 1
-    candidates = [{"player": "cvh", "resolution": 720}, {"player": "kodik", "resolution": 720}]
-    assert choose_reference(candidates, ["kodik", "cvh"])["player"] == "kodik"
-    with pytest.raises(ValueError):
-        choose_reference([])
-
-
-def test_winner_layout_matches_the_agreed_example():
-    layout = plan_layout(WINNER, "manual", FUMODUB_CVH)
-    rows = {row["label"]: row for row in layout["voices"]}
-    assert rows["FumoDub"]["role"] == "reference"
-    assert rows["FumoDub"]["source"]["player"] == "cvh"
-    # The other two come from Kodik, which has every episode; CVH is their fallback.
-    for label in ("RedHeadSound", "BlackCat"):
-        assert rows[label]["role"] == "dub"
-        assert rows[label]["source"]["player"] == "kodik"
-        assert [f["player"] for f in rows[label]["fallbacks"]] == ["cvh"]
-    # The reference comes first, the other voices keep the order of the site.
-    assert [row["label"] for row in layout["voices"]] == ["FumoDub", "BlackCat", "RedHeadSound"]
-    assert layout["reference"]["url"] == FUMODUB_CVH
-    # The reference voice is already in the video: its Kodik copy is not downloaded.
-    assert [(s["player"], s["studio"]) for s in layout["skipped"]] == [("kodik", "FumoDub")]
-    assert layout["skipped"][0]["reason"] == "озвучка уже в референсе"
-
-
-def test_priority_breaks_a_tie_between_equally_full_sources():
-    layout = plan_layout([src("kodik", "A", [1, 2]), src("cvh", "A", [1, 2]),
-                          src("cvh", "Ref", [1, 2])], "manual",
-                         "https://site/?player=cvh&voice=Ref")
-    row = next(r for r in layout["voices"] if r["label"] == "A")
-    assert row["source"]["player"] == "cvh"
-    assert [f["player"] for f in row["fallbacks"]] == ["kodik"]
-
-
-def test_fallbacks_follow_priority_not_coverage():
-    sources = [src("kodik", "A", [1, 2, 3]), src("vibix", "A", [1]), src("cvh", "A", [1, 2]),
-               src("cvh", "Ref", [1])]
-    layout = plan_layout(sources, "manual", "https://site/?player=cvh&voice=Ref")
-    row = next(r for r in layout["voices"] if r["label"] == "A")
-    assert row["source"]["player"] == "kodik"
-    assert [f["player"] for f in row["fallbacks"]] == ["cvh", "vibix"]
-
-
-def test_download_chain_starts_with_the_main_source_and_skips_holes():
-    layout = plan_layout(WINNER, "manual", FUMODUB_CVH)
-    red_head = next(r for r in layout["voices"] if r["label"] == "RedHeadSound")
-    assert [s["player"] for s in download_chain(red_head, 3)] == ["kodik", "cvh"]
-    assert [s["player"] for s in download_chain(red_head, 9)] == ["kodik"]
-    black_cat = next(r for r in layout["voices"] if r["label"] == "BlackCat")
-    assert download_chain(black_cat, 12) == [black_cat["source"]]
-    assert download_chain(black_cat, 99) == []
-
-
-def test_a_combined_credit_is_one_voice_with_the_reference_of_its_studio():
-    sources = [src("cvh", "AniMy / RuChiMe", [1, 2, 3]), src("kodik", "Animy", [1, 2, 3, 4]),
-               src("kodik", "Other", [1, 2])]
-    layout = plan_layout(sources, "manual", sources[0]["url"])
-    assert [(r["label"], r["role"]) for r in layout["voices"]] == [
-        ("AniMy / RuChiMe", "reference"), ("Other", "dub")]
-    assert [s["studio"] for s in layout["skipped"]] == ["Animy"]
-
-
-def test_auto_mode_lists_every_voice_and_excludes_nothing():
-    layout = plan_layout(WINNER, "auto")
-    assert layout["reference"] is None and layout["skipped"] == []
-    assert {row["role"] for row in layout["voices"]} == {"dub"}
-    assert len(layout["voices"]) == 3
-    # Voices are ordered as they would win a resolution tie: FumoDub has a CVH source, the rest only Kodik.
-    assert [row["label"] for row in layout["voices"]] == ["FumoDub", "BlackCat", "RedHeadSound"]
-
-
-def test_manual_mode_needs_a_known_reference():
-    with pytest.raises(ValueError):
-        plan_layout(WINNER, "manual", "https://nowhere")
-    with pytest.raises(ValueError):
-        plan_layout(WINNER, "manual", None)
-
-
-def test_ranges_show_holes_in_each_source():
-    layout = plan_layout(WINNER, "manual", FUMODUB_CVH)
-    black_cat_cvh = next(r for r in layout["voices"] if r["label"] == "BlackCat")["fallbacks"][0]
-    assert (black_cat_cvh["ranges"], black_cat_cvh["count"]) == ("1-10, 13", 11)
 
 
 @pytest.fixture
@@ -207,43 +61,73 @@ async def system(db_path):
     await runner.stop()
 
 
-@pytest.mark.asyncio
-async def test_layout_query_uses_the_default_priority(system):
-    reply = await system.request("voices.layout", {"sources": WINNER, "reference": FUMODUB_CVH},
-                                 timeout=5)
-    assert reply["priority"] == list(DEFAULT_PRIORITY)
-    assert [r["label"] for r in reply["voices"]] == ["FumoDub", "BlackCat", "RedHeadSound"]
+async def resolve(probe, *names):
+    return (await probe.request("voices.groups.resolve", {"names": list(names)}, timeout=5))["groups"]
+
+
+async def set_groups(probe, groups):
+    import json
+    await probe.request("settings.value.set", {"key": "voices.groups", "value": json.dumps(groups)}, timeout=5)
 
 
 @pytest.mark.asyncio
-async def test_layout_query_takes_the_priority_from_settings(system):
-    await system.request("settings.value.set",
-                         {"key": "voices.source_priority", "value": '["kodik", "cvh"]'}, timeout=5)
-    sources = [src("cvh", "A", [1, 2]), src("kodik", "A", [1, 2]), src("cvh", "Ref", [1])]
-    reply = await system.request("voices.layout", {
-        "sources": sources, "reference": "https://site/?player=cvh&voice=Ref"}, timeout=5)
-    assert reply["priority"] == ["kodik", "cvh"]
-    assert next(r for r in reply["voices"] if r["label"] == "A")["source"]["player"] == "kodik"
+async def test_a_name_resolves_to_the_group_whose_name_or_trigger_it_equals_without_case_spaces_and_marks(system):
+    await set_groups(system, {"Red Head Sound": ["RedHeadSound", "РХС"], "Fumo-Dub": []})
+    found = await resolve(system, "red head sound", "REDHEADSOUND", "r.h.s", "рхс", "FumoDub", "BlackCat")
+    assert found == {"red head sound": "Red Head Sound", "REDHEADSOUND": "Red Head Sound", "r.h.s": None,
+                     "рхс": "Red Head Sound", "FumoDub": "Fumo-Dub", "BlackCat": None}
 
 
 @pytest.mark.asyncio
-async def test_a_broken_priority_setting_falls_back_to_the_default(system):
-    await system.request("settings.value.set",
-                         {"key": "voices.source_priority", "value": "not json"}, timeout=5)
-    reply = await system.request("voices.layout", {"sources": WINNER, "reference": FUMODUB_CVH},
-                                 timeout=5)
-    assert reply["priority"] == list(DEFAULT_PRIORITY)
+async def test_without_groups_no_name_belongs_to_one_not_even_a_name_written_twice(system):
+    assert await resolve(system, "BlackCat", "BlackCat", "Black Cat") == {"BlackCat": None, "Black Cat": None}
+
+
+@pytest.mark.asyncio
+async def test_an_empty_name_or_one_of_marks_alone_belongs_to_no_group(system):
+    await set_groups(system, {"Group": ["x"]})
+    assert await resolve(system, "", "  ", "...", "x") == {"": None, "  ": None, "...": None, "x": "Group"}
+    assert await resolve(system) == {}
+
+
+@pytest.mark.asyncio
+async def test_a_combined_credit_is_one_name_and_joins_neither_group_of_its_parts(system):
+    await set_groups(system, {"First": ["A"], "Second": ["B"], "Both": ["A / B"]})
+    found = await resolve(system, "A / B", "A/B", "A & B", "A", "B", "AB")
+    # "A / B" is not split into "A" and "B" and not joined with them; it is the name the user wrote as a trigger.
+    assert found == {"A / B": "Both", "A/B": "Both", "A & B": "Both", "A": "First", "B": "Second", "AB": "Both"}
+    await set_groups(system, {"First": ["A"], "Second": ["B"]})
+    assert (await resolve(system, "A / B"))["A / B"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_trigger_two_groups_hold_answers_the_group_written_first_and_a_group_name_outranks_a_trigger(system):
+    await set_groups(system, {"One": ["shared", "Two"], "Two": ["shared"]})
+    found = await resolve(system, "shared", "two")
+    assert found == {"shared": "One", "two": "Two"}
+
+
+@pytest.mark.asyncio
+async def test_a_broken_groups_setting_leaves_every_name_without_a_group(system):
+    await set_groups(system, {"Group": ["x"]})
+    await system.request("settings.value.set", {"key": "voices.groups", "value": "{broken"}, timeout=5)
+    assert await resolve(system, "x") == {"x": None}
 
 
 def linked(player, studio, episodes, kind="", url=None):
-    """A source whose episode links are what the site catalog would hand out."""
+    """A source whose episode links are what the table of the page would hand out."""
     row = src(player, studio, episodes, kind, url)
     row["links"] = {str(n): f"https://site/title.html#{player}-{studio}-{n}" for n in episodes}
     return row
 
 
 class Neighbours(BaseModule):
-    """catalog + sources + downloads + settings in one fake; fetch commands are captured."""
+    """catalog + composition + scan + downloads + settings in one fake; fetch commands are captured.
+
+    The world is `sources` (each a player's voice-over with the episodes it has and their links, all in one source of
+    the series), `reference_url` (the source whose rows are the references) and `plan` (the (season, episode) pairs
+    that have a reference). The layout, the references and the plan of downloads are derived from them as the real
+    neighbours would hand them out."""
 
     name = "neighbours"
 
@@ -251,20 +135,25 @@ class Neighbours(BaseModule):
         self.serves_conform = conform
         self.sources = sources
         self.reference_url = reference_url
-        self.plan = plan  # [(season, episode, site episode)]
+        self.plan = plan  # [(season, episode)] of the episodes that have a reference
         self.library = library
         self.references = {}  # episode -> file name of the reference video on disk
         self.uids = {}  # episode -> media item of its reference (default: u<episode>)
         self.extra_items = []  # more media items of the plan, as downloads.episodes.get shows them
+        self.marks = {}  # (season, episode) -> mark of the reference when it is not the usual one
+        self.levers = {}  # (season, episode) -> [EffectiveLever] of the output levers
         self.settings = {}
         self.fetches = []
         self.cancels = []
         self.submits = []
         self.submit_reply = None
         self.jobs = {}  # job id -> reply of conform.job.get
-        self.source_type = "web_video"
-        self.has_voices = True
-        self.parses = 0
+        self.kind = "video"
+        self.layout_asks = 0
+        self.output_asks = 0
+        self.layout_failures = 0  # answers of composition.get that fail before it answers again
+        self.layout_gate = None  # an asyncio.Event the answer of composition.get waits for
+        self.extra_rows = []  # more rows of the layout (compilations and the like)
         self.conform_cancels = []
         self.finish_at_once = False
         self.lost_before_arrival = 0
@@ -279,8 +168,8 @@ class Neighbours(BaseModule):
 
     def register(self):
         self.handle("catalog.series.get", self.on_series)
-        self.handle("sources.provider.info", self.on_provider_info)
-        self.handle("sources.parse", self.on_parse)
+        self.handle("composition.get", self.on_layout)
+        self.handle("scan.output.get", self.on_output)
         self.handle("downloads.episodes.get", self.on_episodes)
         self.handle("settings.value.get", self.on_setting)
         self.handle("settings.values.by_prefix", self.on_settings_by_prefix)
@@ -294,25 +183,63 @@ class Neighbours(BaseModule):
             self.handle("conform.workspace", self.on_workspace)
             self.handle("conform.settings.get", self.on_conform_settings)
 
+    # --- the layout, the references and the plan of downloads the sources and `plan` stand for ----------------
+
+    def season_of(self, episode):
+        return next((season for season, number in self.plan if number == episode), 1)
+
+    def row_key(self, source, episode):
+        return f"{source['player']}:{source['studio']}:{episode}"
+
+    def rows(self):
+        return [CompositionRow(
+            series_id=7, source_id=1, row_key=self.row_key(source, number), season=self.season_of(number),
+            episode_start=number, episode_end=number, voice_group=None, voice_label=source["studio"],
+            player=source["player"], heights=[720], state=RowState.PLAYABLE, link=source["links"][str(number)])
+            for source in self.sources for number in source["episodes"]] + list(self.extra_rows)
+
+    def references_list(self):
+        reference = next(s for s in self.sources if s["url"] == self.reference_url)
+        found = []
+        for season, episode in self.plan:
+            mark = self.marks.get((season, episode), ReferenceMark.BY_LEVEL)
+            if mark in (ReferenceMark.NONE, ReferenceMark.UNFIT):
+                found.append(Reference(season=season, episode=episode, mark=mark))
+            else:
+                found.append(Reference(season=season, episode=episode, mark=mark, source_id=1,
+                                       row_key=self.row_key(reference, episode), player=reference["player"],
+                                       height=1080))
+        return found
+
     async def on_series(self, env):
         return {"id": env.payload["series_id"], "url": "https://site/title.html", "name": "Series",
-                "save_path": self.library, "source_type": self.source_type}
+                "save_path": self.library, "kind": self.kind}
 
-    async def on_provider_info(self, env):
-        return {"provider": "fake", "voices": self.has_voices}
+    async def on_layout(self, env):
+        self.layout_asks += 1
+        if self.layout_gate is not None:
+            await self.layout_gate.wait()
+        if self.layout_failures:
+            self.layout_failures -= 1
+            raise RuntimeError("composition does not answer")
+        return CompositionReply(
+            series_id=env.payload["series_id"], rev=1, rows=self.rows(),
+            settings=[EpisodeSettings(season=season, episode=episode, levers=levers)
+                      for (season, episode), levers in self.levers.items()]).model_dump(mode="json")
 
-    async def on_parse(self, env):
-        self.parses += 1
-        assert env.payload.get("with_links") is True
-        return {"sources": self.sources, "selected_source": self.reference_url}
+    async def on_output(self, env):
+        self.output_asks += 1
+        return [reference.model_dump(mode="json") for reference in self.references_list()]
 
     async def on_episodes(self, env):
         reference = next(s for s in self.sources if s["url"] == self.reference_url)
         items = [{"unique_id": self.uids.get(episode, f"u{episode}"), "season": season,
-                  "episode_start": episode, "source_url": reference["links"][str(site)],
+                  "episode_start": episode, "source_url": reference["links"].get(str(episode), ""),
                   "status": "pending", "final_filename": self.references.get(episode),
-                  "superseded_by": None} for season, episode, site in self.plan]
+                  "superseded_by": None} for season, episode in self.plan]
         return {"items": items + self.extra_items}
+
+    # --- the rest of the neighbours ---------------------------------------------------------------------------
 
     async def on_setting(self, env):
         return {"key": env.payload["key"], "value": self.settings.get(env.payload["key"])}
@@ -373,16 +300,15 @@ async def build_system(db_path, tmp_path, daemon=None):
     """The module with fake neighbours; with a `daemon` the real conform bridge talks to it instead of a fake."""
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO parser_profiles (id, name) VALUES (1, 'p')")
-        conn.execute("INSERT INTO series (id, url, name, name_en, site, save_path, source_type, "
-                     "parser_profile_id, auto_scan_enabled, vk_search_mode) VALUES (7, "
-                     "'https://site/title.html', 's', 's', 'dunhuatv', '/media/s', 'web_video', 1, 0, 'search')")
+        insert_series(conn, id=7, name="s", name_en="s", site="dunhuatv", save_path="/media/s",
+                      url="https://site/title.html", source_type="web_video", parser_profile_id=1)
         conn.commit()
     bus = Bus()
     db = Database(db_path)
     sources = [linked("cvh", "FumoDub", range(1, 4), url="https://site/?player=cvh&voice=FumoDub"),
                linked("kodik", "BlackCat", range(1, 4)),
                linked("cvh", "BlackCat", [1, 2])]
-    neighbours = Neighbours(bus, sources, sources[0]["url"], [(1, 1, 1), (1, 2, 2), (1, 3, 3)],
+    neighbours = Neighbours(bus, sources, sources[0]["url"], [(1, 1), (1, 2), (1, 3)],
                             library=str(tmp_path / "library"), conform=daemon is None)
     neighbours.settings["conform.work_dir"] = str(tmp_path / "work")
     probe = Probe(bus)
@@ -434,13 +360,15 @@ async def test_dispatch_downloads_every_other_voice_of_every_planned_episode(dub
     probe, neighbours, voices, _ = dubs
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
+    # The player higher in the order of the settings is the main candidate; episode 3 has only the other one.
     assert {f["url"] for f in neighbours.fetches} == {
-        f"https://site/title.html#kodik-BlackCat-{n}" for n in (1, 2, 3)}
+        "https://site/title.html#cvh-BlackCat-1", "https://site/title.html#cvh-BlackCat-2",
+        "https://site/title.html#kodik-BlackCat-3"}
     first = neighbours.fetches[0]
     assert first["max_height"] == 720 and first["series_id"] == 7 and first["key"].startswith("dub:")
     assert first["path"].startswith(downloads(neighbours) + "/7/s01e01/")
     assert {r["status"] for r in await rows(probe)} == {"downloading"}
-    assert {r["voice_key"] for r in await rows(probe)} == {"blackcat"}
+    assert {r["voice_key"] for r in await rows(probe)} == {"BlackCat"}
 
 
 @pytest.mark.asyncio
@@ -451,7 +379,7 @@ async def test_a_finished_download_makes_the_dub_ready_and_is_announced(dubs):
     await settled(neighbours, 3)
     finish(probe, neighbours.fetches[0]["key"])
     event = await change(sub, "ready")
-    assert event["status"] == "ready" and event["voice_key"] == "blackcat" and event["series_id"] == 7
+    assert event["status"] == "ready" and event["voice_key"] == "BlackCat" and event["series_id"] == 7
     assert sorted(r["status"] for r in await rows(probe)) == ["downloading", "downloading", "ready"]
 
 
@@ -464,7 +392,7 @@ async def test_a_failed_source_hands_over_to_the_next_of_the_chain(dubs):
     finish(probe, victim["key"], ok=False, error="timed out")
     await settled(neighbours, 4)
     retry = neighbours.fetches[3]
-    assert retry["key"] == victim["key"] and retry["url"] == "https://site/title.html#cvh-BlackCat-1"
+    assert retry["key"] == victim["key"] and retry["url"] == "https://site/title.html#kodik-BlackCat-1"
     assert next(r for r in await rows(probe) if r["episode"] == 1)["attempt"] == 1
 
 
@@ -501,7 +429,10 @@ async def test_a_new_dispatch_offers_failed_voices_again_from_the_main_source(du
 @pytest.mark.asyncio
 async def test_an_episode_nobody_offers_is_a_failure_not_silence(dubs):
     probe, neighbours, _, _ = dubs
-    neighbours.plan.append((1, 4, 3))
+    neighbours.plan.append((1, 4))
+    reference = neighbours.sources[0]
+    reference["episodes"].append(4)
+    reference["links"]["4"] = "https://site/title.html#cvh-FumoDub-4"
     neighbours.sources[1]["links"].pop("3")
     neighbours.sources[1]["episodes"].remove(3)
     probe.send_command("voices.dispatch", {"series_id": 7})
@@ -539,19 +470,24 @@ async def test_episodes_that_left_the_plan_lose_their_pending_rows(dubs):
     await settled(neighbours, 3)
     finish(probe, neighbours.fetches[2]["key"], ok=False, error="x")
     await asyncio.sleep(0.1)
-    neighbours.plan[:] = [(1, 1, 1)]
+    neighbours.plan[:] = [(1, 1)]
     probe.send_command("voices.dispatch", {"series_id": 7})
     await asyncio.sleep(0.2)
     assert [r["episode"] for r in await rows(probe)] == [1, 2]
 
 
 @pytest.mark.asyncio
-async def test_other_source_types_and_single_voice_series_are_left_alone(dubs):
-    probe, neighbours, _, _ = dubs
-    neighbours.source_type = "vk_video"
+async def test_a_series_that_is_not_a_video_series_is_not_even_asked_about_its_layout(dubs):
+    probe, neighbours, voices, _ = dubs
+    neighbours.kind = "torrent"
     probe.send_command("voices.dispatch", {"series_id": 7})
-    await asyncio.sleep(0.2)
+    await quiet(voices)
+    assert neighbours.layout_asks == neighbours.output_asks == 0
     assert neighbours.fetches == [] and await rows(probe) == []
+    neighbours.kind = "video"
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    assert neighbours.layout_asks == neighbours.output_asks == 1
 
 
 @pytest.mark.asyncio
@@ -677,7 +613,7 @@ def conform_dir(neighbours):
     return os.path.join(neighbours.settings["conform.work_dir"], "conform")
 
 
-async def two_voices_ready(dubs, plan=((1, 1, 1),), reference=True, finished=True):
+async def two_voices_ready(dubs, plan=((1, 1),), reference=True, finished=True):
     """One planned episode with two additional voices, downloaded; the reference may be missing."""
     probe, neighbours, voices, bus = dubs
     neighbours.sources.append(linked("kodik", "RedHeadSound", range(1, 4)))
@@ -720,7 +656,7 @@ async def test_an_episode_goes_to_alignment_and_its_tracks_land_next_to_the_vide
     assert submit["ref"] != ref and os.path.basename(submit["ref"]) == "7_s01e01_ref.mp4"
     assert submit["ref"].startswith(conform_dir(neighbours) + "/7/s01e01/_ref/")
     assert open(submit["ref"], "rb").read() == open(ref, "rb").read() and os.path.isfile(ref)
-    assert sorted(os.path.basename(p) for p in submit["dubs"]) == ["7_s01e01_blackcat.mp4", "7_s01e01_redheadsound.mp4"]
+    assert sorted(os.path.basename(p) for p in submit["dubs"]) == ["7_s01e01_BlackCat.mp4", "7_s01e01_RedHeadSound.mp4"]
     key = os.path.basename(submit["out_dir"])
     assert os.path.dirname(submit["out_dir"]).endswith("/7/s01e01/_aligned")
     assert os.path.dirname(submit["cache_dir"]).endswith("/7/s01e01/_cache") and os.path.basename(submit["cache_dir"]) == key
@@ -777,7 +713,7 @@ async def test_a_voice_that_could_not_be_downloaded_does_not_hold_the_episode_ba
     touch(black["path"], b"video")
     finish(probe, black["key"])
     await statuses_until(sub, ["failed", "ready", "aligning"])
-    assert [os.path.basename(p) for p in neighbours.submits[0]["dubs"]] == ["7_s01e01_blackcat.mp4"]
+    assert [os.path.basename(p) for p in neighbours.submits[0]["dubs"]] == ["7_s01e01_BlackCat.mp4"]
 
 
 @pytest.mark.asyncio
@@ -786,12 +722,12 @@ async def test_a_result_that_is_not_clean_is_rejected_and_never_placed(dubs, cap
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     settled_sub = bus.subscribe("voices.episode.settled")
     caplog.set_level("WARNING")
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", blackcat={
-        "suspect": True, "warnings": ["остаток вне допуска"]}, redheadsound={"critical": ["нет общего звука"]}))
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={
+        "suspect": True, "warnings": ["остаток вне допуска"]}, RedHeadSound={"critical": ["нет общего звука"]}))
     await statuses_until(sub, ["rejected", "rejected"])
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["blackcat"]["status"] == "rejected" and code_of(by_voice["blackcat"]["outcome"]) == "suspect"
-    assert code_of(by_voice["redheadsound"]["outcome"]) == "critical"
+    assert by_voice["BlackCat"]["status"] == "rejected" and code_of(by_voice["BlackCat"]["outcome"]) == "suspect"
+    assert code_of(by_voice["RedHeadSound"]["outcome"]) == "critical"
     stem = os.path.splitext(ref)[0]
     assert not any(name.startswith(os.path.basename(stem) + ".") and name.endswith(".flac")
                    for name in os.listdir(neighbours.library))
@@ -809,8 +745,8 @@ async def test_a_success_without_a_file_refuses_that_voice_and_leaves_the_others
     probe.publish_event("conform.job.finished", view)
     await statuses_until(sub, ["aligned", "placed", "rejected"])
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["redheadsound"]["status"] == "rejected" and code_of(by_voice["redheadsound"]["outcome"]) == "output_missing"
-    assert by_voice["blackcat"]["status"] == "placed"
+    assert by_voice["RedHeadSound"]["status"] == "rejected" and code_of(by_voice["RedHeadSound"]["outcome"]) == "output_missing"
+    assert by_voice["BlackCat"]["status"] == "placed"
 
 
 @pytest.mark.asyncio
@@ -828,7 +764,7 @@ async def test_a_result_that_breaks_the_handler_fails_its_voice_and_not_the_batc
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
     await statuses_until(sub, ["aligned", "placed", "failed"])
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert code_of(by_voice["redheadsound"]["error"]) == "result_unreadable" and by_voice["blackcat"]["status"] == "placed"
+    assert code_of(by_voice["RedHeadSound"]["error"]) == "result_unreadable" and by_voice["BlackCat"]["status"] == "placed"
 
 
 @pytest.mark.asyncio
@@ -943,7 +879,7 @@ async def test_a_voice_that_arrives_later_makes_a_job_of_its_own(dubs):
     finish(probe, retry["key"])
     await statuses_until(sub, ["ready", "aligning"])
     assert len(neighbours.submits) == 2
-    assert [os.path.basename(p) for p in neighbours.submits[1]["dubs"]] == ["7_s01e01_redheadsound.mp4"]
+    assert [os.path.basename(p) for p in neighbours.submits[1]["dubs"]] == ["7_s01e01_RedHeadSound.mp4"]
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-2"))
     await statuses_until(sub, ["aligned", "placed"])
     assert {r["status"] for r in await rows(probe)} == {"placed"}
@@ -996,7 +932,7 @@ async def test_an_obligation_that_keeps_failing_is_reported_and_still_carried(du
 async def test_the_folders_of_the_series_go_when_every_episode_of_the_series_is_settled(dubs):
     probe, neighbours, _, bus = dubs
     neighbours.sources.append(linked("kodik", "RedHeadSound", range(1, 4)))
-    neighbours.plan[:] = [(1, 1, 1), (1, 2, 2)]
+    neighbours.plan[:] = [(1, 1), (1, 2)]
     for episode in (1, 2):
         reference_on_disk(neighbours, episode)
     sub = bus.subscribe("voices.dub.changed")
@@ -1089,8 +1025,8 @@ async def test_a_track_the_user_deleted_is_not_made_again(dubs):
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
     await statuses_until(sub, ["rejected"])
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["blackcat"]["status"] == "rejected" and code_of(by_voice["blackcat"]["outcome"]) == "track_removed"
-    assert by_voice["redheadsound"]["status"] == "placed"
+    assert by_voice["BlackCat"]["status"] == "rejected" and code_of(by_voice["BlackCat"]["outcome"]) == "track_removed"
+    assert by_voice["RedHeadSound"]["status"] == "placed"
     probe.send_command("voices.dispatch", {"series_id": 7})
     await asyncio.sleep(0.3)
     assert len(neighbours.fetches) == 2 and len(neighbours.submits) == 1
@@ -1186,18 +1122,18 @@ async def test_an_event_carries_the_voice_and_the_reason_so_the_interface_asks_n
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     changes = bus.subscribe("voices.dub.changed")
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", blackcat={
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={
         "suspect": True, "warnings": ["остаток вне допуска"]}))
     await statuses_until(sub, ["aligned", "placed", "rejected"])
     seen = {}
     while not changes.queue.empty():
         event = changes.queue.get_nowait().payload
         seen[(event["voice_key"], event["status"])] = event
-    rejected = seen[("blackcat", "rejected")]
+    rejected = seen[("BlackCat", "rejected")]
     assert rejected["voice_label"] == "BlackCat" and rejected["detail"]["code"] == "suspect"
-    assert seen[("redheadsound", "aligned")]["detail"] is None
+    assert seen[("RedHeadSound", "aligned")]["detail"] is None
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["blackcat"]["detail"]["code"] == "suspect" and by_voice["redheadsound"]["detail"] is None
+    assert by_voice["BlackCat"]["detail"]["code"] == "suspect" and by_voice["RedHeadSound"]["detail"] is None
 
 
 def test_every_step_of_a_voice_over_shows_as_one_of_seven_states():
@@ -1254,15 +1190,15 @@ async def test_the_end_of_a_job_shows_done_and_error_without_any_other_word(dubs
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     changes = bus.subscribe("voices.dub.changed")
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", redheadsound={
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", RedHeadSound={
         "critical": ["нет общего звука"]}))
     await statuses_until(sub, ["aligned", "placed", "rejected"])
     states = {}
     while not changes.queue.empty():
         event = changes.queue.get_nowait().payload
         states[(event["voice_key"], event["status"])] = event["state"]
-    assert states[("blackcat", "placed")] == "done" and states[("redheadsound", "rejected")] == "error"
-    assert await states_of(probe) == {"blackcat": "done", "redheadsound": "error"}
+    assert states[("BlackCat", "placed")] == "done" and states[("RedHeadSound", "rejected")] == "error"
+    assert await states_of(probe) == {"BlackCat": "done", "RedHeadSound": "error"}
 
 
 def start(probe, fetch):
@@ -1276,13 +1212,13 @@ async def test_a_sent_download_is_queued_until_it_really_starts_and_downloading_
     assert set((await states_of(probe)).values()) == {"download_queued"}
     first = next(f for f in neighbours.fetches if "BlackCat" in f["url"])
     start(probe, first)
-    await change_state(changes, "blackcat", "downloading")
-    assert await states_of(probe) == {"blackcat": "downloading", "redheadsound": "download_queued"}
+    await change_state(changes, "BlackCat", "downloading")
+    assert await states_of(probe) == {"BlackCat": "downloading", "RedHeadSound": "download_queued"}
     touch(first["path"], b"video")
     finish(probe, first["key"])
     ready = await change(changes, "ready")
     assert ready["state"] == "align_queued"
-    assert (await states_of(probe))["blackcat"] == "align_queued"
+    assert (await states_of(probe))["BlackCat"] == "align_queued"
 
 
 @pytest.mark.asyncio
@@ -1302,14 +1238,14 @@ async def test_the_next_source_of_a_voice_is_queued_again_until_its_own_start(du
     changes = bus.subscribe("voices.dub.changed")
     black = next(f for f in neighbours.fetches if "BlackCat" in f["url"])
     start(probe, black)
-    await change_state(changes, "blackcat", "downloading")
+    await change_state(changes, "BlackCat", "downloading")
     finish(probe, black["key"], ok=False, error="timed out")
     await settled(neighbours, 3)  # the fallback source of BlackCat is sent
-    await change_state(changes, "blackcat", "download_queued")
-    assert (await states_of(probe))["blackcat"] == "download_queued"
+    await change_state(changes, "BlackCat", "download_queued")
+    assert (await states_of(probe))["BlackCat"] == "download_queued"
     start(probe, neighbours.fetches[2])
-    await change_state(changes, "blackcat", "downloading")
-    assert (await states_of(probe))["blackcat"] == "downloading"
+    await change_state(changes, "BlackCat", "downloading")
+    assert (await states_of(probe))["BlackCat"] == "downloading"
 
 
 @pytest.mark.asyncio
@@ -1323,23 +1259,10 @@ async def test_a_start_of_a_foreign_download_is_none_of_our_business(dubs):
     assert changes.queue.empty()
 
 
-@pytest.mark.asyncio
-async def test_a_series_whose_provider_has_no_voice_catalog_is_not_even_parsed(dubs):
-    probe, neighbours, _, _ = dubs
-    neighbours.has_voices = False
-    probe.send_command("voices.dispatch", {"series_id": 7})
-    await asyncio.sleep(0.3)
-    assert neighbours.parses == 0 and neighbours.fetches == [] and await rows(probe) == []
-    neighbours.has_voices = True
-    probe.send_command("voices.dispatch", {"series_id": 7})
-    await settled(neighbours, 3)
-    assert neighbours.parses == 1
-
-
 async def capped_two_episodes(dubs, cap="1"):
     probe, neighbours, voices, bus = dubs
     neighbours.sources.append(linked("kodik", "RedHeadSound", range(1, 4)))
-    neighbours.plan[:] = [(1, 1, 1), (1, 2, 2)]
+    neighbours.plan[:] = [(1, 1), (1, 2)]
     neighbours.settings["voices.max_temp_episodes"] = cap
     for episode in (1, 2):
         reference_on_disk(neighbours, episode)
@@ -1455,42 +1378,6 @@ async def test_deleting_a_series_takes_its_finished_job_out_of_the_history_and_i
     await until_true(dropped, (neighbours.conform_cancels, os.path.isdir(submit["out_dir"])))
 
 
-def test_layout_takes_synonymous_voices_of_different_sites_as_one_voice():
-    sources = [src("cvh", "FumoDub", [1, 2], url="https://site/?player=cvh&voice=FumoDub"),
-               src("kodik", "AniLibria", [1, 2, 3]), src("cvh", "AniLiberty", [1, 2])]
-    without = plan_layout(sources, "manual", sources[0]["url"])
-    assert sorted(r["label"] for r in without["voices"] if r["role"] == "dub") == ["AniLiberty", "AniLibria"]
-    rules = Equivalence.of({"aniliberty": "anilibria"})
-    with_rules = plan_layout(sources, "manual", sources[0]["url"], rules=rules)
-    dub = [r for r in with_rules["voices"] if r["role"] == "dub"]
-    assert len(dub) == 1 and dub[0]["key"] == "anilibria"
-    assert dub[0]["source"]["player"] == "kodik" and [f["player"] for f in dub[0]["fallbacks"]] == ["cvh"]
-
-
-def test_players_that_the_rules_call_the_same_take_one_place_in_the_priority():
-    assert rank("vk", ["alloha", "cvh", "kodik"]) == 3
-    rules = Equivalence.of(players={"vk": "cvh"})
-    assert rank("vk", ["alloha", "cvh", "kodik"], rules) == 1 == rank("cvh", ["alloha", "cvh", "kodik"], rules)
-    candidates = [{"player": "kodik", "resolution": 720}, {"player": "vk", "resolution": 720}]
-    assert choose_reference(candidates, ["alloha", "cvh", "kodik"], rules)["player"] == "vk"
-
-
-@pytest.mark.asyncio
-async def test_the_module_reads_the_rules_from_settings_and_survives_garbage(system):
-    sources = [src("cvh", "Ref", [1], url="https://site/?player=cvh&voice=Ref"),
-               src("kodik", "AniLibria", [1, 2]), src("cvh", "AniLiberty", [1])]
-    query = {"sources": sources, "reference": sources[0]["url"]}
-    plain = await system.request("voices.layout", query, timeout=5)
-    assert len([r for r in plain["voices"] if r["role"] == "dub"]) == 2
-    await system.request("settings.value.set", {"key": "voices.groups",
-                                                "value": '{"anilibria": ["aniliberty"]}'}, timeout=5)
-    merged = await system.request("voices.layout", query, timeout=5)
-    assert len([r for r in merged["voices"] if r["role"] == "dub"]) == 1
-    await system.request("settings.value.set", {"key": "voices.groups", "value": "{broken"}, timeout=5)
-    again = await system.request("voices.layout", query, timeout=5)
-    assert len([r for r in again["voices"] if r["role"] == "dub"]) == 2
-
-
 FORM = {"priority": ["kodik", "cvh"], "voice_groups": {"anilibria": ["aniliberty"]}}
 
 
@@ -1502,11 +1389,8 @@ async def test_a_saved_form_applies_at_once_and_is_announced_to_every_open_scree
     assert saved["settings"]["priority"] == ["kodik", "cvh"] and saved["settings"]["voice_groups"] == FORM["voice_groups"]
     assert (await system.request("voices.settings.get", {}, timeout=5)) == saved["settings"]
     assert (await asyncio.wait_for(announced.queue.get(), 5)).payload == saved["settings"]
-    sources = [src("cvh", "Ref", [1], url="https://site/?player=cvh&voice=Ref"),
-               src("kodik", "AniLibria", [1, 2]), src("cvh", "AniLiberty", [1])]
-    layout = await system.request("voices.layout", {"sources": sources, "reference": sources[0]["url"]}, timeout=5)
-    assert layout["priority"] == ["kodik", "cvh"]
-    assert len([row for row in layout["voices"] if row["role"] == "dub"]) == 1
+    # The next question of the layout is answered by the groups just saved, with no restart.
+    assert await resolve(system, "AniLiberty", "AniLibria") == {"AniLiberty": "anilibria", "AniLibria": "anilibria"}
 
 
 @pytest.mark.asyncio
@@ -1548,10 +1432,10 @@ def test_two_voices_with_the_same_safe_title_get_two_names():
 @pytest.mark.asyncio
 async def test_a_track_never_overwrites_the_track_of_another_voice(dubs):
     probe, neighbours, voices, bus = dubs
-    # Two different voices (the credit names two studios; the other is one word) with one safe title.
-    neighbours.sources.append(linked("kodik", "AniMy / RuChiMe", range(1, 4)))
-    neighbours.sources.append(linked("kodik", "AniMy RuChiMe", range(1, 4)))
-    neighbours.plan[:] = [(1, 1, 1)]
+    # Voices the layout could not group are numbered; their names differ by a digit and are as like as titles can be.
+    neighbours.sources.append(linked("kodik", "Неизвестная озвучка 1", range(1, 4)))
+    neighbours.sources.append(linked("kodik", "Неизвестная озвучка 2", range(1, 4)))
+    neighbours.plan[:] = [(1, 1)]
     reference_on_disk(neighbours)
     sub = bus.subscribe("voices.dub.changed")
     settled_sub = bus.subscribe("voices.episode.settled")
@@ -1566,7 +1450,6 @@ async def test_a_track_never_overwrites_the_track_of_another_voice(dubs):
     await asyncio.wait_for(settled_sub.queue.get(), 5)
     placed = {r["output_path"] for r in await rows(probe)}
     assert len(placed) == 3 and all(os.path.isfile(p) for p in placed)
-    assert sum(" 2.ru.flac" in p for p in placed) == 1
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
     await asyncio.sleep(0.3)
     assert {r["output_path"] for r in await rows(probe)} == placed  # a later look moves nothing
@@ -1606,7 +1489,7 @@ async def a_series_of(dubs, episodes, voices_count, cap):
     reference = linked("cvh", "FumoDub", episodes, url="https://site/?player=cvh&voice=FumoDub")
     neighbours.sources[:] = [reference] + [linked("kodik", name, episodes) for name in names]
     neighbours.reference_url = reference["url"]
-    neighbours.plan[:] = [(1, n, n) for n in episodes]
+    neighbours.plan[:] = [(1, n) for n in episodes]
     neighbours.settings["voices.max_temp_episodes"] = str(cap)
     for n in episodes:
         reference_on_disk(neighbours, n)
@@ -2158,7 +2041,7 @@ async def test_planned_rows_are_announced_when_created_and_when_they_leave_the_p
     events = drained(sub)
     assert {(e["episode"], e["state"]) for e in events if e["status"] == "pending"} == {(1, "planned"), (2, "planned")}
     assert picture(events) == await held(probe)
-    neighbours.plan[:] = [(1, 1, 1)]
+    neighbours.plan[:] = [(1, 1)]
     probe.send_command("voices.dispatch", {"series_id": 7})
     await asyncio.sleep(0.6)
     later = drained(sub)
@@ -2238,7 +2121,7 @@ async def test_a_connecting_interface_gets_every_row_at_once_and_newer_packets_w
     assert packets.queue.empty()
     assert picture([], snapshot) == await held(probe)
     assert all(item["rev"] <= snapshot["rev"] for item in drained(sub))
-    older = {"series_id": 7, "season": 1, "episode": 1, "voice_key": "blackcat", "voice_label": "BlackCat",
+    older = {"series_id": 7, "season": 1, "episode": 1, "voice_key": "BlackCat", "voice_label": "BlackCat",
              "status": "failed", "state": "error", "detail": "old", "epoch": snapshot["epoch"],
              "rev": snapshot["rev"] - 1}
     assert picture([older], snapshot) == await held(probe)
@@ -2270,18 +2153,19 @@ async def test_the_aligned_track_is_found_where_the_module_asked_for_it_whatever
 
 
 @pytest.mark.asyncio
-async def test_changed_rules_do_not_make_a_new_voice_of_a_recorded_one(dubs):
+async def test_a_label_the_layout_gives_later_is_a_voice_of_its_own_and_the_recorded_key_lives_on(dubs):
     probe, neighbours, voices, bus = dubs
     neighbours.sources.append(linked("kodik", "RedHeadSound", range(1, 4)))
-    neighbours.plan[:] = [(1, 1, 1)]
+    neighbours.plan[:] = [(1, 1)]
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 2)
-    before = {r["voice_key"] for r in await rows(probe)}
-    assert before == {"blackcat", "redheadsound"}
-    neighbours.settings["voices.groups"] = '{"zzz": ["redheadsound"]}'
+    assert {r["voice_key"] for r in await rows(probe)} == {"BlackCat", "RedHeadSound"}
+    # The user made a group for that voice-over: the layout now calls it by the name of the group.
+    neighbours.sources[-1]["studio"] = "Red Group"
     probe.send_command("voices.dispatch", {"series_id": 7})
-    await asyncio.sleep(0.6)
-    assert {r["voice_key"] for r in await rows(probe)} == before and len(neighbours.fetches) == 2
+    await settled(neighbours, 3)
+    assert {r["voice_key"] for r in await rows(probe)} == {"BlackCat", "RedHeadSound", "Red Group"}
+    assert len(neighbours.fetches) == 3
 
 
 class FolderOutput:
@@ -2672,7 +2556,7 @@ async def test_a_failed_voice_over_that_leaves_the_plan_hands_its_file_to_the_jo
         return not os.path.exists(red["path"]) and await voices.repo.cleanup_list() == []
 
     await until_true(file_gone, (os.path.exists(red["path"]), await voices.repo.cleanup_list()))
-    assert {r["voice_key"] for r in await voices.repo.for_series(7)} == {"blackcat"}
+    assert {r["voice_key"] for r in await voices.repo.for_series(7)} == {"BlackCat"}
 
 
 @pytest.mark.asyncio
@@ -2844,12 +2728,12 @@ async def test_a_voice_over_in_alignment_tells_the_queue_its_job_and_the_file_it
         payload = (await asyncio.wait_for(sub.queue.get(), end - asyncio.get_running_loop().time())).payload
         if payload["job_id"]:
             named[payload["voice_key"]] = (payload["job_id"], payload["file"])
-    assert named == {"blackcat": ("job-1", "7_s01e01_blackcat.mp4"), "redheadsound": ("job-1", "7_s01e01_redheadsound.mp4")}
+    assert named == {"BlackCat": ("job-1", "7_s01e01_BlackCat.mp4"), "RedHeadSound": ("job-1", "7_s01e01_RedHeadSound.mp4")}
 
 
 def test_the_file_a_voice_over_is_sent_as_is_named_in_one_place():
-    assert os.path.basename(temp_path("/w", 7, 1, 1, "blackcat")) == dub_file(7, 1, 1, "blackcat") == "7_s01e01_blackcat.mp4"
-    assert dub_file(7, 1, 2, "blackcat") != dub_file(8, 1, 1, "blackcat") != dub_file(7, 1, 1, "blackcat")
+    assert os.path.basename(temp_path("/w", 7, 1, 1, "BlackCat")) == dub_file(7, 1, 1, "BlackCat") == "7_s01e01_BlackCat.mp4"
+    assert dub_file(7, 1, 2, "BlackCat") != dub_file(8, 1, 1, "BlackCat") != dub_file(7, 1, 1, "BlackCat")
 
 
 @pytest.mark.asyncio
@@ -2876,9 +2760,9 @@ async def settled_with_a_record(dubs, **per_dub):
 
 @pytest.mark.asyncio
 async def test_the_folder_a_job_wrote_in_stays_while_its_record_is_in_the_history_and_goes_with_the_record(dubs):
-    probe, neighbours, voices, submit = await settled_with_a_record(dubs, redheadsound={"suspect": True, "warnings": ["w"]})
+    probe, neighbours, voices, submit = await settled_with_a_record(dubs, RedHeadSound={"suspect": True, "warnings": ["w"]})
     out_dir, episode = submit["out_dir"], os.path.dirname(os.path.dirname(submit["out_dir"]))
-    assert sorted(os.listdir(out_dir)) == ["7_s01e01_redheadsound.flac"]  # the refused track stays, the placed one moved
+    assert sorted(os.listdir(out_dir)) == ["7_s01e01_RedHeadSound.flac"]  # the refused track stays, the placed one moved
     assert not os.path.exists(os.path.join(episode, "_ref")) and not os.path.exists(os.path.join(downloads(neighbours), "7", "s01e01"))
     assert neighbours.conform_cancels == [] and await voices.repo.cleanup_list() == []
     del neighbours.jobs["job-1"]  # the owner deletes the record
@@ -2949,3 +2833,292 @@ async def test_a_replaced_reference_takes_the_finished_job_out_of_the_history_wi
         return "job-1" in neighbours.conform_cancels and not os.path.exists(out_dir)
 
     await until_true(job_dropped, (neighbours.conform_cancels, os.path.isdir(out_dir)))
+
+
+# --- the plan follows the layout and the references; only a sync of the series downloads --------------------
+
+
+def layout_changed(probe, **fields):
+    probe.publish_event("composition.changed", {"series_id": 7, "rev": 2, "episodes": [], **fields})
+
+
+def reference_changed(probe, season=1, episode=1, mark="by_level"):
+    probe.publish_event("scan.reference.changed", {"series_id": 7, "season": season, "episode": episode, "mark": mark})
+
+
+async def pass_over(voices, neighbours, asks):
+    """The planning pass that asked the layout for the `asks`-th time has ended."""
+    async def asked():
+        return neighbours.layout_asks >= asks
+
+    await until_true(asked, ("the layout was not asked", neighbours.layout_asks))
+    await quiet(voices)
+
+
+@pytest.mark.asyncio
+async def test_a_change_of_the_layout_plans_the_voice_overs_but_downloads_nothing_until_a_sync(dubs):
+    probe, neighbours, voices, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    layout_changed(probe)
+    await statuses_until(sub, ["pending"] * 3)
+    await pass_over(voices, neighbours, 1)
+    assert neighbours.fetches == []
+    assert {(r["episode"], r["status"], r["state"]) for r in await rows(probe)} == {
+        (1, "pending", "planned"), (2, "pending", "planned"), (3, "pending", "planned")}
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    assert {r["status"] for r in await rows(probe)} == {"downloading"}
+
+
+@pytest.mark.asyncio
+async def test_once_a_sync_was_asked_for_a_series_what_a_change_of_the_layout_adds_goes_on_to_download(dubs):
+    probe, neighbours, voices, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    neighbours.sources.append(linked("kodik", "RedHeadSound", range(1, 4)))
+    layout_changed(probe)
+    await settled(neighbours, 6)
+    assert {f["url"] for f in neighbours.fetches[3:]} == {
+        f"https://site/title.html#kodik-RedHeadSound-{n}" for n in (1, 2, 3)}
+
+
+@pytest.mark.asyncio
+async def test_a_voice_over_that_left_the_layout_before_any_work_leaves_the_plan_with_an_event(dubs):
+    probe, neighbours, voices, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    layout_changed(probe)
+    await statuses_until(sub, ["pending"] * 3)
+    del neighbours.sources[1:]  # only the voice of the reference is left
+    layout_changed(probe)
+    await statuses_until(sub, ["removed"] * 3)
+    assert await rows(probe) == [] and neighbours.fetches == []
+
+
+@pytest.mark.asyncio
+async def test_an_episode_whose_reference_is_none_or_unfit_gets_no_voice_over(dubs):
+    probe, neighbours, voices, bus = dubs
+    neighbours.marks[(1, 2)] = ReferenceMark.NONE
+    neighbours.marks[(1, 3)] = ReferenceMark.UNFIT
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 1)
+    await quiet(voices)
+    assert [r["episode"] for r in await rows(probe)] == [1] and len(neighbours.fetches) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_reference_that_turns_none_takes_the_planned_voice_overs_of_its_episode_with_it(dubs):
+    probe, neighbours, voices, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    layout_changed(probe)
+    await statuses_until(sub, ["pending"] * 3)
+    neighbours.marks[(1, 3)] = ReferenceMark.NONE
+    reference_changed(probe, 1, 3, "none")
+    await statuses_until(sub, ["removed"])
+    assert [r["episode"] for r in await rows(probe)] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_a_reference_that_turns_none_hands_the_downloaded_files_of_its_episode_to_the_journal(dubs):
+    probe, neighbours, voices, bus, sub, _ = await two_voices_ready(dubs, reference=False)
+    await statuses_until(sub, ["ready", "ready"])
+    paths = [row["temp_path"] for row in await rows(probe)]
+    assert len(paths) == 2 and all(os.path.isfile(path) for path in paths)
+    neighbours.marks[(1, 1)] = ReferenceMark.NONE
+    reference_changed(probe, 1, 1, "none")
+    await statuses_until(sub, ["removed", "removed"])
+    assert await rows(probe) == [] and not any(os.path.exists(path) for path in paths)
+    assert await voices.repo.cleanup_list() == []
+
+
+@pytest.mark.asyncio
+async def test_a_reference_that_turns_none_leaves_the_tracks_of_a_video_that_is_still_there(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    voices = dubs[2]
+    neighbours.marks[(1, 1)] = ReferenceMark.NONE
+    reference_changed(probe, 1, 1, "none")
+    await pass_over(voices, neighbours, 2)
+    assert len(await rows(probe)) == 2 and len(library_files(neighbours)) == 3 and sub.queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_an_episode_whose_reference_row_the_layout_lost_keeps_its_rows_until_the_reference_is_decided(dubs):
+    probe, neighbours, voices, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    layout_changed(probe)
+    await statuses_until(sub, ["pending"] * 3)
+    reference = neighbours.sources[0]
+    reference["episodes"].remove(2)
+    reference["links"].pop("2")  # the reference still points at the row of episode 2, the layout no longer has it
+    layout_changed(probe)
+    await pass_over(voices, neighbours, 2)
+    assert [r["episode"] for r in await rows(probe)] == [1, 2, 3] and sub.queue.empty()
+    neighbours.marks[(1, 2)] = ReferenceMark.NONE  # the reference is decided: there is none
+    reference_changed(probe, 1, 2, "none")
+    await statuses_until(sub, ["removed"])
+    assert [r["episode"] for r in await rows(probe)] == [1, 3]
+
+
+@pytest.mark.asyncio
+async def test_an_event_that_says_only_the_summaries_changed_is_not_acted_on(dubs, monkeypatch):
+    probe, _, voices, _ = dubs
+    asked = []
+    monkeypatch.setattr(voices, "_want_plan", asked.append)
+    layout_changed(probe, summary_only=True)
+    layout_changed(probe)
+    reference_changed(probe)
+
+    async def both():
+        return len(asked) >= 2
+
+    await until_true(both, asked)
+    assert asked == [7, 7]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_download_is_offered_again_by_a_sync_and_not_by_a_change_of_the_layout(dubs):
+    probe, neighbours, voices, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    victim = next(f for f in neighbours.fetches if f["url"].endswith("kodik-BlackCat-3"))
+    finish(probe, victim["key"], ok=False, error="gone")
+    await change(sub, "failed")
+    layout_changed(probe)
+    await pass_over(voices, neighbours, 2)
+    assert len(neighbours.fetches) == 3 and next(r for r in await rows(probe) if r["episode"] == 3)["status"] == "failed"
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 4)
+    assert neighbours.fetches[3]["key"] == victim["key"]
+
+
+@pytest.mark.asyncio
+async def test_a_voice_over_that_failed_for_want_of_a_source_is_planned_again_when_the_layout_has_one(dubs):
+    probe, neighbours, voices, bus = dubs
+    kodik = neighbours.sources[1]
+    kodik["episodes"].remove(3)
+    link = kodik["links"].pop("3")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 2)
+    await quiet(voices)
+    assert next(r for r in await rows(probe) if r["episode"] == 3)["status"] == "failed"
+    kodik["episodes"].append(3)
+    kodik["links"]["3"] = link
+    layout_changed(probe)
+    await settled(neighbours, 3)
+    assert neighbours.fetches[2]["url"] == link
+
+
+@pytest.mark.asyncio
+async def test_a_restart_asks_no_neighbour_for_the_plan_and_the_sync_of_a_series_is_not_forgotten(db_path, dubs):
+    probe, neighbours, voices, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    asks = (neighbours.layout_asks, neighbours.output_asks)
+    await voices.stop()
+    again = VoicesModule(bus, Database(db_path))
+    await again.start()
+    try:
+        await settled(neighbours, 6)
+        assert (neighbours.layout_asks, neighbours.output_asks) == asks
+    finally:
+        await again.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_series_that_was_never_synced_stays_planned_after_a_restart(db_path, dubs):
+    probe, neighbours, voices, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    layout_changed(probe)
+    await statuses_until(sub, ["pending"] * 3)
+    await pass_over(voices, neighbours, 1)
+    await voices.stop()
+    again = VoicesModule(bus, Database(db_path))
+    await again.start()
+    try:
+        await asyncio.sleep(0.1)
+        assert neighbours.fetches == [] and {r["status"] for r in await rows(probe)} == {"pending"}
+        probe.send_command("voices.dispatch", {"series_id": 7})
+        await settled(neighbours, 3)
+    finally:
+        await again.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_neighbour_that_does_not_answer_the_plan_is_asked_again_by_itself(dubs, monkeypatch):
+    monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.02)
+    probe, neighbours, voices, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    neighbours.layout_failures = 2
+    layout_changed(probe)
+    await statuses_until(sub, ["pending"] * 3)
+    assert neighbours.layout_asks == 3
+
+    async def carried():
+        return not voices._recovery.failures()
+
+    await until_true(carried, voices._recovery.failures())
+
+
+@pytest.mark.asyncio
+async def test_a_series_deleted_while_its_plan_is_being_written_leaves_no_row_behind(dubs):
+    probe, neighbours, voices, bus = dubs
+    neighbours.layout_gate = asyncio.Event()
+    purged = bus.subscribe("series.purged")
+    layout_changed(probe)
+
+    async def asked():
+        return neighbours.layout_asks >= 1
+
+    await until_true(asked, "the layout was not asked")
+    probe.publish_event("series.deleted", {"series_id": 7})
+    await asyncio.wait_for(purged.queue.get(), 3)
+    neighbours.layout_gate.set()
+    await quiet(voices)
+    assert await rows(probe) == [] and neighbours.fetches == []
+
+
+@pytest.mark.asyncio
+async def test_the_levers_choose_which_voice_overs_an_episode_gets_and_where_from(dubs):
+    probe, neighbours, voices, bus = dubs
+    neighbours.levers[(1, 1)] = [EffectiveLever(lever="voice.take", target=group_target("BlackCat"), value=False,
+                                                level=Level.EPISODE)]
+    neighbours.levers[(1, 2)] = [EffectiveLever(lever="voice.player", target=group_target("BlackCat"),
+                                                value={"source_id": 1, "player": "kodik"}, level=Level.SEASON)]
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 2)
+    await quiet(voices)
+    assert [r["episode"] for r in await rows(probe)] == [2, 3]
+    assert {f["url"] for f in neighbours.fetches} == {
+        "https://site/title.html#kodik-BlackCat-2", "https://site/title.html#kodik-BlackCat-3"}
+
+
+@pytest.mark.asyncio
+async def test_a_compilation_is_noted_in_the_log_once_and_makes_no_voice_over(dubs, caplog):
+    caplog.set_level("INFO")
+    probe, neighbours, voices, bus = dubs
+    neighbours.extra_rows = [CompositionRow(
+        series_id=7, source_id=1, row_key="kodik:Red:1-3", season=1, episode_start=1, episode_end=3,
+        voice_label="Red", player="kodik", state=RowState.PLAYABLE, link="https://site/title.html#kodik-Red-1-3")]
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    layout_changed(probe)
+    await pass_over(voices, neighbours, 2)
+    assert {r["voice_key"] for r in await rows(probe)} == {"BlackCat"}
+    assert len([record for record in caplog.records if "склейки озвучек" in record.getMessage()]) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_reference_that_turns_none_while_a_voice_over_downloads_takes_its_episode_when_the_download_ends(dubs):
+    probe, neighbours, voices, bus = dubs
+    sub = bus.subscribe("voices.dub.changed")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    neighbours.marks[(1, 3)] = ReferenceMark.NONE
+    reference_changed(probe, 1, 3, "none")
+    await pass_over(voices, neighbours, 2)
+    assert [r["episode"] for r in await rows(probe)] == [1, 2, 3]  # a download under way is not cut short
+    victim = next(f for f in neighbours.fetches if f["url"].endswith("kodik-BlackCat-3"))
+    touch(victim["path"], b"video")
+    finish(probe, victim["key"])
+    await statuses_until(sub, ["ready", "removed"])
+    assert [r["episode"] for r in await rows(probe)] == [1, 2] and not os.path.exists(victim["path"])

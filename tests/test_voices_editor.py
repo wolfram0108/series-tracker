@@ -6,8 +6,7 @@ import pytest
 from core.contracts import VoiceSettingsDraft
 from modules.gateway import SSE_MAP
 from modules.voices import editor
-from modules.voices.layout import DEFAULT_PRIORITY
-from modules.voices.settings import parse
+from modules.voices.settings import DEFAULT_PRIORITY, parse
 
 
 def draft(**changes) -> VoiceSettingsDraft:

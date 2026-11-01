@@ -9,13 +9,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Callable
 
-from core.contracts import parse_group_target, parse_player_target
-
-REFERENCE_CHOICE = "reference.choice"
-REFERENCE_ALLOW = "reference.allow"
-VOICE_TAKE = "voice.take"
-VOICE_PLAYER = "voice.player"
-
+from core.contracts import (REFERENCE_ALLOW, REFERENCE_CHOICE, VOICE_PLAYER, VOICE_TAKE, parse_group_target,
+                            parse_player_target)
 
 class TargetKind(StrEnum):
     """What a lever's value is about: nothing in particular, a player of a source, or a voice-over group."""
