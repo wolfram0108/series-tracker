@@ -75,11 +75,11 @@
 | П-0 | закрыт | 3ac44b4 |
 | П-1 | закрыт | 65dac3c |
 | П-2 | закрыт | 1d218f3 |
-| П-3 | ступень 1 закрыта; ступень 2 (ruchime, канал VK) в работе; ступень 3 (dunhuatv, Kodik) впереди | 1c24855 |
+| П-3 | закрыт (ступени 1–3); остаётся измерить цену чтения и предохранитель на стенде (М-2) | c20f00d |
 | П-4 | закрыт; остаётся убрать `composition_failures`, когда sources отдаст вердикт неудачи при `refresh=false` | d772bd0 |
-| П-5 | ступень 1 (вход — раскладка и референс) в работе; ступень 2 (общий файл склейки) впереди | — |
+| П-5 | ступень 1 закрыта (вход — раскладка и референс); ступень 2 (общий файл склейки, допуск по строке) в работе | 1ec8a4a |
 | П-6 | в работе | — |
-| П-7 | не начат | — |
+| П-7 | в работе | — |
 | П-8 | не начат | — |
 | П-9 | не начат | — |
 | П-10 | не начат | — |
@@ -93,4 +93,5 @@
 | Тест или группа | Причина | Закрывает |
 |---|---|---|
 | `tests/test_series_cascade.py::test_delete_during_scan_leaves_no_rows` | scan читает `series["parser_profile_id"]` | П-6 |
+| `tests/test_settings_api.py`, `tests/test_gateway.py` (карта SSE) | шлюз ссылается на удалённые топики и пакеты sources | П-8 |
 | тесты с голым `INSERT INTO series (… url, source_type …)`: `test_downloads_module`, `test_library_relocation`, `test_media_api`, `test_renaming_module`, `test_scan_module`, `test_series_api`, `test_settings_api`, `test_settings_metadata_library`, `test_slicing_module`, `test_system_api`, `test_tmdb_multiseason`, `test_torrents_pipeline`, `test_voices` | колонок удалены из `series` (миграция 0025); перевод на `tests/series_factory.py` | П-5…П-8 каждый в своём файле |
