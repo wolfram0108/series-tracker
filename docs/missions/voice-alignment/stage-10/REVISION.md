@@ -90,13 +90,13 @@
 
 | Точка | Сейчас | Статус | Новое место / причина |
 |---|---|---|---|
-| `POST /api/parse_url` (веб-ветка и вызов `voices.layout`) | шлюз собирает ответ из двух модулей | перепроектирована | торренты — как есть; веб-источник — `sources.table.get` и сводка `composition` |
-| `POST /api/web_video/coverage`, `POST /api/web_video/layout` | отдельные чтения | удалена | таблица страницы |
-| `POST /api/parser-profiles/scrape-titles` (ветвление VK / веб, повторный скан, фильтр по запросу) | бизнес-логика в шлюзе | перепроектирована | строки для конструктора из таблицы источника (`line_of`) |
-| `POST /api/parser-profiles/test` | `rules.test` | перепроектирована | `rules.apply` |
-| `GET /api/series/{id}/composition` | `scan.on_composition` | перепроектирована | `composition.get` + план `scan` — `scan.on_composition` удалён (П-6); шлюз — П-8 |
-| `GET /api/series/{id}` (`scan.availability`) | отчёт о плеерах | перепроектирована | сводка источников `composition` — `scan.availability` удалён (П-6); шлюз — П-8 |
-| `SSE_MAP`: `video_scan_progress`, `coverage_progress` | ход старых чтений | удалена | `sources_table_progress`, `sources_table_ready`, `composition_changed`, `reference_changed` |
+| `POST /api/parse_url` (веб-ветка и вызов `voices.layout`) | шлюз собирает ответ из двух модулей | перепроектирована | торренты — как есть; веб-источник — `sources.table.get` и сводка `composition` — сделано (П-8): страница трекера разбирается `sources.parse`, адрес, который читает сайт (`sources.site.resolve`), — отказ 400 `not_a_torrent_page`; сводку и строки даёт `POST /api/sources/preview` |
+| `POST /api/web_video/coverage`, `POST /api/web_video/layout` | отдельные чтения | удалена | таблица страницы — сделано (П-8): точки, модели `WebVideoCoverage`/`WebVideoLayout` и их типы удалены |
+| `POST /api/parser-profiles/scrape-titles` (ветвление VK / веб, повторный скан, фильтр по запросу) | бизнес-логика в шлюзе | перепроектирована | строки для конструктора из таблицы источника (`line_of`) — сделано (П-8): точка удалена вместе с регулярными выражениями ссылок VK и подстроками адресов; строки — `composition.preview` |
+| `POST /api/parser-profiles/test` | `rules.test` | перепроектирована | `rules.apply` — сделано (П-8): тело `{url, options?, profile_id, series_season?}`, ответ `composition.preview` (строки для конструктора и ответ на каждую) |
+| `GET /api/series/{id}/composition` | `scan.on_composition` | перепроектирована | `composition.get` + план `scan` — `scan.on_composition` удалён (П-6); сделано (П-8): видео — `composition.get`, торрент — `torrents.composition`; план референсов — `GET /api/series/{id}/output` (`scan.output.get`), ответы не склеиваются |
+| `GET /api/series/{id}` (`scan.availability`) | отчёт о плеерах | перепроектирована | сводка источников `composition` — `scan.availability` удалён (П-6); сделано (П-8): ответ несёт `kind` и `sources` из `catalog` |
+| `SSE_MAP`: `video_scan_progress`, `coverage_progress` | ход старых чтений | удалена | `sources_table_progress`, `sources_table_ready`, `composition_changed`, `reference_changed` — сделано (П-8): добавлены также `sources_table_failed`, `composition_failed` |
 
 ## 7. Интерфейс (`web/src`)
 
@@ -134,7 +134,7 @@
 | `video_providers/table.py::ReleaseTable.fill` (исключение пробы → `Cell(False)` без `transient`), `ruchime/provider.py` (`_quick_report`), `views.py` (ячейка без ответа) | исключение пробы даёт «нет», хотя Т-5 требует «не получено» | перепроектирована | исключение пробы → состояние «не получено» с причиной | `ruchime`, `views` — сделано (П-3): `players/asking.py::outcome_of` |
 | `video_providers/__init__.py::_DEFAULT_REGISTRY`, `players.py::PLAYER_ORDER` | глобальные реестры сайтов и плееров | перепроектирована | реестры принадлежат модулю `sources`; регистрация по `ARCHITECTURE.md`, раздел 12 | `run.py`, `tests/conftest.py`, `tests/test_contracts.py` — сделано (П-3): реестр сайтов и реестр плееров — у экземпляра модуля |
 | `RuchimeProvider._tables`, `_table_locks`, `SURVEY_TTL_S`, `ReleaseTable.expires_at` | кэш таблицы в памяти по slug без учёта выбора в адресе | удалена | таблица в БД, срок 1 час, замок страницы (Т-2, Т-4) | `test_sources_ruchime_players.py` (проверка `_tables["test"].expires_at`) — сделано (П-3) |
-| `gateway/api_settings.py` (регулярное выражение ссылки VK, подстроки `vk.com`, `vkvideo.ru`, `@`), `web/src/lib/webSources.ts::SOURCE_ORDER`, `AddSeriesModal.vue` (метки плееров) | знание сайтов и плееров вне `sources` | перепроектирована | вид сайта по адресу — реестр сайтов `sources`; метка плеера — поле строки таблицы `player_label`; порядок плееров — настройка `voices.source_priority` | `scrape_titles`, `web` |
+| `gateway/api_settings.py` (регулярное выражение ссылки VK, подстроки `vk.com`, `vkvideo.ru`, `@`), `web/src/lib/webSources.ts::SOURCE_ORDER`, `AddSeriesModal.vue` (метки плееров) | знание сайтов и плееров вне `sources` | перепроектирована | вид сайта по адресу — реестр сайтов `sources`; метка плеера — поле строки таблицы `player_label`; порядок плееров — настройка `voices.source_priority` | `scrape_titles` — сделано (П-8), `web` — П-9 |
 | `tests/test_retry.py` (три сторожа, читающие исходники по жёсткому списку путей) | ломаются при переименовании файлов | перепроектирована | список путей приводится к новой файловой раскладке | `tests/test_retry.py` — сделано (П-3) |
 
 ### 9.2. Конструктор (`rules`)
@@ -157,4 +157,4 @@
 | `torrents/module.py` (788), `rules/formatter.py` (103) | профиль торрента, расширение `.mp4` по виду | перепроектирована | профиль из источника; расширение по кандидату | — сделано (П-7): `torrents/module.py`; `rules/formatter.py` — П-2 |
 | `voices/module.py` (383) | пропуск не-web серий | перепроектирована | вход озвучек — раскладка | сделано (П-5) |
 | `scan/module.py` (вид, адрес и профиль сериала, `vk_search_mode`, `vk_quality_priority`) | ветвление по `source_type`, адрес и профиль в самом сериале | перепроектирована | `kind`; адрес и профиль торрента — из источника сериала; веб- и VK-сериалы — синхронизация и референс | сделано (П-6) |
-| `gateway/api_series.py` (`list_series`, `add_series`, `series_details`, `update_series`, `set_state`), `api_media.py` (`composition`, `source_filenames`) | ветвление по виду, сборка ответов из нескольких модулей | перепроектирована | тело запросов с источниками; сборка ответов — в модулях-владельцах | `web`, `schema.d.ts` |
+| `gateway/api_series.py` (`list_series`, `add_series`, `series_details`, `update_series`, `set_state`), `api_media.py` (`composition`, `source_filenames`) | ветвление по виду, сборка ответов из нескольких модулей | перепроектирована | тело запросов с источниками; сборка ответов — в модулях-владельцах | `web`, `schema.d.ts` — сделано (П-8): тела `SeriesCreate`/`SeriesUpdate`, эндпоинты источников и выхода, `GET /api/series` без ветвления по виду (счётчики складываются по владельцам), сверка файлов при открытии окна просит каждого владельца, `renaming.reprocess` без ветки по виду; `schema.d.ts` пересобран; `web` — П-9 |

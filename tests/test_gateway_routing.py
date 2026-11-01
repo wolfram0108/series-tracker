@@ -4,8 +4,9 @@ from collections import Counter
 
 import pytest
 
-from core import Bus
+from core import Bus, BusRequestError
 from modules.gateway import GatewayModule
+from modules.gateway.routing import refusal
 
 # Routes the legacy front calls with several methods; each method must stay served.
 MULTI_METHOD = {
@@ -36,3 +37,20 @@ def test_every_operation_of_the_api_schema_has_its_own_id(schema):
 @pytest.mark.parametrize("path", sorted(MULTI_METHOD))
 def test_a_route_of_several_methods_serves_each_of_them(schema, path):
     assert set(schema["paths"][path]) == MULTI_METHOD[path]
+
+
+@pytest.mark.parametrize("message,status", [
+    ("LookupError: сериал 1 не найден", 404),
+    ("ValueError: {\"code\":\"last_source\"}", 400),
+    ("нет обработчика для query 'composition.get'", 503),
+    ("RuntimeError: boom", 500)])
+def test_a_refusal_of_a_module_is_an_http_status_by_its_kind(message, status):
+    assert refusal(BusRequestError(message)).status_code == status
+
+
+def test_a_refusal_carries_the_text_of_the_module_after_the_name_of_the_error():
+    import json
+    answer = refusal(BusRequestError('ValueError: {"code":"last_source","source_id":4}'))
+    assert json.loads(answer.body) == {"success": False, "error": '{"code":"last_source","source_id":4}'}
+    assert json.loads(refusal(BusRequestError("ValueError: x"), 409, with_success=False).body) == {"error": "x"}
+    assert refusal(BusRequestError("ValueError: x"), 409).status_code == 409

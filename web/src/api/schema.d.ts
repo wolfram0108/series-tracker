@@ -216,8 +216,9 @@ export interface paths {
         put?: never;
         /**
          * Update Series
-         * @description Сохранение свойств: catalog → metadata → library/renaming
-         *     (сценарий Р-19; цепочка «переместили → переименовали» — Р-17).
+         * @description Saving the properties: catalog, then metadata, then library or renaming.
+         *     The sources are not changed here; the layout of a video series is counted again on
+         *     series.updated, and what renaming does for each kind of series is renaming's own.
          */
         post: operations["update_series_api_series__series_id__post"];
         /** Delete Series */
@@ -307,23 +308,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/series/{series_id}/vk-quality-priority": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Vk Quality Priority */
-        put: operations["vk_quality_priority_api_series__series_id__vk_quality_priority_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/series/{series_id}/torrents/history": {
         parameters: {
             query?: never;
@@ -356,6 +340,186 @@ export interface paths {
          *     результата; force_replace scan берёт из настройки отладки.
          */
         post: operations["scan_series_api_series__series_id__scan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/series/{series_id}/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sources Of */
+        get: operations["sources_of_api_series__series_id__sources_get"];
+        put?: never;
+        /** Add Source */
+        post: operations["add_source_api_series__series_id__sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/series/{series_id}/sources/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Change Source */
+        put: operations["change_source_api_series__series_id__sources__source_id__put"];
+        post?: never;
+        /** Remove Source */
+        delete: operations["remove_source_api_series__series_id__sources__source_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sources/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Source
+         * @description What a window shows of an address before it is a source: the summary of its table and its lines.
+         */
+        post: operations["preview_source_api_sources_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sources/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Source
+         * @description Which site reads an address, and the address in its canonical form; no network.
+         */
+        post: operations["resolve_source_api_sources_resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/parser-profiles/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rules Test
+         * @description The test of a profile: the same preview of a page, with the profile given, so that every line comes
+         *     with the constructor's answer.
+         */
+        post: operations["rules_test_api_parser_profiles_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/series/{series_id}/composition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Composition
+         * @description The composition window: the layout of a video series (`composition`, rows the constructor excluded
+         *     only with `include_excluded`), or the composition of a torrent series (`torrents`; `refresh` fetches
+         *     the release first).
+         */
+        get: operations["composition_api_series__series_id__composition_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/series/{series_id}/output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Output
+         * @description The reference of every episode of the series and why it is that one (the mark).
+         */
+        get: operations["output_api_series__series_id__output_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/series/{series_id}/output/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Output Setting
+         * @description Sets the value of a lever at a level (the series, a season or an episode); a lever, a target or a value
+         *     that the registry does not know is refused with its code (`unknown_lever`, `bad_target`, `bad_value`).
+         */
+        put: operations["set_output_setting_api_series__series_id__output_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/series/{series_id}/output/settings/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Output Settings
+         * @description Takes the levers of a level (or the one named) back to the level above.
+         */
+        post: operations["reset_output_settings_api_series__series_id__output_settings_reset_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -729,23 +893,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/series/{series_id}/composition": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Composition */
-        get: operations["composition_api_series__series_id__composition_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/series/{series_id}/rename_preview": {
         parameters: {
             query?: never;
@@ -804,7 +951,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Source Filenames */
+        /**
+         * Source Filenames
+         * @description File names of the series' torrents for the rules test; a video series has none, its lines
+         *     for the test come from composition.preview.
+         */
         get: operations["source_filenames_api_series__series_id__source_filenames_get"];
         put?: never;
         post?: never;
@@ -865,42 +1016,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Parse Url */
+        /**
+         * Parse Url
+         * @description A torrent page for the add form. A page that a site reads is no torrent page: `composition.preview`
+         *     shows it, and here it is refused with a code.
+         */
         post: operations["parse_url_api_parse_url_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/web_video/coverage": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Web Video Coverage */
-        post: operations["web_video_coverage_api_web_video_coverage_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/web_video/layout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Web Video Layout */
-        post: operations["web_video_layout_api_web_video_layout_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1259,40 +1380,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/parser-profiles/scrape-titles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Scrape Titles */
-        post: operations["scrape_titles_api_parser_profiles_scrape_titles_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/parser-profiles/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Rules Test */
-        post: operations["rules_test_api_parser_profiles_test_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/parser-rules/{rule_id}": {
         parameters: {
             query?: never;
@@ -1508,6 +1595,140 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * ChangedSource
+         * @description `applied` holds the fields that differed from the stored ones; nothing applied is no change and no event.
+         */
+        ChangedSource: {
+            /** Success */
+            success: boolean;
+            /** Applied */
+            applied?: {
+                [key: string]: unknown;
+            };
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * CompositionPreviewReply
+         * @description `state` is the state of the table of the page; `summary` and `lines` come from the last complete table.
+         */
+        CompositionPreviewReply: {
+            /** Url */
+            url: string;
+            state: components["schemas"]["TableState"];
+            /** Reason */
+            reason?: string | null;
+            summary?: components["schemas"]["SourceSummary"] | null;
+            /** Lines */
+            lines?: components["schemas"]["PreviewLine"][];
+        };
+        /**
+         * CompositionPreviewRequest
+         * @description What a window shows of an address before it belongs to a series. `refresh` False reads nothing.
+         */
+        CompositionPreviewRequest: {
+            /** Url */
+            url: string;
+            /** Options */
+            options?: {
+                [key: string]: string;
+            };
+            /** Profile Id */
+            profile_id?: number | null;
+            /** Series Season */
+            series_season?: string | number | null;
+            /**
+             * Refresh
+             * @default true
+             */
+            refresh: boolean;
+        };
+        /** CompositionReply */
+        CompositionReply: {
+            /** Series Id */
+            series_id: number;
+            /** Rev */
+            rev: number;
+            /** Rows */
+            rows?: components["schemas"]["CompositionRow"][];
+            /** Sources */
+            sources?: components["schemas"]["SourceSummary"][];
+            /** Levels */
+            levels?: components["schemas"]["LevelSettings"][];
+            /** Settings */
+            settings?: components["schemas"]["EpisodeSettings"][];
+        };
+        /**
+         * CompositionRow
+         * @description A table row of a source of the series with the answer of its profile and its voice-over group.
+         *
+         *     A single episode has `episode_end` equal to `episode_start`; `episode_end` greater than `episode_start` is a
+         *     compilation. A source without a profile has no rows.
+         */
+        CompositionRow: {
+            /** Series Id */
+            series_id: number;
+            /** Source Id */
+            source_id: number;
+            /** Row Key */
+            row_key: string;
+            /**
+             * Excluded
+             * @default false
+             */
+            excluded: boolean;
+            exclusion?: components["schemas"]["Exclusion"] | null;
+            /** Season */
+            season?: number | null;
+            /** Episode Start */
+            episode_start?: number | null;
+            /** Episode End */
+            episode_end?: number | null;
+            /** Part */
+            part?: number | null;
+            /** Voice Group */
+            voice_group?: string | null;
+            /**
+             * Voice Label
+             * @default
+             */
+            voice_label: string;
+            /**
+             * Voice Name
+             * @default
+             */
+            voice_name: string;
+            /** Voice Unknown */
+            voice_unknown?: number | null;
+            /** Player */
+            player: string;
+            /**
+             * Player Label
+             * @default
+             */
+            player_label: string;
+            /**
+             * Group
+             * @default
+             */
+            group: string;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+            /** Heights */
+            heights?: number[];
+            state: components["schemas"]["RowState"];
+            /** Published */
+            published?: string | null;
+            /**
+             * Link
+             * @default
+             */
+            link: string;
+        };
+        /**
          * ConformJobChange
          * @description The reply to the stop or deletion of a job of the alignment service.
          */
@@ -1565,6 +1786,13 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** CreatedSource */
+        CreatedSource: {
+            /** Id */
+            id: number;
+        } & {
+            [key: string]: unknown;
+        };
         /**
          * DubHint
          * @description Which sentence explains a state when there is no reason to show (several steps share a state).
@@ -1608,22 +1836,26 @@ export interface components {
             [key: string]: unknown;
         };
         /**
-         * EpisodeSpan
-         * @description Episodes as a count and ranges, e.g. "1-10, 13".
+         * EffectiveLever
+         * @description The value a lever has for an episode and the level it comes from.
          */
-        EpisodeSpan: {
-            /**
-             * Count
-             * @default 0
-             */
-            count: number;
-            /**
-             * Ranges
-             * @default
-             */
-            ranges: string;
-        } & {
-            [key: string]: unknown;
+        EffectiveLever: {
+            /** Lever */
+            lever: string;
+            /** Target */
+            target?: string | null;
+            /** Value */
+            value?: unknown;
+            level: components["schemas"]["Level"];
+        };
+        /** EpisodeSettings */
+        EpisodeSettings: {
+            /** Season */
+            season: number;
+            /** Episode */
+            episode: number;
+            /** Levers */
+            levers?: components["schemas"]["EffectiveLever"][];
         };
         /**
          * ErrorOnly
@@ -1651,45 +1883,32 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /**
+         * Exclusion
+         * @description Why a row is out of the layout: the constructor excluded it, or it gave the row no episode number.
+         * @enum {string}
+         */
+        Exclusion: "rule" | "no_number";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
-         * Layout
-         * @description The reply of `voices.layout`: which source gives the reference and where every other voice comes from.
-         */
-        Layout: {
-            /** Mode */
-            mode: string;
-            reference?: components["schemas"]["ReleaseSource"] | null;
-            /** Voices */
-            voices: components["schemas"]["LayoutVoice"][];
-            /** Skipped */
-            skipped?: components["schemas"]["SkippedSource"][];
-            /** Priority */
-            priority?: string[];
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * LayoutRole
+         * Level
          * @enum {string}
          */
-        LayoutRole: "reference" | "dub";
-        /** LayoutVoice */
-        LayoutVoice: {
-            /** Key */
-            key: string;
-            /** Label */
-            label: string;
-            role: components["schemas"]["LayoutRole"];
-            source: components["schemas"]["ReleaseSource"];
-            /** Fallbacks */
-            fallbacks?: components["schemas"]["ReleaseSource"][];
-        } & {
-            [key: string]: unknown;
+        Level: "default" | "series" | "season" | "episode";
+        /**
+         * LevelSettings
+         * @description The levers as they stand on the series (season None) or on one season: what the header of the level shows
+         *     and what its episodes inherit.
+         */
+        LevelSettings: {
+            /** Season */
+            season?: number | null;
+            /** Levers */
+            levers?: components["schemas"]["EffectiveLever"][];
         };
         /**
          * OkResponse
@@ -1704,62 +1923,104 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * OutputSettingsReset
+         * @description The body of the command `composition.settings.reset` without the series.
+         */
+        OutputSettingsReset: {
+            /** Season */
+            season?: number | null;
+            /** Episode */
+            episode?: number | null;
+            /** Lever */
+            lever?: string | null;
+            /** Target */
+            target?: string | null;
+        };
+        /**
+         * OutputSettingsSet
+         * @description The body of the command `composition.settings.set` without the series, which the path names; the fields
+         *     are those of core.contracts.SettingsSet (a test keeps them equal).
+         */
+        OutputSettingsSet: {
+            /** Season */
+            season?: number | null;
+            /** Episode */
+            episode?: number | null;
+            /** Lever */
+            lever: string;
+            /** Target */
+            target?: string | null;
+            /** Value */
+            value?: unknown;
+        };
+        /** ParseUrlRequest */
+        ParseUrlRequest: {
+            /** Url */
+            url: string;
+        };
+        /**
          * ParsedUrl
-         * @description A parsed address for the add form: the source and layout fields are contract models, the rest
-         *     passes through.
+         * @description A parsed torrent page for the add form. A page that a site reads is not a torrent page: it is refused
+         *     with the reason `not_a_torrent_page` and shown by `composition.preview`.
          */
         ParsedUrl: {
+            /** Success */
+            success: boolean;
+            /** Title */
+            title?: {
+                [key: string]: unknown;
+            } | null;
             /**
-             * Sources
+             * Torrents
              * @default []
              */
-            sources: components["schemas"]["ReleaseSource"][];
-            /** Selected Source */
-            selected_source?: string | null;
-            layout?: components["schemas"]["Layout"] | null;
-            /**
-             * Has Layout
-             * @default false
-             */
-            has_layout: boolean;
+            torrents: {
+                [key: string]: unknown;
+            }[];
+            /** Tracker Info */
+            tracker_info?: {
+                [key: string]: unknown;
+            } | null;
         } & {
             [key: string]: unknown;
         };
         /**
-         * PlayerCoverage
-         * @description What one page player gives: episodes that show it, episodes it plays with their resolution by ranges, episodes it
-         *     shows but does not play, and episodes whose answer was not obtained.
+         * PlayerSummary
+         * @description What a window may show before a profile is assigned: counts, resolutions and voices, never numbers.
          */
-        PlayerCoverage: {
-            /** Present */
-            present: number;
-            /** Available */
-            available: number;
-            /** Count */
-            count: number;
-            /** Ranges */
-            ranges: string;
+        PlayerSummary: {
+            /** Player */
+            player: string;
             /**
-             * Resolutions
-             * @default []
+             * Player Label
+             * @default
              */
-            resolutions: components["schemas"]["ResolutionGroup"][];
+            player_label: string;
             /**
-             * @default {
-             *       "count": 0,
-             *       "ranges": ""
-             *     }
+             * Rows
+             * @default 0
              */
-            unavailable: components["schemas"]["EpisodeSpan"];
+            rows: number;
             /**
-             * @default {
-             *       "count": 0,
-             *       "ranges": ""
-             *     }
+             * Groups
+             * @default 0
              */
-            not_obtained: components["schemas"]["EpisodeSpan"];
-        } & {
-            [key: string]: unknown;
+            groups: number;
+            /** Heights */
+            heights?: number[];
+            /** Voices */
+            voices?: components["schemas"]["VoiceSummary"][];
+        };
+        /**
+         * PreviewLine
+         * @description A row of a page as the constructor gets it (`line` is `line_of`), with its answer when a profile is given.
+         */
+        PreviewLine: {
+            /** Key */
+            key: string;
+            /** Line */
+            line: string;
+            result?: components["schemas"]["RuleResult"] | null;
         };
         /**
          * QueueTask
@@ -1782,59 +2043,87 @@ export interface components {
             };
         };
         /**
-         * ReleaseSource
-         * @description One voice-over of a release at one player, with the episodes it really has.
-         *
-         *     `links` (episode number -> address) is given only to the voices module.
+         * Reference
+         * @description `reason` is a code of core/reasons: for `other_player` it names the player taken and the one missing.
          */
-        ReleaseSource: {
-            /** Url */
-            url: string;
+        Reference: {
+            /** Season */
+            season: number;
+            /** Episode */
+            episode: number;
+            /** Part */
+            part?: number | null;
+            mark: components["schemas"]["ReferenceMark"];
+            /** Source Id */
+            source_id?: number | null;
+            /** Row Key */
+            row_key?: string | null;
             /** Player */
-            player: string;
-            /** Studio */
-            studio: string;
+            player?: string | null;
+            /** Voice Group */
+            voice_group?: string | null;
+            /** Height */
+            height?: number | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * ReferenceMark
+         * @enum {string}
+         */
+        ReferenceMark: "by_level" | "own" | "other_player" | "none" | "unfit";
+        /**
+         * RowState
+         * @description `not_obtained` is not `absent`: the answer stayed unsure to the end, the player may still have the video.
+         * @enum {string}
+         */
+        RowState: "playable" | "absent" | "not_obtained";
+        /**
+         * RuleResult
+         * @description The only source of episode, season, range and part numbers; an excluded line has none of them.
+         */
+        RuleResult: {
             /**
-             * Kind
-             * @default
+             * Excluded
+             * @default false
              */
-            kind: string;
-            /** First */
-            first?: number | null;
-            /** Last */
-            last?: number | null;
-            /**
-             * Count
-             * @default 0
-             */
-            count: number;
-            /**
-             * Ranges
-             * @default
-             */
-            ranges: string;
-            /** Episodes */
-            episodes?: number[];
-            /** Links */
-            links?: {
-                [key: string]: string;
-            } | null;
+            excluded: boolean;
+            /** Season */
+            season?: number | null;
+            /** Episode */
+            episode?: number | null;
+            /** Start */
+            start?: number | null;
+            /** End */
+            end?: number | null;
+            /** Part */
+            part?: number | null;
+            /** Voiceover */
+            voiceover?: string | null;
+            /** Events */
+            events?: {
+                [key: string]: unknown;
+            }[];
+            /** Errors */
+            errors?: unknown[];
         } & {
             [key: string]: unknown;
         };
         /**
-         * ResolutionGroup
-         * @description The episodes of a source that have one resolution, as ranges.
+         * RulesTestRequest
+         * @description The test of a profile on a page: the rows of the page as the constructor gets them, each with its answer.
          */
-        ResolutionGroup: {
-            /** Resolution */
-            resolution: number;
-            /** Ranges */
-            ranges: string;
-            /** Count */
-            count: number;
-        } & {
-            [key: string]: unknown;
+        RulesTestRequest: {
+            /** Url */
+            url: string;
+            /** Options */
+            options?: {
+                [key: string]: string;
+            };
+            /** Profile Id */
+            profile_id: number;
+            /** Series Season */
+            series_season?: string | number | null;
         };
         /** ScannerStatus */
         ScannerStatus: {
@@ -1852,12 +2141,57 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * SeriesCreate
+         * @description A new series: its own fields and at least one source. The address, kind and profile of the series are the
+         *     fields of a source, so the series model does not know `url`, `source_type`, `parser_profile_id`,
+         *     `vk_search_mode` nor `vk_quality_priority`.
+         */
+        SeriesCreate: {
+            /** Name */
+            name: string;
+            /** Name En */
+            name_en: string;
+            /** Site */
+            site: string;
+            /** Save Path */
+            save_path: string;
+            /** Season */
+            season?: string | null;
+            /** Quality */
+            quality?: string | null;
+            /** Quality Override */
+            quality_override?: string | null;
+            /** Resolution Override */
+            resolution_override?: string | null;
+            /** Auto Scan Enabled */
+            auto_scan_enabled?: boolean | null;
+            /** Ignored Seasons */
+            ignored_seasons?: string | null;
+            /** Ignored Episodes */
+            ignored_episodes?: string | null;
+            /** Tmdb Data */
+            tmdb_data?: {
+                [key: string]: unknown;
+            } | null;
+            /** Sources */
+            sources: components["schemas"]["SourceDraft"][];
+            /** Torrents */
+            torrents?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /**
+         * SeriesKind
+         * @description What a series is to the rest of the system: a series has sources of one kind, a torrent one or a video one.
+         * @enum {string}
+         */
+        SeriesKind: "torrent" | "video";
+        /**
          * SeriesObject
-         * @description Серия (список и карточка). Объявлены ВСЕГДА присутствующие поля;
-         *     условные (tracker_info — только торренты; downloaded_episodes_count —
-         *     только список) проходят через extra='allow'. ВАЖНО: на серии НЕ
-         *     применять exclude_none — иначе исчезнут null-поля (quality_override,
-         *     tmdb_info и т.п.), что сломает форму контракта.
+         * @description A series (list and card). The fields that are always there are declared; the conditional ones
+         *     (tracker_info for a series with a tracker address, downloaded_episodes_count in the list) pass through
+         *     extra='allow'. The address, type and profile are fields of the sources (`sources`), not of the series.
+         *     Do NOT apply exclude_none to a series: the null fields (quality_override, tmdb_info) must stay.
          */
         SeriesObject: {
             /** Id */
@@ -1868,24 +2202,19 @@ export interface components {
             name_en: string;
             /** Site */
             site: string;
-            /** Url */
-            url: string;
             /** Save Path */
             save_path: string;
             /** Season */
             season?: string | null;
-            /** Source Type */
-            source_type: string;
-            /** Vk Search Mode */
-            vk_search_mode: string;
+            kind: components["schemas"]["SeriesKind"];
+            /** Sources */
+            sources: components["schemas"]["SeriesSource"][];
             /** Auto Scan Enabled */
             auto_scan_enabled: boolean;
             /** Is Busy */
             is_busy: boolean;
             /** Statuses */
             statuses: string[];
-            /** Parser Profile Id */
-            parser_profile_id?: number | null;
             /** Quality */
             quality?: string | null;
             /** Quality Override */
@@ -1896,13 +2225,72 @@ export interface components {
             ignored_seasons?: string | null;
             /** Ignored Episodes */
             ignored_episodes?: string | null;
-            /** Vk Quality Priority */
-            vk_quality_priority?: string | null;
             /** Last Scan Time */
             last_scan_time?: string | null;
             tmdb_info?: components["schemas"]["TmdbInfo"] | null;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * SeriesSource
+         * @description `url` is a page address, or `channel|query` for a VK channel; the choices belong to the source, not the address.
+         */
+        SeriesSource: {
+            /** Id */
+            id: number;
+            /** Series Id */
+            series_id: number;
+            /**
+             * Position
+             * @default 0
+             */
+            position: number;
+            /** Url */
+            url: string;
+            source_type: components["schemas"]["SourceType"];
+            /** Parser Profile Id */
+            parser_profile_id?: number | null;
+            /**
+             * Vk Search Mode
+             * @default search
+             */
+            vk_search_mode: string;
+            /** Vibix Season */
+            vibix_season?: number | null;
+            /** Players Off */
+            players_off?: string[];
+        };
+        /**
+         * SeriesUpdate
+         * @description The properties of a series to save; only the fields sent change.
+         */
+        SeriesUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Name En */
+            name_en?: string | null;
+            /** Site */
+            site?: string | null;
+            /** Save Path */
+            save_path?: string | null;
+            /** Season */
+            season?: string | null;
+            /** Quality */
+            quality?: string | null;
+            /** Quality Override */
+            quality_override?: string | null;
+            /** Resolution Override */
+            resolution_override?: string | null;
+            /** Auto Scan Enabled */
+            auto_scan_enabled?: boolean | null;
+            /** Ignored Seasons */
+            ignored_seasons?: string | null;
+            /** Ignored Episodes */
+            ignored_episodes?: string | null;
+            /** Tmdb Data */
+            tmdb_data?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * SettingProblem
@@ -1914,48 +2302,120 @@ export interface components {
             detail: components["schemas"]["Reason"];
         };
         /**
-         * SkippedSource
-         * @description A source that is not downloaded, and why (its voice is already in the reference).
+         * SiteResolveReply
+         * @description Which site reads an address and the canonical form of it; both None when no site does.
          */
-        SkippedSource: {
+        SiteResolveReply: {
+            /** Site */
+            site?: string | null;
+            /** Canonical Url */
+            canonical_url?: string | null;
+        };
+        /** SiteResolveRequest */
+        SiteResolveRequest: {
             /** Url */
             url: string;
-            /** Player */
-            player: string;
-            /** Studio */
-            studio: string;
+            /** Options */
+            options?: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * SourceAdd
+         * @description A source added to a series; without `position` it goes to the end of the list.
+         */
+        SourceAdd: {
+            /** Url */
+            url: string;
+            source_type: components["schemas"]["SourceType"];
+            /** Parser Profile Id */
+            parser_profile_id?: number | null;
             /**
-             * Kind
-             * @default
+             * Vk Search Mode
+             * @default search
              */
-            kind: string;
-            /** First */
-            first?: number | null;
-            /** Last */
-            last?: number | null;
+            vk_search_mode: string;
+            /** Vibix Season */
+            vibix_season?: number | null;
+            /** Players Off */
+            players_off?: string[];
+            /** Position */
+            position?: number | null;
+        };
+        /**
+         * SourceChange
+         * @description The fields of a source a caller may change; a field that is not sent stays, `null` clears a profile or a choice.
+         */
+        SourceChange: {
+            /** Url */
+            url?: string | null;
+            /** Parser Profile Id */
+            parser_profile_id?: number | null;
+            /** Vk Search Mode */
+            vk_search_mode?: string | null;
+            /** Vibix Season */
+            vibix_season?: number | null;
+            /** Players Off */
+            players_off?: string[] | null;
+            /** Position */
+            position?: number | null;
+        };
+        /**
+         * SourceDraft
+         * @description A source of a series that does not exist yet: the fields of `SeriesSource` the caller chooses.
+         */
+        SourceDraft: {
+            /** Url */
+            url: string;
+            source_type: components["schemas"]["SourceType"];
+            /** Parser Profile Id */
+            parser_profile_id?: number | null;
             /**
-             * Count
+             * Vk Search Mode
+             * @default search
+             */
+            vk_search_mode: string;
+            /** Vibix Season */
+            vibix_season?: number | null;
+            /** Players Off */
+            players_off?: string[];
+        };
+        /**
+         * SourceStatus
+         * @enum {string}
+         */
+        SourceStatus: "waiting" | "no_profile" | "ready" | "failed";
+        /**
+         * SourceSummary
+         * @description `source_id` is 0 for an address that is not yet a source of a series (the add window, the test of rules).
+         */
+        SourceSummary: {
+            /**
+             * Source Id
              * @default 0
              */
-            count: number;
-            /**
-             * Ranges
-             * @default
-             */
-            ranges: string;
-            /** Episodes */
-            episodes?: number[];
-            /** Links */
-            links?: {
-                [key: string]: string;
-            } | null;
-            /** Label */
-            label: string;
+            source_id: number;
+            /** Url */
+            url: string;
+            status: components["schemas"]["SourceStatus"];
             /** Reason */
-            reason: string;
-        } & {
-            [key: string]: unknown;
+            reason?: string | null;
+            /** Read At */
+            read_at?: string | null;
+            /** Players */
+            players?: components["schemas"]["PlayerSummary"][];
         };
+        /**
+         * SourceType
+         * @enum {string}
+         */
+        SourceType: "torrent" | "vk_video" | "web_video";
+        /**
+         * TableState
+         * @description `absent`: no complete table exists and the request asked for no read.
+         * @enum {string}
+         */
+        TableState: "ready" | "reading" | "failed" | "absent";
         /**
          * TmdbInfo
          * @description TMDB-маппинг серии; поля динамические (tmdb_id, series_name, year,
@@ -2023,47 +2483,28 @@ export interface components {
             default_priority: string[];
             /** Rejected */
             rejected: string[];
-        };
-        /**
-         * WebVideoCoverage
-         * @description The coverage of the players of a web release; `reason` is a coded reason when it could not be read.
-         */
-        WebVideoCoverage: {
-            /**
-             * Players
-             * @default {}
-             */
-            players: {
-                [key: string]: components["schemas"]["PlayerCoverage"];
+            /** Player Groups */
+            player_groups?: {
+                [key: string]: string[];
             };
-            /**
-             * Reason
-             * @default
-             */
-            reason: string;
-        } & {
-            [key: string]: unknown;
         };
         /**
-         * WebVideoLayout
-         * @description The sources of a web release that its provider describes apart from the parse; `reason` is a coded
-         *     reason when they could not be read.
+         * VoiceSummary
+         * @description A voice-over of a player as the table names it and the user group it belongs to (None: no group).
          */
-        WebVideoLayout: {
+        VoiceSummary: {
             /**
-             * Sources
-             * @default []
-             */
-            sources: components["schemas"]["ReleaseSource"][];
-            /** Selected Source */
-            selected_source?: string | null;
-            /**
-             * Reason
+             * Name
              * @default
              */
-            reason: string;
-        } & {
-            [key: string]: unknown;
+            name: string;
+            /** Group */
+            group?: string | null;
+            /**
+             * Rows
+             * @default 0
+             */
+            rows: number;
         };
         /**
          * DubEventStatus
@@ -2140,6 +2581,80 @@ export interface components {
             rev: number;
             /** Items */
             items: components["schemas"]["SnapshotItem"][];
+        };
+        /** TableProgress */
+        TableProgress: {
+            /** Url */
+            url: string;
+            /** Phase */
+            phase: string;
+            /** Current */
+            current: number;
+            /** Total */
+            total: number;
+        };
+        /** TableReady */
+        TableReady: {
+            /** Url */
+            url: string;
+            /** Read At */
+            read_at: string;
+        };
+        /** TableFailed */
+        TableFailed: {
+            /** Url */
+            url: string;
+            /** Reason */
+            reason: string;
+        };
+        /** EpisodeRef */
+        EpisodeRef: {
+            /** Season */
+            season: number;
+            /** Episode */
+            episode: number;
+        };
+        /**
+         * CompositionChanged
+         * @description `episodes` are the episodes the change touched; empty means the whole series.
+         *
+         *     `summary_only` says that no row and no lever changed, only the summaries of the sources (state, reason, time
+         *     of reading): a consumer that works from rows and levers has nothing to do, a window refreshes.
+         */
+        CompositionChanged: {
+            /** Series Id */
+            series_id: number;
+            /** Rev */
+            rev: number;
+            /** Episodes */
+            episodes?: components["schemas"]["EpisodeRef"][];
+            /**
+             * Summary Only
+             * @default false
+             */
+            summary_only: boolean;
+        };
+        /** CompositionFailed */
+        CompositionFailed: {
+            /** Series Id */
+            series_id: number;
+            /** Reason */
+            reason: string;
+        };
+        /** ReferenceChanged */
+        ReferenceChanged: {
+            /** Series Id */
+            series_id: number;
+            /** Season */
+            season: number;
+            /** Episode */
+            episode: number;
+            /**
+             * Part
+             * @default null
+             */
+            part: number | null;
+            mark: components["schemas"]["ReferenceMark"];
         };
     };
     responses: never;
@@ -2317,7 +2832,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesCreate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -2326,6 +2845,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreatedSeries"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2457,7 +3021,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeriesUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -2816,73 +3384,6 @@ export interface operations {
             };
         };
     };
-    vk_quality_priority_api_series__series_id__vk_quality_priority_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                series_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OkResponse"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     torrents_history_api_series__series_id__torrents_history_get: {
         parameters: {
             query?: never;
@@ -2954,6 +3455,707 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    sources_of_api_series__series_id__sources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeriesSource"][];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    add_source_api_series__series_id__sources_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceAdd"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedSource"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    change_source_api_series__series_id__sources__source_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+                source_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceChange"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangedSource"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_source_api_series__series_id__sources__source_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+                source_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    preview_source_api_sources_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompositionPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompositionPreviewReply"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    resolve_source_api_sources_resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteResolveReply"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    rules_test_api_parser_profiles_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RulesTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompositionPreviewReply"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    composition_api_series__series_id__composition_get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+                include_excluded?: boolean;
+            };
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompositionReply"] | components["schemas"]["DynamicObject"][];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    output_api_series__series_id__output_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Reference"][];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    set_output_setting_api_series__series_id__output_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutputSettingsSet"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reset_output_settings_api_series__series_id__output_settings_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutputSettingsReset"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3882,57 +5084,6 @@ export interface operations {
             };
         };
     };
-    composition_api_series__series_id__composition_get: {
-        parameters: {
-            query?: {
-                refresh?: boolean;
-            };
-            header?: never;
-            path: {
-                series_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DynamicObject"][];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-        };
-    };
     rename_preview_api_series__series_id__rename_preview_get: {
         parameters: {
             query?: never;
@@ -4232,7 +5383,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ParseUrlRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -4270,116 +5425,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOnly"];
                 };
             };
-            /** @description Internal Server Error */
-            500: {
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-        };
-    };
-    web_video_coverage_api_web_video_coverage_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebVideoCoverage"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-        };
-    };
-    web_video_layout_api_web_video_layout_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebVideoLayout"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Internal Server Error */
@@ -5573,118 +6625,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    scrape_titles_api_parser_profiles_scrape_titles_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DynamicObject"][];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-        };
-    };
-    rules_test_api_parser_profiles_test_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DynamicObject"][];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOnly"];
                 };
             };
         };

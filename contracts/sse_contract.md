@@ -33,8 +33,12 @@
 | `conform_settings_update` | — (новое, Р-57) | адрес демона выравнивания и карта путей после сохранения (`ConformSettingsView`); пакет самодостаточен | `conform.settings.changed` | как есть |
 | `voice_settings_update` | — (новое, Р-54) | настройки озвучек после сохранения (`VoiceSettingsView`); пакет самодостаточен: открытые экраны настроек применяют его без запроса | `voices.settings.changed` | как есть |
 | `scanner_status_update` | `{scanner_enabled, scan_interval, is_scanning, is_awaiting_tasks, next_scan_time}` | подтверждено | `scan.status.changed` | как есть (форма совпадает) |
-| `video_scan_progress` | — (новое) | прогресс опроса серий web-источника | `sources.video.progress {series_id, current, total, rate, phase, active}` | как есть |
-| `coverage_progress` | — (новое) | прогресс чтения серий для окна добавления и свойств (ключ — адрес страницы релиза, не сериал) | `sources.coverage.progress {url, current, total, phase, active}` | как есть |
+| `sources_table_progress` | — (этап 10, заменил `video_scan_progress` и `coverage_progress`) | как далеко прочитана страница сайта; ключ — адрес страницы, пакет самодостаточен | `sources.table.progress` | как есть: `{url, phase, current, total}` — модель `TableProgress` |
+| `sources_table_ready` | — (этап 10) | полная таблица страницы сохранена; окно, которое ждало её, берёт сводку или строки запросом | `sources.table.ready` | как есть: `{url, read_at}` — `TableReady` |
+| `sources_table_failed` | — (этап 10) | чтение страницы не удалось; причина кодом `core/reasons`, действует прежняя полная таблица | `sources.table.failed` | как есть: `{url, reason}` — `TableFailed` |
+| `composition_changed` | — (этап 10) | раскладка сериала, сводки его источников или рычаги выхода изменились; `episodes` — затронутые серии (пусто: весь сериал); `summary_only` — изменились только сводки источников (состояние, причина, время чтения): окно обновляет сводку, потребитель строк и рычагов пропускает | `composition.changed` | как есть: `{series_id, rev, episodes: [{season, episode}], summary_only}` — `CompositionChanged`; из двух пакетов интерфейс оставляет с большим `rev` |
+| `composition_failed` | — (этап 10) | пересчёт раскладки не удался, действует прежняя; причина кодом | `composition.failed` | как есть: `{series_id, reason}` — `CompositionFailed` |
+| `reference_changed` | — (этап 10) | референс серии или его отметка (`by_level`, `own`, `other_player`, `none`, `unfit`) изменились; подробности (источник, плеер, разрешение, причина) — запросом `GET /api/series/{id}/output` | `scan.reference.changed` | как есть: `{series_id, season, episode, part, mark}` — `ReferenceChanged` |
 | `agent_heartbeat` | `{name, activity?}` | **удалено по согласованию** (см. ниже) | — | — |
 | `relocation_started` | `{series_id}` | подтверждено | `library.relocation.started` | как есть |
 | `relocation_finished` | `{series_id, success, message}` | подтверждено | `library.relocation.finished` | как есть |

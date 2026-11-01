@@ -17,6 +17,7 @@ from modules.gateway import GatewayModule
 from modules.renaming import RenamingModule
 from modules.scan import ScanModule
 from modules.slicing import SlicingModule
+from series_factory import insert_series
 
 CHAPTERS = [
     {"time": "00:01:00", "title": "Серия 1"},
@@ -45,16 +46,9 @@ def db_path(tmp_path):
     media_s = tmp_path / "media_s"
     media_s.mkdir()
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode, "
-            "parser_profile_id) VALUES (1, 'http://x', 'Т', 'T', 'kinozal', "
-            "'/media/t', 'waiting', 'torrent', 0, 'search', 1)")
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode, "
-            "parser_profile_id) VALUES (2, 'u|q', 'ВК', 'Show', 'vk', ?, "
-            "'waiting', 'vk_video', 0, 'get_all', 1)", (str(media_s),))
+        insert_series(conn, id=1, url="http://x", source_type="torrent")
+        insert_series(conn, id=2, name="ВК", name_en="Show", site="vk", save_path=str(media_s),
+                      url="u|q", source_type="vk_video", vk_search_mode="get_all")
         # одиночный скачанный эпизод
         conn.execute(
             "INSERT INTO media_items (series_id, unique_id, episode_start, "
@@ -85,26 +79,22 @@ class Neighbours(BaseModule):
         super().__init__(bus)
 
     def register(self):
-        async def fs_sync(env):
-            self.calls.append(("fs.sync", env.payload))
-            return {"adopted": 0, "lost": 0}
-
-        async def rules_apply(env):
-            return {"results": [
-                {"title": t, "extracted": {"episode": i + 1},
-                 "events": [], "excluded": False, "errors": []}
-                for i, t in enumerate(env.payload["titles"])],
-                "invalid_rules": []}
-
         async def format_filename(env):
             ep = env.payload.get("episode_override") \
                 or env.payload["media_item"].get("episode_start")
             return {"filename": f"Show s01e{ep:02d}.mp4"}
 
         async def files_for_series(env):
+            if env.payload["series_id"] != 1:  # the owner has no torrent files of a video series
+                return []
             return [{"id": 1, "original_path": "Dir/T.S01E01.mkv",
                      "renamed_path": None, "status": "renamed",
                      "qb_hash": "h1", "extracted_metadata": None}]
+
+        async def composition_get(env):
+            self.calls.append(("composition.get", env.payload))
+            return {"series_id": env.payload["series_id"], "rev": 2, "rows": [], "sources": [], "levels": [],
+                    "settings": []}
 
         async def reprocess(env):
             self.calls.append(("reprocess", env.payload))
@@ -122,8 +112,7 @@ class Neighbours(BaseModule):
             return {"source_type": "torrent", "tasks_created": 1}
 
         self.handle("scan.series.prepare", series_prepare)
-        self.handle("downloads.fs.sync", fs_sync)
-        self.handle("rules.apply", rules_apply)
+        self.handle("composition.get", composition_get)
         self.handle("rules.format_filename", format_filename)
         self.handle("torrents.db.files.for_series", files_for_series)
         self.handle("renaming.reprocess", reprocess)
@@ -218,7 +207,7 @@ async def test_chapters_filtered_status_message(system):
 
 
 @pytest.mark.asyncio
-async def test_composition_routes_by_source_type(system):
+async def test_composition_routes_by_the_kind_of_the_series(system):
     _, _, client, neighbours = system
     # торрент-серия → torrents.composition (фейк)
     resp = await client.get("/api/series/1/composition")
@@ -226,15 +215,14 @@ async def test_composition_routes_by_source_type(system):
     assert ("torrents.composition",
             {"series_id": 1, "refresh": False}) in neighbours.calls
 
-    # VK-серия → scan.composition (реальный scan: план + реконструкция)
+    # a video series: the layout of composition as it is; the plan and the scan are not mixed in
     resp = await client.get("/api/series/2/composition")
     assert resp.status_code == 200
-    plan = {i["unique_id"]: i for i in resp.json()}
-    assert plan["uid1"]["result"]["extracted"] == {"episode": 1}
-    assert plan["uid1"]["source_data"]["publication_date"] == \
-        "2026-01-01T00:00:00"
-    assert plan["uid2"]["plan_status"]  # план пересобран
-    assert ("fs.sync", {"series_id": 2}) in neighbours.calls
+    assert resp.json() == {"series_id": 2, "rev": 2, "rows": [], "sources": [], "levels": [], "settings": []}
+    assert ("composition.get",
+            {"series_id": 2, "include_excluded": False}) in neighbours.calls
+    assert not any(call[0] in ("torrents.composition", "scan.series.prepare") and call[1]["series_id"] == 2
+                   for call in neighbours.calls)
 
 
 @pytest.mark.asyncio
@@ -296,12 +284,14 @@ async def test_reprocess_409_and_command(system):
 
 
 @pytest.mark.asyncio
-async def test_source_filenames_both_types(system):
-    _, _, client, _ = system
+async def test_source_filenames_are_the_torrent_files_and_a_video_series_has_none(system):
+    _, _, client, neighbours = system
     resp = await client.get("/api/series/1/source-filenames")
     assert resp.json() == ["T.S01E01.mkv"]
+    # the lines for the rules test of a video series come from composition.preview, not from this list
     resp = await client.get("/api/series/2/source-filenames")
-    assert resp.json() == ["Show s01e01.mp4"]
+    assert resp.json() == []
+    assert not any(call[0] == "scan.media.list" for call in neighbours.calls)
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ import pytest
 
 from core import BaseModule, Bus, Runner
 from core.db import Database
+from core.reasons import parse
 from modules.catalog import CatalogModule
 from modules.gateway import GatewayModule
 from modules.library import LibraryModule
@@ -18,6 +19,7 @@ from modules.metadata import MetadataModule
 from modules.renaming import RenamingModule
 from modules.scan.repository import ScanRepository
 from modules.slicing.repository import SlicingRepository
+from series_factory import insert_series, source
 
 
 @pytest.fixture
@@ -28,16 +30,9 @@ def db_path(tmp_path):
                         "PATH": "/usr/bin:/bin"},
                    cwd=".", check=True, capture_output=True)
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode) VALUES "
-            "(1, 'http://kinozal.tv/details.php?id=7', 'Тайтл', 'Title', "
-            "'kinozal', '/media/t', 'waiting', 'torrent', 0, 'search')")
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode) VALUES "
-            "(2, 'u|q', 'ВК', 'Show', 'vk', '/media/s', 'waiting', "
-            "'vk_video', 0, 'get_all')")
+        insert_series(conn, id=1, url="http://kinozal.tv/details.php?id=7", source_type="torrent")
+        insert_series(conn, id=2, name="ВК", name_en="Show", site="vk", save_path="/media/s",
+                      url="u|q", source_type="vk_video", vk_search_mode="get_all")
         # данные для каскада удаления серии 2
         conn.execute(
             "INSERT INTO media_items (series_id, unique_id, episode_start, "
@@ -78,7 +73,7 @@ class Neighbours(BaseModule):
 
         async def resolve(env):
             self.calls.append(("resolve", env.payload))
-            return {"tracker": {"canonical_name": "kinozal"}}
+            return {"tracker": {"canonical_name": "kinozal"} if "kinozal" in env.payload["url"] else None}
 
         async def history(env):
             return [{"id": 1, "torrent_id": "abc", "is_active": 1}]
@@ -155,6 +150,15 @@ async def system(db_path, tmp_path):
 # --- GET: список и карточка -------------------------------------------------------
 
 
+def topics(spy) -> list[str]:
+    out = []
+    while not spy.queue.empty():
+        env = spy.queue.get_nowait()
+        if env.kind != "reply":
+            out.append(env.topic)
+    return out
+
+
 @pytest.mark.asyncio
 async def test_series_list_shape(system):
     _, _, client, _ = system
@@ -162,8 +166,16 @@ async def test_series_list_shape(system):
     assert resp.status_code == 200
     data = {s["id"]: s for s in resp.json()}
     assert set(data) == {1, 2}
-    # форма карточки старого контракта
+    # the card: kind and sources come from the catalog, the series itself has no address
     torrent, vk = data[1], data[2]
+    assert torrent["kind"] == "torrent" and vk["kind"] == "video"
+    assert [(each["url"], each["source_type"]) for each in torrent["sources"]] == [
+        ("http://kinozal.tv/details.php?id=7", "torrent")]
+    assert [(each["url"], each["source_type"], each["vk_search_mode"]) for each in vk["sources"]] == [
+        ("u|q", "vk_video", "get_all")]
+    for card in (torrent, vk):
+        assert not {"url", "source_type", "parser_profile_id", "vk_search_mode", "vk_quality_priority",
+                    "availability"} & set(card)
     assert torrent["downloaded_episodes_count"] == 3   # счётчик torrents
     assert vk["downloaded_episodes_count"] == 5        # счётчик scan
     assert vk["tmdb_info"]["tmdb_id"] == 99
@@ -175,12 +187,20 @@ async def test_series_list_shape(system):
 
 @pytest.mark.asyncio
 async def test_series_details_and_404(system):
-    _, _, client, neighbours = system
+    bus, _, client, neighbours = system
+    spy = bus.subscribe("#")
     resp = await client.get("/api/series/1")
     assert resp.status_code == 200
     body = resp.json()
+    assert body["kind"] == "torrent" and body["sources"][0]["source_type"] == "torrent"
+    # `sources` tells the tracker by the address of a source; the series itself has no address
     assert body["tracker_info"] == {"canonical_name": "kinozal"}
-    assert ("resolve", {"url": body["url"]}) in neighbours.calls
+    assert ("resolve", {"url": "http://kinozal.tv/details.php?id=7"}) in neighbours.calls
+
+    video = (await client.get("/api/series/2")).json()
+    assert video["kind"] == "video" and "tracker_info" not in video and "availability" not in video
+    # there is no report of players any more: the summary of the sources is composition's, the window takes it itself
+    assert "scan.availability" not in topics(spy)
 
     resp = await client.get("/api/series/777")
     assert resp.status_code == 404
@@ -194,10 +214,11 @@ async def test_series_details_and_404(system):
 async def test_add_series_with_torrents_and_event(system):
     bus, _, client, neighbours = system
     sub = bus.subscribe("series.added")
+    sources = bus.subscribe("series.source.added")
     resp = await client.post("/api/series", json={
-        "url": "http://kinozal.tv/details.php?id=9", "name": "Новый",
+        "name": "Новый",
         "name_en": "New", "site": "kinozal", "save_path": "/media/n",
-        "source_type": "torrent",
+        "sources": [{"url": "http://kinozal.tv/details.php?id=9", "source_type": "torrent"}],
         "tmdb_data": {"tmdb_id": 5, "tmdb_season_number": 1,
                       "total_episodes": 8},
         "torrents": [{"torrent_id": "t9", "link": "http://kinozal.tv/9",
@@ -207,7 +228,11 @@ async def test_add_series_with_torrents_and_event(system):
     env = await asyncio.wait_for(sub.queue.get(), 3)
     assert env.payload["id"] == series_id
     assert env.payload["name"] == "Новый"
+    assert env.payload["kind"] == "torrent"
     assert env.payload["statuses"] == ["waiting"]
+    # the source appeared like any added later
+    added = await asyncio.wait_for(sources.queue.get(), 3)
+    assert added.payload["series_id"] == series_id
     assert ("torrents.db.add",
             {"series_id": series_id,
              "torrents": [{"torrent_id": "t9",
@@ -220,12 +245,67 @@ async def test_add_series_with_torrents_and_event(system):
 
 
 @pytest.mark.asyncio
+async def test_add_series_of_several_sources_keeps_their_order_and_choices(system):
+    _, _, client, neighbours = system
+    resp = await client.post("/api/series", json={
+        "name": "Видео", "name_en": "Video", "site": "somesite", "save_path": "/media/v",
+        "sources": [{"url": "https://one.test/p", "source_type": "web_video", "vibix_season": 2},
+                    {"url": "chan|query", "source_type": "vk_video", "vk_search_mode": "get_all",
+                     "players_off": ["vk"]}]})
+    assert resp.status_code == 200
+    details = (await client.get(f"/api/series/{resp.json()['series_id']}")).json()
+    assert details["kind"] == "video"
+    assert [(each["url"], each["position"], each["vibix_season"], each["vk_search_mode"], each["players_off"])
+            for each in details["sources"]] == [("https://one.test/p", 0, 2, "search", []),
+                                                ("chan|query", 1, None, "get_all", ["vk"])]
+    # no torrents in the form: nothing for the torrent module to write
+    assert not any(call[0] == "torrents.db.add" for call in neighbours.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("removed", [{"url": "http://x"}, {"source_type": "torrent"}, {"parser_profile_id": 1},
+                                      {"vk_search_mode": "search"}, {"vk_quality_priority": "[]"}])
+async def test_add_series_does_not_take_the_fields_that_left_the_series(system, removed):
+    _, _, client, _ = system
+    body = {"name": "Т", "name_en": "T", "site": "s", "save_path": "/media/t",
+            "sources": [{"url": "http://kinozal.tv/details.php?id=9", "source_type": "torrent"}], **removed}
+    resp = await client.post("/api/series", json=body)
+    assert resp.status_code == 422
+    assert next(iter(removed)) in json.dumps(resp.json(), ensure_ascii=False)
+    assert len((await client.get("/api/series")).json()) == 2  # серия не создана
+
+
+@pytest.mark.asyncio
+async def test_add_series_needs_a_source_and_torrents_need_a_torrent_source(system):
+    _, _, client, neighbours = system
+    base = {"name": "Т", "name_en": "T", "site": "s", "save_path": "/media/t"}
+    assert (await client.post("/api/series", json=base)).status_code == 422
+    assert (await client.post("/api/series", json={**base, "sources": []})).status_code == 422
+    resp = await client.post("/api/series", json={
+        **base, "sources": [{"url": "https://one.test/p", "source_type": "web_video"}],
+        "torrents": [{"torrent_id": "t9", "link": "http://kinozal.tv/9"}]})
+    assert resp.status_code == 422
+    assert not any(call[0] == "torrents.db.add" for call in neighbours.calls)
+
+
+@pytest.mark.asyncio
+async def test_add_series_with_a_source_the_catalog_refuses_leaves_no_series_and_says_why(system):
+    _, _, client, _ = system
+    resp = await client.post("/api/series", json={
+        "name": "Т", "name_en": "T", "site": "s", "save_path": "/media/t",
+        "sources": [{"url": "https://one.test/p", "source_type": "web_video"},
+                    {"url": "https://one.test/p", "source_type": "web_video"}]})
+    assert resp.status_code == 400
+    assert parse(resp.json()["error"])["code"] == "source_exists"
+    assert len((await client.get("/api/series")).json()) == 2
+
+
+@pytest.mark.asyncio
 async def test_add_series_rejects_relative_save_path(system):
     _, _, client, _ = system
     resp = await client.post("/api/series", json={
-        "url": "http://kinozal.tv/details.php?id=10", "name": "Кривой",
-        "name_en": "Bad", "site": "kinozal", "save_path": "Z/Donghua",
-        "source_type": "torrent"})
+        "name": "Кривой", "name_en": "Bad", "site": "kinozal", "save_path": "Z/Donghua",
+        "sources": [{"url": "http://kinozal.tv/details.php?id=10", "source_type": "torrent"}]})
 
     assert resp.status_code == 400
     assert "абсолютн" in resp.json()["error"]
@@ -281,20 +361,24 @@ async def test_delete_cascade_by_owners(db_path, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_update_without_path_change_triggers_reprocess(system):
-    _, db, client, neighbours = system
-    resp = await client.post("/api/series/1", json={
-        "name": "Переименован", "save_path": "/media/t"})
+@pytest.mark.parametrize("series_id", [1, 2])
+async def test_update_without_path_change_asks_renaming_whatever_the_kind(system, series_id):
+    """What renaming does with a video and a torrent series is its own; the gateway does not branch or start a scan."""
+    bus, db, client, neighbours = system
+    spy = bus.subscribe("#")
+    resp = await client.post(f"/api/series/{series_id}", json={
+        "name": "Переименован", "save_path": "/media/t" if series_id == 1 else "/media/s"})
     assert resp.status_code == 200
-    row = await db.fetch_one("SELECT name, save_path FROM series WHERE id=1")
+    row = await db.fetch_one("SELECT name FROM series WHERE id=?", (series_id,))
     assert row["name"] == "Переименован"
-    assert row["save_path"] == "/media/t"
     for _ in range(100):  # команда фоновая — дожидаемся
-        if ("reprocess", {"series_id": 1}) in neighbours.calls:
+        if ("reprocess", {"series_id": series_id}) in neighbours.calls:
             break
         await asyncio.sleep(0.02)
-    assert ("reprocess", {"series_id": 1}) in neighbours.calls
+    assert ("reprocess", {"series_id": series_id}) in neighbours.calls
     assert all(c[0] != "relocate" for c in neighbours.calls)
+    # the layout of a video series is counted again on series.updated; the gateway starts no sync
+    assert "scan.series.run" not in topics(spy)
 
 
 @pytest.mark.asyncio
@@ -309,6 +393,18 @@ async def test_update_with_path_change_calls_relocate(system):
     row = await db.fetch_one("SELECT save_path FROM series WHERE id=1")
     assert row["save_path"] == "/media/t"
     assert all(c[0] != "reprocess" for c in neighbours.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("removed", [{"url": "http://x"}, {"source_type": "torrent"}, {"parser_profile_id": 1},
+                                      {"vk_search_mode": "get_all"}, {"vk_quality_priority": "[]"},
+                                      {"sources": []}])
+async def test_update_does_not_take_what_belongs_to_the_sources(system, removed):
+    _, db, client, neighbours = system
+    resp = await client.post("/api/series/1", json={"name": "Другой", **removed})
+    assert resp.status_code == 422
+    assert (await db.fetch_one("SELECT name FROM series WHERE id=1"))["name"] == "Тайтл"
+    assert not any(call[0] in ("reprocess", "relocate") for call in neighbours.calls)
 
 
 # --- мелкие точки ------------------------------------------------------------------
@@ -335,22 +431,27 @@ async def test_toggle_auto_scan_and_update_event(system):
 
 
 @pytest.mark.asyncio
-async def test_state_route_drives_viewing(system):
+@pytest.mark.parametrize("series_id", [1, 2])
+async def test_state_route_drives_viewing_and_asks_each_owner_to_check_its_files(system, series_id):
     bus, _, client, neighbours = system
     sub = bus.subscribe("series.status.changed")
-    resp = await client.post("/api/series/1/state",
+    spy = bus.subscribe("#")
+    resp = await client.post(f"/api/series/{series_id}/state",
                              json={"state": ["viewing"]})
     assert resp.status_code == 200
     env = await asyncio.wait_for(sub.queue.get(), 3)
-    assert env.payload["series_id"] == 1
+    assert env.payload["series_id"] == series_id
     assert "viewing" in env.payload["statuses"]
-    # открытие модалки торрент-серии запускает сверку файлов (Р-23)
+    # opening the window asks every owner of files to check its own with the disk; the gateway knows no kind
     for _ in range(100):
-        if ("fs.verify", {"series_id": 1}) in neighbours.calls:
+        if ("fs.verify", {"series_id": series_id}) in neighbours.calls and \
+                ("fs.sync", {"series_id": series_id}) in neighbours.calls:
             break
         await asyncio.sleep(0.02)
-    assert ("fs.verify", {"series_id": 1}) in neighbours.calls
-    resp = await client.post("/api/series/1/state", json={"state": []})
+    assert ("fs.verify", {"series_id": series_id}) in neighbours.calls
+    assert ("fs.sync", {"series_id": series_id}) in neighbours.calls
+    assert "catalog.series.get" not in topics(spy)
+    resp = await client.post(f"/api/series/{series_id}/state", json={"state": []})
     assert resp.status_code == 200
     env = await asyncio.wait_for(sub.queue.get(), 3)
     assert "viewing" not in env.payload["statuses"]
@@ -375,12 +476,9 @@ async def test_small_endpoints(system):
     resp = await client.put("/api/series/1/ignored-episodes", json={})
     assert resp.status_code == 400
 
-    resp = await client.put("/api/series/2/vk-quality-priority",
-                            json={"priority": ["1080p", "720p"]})
-    assert resp.status_code == 200
-    resp = await client.put("/api/series/2/vk-quality-priority",
-                            json={"priority": "не список"})
-    assert resp.status_code == 400
+    # the priority of resolutions of the user left with its column: the rule of the reference applies
+    resp = await client.put("/api/series/2/vk-quality-priority", json={"priority": ["1080p", "720p"]})
+    assert resp.status_code in (404, 405)
 
     resp = await client.get("/api/series/1/torrents/history")
     assert resp.json()[0]["torrent_id"] == "abc"
@@ -399,10 +497,11 @@ async def test_create_and_update_store_fs_safe_names(system):
     write, so forbidden characters never reach the DB from any client."""
     _, _, client, _ = system
     resp = await client.post("/api/series", json={
-        "url": "http://kinozal.tv/details.php?id=10", "name": "Кто: доктор",
+        "name": "Кто: доктор",
         "name_en": '  Doctor "Who"?  ', "site": "kinozal",
         "save_path": "/media/Doctor Who: Flux (2021)\\extra",
-        "source_type": "torrent", "quality_override": "WEB-DL/1080p"})
+        "sources": [{"url": "http://kinozal.tv/details.php?id=10", "source_type": "torrent"}],
+        "quality_override": "WEB-DL/1080p"})
     assert resp.status_code == 200
     series_id = resp.json()["series_id"]
     details = (await client.get(f"/api/series/{series_id}")).json()

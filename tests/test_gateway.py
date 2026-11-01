@@ -1,11 +1,14 @@
 """Сквозной тест этапа 1: HTTP → query → модуль → reply → HTTP, и шина → SSE."""
 import asyncio
 import json
+import re
+from pathlib import Path
 
 import httpx
 import pytest
 
 from core import BaseModule, Bus, Envelope, Runner
+from core import logging as core_logging
 from modules.gateway import GatewayModule
 from modules.gateway import module as gateway_module
 
@@ -187,3 +190,67 @@ async def test_voice_dubs_snapshot_reaches_the_interface_whole(system):
     events = await _collect_sse_events(gateway, bus, [
         Envelope(topic="voices.dubs.snapshot", kind="event", payload=payload)], 1)
     assert events == [("voice_dubs_snapshot", payload)]
+
+
+NEW_PACKETS = [
+    ("sources.table.progress", "sources_table_progress",
+     {"url": "https://x.test/p", "phase": "pages", "current": 3, "total": 10}),
+    ("sources.table.ready", "sources_table_ready", {"url": "https://x.test/p", "read_at": "2026-11-01T10:00:00"}),
+    ("sources.table.failed", "sources_table_failed", {"url": "https://x.test/p", "reason": "{\"code\":\"x\"}"}),
+    ("composition.changed", "composition_changed",
+     {"series_id": 1, "rev": 4, "episodes": [{"season": 1, "episode": 2}], "summary_only": True}),
+    ("composition.failed", "composition_failed", {"series_id": 1, "reason": "{\"code\":\"composition_error\"}"}),
+    ("scan.reference.changed", "reference_changed",
+     {"series_id": 1, "season": 1, "episode": 2, "part": None, "mark": "other_player"}),
+]
+
+
+@pytest.mark.asyncio
+async def test_the_events_of_the_tables_the_layout_and_the_references_reach_the_interface_whole(system):
+    """Stage 10: each packet is whole for its part of the screen, `summary_only` and all, so nothing is asked again."""
+    bus, _, gateway = system
+    events = await _collect_sse_events(gateway, bus, [
+        Envelope(topic=topic, kind="event", payload=payload) for topic, _, payload in NEW_PACKETS], len(NEW_PACKETS))
+    assert events == [(name, payload) for _, name, payload in NEW_PACKETS]
+
+
+def test_the_progress_events_of_the_old_reading_are_not_in_the_map():
+    assert "sources.video.progress" not in gateway_module.SSE_MAP
+    assert "sources.coverage.progress" not in gateway_module.SSE_MAP
+    names = {name for name, _ in gateway_module.SSE_MAP.values()}
+    assert not {"video_scan_progress", "coverage_progress"} & names
+
+
+def test_every_topic_of_the_map_is_named_by_a_module_that_publishes_it():
+    """A topic renamed or removed in its owner must not stay in the map unnoticed."""
+    root = Path(__file__).resolve().parent.parent / "modules"
+    published = set()
+    for source in root.rglob("*.py"):
+        if source.parent.name != "gateway":
+            published |= set(re.findall(r'"([a-z_]+(?:\.[a-z_]+)+)"', source.read_text(encoding="utf-8")))
+    assert [topic for topic in gateway_module.SSE_MAP if topic not in published] == []
+
+
+@pytest.mark.asyncio
+async def test_the_debug_groups_of_logging_are_read_when_the_system_says_it_is_up(tmp_path, monkeypatch):
+    """Settings starts after the gateway, so the groups are read on the signal of the whole system, not by retries."""
+    from gateway_fakes import serving
+    read = asyncio.Event()
+    seen: list[set] = []
+    monkeypatch.setattr(core_logging, "set_debug_groups", lambda groups: (seen.append(groups), read.set()))
+    answers = {"settings.values.by_prefix": {"values": {"debug_enabled_scan": "true", "debug_enabled_sources": "false"}}}
+    async with serving(tmp_path, answers) as (_, owners, bus, _):
+        assert owners.asked("settings.values.by_prefix") == []
+        bus.publish(Envelope(topic="system.started", kind="event"))
+        await asyncio.wait_for(read.wait(), 5)
+    assert seen == [{"scan"}]
+    assert owners.asked("settings.values.by_prefix") == [{"prefix": "debug_enabled_"}]
+
+
+@pytest.mark.asyncio
+async def test_settings_that_does_not_answer_is_a_warning_and_not_a_reason_to_wait(tmp_path):
+    from gateway_fakes import serving
+    async with serving(tmp_path, {"settings.values.by_prefix": RuntimeError("down")}) as (_, owners, bus, _):
+        bus.publish(Envelope(topic="system.started", kind="event"))
+        await owners.next("settings.values.by_prefix")
+    assert len(owners.asked("settings.values.by_prefix")) == 1

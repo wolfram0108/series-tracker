@@ -20,8 +20,9 @@ from modules.settings import SettingsModule
 from modules.sources import SourcesModule
 from modules.trackerauth import TrackerauthModule
 from modules.voices import VoicesModule
-from modules.sources.video_providers import BaseVideoProvider, get_default_registry
 from core import ids
+from core.reasons import parse
+from series_factory import insert_series
 
 
 @pytest.fixture
@@ -40,13 +41,9 @@ def db_path(tmp_path):
             "(1, 'kinozal', 'Kinozal', '[\"kinozal.tv\"]', "
             "'KinozalParser', 'kinozal', '{}')")
         conn.execute(
-            "INSERT INTO parser_profiles (id, name, preferred_voiceovers) "
-            "VALUES (1, 'Занятый', '')")
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode, "
-            "parser_profile_id) VALUES (1, 'http://x', 'Т', 'T', 'kinozal', "
-            "'/media/t', 'waiting', 'torrent', 0, 'search', 1)")
+            "INSERT INTO parser_profiles (id, name) VALUES (1, 'Занятый')")
+        insert_series(conn, id=1, name="Т", name_en="T", url="http://x", source_type="torrent",
+                      parser_profile_id=1)
         conn.commit()
     conn.close()
     return str(path)
@@ -142,153 +139,34 @@ async def test_parse_url_form(system):
     assert body["tracker_info"]["canonical_name"] == "kinozal"
 
 
-class _TwoVoiceSite(BaseVideoProvider):
-    """A web source with two players and the same voice-over in both."""
-
-    name = "twovoice"
-    domains = ("fake.test",)
-
-    def match_url(self, url):
-        return "fake.test" in url
-
-    def canonical_url(self, url):
-        return url
-
-    async def parse_release(self, url, http):
-        def source(player, studio, episodes):
-            return {"url": f"https://fake.test/t?player={player}&voice={studio}", "player": player,
-                    "studio": studio, "kind": "", "episodes": episodes,
-                    "links": {str(n): f"https://fake.test/t#{player}={n}" for n in episodes}}
-        return {"canonical_url": url, "title": {"ru": "Т", "en": "T"}, "titles": [], "episodes": [],
-                "resolution": None, "videos": [], "episodes_count": 0, "provider": self.name,
-                "source_type": "web_video", "releases": [], "players": {},
-                "sources": [source("cvh", "Main", [1, 2]), source("kodik", "Main", [1, 2]),
-                            source("kodik", "Extra", [1, 2])],
-                "selected_source": "https://fake.test/t?player=cvh&voice=Main"}
-
-    async def scan_episodes(self, url, http, series, episodes=None, progress=None):
-        return {"videos": []}
+A_SITE_PAGE = {"ruchime": "https://1.ruchime.org/release/x/episode-3?off=vk#top",
+               "dunhuatv": "https://www.dunhuatv.ru/28-x-smotret-onlajn.html?a=1#cvh=2",
+               "vk_channel": "https://vk.com/@chan/videos|запрос"}
 
 
 @pytest.mark.asyncio
-async def test_parse_url_of_a_web_source_carries_the_voice_layout(system):
+@pytest.mark.parametrize("site", sorted(A_SITE_PAGE))
+async def test_parse_url_refuses_a_page_a_site_reads_with_a_code_and_reads_nothing(system, site):
+    """The gateway knows no site: `sources` says that a site reads the address, and the page is not parsed."""
     _, _, client = system
-    registry = get_default_registry()
-    site = _TwoVoiceSite()
-    registry.register(site)
-    try:
-        body = (await client.post("/api/parse_url", json={"url": "https://fake.test/t"})).json()
-    finally:
-        registry._providers.remove(site)
-    layout = body["layout"]
-    assert [(row["label"], row["role"]) for row in layout["voices"]] == [
-        ("Main", "reference"), ("Extra", "dub")]
-    assert [s["player"] for s in layout["skipped"]] == ["kodik"]
-    assert body["selected_source"] == layout["reference"]["url"]
-    # Episode links are for the voices module; the form never receives them.
-    assert all("links" not in source for source in body["sources"])
-
-
-class _LayoutSite(_TwoVoiceSite):
-    """A web source whose sources are described apart from the parse."""
-
-    name = "withlayout"
-    domains = ("layout.test",)
-    has_layout = True
-
-    def match_url(self, url):
-        return "layout.test" in url
-
-    async def parse_release(self, url, http):
-        release = await super().parse_release(url, http)
-        return {**release, "sources": [], "selected_source": None}
-
-    async def layout(self, url, http):
-        return {"sources": [{"url": f"{url}?vibix=1", "player": "vibix", "studio": "Сезон 1", "kind": "",
-                             "first": 1, "last": 2, "count": 2, "ranges": "1-2", "episodes": [1, 2],
-                             "resolutions": [{"resolution": 1080, "ranges": "1-2", "count": 2}]}],
-                "selected_source": f"{url}?vibix=1", "reason": ""}
+    resp = await client.post("/api/parse_url", json={"url": A_SITE_PAGE[site]})
+    assert resp.status_code == 400
+    assert parse(resp.json()["error"]) == {"code": "not_a_torrent_page", "params": {}}
 
 
 @pytest.mark.asyncio
-async def test_parse_url_says_whether_the_provider_has_a_layout(system):
-    _, _, client = system
-    registry = get_default_registry()
-    site = _LayoutSite()
-    registry.register(site)
-    try:
-        body = (await client.post("/api/parse_url", json={"url": "https://layout.test/t"})).json()
-    finally:
-        registry._providers.remove(site)
-    assert body["has_layout"] is True
-    assert (await client.post("/api/parse_url", json={"url": "http://kinozal.tv/details.php?id=1"})).json()["has_layout"] is False
-
-
-@pytest.mark.asyncio
-async def test_the_layout_of_a_web_release_passes_through_with_its_resolutions(system):
-    _, _, client = system
-    registry = get_default_registry()
-    site = _LayoutSite()
-    registry.register(site)
-    try:
-        body = (await client.post("/api/web_video/layout", json={"url": "https://layout.test/t"})).json()
-    finally:
-        registry._providers.remove(site)
-    assert body["selected_source"] == "https://layout.test/t?vibix=1"
-    assert body["reason"] == ""
-    assert body["sources"][0]["resolutions"] == [{"resolution": 1080, "ranges": "1-2", "count": 2}]
-
-
-@pytest.mark.asyncio
-async def test_the_coverage_of_a_web_release_passes_through(system):
-    _, _, client = system
-    registry = get_default_registry()
-
-    class Site(_LayoutSite):
-        name = "withcoverage"
-        domains = ("coverage.test",)
-
-        def match_url(self, url):
-            return "coverage.test" in url
-
-        async def coverage(self, url, http, progress=None):
-            return {"players": {"vk": {"present": 3, "available": 2, "count": 2, "ranges": "1-2",
-                                       "resolutions": [{"resolution": 1080, "ranges": "1-2", "count": 2}],
-                                       "unavailable": {"count": 1, "ranges": "3"}}},
-                    "reason": ""}
-
-    site = Site()
-    registry.register(site)
-    try:
-        body = (await client.post("/api/web_video/coverage", json={"url": "https://coverage.test/t"})).json()
-    finally:
-        registry._providers.remove(site)
-    assert body["players"]["vk"] == {"present": 3, "available": 2, "count": 2, "ranges": "1-2",
-                                     "resolutions": [{"resolution": 1080, "ranges": "1-2", "count": 2}],
-                                     "unavailable": {"count": 1, "ranges": "3"},
-                                     "not_obtained": {"count": 0, "ranges": ""}}
-    assert body["reason"] == ""
-
-
-@pytest.mark.asyncio
-async def test_the_coverage_of_a_release_without_one_is_empty(system):
-    _, _, client = system
-    body = (await client.post("/api/web_video/coverage", json={"url": "http://kinozal.tv/details.php?id=1"})).json()
-    assert body == {"players": {}, "reason": ""}
-
-
-@pytest.mark.asyncio
-async def test_the_layout_of_a_release_without_one_is_empty(system):
-    _, _, client = system
-    body = (await client.post("/api/web_video/layout", json={"url": "http://kinozal.tv/details.php?id=1"})).json()
-    assert body == {"sources": [], "selected_source": None, "reason": ""}
-
-
-@pytest.mark.asyncio
-async def test_parse_url_of_a_torrent_has_no_layout(system):
+async def test_parse_url_of_a_torrent_page_has_only_what_a_torrent_form_needs(system):
     _, _, client = system
     body = (await client.post("/api/parse_url", json={"url": "http://kinozal.tv/details.php?id=1"})).json()
-    assert body["layout"] is None
+    assert set(body) == {"success", "title", "torrents", "tracker_info"}
+
+
+@pytest.mark.asyncio
+async def test_parse_url_of_an_address_nobody_reads_says_so_in_the_words_of_sources(system):
+    _, _, client = system
+    resp = await client.post("/api/parse_url", json={"url": "http://nowhere.test/page"})
+    assert resp.status_code == 400
+    assert "трекер не распознан" in resp.json()["error"]
 
 
 @pytest.mark.asyncio
@@ -403,18 +281,10 @@ async def test_parser_profiles_crud_flow(system):
     resp = await client.post("/api/parser-rules/reorder", json=[rule_id])
     assert resp.json()["success"] is True
 
-    # тест конструктора — форма старого ответа
-    resp = await client.post("/api/parser-profiles/test", json={
-        "profile_id": profile_id,
-        "videos": [{"title": "Тайтл 5 серия"}]})
-    body = resp.json()
-    assert body[0]["source_data"] == {"title": "Тайтл 5 серия"}
-    assert "extracted" in body[0]["result"]
-
     # удаление: занятый серией профиль — 400, свободный — ок
     resp = await client.delete("/api/parser-profiles/1")
     assert resp.status_code == 400
-    assert "используется" in resp.json()["error"]
+    assert parse(resp.json()["error"])["code"] == "profile_in_use"
     resp = await client.delete(f"/api/parser-profiles/{profile_id}")
     assert resp.json()["success"] is True
 
@@ -467,98 +337,6 @@ async def test_saved_paths_are_fs_safe(system):
                              json={"path": " /nas/Series: test\\sub "})
     assert resp.status_code == 200
     assert [p["path"] for p in resp.json()["paths"]] == ["/nas/Series test/sub"]
-
-
-@pytest.mark.asyncio
-async def test_scrape_titles_endpoint(system, monkeypatch):
-    """Verify scrape-titles validation, VK single-video rejection, and web provider routing."""
-    from modules.sources.video_providers import get_default_registry
-    from modules.sources.video_providers.base import BaseVideoProvider
-
-    class FakeVideoProvider(BaseVideoProvider):
-        name = "fakeprovider"
-        domains = ("fakevideo.org",)
-
-        def match_url(self, url: str) -> bool:
-            return "fakevideo.org" in url
-
-        def canonical_url(self, url: str) -> str:
-            return url
-
-        async def parse_release(self, url: str, http: httpx.AsyncClient) -> dict:
-            return {
-                "canonical_url": url,
-                "title": {"ru": "Тест", "en": "Test"},
-                "titles": ["Серия 1", "Серия 2", "Серия 3 Special"],
-                "resolution": 2160,
-                "videos": [
-                    {"title": "Серия 1", "resolution": 1080},
-                    {"title": "Серия 2", "resolution": 2160},
-                    {"title": "Серия 3 Special", "resolution": 1080},
-                ],
-                "episodes_count": 3,
-                "provider": self.name,
-                "source_type": "web_video",
-                "releases": [],
-            }
-
-        async def scan_episodes(self, url: str, http: httpx.AsyncClient,
-                                series: dict, episodes: list[int] | None = None,
-                                progress=None) -> dict:
-            return {"videos": [
-                {"title": "Серия 1", "url": "https://fake/1",
-                 "publication_date": "2026-10-01T12:00:00Z", "resolution": 1080},
-                {"title": "Серия 2", "url": "https://fake/2",
-                 "publication_date": "2026-10-02T12:00:00Z", "resolution": 2160},
-                {"title": "Серия 3 Special", "url": "https://fake/3",
-                 "publication_date": "2026-10-03T12:00:00Z", "resolution": 1080},
-            ], "players": {}}
-
-        async def resolve_stream(self, url: str, http: httpx.AsyncClient,
-                                 max_height: int | None = None) -> dict | None:
-            return None
-
-    # The default registry is process-wide: the fake must not outlive this test.
-    registry = get_default_registry()
-    monkeypatch.setattr(registry, "_providers", [*registry._providers, FakeVideoProvider()])
-    bus, _, client = system
-
-    # 1. Empty URL
-    resp = await client.post("/api/parser-profiles/scrape-titles", json={"channel_url": ""})
-    assert resp.status_code == 400
-    assert "Необходимо указать ссылку" in resp.json()["error"]
-
-    # 2. Single VK video link (must return 400, not 500 or NameError)
-    resp = await client.post("/api/parser-profiles/scrape-titles",
-                             json={"channel_url": "https://vkvideo.ru/video-170515668_456256365"})
-    assert resp.status_code == 400
-    assert "ссылка на отдельное видео" in resp.json()["error"]
-
-    # 3. Tracker URL rejected with 400
-    resp_tracker = await client.post("/api/parser-profiles/scrape-titles",
-                                     json={"channel_url": "http://kinozal.tv/details.php?id=1"})
-    assert resp_tracker.status_code == 400
-    assert "торрент-трекера" in resp_tracker.json()["error"]
-
-    # 4. Web video release URL returns parsed videos
-    resp_web = await client.post("/api/parser-profiles/scrape-titles",
-                                 json={"channel_url": "https://fakevideo.org/release/battle-spirit"})
-    assert resp_web.status_code == 200
-    items = resp_web.json()
-    assert len(items) == 3
-    assert items[0]["title"] == "Серия 1"
-    assert items[1]["resolution"] == 2160
-
-    # 5. Filtering by query
-    resp_filtered = await client.post("/api/parser-profiles/scrape-titles",
-                                     json={"channel_url": "https://fakevideo.org/release/battle-spirit",
-                                           "query": "Special"})
-    assert resp_filtered.status_code == 200
-    filtered_items = resp_filtered.json()
-    assert len(filtered_items) == 1
-    assert filtered_items[0]["title"] == "Серия 3 Special"
-
-
 
 
 @pytest.mark.asyncio

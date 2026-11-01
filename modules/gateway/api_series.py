@@ -11,11 +11,11 @@ import json
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from core import BusRequestError, is_video_source
+from core import BusRequestError
 from core.contracts import DubItem
 
 from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, OkResponse,
-                      QueueTask, SeriesObject,
+                      QueueTask, SeriesCreate, SeriesObject, SeriesUpdate,
                       VoiceDubs)
 
 # Общая документация веток ошибок (отдаются через JSONResponse, на них
@@ -69,32 +69,31 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         series = await gw.request("catalog.series.list", {}, timeout=15)
         reply = await gw.request("metadata.map.list", {}, timeout=10)
         mappings = {m["series_id"]: m for m in reply["mappings"]}
-        vk = await _counts("scan.media.downloaded_counts")
-        torrent = await _counts("torrents.db.downloaded_counts")
+        # Each owner counts its own rows and a series has rows with one of them only, so the sum needs no kind.
+        counts = [await _counts("scan.media.downloaded_counts"),
+                  await _counts("torrents.db.downloaded_counts")]
         for s in series:
             s["last_scan_time"] = _iso(s.get("last_scan_time"))
             _attach_tmdb(s, mappings.get(s["id"]))
-            counts = vk if is_video_source(s.get("source_type")) else torrent
-            s["downloaded_episodes_count"] = counts.get(s["id"], 0)
+            s["downloaded_episodes_count"] = sum(each.get(s["id"], 0) for each in counts)
         return series
 
-    @r.post("/api/series", response_model=CreatedSeries)
-    async def add_series(request: Request):
-        data = await request.json()
+    @r.post("/api/series", response_model=CreatedSeries, responses=_ERRORS)
+    async def add_series(body: SeriesCreate):
+        data = body.model_dump(mode="json", exclude={"tmdb_data", "torrents"}, exclude_unset=True)
         try:
             series = await gw.request("catalog.series.create", {"data": data},
                                       timeout=15)
         except BusRequestError as exc:
             return _error_response(exc)
         series_id = series["id"]
-        if tmdb_data := data.get("tmdb_data"):
+        if body.tmdb_data:
             await gw.request("metadata.map.set", {
-                "series_id": series_id, "tmdb_data": tmdb_data}, timeout=10)
-        if data.get("source_type", "torrent") == "torrent" \
-                and data.get("torrents"):
+                "series_id": series_id, "tmdb_data": body.tmdb_data}, timeout=10)
+        if body.torrents:
             try:
                 await gw.request("torrents.db.add", {
-                    "series_id": series_id, "torrents": data["torrents"]},
+                    "series_id": series_id, "torrents": body.torrents},
                     timeout=10)
             except BusRequestError as exc:
                 gw.log.warning("торренты формы добавления не записаны "
@@ -135,16 +134,13 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError as exc:
             return _error_response(exc, with_success=False)
         s["last_scan_time"] = _iso(s.get("last_scan_time"))
-        if s.get("source_type") == "torrent":
+        # `sources` decides which address is a tracker's; a series with no such address has no tracker_info.
+        for source in s["sources"]:
             reply = await gw.request("sources.tracker.resolve",
-                                     {"url": s["url"]}, timeout=10)
-            s["tracker_info"] = reply["tracker"]
-        if is_video_source(s.get("source_type")):
-            try:
-                s["availability"] = await gw.request(
-                    "scan.availability", {"series_id": series_id}, timeout=10)
-            except BusRequestError:
-                s["availability"] = None
+                                     {"url": source["url"]}, timeout=10)
+            if reply["tracker"]:
+                s["tracker_info"] = reply["tracker"]
+                break
         reply = await gw.request("metadata.map.get",
                                  {"series_id": series_id}, timeout=10)
         _attach_tmdb(s, reply["mapping"])
@@ -152,46 +148,34 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.post("/api/series/{series_id}", response_model=OkResponse,
             response_model_exclude_none=True, responses=_ERRORS)
-    async def update_series(series_id: int, request: Request):
-        """Сохранение свойств: catalog → metadata → library/renaming
-        (сценарий Р-19; цепочка «переместили → переименовали» — Р-17)."""
-        data = await request.json()
+    async def update_series(series_id: int, body: SeriesUpdate):
+        """Saving the properties: catalog, then metadata, then library or renaming.
+        The sources are not changed here; the layout of a video series is counted again on
+        series.updated, and what renaming does for each kind of series is renaming's own."""
+        sent = body.model_dump(mode="json", exclude_unset=True)
         try:
             series = await gw.request("catalog.series.get",
                                       {"series_id": series_id}, timeout=10)
-            fields = {k: v for k, v in data.items()
-                      if k not in ("save_path", "last_scan_time",
-                                   "tmdb_data")}
+            fields = {k: v for k, v in sent.items()
+                      if k not in ("save_path", "tmdb_data")}
             await gw.request("catalog.series.update", {
                 "series_id": series_id, "fields": fields}, timeout=10)
         except BusRequestError as exc:
             return _error_response(exc)
-        if tmdb_data := data.get("tmdb_data"):
+        if tmdb_data := sent.get("tmdb_data"):
             await gw.request("metadata.map.set", {
                 "series_id": series_id, "tmdb_data": tmdb_data}, timeout=10)
-        new_path = data.get("save_path")
-        path_changed = bool(new_path and new_path != series.get("save_path"))
-        is_vk = is_video_source(series.get("source_type"))
-        if path_changed:
+        new_path = sent.get("save_path")
+        if new_path and new_path != series.get("save_path"):
             try:
                 await gw.request("library.relocate", {
                     "series_id": series_id, "new_path": new_path},
                     timeout=15)
             except BusRequestError as exc:
                 return _error_response(exc)
-        elif not is_vk:
-            # торрент без смены пути: переименование на месте (как оригинал;
-            # при перемещении это делает сам library, Р-17)
+        else:
+            # Without a move the files are renamed in place; on a move library does it.
             gw.send_command("renaming.reprocess", {"series_id": series_id})
-        # VK: «Сохранить» = ПОЛНЫЙ процесс без загрузки (смена профиля должна
-        # быть процессно обоснованной): пере-скан по (возможно новому)
-        # профилю + переименование всех файлов + усыновление с диска, но БЕЗ
-        # постановки загрузок. Реюз _run_series(download=False) — он сам в
-        # верном порядке делает reprocess → fs.sync → re-scan → verify →
-        # (без dispatch). Заменяет прежний одиночный fs.sync.
-        if is_vk:
-            gw.send_command("scan.series.run",
-                            {"series_id": series_id, "download": False})
         return {"success": True,
                 "message": "Задача на обновление принята в обработку."}
 
@@ -220,16 +204,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         topic = "catalog.viewing.start" if viewing else "catalog.viewing.stop"
         gw.send_command(topic, {"series_id": series_id})
         if viewing:
-            try:
-                series = await gw.request("catalog.series.get",
-                                          {"series_id": series_id},
-                                          timeout=10)
-            except BusRequestError:
-                return {"success": True}
-            sync_topic = ("downloads.fs.sync"
-                          if is_video_source(series.get("source_type"))
-                          else "torrents.fs.verify")
-            gw.send_command(sync_topic, {"series_id": series_id})
+            # Each owner of downloaded files checks its own and finds nothing of a foreign series, so the
+            # gateway needs no kind to choose between them.
+            for sync_topic in ("downloads.fs.sync", "torrents.fs.verify"):
+                gw.send_command(sync_topic, {"series_id": series_id})
         return {"success": True}
 
     @r.post("/api/series/{series_id}/toggle_auto_scan",
@@ -291,25 +269,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError as exc:
             return _error_response(exc)
         return {"success": True}
-
-    @r.put("/api/series/{series_id}/vk-quality-priority",
-           response_model=OkResponse, response_model_exclude_none=True,
-           responses=_ERRORS)
-    async def vk_quality_priority(series_id: int, request: Request):
-        data = await request.json()
-        priority = data.get("priority")
-        if not isinstance(priority, list):
-            return JSONResponse(
-                {"success": False, "error": "Приоритет должен быть списком"},
-                status_code=400)
-        try:
-            await gw.request("catalog.series.update", {
-                "series_id": series_id,
-                "fields": {"vk_quality_priority": json.dumps(priority)}},
-                timeout=10)
-        except BusRequestError as exc:
-            return _error_response(exc)
-        return {"success": True, "message": "Приоритет качества сохранен."}
 
     @r.get("/api/series/{series_id}/torrents/history",
            response_model=list[DynamicObject])

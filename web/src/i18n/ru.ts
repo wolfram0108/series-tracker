@@ -208,6 +208,8 @@ export const ru = {
   "reason.last_source": "Единственный источник сериала удалить нельзя",
   "reason.source_exists": "Этот источник уже есть у сериала",
   "reason.profile_not_found": "Профиль правил не найден",
+  "reason.not_a_torrent_page": "Страницу этого адреса читает сайт, а не трекер: добавьте её источником сериала",
+  "reason.source_not_found": "У этого сериала нет источника {source_id}",
   "reason.profile_in_use": "Профиль используется источниками сериалов: {sources}",
   "reason.unknown_lever": "Рычага «{lever}» нет в реестре",
   "reason.bad_target": "Цель не подходит рычагу «{lever}»",

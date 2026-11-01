@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -19,9 +18,10 @@ from core import BusRequestError
 from core import logging as core_logging
 from core.contracts import (ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView, VoiceSettingsDraft,
                             VoiceSettingsSaved, VoiceSettingsView)
+from core.reasons import reason
 
-from .routing import route_per_method
-from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse, ParsedUrl, WebVideoCoverage, WebVideoLayout
+from .routing import refusal, route_per_method
+from .schemas import DynamicObject, ErrorOnly, ErrorResponse, OkResponse, ParsedUrl, ParseUrlRequest
 
 # Документация веток ошибок (JSONResponse, response_model не трогает).
 _ERR = {c: {"model": ErrorResponse} for c in (400, 403, 404, 409, 500)}
@@ -34,19 +34,23 @@ LOGGING_MODULES = {
         {"name": "gateway", "description": "HTTP/SSE-шлюз: запросы фронта и трансляция событий."},
         {"name": "catalog", "description": "Каталог сериалов: CRUD, агрегатор статусов и занятости."},
         {"name": "settings", "description": "Хранилище настроек (ключ-значение)."},
+        {"name": "auth", "description": "Вход администратора и смена пароля."},
     ],
     "Конвейер": [
-        {"name": "scan", "description": "Сканирование: планировщик, кандидаты, план загрузки."},
+        {"name": "scan", "description": "Синхронизация и скан: планировщик, референсы, план загрузки."},
         {"name": "torrents", "description": "qBittorrent и торрент-конвейер (стадии обработки)."},
-        {"name": "downloads", "description": "Загрузка VK-видео (yt-dlp), очередь и прогресс."},
+        {"name": "downloads", "description": "Загрузка видео (yt-dlp), очередь и прогресс."},
         {"name": "slicing", "description": "Нарезка компиляций ffmpeg по главам."},
         {"name": "renaming", "description": "Переименование файлов и переобработка имён."},
         {"name": "library", "description": "Медиатека: каталоги и перемещение сериалов."},
+        {"name": "voices", "description": "Озвучки: группы, загрузка и дорожки рядом с референсом."},
+        {"name": "conform", "description": "Выравнивание озвучек: связь с демоном track-muxer."},
     ],
     "Источники и метаданные": [
-        {"name": "sources", "description": "Парсеры трекеров и VK API."},
+        {"name": "sources", "description": "Парсеры трекеров, таблицы страниц сайтов и плееры."},
         {"name": "trackerauth", "description": "Авторизация на трекерах, сессии и куки."},
         {"name": "rules", "description": "Движок правил и форматирование имён."},
+        {"name": "composition", "description": "Раскладка сериала и настройки выхода."},
         {"name": "metadata", "description": "TMDB: поиск и привязки сериалов."},
     ],
 }
@@ -109,54 +113,22 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     # --- разбор URL (форма добавления) ---------------------------------------------
 
     @r.post("/api/parse_url", response_model=ParsedUrl, response_model_exclude_unset=True, responses=_ERR1)
-    async def parse_url(request: Request):
-        data = await request.json()
+    async def parse_url(body: ParseUrlRequest):
+        """A torrent page for the add form. A page that a site reads is no torrent page: `composition.preview`
+        shows it, and here it is refused with a code."""
         try:
-            result = await gw.request("sources.parse",
-                                      {"url": data["url"]}, timeout=300)
+            site = await gw.request("sources.site.resolve", {"url": body.url}, timeout=10)
+            if site["site"] is not None:
+                return JSONResponse({"error": reason("not_a_torrent_page")}, status_code=400)
+            result = await gw.request("sources.parse", {"url": body.url}, timeout=300)
         except BusRequestError as exc:
-            return JSONResponse({"error": str(exc).split(": ", 1)[-1]},
-                                status_code=400)
+            return refusal(exc, 400, with_success=False)
         torrents = [{**rel,
                      "link": rel.get("link") or rel.get("magnet"),
                      "date_time": rel.get("date_marker")}
                     for rel in result.get("releases", [])]
-        layout = None
-        if result.get("sources"):
-            try:
-                layout = await gw.request("voices.layout", {
-                    "sources": result["sources"],
-                    "reference": result.get("selected_source")}, timeout=10)
-            except BusRequestError as exc:
-                gw.log.warning("раскладка озвучек не посчитана: %s", exc)
         return {"success": True, "title": result.get("title"),
-                "torrents": torrents, "tracker_info": result.get("tracker"),
-                "source_type": result.get("source_type"),
-                "titles": result.get("titles", []),
-                "canonical_url": result.get("canonical_url"),
-                "episodes_count": result.get("episodes_count"),
-                "players": result.get("players", {}),
-                "sources": result.get("sources", []),
-                "selected_source": result.get("selected_source"),
-                "layout": layout,
-                "has_layout": bool(result.get("has_layout")),
-                "resolution": result.get("resolution")}
-
-    @r.post("/api/web_video/coverage", response_model=WebVideoCoverage, responses=_ERR1)
-    async def web_video_coverage(request: Request):
-        data = await request.json()
-        try:
-            return await gw.request("sources.video.coverage", {"url": data["url"]}, timeout=900)
-        except BusRequestError as exc:
-            return JSONResponse({"error": str(exc).split(": ", 1)[-1]}, status_code=400)
-
-    @r.post("/api/web_video/layout", response_model=WebVideoLayout, responses=_ERR1)
-    async def web_video_layout(request: Request):
-        data = await request.json()
-        try:
-            return await gw.request("sources.video.layout", {"url": data["url"]}, timeout=300)
-        except BusRequestError as exc:
-            return JSONResponse({"error": str(exc).split(": ", 1)[-1]}, status_code=400)
+                "torrents": torrents, "tracker_info": result.get("tracker")}
 
     # --- настройки -------------------------------------------------------------------
 
@@ -366,11 +338,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- конструктор правил -----------------------------------------------------------
 
-    def _value_error(exc: BusRequestError, code: int):
-        return JSONResponse(
-            {"success": False, "error": str(exc).split(": ", 1)[-1]},
-            status_code=code)
-
     @r.get("/api/parser-profiles", response_model=list[DynamicObject])
     async def profiles_list():
         return await gw.request("rules.profiles.list", {}, timeout=10)
@@ -389,7 +356,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             reply = await gw.request("rules.profiles.create",
                                      {"name": name}, timeout=10)
         except BusRequestError as exc:
-            return _value_error(exc, 409)
+            return refusal(exc, 409)
         return JSONResponse({"success": True, "id": reply["id"]},
                             status_code=201)
 
@@ -406,7 +373,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 "profile_id": profile_id, "data": {"name": data["name"]}},
                 timeout=10)
         except BusRequestError as exc:
-            return _value_error(exc, 409)
+            return refusal(exc, 409)
         return {"success": True}
 
     @r.delete("/api/parser-profiles/{profile_id}", response_model=OkResponse,
@@ -416,7 +383,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             await gw.request("rules.profiles.delete",
                              {"profile_id": profile_id}, timeout=10)
         except BusRequestError as exc:
-            return _value_error(exc, 400)
+            return refusal(exc, 400)
         return {"success": True}
 
     @r.get("/api/parser-profiles/{profile_id}/rules",
@@ -434,95 +401,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             reply = await gw.request("rules.rules.add", {
                 "profile_id": profile_id, "data": data}, timeout=10)
         except BusRequestError as exc:
-            return _value_error(exc, 400)
+            return refusal(exc, 400)
         return {"success": True, "id": reply["id"]}
-
-    @r.post("/api/parser-profiles/scrape-titles",
-            response_model=list[DynamicObject], responses=_ERR1)
-    async def scrape_titles(request: Request):
-        data = await request.json()
-        channel_url = (data.get("channel_url") or "").strip()
-        if not channel_url:
-            return JSONResponse(
-                {"error": "Необходимо указать ссылку или URL канала"}, status_code=400)
-
-        # Reject individual VK video links with a clear explanatory error
-        if re.search(r"(?:vk\.com|vkvideo\.ru)/video-?\d+_\d+", channel_url):
-            return JSONResponse(
-                {"error": "Указана ссылка на отдельное видео. Для сбора названий укажите ссылку на канал VK (например https://vkvideo.ru/@channel_name)."},
-                status_code=400)
-
-        # 1. Web video provider branch
-        is_vk = ("vk.com" in channel_url.lower()
-                 or "vkvideo.ru" in channel_url.lower()
-                 or channel_url.startswith("@"))
-        if not is_vk and channel_url.startswith(("http://", "https://")):
-            try:
-                parse_res = await gw.request("sources.parse", {"url": channel_url},
-                                             timeout=180)
-                if parse_res:
-                    if parse_res.get("source_type") != "web_video" or parse_res.get("tracker"):
-                        return JSONResponse(
-                            {"error": "Указан URL торрент-трекера. Функция 'Получить с сайта' предназначена для видеохостингов и веб-релизов. Для торрентов используйте проверку по именам раздач."},
-                            status_code=400)
-
-                    # Rule-test cards must carry facts: probe every episode page,
-                    # exactly like the scan does, instead of a release preview.
-                    scan = await gw.request("sources.video.scan", {
-                        "url": parse_res.get("canonical_url") or channel_url,
-                        "series": {"name": (parse_res.get("title") or {}).get("ru")},
-                    }, timeout=900)
-                    videos = scan.get("videos") or []
-                    if not videos:
-                        videos = [{"title": title, "resolution": None}
-                                  for title in parse_res.get("titles") or []]
-
-                    query = (data.get("query") or "").strip()
-                    terms = [t.strip().lower() for t in query.split("/") if t.strip()]
-                    if terms:
-                        videos = [v for v in videos
-                                  if any(term in v.get("title", "").lower() for term in terms)]
-
-                    return videos
-            except Exception as exc:
-                err_msg = str(exc).split(': ', 1)[-1]
-                return JSONResponse(
-                    {"error": f"Ошибка сбора названий с сайта: {err_msg}"},
-                    status_code=500)
-
-        # 2. VK channel scan
-        try:
-            reply = await gw.request("sources.vk.scan", {
-                "channel_url": channel_url,
-                "query": data.get("query"),
-                "search_mode": data.get("search_mode", "search")},
-                timeout=900)
-        except BusRequestError as exc:
-            err_msg = str(exc).split(': ', 1)[-1]
-            if "в URL канала нет имени" in err_msg:
-                return JSONResponse(
-                    {"error": "В URL канала нет имени (@...). Укажите ссылку на канал VK Video (например https://vkvideo.ru/@channel_name)."},
-                    status_code=400)
-            return JSONResponse(
-                {"error": f"Ошибка на сервере при скрапинге: {err_msg}"},
-                status_code=500)
-        return reply["videos"]
-
-    @r.post("/api/parser-profiles/test", response_model=list[DynamicObject],
-            responses=_ERR1)
-    async def rules_test(request: Request):
-        data = await request.json()
-        if not data.get("profile_id"):
-            return JSONResponse({"error": "profile_id не указан"},
-                                status_code=400)
-        videos = data.get("videos", [])
-        if not videos:
-            return JSONResponse(
-                {"error": "Не переданы данные для тестирования"},
-                status_code=400)
-        return await gw.request("rules.test", {
-            "profile_id": data["profile_id"], "videos": videos},
-            timeout=60)
 
     @r.put("/api/parser-rules/{rule_id}", response_model=OkResponse,
            response_model_exclude_none=True, responses=_ERR)
@@ -532,7 +412,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             await gw.request("rules.rules.update",
                              {"rule_id": rule_id, "data": data}, timeout=10)
         except BusRequestError as exc:
-            return _value_error(exc, 400)
+            return refusal(exc, 400)
         return {"success": True}
 
     @r.delete("/api/parser-rules/{rule_id}", response_model=OkResponse,

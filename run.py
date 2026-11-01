@@ -20,11 +20,12 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 
-from core import Bus, Runner
+from core import Bus, Envelope, Runner
 from core.db import Database
 from core.logging import configure, get_logger
 from modules.auth import AuthModule
 from modules.catalog import CatalogModule
+from modules.composition import CompositionModule
 from modules.conform import ConformModule
 from modules.downloads import DownloadsModule
 from modules.gateway import GatewayModule
@@ -88,6 +89,9 @@ modules = [
     RenamingModule(bus, db),
     SlicingModule(bus, db),
     VoicesModule(bus, db),
+    # composition asks catalog, sources, rules and voices at its start and then publishes composition.changed, so scan
+    # and voices must be subscribed by then; a request of voices that comes too early is deferred to that event.
+    CompositionModule(bus, db),
     # Alignment daemon (track-muxer): mirrored read-only; no address, no bridge.
     ConformModule(bus, default_url=os.environ.get("ST_CONFORM_URL", "")),
 ]
@@ -106,6 +110,8 @@ runner = Runner(bus, modules)
 @asynccontextmanager
 async def _lifespan(_app):
     await runner.start()
+    # Whoever needs the whole system (the gateway reads the debug groups of logging) acts on this, not on a pause.
+    bus.publish(Envelope(topic="system.started", kind="event"))
     log.info("система поднята")
     try:
         yield

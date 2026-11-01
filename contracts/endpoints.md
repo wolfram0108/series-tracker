@@ -1,6 +1,6 @@
 # HTTP API — справочник (v2)
 
-> Актуально на **2026-10-20**, коммит `1f016f4`. Источник истины — код
+> Актуально на **2026-11-01** (этап 10, П-8). Источник истины — код
 > `modules/gateway/api_*.py`; перечень снят с живого приложения
 > (`GatewayModule._create_app`), а не из документации.
 >
@@ -13,22 +13,21 @@
 
 | | |
 |---|---|
-| Уникальных путей | 74 |
-| Метод-эндпоинтов (путь × метод) | 90 |
-| Путей под `/api` | 68 |
-| Метод-эндпоинтов под `/api` | 84 |
+| Уникальных путей | 85 |
+| Метод-эндпоинтов (путь × метод) | 106 |
+| Путей под `/api` | 79 |
+| Метод-эндпоинтов под `/api` | 100 |
 | Служебных путей вне `/api` | 5: `/`, `/legacy`, `/v2`, `/v2/`, `/favicon.svg` |
 
 Один маршрут условный: `POST /api/_diag/echo` существует только при запуске
-gateway с `diag=True` (в проде выключен) — в таблице 90 он учтён, в счёт
-84 метод-эндпоинтов под `/api` — нет.
+gateway с `diag=True` (в проде выключен) — в таблице 106 он учтён, в счёт
+100 метод-эндпоинтов под `/api` — нет.
 
 `/docs` и `/openapi.json` (собственные маршруты FastAPI) появляются только
 при `ST_DOCS_ENABLED=true` и в реестр не входят.
 
-Файлы-источники: `api_auth.py` (6 путей), `api_series.py` (13),
-`api_system.py` (7), `api_media.py` (18), `api_settings.py` (26),
-`module.py` (5 служебных + `/api/stream`).
+Файлы-источники: `api_auth.py` (6 путей), `api_series.py` (10), `api_sources.py` (5), `api_output.py` (4),
+`api_system.py` (9), `api_media.py` (17), `api_settings.py` (27), `module.py` (5 служебных + `/api/stream` + диагностический).
 
 ---
 
@@ -88,17 +87,16 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 
 | Метод | Путь | Назначение | Панель |
 |---|---|---|---|
-| GET | `/api/series` | Список сериалов со статусами и счётчиком скачанного | `stores/series.ts` |
-| POST | `/api/series` | Создание серии (+ TMDB-маппинг, + раздачи) | `AddSeriesModal.vue` |
+| GET | `/api/series` | Список сериалов: `kind`, `sources`, статусы, счётчик скачанного | `stores/series.ts` |
+| POST | `/api/series` | Создание серии с источниками (минимум один; + TMDB-маппинг, + раздачи торрента) | `AddSeriesModal.vue` |
 | GET | `/api/series/active_torrents` | Прогресс активных загрузок с именами серий | — |
-| GET | `/api/series/{series_id}` | Карточка серии (+ `tracker_info` для торрентов, `availability` для web-видео) | `StatusModal.vue`, `StatusComposition.vue`, `StatusVkComposition.vue` |
-| POST | `/api/series/{series_id}` | Сохранение свойств: catalog → metadata → library/renaming | `StatusProperties.vue` |
+| GET | `/api/series/{series_id}` | Карточка серии: `kind`, `sources`, `tracker_info` (если адрес источника — трекер) | `StatusModal.vue`, `StatusComposition.vue`, `StatusVkComposition.vue` |
+| POST | `/api/series/{series_id}` | Сохранение свойств серии (без источников): catalog → metadata → library/renaming | `StatusProperties.vue` |
 | DELETE | `/api/series/{series_id}` | Удаление серии (каскад по событию) | `App.vue` |
 | POST | `/api/series/{series_id}/state` | Эфемерный viewing: открытие/закрытие статус-окна | `stores/ui.ts` |
 | POST | `/api/series/{series_id}/toggle_auto_scan` | Вкл/выкл автоскана серии | `App.vue` |
 | POST | `/api/series/{series_id}/ignored-seasons` | Список игнорируемых сезонов | `StatusComposition.vue`, `StatusVkComposition.vue` |
 | PUT | `/api/series/{series_id}/ignored-episodes` | Память отключённых серий | `StatusComposition.vue` |
-| PUT | `/api/series/{series_id}/vk-quality-priority` | Приоритет качества для видео-источника | `StatusVkComposition.vue` |
 | GET | `/api/series/{series_id}/torrents/history` | История раздач серии | `StatusHistory.vue`, `StatusProperties.vue` |
 | POST | `/api/series/{series_id}/scan` | Синхронный скан одной серии | `App.vue` |
 
@@ -118,12 +116,11 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | POST | `/api/media-items/{unique_id}/verify-sliced-files` | Сверка нарезок с диском | — |
 | POST | `/api/series/{series_id}/deep-adoption` | Глубокое усыновление (фон) | `StatusVkComposition.vue` |
 | GET | `/api/series/{series_id}/sliced-files` | Нарезки с именем родителя и сезоном | `StatusVkComposition.vue` |
-| GET | `/api/series/{series_id}/composition` | Состав композиции | `StatusComposition.vue`, `StatusVkComposition.vue` |
 | GET | `/api/series/{series_id}/voices` | Озвучки сериала: `{items: [DubItem]}` — `{season, episode, voice_key, voice_label, status, state, hint, detail: {code, params} \| null}` (Р-43, Р-44, Р-46, Р-47); интерфейс озвучки получает по SSE (`voice_dubs_snapshot`, `voice_dub_update`), точка нужна для диагностики | — |
 | GET | `/api/series/{series_id}/rename_preview` | Предпросмотр новых имён файлов | `StatusVkComposition.vue` |
 | POST | `/api/series/{series_id}/reprocess` | Переобработка имён файлов (торрент) | `StatusComposition.vue` |
 | POST | `/api/series/{series_id}/reprocess_vk_files` | Переобработка имён файлов (видео) | `StatusVkComposition.vue` |
-| GET | `/api/series/{series_id}/source-filenames` | Имена исходных файлов серии | `ParserTest.vue` |
+| GET | `/api/series/{series_id}/source-filenames` | Имена файлов раздач торрент-сериала для теста правил | `ParserTest.vue` |
 | POST | `/api/preview/naming/fetch` | Фоновый префетч списков файлов раздач | `AddSeriesModal.vue` |
 
 ### 3.4 Скан и очереди — `api_system.py`
@@ -144,9 +141,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 |---|---|---|---|
 | GET | `/api/auth` | Креды внешних сервисов без секретов + статус TMDB | `SettingsAuth.vue` |
 | POST | `/api/auth` | Сохранение кредов сервисов | `SettingsAuth.vue` |
-| POST | `/api/parse_url` | Разбор URL серии: заголовок, раздачи, трекер; у web-источника — `sources`, `selected_source` и `layout` (раскладка озвучек, Р-39) и `has_layout` (провайдер описывает источники отдельно, Р-60) | `AddSeriesModal.vue`, `StatusProperties.vue` |
-| POST | `/api/web_video/coverage` | Что даёт каждый плеер веб-релиза: серии, диапазоны и разрешение по сериям; читает страницы всех серий (Р-60) | `AddSeriesModal.vue`, `StatusProperties.vue` |
-| POST | `/api/web_video/layout` | Раскладка источников веб-релиза: сезоны каталога как источники, выбранный сезон, причина при отказе (Р-60) | `AddSeriesModal.vue` |
+| POST | `/api/parse_url` | Разбор страницы трекера: заголовок, раздачи, трекер; страница, которую читает сайт, — отказ 400 `not_a_torrent_page` | `AddSeriesModal.vue`, `StatusProperties.vue` |
 | GET, POST | `/api/settings/force_replace` | Флаг «всегда заменять торренты» | `SettingsDebug.vue` |
 | GET, POST | `/api/settings/conform_clear_finished` | Флаг «очищать очередь выравнивания по завершении» (Р-59): завершённая задача уходит из истории демона вместе с графиками | `SettingsDebug.vue` |
 | GET, POST | `/api/settings/less_strict_scan` | Флаг «менее строгий скан» | `SettingsDebug.vue` |
@@ -175,8 +170,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | PUT | `/api/parser-rules/{rule_id}` | Изменение правила | `SettingsParser.vue` |
 | DELETE | `/api/parser-rules/{rule_id}` | Удаление правила | `SettingsParser.vue` |
 | POST | `/api/parser-rules/reorder` | Перестановка правил | `SettingsParser.vue` |
-| POST | `/api/parser-profiles/scrape-titles` | Сбор названий с VK-канала или видеохостинга | `ParserTest.vue` |
-| POST | `/api/parser-profiles/test` | Тест профиля правил на наборе видео | `ParserTest.vue` |
+| POST | `/api/parser-profiles/test` | Тест профиля на странице: строки для конструктора и ответ на каждую (`composition.preview`); живёт в `api_sources.py` | `ParserTest.vue` |
 | GET | `/api/logs` | Чтение логов из `logs/*.log` | `LogsModal.vue` |
 | GET | `/api/logs/groups` | Список групп логов (distinct по файлам) | `LogsModal.vue` |
 | GET | `/api/database/tables` | Список таблиц БД | `DatabaseViewerModal.vue`, `SettingsDebug.vue` |
@@ -194,9 +188,34 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | GET | `/favicon.svg` | Фавикон | браузер |
 | POST | `/api/_diag/echo` | Диагностический прокси к шине (только при `diag=True`) | — |
 
+### 3.7 Источники — `api_sources.py`
+
+| Метод | Путь | Назначение | Панель |
+|---|---|---|---|
+| GET | `/api/series/{series_id}/sources` | Источники сериала по порядку (`catalog.sources.list`) | — |
+| POST | `/api/series/{series_id}/sources` | Добавить источник; ответ `{id}` (`catalog.sources.add`) | — |
+| PUT | `/api/series/{series_id}/sources/{source_id}` | Изменить поля источника: адрес, профиль, режим поиска VK, сезон Vibix, отключённые плееры, место (`catalog.sources.update`) | — |
+| DELETE | `/api/series/{series_id}/sources/{source_id}` | Удалить источник; единственный источник — отказ `last_source` (`catalog.sources.remove`) | — |
+| POST | `/api/sources/preview` | Что показать окну об адресе, который ещё не источник сериала: состояние таблицы, сводка, строки для конструктора (`composition.preview`) | — |
+| POST | `/api/sources/resolve` | Какой сайт читает адрес и его канонический вид, без сети (`sources.site.resolve`) | — |
+
+### 3.8 Выход — `api_output.py`
+
+| Метод | Путь | Назначение | Панель |
+|---|---|---|---|
+| GET | `/api/series/{series_id}/composition` | Видео-сериал — раскладка (`composition.get`, query `include_excluded`); торрент — состав раздач (`torrents.composition`, query `refresh`) | `StatusComposition.vue`, `StatusVkComposition.vue` |
+| GET | `/api/series/{series_id}/output` | Референс каждой серии и отметка (`scan.output.get`) | — |
+| PUT | `/api/series/{series_id}/output/settings` | Значение рычага на уровне сериала, сезона или серии (`composition.settings.set`) | — |
+| POST | `/api/series/{series_id}/output/settings/reset` | Вернуть рычаги уровня в наследование (`composition.settings.reset`) | — |
+
 ---
 
 ## 4. Функции панели → эндпоинты
+
+> Раздел описывает панель **до интерфейсной части этапа 10 (П-9)**: вызовы `/api/web_video/layout`,
+> `/api/web_video/coverage`, `/api/parser-profiles/scrape-titles`, `/api/series/{series_id}/vk-quality-priority`
+> и прежние тела `POST /api/series`, `POST /api/series/{series_id}`, `POST /api/parser-profiles/test` остались в ней
+> и переводятся на эндпоинты разделов 3.7 и 3.8 в П-9. Эндпоинтов у этих вызовов больше нет.
 
 Полный перечень вызовов из `web/src` — 88 мест (83 прямых `api.METHOD(...)`,
 4 через общие хелперы `loadFlag`/`saveFlag`/`loadNum`/`saveNum`, 1 через
@@ -288,7 +307,8 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 
 ## 5. Эндпоинты, не используемые панелью
 
-8 из 84 метод-эндпоинтов под `/api` панель не вызывает.
+17 из 100 метод-эндпоинтов под `/api` панель не вызывает: 8 прежних и 9 новых эндпоинтов этапа 10, под которые
+интерфейс (П-9) ещё не перестроен.
 
 | Метод | Путь | Кто вызывает | Статус |
 |---|---|---|---|
@@ -300,15 +320,22 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 | GET | `/api/directories` | `legacy_frontend` (выбор каталога) | то же |
 | POST | `/api/downloads/queue/clear` | только тесты | админ-инструмент, в панели нет кнопки |
 | GET | `/api/me` | только тесты | панель определяет вход по `/api/auth/status` |
+| GET, POST | `/api/series/{series_id}/sources` | пока никто | эндпоинт этапа 10, интерфейс — П-9 |
+| PUT, DELETE | `/api/series/{series_id}/sources/{source_id}` | пока никто | то же |
+| POST | `/api/sources/preview`, `/api/sources/resolve` | пока никто | то же |
+| GET | `/api/series/{series_id}/output` | пока никто | то же |
+| PUT | `/api/series/{series_id}/output/settings` | пока никто | то же |
+| POST | `/api/series/{series_id}/output/settings/reset` | пока никто | то же |
 
 ---
 
 ## 6. Контракты
 
-Тела запросов разбираются вручную (`await request.json()`), схем запросов нет;
-формы ответов заданы `response_model` в `schemas.py` (база `extra="allow"` —
-лишние поля не отрезаются). Поля `ignored_seasons`, `ignored_episodes`,
-`vk_quality_priority` передаются **строкой JSON**, а не объектом.
+Тела запросов эндпоинтов этапа 10 и сохранения/создания серии — модели в `schemas.py` с `extra="forbid"`: поле,
+которого модель не знает, отклоняется кодом 422 с его именем. Прочие тела разбираются вручную (`await request.json()`).
+Формы ответов заданы `response_model` в `schemas.py` (база `extra="allow"` — лишние поля не отрезаются; новые
+эндпоинты строятся на моделях `core/contracts`). Поля `ignored_seasons`, `ignored_episodes` передаются **строкой JSON**,
+а не объектом.
 
 ### 6.1 Авторизация
 
@@ -333,34 +360,36 @@ gateway с `diag=True` (в проде выключен) — в таблице 90
 ### 6.2 Серии
 
 **GET `/api/series`** — список объектов серии. Постоянные поля: `id`, `name`,
-`name_en`, `site`, `url`, `save_path`, `source_type`, `vk_search_mode`,
-`auto_scan_enabled`, `is_busy`, `statuses`, `last_scan_time`, `tmdb_info`;
-непостоянные — `season`, `quality`, `quality_override`,
-`resolution_override`, `parser_profile_id`, `ignored_seasons`,
-`ignored_episodes`, `vk_quality_priority`, `downloaded_episodes_count`.
-`tmdb_info` — маппинг или `null`; `downloaded_episodes_count` — целое (0, если
-модуль недоступен).
+`name_en`, `site`, `save_path`, `kind` (`torrent` | `video`), `sources`, `auto_scan_enabled`,
+`is_busy`, `statuses`, `last_scan_time`, `tmdb_info`; непостоянные — `season`,
+`quality`, `quality_override`, `resolution_override`, `ignored_seasons`,
+`ignored_episodes`, `downloaded_episodes_count`. Адреса, типа источника и профиля у самого
+сериала нет: они в `sources` — списке `SeriesSource` (`id`, `series_id`,
+`position`, `url`, `source_type`, `parser_profile_id`, `vk_search_mode`,
+`vibix_season`, `players_off`). `tmdb_info` — маппинг или `null`;
+`downloaded_episodes_count` — целое (0, если модуль недоступен).
 
-**POST `/api/series`** — тело передаётся в `catalog.series.create` целиком.
-Обязательные: `url`, `name`, `name_en`, `site`, `save_path`. Необязательные:
-`source_type` (`torrent` | `vk_video` | `web_video`, по умолчанию `torrent`),
-`auto_scan_enabled` (false), `vk_search_mode` (`search`), `season`, `quality`,
-`quality_override`, `resolution_override`, `parser_profile_id`,
-`ignored_seasons` (`"[]"`), `ignored_episodes` (`"{}"`),
-`vk_quality_priority` (null), `tmdb_data`, `torrents`.
-`tmdb_data` — объект `{tmdb_id, tmdb_season_number, total_episodes,
-poster_path, series_name, year}`; `torrents` — список
-`{torrent_id, link, date_time, quality, episodes}`, `link` обязателен.
-Ответ `{success, series_id}`. Ошибка записи раздач не влияет на ответ: она
-логируется как предупреждение, серия создаётся без них.
+**POST `/api/series`** — тело `SeriesCreate`. Обязательные: `name`, `name_en`,
+`site`, `save_path`, `sources` (минимум один: `{url, source_type, parser_profile_id?,
+vk_search_mode?, vibix_season?, players_off?}`, `source_type` — `torrent` | `vk_video` |
+`web_video`). Необязательные: `season`, `quality`, `quality_override`,
+`resolution_override`, `auto_scan_enabled`, `ignored_seasons`, `ignored_episodes`,
+`tmdb_data`, `torrents` (только при торрент-источнике). Поля `url`, `source_type`,
+`parser_profile_id`, `vk_search_mode`, `vk_quality_priority` на верхнем уровне
+отклоняются (422). `tmdb_data` — объект `{tmdb_id, tmdb_season_number, total_episodes,
+poster_path, series_name, year}`; `torrents` — список `{torrent_id, link, date_time,
+quality, episodes}`, `link` обязателен. Ответ `{success, series_id}`; 400 — отказ catalog
+с кодом (`source_exists`, `profile_not_found`) или относительный путь. Ошибка записи раздач
+не влияет на ответ: она логируется как предупреждение, серия создаётся без них.
 
-**GET `/api/series/{series_id}`** — объект серии плюс `tracker_info` (только
-для `source_type = "torrent"`). Ошибки: 404 (не найден), 400, 409, 500.
+**GET `/api/series/{series_id}`** — объект серии плюс `tracker_info`, если
+адрес одного из источников — адрес трекера. Ошибки: 404 (не найден), 400, 409, 500.
 
-**POST `/api/series/{series_id}`** — все поля необязательные; меняются только
-переданные. `save_path` идёт не в `catalog`, а в `library.relocate`;
-`tmdb_data` — в `metadata.map.set`; `last_scan_time` игнорируется. Если путь
-не изменился и источник не видео — команда `renaming.reprocess`. Ответ
+**POST `/api/series/{series_id}`** — тело `SeriesUpdate`: поля серии (без источников),
+все необязательные; меняются только переданные, неизвестное поле — 422. `save_path` идёт не в `catalog`,
+а в `library.relocate`; `tmdb_data` — в `metadata.map.set`. Если путь не изменился —
+команда `renaming.reprocess` (что она делает с видео и с торрентом, решает `renaming`);
+шлюз не запускает скан, раскладка видео пересчитывается по событию `series.updated`. Ответ
 `{success, message}`.
 
 **DELETE `/api/series/{series_id}`** — query `delete_from_qb` (bool, по
@@ -368,7 +397,8 @@ poster_path, series_name, year}`; `torrents` — список
 
 **POST `/api/series/{series_id}/state`** — тело `{state: ["viewing"]}` при
 открытии статус-окна, `{state: []}` при закрытии. Открытие дополнительно
-запускает сверку файлов с диском. Ответ `{success}`.
+просит каждого владельца файлов (`downloads.fs.sync`, `torrents.fs.verify`) сверить свои файлы с диском;
+вида сериала шлюз не знает. Ответ `{success}`.
 
 **POST `/api/series/{series_id}/toggle_auto_scan`** — тело `{enabled}`
 (обязательно, иначе 400).
@@ -379,9 +409,6 @@ poster_path, series_name, year}`; `torrents` — список
 **PUT `/api/series/{series_id}/ignored-episodes`** — тело
 `{episodes: {"<сезон>": [номера]}}`. Ключ — номер серии сериала, а не файл
 раздачи: выбор обязан пережить замену релиза. 400 при отсутствии ключа.
-
-**PUT `/api/series/{series_id}/vk-quality-priority`** — тело `{priority: [...]}`;
-обязателен и должен быть списком, иначе 400. Ответ `{success, message}`.
 
 **GET `/api/series/{series_id}/torrents/history`** — список раздач: `id`,
 `series_id`, `torrent_id`, `link`, `date_time`, `quality`, `episodes`,
@@ -438,10 +465,6 @@ status_message}`.
 `series_id`, `source_media_item_unique_id`, `episode_number`, `file_path`,
 `status`, `parent_filename`, `season`.
 
-**GET `/api/series/{series_id}/composition`** — query `refresh` (bool) — полное
-обновление; для торрента дополнительно выполняется `scan.series.prepare`.
-Список элементов композиции; 404 — сериал не найден.
-
 **GET `/api/series/{series_id}/rename_preview`** — ответ
 `{preview: [{unique_id, type, current_filename, new_filename_preview}],
 needs_rename_count}`; без профиля парсера — пустой превью.
@@ -450,8 +473,9 @@ needs_rename_count}`; без профиля парсера — пустой пр
 **`/reprocess_vk_files`** — ответ `{success, message}`; 409 — переименование
 уже выполняется.
 
-**GET `/api/series/{series_id}/source-filenames`** — список строк с базовыми
-именами файлов.
+**GET `/api/series/{series_id}/source-filenames`** — список базовых имён файлов раздач
+торрент-сериала для теста правил; у видео-сериала пуст (строки для его теста даёт
+`POST /api/sources/preview`).
 
 **POST `/api/preview/naming/fetch`** — тело `{items: [{torrent_id, magnet?,
 link?}]}`; ответ сразу `{accepted: [torrent_id, ...]}`, сами списки файлов
@@ -497,8 +521,8 @@ tmdb?}`; каждый сервис — объект `{username, password?, url?}
 пишется, только если токен непустой.
 
 **POST `/api/parse_url`** — тело `{url}`; ответ `{success, title, torrents,
-tracker_info, source_type, titles, canonical_url, episodes_count,
-resolution, players, sources, selected_source, layout}`. 400 — трекер не распознан; 500 — в теле нет ключа `url`.
+tracker_info}` — страница торрент-трекера. 400 — трекер не распознан; 400 с кодом
+`not_a_torrent_page` — адрес читает сайт (`sources.site.resolve`), страница не разбирается; 422 — в теле нет `url`.
 
 **GET|POST `/api/settings/force_replace`**, **`/less_strict_scan`**,
 **`/slicing_delete_source`**, **`/conform_clear_finished`** — тело `{enabled}`; ответ GET `{enabled}`,
@@ -535,7 +559,7 @@ status, seasons: [{season_number, episode_count, air_date, name}]}`; 404 —
 **GET `/api/directories`** — query `path` (по умолчанию `/`); ответ
 `{path, items: [{name, path, type}]}`; 403 — нет доступа, 400 — не каталог.
 
-**GET `/api/parser-profiles`** — список `{id, name, preferred_voiceovers}`.
+**GET `/api/parser-profiles`** — список `{id, name}`.
 
 **POST `/api/parser-profiles`** — тело `{name}`; ответ **201** `{success, id}`;
 400 — имя не указано, 409 — профиль с таким именем уже есть.
@@ -543,8 +567,8 @@ status, seasons: [{season_number, episode_count, air_date, name}]}`; 404 —
 **PUT `/api/parser-profiles/{profile_id}`** — тело `{name}`; 400 — новое имя
 не указано, 409 — дубль имени либо профиля нет.
 
-**DELETE `/api/parser-profiles/{profile_id}`** — ответ `{success}`; 400 —
-профиль используется сериалами.
+**DELETE `/api/parser-profiles/{profile_id}`** — ответ `{success}`; 400 с кодом `profile_in_use` —
+профиль назначен источникам сериалов.
 
 **GET `/api/parser-profiles/{profile_id}/rules`** — список правил: `id`,
 `profile_id`, `name`, `priority`, `action_pattern`,
@@ -569,16 +593,6 @@ logical_operator}]`, плюс `valid` (bool) и `error` (строка причи
 
 **POST `/api/parser-rules/reorder`** — тело — **массив** id правил в новом
 порядке (не объект). Ответ `{success}`.
-
-**POST `/api/parser-profiles/scrape-titles`** — тело `{channel_url, query?,
-search_mode?}`; `search_mode` — `search` | `get_all` (только VK). Ответ —
-список `{title, url, publication_date, resolution}`. 400 — пустая ссылка,
-указано отдельное видео, указан трекер или в URL канала нет имени `@…`.
-
-**POST `/api/parser-profiles/test`** — тело `{profile_id, videos}`; `videos` —
-список объектов с полем `title`. Ответ — список
-`{source_data, match_events, result: {extracted, excluded}}`. 400 — не задан
-`profile_id` или пуст `videos`.
 
 **GET `/api/logs`** — query `group` (имя модуля), `level` (`error` |
 `warning` | `info` | `debug`), `limit` (по умолчанию 200). Ответ — список
@@ -614,9 +628,8 @@ search_mode?}`; `search_mode` — `search` | `get_all` (только VK). Отв
 собираются в список, при сохранении сериализуются в `pattern` условия или в
 `action_pattern` действия и уходят в тело `POST`/`PUT` правила. Порядок
 правил в панели меняется стрелками «вверх/вниз» (`moveRule`), и уходит в
-`POST /api/parser-rules/reorder` массивом id. Перетаскивание приоритета
-качества в статус-окне видео-сериала уходит в
-`PUT /api/series/{series_id}/vk-quality-priority`.
+`POST /api/parser-rules/reorder` массивом id. Приоритета
+разрешений пользователя больше нет (Д-36): референс выбирает `scan` по разрешению и порядку плееров.
 
 **`condition_type`** — «ЕСЛИ». Значения, которые предлагает панель:
 
@@ -736,7 +749,57 @@ POST /api/parser-profiles/{profile_id}/rules
 Правило, сломанное до появления проверки (или исправленное в базе вручную),
 при применении профиля отключается с записью причины в лог модуля `rules`,
 а не роняет профиль. Проверка без записи в базу доступна через
-`POST /api/parser-profiles/test`.
+`POST /api/parser-profiles/test`: страница показывается строками для конструктора с ответом на каждую.
+
+### 6.7 Источники
+
+Шлюз передаёт тело в запрос шины и ответ владельца обратно; видов сайтов и плееров он не знает. Отказ владельца —
+код причины (`core/reasons`) в поле `error` строкой JSON; формулировку даёт интерфейс. Статусы: `LookupError`
+владельца — 404, `ValueError` — 400, модуля нет на шине — 503.
+
+**GET `/api/series/{series_id}/sources`** — список `SeriesSource`; 404 — сериала нет.
+
+**POST `/api/series/{series_id}/sources`** — тело `{url, source_type, parser_profile_id?, vk_search_mode?, vibix_season?,
+players_off?, position?}`; поля, которых нет в теле, шлюз не посылает, умолчания подставляет `catalog`. Ответ `{id}`.
+400: `source_exists` (тот же адрес у сериала), `profile_not_found`; 404 — сериала нет.
+
+**PUT `/api/series/{series_id}/sources/{source_id}`** — тело: любое из `url`, `parser_profile_id`, `vk_search_mode`,
+`vibix_season`, `players_off`, `position`; не присланное остаётся, `null` снимает профиль и сезон Vibix; `source_type` и
+прочие поля — 422. Ответ `{success, applied}` (`applied` — поля, отличавшиеся от хранимых; без изменений события нет).
+404 с кодом `source_not_found` — источник другого сериала или его нет.
+
+**DELETE `/api/series/{series_id}/sources/{source_id}`** — ответ `{success}`; 400 с кодом `last_source` — единственный
+источник сериала; 404 с `source_not_found`.
+
+**POST `/api/sources/preview`** — тело `CompositionPreviewRequest` `{url, options?, profile_id?, series_season?,
+refresh?}`; ответ `CompositionPreviewReply` `{url, state (ready | reading | failed | absent), reason?, summary?,
+lines: [{key, line, result?}]}`. `refresh: false` ничего не читает. Пока страница читается, `state: reading`, итог —
+события `sources_table_ready` / `sources_table_failed` (запрос повторяется без чтения). Ничего не пишет.
+
+**POST `/api/sources/resolve`** — тело `{url, options?}`; ответ `{site, canonical_url}`, оба `null`, если адрес не читает
+ни один сайт; сети нет.
+
+**POST `/api/parser-profiles/test`** — тело `{url, options?, profile_id, series_season?}` (`profile_id` обязателен, иначе
+422); ответ — тот же `CompositionPreviewReply`, у каждой строки `result` — ответ конструктора (`excluded`, `season`,
+`episode`, `start`, `end`, `part`, `voiceover`, `events`, `errors`).
+
+### 6.8 Выход
+
+**GET `/api/series/{series_id}/composition`** — видео-сериал: `CompositionReply` `{series_id, rev, rows, sources, levels,
+settings}` (query `include_excluded` — вернуть и строки, которые конструктор исключил или оставил без номера серии;
+`refresh` игнорируется: синхронизацию запускает `POST /api/series/{series_id}/scan`); торрент-сериал: список состава
+раздач, query `refresh` сначала выполняет `scan.series.prepare`. 404 — сериал не найден.
+
+**GET `/api/series/{series_id}/output`** — список `Reference` `{season, episode, part, mark, source_id, row_key, player,
+voice_group, height, reason}`; `mark` — `by_level` | `own` | `other_player` | `none` | `unfit`. Сведения раскладки и
+озвучек (`/composition`, `/voices`) шлюз не склеивает: интерфейс сопоставляет их по (сезон, серия).
+
+**PUT `/api/series/{series_id}/output/settings`** — тело `{season?, episode?, lever, target?, value}`; уровень — сериал
+(без сезона), сезон или серия (сезон и серия). Ответ `{success}`. 400 с кодом: `unknown_lever`, `bad_target`,
+`bad_value`; 422 — серия без сезона или неизвестное поле тела.
+
+**POST `/api/series/{series_id}/output/settings/reset`** — тело `{season?, episode?, lever?, target?}`; без `lever`
+возвращаются все рычаги уровня. Ответ `{success}`; отказы — как у записи.
 
 ---
 
@@ -764,6 +827,12 @@ POST /api/parser-profiles/{profile_id}/rules
 | `renaming_complete` | `renaming.finished` | `{series_id}` |
 | `relocation_started` | `library.relocation.started` | `{series_id}` |
 | `relocation_finished` | `library.relocation.finished` | `{series_id, success, message}` |
+| `sources_table_progress` | `sources.table.progress` | `{url, phase, current, total}` |
+| `sources_table_ready` | `sources.table.ready` | `{url, read_at}` |
+| `sources_table_failed` | `sources.table.failed` | `{url, reason}` |
+| `composition_changed` | `composition.changed` | `{series_id, rev, episodes, summary_only}` |
+| `composition_failed` | `composition.failed` | `{series_id, reason}` |
+| `reference_changed` | `scan.reference.changed` | `{series_id, season, episode, part, mark}` |
 
 Подробный контракт событий — [sse_contract.md](sse_contract.md).
 
@@ -789,9 +858,9 @@ curl -s http://127.0.0.1:5000/openapi.json -o /tmp/openapi.json
 cd web && npm run gen:api
 ```
 
-Типы фронта лежат в `web/src/api/schema.d.ts`; они выровнены с кодом.
-Формы ответов 25 read-эндпоинтов зафиксированы golden-харнессом
-`tests/api_golden.py` (снимки в `tests/golden/api/`, вне git).
+Типы фронта лежат в `web/src/api/schema.d.ts`; они выровнены с кодом (`tests/test_contracts.py` сверяет
+типы пакетов потока событий и перечисления с моделями). Команда `npm run gen:api` берёт схему у экземпляра
+на `:5000`; стенд на свободном порту поднимается `uvicorn run:app` с `ST_DOCS_ENABLED=true` на новой БД.
 
 ---
 

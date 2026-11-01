@@ -8,9 +8,11 @@ import pytest
 
 from core import Bus
 from core.contracts import (AlignmentJob, DubEvent, DubEventStatus, DubHint, DubState, DubStatus, DubsSnapshot,
-                            JobStatus, LayoutRole, SubmitOutcome, SubmitReply)
+                            Exclusion, JobStatus, Level, ReferenceMark, RowState, SeriesKind, SourceStatus,
+                            SourceType, SubmitOutcome, SubmitReply, TableState)
 from modules.conform.module import finished_view
 from modules.gateway import GatewayModule
+from modules.gateway.module import EVENT_PACKETS
 from modules.sources.sites import SiteRegistry
 from modules.sources.sites.builtin import builtin_sites
 from modules.voices import alignment, lifecycle, repository
@@ -26,13 +28,14 @@ def ts_block(name: str) -> str:
     return SCHEMA_TS[start:SCHEMA_TS.index("\n        };", start)]
 
 
-@pytest.mark.parametrize("enum", [DubStatus, DubEventStatus, DubState, DubHint, LayoutRole])
+@pytest.mark.parametrize("enum", [DubStatus, DubEventStatus, DubState, DubHint, ReferenceMark, SourceType, SeriesKind,
+                                  SourceStatus, RowState, TableState, Exclusion, Level])
 def test_every_value_of_a_public_enum_is_in_the_generated_types(enum):
     block = ts_block(enum.__name__)
     assert all(f'"{member.value}"' in block for member in enum), enum.__name__
 
 
-@pytest.mark.parametrize("model", [DubEvent, DubsSnapshot])
+@pytest.mark.parametrize("model", EVENT_PACKETS)
 def test_the_generated_types_have_the_fields_of_the_models(model):
     fields = set(re.findall(r"^\s{12}(\w+)\??:", ts_block(model.__name__), re.MULTILINE))
     assert fields == set(model.model_fields), "run the type generation after changing a contract model"
@@ -40,7 +43,7 @@ def test_the_generated_types_have_the_fields_of_the_models(model):
 
 def test_the_api_schema_describes_the_packets_of_the_event_stream():
     schemas = GatewayModule(Bus(), docs_enabled=True, auth_required=False)._create_app().openapi()["components"]["schemas"]
-    assert {"DubEvent", "DubsSnapshot", "DubStatus", "DubState", "ReleaseSource", "Layout"} <= set(schemas)
+    assert {model.__name__ for model in EVENT_PACKETS} | {"DubStatus", "DubState", "ReferenceMark"} <= set(schemas)
     assert set(schemas["DubEvent"]["properties"]) == set(DubEvent.model_fields)
 
 

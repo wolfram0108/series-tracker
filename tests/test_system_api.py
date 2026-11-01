@@ -16,6 +16,7 @@ from modules.catalog import CatalogModule
 from modules.gateway import GatewayModule
 from modules.scan import ScanModule
 from modules.settings import SettingsModule
+from series_factory import insert_series
 
 
 @pytest.fixture
@@ -26,11 +27,7 @@ def db_path(tmp_path):
                         "PATH": "/usr/bin:/bin"},
                    cwd=".", check=True, capture_output=True)
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode) VALUES "
-            "(1, 'http://x', 'Т', 'T', 'kinozal', '/media/t', 'waiting', "
-            "'torrent', 0, 'search')")
+        insert_series(conn, id=1, name="Т", name_en="T", url="http://x", source_type="torrent")
         conn.commit()
     return str(path)
 

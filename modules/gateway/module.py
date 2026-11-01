@@ -24,7 +24,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import BaseModule, BusRequestError
-from core.contracts import DubEvent, DubsSnapshot
+from core.contracts import (CompositionChanged, CompositionFailed, DubEvent, DubsSnapshot, ReferenceChanged,
+                            TableFailed, TableProgress, TableReady)
 
 
 class AuthGateMiddleware:
@@ -138,6 +139,8 @@ def _series_added(p: dict) -> dict:
 # Топик шины -> (имя SSE-события, трансформация payload | None=как есть).
 # Контракт и решения по каждому событию — contracts/sse_contract.md (Р-18).
 # agent_heartbeat удалён по согласованию (Р-18).
+# The events of the sources, the layout and the references go as they are: a packet is whole for its part of
+# the screen, so the interface asks nothing more.
 SSE_MAP: dict[str, tuple[str, object]] = {
     "series.status.changed": ("series_updated", _series_delta),
     "series.busy.changed": ("series_updated", _series_delta),
@@ -152,8 +155,12 @@ SSE_MAP: dict[str, tuple[str, object]] = {
     "downloads.queue.changed": ("download_queue_update", _bare_tasks),
     "slicing.queue.changed": ("slicing_queue_update", _bare_tasks),
     "scan.status.changed": ("scanner_status_update", None),
-    "sources.video.progress": ("video_scan_progress", None),
-    "sources.coverage.progress": ("coverage_progress", None),
+    "sources.table.progress": ("sources_table_progress", None),
+    "sources.table.ready": ("sources_table_ready", None),
+    "sources.table.failed": ("sources_table_failed", None),
+    "composition.changed": ("composition_changed", None),
+    "composition.failed": ("composition_failed", None),
+    "scan.reference.changed": ("reference_changed", None),
     "conform.queue.changed": ("conform_queue_update", None),
     "voices.dub.changed": ("voice_dub_update", None),
     "voices.dubs.snapshot": ("voice_dubs_snapshot", None),
@@ -163,6 +170,10 @@ SSE_MAP: dict[str, tuple[str, object]] = {
     "library.relocation.started": ("relocation_started", None),
     "library.relocation.finished": ("relocation_finished", None),
 }
+
+# The packets of the event stream that the interface types: their models go into the schema of the API.
+EVENT_PACKETS = (DubEvent, DubsSnapshot, TableProgress, TableReady, TableFailed, CompositionChanged,
+                 CompositionFailed, ReferenceChanged)
 
 _KEEPALIVE_SECONDS = 15.0
 # Put into a stream's queue to end it: uvicorn waits for open responses before it stops the app.
@@ -206,16 +217,18 @@ class GatewayModule(BaseModule):
         super().__init__(bus)
         self.app = self._create_app()
 
-    # Gateway ничего не слушает декларативно: SSE-подписки создаются
-    # на каждое клиентское соединение в _sse_stream().
+    # SSE subscriptions are made per client connection in _sse_stream(); the one signal listened to
+    # declaratively is "the system is up", which run.py sends.
     def register(self) -> None:
-        pass
+        self.handle("system.started", self.on_system_started)
 
     async def on_start(self) -> None:
-        # Начальная загрузка debug-групп логирования (Р-22): settings
-        # может стартовать позже gateway — добираем с повторами.
-        self._tasks.append(asyncio.create_task(self._load_debug_groups()))
         self._end_streams_on_stop_signal()
+
+    async def on_system_started(self, env) -> None:
+        """Debug groups of logging are read once every module is up: settings starts after the gateway,
+        and waiting for it by retries would be a pause used as a sync."""
+        await self._load_debug_groups()
 
     async def on_stop(self) -> None:
         for number, previous in self._restore_signals:
@@ -246,23 +259,20 @@ class GatewayModule(BaseModule):
 
     async def _load_debug_groups(self) -> None:
         from core import logging as core_logging
-        for _ in range(20):
-            try:
-                reply = await self.request("settings.values.by_prefix",
-                                           {"prefix": "debug_enabled_"},
-                                           timeout=5)
-            except BusRequestError:
-                await asyncio.sleep(0.5)
-                continue
-            groups = {k.removeprefix("debug_enabled_")
-                      for k, v in reply["values"].items() if v == "true"}
-            core_logging.set_debug_groups(groups)
-            if groups:
-                self.log.info("DEBUG-логирование включено для групп: %s",
-                              ", ".join(sorted(groups)))
+        try:
+            reply = await self.request("settings.values.by_prefix",
+                                       {"prefix": "debug_enabled_"},
+                                       timeout=5)
+        except (BusRequestError, asyncio.TimeoutError):
+            self.log.warning("debug-группы логирования не загружены — "
+                             "settings не ответил")
             return
-        self.log.warning("debug-группы логирования не загружены — "
-                         "settings так и не ответил")
+        groups = {k.removeprefix("debug_enabled_")
+                  for k, v in reply["values"].items() if v == "true"}
+        core_logging.set_debug_groups(groups)
+        if groups:
+            self.log.info("DEBUG-логирование включено для групп: %s",
+                          ", ".join(sorted(groups)))
 
     # --- FastAPI-приложение -------------------------------------------------
 
@@ -275,7 +285,7 @@ class GatewayModule(BaseModule):
         def openapi() -> dict:
             if app.openapi_schema is None:
                 schema = built()
-                for model in (DubEvent, DubsSnapshot):
+                for model in EVENT_PACKETS:
                     described = model.model_json_schema(ref_template="#/components/schemas/{model}")
                     schema["components"]["schemas"].update(described.pop("$defs", {}))
                     schema["components"]["schemas"][model.__name__] = described
@@ -314,11 +324,15 @@ class GatewayModule(BaseModule):
 
         from .api_auth import build_router as auth_router
         from .api_media import build_router as media_router
+        from .api_output import build_router as output_router
         from .api_series import build_router as series_router
         from .api_settings import build_router as settings_router
+        from .api_sources import build_router as sources_router
         from .api_system import build_router as system_router
         app.include_router(auth_router(self))
         app.include_router(series_router(self))
+        app.include_router(sources_router(self))
+        app.include_router(output_router(self))
         app.include_router(system_router(self))
         app.include_router(media_router(self))
         app.include_router(settings_router(self))

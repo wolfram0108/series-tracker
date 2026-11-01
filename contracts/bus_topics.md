@@ -1,87 +1,90 @@
-# Карта топиков шины (снимок после этапа 4, 2026-06-12)
+# Карта топиков шины (после этапа 10, П-8, 2026-11-01)
 
-> Сводный справочник для этапа 5: что уже есть на шине и кто владелец.
-> Детали payload'ов — в докстрингах модулей и contracts/revision.md
-> (Р-11..Р-17). Сгенерировано из кода (handle/publish_event), сгруппировано
-> вручную.
+> Сводный справочник: что есть на шине и кто владелец. Детали payload'ов — в докстрингах `modules/*/module.py`
+> (читать первыми) и в моделях `core/contracts`; решения — `contracts/revision.md` и
+> `docs/missions/voice-alignment/stage-10/REVISION.md`. Перечень снят с кода (вызовы `handle` и `publish_event`),
+> описания — из докстрингов модулей. Контракт шины: подписчик получает каждое подходящее сообщение один раз, в порядке
+> публикации; сообщения не переживают перезапуск, поэтому обработчики идемпотентны, а продолжение работы берётся из БД.
+> Каждый конверт несёт `correlation_id`.
 
-## Queries / commands по модулям
+## Запросы и команды по модулям
+
+Запрос отвечает значением; команда ответа не ждёт. Отказ запроса — исключение владельца: текст `ValueError` — код
+причины (`core/reasons`, формулировку даёт интерфейс), `LookupError` — «нет такой сущности».
 
 | Модуль | Топики |
 |---|---|
-| catalog | series.list, series.get, status.get, series.create/update/delete (Р-19), series.set_save_path, series.touch_scan_time, viewing.start/stop |
-| scan | series.run {series_id, force_replace?}, series.prepare {series_id} (состав торрент-раздачи без запуска закачки), all.start → {started}, status.get, availability {series_id} (последний отчёт о плеерах web-серии), composition {series_id, refresh?} (Р-21), media.list, media.downloaded_counts, item.set_ignored (+ scan.plan.updated), items.set_ignored_bulk {series_id, season, is_ignored} (+ scan.plan.updated) |
-| sources | provider.info {url} → {provider, voices} (без сети), parse {url} (+torrent_id из core/ids, отчёт `players`), torrent_file.get/drop, trackers.list, tracker.resolve {url}, tracker.set_mirrors (Р-22), vk.scan, video.scan {url, series}, video.layout {url} → {sources, selected_source, reason} (раскладка источников, которую провайдер описывает отдельно от разбора из-за медленного чтения; `has_layout` в ответе parse, Р-60), video.coverage {url} → {players, reason} (что даёт каждый плеер страницы: серии и разрешение по сериям диапазонами; читает страницы всех серий, прогресс событием `sources.coverage.progress`, Р-60), video.stream {url, max_height?} → {handled, stream_url, progressive, headers: Referer/Origin/User-Agent доходят до ffmpeg целиком, Р-38} либо {handled, error, transient} (`progressive` — готовый файл одним адресом, отдаваемый по HTTP Range: загрузчик качает его кусками, Р-64; Р-25; для Vibix — `file://` на расшифрованный манифест; `error` — ссылка страницы серии без потока, загрузчик не отдаёт её yt-dlp) |
-| rules | apply, test (Р-22), profiles.list/create/update/delete, rules.list/add/update/delete/reorder (Р-22), cache.invalidate, format_filename, format_torrent_file |
-| torrents | add, info.get, files.get, pause/resume/recheck/delete, rename_file, set_location, db.active, db.deactivate_all, db.files.list/upsert, db.files.for_series, db.history, db.add, db.downloaded_counts, db.progress.list (Р-23), composition (Р-21), register {…, start_pipeline?} (false — подготовка состава без конвейера), queue.get, fs.verify |
-| downloads | queue.get, queue.clear, fs.sync, item.set_filename, item.set_status, episodes.get {series_id} → референс-серии плана, fetch {key, url, path, max_height?, series_id?} (поток ссылки в файл вне медиатеки, Р-40), fetch.cancel {series_id} |
-| slicing | chapters.get/filtered/mark, task.create, verify, deep_adoption, files.list, files.drop_for_source (Р-21), file.set_path, queue.get |
-| renaming | reprocess, process_torrent {…, dry_run?} (разбор состава без переименования), tasks.active, preview (Р-21) |
-| library | directories.list, relocate, relocation.active |
-| metadata | search, details, map.get/list/set (владелец series_tmdb_mappings, Р-19) |
-| settings | value.get, value.set, values.by_prefix (Р-22), values.set_many {values: {ключ: значение}} → запись пачкой в одной транзакции, `settings.changed` на каждый ключ (Р-54) |
-| trackerauth | fetch, credentials.get/set (Р-22, владелец auth) |
-| voices | layout {sources: [{url, player, studio, kind, episodes, links?}], mode?, reference?} → раскладка озвучек сериала с ключом озвучки (Р-39); приоритет источников — настройка `voices.source_priority`; dispatch {series_id} (скан → озвучки серий во временный каталог, Р-40); dubs.get {series_id} → записи voice_dubs; settings.get {} → `VoiceSettingsView` (группы озвучек и порядок источников как действуют, порядок по умолчанию, отвергнутые поля); settings.set `VoiceSettingsDraft` {priority, voice_groups} → `VoiceSettingsSaved` (группы и порядок проверяются целиком и пишутся через settings.values.set_many либо отклоняются с кодами причин, Р-54) |
-| conform | submit {ref, dubs, out_dir, cache_dir, label?, key?} → {job_id} \| {rejected} \| {unavailable, retry} (постановка серии, Р-41; `key` попадает в метку задачи); job.find {key} → {reachable, job_id}; cancel {job_id} → {done} (ждущую или идущую задачу останавливает, запись завершённой удаляет); plot {job_id, name} → {found, data?} (картинка графика, base64); job.get {job_id} → итог задачи; status {} → {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks} — зеркало очереди выравнивания демона track-muxer (Р-39); слушает `gateway.sse.clients` |
+| catalog | `catalog.series.list` → `[{…сериал, kind, sources, statuses, is_busy}]`; `.get {series_id}` → то же для одного; `.create {data}` → сериал (`data.sources` — минимум один источник; отказ `no_source`, `source_exists`; поля `url`, `source_type`, `parser_profile_id`, `vk_search_mode`, `vk_quality_priority` у сериала удалены — отказ с именем поля) + `series.added`, затем `series.source.added` на каждый источник; `.update {series_id, fields}` → `{applied}` (источники здесь не меняются) + `series.updated`; `.delete {series_id, delete_from_qb?}` → `{ok}` + `series.deleted` (каскад по событию); `.set_save_path {series_id, save_path}` (пишет library после переноса); `.touch_scan_time`; `catalog.status.get {series_id}`; `catalog.viewing.start/stop {series_id}` (команды); **источники сериала (Д-38):** `catalog.sources.list {series_id}` → `[источник]` по `position`; `.by_url {url}` и `.by_profile {profile_id}` → источники всех сериалов; `.add {series_id, source}` → `{id}`; `.update {source_id, fields}` → `{applied}`; `.remove {source_id}` → `{ok}` (единственный источник — отказ `last_source`); источник — модель `SeriesSource`; вид сериала `kind` (`torrent` либо `video`) считает одна функция каталога |
+| sources | `sources.table.get {url, options?, refresh?}` → `TableGetReply {url, state: ready \| reading \| failed \| absent, table?, reason?}` — таблица страницы сайта (З-1): полная таблица моложе часа отдаётся сразу, иначе страницу читает один процесс чтения на страницу, ответ `reading` сразу, итог — события `sources.table.*`; `sources.table.read {url, options?}` (команда: прочитать сейчас); `sources.site.resolve {url, options?}` → `{site, canonical_url}` — какой сайт читает адрес (без сети; оба `null`, если никакой); `sources.video.stream {url, max_height?}` → `{handled, stream_url, progressive, headers}` либо `{handled, error, transient}` — поток кандидата перед загрузкой (`progressive` — готовый файл по HTTP Range; для Vibix `stream_url` — `file://` на расшифрованный манифест); торрентная часть: `sources.parse {url}` → `{service, title, releases[], tracker, ui_features}` (только страницы трекеров; страницу сайта читает `sources.table.get`), `sources.torrent_file.get {url, torrent_id}` → `{content_b64}` (с кэшем), `.drop {torrent_id}`, `sources.trackers.list`, `sources.tracker.resolve {url}` → `{tracker \| null}`, `sources.tracker.set_mirrors {tracker_id, mirrors}` |
+| rules | `rules.apply {profile_id, lines: [{key, text}], series_season?}` → `{results: {key: {excluded, season, episode, start, end, part, voiceover, events, errors}}, invalid_rules}` — единственный источник номеров (З-3), модели `RulesApplyRequest/Reply`; `rules.format_filename {series, media_item, episode_override?, original_filename?}` → `{filename}` — имя по готовым номерам, правила повторно не применяются; `rules.format_torrent_file {series, profile_id, file_basename, original_path}` → `{filename, extracted}`; `rules.profiles.list/create/update/delete`, `rules.rules.list/add/update/delete/reorder` (профиль, назначенный источникам, удалить нельзя — `profile_in_use`) |
+| composition | `composition.get {series_id, include_excluded?}` → `CompositionReply` (строки раскладки в порядке источников, сводка по источникам, рычаги сериала и сезонов, итоговые рычаги каждой серии; исключённые конструктором строки — только по `include_excluded`); `composition.recompute {series_id}` → `{rev, changed}` (посчитать сейчас по хранимым таблицам и ответить, когда расчёт записан и событие вышло); `composition.preview {url, options?, profile_id?, series_season?, refresh?}` → `CompositionPreviewReply` — адрес, который ещё не источник сериала: состояние таблицы, сводка, строки для конструктора и ответ на каждую (ничего не пишет); `composition.settings.set {series_id, season?, episode?, lever, target?, value}` → `{ok}` (отказ `unknown_lever`, `bad_target`, `bad_value`); `composition.settings.reset {series_id, season?, episode?, lever?, target?}` → `{ok}` |
+| scan | `scan.series.run {series_id, force_replace?, download?}` — торрент: проход по раздачам; видео: синхронизация источников (таблицы → раскладка → референсы → план → при `download` загрузки и озвучки), отказ «уже запущен» при скане той же серии; `scan.series.prepare {series_id}` (состав торрент-раздачи без закачки); `scan.output.get {series_id}` → `[Reference]` — референс каждой серии и отметка (`by_level`, `own`, `other_player`, `none`, `unfit`); `scan.all.start` → `{started}`; `scan.status.get`; `scan.media.list {series_id}`; `scan.media.downloaded_counts` → `{counts}`; `scan.seasons {series_id}` → `{seasons}`; `scan.item.set_ignored {unique_id, is_ignored}` и `scan.items.set_ignored_bulk {series_id, season, is_ignored}` (+ `scan.plan.updated`, `scan.reference.changed` у изменившихся серий) |
+| voices | `voices.groups.resolve {names}` → `{groups: {имя: группа \| null}}` (только пользовательские группы, З-6); `voices.settings.get` → `VoiceSettingsView`; `voices.settings.set` `VoiceSettingsDraft` → `VoiceSettingsSaved` (проверка целиком, запись одной пачкой через `settings.values.set_many`, отказ — коды причин); `voices.dubs.get {series_id}` → `{items}` — озвучки по сериям с состоянием; `voices.dispatch {series_id}` (команда скана: план озвучек по `composition.get` и `scan.output.get`, допуск к загрузке) |
+| downloads | `downloads.dispatch {series_id}` — единственная точка старта загрузки (шлёт только скан по явному скану); `downloads.queue.get` → `{tasks, count}`; `.queue.clear` → `{deleted}`; `downloads.cancel {task_id}`; `downloads.fs.sync {series_id}` → `{adopted, lost}` (сверка с диском); `downloads.episodes.get {series_id}` → `{items}` — референс-серии плана; `downloads.item.set_filename`, `downloads.item.set_status`; `downloads.fetch {key, url, path, max_height?, series_id?}` — поток по ссылке в файл вне медиатеки (озвучки, Р-40), `downloads.fetch.cancel {series_id?, key?}`; поток кандидата разрешает только `sources.video.stream`, запасной путь yt-dlp — по плееру источника кандидата |
+| renaming | `renaming.reprocess {series_id}` — массовая переобработка имён по `kind` сериала (видео — по готовым номерам строк, торрент — по профилю торрентного источника); `renaming.process_torrent {series_id, qb_hash, dry_run?}`; `renaming.tasks.active {series_id}`; `renaming.preview {series_id}` |
+| library | `library.directories.list {path}`; `library.relocate {series_id, new_path}` (по завершении library сам вызывает `renaming.reprocess`); `library.relocation.active {series_id}` |
+| metadata | `metadata.search`, `metadata.details {tmdb_id}`, `metadata.map.get/list/set` (владелец `series_tmdb_mappings`), `metadata.seasons.recompute {series_id}` (число серий многосезонного сериала → `series.updated`) |
+| torrents | `torrents.add`, `.info.get`, `.files.get`, `.pause`, `.resume`, `.recheck`, `.delete`, `.rename_file`, `.set_location`; `torrents.db.active/deactivate_all/add/history/downloaded_counts/progress.list/files.list/files.upsert/files.for_series`; `torrents.register {…, start_pipeline?}` (false — подготовка состава без конвейера); `torrents.composition {series_id, refresh?}` (композиция торрента); `torrents.queue.get`; `torrents.fs.verify {series_id}`; `torrents.drive_incomplete`; `torrents.seasons {series_id}`; `torrents.preview.parse_torrent` и `.fetch_magnet` (результат событием); адрес и профиль торрента берутся из источника сериала |
+| slicing | `slicing.chapters.get/filtered/mark`, `slicing.task.create`, `slicing.verify`, `slicing.deep_adoption`, `slicing.files.list`, `.files.drop_for_source`, `.file.set_path`, `.source.delete`, `slicing.queue.get`; в архитектуре этапа 10 модуль не участвует (Д-34): склейка в план не попадает |
+| conform | `conform.submit {ref, dubs, out_dir, cache_dir, label?, key?}` → `SubmitReply` (`accepted`, `rejected`, `unavailable`, `uncertain`); `conform.job.find {key}` → `{reachable, job_id}`; `conform.job.get {job_id}` → итог задачи (`gone` — демон спрошен и не знает задачу); `conform.cancel {job_id}` → `{done}` (ждущую или идущую останавливает, запись завершённой удаляет); `conform.plot {job_id, name}` → `{found, data?}` (PNG, base64); `conform.status` → `{configured, daemon, tasks}` — зеркало очереди демона track-muxer; `conform.workspace {dub_folder?}` → две папки внутри рабочей папки / раскладка папок сервиса; `conform.settings.get` → `ConformSettingsView`; `conform.settings.set` `ConformSettingsDraft` → `ConformSettingsSaved` |
+| settings | `settings.value.get/set`, `settings.values.by_prefix`, `settings.values.set_many {values}` (одна транзакция, `settings.changed` на каждый ключ), `settings.paths.add/list/remove` |
+| trackerauth | `trackerauth.fetch`, `trackerauth.credentials.get/set` |
+| auth | `auth.exists`, `auth.login`, `auth.password.set` |
 
 ## События (издатель → подписчики)
 
-| Событие | Издатель | Подписчики сейчас | SSE (этап 5) |
+| Событие | Издатель | Подписчики | SSE |
 |---|---|---|---|
-| series.status.contribution | scan, downloads, torrents, slicing | catalog | — |
-| series.status.changed {series_id, statuses, is_busy} | catalog | gateway | series_updated {id, statuses, is_busy} (Р-18) |
-| series.busy.contribution | library, renaming | catalog | — |
-| series.busy.changed {series_id, is_busy, statuses} | catalog | gateway | series_updated {id, statuses, is_busy} (Р-18) |
-| series.added {…series} | catalog | gateway | series_added (полный объект, Р-19) |
-| series.updated {series_id, …поля, statuses, is_busy} | catalog | gateway, torrents (память исключений → приоритеты файлов) | series_updated (дельта, Р-19) |
-| series.deleted {series_id, delete_from_qb} | catalog | scan, torrents, downloads, slicing, renaming, library, metadata, voices (каскад), gateway | series_deleted {id} (Р-19) |
-| series.purged {series_id, owner} | scan, torrents, downloads, slicing, renaming, library, metadata, voices | catalog (учёт отчётов о чистке) | — |
-| scan.plan.updated {series_id} | scan | downloads | — |
-| scan.status.changed | scan | — | scanner_status_update |
-| sources.video.progress {series_id, current, total, rate, phase, active} | sources | gateway | video_scan_progress |
-| sources.coverage.progress {url, current, total, phase, active} | sources | gateway | coverage_progress |
-| torrents.queue.changed {count, tasks} | torrents | scan (count=0 → следующий скан) | agent_queue_update |
-| torrents.progress.changed {tasks} | torrents | gateway | torrent_progress_update (Р-23, замена поллинга) |
-| downloads.queue.changed {tasks, count} | downloads | — | download_queue_update |
-| downloads.fetch.finished {key, ok, error, transient, path, series_id} | downloads | voices (ключи `dub:<id>`) | — |
-| conform.submit {ref, dubs, out_dir, cache_dir, label, key} (запрос) → `SubmitReply` {outcome: accepted/rejected/unavailable/uncertain, job_id?, reason?, retry} | voices | conform | — |
-| conform.job.get {job_id} (запрос) → {job_id, status, error, results}; `gone` только когда демон спрошен и не знает задачу, недоступный демон — ошибка запроса | voices | conform | — |
-| conform.cancel {job_id} (запрос) → {done}: задача, которая ждёт или идёт, останавливается (запись остаётся «отменено»), запись завершённой удаляется вместе с файлами, которые демон держит для записи (Р-59) | voices, gateway | conform | — |
-| conform.plot {job_id, name} (запрос) → {found, data?}: картинка графика (PNG, base64); спрашивается только простое имя `*.png` (Р-59) | gateway | conform | — |
-| conform.job.find {key} (запрос) → {reachable, job_id} | voices | conform | — |
-| conform.workspace {} (запрос) → {downloads, conform} — две папки внутри рабочей папки (пусто, пока владелец её не назвал); {dub_folder} → {out_dir, cache_dir} — раскладка папок сервиса для папки серии; чистые, демон не опрашивается (Р-58) | voices | conform | — |
-| conform.settings.get {} (запрос) → `ConformSettingsView` {url, work_dir, work_dir_remote, clear_finished}: адрес демона, рабочая папка здесь и на демоне, очистка очереди по завершении (флаг `conform.clear_finished`, пишется флагом вкладки «Отладка»), как действуют сейчас (Р-57, Р-58, Р-59) | gateway, voices | conform | — |
-| conform.settings.set `ConformSettingsDraft` {url, work_dir, work_dir_remote} (запрос) → `ConformSettingsSaved` {saved, problems, settings}: проверка целиком, запись через settings.values.set_many, новый адрес применяется сразу; отказ — коды причин, ничего не записано (Р-57) | gateway | conform | — |
-| voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, hint, detail, epoch, rev, job_id, file} — `DubEvent` (job_id и file — как очередь выравнивания называет озвучку) | voices | gateway | voice_dub_update (Р-43, Р-44) |
-| voices.dubs.snapshot {epoch, rev, items} — `DubsSnapshot` (при gateway.sse.clients) | voices | gateway | voice_dubs_snapshot |
-| downloads.item.renamed {series_id, unique_id, filename} | downloads | voices | — |
-| downloads.fetch.started {key, series_id, path} | downloads | voices (ключи `dub:<id>`) | — |
-| voices.settings.changed `VoiceSettingsView` (после сохранения настроек озвучек) | voices | gateway | voice_settings_update (Р-54) |
-| voices.episode.settled {series_id, season, episode} | voices | — | — |
-| conform.job.finished {job_id, status, error, results} | conform | voices | — |
-| conform.job.removed {job_id} (запись задачи ушла из истории демона: удалил владелец, демон или уборка проекта) | conform | voices (убирает папку результата задачи) | — |
-| conform.daemon.up {} | conform | voices | — |
-| slicing.queue.changed {tasks} | slicing | — | slicing_queue_update |
-| conform.queue.changed {daemon, tasks} | conform | voices (состояние задач) | conform_queue_update (Р-39; вся картина на каждое изменение и при подключении клиента SSE; у задачи `label` — человеческая часть, `key` — ключ постановки, Р-57) |
-| conform.settings.changed `ConformSettingsView` | conform | gateway | conform_settings_update (Р-57; после каждого сохранения, пакет самодостаточен) |
-| gateway.sse.clients {count} | gateway | catalog, conform, voices | — |
-| renaming.finished {series_id} | renaming | — | renaming_complete |
-| library.relocation.started/finished | library | voices (finished) | relocation_started/finished |
-| settings.changed {key, value} | settings | downloads (max_parallel_downloads), scan (настройки сканера → пересчёт расписания, Р-20) | — |
-| gateway.sse.clients {count} | gateway | catalog (count=0 → сброс viewing), scan (count>0 → публикация статуса, Р-20) | — |
-| trackerauth.credentials.changed {service} | trackerauth | torrents (qbittorrent → пересоздание клиента, Р-22) | — |
+| `system.started {}` — все модули подняты | `run.py` (сборка процесса, после `Runner.start`) | gateway (читает группы отладочного логирования) | — |
+| `gateway.sse.clients {count}` | gateway | catalog (0 → сброс viewing), scan (>0 → публикация статуса), conform и voices (снимок при подключении) | — |
+| `series.added {…сериал, kind, sources}` | catalog | composition, gateway | `series_added` |
+| `series.updated {series_id, …поля, statuses, is_busy}` | catalog, metadata | composition (сезон карточки), torrents (память исключений), gateway | `series_updated` (дельта) |
+| `series.deleted {series_id, delete_from_qb}` | catalog | все владельцы серийных таблиц (scan, torrents, downloads, slicing, renaming, library, metadata, voices, composition), gateway | `series_deleted {id}` |
+| `series.purged {series_id, owner}` | владельцы серийных таблиц | catalog (учёт отчётов о чистке) | — |
+| `series.source.added \| .updated \| .removed {series_id, source_id}` — `SourceEvent` | catalog | composition | — |
+| `series.status.contribution {source, series_id, flags}` | scan, downloads, torrents, slicing | catalog | — |
+| `series.status.changed {series_id, statuses, is_busy}` | catalog | gateway | `series_updated` |
+| `series.busy.contribution` / `series.busy.changed` | library, renaming / catalog | catalog / gateway | `series_updated` |
+| `series.downloaded.changed {series_id, count}` | downloads, torrents | voices, gateway | `series_updated` (счётчик скачанного) |
+| `sources.table.progress {url, phase, current, total}` | sources | gateway | `sources_table_progress` |
+| `sources.table.ready {url, read_at}` — полная таблица сохранена | sources | composition, scan, gateway | `sources_table_ready` |
+| `sources.table.failed {url, reason}` — чтение не удалось, действует прежняя полная таблица | sources | composition, scan, gateway | `sources_table_failed` |
+| `rules.profile.changed {profile_id}` | rules | composition | — |
+| `composition.changed {series_id, rev, episodes, summary_only}` — `CompositionChanged`; `episodes` пусто — весь сериал; `summary_only` — изменились только сводки источников | composition | scan, voices, gateway | `composition_changed` |
+| `composition.failed {series_id, reason}` — пересчёт не удался, действует прежняя раскладка | composition | gateway | `composition_failed` |
+| `scan.reference.changed {series_id, season, episode, part, mark}` — `ReferenceChanged` | scan | voices, gateway | `reference_changed` |
+| `scan.plan.updated {series_id}` — план пересчитан (загрузку не запускает) | scan | downloads | — |
+| `scan.status.changed` | scan | gateway | `scanner_status_update` |
+| `settings.changed {key, value}` | settings | downloads, scan | — |
+| `trackerauth.credentials.changed {service}` | trackerauth | torrents | — |
+| `torrents.queue.changed {count, tasks}` | torrents | scan (0 → следующий проход), gateway | `agent_queue_update` |
+| `torrents.progress.changed {tasks}` | torrents | gateway | `torrent_progress_update` |
+| `torrents.preview.ready \| .failed` | torrents (`failed` — и gateway при ошибке скачивания .torrent) | gateway | `preview_naming_ready`, `preview_naming_failed` |
+| `downloads.queue.changed {tasks, count}` | downloads | gateway | `download_queue_update` |
+| `downloads.fetch.started \| .finished {key, …}` | downloads | voices | — |
+| `downloads.item.renamed {series_id, unique_id, filename}` | downloads | voices | — |
+| `slicing.queue.changed {tasks}` | slicing | gateway | `slicing_queue_update` |
+| `renaming.finished {series_id}` | renaming | gateway | `renaming_complete` |
+| `library.relocation.started \| .finished` | library | voices (`finished`), gateway | `relocation_started`, `relocation_finished` |
+| `voices.dub.changed` — `DubEvent` | voices | gateway | `voice_dub_update` |
+| `voices.dubs.snapshot {epoch, rev, items}` — `DubsSnapshot` (при `gateway.sse.clients`) | voices | gateway | `voice_dubs_snapshot` |
+| `voices.settings.changed` — `VoiceSettingsView` | voices | composition, scan, gateway | `voice_settings_update` |
+| `voices.episode.settled {series_id, season, episode}` | voices | — | — |
+| `conform.queue.changed {daemon, tasks}` | conform | voices, gateway | `conform_queue_update` |
+| `conform.settings.changed` — `ConformSettingsView` | conform | voices, gateway | `conform_settings_update` |
+| `conform.job.finished {job_id, status, error, results}` / `conform.job.removed {job_id}` / `conform.daemon.up {}` | conform | voices | — |
 
-## SSE: контракт закрыт Р-18 (см. sse_contract.md)
+## SSE
 
-SSE_MAP gateway реализован (блок 1 этапа 5): series_updated — дельта,
-очереди — голые массивы, agent_heartbeat — удалён по согласованию,
-второе SSE-соединение фронта (находка 37) чинится в блоке 6.
+`SSE_MAP` шлюза (`modules/gateway/module.py`) — единственная таблица «топик шины → имя события интерфейса»; пакеты
+событий самодостаточны для своего участка экрана, интерфейс ничего не доспрашивает. Контракт по каждому событию —
+`contracts/sse_contract.md`. Модели пакетов этапа 10 (`TableProgress`, `TableReady`, `TableFailed`, `CompositionChanged`,
+`CompositionFailed`, `ReferenceChanged`) шлюз кладёт в схему API рядом с маршрутами: типы интерфейса строятся из них.
 
-Блок 2 (Р-19) закрыл: series_added/series_deleted (CRUD в catalog),
-сохранение свойств (сценарий gateway: catalog → library/relocate |
-renaming.reprocess), POST /state как транспорт viewing.start/stop.
+## Что ушло в этапе 10
 
-Остаётся на следующие блоки:
-- Вызовы при открытии модалки статуса: catalog.viewing.start (уже
-  работает через /state) + downloads.fs.sync + torrents.fs.verify
-  (Р-13/Р-14, блок 4/6).
+Топики, которых в коде больше нет (`REVISION.md`): `sources.video.scan`, `sources.video.layout`, `sources.video.coverage`,
+`sources.vk.scan`, `sources.provider.info`, а у `sources.parse` — ветка веб-источников; события
+`sources.video.progress` и `sources.coverage.progress` (SSE `video_scan_progress`, `coverage_progress`);
+`scan.composition`, `scan.availability` (и таблица `video_availability`); `voices.layout`; `rules.test`,
+`rules.cache.invalidate`.
