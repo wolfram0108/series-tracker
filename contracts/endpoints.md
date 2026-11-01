@@ -361,7 +361,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 
 **POST `/api/series`** — тело `SeriesCreate`. Обязательные: `name`, `name_en`,
 `site`, `save_path`, `sources` (минимум один: `{url, source_type, parser_profile_id?,
-vk_search_mode?, vibix_season?, players_off?}`, `source_type` — `torrent` | `vk_video` |
+vk_search_mode?, vibix_season?, players_off?, voice_name?}`, `source_type` — `torrent` | `vk_video` |
 `web_video`). Необязательные: `season`, `quality`, `quality_override`,
 `resolution_override`, `auto_scan_enabled`, `ignored_seasons`, `ignored_episodes`,
 `tmdb_data`, `torrents` (только при торрент-источнике). Поля `url`, `source_type`,
@@ -739,11 +739,11 @@ POST /api/parser-profiles/{profile_id}/rules
 **GET `/api/series/{series_id}/sources`** — список `SeriesSource`; 404 — сериала нет.
 
 **POST `/api/series/{series_id}/sources`** — тело `{url, source_type, parser_profile_id?, vk_search_mode?, vibix_season?,
-players_off?, position?}`; поля, которых нет в теле, шлюз не посылает, умолчания подставляет `catalog`. Ответ `{id}`.
+players_off?, voice_name?, position?}`; поля, которых нет в теле, шлюз не посылает, умолчания подставляет `catalog`. Ответ `{id}`.
 400: `source_exists` (тот же адрес у сериала), `profile_not_found`; 404 — сериала нет.
 
 **PUT `/api/series/{series_id}/sources/{source_id}`** — тело: любое из `url`, `parser_profile_id`, `vk_search_mode`,
-`vibix_season`, `players_off`, `position`; не присланное остаётся, `null` снимает профиль и сезон Vibix; `source_type` и
+`vibix_season`, `players_off`, `voice_name`, `position`; не присланное остаётся, `null` снимает профиль и сезон Vibix; `source_type` и
 прочие поля — 422. Ответ `{success, applied}` (`applied` — поля, отличавшиеся от хранимых; без изменений события нет).
 404 с кодом `source_not_found` — источник другого сериала или его нет.
 

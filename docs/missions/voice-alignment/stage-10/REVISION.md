@@ -30,7 +30,7 @@
 | `players/kodik.py::parse_episodes` | номер серии = `value` пункта | перепроектирована | строка = пункт: `data-id`, текст пункта, сезон из списка сезонов | `dunhuatv`, `KodikPlayer.fetch` — сделано (П-3): строка — пункт списка (`data-id`, текст дословно), сезон из списка сезонов |
 | `players/kodik.py::parse_voices`, `players/vibix_protocol.py::parse_playlist` (номер из заголовка регуляркой) | имя озвучки Kodik читается; номер Vibix извлекается регуляркой | перепроектирована | номер Vibix не извлекается: текст «Серия N» уходит конструктору; озвучка потока `{…}` — в строку | `vibix.py`, `ruchime` — сделано (П-3): у записи каталога Vibix место (`position`) и озвучка потока, у пункта Kodik id и текст |
 | `players/*` контракт `find / fetch / read`, `policy.py`, `core/retry.py` | общий контракт плееров, одна политика повторов | подтверждена | соответствует З-5 и Р-61; меняется только состав строки | — |
-| `sources.video.stream` и `resolve_stream` провайдеров | поток кандидата перед загрузкой | подтверждена | поток живёт недолго, разрешается перед загрузкой | `downloads` |
+| `sources.video.stream` и `resolve_stream` провайдеров | поток кандидата перед загрузкой; пять имён плееров в диспетчере | перепроектирована | поток даёт сам плеер (`stream` в контракте плеера, с границей высоты озвучек); `resolve_stream` перебирает реестр плееров | `downloads` |
 | `core/contracts/release.py` (`Release`, `ReleaseSource`) | ответ `parse_release`; источник с `first/last/ranges/episodes/links` | удалена | `core/contracts/release_table.py` | `voices.layout`, `gateway.schemas`, `tests/provider_contract.py` |
 | `tests/provider_contract.py::check_release` | требует от провайдера без каталога озвучек пустых `sources`, а от провайдера с каталогом — отсортированных номеров и диапазонов | перепроектирована | проверка таблицы страницы | тесты провайдеров — сделано (П-3): файл удалён, таблицу проверяют тесты сайтов |
 
@@ -166,3 +166,22 @@
 | `voices/module.py` (383) | пропуск не-web серий | перепроектирована | вход озвучек — раскладка | сделано (П-5) |
 | `scan/module.py` (вид, адрес и профиль сериала, `vk_search_mode`, `vk_quality_priority`) | ветвление по `source_type`, адрес и профиль в самом сериале | перепроектирована | `kind`; адрес и профиль торрента — из источника сериала; веб- и VK-сериалы — синхронизация и референс | сделано (П-6) |
 | `gateway/api_series.py` (`list_series`, `add_series`, `series_details`, `update_series`, `set_state`), `api_media.py` (`composition`, `source_filenames`) | ветвление по виду, сборка ответов из нескольких модулей | перепроектирована | тело запросов с источниками; сборка ответов — в модулях-владельцах | `web`, `schema.d.ts` — сделано (П-8): тела `SeriesCreate`/`SeriesUpdate`, эндпоинты источников и выхода, `GET /api/series` без ветвления по виду (счётчики складываются по владельцам), сверка файлов при открытии окна просит каждого владельца, `renaming.reprocess` без ветки по виду; `schema.d.ts` пересобран; `web` — сделано (П-9, ступень 1) |
+
+## 10. Точки, тронутые кругом ревью (2026-11-02)
+
+Независимое ревью нашло дефекты на границах модулей; исправления меняют следующие точки.
+
+| Точка | Сейчас | Статус | Новое место / причина | Вызовы, которые меняются |
+|---|---|---|---|---|
+| `composition/project.py::_numbers_of`, `_with_part_one`, `DEFAULT_SEASON` | сезон 1 и «часть 1» назначала раскладка | перепроектирована | конструктор: `rules/numbering.py` (`season_of`, `settle_parts`), строка конструктора несёт плеер и озвучку; раскладка копирует ответ (З-3) | `rules.apply`, `composition.lines_for` |
+| `scan/candidates.py::place` (строка с прежним ключом и другим адресом) | старая строка принимала новый адрес и сохраняла скачанный файл | перепроектирована | другое видео при скачанном прежнем — строка версии (`ids.version_row_unique_id`), прежняя вытесняется планом | `scan._refresh`, `downloads` |
+| `downloads/module.py::_adopt_existing_files`, загрузка вытесняющего видео | усыновлял любой файл с ожидаемым именем | перепроектирована | файл, которым владеет другая строка, не усыновляется; файл вытесняемого видео убирается перед загрузкой нового | `scan.plan.updated` |
+| `voice_dubs`, `voices/planning.py`, `voices/repository.py`, `voices.dub.changed` | ключ (сезон, серия, озвучка) | перепроектирована | ключ с частью (миграция 0032); события и снимок несут `part` | `downloads.episodes.get`, `web/src/stores/voices.ts` |
+| `voices/repository.py::drop_unplanned` | снимала ждущие и упавшие озвучки | перепроектирована | серия с известным референсом: озвучка вне плана снимается в любом состоянии | `downloads.fetch.cancel` |
+| `scan/module.py::on_output_switch`, `on_set_ignored` | меняли флаг и отметку, план не пересчитывался | перепроектирована | после выбора пользователя план серии пересчитывается (`_recount`) | `scan.plan.updated`, `downloads` |
+| `scan/module.py::on_start`, `_run_series` (видео-синхронизация) | команда жила в памяти | перепроектирована | команда в `scan_tasks` до первого ожидания; возобновление по `system.started` | `run.py` |
+| `library/module.py::on_start`, `renaming/module.py::on_start` | возобновление до старта соседей | перепроектирована | возобновление по `system.started` | `run.py` |
+| `reference.allow` (`core/contracts`, `composition/levers.py`, `scan/reference.py`, `web/src/lib/output.ts`) | участие плеера источника в выборе референса | удалена | `variant.allow`: участие варианта (группа, источник, плеер) в референсе и в озвучках | `voices/planning.py`, окно «Выход» |
+| `web/src/components/status/OutputLevers.vue`, `lib/output.ts::LEVER`, `defaultValue` | четыре блока рычагов, имена и умолчания в окне | перепроектирована | сетка по описаниям рычагов ядра (`LeverSpec`), умолчание из описания | `composition.get` |
+| `sources/players/streams.py::resolve_stream` | пять имён плееров, Vibix без границы высоты | перепроектирована | `stream` в контракте плеера, перебор реестра | `sources.video.stream` |
+| `web/src/styles/fields.css` (`.item-floating-label`, `.selected-value`) | подпись и значение обрезались многоточием | перепроектирована | подпись поднятого поля — строка над значением, переносится; значение списка переносится | все окна с полями |

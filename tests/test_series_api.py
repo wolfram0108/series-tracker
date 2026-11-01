@@ -523,7 +523,7 @@ async def test_voices_of_a_series_show_state_and_reason_only(system):
     resp = await client.get("/api/series/2/voices")
     assert resp.status_code == 200
     assert resp.json() == {"items": [
-        {"season": 1, "episode": 2, "voice_key": "blackcat", "voice_label": "BlackCat",
+        {"season": 1, "episode": 2, "part": None, "voice_key": "blackcat", "voice_label": "BlackCat",
          "status": "rejected", "state": "error", "hint": None, "detail": {"code": "suspect_residual", "params": {}}},
-        {"season": 1, "episode": 2, "voice_key": "red", "voice_label": "RedHeadSound",
+        {"season": 1, "episode": 2, "part": None, "voice_key": "red", "voice_label": "RedHeadSound",
          "status": "placed", "state": "done", "hint": "done", "detail": None}]}
