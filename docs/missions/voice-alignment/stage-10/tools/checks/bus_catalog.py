@@ -40,7 +40,15 @@ _CALL_KINDS = {"handle": HANDLE, "publish_event": PUBLISH, "send_command": COMMA
 _ENVELOPE_KINDS = {"event": PUBLISH, "command": COMMAND, "query": REQUEST}
 
 # (topic or pattern, ground): a handler or an SSE_MAP key that nobody in the code sends and that is kept on purpose.
-UNSENT_ALLOWED: list[tuple[str, str]] = []
+UNSENT_ALLOWED: list[tuple[str, str]] = [
+    ("slicing.files.drop_for_source", "slicing вне архитектуры этапа, Д-34"),
+    ("slicing.queue.get", "slicing вне архитектуры этапа, Д-34"),
+    ("torrents.info.get", "публичный контракт управления торрентами, записан в contracts/bus_topics.md"),
+    ("torrents.pause", "публичный контракт управления торрентами, записан в contracts/bus_topics.md"),
+    ("torrents.resume", "публичный контракт управления торрентами, записан в contracts/bus_topics.md"),
+    ("torrents.recheck", "публичный контракт управления торрентами, записан в contracts/bus_topics.md"),
+    ("torrents.delete", "публичный контракт управления торрентами, записан в contracts/bus_topics.md"),
+]
 _TOPIC = re.compile(r"^[a-z_][a-z0-9_]*(?:\.[a-z0-9_*#]+)+$")
 _TOKEN = re.compile(r"(?<![A-Za-z0-9_.*#])(\.?[a-z_][a-z0-9_]*(?:\.[a-z0-9_*#]+)*(?:/[a-z0-9_]+(?:\.[a-z0-9_]+)*)*)(?![A-Za-z0-9_])")
 
@@ -259,7 +267,8 @@ def _documented(topic: str, entries: list[Entry]) -> bool:
 
 def check_bus_catalog(root: Path, topics_doc: str = TOPICS_DOC, architecture_doc: str = ARCHITECTURE_DOC,
                       unsent_allowed: list[tuple[str, str]] | None = None) -> Outcome:
-    unsent_allowed = UNSENT_ALLOWED if unsent_allowed is None else unsent_allowed
+    # Repository permits come only from main(): a tree judged in isolation must not inherit them.
+    unsent_allowed = [] if unsent_allowed is None else unsent_allowed
     outcome = Outcome()
     uses, unresolved = code_topics(root)
     for where, line, expression in unresolved:
@@ -360,7 +369,7 @@ def main(argv: list[str] | None = None) -> int:
             entries, _ = doc_topics((args.root / args.topics_doc).read_text(encoding="utf-8"), namespaces(args.root, uses))
             for entry in entries:
                 print(f"док {' | '.join(entry.readings)}  {args.topics_doc}:{entry.line}")
-        return check_bus_catalog(args.root, args.topics_doc, args.architecture_doc)
+        return check_bus_catalog(args.root, args.topics_doc, args.architecture_doc, UNSENT_ALLOWED)
 
     return run_guard(NAME, build, argv, add)
 

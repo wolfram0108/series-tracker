@@ -35,7 +35,10 @@ PY = sys.executable
 class Stand:
     """An instance on a free port with a new database; leaves nothing behind but the journal in `raw/`."""
 
-    def __init__(self, credentials_from: str | None = None) -> None:
+    def __init__(self, credentials_from: str | None = None, whole_db_from: str | None = None) -> None:
+        self.whole_db_from = whole_db_from
+        if whole_db_from and not credentials_from:
+            credentials_from = whole_db_from
         self.work = Path(tempfile.mkdtemp(prefix="stage10-stand-"))
         self.db = self.work / "app.db"
         self.credentials_from = credentials_from
@@ -51,11 +54,15 @@ class Stand:
         if self.credentials_from:
             # Copied secrets are readable only with the keys they were written under; the values stay in the process.
             env.update(self._keys_of_the_source())
+        if self.whole_db_from:
+            self._copy_whole_db()
         migrated = subprocess.run([PY, "-m", "alembic", "upgrade", "head"], cwd=ROOT, env=env, capture_output=True, text=True)
         if migrated.returncode != 0:
             raise RuntimeError(f"migrations failed: {migrated.stderr[-300:]}")
-        if self.credentials_from:
+        if self.credentials_from and not self.whole_db_from:
             self._copy_credentials()
+        if self.whole_db_from:
+            self._silence_the_schedule()
         probe = socket.socket()
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
@@ -101,6 +108,23 @@ class Stand:
                 if name.strip() in ("ST_ENCRYPTION_KEY", "ST_SECRET_KEY") and value.strip():
                     found[name.strip()] = value.strip().strip('"').strip("'")
         return found
+
+    def _copy_whole_db(self) -> None:
+        """A copy of a real database by the backup API of SQLite; the source is opened read-only and never written."""
+        source = sqlite3.connect(f"file:{self.whole_db_from}?mode=ro", uri=True)
+        target = sqlite3.connect(self.db)
+        source.backup(target)
+        target.close()
+        source.close()
+
+    def _silence_the_schedule(self) -> None:
+        """The copy must not scan, fetch or download anything of its own: the schedule of the scanner is switched off
+        and no series is left on the automatic scan, before the instance comes up."""
+        conn = sqlite3.connect(self.db)
+        conn.execute("UPDATE series SET auto_scan_enabled=0")
+        conn.execute("UPDATE settings SET value='false' WHERE key='scanner_agent_enabled'")
+        conn.commit()
+        conn.close()
 
     def _copy_credentials(self) -> None:
         """The token of VK lives in the table `auth` (module trackerauth); the stand takes a copy of the rows."""
@@ -169,6 +193,30 @@ def measure_table(stand: Stand, url: str, options: dict[str, str], safeguard: fl
     }
 
 
+def check_series(stand: Stand) -> dict:
+    """M-20 on a migrated copy: every series is listed and opens with its kind and its sources, and a video series
+    is deleted by the ordinary request, which takes its records and nothing else."""
+    with httpx.Client(base_url=stand.base, timeout=60) as client:
+        listed = client.get("/api/series").json()
+        opened, broken = 0, []
+        for item in listed:
+            card = client.get(f"/api/series/{item['id']}")
+            if card.status_code != 200 or "kind" not in card.json() or not card.json().get("sources"):
+                broken.append(item["id"])
+            else:
+                opened += 1
+        kinds: dict[str, int] = {}
+        for item in listed:
+            kinds[item.get("kind")] = kinds.get(item.get("kind"), 0) + 1
+        victim = next((item["id"] for item in listed if item.get("kind") == "video"), None)
+        deleted = None
+        if victim is not None:
+            deleted = client.delete(f"/api/series/{victim}").status_code
+        after = len(client.get("/api/series").json())
+    return {"series": len(listed), "opened": opened, "broken": broken, "kinds": kinds, "deleted_status": deleted,
+            "listed_after_delete": after}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="what", required=True)
@@ -178,7 +226,26 @@ def main() -> int:
     table.add_argument("--option", action="append", default=[])
     table.add_argument("--credentials-from")
     table.add_argument("--safeguard", type=float, default=170)
+    listing = sub.add_parser("series")
+    listing.add_argument("--id", required=True)
+    listing.add_argument("--from-db", required=True)
     args = parser.parse_args()
+    if args.what == "series":
+        try:
+            with Stand(whole_db_from=args.from_db) as stand:
+                record = check_series(stand)
+        except Exception as exc:  # noqa: BLE001 - the last line must come out in any outcome
+            print(f"ИЗМЕРЕНИЕ {args.id}: FAIL прибор: {type(exc).__name__}: {exc}")
+            return 2
+        RAW.mkdir(parents=True, exist_ok=True)
+        with open(RAW / f"{args.id}__{datetime.now(timezone.utc):%Y%m%d}.jsonl", "a", encoding="utf-8") as out:
+            out.write(json.dumps(record, ensure_ascii=False) + "\n")
+        print(json.dumps(record, ensure_ascii=False))
+        ok = (record["series"] > 0 and record["opened"] == record["series"] and record["deleted_status"] == 200
+              and record["listed_after_delete"] == record["series"] - 1)
+        print(f"ИЗМЕРЕНИЕ {args.id}: {'PASS' if ok else 'FAIL'} series={record['series']} opened={record['opened']} "
+              f"broken={record['broken']} deleted={record['deleted_status']}")
+        return 0 if ok else 1
     options = dict(pair.split("=", 1) for pair in args.option)
     try:
         with Stand(args.credentials_from) as stand:
