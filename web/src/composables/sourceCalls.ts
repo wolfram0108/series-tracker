@@ -49,6 +49,11 @@ export function previewAddress(body: {
   return call(() => api.POST("/api/sources/preview", { body: { refresh: true, ...body } }))
 }
 
+/** Reads the page now, whatever the age of its table; how the read goes and where it ends come as events. */
+export function readPageNow(url: string, options: Record<string, string> = {}): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/sources/read", { body: { url, options } }))
+}
+
 export async function fetchProfiles(): Promise<{ id: number; name: string }[]> {
   const { data } = await api.GET("/api/parser-profiles")
   return Array.isArray(data) ? (data as { id: number; name: string }[]) : []

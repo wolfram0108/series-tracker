@@ -63,6 +63,14 @@ describe("SourcesEditor", () => {
     expect(w.emitted("remove")?.[0]).toEqual([7])
   })
 
+  it("asks to read a source again by its id, and not while it is being read", async () => {
+    const w = mountEditor()
+    await w.find("button.source-reread").trigger("click")
+    expect(w.emitted("reread")?.[0]).toEqual([7])
+    const reading = itemOfSource(stored(), summary, { state: "reading", progress: null, reason: null, readAt: null })
+    expect(mountEditor([reading]).find("button.source-reread").attributes("disabled")).toBeDefined()
+  })
+
   it("shows the progress of a read and the words of a failure", () => {
     const reading = itemOfSource(stored(), summary, {
       state: "reading", progress: { phase: "episodes", current: 3, total: 20 }, reason: null, readAt: null,

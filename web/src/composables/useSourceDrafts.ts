@@ -5,7 +5,7 @@ import {
   type PreviewReply, type SourceDraft, type SourceItem, type SourceSummary, type SourceType,
 } from "../lib/sources"
 import { useSourceTablesStore, type PageStatus } from "../stores/sourceTables"
-import { previewAddress } from "./sourceCalls"
+import { previewAddress, readPageNow } from "./sourceCalls"
 import { typeAddress } from "./sourceAddress"
 import { useSSE } from "./useSSE"
 
@@ -140,6 +140,20 @@ export function useSourceDrafts() {
     }
   }
 
+  /** The page of a draft is read now, though its table is not old: the answer in hand is taken as the one to improve on. */
+  async function reread(key: string | number): Promise<void> {
+    const draft = find(key)
+    if (!draft) return
+    error.value = ""
+    draft.asked = { state: "reading" }
+    draft.handled = tables.forUrl(draft.canonical)
+    const answer = await readPageNow(draft.url, readOptions(draft))
+    if (!answer.ok) {
+      error.value = answer.text
+      draft.asked = { state: "failed", reason: null }
+    }
+  }
+
   function reset(): void {
     drafts.value = []
     error.value = ""
@@ -149,5 +163,5 @@ export function useSourceDrafts() {
   const bodies = computed<SourceDraft[]>(() => items.value.map((item) => draftBody(item)))
   const failed = computed(() => items.value.some((item) => item.view.state === "failed"))
 
-  return { items, bodies, failed, error, busy, add, remove, change, reset }
+  return { items, bodies, failed, error, busy, add, remove, change, reread, reset }
 }

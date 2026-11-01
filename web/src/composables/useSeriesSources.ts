@@ -7,7 +7,9 @@ import {
 import { useCompositionStore } from "../stores/composition"
 import { useSourceTablesStore } from "../stores/sourceTables"
 import { useSSE } from "./useSSE"
-import { changeSource, createSource, fetchSources, fetchSummaries, removeSource, resolveAddress } from "./sourceCalls"
+import {
+  changeSource, createSource, fetchSources, fetchSummaries, readPageNow, removeSource, resolveAddress,
+} from "./sourceCalls"
 import { typeAddress } from "./sourceAddress"
 import type { DraftPatch } from "./useSourceDrafts"
 
@@ -106,6 +108,15 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     }
   }
 
+  /** The page of a source is read now, though its table is not old; the reading and its end come as events. */
+  async function reread(id: string | number): Promise<void> {
+    const source = sources.value.find((each) => each.id === Number(id))
+    if (!source) return
+    error.value = ""
+    const answer = await readPageNow(source.url, readOptions({ sourceType: source.source_type, vkSearchMode: source.vk_search_mode }))
+    if (!answer.ok) error.value = answer.text
+  }
+
   onMounted(() => void load())
   // The layout of the series changed (a summary of a source too): the sources are read again.
   watch(() => composition.layoutChanged[seriesId]?.rev, () => void load())
@@ -116,5 +127,5 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     if (up) void load()
   })
 
-  return { items, error, busy, add, remove, change, reload: load }
+  return { items, error, busy, add, remove, change, reread, reload: load }
 }

@@ -406,7 +406,7 @@
   "summary": "Список профилей парсера",
   "panel_sites": [
    "components/settings/SettingsParser.vue:81",
-   "composables/sourceCalls.ts:53"
+   "composables/sourceCalls.ts:58"
   ]
  },
  {
@@ -667,7 +667,7 @@
   "panel_sites": [
    "components/status/StatusComposition.vue:231",
    "composables/outputCalls.ts:14",
-   "composables/sourceCalls.ts:64"
+   "composables/sourceCalls.ts:69"
   ]
  },
  {
@@ -848,7 +848,7 @@
   "conditional": null,
   "summary": "Источники сериала по порядку",
   "panel_sites": [
-   "composables/sourceCalls.ts:58"
+   "composables/sourceCalls.ts:63"
   ]
  },
  {
@@ -861,7 +861,7 @@
   "conditional": null,
   "summary": "Добавление источника сериалу (ответ {id})",
   "panel_sites": [
-   "composables/sourceCalls.ts:69"
+   "composables/sourceCalls.ts:74"
   ]
  },
  {
@@ -874,7 +874,7 @@
   "conditional": null,
   "summary": "Удаление источника (единственный не удаляется: last_source)",
   "panel_sites": [
-   "composables/sourceCalls.ts:79"
+   "composables/sourceCalls.ts:84"
   ]
  },
  {
@@ -887,7 +887,7 @@
   "conditional": null,
   "summary": "Изменение полей источника: адрес, профиль, режим поиска, сезон Vibix, отключённые плееры, место",
   "panel_sites": [
-   "composables/sourceCalls.ts:73"
+   "composables/sourceCalls.ts:78"
   ]
  },
  {
@@ -1216,7 +1216,9 @@
   "access": "session",
   "conditional": null,
   "summary": "",
-  "panel_sites": []
+  "panel_sites": [
+   "composables/sourceCalls.ts:54"
+  ]
  },
  {
   "method": "POST",

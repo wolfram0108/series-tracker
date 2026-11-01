@@ -82,6 +82,21 @@ describe("useSeriesSources", () => {
     expect(calls.fetchSources).toHaveBeenCalledTimes(before + 1)
   })
 
+  it("reads the page of a source now, with the options of its read, and says why when the core refuses", async () => {
+    vi.mocked(calls.readPageNow).mockReset().mockResolvedValue(ok({ success: true }))
+    const channel = source({ source_type: "vk_video", url: "https://vk.com/video/@c|Тайтл", vk_search_mode: "get_all" })
+    vi.mocked(calls.fetchSources).mockResolvedValue(ok([channel]))
+    const sources = setup("video", [channel])
+    await flushPromises()
+    await sources.reread(7)
+    expect(calls.readPageNow).toHaveBeenCalledWith("https://vk.com/video/@c|Тайтл", { vk_search_mode: "get_all" })
+    vi.mocked(calls.readPageNow).mockResolvedValueOnce({ ok: false, text: "Нет связи с сервером" })
+    await sources.reread(7)
+    expect(sources.error.value).toBe("Нет связи с сервером")
+    await sources.reread(99)
+    expect(calls.readPageNow).toHaveBeenCalledTimes(2)
+  })
+
   it("adds a source made of a site address and reads the list again", async () => {
     const sources = setup()
     await flushPromises()

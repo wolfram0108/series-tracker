@@ -370,7 +370,7 @@ onMounted(() => {
       <div class="fieldset-content">
         <SourcesEditor
           :items="sources.items.value" :profiles="profiles" :error="sources.error.value" :busy="sources.busy.value"
-          :editable="isVideo" :adder="sources.add" @remove="sources.remove" @change="sources.change"
+          :editable="isVideo" :adder="sources.add" @remove="sources.remove" @change="sources.change" @reread="sources.reread"
         />
       </div>
     </div>

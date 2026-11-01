@@ -25,6 +25,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: "remove", id: string | number): void
   (e: "change", id: string | number, patch: DraftPatch): void
+  (e: "reread", id: string | number): void
 }>()
 
 const address = ref("")
@@ -48,6 +49,7 @@ async function add(): Promise<void> {
     <SourceCard
       v-for="item in items" :key="item.id" :item="item" :profiles="profiles" :busy="busy"
       @change="emit('change', item.id, $event)" @remove="editable && emit('remove', item.id)"
+      @reread="emit('reread', item.id)"
     />
     <div v-if="editable" class="source-add cluster">
       <StGroup>

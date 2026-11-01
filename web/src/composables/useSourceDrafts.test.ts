@@ -2,11 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { flushPromises } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import { useSourceDrafts } from "./useSourceDrafts"
-import { previewAddress, resolveAddress } from "./sourceCalls"
+import { previewAddress, readPageNow, resolveAddress } from "./sourceCalls"
 import { useSourceTablesStore } from "../stores/sourceTables"
 import type { PreviewReply, ResolveReply } from "../lib/sources"
 
-vi.mock("./sourceCalls", () => ({ resolveAddress: vi.fn(), previewAddress: vi.fn() }))
+vi.mock("./sourceCalls", () => ({ resolveAddress: vi.fn(), previewAddress: vi.fn(), readPageNow: vi.fn() }))
 
 const PAGE = "https://1.ruchime.org/release/test"
 const resolve = vi.mocked(resolveAddress)
@@ -151,5 +151,33 @@ describe("useSourceDrafts", () => {
     drafts.remove(drafts.items.value[0].id)
     expect(drafts.failed.value).toBe(false)
     expect(drafts.items.value).toHaveLength(0)
+  })
+
+  it("reads a page now though its table is fresh, and asks for the result once the read has ended", async () => {
+    site({ site: "ruchime", canonical_url: PAGE })
+    preview.mockResolvedValueOnce(page({ state: "ready", summary }))
+    vi.mocked(readPageNow).mockReset().mockResolvedValue({ ok: true, data: { success: true } })
+    const drafts = useSourceDrafts()
+    await drafts.add(PAGE)
+    const key = drafts.items.value[0].id
+    await drafts.reread(key)
+    expect(readPageNow).toHaveBeenCalledWith(PAGE, {})
+    expect(drafts.items.value[0].view.state).toBe("reading")
+    preview.mockResolvedValueOnce(page({ state: "ready", summary }))
+    useSourceTablesStore().applyReady({ url: PAGE, read_at: "2026-11-01T10:00:00Z" })
+    await flushPromises()
+    expect(preview).toHaveBeenLastCalledWith({ url: PAGE, options: {}, profile_id: null, refresh: false })
+    expect(drafts.items.value[0].view.state).toBe("noProfile")
+  })
+
+  it("says why the page could not be read now, and leaves the draft failed", async () => {
+    site({ site: "ruchime", canonical_url: PAGE })
+    preview.mockResolvedValueOnce(page({ state: "ready", summary }))
+    vi.mocked(readPageNow).mockReset().mockResolvedValue({ ok: false, text: "Нет связи с сервером" })
+    const drafts = useSourceDrafts()
+    await drafts.add(PAGE)
+    await drafts.reread(drafts.items.value[0].id)
+    expect(drafts.error.value).toBe("Нет связи с сервером")
+    expect(drafts.failed.value).toBe(true)
   })
 })

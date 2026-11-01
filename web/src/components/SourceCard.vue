@@ -16,7 +16,7 @@ import type { DraftPatch } from "../composables/useSourceDrafts"
 // One source of a series: its address, its constructor profile, and what its table holds — players with their
 // voice-overs and the group of each. The numbers of episodes are not here: they exist only as the constructor's answer.
 const props = defineProps<{ item: SourceItem; profiles: { id: number; name: string }[]; busy?: boolean }>()
-const emit = defineEmits<{ (e: "change", patch: DraftPatch): void; (e: "remove"): void }>()
+const emit = defineEmits<{ (e: "change", patch: DraftPatch): void; (e: "remove"): void; (e: "reread"): void }>()
 const toast = useToast()
 
 const isTorrent = computed(() => props.item.sourceType === "torrent")
@@ -68,6 +68,9 @@ async function copyAddress(): Promise<void> {
           <i v-if="view.state === 'reading'" class="pi pi-spin pi-spinner" />{{ stateText }}
         </span>
         <span v-if="view.players.length" class="muted">{{ sourceCaption(view.players) }}</span>
+        <button type="button" class="source-reread" :disabled="busy || view.state === 'reading'" @click="emit('reread')">
+          <i class="pi pi-refresh" />{{ t("sources.reread") }}
+        </button>
         <button type="button" class="source-remove" :disabled="busy" @click="emit('remove')">
           <i class="pi pi-trash" />{{ t("sources.remove") }}
         </button>
@@ -178,11 +181,12 @@ async function copyAddress(): Promise<void> {
 .source-state.is-reading { color: var(--color-blue); }
 .source-reason { color: var(--color-red-1); overflow-wrap: anywhere; }
 .muted { color: var(--text-muted); font-size: smaller; }
-.source-remove {
+.source-reread, .source-remove {
   display: inline-flex; align-items: center; gap: var(--space); cursor: pointer;
   background: none; border: none; color: var(--color-red-1);
 }
-.source-remove:disabled { cursor: default; opacity: 0.5; }
+.source-reread:disabled, .source-remove:disabled { cursor: default; opacity: 0.5; }
+.source-reread { color: var(--color-blue); }
 .players { list-style: none; margin: 0; padding: 0; }
 .player { padding: var(--space); border: var(--border-width) solid var(--border-color); border-radius: var(--border-radius); }
 .player.is-off .voices, .player.is-off .player-switch b { opacity: 0.5; }

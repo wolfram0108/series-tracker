@@ -59,7 +59,7 @@ const showValidation = ref(false)
 // Sources of a video series pile up here until "Add"; a torrent series has the one address of the field above.
 const {
   items: sourceItems, bodies: sourceBodies, failed: sourcesFailed, error: sourcesError, busy: sourcesBusy,
-  add: addDraft, remove: removeDraft, change: changeDraft,
+  add: addDraft, remove: removeDraft, change: changeDraft, reread: rereadDraft,
 } = useSourceDrafts()
 // The address of the field that a site reads: it becomes a source on the user's word, so a half-typed one makes none.
 const candidate = ref("")
@@ -556,7 +556,7 @@ onBeforeUnmount(() => {
         <div class="fieldset-content">
           <SourcesEditor
             :items="sourceItems" :profiles="profiles" :error="sourcesError" :busy="sourcesBusy" :adder="addSource"
-            @remove="removeDraft" @change="changeDraft"
+            @remove="removeDraft" @change="changeDraft" @reread="rereadDraft"
           />
         </div>
       </div>
