@@ -18,6 +18,8 @@ class CompositionRow(BaseModel):
     source_id: int
     row_key: str
     excluded: bool = False
+    # Why the row is excluded: `rule` (the constructor excluded it) or `no_number` (it gave no episode number).
+    exclusion: str | None = None
     season: int | None = None
     episode_start: int | None = None
     episode_end: int | None = None
@@ -72,7 +74,10 @@ class SourceSummary(BaseModel):
 
 
 class CompositionGetRequest(BaseModel):
+    """Excluded rows are for the window that counts what a source gave; no consumer of the layout asks for them."""
+
     series_id: int
+    include_excluded: bool = False
 
 
 class CompositionReply(BaseModel):

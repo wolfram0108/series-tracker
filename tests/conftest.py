@@ -14,21 +14,33 @@ def stuck_test_guard():
     faulthandler.cancel_dump_traceback_later()
 
 
+def _relaxed_paces():
+    """(module, name, value) of every pause that spares a real host; a name that no longer exists is skipped."""
+    from core.retry import UNTIMED, Budget
+    from modules.sources import policy
+    ruchime = "modules.sources.video_providers.ruchime"
+    return [
+        ("modules.sources.module", "REQUEST_MIN_INTERVAL", 0.0),
+        ("modules.sources.policy", "DEFAULT", policy.Budget(pauses=(0.0,))),
+        (f"{ruchime}.provider", "PROBE_INTERVAL_S", 0.0),
+        (f"{ruchime}.site", "PAGE_INTERVAL_S", 0.0),
+        (f"{ruchime}.site", "PAGE_COOLDOWN_S", 0.0),
+        (f"{ruchime}.site", "PAGE_BUDGET", Budget(attempts=4, pauses=(0.0,), limit_s=UNTIMED)),
+        (f"{ruchime}.site", "RELEASE_BUDGET", Budget(attempts=3, pauses=(0.0,), limit_s=UNTIMED)),
+    ]
+
+
 @pytest.fixture(autouse=True)
 def hosts_are_not_paced_in_tests(monkeypatch):
     """The pauses that spare a real host (between requests, probes and repeated asks) would only slow fakes down."""
-    from modules.sources import module as sources
-    from modules.sources import policy
-    from core.retry import UNTIMED, Budget
-    from modules.sources.video_providers.ruchime import provider as ruchime
-    from modules.sources.video_providers.ruchime import site
-    monkeypatch.setattr(sources, "REQUEST_MIN_INTERVAL", 0.0)
-    monkeypatch.setattr(policy, "DEFAULT", policy.Budget(pauses=(0.0,)))
-    monkeypatch.setattr(ruchime, "PROBE_INTERVAL_S", 0.0)
-    monkeypatch.setattr(site, "PAGE_INTERVAL_S", 0.0)
-    monkeypatch.setattr(site, "PAGE_COOLDOWN_S", 0.0)
-    monkeypatch.setattr(site, "PAGE_BUDGET", Budget(attempts=4, pauses=(0.0,), limit_s=UNTIMED))
-    monkeypatch.setattr(site, "RELEASE_BUDGET", Budget(attempts=3, pauses=(0.0,), limit_s=UNTIMED))
+    import importlib
+    for module_name, name, value in _relaxed_paces():
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        if hasattr(module, name):
+            monkeypatch.setattr(module, name, value)
 
 
 @pytest.fixture(autouse=True)
