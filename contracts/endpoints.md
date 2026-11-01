@@ -90,12 +90,12 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | GET | `/api/series` | Список сериалов: `kind`, `sources`, статусы, счётчик скачанного | `stores/series.ts` |
 | POST | `/api/series` | Создание серии с источниками (минимум один; + TMDB-маппинг, + раздачи торрента) | `AddSeriesModal.vue` |
 | GET | `/api/series/active_torrents` | Прогресс активных загрузок с именами серий | — |
-| GET | `/api/series/{series_id}` | Карточка серии: `kind`, `sources`, `tracker_info` (если адрес источника — трекер) | `StatusModal.vue`, `StatusComposition.vue`, `StatusVkComposition.vue` |
+| GET | `/api/series/{series_id}` | Карточка серии: `kind`, `sources`, `tracker_info` (если адрес источника — трекер) | `StatusModal.vue`, `StatusComposition.vue` |
 | POST | `/api/series/{series_id}` | Сохранение свойств серии (без источников): catalog → metadata → library/renaming | `StatusProperties.vue` |
 | DELETE | `/api/series/{series_id}` | Удаление серии (каскад по событию) | `App.vue` |
 | POST | `/api/series/{series_id}/state` | Эфемерный viewing: открытие/закрытие статус-окна | `stores/ui.ts` |
 | POST | `/api/series/{series_id}/toggle_auto_scan` | Вкл/выкл автоскана серии | `App.vue` |
-| POST | `/api/series/{series_id}/ignored-seasons` | Список игнорируемых сезонов | `StatusComposition.vue`, `StatusVkComposition.vue` |
+| POST | `/api/series/{series_id}/ignored-seasons` | Список игнорируемых сезонов | `StatusComposition.vue` |
 | PUT | `/api/series/{series_id}/ignored-episodes` | Память отключённых серий | `StatusComposition.vue` |
 | GET | `/api/series/{series_id}/torrents/history` | История раздач серии | `StatusHistory.vue`, `StatusProperties.vue` |
 | POST | `/api/series/{series_id}/scan` | Синхронный скан одной серии | `App.vue` |
@@ -105,8 +105,6 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | Метод | Путь | Назначение | Панель |
 |---|---|---|---|
 | GET | `/api/series/{series_id}/media-items` | Медиа-элементы серии | `StatusHistory.vue`, `StatusSlicing.vue` |
-| PUT | `/api/media-items/{unique_id}/ignore` | Игнор одного медиа-элемента | `StatusVkComposition.vue` |
-| PUT | `/api/series/{series_id}/media-items/ignore-season` | Массовый игнор сезона | `StatusVkComposition.vue` |
 | POST | `/api/media-items/{unique_id}/chapters` | Оглавление исходника | `StatusSlicing.vue` |
 | POST | `/api/media-items/{unique_id}/chapters/filtered` | Оглавление с автофильтром мусора | `StatusSlicing.vue` |
 | POST | `/api/media-items/{unique_id}/chapters/mark-garbage` | Ручная разметка мусорных глав | `StatusSlicing.vue` |
@@ -114,9 +112,9 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | POST | `/api/media-items/{unique_id}/slice-with-filter` | Нарезка с заданным списком отброшенных глав | `StatusSlicing.vue` |
 | POST | `/api/media-items/{unique_id}/delete-source` | Удаление исходника нарезанной компиляции | `StatusSlicing.vue` |
 | POST | `/api/media-items/{unique_id}/verify-sliced-files` | Сверка нарезок с диском | — |
-| POST | `/api/series/{series_id}/deep-adoption` | Глубокое усыновление (фон) | `StatusVkComposition.vue` |
+| POST | `/api/series/{series_id}/deep-adoption` | Глубокое усыновление (фон) | `StatusOutput.vue` |
 | GET | `/api/series/{series_id}/voices` | Озвучки сериала: `{items: [DubItem]}` — `{season, episode, voice_key, voice_label, status, state, hint, detail: {code, params} \| null}` (Р-43, Р-44, Р-46, Р-47); интерфейс озвучки получает по SSE (`voice_dubs_snapshot`, `voice_dub_update`), точка нужна для диагностики | — |
-| GET | `/api/series/{series_id}/rename_preview` | Предпросмотр новых имён файлов | `StatusVkComposition.vue` |
+| GET | `/api/series/{series_id}/rename_preview` | Предпросмотр новых имён файлов; строки несут `season`, `episode`, `part` | `StatusOutput.vue` |
 | POST | `/api/series/{series_id}/reprocess` | Переобработка имён файлов (торрент) | `StatusComposition.vue` |
 | GET | `/api/series/{series_id}/source-filenames` | Имена файлов раздач торрент-сериала для теста правил | `ParserTest.vue` |
 | POST | `/api/preview/naming/fetch` | Предпросмотр нейминга: команда `torrents.preview.fetch`, ответ сразу; списки — по SSE | `AddSeriesModal.vue` |
@@ -213,16 +211,13 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 
 ## 4. Функции панели → эндпоинты
 
-> Раздел описывает панель **до интерфейсной части этапа 10 (П-9)**: вызовы `/api/web_video/layout`,
-> `/api/web_video/coverage`, `/api/parser-profiles/scrape-titles`, `/api/series/{series_id}/vk-quality-priority`
-> `GET /api/series/{series_id}/sliced-files`, `POST /api/series/{series_id}/reprocess_vk_files`
-> и прежние тела `POST /api/series`, `POST /api/series/{series_id}`, `POST /api/parser-profiles/test` остались в ней
-> и переводятся на эндпоинты разделов 3.7 и 3.8 в П-9. Эндпоинтов у этих вызовов больше нет.
-
-Полный перечень вызовов из `web/src` — 88 мест (83 прямых `api.METHOD(...)`,
-4 через общие хелперы `loadFlag`/`saveFlag`/`loadNum`/`saveNum`, 1 через
-`EventSource`), 76 задействованных метод-эндпоинтов. Расхождений «действие
-в панели без эндпоинта» нет: каждый вызов попадает в живой маршрут.
+> Раздел описывает панель **после интерфейсной части этапа 10 (П-9)**. Вызовов `/api/web_video/layout`,
+> `/api/web_video/coverage`, `/api/parser-profiles/scrape-titles`, `/api/series/{series_id}/vk-quality-priority`,
+> `GET /api/series/{series_id}/sliced-files`, `POST /api/series/{series_id}/reprocess_vk_files`,
+> `PUT /api/media-items/{unique_id}/ignore` и `PUT /api/series/{series_id}/media-items/ignore-season` в панели нет, и
+> эндпоинтов у них больше нет: источники, раскладка, выход и отключение серий идут через разделы 3.7 и 3.8.
+> Расхождений «действие в панели без эндпоинта» нет: каждый вызов попадает в живой маршрут (проверяет
+> `scripts/gen_endpoints.py` по `contracts/endpoints.json`).
 
 | Экран / элемент панели | Метод | Путь |
 |---|---|---|
@@ -263,15 +258,15 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | Статус-окно: вкладка «Нарезка» — нарезать | POST | `/api/media-items/{unique_id}/slice` |
 | Статус-окно: вкладка «Нарезка» — нарезать с фильтром | POST | `/api/media-items/{unique_id}/slice-with-filter` |
 | Статус-окно: вкладка «Нарезка» — удалить исходник | POST | `/api/media-items/{unique_id}/delete-source` |
-| Статус-окно: вкладка «Композиция» (видео) | GET | `/api/series/{series_id}/composition` |
-| Статус-окно: вкладка «Композиция» (видео) | GET | `/api/series/{series_id}/rename_preview` |
-| Статус-окно: вкладка «Композиция» (видео) | GET | `/api/series/{series_id}` |
-| Статус-окно: вкладка «Композиция» (видео) — приоритет качества | PUT | `/api/series/{series_id}/vk-quality-priority` |
-| Статус-окно: вкладка «Композиция» (видео) — игнор элемента | PUT | `/api/media-items/{unique_id}/ignore` |
-| Статус-окно: вкладка «Композиция» (видео) — игнор сезона | PUT | `/api/series/{series_id}/media-items/ignore-season` |
-| Статус-окно: вкладка «Композиция» (видео) — исключить сезон | POST | `/api/series/{series_id}/ignored-seasons` |
-| Статус-окно: вкладка «Композиция» (видео) — переобработать | POST | `/api/series/{series_id}/reprocess_vk_files` |
-| Статус-окно: вкладка «Композиция» (видео) — усыновить | POST | `/api/series/{series_id}/deep-adoption` |
+| Статус-окно: раздел «Выход» — раскладка | GET | `/api/series/{series_id}/composition` |
+| Статус-окно: раздел «Выход» — референсы | GET | `/api/series/{series_id}/output` |
+| Статус-окно: раздел «Выход» — отключить или включить серию, сезон | PUT | `/api/series/{series_id}/output/switch` |
+| Статус-окно: раздел «Выход» — рычаг | PUT | `/api/series/{series_id}/output/settings` |
+| Статус-окно: раздел «Выход» — сбросить рычаги уровня | POST | `/api/series/{series_id}/output/settings/reset` |
+| Статус-окно: раздел «Выход» — имена файлов | GET | `/api/series/{series_id}/rename_preview` |
+| Статус-окно: раздел «Выход» — синхронизировать | POST | `/api/series/{series_id}/scan` |
+| Статус-окно: раздел «Выход» — переприменить правила | POST | `/api/series/{series_id}/reprocess` |
+| Статус-окно: раздел «Выход» — усыновить | POST | `/api/series/{series_id}/deep-adoption` |
 | Настройки → Авторизация: прочитать | GET | `/api/auth` |
 | Настройки → Авторизация: сохранить | POST | `/api/auth` |
 | Настройки → Аккаунт: сменить пароль | POST | `/api/auth/password` |
@@ -420,13 +415,6 @@ quality, episodes}`, `link` обязателен. Ответ `{success, series_i
 `episode_end`, `plan_status`, `status`, `is_ignored_by_user`, `source_url`,
 `publication_date` (ISO), `voiceover_tag`, `final_filename`, `chapters`,
 `chapters_filtered`, `slicing_status`, `is_available`, `resolution`, `part`.
-
-**PUT `/api/media-items/{unique_id}/ignore`** — тело `{is_ignored}`
-(обязательно, иначе 400).
-
-**PUT `/api/series/{series_id}/media-items/ignore-season`** — тело
-`{season, is_ignored}` (оба обязательны, иначе 400). Снимок списка
-элементов — на момент вызова.
 
 **POST `/api/media-items/{unique_id}/chapters`** — список глав
 `{title, start_time, end_time}`. 404 — элемент не найден, 500 — не удалось
@@ -876,8 +864,7 @@ cd web && npm run gen:api
 `POST /api/auth/password`, `POST /api/setup`, `POST
 /api/downloads/{task_id}/cancel`, `GET /api/logs/groups`, `POST
 /api/media-items/{unique_id}/delete-source`, `POST /api/preview/naming/fetch`,
-`PUT /api/series/{series_id}/ignored-episodes`, `PUT
-/api/series/{series_id}/media-items/ignore-season`, `GET /api/settings/
+`PUT /api/series/{series_id}/ignored-episodes`, `GET /api/settings/
 concurrent_fragments`, `POST /api/settings/concurrent_fragments`, `GET
 /api/settings/saved_paths`, `POST /api/settings/saved_paths`, `DELETE
 /api/settings/saved_paths`.

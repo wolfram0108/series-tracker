@@ -102,6 +102,8 @@
 | `POST /api/preview/naming/fetch` (оркестровка `torrents` и `sources`, событие `torrents.preview.failed` из шлюза) | шлюз вёл три модуля и издавал чужое событие | перепроектирована | команда `torrents.preview.fetch {items}` у `torrents`, исходы издаёт он один; шлюз шлёт команду — сделано (П-8); темы `torrents.preview.parse_torrent` и `.fetch_magnet` стали внутренними |
 | `FILE_DUMP_FLAGS` (`save_html_*`, `save_json_vk_scraper`) в `GET /api/settings/debug_flags` | флаги, которых никто не читает | удалена | сканер VK удалён, потребителей нет — сделано (П-8); блок в панели — сделано (П-9) |
 | `downloads.fs.sync`, `torrents.fs.verify` для сериала чужого вида | сверка и предупреждение о пути впустую | перепроектирована | сразу `{0, 0}` по `kind` из `catalog.series.get`, ничего не публикуется — сделано (П-8) |
+| `PUT /api/media-items/{unique_id}/ignore`, `PUT /api/series/{id}/media-items/ignore-season` | HTTP-отключение строки плана и сезона у прежней вкладки; дубль отключения серии | удалена | `PUT /api/series/{id}/output/switch` (`scan.output.switch`): серия или сезон по номерам, память сериала и строки плана меняются вместе; отключённая серия остаётся в выходе с отметкой `off` — сделано (П-9) |
+| `scan.items.set_ignored_bulk` (обработчик `on_set_ignored_bulk`, массовая правка строк сезона) | единственным отправителем был удалённый маршрут | удалена | то же — сделано (П-9) |
 
 ## 7. Интерфейс (`web/src`)
 
@@ -110,7 +112,7 @@
 | `components/WebSourcesEditor.vue`, `composables/useWebSources.ts`, `lib/webSources.ts` (`SOURCE_ORDER = vk, allvideo, vibix`) | источники только ruchime | перепроектирована | один компонент источников (Т-31) — сделано (П-9): `SourcesEditor.vue` и `SourceCard.vue`, данные — `useSourceDrafts.ts` и `useSeriesSources.ts`, логика строк — `lib/sources.ts` |
 | `AddSeriesModal.vue`: выпадающий список озвучки dunhuatv, `playerReportRows`, блок «Озвучки» (`webLayout`) | отдельный экран под каждый сайт | перепроектирована | компонент источников; блок озвучек — раздел «Выход» — сделано (П-9): список источников копится в окне до «Добавить», блока озвучек нет |
 | `status/StatusProperties.vue`, блок «Источники» | редактор ruchime | перепроектирована | компонент источников с добавлением и удалением источника — сделано (П-9): действия идут сразу в `/api/series/{id}/sources` |
-| `status/StatusComposition.vue`, `status/StatusVkComposition.vue` | номера из `scan._reconstruct` | перепроектирована | раскладка и план; раздел «Выход» |
+| `status/StatusComposition.vue`, `status/StatusVkComposition.vue` | номера из `scan._reconstruct` | перепроектирована | раскладка и план; раздел «Выход» — сделано (П-9): `StatusOutput` несёт все функции прежней вкладки видео-сериала — отключение серии и сезона (`output/switch`), имена файлов (`rename_preview`), переприменение правил (`reprocess`), глубокое усыновление (`deep-adoption`), синхронизация (`scan`), «Перечитать» у источника; убраны решениями: приоритет качества (Д-36), отчёт о доступности (`video_availability`), показ склеек и нарезки (Д-34: вкладка «Нарезка» осталась как была) |
 | `settings/ParserTest.vue` (`scrape-titles`, `test`) | тест правил по заголовкам скана | перепроектирована | строки для конструктора выбранного источника |
 | `settings/SettingsVoices.vue`, `VoiceGroupsEditor.vue` | группы и порядок источников | подтверждена | — |
 

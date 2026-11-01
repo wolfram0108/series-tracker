@@ -149,23 +149,6 @@ async def test_media_items_iso_dates(system):
 
 
 @pytest.mark.asyncio
-async def test_ignore_triggers_plan_update(system):
-    bus, db, client, _ = system
-    sub = bus.subscribe("scan.plan.updated")
-    resp = await client.put("/api/media-items/uid1/ignore",
-                            json={"is_ignored": True})
-    assert resp.json() == {"success": True}
-    env = await asyncio.wait_for(sub.queue.get(), 3)
-    assert env.payload == {"series_id": 2}
-    row = await db.fetch_one(
-        "SELECT is_ignored_by_user FROM media_items WHERE unique_id='uid1'")
-    assert row["is_ignored_by_user"] == 1
-
-    resp = await client.put("/api/media-items/uid1/ignore", json={})
-    assert resp.status_code == 400
-
-
-@pytest.mark.asyncio
 async def test_chapters_and_slice_flow(system):
     _, db, client, _ = system
     resp = await client.post("/api/media-items/uid2/chapters")

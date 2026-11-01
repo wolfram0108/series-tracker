@@ -120,8 +120,12 @@ class RenamingModule(BaseModule):
             new_name = reply["filename"]
             if current and current != new_name:
                 needs += 1
+            # The numbers are the row's own (the constructor's): a window puts the name where its episode is.
             preview.append({"unique_id": item["unique_id"],
                             "type": "media_item",
+                            "season": item.get("season"),
+                            "episode": item.get("episode_start"),
+                            "part": item.get("part"),
                             "current_filename": current,
                             "new_filename_preview": new_name})
         for child in await self._sliced_files(series_id):

@@ -449,3 +449,13 @@ async def test_preview_names_the_rows_of_a_video_series(system):
     assert reply["needs_rename_count"] == 1
     assert [(row["unique_id"], row["new_filename_preview"]) for row in reply["preview"]] == [
         ("u1", "Show s01e01.mp4"), ("u2", "Show s01e02.mp4")]
+
+
+@pytest.mark.asyncio
+async def test_preview_gives_every_row_the_numbers_of_its_slot(system):
+    _, fake, probe, _, _ = system
+    fake.media_items = [{**_item("u1", 3, "a.mp4"), "season": 2, "part": 1}]
+
+    reply = await probe.request("renaming.preview", {"series_id": 2}, timeout=10)
+
+    assert [(row["season"], row["episode"], row["part"]) for row in reply["preview"]] == [(2, 3, 1)]

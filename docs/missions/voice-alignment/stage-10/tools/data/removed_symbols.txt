@@ -107,3 +107,7 @@ const:SURVEY_TTL_S — откуда: 9.1/5
 # Раздел 9.2. Конструктор (rules)
 none:rules/repository.py чтение таблицы series — откуда: 9.2/1 — причина: чужую таблицу ловит table_owners.py (series принадлежит catalog)
 topic:rules.cache.invalidate — откуда: 9.2/3
+literal:/api/media-items/{unique_id}/ignore — откуда: 6/13
+literal:/api/series/{id}/media-items/ignore-season — откуда: 6/13
+topic:scan.items.set_ignored_bulk — откуда: 6/14
+def:on_set_ignored_bulk — откуда: 6/14

@@ -286,7 +286,7 @@
   "path": "/api/media-items/{unique_id}/chapters",
   "func": "chapters",
   "file": "modules/gateway/api_media.py",
-  "line": 90,
+  "line": 61,
   "access": "session",
   "conditional": null,
   "summary": "Оглавление исходника",
@@ -299,7 +299,7 @@
   "path": "/api/media-items/{unique_id}/chapters/filtered",
   "func": "chapters_filtered",
   "file": "modules/gateway/api_media.py",
-  "line": 103,
+  "line": 74,
   "access": "session",
   "conditional": null,
   "summary": "Оглавление с автофильтром мусора",
@@ -312,7 +312,7 @@
   "path": "/api/media-items/{unique_id}/chapters/mark-garbage",
   "func": "chapters_mark",
   "file": "modules/gateway/api_media.py",
-  "line": 118,
+  "line": 89,
   "access": "session",
   "conditional": null,
   "summary": "Ручная разметка мусорных глав",
@@ -325,7 +325,7 @@
   "path": "/api/media-items/{unique_id}/delete-source",
   "func": "delete_source",
   "file": "modules/gateway/api_media.py",
-  "line": 188,
+  "line": 159,
   "access": "session",
   "conditional": null,
   "summary": "Удаление исходника нарезанной компиляции",
@@ -334,22 +334,11 @@
   ]
  },
  {
-  "method": "PUT",
-  "path": "/api/media-items/{unique_id}/ignore",
-  "func": "set_ignored",
-  "file": "modules/gateway/api_media.py",
-  "line": 59,
-  "access": "session",
-  "conditional": null,
-  "summary": "Игнор одного медиа-элемента",
-  "panel_sites": []
- },
- {
   "method": "POST",
   "path": "/api/media-items/{unique_id}/slice",
   "func": "slice_task",
   "file": "modules/gateway/api_media.py",
-  "line": 154,
+  "line": 125,
   "access": "session",
   "conditional": null,
   "summary": "Задача нарезки компиляции",
@@ -362,7 +351,7 @@
   "path": "/api/media-items/{unique_id}/slice-with-filter",
   "func": "slice_with_filter",
   "file": "modules/gateway/api_media.py",
-  "line": 168,
+  "line": 139,
   "access": "session",
   "conditional": null,
   "summary": "Нарезка с заданным списком отброшенных глав",
@@ -375,7 +364,7 @@
   "path": "/api/media-items/{unique_id}/verify-sliced-files",
   "func": "verify_sliced",
   "file": "modules/gateway/api_media.py",
-  "line": 203,
+  "line": 174,
   "access": "session",
   "conditional": null,
   "summary": "Сверка нарезок с диском",
@@ -531,7 +520,7 @@
   "path": "/api/preview/naming/fetch",
   "func": "preview_naming_fetch",
   "file": "modules/gateway/api_media.py",
-  "line": 272,
+  "line": 243,
   "access": "session",
   "conditional": null,
   "summary": "Предпросмотр нейминга: команда torrents.preview.fetch, ответ сразу",
@@ -675,12 +664,12 @@
   "path": "/api/series/{series_id}/deep-adoption",
   "func": "deep_adoption",
   "file": "modules/gateway/api_media.py",
-  "line": 220,
+  "line": 191,
   "access": "session",
   "conditional": null,
   "summary": "Глубокое усыновление (фон)",
   "panel_sites": [
-   "composables/outputCalls.ts:34"
+   "composables/outputCalls.ts:47"
   ]
  },
  {
@@ -724,17 +713,6 @@
   ]
  },
  {
-  "method": "PUT",
-  "path": "/api/series/{series_id}/media-items/ignore-season",
-  "func": "set_ignored_bulk",
-  "file": "modules/gateway/api_media.py",
-  "line": 72,
-  "access": "session",
-  "conditional": null,
-  "summary": "Массовый игнор сезона",
-  "panel_sites": []
- },
- {
   "method": "GET",
   "path": "/api/series/{series_id}/output",
   "func": "output",
@@ -757,7 +735,7 @@
   "conditional": null,
   "summary": "Значение рычага выхода на уровне сериала, сезона или серии",
   "panel_sites": [
-   "composables/outputCalls.ts:45"
+   "composables/outputCalls.ts:58"
   ]
  },
  {
@@ -770,7 +748,7 @@
   "conditional": null,
   "summary": "Возврат рычагов уровня в наследование",
   "panel_sites": [
-   "composables/outputCalls.ts:51"
+   "composables/outputCalls.ts:64"
   ]
  },
  {
@@ -783,7 +761,7 @@
   "conditional": null,
   "summary": "",
   "panel_sites": [
-   "composables/outputCalls.ts:39"
+   "composables/outputCalls.ts:52"
   ]
  },
  {
@@ -791,24 +769,26 @@
   "path": "/api/series/{series_id}/rename_preview",
   "func": "rename_preview",
   "file": "modules/gateway/api_media.py",
-  "line": 230,
+  "line": 201,
   "access": "session",
   "conditional": null,
   "summary": "Предпросмотр новых имён файлов",
-  "panel_sites": []
+  "panel_sites": [
+   "composables/outputCalls.ts:37"
+  ]
  },
  {
   "method": "POST",
   "path": "/api/series/{series_id}/reprocess",
   "func": "reprocess",
   "file": "modules/gateway/api_media.py",
-  "line": 241,
+  "line": 212,
   "access": "session",
   "conditional": null,
   "summary": "Переобработка имён файлов (вид сериала решает renaming)",
   "panel_sites": [
    "components/status/StatusComposition.vue:257",
-   "composables/outputCalls.ts:29"
+   "composables/outputCalls.ts:42"
   ]
  },
  {
@@ -830,7 +810,7 @@
   "path": "/api/series/{series_id}/source-filenames",
   "func": "source_filenames",
   "file": "modules/gateway/api_media.py",
-  "line": 258,
+  "line": 229,
   "access": "session",
   "conditional": null,
   "summary": "Имена файлов раздач сериала для теста правил торрента",
