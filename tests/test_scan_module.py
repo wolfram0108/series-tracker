@@ -12,6 +12,7 @@ import pytest
 
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.db import Database
+from core.envelope import Envelope
 from modules.catalog import CatalogModule
 from modules.scan import ScanModule
 from core import ids
@@ -354,6 +355,7 @@ async def test_resume_continues_from_journal(db_path):
 
     bus, fake, scan, probe, runner = _system_factory(db_path)
     await runner.start()
+    bus.publish(Envelope(topic="system.started", kind="event"))
     try:
         for _ in range(100):
             if len(fake.registered) == 2:

@@ -88,8 +88,11 @@ class RenamingModule(BaseModule):
         self.handle("renaming.tasks.active", self.on_tasks_active)
         self.handle("renaming.preview", self.on_preview, concurrent=True)
         self.handle("series.deleted", self.on_series_deleted)
+        self.handle("system.started", self.on_system_started)
 
-    async def on_start(self) -> None:
+    async def on_system_started(self, env: Envelope) -> None:
+        """Every module is up: a переобработка, прерванная рестартом, выполняется заново — ей нужны соседи, которые на
+        старте этого модуля ещё не отвечают."""
         for task in await self.repo.unfinished():
             self.log.info("перевыполнение незавершённой переобработки "
                           "(задача %d, сериал %d)", task["id"],

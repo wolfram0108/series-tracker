@@ -53,10 +53,12 @@ class LibraryModule(BaseModule):
         self.handle("library.directories.list", self.on_list_directories)
         self.handle("library.relocate", self.on_relocate)
         self.handle("series.deleted", self.on_series_deleted)
+        self.handle("system.started", self.on_system_started)
 
-    async def on_start(self) -> None:
-        # Reconcile: незавершённые перемещения продолжаются
-        # (os.rename идемпотентен — перемещённое пропускается).
+    async def on_system_started(self, env: Envelope) -> None:
+        """Every module is up. Reconcile: незавершённые перемещения продолжаются (os.rename идемпотентен —
+        перемещённое пропускается); они спрашивают торренты и переименование, которые на старте этого модуля ещё
+        не отвечают."""
         for task in await self.repo.unfinished():
             self.log.info("возобновление перемещения: задача %d, сериал %d",
                           task["id"], task["series_id"])

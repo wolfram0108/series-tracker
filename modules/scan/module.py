@@ -142,6 +142,7 @@ class ScanModule(BaseModule):
         self._signals = TableSignals()
         self._locks: dict[int, asyncio.Lock] = {}
         self._running: set[int] = set()
+        self._owned: set[int] = set()  # the tasks of scan_tasks that the scans running here keep
         self._aborted: set[int] = set()
         self._scan_all_running = False
         self._awaiting_pipeline = False
@@ -162,6 +163,7 @@ class ScanModule(BaseModule):
         self.handle("scan.status.get", self.on_status_get)
         self.handle("composition.changed", self.on_composition_changed)
         self.handle("voices.settings.changed", self.on_voice_settings_changed)
+        self.handle("system.started", self.on_system_started)
         self.handle("sources.table.ready", self.on_table_ready)
         self.handle("sources.table.failed", self.on_table_failed)
         self.handle("torrents.queue.changed", self.on_queue_changed)
@@ -174,13 +176,16 @@ class ScanModule(BaseModule):
         # вклад при старте после reconcile).
         for task in await self.repo.error_tasks():
             self._contribute(task["series_id"], scanning=False, error=True)
-        # Настоящий resume незавершённых задач (вместо удаления).
+        if self._tick is not None:
+            self._spawn(self._scheduler_loop())
+
+    async def on_system_started(self, env: Envelope) -> None:
+        """Every module is up: the scans that were under way are taken up again. The work needs the catalog, the
+        sources and the neighbours of a scan, which do not all answer while this module starts."""
         for task in await self.repo.incomplete_tasks():
             self.log.info("возобновление прерванного скана: задача %d, "
                           "сериал %d", task["id"], task["series_id"])
-            self._spawn(self._resume_task(task))
-        if self._tick is not None:
-            self._spawn(self._scheduler_loop())
+            self._spawn(self._resume(task))
 
     def _spawn(self, coro) -> None:
         self._tasks.append(asyncio.create_task(coro))
@@ -417,15 +422,24 @@ class ScanModule(BaseModule):
             raise SyncFailed(reason("scan_step_failed", step=topic)) from exc
 
     async def _run_series(self, series_id: int, force: bool = False,
-                          download: bool = True) -> dict:
+                          download: bool = True, resume: int | None = None) -> dict:
+        """A scan of one series. The command is written down before anything is waited for, so that a restart finds
+        it: a video synchronization is a task of `scan_tasks` until it ends (`resume` is the task a restart found)."""
         if series_id in self._running:
             raise ScanError(f"скан сериала {series_id} уже запущен")
         self._running.add(series_id)
         self._contribute(series_id, scanning=True, error=False)
+        intent = resume
         try:
+            if intent is None:
+                intent = await self.repo.create_task(series_id, [], {"video_sync": True, "download": download})
+            self._owned.add(intent)
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
             video = series.get("kind") == "video"
+            if not video:  # a torrent scan writes the task of its own plan
+                await self.repo.delete_task(intent)
+                intent = None
             if video:
                 if not any(each.parser_profile_id for each in _sources_of(series)):
                     raise SyncFailed(reason("scan_no_profile"))
@@ -438,6 +452,7 @@ class ScanModule(BaseModule):
             await self._reprocess_names(series_id)
             if video:
                 result = await self._sync_video(series, download)
+                await self.repo.delete_task(intent)
             else:
                 result = await self._scan_torrents(series, _torrent_source(series), force)
             self._contribute(series_id, scanning=False, error=False)
@@ -448,19 +463,26 @@ class ScanModule(BaseModule):
             return result
         except ScanAborted as exc:
             self.log.info("скан сериала %d прерван: %s", series_id, exc)
+            if intent is not None:
+                await self.repo.delete_task(intent)
             self._contribute(series_id, scanning=False, error=False)
             return {"changed": False, "aborted": True}
         except Exception as exc:
             # Носитель ошибки: error-запись в scan_tasks, если её не
             # оставила торрент-фаза. Серии нет — носитель не пишем.
-            if await self._series_alive(series_id) \
-                    and not await self._has_error_task(series_id):
+            alive = await self._series_alive(series_id)
+            if intent is not None and alive:
+                await self.repo.set_error(intent, str(exc))  # the written command becomes the carrier of its failure
+            elif intent is not None:
+                await self.repo.delete_task(intent)
+            elif alive and not await self._has_error_task(series_id):
                 task_id = await self.repo.create_task(series_id, [])
                 await self.repo.set_error(task_id, str(exc))
             self._contribute(series_id, scanning=False, error=True)
             raise
         finally:
             self._running.discard(series_id)
+            self._owned.discard(intent)
 
     async def _prepare_series(self, series_id: int) -> dict:
         """Состав раздачи для композиции без запуска закачки.
@@ -796,6 +818,24 @@ class ScanModule(BaseModule):
         except Exception as exc:
             await self.repo.set_error(task_id, str(exc))
             raise
+
+    async def _resume(self, task: dict) -> None:
+        """A task a restart found: a video synchronization is run again from its written command, a torrent scan
+        goes on from its journal."""
+        if not task["results_data"].get("video_sync"):
+            await self._resume_task(task)
+            return
+        if task["id"] in self._owned:  # the scan of this very command is running in this process
+            return
+        series_id = task["series_id"]
+        if series_id in self._running:  # a command that came after the restart is the scan of the series already
+            await self.repo.delete_task(task["id"])
+            return
+        try:
+            await self._run_series(series_id, download=bool(task["results_data"].get("download", True)),
+                                   resume=task["id"])
+        except Exception:  # noqa: BLE001 - the failure is kept as the error task of the series
+            self.log.exception("возобновление синхронизации сериала %d не удалось", series_id)
 
     async def _resume_task(self, task: dict) -> None:
         series_id = task["series_id"]

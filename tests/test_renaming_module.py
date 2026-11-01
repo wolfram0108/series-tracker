@@ -9,6 +9,7 @@ import pytest
 
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.db import Database
+from core.envelope import Envelope
 from modules.renaming import RenamingModule
 from series_factory import insert_series
 
@@ -459,3 +460,21 @@ async def test_preview_gives_every_row_the_numbers_of_its_slot(system):
     reply = await probe.request("renaming.preview", {"series_id": 2}, timeout=10)
 
     assert [(row["season"], row["episode"], row["part"]) for row in reply["preview"]] == [(2, 3, 1)]
+
+
+@pytest.mark.asyncio
+async def test_a_reprocess_a_restart_interrupted_is_run_again_when_the_system_has_started_and_not_before(system):
+    bus, fake, probe, db_path, media = system
+    fake.media_items = [_item("u1", 1, "старое имя 1.mp4")]
+    open(os.path.join(media, "старое имя 1.mp4"), "wb").close()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO renaming_tasks (series_id, status, attempts, created_at, task_type, task_data) "
+                     "VALUES (2, 'in_progress', 0, '2026-11-02 10:00:00', 'reprocess', '{}')")
+        conn.commit()
+    sub = bus.subscribe("renaming.finished")
+    await asyncio.sleep(0.2)  # nothing in the module looks for such a task by itself
+    assert os.path.exists(os.path.join(media, "старое имя 1.mp4")) and sub.queue.empty()
+    bus.publish(Envelope(topic="system.started", kind="event"))
+    env = await asyncio.wait_for(sub.queue.get(), 5)
+    assert env.payload == {"series_id": 2}
+    assert os.path.exists(os.path.join(media, "Show s01e01.mp4")) and _renaming_tasks(db_path) == []

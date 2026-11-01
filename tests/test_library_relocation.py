@@ -10,6 +10,7 @@ import pytest
 
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.db import Database
+from core.envelope import Envelope
 from modules.catalog import CatalogModule
 from modules.library import LibraryModule
 from series_factory import insert_series
@@ -207,3 +208,22 @@ async def test_relocate_sanitizes_target_path(system, tmp_path):
     env = await asyncio.wait_for(sub_fin.queue.get(), 3)
     assert env.payload["success"] is True
     assert _save_path(db_path) == str(tmp_path / "Show Two")
+
+
+@pytest.mark.asyncio
+async def test_a_relocation_a_restart_interrupted_is_taken_up_when_the_system_has_started_and_not_before(system):
+    bus, fake, _, db_path, old_dir, new_dir = system
+    fake.media_items = [{"unique_id": "u1", "final_filename": "Show s01e01.mp4"}]
+    fake.sliced = []
+    open(os.path.join(old_dir, "Show s01e01.mp4"), "wb").close()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO relocation_tasks (series_id, new_path, status, created_at) "
+                     "VALUES (2, ?, 'in_progress', '2026-11-02 10:00:00')", (new_dir,))
+        conn.commit()
+    sub_fin = bus.subscribe("library.relocation.finished")
+    await asyncio.sleep(0.2)  # nothing in the module looks for such a task by itself
+    assert os.path.exists(os.path.join(old_dir, "Show s01e01.mp4")) and sub_fin.queue.empty()
+    bus.publish(Envelope(topic="system.started", kind="event"))
+    env = await asyncio.wait_for(sub_fin.queue.get(), 5)
+    assert env.payload["success"] is True and os.path.exists(os.path.join(new_dir, "Show s01e01.mp4"))
+    assert _save_path(db_path) == new_dir and _tasks(db_path) == []

@@ -15,6 +15,7 @@ from core import BaseModule, Bus, BusRequestError, Runner, ids
 from core.contracts import (REFERENCE_CHOICE, VARIANT_ALLOW, Level, Reference, ReferenceChanged, ReferenceChoice,
                             ReferenceMark, RowState, TableState, variant_target)
 from core.db import Database
+from core.envelope import Envelope
 from core.reasons import parse, reason
 from modules.catalog import CatalogModule
 from modules.scan import ScanModule
@@ -184,6 +185,99 @@ async def test_a_synchronization_waits_for_the_verdict_of_a_page_that_is_being_r
     order = rig.world.order
     assert order.index(f"table.ready {URL1}") < order.index("composition.recompute")
     assert result["sources"] == [{"source_id": rig.source_ids[0], "url": URL1, "state": "ready", "reason": None}]
+
+
+# --- the command of a synchronization is the database's (T-28) ---------------------------------------------------------
+
+def tasks_of(rig: "Rig") -> list[dict]:
+    return rig.query("SELECT status, results_data FROM scan_tasks WHERE series_id=?", (rig.series_id,))
+
+
+async def no_task_left(rig: "Rig") -> None:
+    """The command is gone from the database: it goes when the scan ends, a moment after the last signal it sent."""
+    for _ in range(200):
+        if not tasks_of(rig):
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(("the command stayed", tasks_of(rig)))
+
+
+async def test_the_command_of_a_synchronization_is_written_before_its_table_is_waited_for_and_gone_when_it_ends(rig):
+    rig.world.pages[URL1] = Page(TableState.READING, held=False)
+    rig.world.rows = [rig.row("a", 1, 1)]
+    run = rig.start_run(download=False)
+    await rig.world.asked.get()
+    assert [(each["status"], json.loads(each["results_data"])) for each in tasks_of(rig)] == [
+        ("processing", {"video_sync": True, "download": False})]
+    rig.world.finish(URL1)
+    await asyncio.wait_for(run, STUCK_S)
+    assert tasks_of(rig) == []
+
+
+async def test_a_synchronization_that_fails_leaves_its_command_as_the_error_of_the_series_and_one_record_only(rig):
+    rig.world.rows = [rig.row("a", 1, 1)]
+    rig.world.recompute_error = "boom"
+    with pytest.raises(BusRequestError):
+        await rig.run()
+    assert [(each["status"], json.loads(each["results_data"]).get("video_sync")) for each in tasks_of(rig)] == [("error", True)]
+    rig.world.recompute_error = None
+    await rig.run()
+    assert tasks_of(rig) == []
+
+
+async def test_a_restart_in_the_middle_of_a_synchronization_runs_it_again_from_its_command_when_the_system_has_started(rig):
+    rig.world.rows = [rig.row("a", 1, 1)]
+    with sqlite3.connect(rig.db_path) as conn:
+        conn.execute("INSERT INTO scan_tasks (series_id, status, task_data, results_data) VALUES (?, 'processing', '[]', ?)",
+                     (rig.series_id, json.dumps({"video_sync": True, "download": True})))
+        conn.commit()
+    again = await build(rig.db_path, series_id=rig.series_id, source_ids=rig.source_ids)
+    try:
+        assert again.world.order == []  # nothing is asked while the modules start
+        again.world.rows = [again.row("a", 1, 1)]
+        again.bus.publish(Envelope(topic="system.started", kind="event"))
+        assert await asyncio.wait_for(again.world.dispatched.get(), STUCK_S)
+        assert await asyncio.wait_for(again.world.dispatched.get(), STUCK_S)
+        assert f"downloads.dispatch {again.series_id}" in again.world.order
+        await no_task_left(again)
+        assert [each.mark for each in await again.output()] == [MARK.BY_LEVEL]
+    finally:
+        await again.runner.stop()
+
+
+async def test_a_command_found_at_a_restart_without_the_wish_to_download_does_not_download(rig):
+    with sqlite3.connect(rig.db_path) as conn:
+        conn.execute("INSERT INTO scan_tasks (series_id, status, task_data, results_data) VALUES (?, 'processing', '[]', ?)",
+                     (rig.series_id, json.dumps({"video_sync": True, "download": False})))
+        conn.commit()
+    again = await build(rig.db_path, series_id=rig.series_id, source_ids=rig.source_ids)
+    try:
+        again.world.rows = [again.row("a", 1, 1)]
+        again.bus.publish(Envelope(topic="system.started", kind="event"))
+        await no_task_left(again)
+        assert "downloads.dispatch" not in " ".join(again.world.order)
+    finally:
+        await again.runner.stop()
+
+
+async def test_a_command_found_at_a_restart_for_a_series_already_being_scanned_is_dropped(rig):
+    rig.world.pages[URL1] = Page(TableState.READING, held=False)
+    rig.world.rows = [rig.row("a", 1, 1)]
+    run = rig.start_run()
+    await rig.world.asked.get()
+    with sqlite3.connect(rig.db_path) as conn:
+        conn.execute("INSERT INTO scan_tasks (series_id, status, task_data, results_data) VALUES (?, 'processing', '[]', ?)",
+                     (rig.series_id, json.dumps({"video_sync": True, "download": True})))
+        conn.commit()
+    rig.bus.publish(Envelope(topic="system.started", kind="event"))
+    for _ in range(200):
+        if len(tasks_of(rig)) == 1:
+            break
+        await asyncio.sleep(0.02)
+    assert len(tasks_of(rig)) == 1
+    rig.world.finish(URL1)
+    await asyncio.wait_for(run, STUCK_S)
+    assert tasks_of(rig) == []
 
 
 async def test_a_verdict_that_beats_the_reply_to_the_request_is_not_lost(rig):
