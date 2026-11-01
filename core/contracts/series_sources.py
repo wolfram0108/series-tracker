@@ -31,6 +31,8 @@ class SeriesSource(BaseModel):
     vk_search_mode: str = "search"
     vibix_season: int | None = None
     players_off: list[str] = Field(default_factory=list)
+    # The voice-over of the rows that have no name of their own and none from the constructor (a VK channel gives none).
+    voice_name: str = ""
 
     def read_options(self) -> dict[str, str]:
         """The choices that change what the site is asked for; the others are applied to the table afterwards."""

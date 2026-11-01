@@ -8,7 +8,7 @@ import { itemOfSource, type SeriesSource, type SourceSummary } from "../lib/sour
 const PAGE = "https://1.ruchime.org/release/test"
 const stored = (over: Partial<SeriesSource> = {}): SeriesSource => ({
   id: 7, series_id: 1, position: 0, url: PAGE, source_type: "web_video", parser_profile_id: null,
-  vk_search_mode: "search", vibix_season: null, players_off: [], ...over,
+  vk_search_mode: "search", vibix_season: null, players_off: [], voice_name: "", ...over,
 })
 const summary: SourceSummary = {
   source_id: 7, url: PAGE, status: "no_profile", read_at: "2026-11-01T10:00:00Z", players: [
@@ -103,6 +103,24 @@ describe("SourcesEditor", () => {
     await w.find(".source-add button").trigger("click")
     await flushPromises()
     expect((field.element as HTMLInputElement).value).toBe("")
+  })
+
+  it("names the voice-over of a source in a field that sends the name when it is left, trimmed, and only when it changed", async () => {
+    const w = mountEditor([itemOfSource(stored({ voice_name: "AniStar" }), summary, null)])
+    const field = w.find(".source-voice-name input")
+    expect((field.element as HTMLInputElement).value).toBe("AniStar")
+    await field.trigger("focusout")
+    expect(w.emitted("change")).toBeUndefined()
+    await field.setValue("  AniLibria ")
+    expect(w.emitted("change")).toBeUndefined()
+    await field.trigger("focusout")
+    expect(w.emitted("change")?.[0]).toEqual([7, { voiceName: "AniLibria" }])
+  })
+
+  it("offers a group to a voice-over that is in none and not to one that is in a group", () => {
+    const w = mountEditor()
+    const voices = w.findAll(".voices .voice")
+    expect(voices.map((voice) => voice.find(".group-maker").exists())).toEqual([false, true])
   })
 
   it("edits the channel of VK and sends it when the field is left", async () => {

@@ -9,8 +9,8 @@ import { SPECS } from "../../lib/output.fixtures"
 // A playable single-episode line; each test changes only the fields it is about.
 const rowOf = (over: Partial<Row>): Row => ({
   series_id: 1, source_id: 7, row_key: "a", excluded: false, season: 1, episode_start: 5, episode_end: 5,
-  voice_label: "Ruchime", voice_name: "Ruchime", player: "vk", player_label: "VK", group: "", text: "", link: "",
-  state: "playable", heights: [1080], ...over,
+  voice_label: "Ruchime", voice_group: over.voice_label ?? "Ruchime", voice_name: "Ruchime", player: "vk", player_label: "VK",
+  group: "", text: "", link: "", state: "playable", heights: [1080], ...over,
 })
 
 // Source 7 has two players of one group; source 9 has a voice-over of its own, a compilation of it, and a line absent.
@@ -149,6 +149,19 @@ describe("OutputLevers", () => {
     await columnOf(picked, "Ruchime").find(".voice-head .lever-reset").trigger("click")
     expect(picked.emitted("set")?.[0]).toEqual(["voice.player", groupTarget("Ruchime"), null])
     expect(picked.emitted("reset")?.[0]).toEqual(["voice.player", groupTarget("Ruchime")])
+  })
+
+  it("offers to make a group in the head of a column of a voice-over that is in none, and in no other", () => {
+    const rows = [
+      rowOf({ row_key: "a", voice_label: "AniStar", voice_group: "AniStar" }),
+      rowOf({ row_key: "b", voice_label: "Неизвестная озвучка 1", voice_group: null, voice_name: "Animy" }),
+      rowOf({ row_key: "c", voice_label: "Неизвестная озвучка 2", voice_group: null, voice_name: "" }),
+    ]
+    const w = mountLevers({ view: viewOf(rows) })
+    expect(columnOf(w, "AniStar").find(".group-maker").exists()).toBe(false)
+    expect(columnOf(w, "Неизвестная озвучка 1").find(".group-maker").exists()).toBe(true)
+    expect(columnOf(w, "Неизвестная озвучка 2").find(".group-maker").exists()).toBe(false)
+    expect(columnOf(w, "Неизвестная озвучка 2").text()).toContain(t("voices.group.nameless"))
   })
 
   it("draws a lever registered later from its description alone, titled by its own name until the catalog has a title", () => {

@@ -14,7 +14,7 @@ vi.mock("./sourceCalls")
 const PAGE = "https://1.ruchime.org/release/test"
 const source = (over: Partial<SeriesSource> = {}): SeriesSource => ({
   id: 7, series_id: 1, position: 0, url: PAGE, source_type: "web_video", parser_profile_id: null,
-  vk_search_mode: "search", vibix_season: null, players_off: [], ...over,
+  vk_search_mode: "search", vibix_season: null, players_off: [], voice_name: "", ...over,
 })
 const summary: SourceSummary = {
   source_id: 7, url: PAGE, status: "no_profile",

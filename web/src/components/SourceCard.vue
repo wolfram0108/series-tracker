@@ -5,6 +5,7 @@ import StGroup from "./StGroup.vue"
 import StIcon from "./StIcon.vue"
 import StInput from "./StInput.vue"
 import StSelect from "./StSelect.vue"
+import VoiceGroupMaker from "./VoiceGroupMaker.vue"
 import { t, type MessageKey } from "../i18n"
 import { reasonText } from "../lib/reason"
 import {
@@ -43,6 +44,14 @@ watch(() => props.item.url, (url) => {
   channel.value = parts.channel
   query.value = parts.query
 }, { immediate: true })
+
+// The name of the voice-over of the source is typed and sent when the field is left, like the channel.
+const voiceName = ref("")
+watch(() => props.item.voiceName, (name) => { voiceName.value = name }, { immediate: true })
+function commitVoiceName(): void {
+  const name = voiceName.value.trim()
+  if (name !== props.item.voiceName) emit("change", { voiceName: name })
+}
 
 function commitChannel(): void {
   const url = joinVkAddress(channel.value, query.value)
@@ -123,6 +132,13 @@ async function copyAddress(): Promise<void> {
       />
     </StGroup>
     <small v-if="item.profileId === null && !isTorrent" class="muted">{{ t("sources.profile.hint") }}</small>
+    <div v-if="!isTorrent" class="stack source-voice-name" @focusout="commitVoiceName" @keyup.enter="commitVoiceName">
+      <StGroup>
+        <StIcon icon="pi pi-microphone" />
+        <StInput v-model="voiceName" :label="t('sources.voiceName.label')" />
+      </StGroup>
+      <small class="muted">{{ t("sources.voiceName.hint") }}</small>
+    </div>
     <div v-if="view.reason" class="source-reason">{{ reasonText(view.reason) }}</div>
 
     <ul v-if="!isTorrent && view.players.length" class="players grid-fit">
@@ -160,6 +176,7 @@ async function copyAddress(): Promise<void> {
             <span class="voice-group" :class="{ 'is-none': voice.group === null }">{{
               voice.group === null ? t("sources.voice.noGroup") : t("sources.voice.group", { group: voice.group })
             }}</span>
+            <VoiceGroupMaker v-if="voice.group === null" class="voice-maker" :names="[voice.name]" />
           </li>
         </ul>
       </li>
@@ -193,6 +210,7 @@ async function copyAddress(): Promise<void> {
 .player-switch { cursor: pointer; }
 .voices { list-style: none; margin: 0; padding: 0; gap: calc(var(--space) / 2); }
 .voice { justify-content: space-between; }
+.voice-maker { flex-basis: 100%; }
 .voice-name { overflow-wrap: anywhere; }
 .voice-group { color: var(--color-green-1); font-size: smaller; }
 .voice-group.is-none { color: var(--text-muted); }

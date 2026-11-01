@@ -173,10 +173,10 @@ describe("addresses", () => {
   it("sends a draft with exactly the fields of a source", () => {
     expect(draftBody({
       url: "https://1.ruchime.org/release/test", sourceType: "web_video", profileId: 4, vkSearchMode: "search",
-      vibixSeason: 2, playersOff: ["kodik"],
+      vibixSeason: 2, playersOff: ["kodik"], voiceName: "AniStar",
     })).toEqual({
       url: "https://1.ruchime.org/release/test", source_type: "web_video", parser_profile_id: 4, vk_search_mode: "search",
-      vibix_season: 2, players_off: ["kodik"],
+      vibix_season: 2, players_off: ["kodik"], voice_name: "AniStar",
     })
   })
 })
@@ -184,7 +184,7 @@ describe("addresses", () => {
 describe("the sources of a stored series", () => {
   const stored: SeriesSource = {
     id: 7, series_id: 1, position: 0, url: "https://1.ruchime.org/release/test", source_type: "web_video",
-    parser_profile_id: null, vk_search_mode: "search", vibix_season: 2, players_off: ["kodik"],
+    parser_profile_id: null, vk_search_mode: "search", vibix_season: 2, players_off: ["kodik"], voice_name: "",
   }
 
   it("finds the summary of a source by its id", () => {

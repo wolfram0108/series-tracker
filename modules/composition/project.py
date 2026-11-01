@@ -64,14 +64,17 @@ def selected_rows(source: SeriesSource, table: ReleaseTable) -> list[TableRow]:
 
 def lines_for(source: SeriesSource, table: ReleaseTable) -> list[RuleLine]:
     """What the constructor is asked about the source: one line with its key for every row in play."""
-    return [RuleLine(key=row.key, text=line_of(table, row), player=row.player, voice=row.voice.name)
-            for row in selected_rows(source, table)]
+    return [RuleLine(key=row.key, text=line_of(table, row), player=row.player,
+                     voice=voice_name_of(row, None, source.voice_name)) for row in selected_rows(source, table)]
 
 
-def voice_name_of(row: TableRow, result: RuleResult | None) -> str:
-    """The name the constructor assigned beats the one the player or the site gave."""
+def voice_name_of(row: TableRow, result: RuleResult | None, fallback: str = "") -> str:
+    """The name the constructor assigned beats the one the player or the site gave, which beats the one the user gave
+    the source for rows that have no name."""
     assigned = result.voiceover if result is not None else None
-    return assigned if assigned and assigned.strip() else row.voice.name
+    if assigned and assigned.strip():
+        return assigned
+    return fallback if not row.voice.name.strip() and fallback.strip() else row.voice.name
 
 
 def voice_names(inputs: Sequence[SourceInput]) -> list[str]:
@@ -81,7 +84,8 @@ def voice_names(inputs: Sequence[SourceInput]) -> list[str]:
     for item in _ordered(inputs):
         if item.table is None:
             continue
-        names.update((row.voice.name, None) for row in item.table.rows if row.voice.name.strip())
+        names.update((voice_name_of(row, None, item.source.voice_name), None) for row in item.table.rows
+                     if voice_name_of(row, None, item.source.voice_name).strip())
         names.update((result.voiceover, None) for result in _results_of(item).values()
                      if result.voiceover and result.voiceover.strip())
     return list(names)
@@ -98,7 +102,8 @@ def project(inputs: Sequence[SourceInput], groups: Mapping[str, str | None],
     for item in _ordered(inputs):
         summaries.append(_summary(item, groups))
         for row, result in _answered_rows(item):
-            rows.append(_row_of(item.source, row, result, voice_name_of(row, result), groups, numbering))
+            rows.append(_row_of(item.source, row, result, voice_name_of(row, result, item.source.voice_name), groups,
+                                numbering))
     return Projection(rows, summaries, numbering)
 
 
@@ -196,7 +201,7 @@ def _summary(item: SourceInput, groups: Mapping[str, str | None]) -> SourceSumma
         source_id=item.source.id, url=item.source.url, canonical_url=table.url if table else item.table_url,
         status=_status_of(item),
         reason=item.failure or None, read_at=table.read_at if table else None,
-        players=_players_of(table, _results_of(item), groups) if table else [])
+        players=_players_of(table, _results_of(item), groups, item.source.voice_name) if table else [])
 
 
 def _status_of(item: SourceInput) -> SourceStatus:
@@ -209,8 +214,8 @@ def _status_of(item: SourceInput) -> SourceStatus:
     return SourceStatus.READY if item.reply is not None else SourceStatus.WAITING
 
 
-def _players_of(table: ReleaseTable, results: Mapping[str, RuleResult],
-                groups: Mapping[str, str | None]) -> list[PlayerSummary]:
+def _players_of(table: ReleaseTable, results: Mapping[str, RuleResult], groups: Mapping[str, str | None],
+                fallback: str = "") -> list[PlayerSummary]:
     """What a window shows before any number exists: per player the rows, the seasons it keeps, its resolutions and
     its voice-overs with their groups. A voice-over the constructor assigned is shown as soon as it answered."""
     by_player: dict[str, list[TableRow]] = {}
@@ -221,15 +226,15 @@ def _players_of(table: ReleaseTable, results: Mapping[str, RuleResult],
         rows=len(rows), groups=len({row.group for row in rows if row.group}),
         group_names=list(dict.fromkeys(row.group for row in rows if row.group)),
         heights=sorted({height for row in rows if row.state == RowState.PLAYABLE for height in row.heights}),
-        voices=_voices_of(rows, results, groups))
+        voices=_voices_of(rows, results, groups, fallback))
         for player, rows in by_player.items()]
 
 
 def _voices_of(rows: Sequence[TableRow], results: Mapping[str, RuleResult],
-               groups: Mapping[str, str | None]) -> list[VoiceSummary]:
+               groups: Mapping[str, str | None], fallback: str = "") -> list[VoiceSummary]:
     counts: dict[str, int] = {}
     for row in rows:
-        name = voice_name_of(row, results.get(row.key))
+        name = voice_name_of(row, results.get(row.key), fallback)
         if name.strip():
             counts[name] = counts.get(name, 0) + 1
     return [VoiceSummary(name=name, group=groups.get(name) or None, rows=count) for name, count in counts.items()]

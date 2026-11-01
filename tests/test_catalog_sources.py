@@ -93,7 +93,7 @@ async def test_a_series_is_given_with_its_kind_and_its_sources(system):
     assert [s["id"] for s in two["sources"]] == list(video.source_ids)
     assert two["sources"][0] == {"id": video.source_ids[0], "series_id": video.series_id, "position": 0,
                                  "url": RUCHIME, "source_type": "web_video", "parser_profile_id": 2,
-                                 "vk_search_mode": "search", "vibix_season": 2, "players_off": ["vk"]}
+                                 "vk_search_mode": "search", "vibix_season": 2, "players_off": ["vk"], "voice_name": ""}
     assert two["sources"][1]["vk_search_mode"] == "get_all"
     for each in (*one["sources"], *two["sources"]):
         assert list(each) == list(SeriesSource.model_fields)
@@ -316,7 +316,7 @@ async def test_a_source_is_added_at_the_end_and_announced(system):
     added = (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[-1]
     assert added == {"id": reply["id"], "series_id": made.series_id, "position": 1, "url": RUCHIME,
                      "source_type": "web_video", "parser_profile_id": 2, "vk_search_mode": "search",
-                     "vibix_season": None, "players_off": ["vk"]}
+                     "vibix_season": None, "players_off": ["vk"], "voice_name": ""}
 
 
 @pytest.mark.asyncio
@@ -381,6 +381,25 @@ async def test_update_that_changes_nothing_says_nothing(system):
         "source_id": made.source_id, "fields": {"parser_profile_id": 1, "url": RUCHIME}}, timeout=5)
     assert reply == {"applied": {}}
     assert drain(sub) == []
+
+
+@pytest.mark.asyncio
+async def test_a_source_is_given_a_name_for_its_voice_over_that_is_trimmed_kept_and_taken_back(system):
+    bus, probe = system
+    made = await create_series(probe, sources=[source(url=VK, source_type="vk_video", parser_profile_id=1)])
+    sub = bus.subscribe("series.source.*")
+
+    reply = await probe.request("catalog.sources.update", {"source_id": made.source_id, "fields": {"voice_name": "  AniStar "}},
+                                timeout=5)
+    assert reply == {"applied": {"voice_name": "AniStar"}} and len(drain(sub)) == 1
+    stored = (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[0]
+    assert stored["voice_name"] == "AniStar"
+    again = await probe.request("catalog.sources.update", {"source_id": made.source_id, "fields": {"voice_name": "AniStar"}},
+                                timeout=5)
+    assert again == {"applied": {}} and drain(sub) == []
+    taken = await probe.request("catalog.sources.update", {"source_id": made.source_id, "fields": {"voice_name": " "}},
+                                timeout=5)
+    assert taken == {"applied": {"voice_name": ""}}
 
 
 @pytest.mark.asyncio

@@ -11,7 +11,7 @@ import { SPECS } from "../../lib/output.fixtures"
 // A playable line of one episode of season 2; each test changes only the fields it is about.
 const rowOf = (over: Partial<Row>): Row => ({
   series_id: 1, source_id: 7, row_key: "a", excluded: false, season: 2, episode_start: 1, episode_end: 1,
-  voice_label: "Ruchime", voice_name: "Ruchime", player: "vk", player_label: "VK", group: "", text: "", link: "",
+  voice_label: "Ruchime", voice_group: "Ruchime", voice_name: "Ruchime", player: "vk", player_label: "VK", group: "", text: "", link: "",
   state: "playable", heights: [1080], ...over,
 })
 

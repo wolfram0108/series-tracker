@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { hasMessage, t, type MessageKey } from "../../i18n"
+import VoiceGroupMaker from "../VoiceGroupMaker.vue"
 import {
   groupTarget, isOwn, leverState, variantTarget, voiceColumns,
   type EpisodeView, type Lever, type LeverSpec, type LeverState, type Variant,
@@ -128,6 +129,7 @@ const preferVariant = (spec: LeverSpec, variant: Variant): void =>
       <article v-for="column in columns" :key="column.group" class="voice-column lever-block stack" :data-group="column.group">
         <header class="voice-head stack">
           <h4 class="voice-name">{{ groupText(column.group) }}</h4>
+          <VoiceGroupMaker v-if="column.groupless" :names="column.names" :disabled="busy" />
           <div v-for="spec in groupFlags" :key="spec.name" class="cluster lever-row">
             <label class="cluster lever-pick">
               <input

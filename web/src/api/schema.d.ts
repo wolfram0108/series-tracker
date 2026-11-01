@@ -2312,6 +2312,11 @@ export interface components {
             vibix_season?: number | null;
             /** Players Off */
             players_off?: string[];
+            /**
+             * Voice Name
+             * @default
+             */
+            voice_name: string;
         };
         /**
          * SeriesUpdate
@@ -2394,6 +2399,11 @@ export interface components {
             vibix_season?: number | null;
             /** Players Off */
             players_off?: string[];
+            /**
+             * Voice Name
+             * @default
+             */
+            voice_name: string;
             /** Position */
             position?: number | null;
         };
@@ -2412,6 +2422,8 @@ export interface components {
             vibix_season?: number | null;
             /** Players Off */
             players_off?: string[] | null;
+            /** Voice Name */
+            voice_name?: string | null;
             /** Position */
             position?: number | null;
         };
@@ -2434,6 +2446,11 @@ export interface components {
             vibix_season?: number | null;
             /** Players Off */
             players_off?: string[];
+            /**
+             * Voice Name
+             * @default
+             */
+            voice_name: string;
         };
         /**
          * SourceStatus

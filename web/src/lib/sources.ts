@@ -63,6 +63,8 @@ export interface SourceItem {
   vkSearchMode: string
   vibixSeason: number | null
   playersOff: string[]
+  /** The name of the voice-over of the lines that have none; empty when the user gave none. */
+  voiceName: string
   view: SourceView
 }
 
@@ -211,7 +213,7 @@ export function readOptions(source: { sourceType: SourceType; vkSearchMode: stri
 }
 
 /** The body of a new source for `POST /api/series` and `POST /api/series/{id}/sources`. */
-export function draftBody(item: Pick<SourceItem, "url" | "sourceType" | "profileId" | "vkSearchMode" | "vibixSeason" | "playersOff">): SourceDraft {
+export function draftBody(item: Pick<SourceItem, "url" | "sourceType" | "profileId" | "vkSearchMode" | "vibixSeason" | "playersOff" | "voiceName">): SourceDraft {
   return {
     url: item.url,
     source_type: item.sourceType,
@@ -219,6 +221,7 @@ export function draftBody(item: Pick<SourceItem, "url" | "sourceType" | "profile
     vk_search_mode: item.vkSearchMode,
     vibix_season: item.vibixSeason,
     players_off: item.playersOff,
+    voice_name: item.voiceName,
   }
 }
 
@@ -232,6 +235,7 @@ export function itemOfSource(source: SeriesSource, summary: SourceSummary | null
     vkSearchMode: source.vk_search_mode,
     vibixSeason: source.vibix_season ?? null,
     playersOff,
+    voiceName: source.voice_name ?? "",
     view: viewOf({ summary, playersOff, live }),
   }
 }

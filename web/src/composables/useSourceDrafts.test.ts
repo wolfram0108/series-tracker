@@ -41,6 +41,7 @@ describe("useSourceDrafts", () => {
     expect(drafts.items.value[0].view.state).toBe("reading")
     expect(drafts.bodies.value).toEqual([{
       url: PAGE, source_type: "web_video", parser_profile_id: null, vk_search_mode: "search", vibix_season: null, players_off: [],
+      voice_name: "",
     }])
   })
 

@@ -13,7 +13,7 @@ REMOVED_FIELDS = ("url", "source_type", "parser_profile_id", "vk_search_mode", "
 
 # What a caller may write to a source; `id` and `series_id` belong to the table.
 SOURCE_FIELDS = ("position", "url", "source_type", "parser_profile_id", "vk_search_mode", "vibix_season",
-                 "players_off")
+                 "players_off", "voice_name")
 
 
 def kind_of_type(source_type: str) -> str:
@@ -59,6 +59,7 @@ def checked_fields(fields: dict, stored: dict | None = None) -> dict:
         raise ValueError("vibix_season: сезоны каталога Vibix считаются с 1")
     values = model.model_dump(mode="json")
     values["players_off"] = list(dict.fromkeys(values["players_off"]))
+    values["voice_name"] = values["voice_name"].strip()
     names = tuple(fields) if stored else tuple(name for name in SOURCE_FIELDS
                                                if name != "position" or "position" in fields)
     return {name: values[name] for name in names}

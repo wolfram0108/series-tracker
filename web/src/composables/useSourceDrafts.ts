@@ -17,6 +17,7 @@ interface Draft {
   vkSearchMode: string
   vibixSeason: number | null
   playersOff: string[]
+  voiceName: string
   /** The address the core names the page with in its events; known after the first preview. */
   canonical: string
   summary: SourceSummary | null
@@ -25,7 +26,7 @@ interface Draft {
   handled: PageStatus | null
 }
 
-export type DraftPatch = Partial<Pick<SourceItem, "url" | "profileId" | "vkSearchMode" | "vibixSeason" | "playersOff">>
+export type DraftPatch = Partial<Pick<SourceItem, "url" | "profileId" | "vkSearchMode" | "vibixSeason" | "playersOff" | "voiceName">>
 /** `kind`: the address is no site's, so it is not a video source (the window goes on as with a torrent). */
 export type AddOutcome = { kind: "added" } | { kind: "other" } | { kind: "refused"; text: string }
 
@@ -50,6 +51,7 @@ export function useSourceDrafts() {
     vkSearchMode: draft.vkSearchMode,
     vibixSeason: draft.vibixSeason,
     playersOff: draft.playersOff,
+    voiceName: draft.voiceName,
     view: viewOf({
       summary: draft.summary, playersOff: draft.playersOff, live: tables.forUrl(draft.canonical), asked: draft.asked,
     }),
@@ -108,7 +110,7 @@ export function useSourceDrafts() {
       }
       const draft: Draft = {
         key: `draft-${++counter}`, url, sourceType, profileId: null, vkSearchMode: vkModeOf(null), vibixSeason: null,
-        playersOff: [], canonical: "", summary: null, asked: { state: "reading" }, handled: null,
+        playersOff: [], voiceName: "", canonical: "", summary: null, asked: { state: "reading" }, handled: null,
       }
       drafts.value.push(draft)
       await ask(drafts.value[drafts.value.length - 1], true)

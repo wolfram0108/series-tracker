@@ -413,6 +413,24 @@ def test_the_name_of_a_voice_is_the_assigned_one_or_the_one_of_the_row():
     assert voice_name_of(row("b"), RuleResult(voiceover="Мой")) == "Мой"
 
 
+def test_the_name_the_user_gave_a_source_is_the_name_of_the_rows_that_have_none_and_of_no_other():
+    nameless, named = row("a"), row("b", voice="AniStar")
+    assert voice_name_of(nameless, None, "Мой дубляж") == "Мой дубляж"
+    assert voice_name_of(nameless, RuleResult(voiceover="Ассистент"), "Мой дубляж") == "Ассистент"
+    assert voice_name_of(named, None, "Мой дубляж") == "AniStar"
+    assert voice_name_of(nameless, None, "  ") == "" and voice_name_of(nameless, None) == ""
+
+
+def test_a_source_with_a_name_for_its_voice_has_the_name_in_its_rows_its_summary_its_lines_and_its_groups():
+    tbl = table(row("a", "Серия 1"), row("b", "Серия 2", voice="Animy"))
+    one = item(source(voice_name="AniStar"), tbl, {"a": {"episode": 1}, "b": {"episode": 2}})
+    out = project([one], {"AniStar": "Стар"}, {})
+    assert [(r.voice_name, r.voice_label) for r in out.rows] == [("AniStar", "Стар"), ("Animy", "Неизвестная озвучка 1")]
+    assert [(v.name, v.group) for v in out.sources[0].players[0].voices] == [("AniStar", "Стар"), ("Animy", None)]
+    assert [line.voice for line in lines_for(one.source, tbl)] == ["AniStar", "Animy"]
+    assert voice_names([one]) == ["AniStar", "Animy"]
+
+
 def test_names_are_the_same_name_without_case_spaces_and_punctuation():
     assert fold_name(" Red Head-Sound ") == fold_name("redheadsound") == "redheadsound"
     assert fold_name("") == fold_name("  ") == ""
