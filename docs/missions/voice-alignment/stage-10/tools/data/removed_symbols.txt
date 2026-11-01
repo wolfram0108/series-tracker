@@ -1,0 +1,109 @@
+# Символы, которые REVISION.md этапа 10 объявляет удалёнными или переименованными и отмечает «сделано (П-N)».
+# Читает сторож tools/checks/revision_registry.py. Составлено вручную по строкам REVISION.md; сторож проверяет, что
+# символ стоит в тексте указанной строки реестра и что его определения (def, class, константа, топик на шине, файл)
+# в modules/, core/ и web/src нет. Упоминание в комментарии определением не считается.
+#
+# Строка: <вид>:<символ> — откуда: <раздел>/<номер строки таблицы раздела> [— допуск: <путь>[, <путь>] — причина: <текст>]
+# Виды: def (функция или метод; «Класс.метод» закрепляет класс), class, const, topic, file, none.
+# none — для строки реестра, по которой нет символа, отсутствие которого можно проверить; причина обязательна.
+# Допуск — путь, где символ вправе стоять, потому что имя вернулось по другой причине.
+#
+# Раздел 1. Чтение сайтов (modules/sources)
+none:sources.parse — откуда: 1/1 — причина: топик остаётся ради торрентной ветки; удалена только ветка веб-источников, и искомого символа нет
+topic:sources.video.layout — откуда: 1/2
+def:on_video_layout — откуда: 1/2
+class:RuchimeProvider — откуда: 1/2
+topic:sources.video.coverage — откуда: 1/3
+topic:sources.coverage.progress — откуда: 1/3
+def:on_video_coverage — откуда: 1/3
+topic:sources.video.scan — откуда: 1/4
+topic:sources.video.progress — откуда: 1/4
+def:on_video_scan — откуда: 1/4
+def:scan_episodes — откуда: 1/4
+topic:sources.vk.scan — откуда: 1/5
+def:on_vk_scan — откуда: 1/5
+file:modules/sources/vk.py — откуда: 1/5
+topic:sources.provider.info — откуда: 1/6
+class:BaseVideoProvider — откуда: 1/7
+def:parse_release — откуда: 1/7
+def:has_voice_catalog — откуда: 1/7
+def:has_layout — откуда: 1/7
+file:modules/sources/video_providers — откуда: 1/7
+class:ReleaseTable — откуда: 1/8 — допуск: core/contracts/release_table.py — причина: имя вернулось как контракт таблицы страницы (ARCHITECTURE.md, 4.1)
+file:modules/sources/video_providers/table.py — откуда: 1/8
+def:availability_report — откуда: 1/9
+file:modules/sources/video_providers/views.py — откуда: 1/9
+def:episode_ranges — откуда: 1/10
+file:modules/sources/video_providers/ranges.py — откуда: 1/10
+const:PLAYER_ORDER — откуда: 1/11
+file:modules/sources/video_providers/players.py — откуда: 1/11
+def:_needs_lower_source — откуда: 1/12
+def:_apply_vibix — откуда: 1/12
+def:_quick_report — откуда: 1/12
+def:_survey — откуда: 1/12
+const:SURVEY_TTL_S — откуда: 1/12
+file:modules/sources/video_providers/ruchime/provider.py — откуда: 1/12
+def:episode_title — откуда: 1/13
+file:modules/sources/video_providers/ruchime/site.py — откуда: 1/13
+def:choice_of — откуда: 1/14
+def:address_of — откуда: 1/14
+file:modules/sources/video_providers/ruchime/address.py — откуда: 1/14
+def:split_address — откуда: 1/15
+const:_LEGACY_PLAYER — откуда: 1/15
+def:_choose — откуда: 1/15
+file:modules/sources/video_providers/dunhuatv.py — откуда: 1/15
+def:_seasons_of — откуда: 1/16
+def:_episode_title — откуда: 1/17
+file:tests/provider_contract.py — откуда: 1/24
+#
+# Раздел 2. Сериал и источники (modules/catalog)
+def:_quality_priority — откуда: 2/3
+def:_quality_key — откуда: 2/3
+#
+# Раздел 3. Конструктор (modules/rules)
+topic:rules.test — откуда: 3/2
+#
+# Раздел 4. Раскладка и скан (modules/scan, modules/composition)
+def:_included_episodes — откуда: 4/1
+def:_scan_web_video — откуда: 4/2
+def:_scan_vk — откуда: 4/2
+def:_process_video_candidates — откуда: 4/3
+def:_vk_candidates — откуда: 4/3
+def:_resolve_part_ones — откуда: 4/4
+def:_reconstruct — откуда: 4/5
+topic:scan.composition — откуда: 4/6
+def:ScanModule.on_composition — откуда: 4/6
+topic:scan.availability — откуда: 4/7
+def:save_availability — откуда: 4/7
+none:video_availability — откуда: 4/7 — причина: таблица удалена миграцией 0028; упоминание в SQL ловит table_owners.py как «не создаётся миграциями»
+#
+# Раздел 5. Озвучки (modules/voices)
+def:_reference_episodes — откуда: 5/2
+def:choose_reference — откуда: 5/4
+def:_ranges — откуда: 5/5
+topic:voices.layout — откуда: 5/6
+#
+# Раздел 6. Шлюз (modules/gateway)
+literal:/api/parser-profiles/scrape-titles — откуда: 6/3
+literal:/api/web_video/coverage — откуда: 6/2
+literal:/api/web_video/layout — откуда: 6/2
+class:WebVideoCoverage — откуда: 6/2
+class:WebVideoLayout — откуда: 6/2
+const:WebVideoCoverage — откуда: 6/2
+const:WebVideoLayout — откуда: 6/2
+literal:video_scan_progress — откуда: 6/7
+literal:coverage_progress — откуда: 6/7
+literal:/api/series/{id}/sliced-files — откуда: 6/8
+literal:/api/series/{id}/reprocess_vk_files — откуда: 6/9
+const:FILE_DUMP_FLAGS — откуда: 6/11
+#
+# Раздел 9.1. Знание сайтов вне sources и дубли внутри
+def:is_allvideo_url — откуда: 9.1/1
+def:_resolve_allvideo_stream — откуда: 9.1/1
+def:_extract_best_stream_from_playerjs — откуда: 9.1/1
+const:_DEFAULT_REGISTRY — откуда: 9.1/4
+const:SURVEY_TTL_S — откуда: 9.1/5
+#
+# Раздел 9.2. Конструктор (rules)
+none:rules/repository.py чтение таблицы series — откуда: 9.2/1 — причина: чужую таблицу ловит table_owners.py (series принадлежит catalog)
+topic:rules.cache.invalidate — откуда: 9.2/3
