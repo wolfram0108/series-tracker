@@ -74,10 +74,10 @@ function str(v: unknown): string {
       <h6 class="queue-title-bar"><i class="pi pi-wifi"></i> Активные статусы торрентов (Мониторинг)</h6>
       <div v-if="!q.torrents.length" class="queue-empty">Нет активных торрентов для мониторинга</div>
       <div v-else class="composition-cards-container">
-        <div v-for="(t, i) in q.torrents" :key="str(t.task_key) || i" class="card-final card-queue">
+        <div v-for="(t, i) in q.torrents" :key="str(t.qb_hash) || i" class="card-final card-queue">
           <div class="queue-row">
             <span class="queue-title">{{ str(t.series_name) }}</span>
-            <div class="pill"><i class="pi pi-key"></i> {{ str(t.task_key).slice(0, 8) }}…</div>
+            <div class="pill"><i class="pi pi-key"></i> {{ str(t.qb_hash).slice(0, 8) }}…</div>
             <div class="pill pill-primary">{{ str(t.status) }}</div>
           </div>
           <div class="queue-row">
