@@ -5,7 +5,7 @@
 
 .input-constructor-group {
   /* a group is not lower than its row, and grows when its text wraps instead of cutting it */
-  min-height: 46px;
+  min-height: 2.875rem;
   border-radius: var(--border-radius);
   border: var(--border-width) solid var(--color-gray-200);
   background-color: #fff;
@@ -16,7 +16,7 @@
   box-sizing: border-box;
   gap: 2px;
 }
-.input-constructor-group:has(.item-floating-label) { min-height: 64px; }
+.input-constructor-group:has(.item-floating-label) { min-height: 4rem; }
 .input-constructor-group:focus-within {
   border-color: var(--color-blue);
   box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.25);
