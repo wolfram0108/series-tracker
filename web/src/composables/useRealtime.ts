@@ -47,6 +47,7 @@ export function setupRealtime(): void {
   sse.on("composition_changed", (d) => composition.applyChanged(d as Schemas["CompositionChanged"]))
   sse.on("composition_failed", (d) => composition.applyFailed(d as Schemas["CompositionFailed"]))
   sse.on("reference_changed", (d) => composition.applyReference(d as Schemas["ReferenceChanged"]))
+  sse.on("series_sources_changed", (d) => composition.applySourcesChanged(d as Schemas["SourceChanged"]))
 
   // relocation: бэк помечает серию занятой на старте и шлёт обновление в конце
   sse.on("relocation_started", (d) =>

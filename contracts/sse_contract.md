@@ -40,6 +40,7 @@
 | `composition_failed` | — (этап 10) | пересчёт раскладки не удался, действует прежняя; причина кодом | `composition.failed` | как есть: `{series_id, reason}` — `CompositionFailed` |
 | `reference_changed` | — (этап 10) | референс серии или его отметка (`by_level`, `own`, `other_player`, `none`, `unfit`) изменились; пакет несёт референс целиком (источник, плеер, разрешение, причина), окно ничего не доспрашивает | `scan.reference.changed` | как есть: `{series_id, season, episode, part, mark, source_id, row_key, player, voice_group, height, reason}` — `ReferenceChanged` (`Reference` и `series_id`) |
 | `agent_heartbeat` | `{name, activity?}` | **удалено по согласованию** (см. ниже) | — | — |
+| `series_sources_changed` | — (этап 10) | у сериала добавлен, изменён или удалён источник (профиль, отключённые плееры, сезон каталога, режим поиска VK): второе окно перечитывает источники | `series.source.added`, `.updated`, `.removed` | `{series_id, source_id, what}` — `SourceChanged` (`what`: `added`, `updated`, `removed`) |
 | `relocation_started` | `{series_id}` | подтверждено | `library.relocation.started` | как есть |
 | `relocation_finished` | `{series_id, success, message}` | подтверждено | `library.relocation.finished` | как есть |
 | `renaming_complete` | `{series_id}` | подтверждено | `renaming.finished` | как есть |

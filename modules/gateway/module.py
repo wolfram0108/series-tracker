@@ -25,7 +25,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import BaseModule, BusRequestError
 from core.contracts import (CompositionChanged, CompositionFailed, DubEvent, DubsSnapshot, ReferenceChanged,
-                            TableFailed, TableProgress, TableReady)
+                            SourceChanged, TableFailed, TableProgress, TableReady)
 
 
 class AuthGateMiddleware:
@@ -155,6 +155,9 @@ SSE_MAP: dict[str, tuple[str, object]] = {
     "downloads.queue.changed": ("download_queue_update", _bare_tasks),
     "slicing.queue.changed": ("slicing_queue_update", _bare_tasks),
     "scan.status.changed": ("scanner_status_update", None),
+    "series.source.added": ("series_sources_changed", lambda payload: {**payload, "what": "added"}),
+    "series.source.updated": ("series_sources_changed", lambda payload: {**payload, "what": "updated"}),
+    "series.source.removed": ("series_sources_changed", lambda payload: {**payload, "what": "removed"}),
     "sources.table.progress": ("sources_table_progress", None),
     "sources.table.ready": ("sources_table_ready", None),
     "sources.table.failed": ("sources_table_failed", None),
@@ -173,7 +176,7 @@ SSE_MAP: dict[str, tuple[str, object]] = {
 
 # The packets of the event stream that the interface types: their models go into the schema of the API.
 EVENT_PACKETS = (DubEvent, DubsSnapshot, TableProgress, TableReady, TableFailed, CompositionChanged,
-                 CompositionFailed, ReferenceChanged)
+                 CompositionFailed, ReferenceChanged, SourceChanged)
 
 _KEEPALIVE_SECONDS = 15.0
 # Put into a stream's queue to end it: uvicorn waits for open responses before it stops the app.

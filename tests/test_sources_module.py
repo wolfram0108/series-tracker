@@ -83,7 +83,8 @@ def test_every_phase_of_a_read_has_its_wording_and_every_wording_has_a_phase():
     catalog = (ROOT / "web" / "src" / "i18n" / "ru.ts").read_text(encoding="utf-8")
     worded = set(re.findall(r'"sources\.phase\.(\w+)"', catalog))
 
-    assert worded == set(PHASES)
+    # `unknown` words a phase code that a newer server may send and this screen does not know yet.
+    assert worded - {"unknown"} == set(PHASES)
 
 
 BLOCKING_METHODS = {"write_text", "write_bytes", "read_text", "read_bytes", "mkdir", "touch", "unlink", "rename", "rmdir",

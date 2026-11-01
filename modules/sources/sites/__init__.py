@@ -63,6 +63,8 @@ class Site(Protocol):
 
     name: str
     domains: tuple[str, ...]
+    # The kind of source a page of this site makes in a series (`vk_video` or `web_video`); a window does not guess it.
+    source_type: str
 
     def match_url(self, url: str) -> bool:
         """Whether the address is a page this site reads (the domain is already known to be the site's)."""

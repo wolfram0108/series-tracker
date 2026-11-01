@@ -40,9 +40,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.get("/api/series/{series_id}/composition", response_model=CompositionReply | list[DynamicObject],
            responses=_ERR1)
-    async def composition(series_id: int, refresh: bool = False, include_excluded: bool = False):
+    async def composition(series_id: int, refresh: bool = False, include_excluded: bool = False,
+                          sources_only: bool = False):
         """The composition window: the layout of a video series (`composition`, rows the constructor excluded
-        only with `include_excluded`), or the composition of a torrent series (`torrents`; `refresh` fetches
+        only with `include_excluded`; `sources_only` leaves out the rows, levels and settings), or the composition of
+        a torrent series (`torrents`; `refresh` fetches
         the release first)."""
         try:
             series = await gw.request("catalog.series.get", {"series_id": series_id}, timeout=10)
@@ -51,7 +53,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         try:
             if series["kind"] == SeriesKind.VIDEO:
                 return await gw.request("composition.get", CompositionGetRequest(
-                    series_id=series_id, include_excluded=include_excluded).model_dump(mode="json"), timeout=30)
+                    series_id=series_id, include_excluded=include_excluded,
+                    sources_only=sources_only).model_dump(mode="json"), timeout=30)
             if refresh:
                 # Fetch the release and split it into files without starting the download.
                 await gw.request("scan.series.prepare", {"series_id": series_id}, timeout=900)

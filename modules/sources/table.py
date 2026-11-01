@@ -94,7 +94,9 @@ class TableReader:
     def resolve(self, url: str, options: Mapping[str, str]) -> SiteResolveReply:
         """Which site reads the address and its canonical form, with no network."""
         found = self._resolve(url, options)
-        return SiteResolveReply(site=found[0].name, canonical_url=found[1]) if found else SiteResolveReply()
+        if not found:
+            return SiteResolveReply()
+        return SiteResolveReply(site=found[0].name, canonical_url=found[1], source_type=found[0].source_type)
 
     async def resume(self) -> None:
         """Begin again the reads that a stop interrupted; their consumers ask again by themselves when they start."""

@@ -37,6 +37,7 @@ VK_PAGE_INTERVAL_S = 1.0
 class VkChannelSite:
     name = "vk_channel"
     domains = ("vk.com", "vkvideo.ru", "vk.ru")
+    source_type = "vk_video"
 
     def __init__(self, players: PlayerRegistry | None = None, vk_call=None) -> None:
         self.players = players or PlayerRegistry.standard()

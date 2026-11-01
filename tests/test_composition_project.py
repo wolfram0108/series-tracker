@@ -195,7 +195,8 @@ def test_the_summary_counts_players_rows_seasons_and_resolutions_without_a_numbe
         row("5", "Серия 2", player="vk", label="VK", heights=(4320,), state=RowState.ABSENT),
         row("6", "Серия 3", player="vk", label="VK", heights=(), state=RowState.NOT_OBTAINED))
     players = project([item(source(profile=None), tbl)], {}, {}).sources[0].players
-    assert players == [PlayerSummary(player="vibix", player_label="Vibix", rows=3, groups=2, heights=[480, 720, 1080]),
+    assert players == [PlayerSummary(player="vibix", player_label="Vibix", rows=3, groups=2,
+                                     group_names=["Сезон 1", "Сезон 2"], heights=[480, 720, 1080]),
                        PlayerSummary(player="vk", player_label="VK", rows=3, groups=0, heights=[1080, 2160])]
 
 
@@ -590,3 +591,20 @@ def test_the_two_seasons_of_the_asura_vibix_catalog_are_told_apart_by_the_choice
     assert [len(selected_rows(source(vibix_season=chosen), tbl)) for chosen in (None, 1, 2, 3)] == [23, 9, 14, 0]
     second = lines_for(source(vibix_season=2), tbl)
     assert second[0].text == "Асура: Безумный король 2 | Vibix | Ruchime | Сезон 2 | 1080p | Серия 1"
+
+
+def test_the_summary_of_a_player_names_its_groups_in_the_order_of_the_table_once_each():
+    rows = [row("a", "1", player="vibix", group="Сезон 2"), row("b", "2", player="vibix", group="Сезон 1"),
+            row("c", "3", player="vibix", group="Сезон 2"), row("d", "4", player="vk")]
+    summary = project([item(source(), table(*rows))], {}, {}).sources[0]
+    by_player = {each.player: each for each in summary.players}
+    assert by_player["vibix"].group_names == ["Сезон 2", "Сезон 1"] and by_player["vibix"].groups == 2
+    assert by_player["vk"].group_names == []
+
+
+def test_the_summary_carries_the_canonical_address_of_the_page_before_and_after_the_table_arrives():
+    waiting = project([SourceInput(source(), None, None, None, "https://example.org/canonical")], {}, {}).sources[0]
+    assert waiting.status == SourceStatus.WAITING and waiting.canonical_url == "https://example.org/canonical"
+    read = project([item(source(), table(row("a", "1")))], {}, {}).sources[0]
+    assert read.canonical_url == "https://example.org/page"
+

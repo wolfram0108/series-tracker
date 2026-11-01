@@ -34,7 +34,7 @@ async def test_the_composition_of_a_video_series_is_the_layout_of_composition(tm
         response = await client.get("/api/series/1/composition")
     assert response.status_code == 200
     assert CompositionReply.model_validate(response.json()) == CompositionReply.model_validate(LAYOUT)
-    assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": False}]
+    assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": False, "sources_only": False}]
     assert owners.asked("torrents.composition") == [] and owners.asked("scan.series.prepare") == []
     # Nothing is merged in: the layout is asked for alone, the references have their own point.
     assert [t for t in topics(spy) if t not in ("catalog.series.get", "composition.get")] == []
@@ -44,7 +44,7 @@ async def test_the_rows_the_constructor_excluded_come_only_when_asked_for(tmp_pa
     answers = {"catalog.series.get": card_of, "composition.get": LAYOUT}
     async with serving(tmp_path, answers) as (client, owners, _, _):
         await client.get("/api/series/1/composition?include_excluded=true")
-    assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": True}]
+    assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": True, "sources_only": False}]
 
 
 async def test_refresh_does_not_start_a_scan_of_a_video_series(tmp_path):
@@ -178,3 +178,11 @@ async def test_a_command_to_a_module_that_is_not_there_is_a_503(tmp_path):
 def test_the_body_of_a_lever_has_the_fields_of_the_command_but_the_series():
     assert set(OutputSettingsSet.model_fields) == set(SettingsSet.model_fields) - {"series_id"}
     assert set(OutputSettingsReset.model_fields) == set(SettingsReset.model_fields) - {"series_id"}
+
+
+async def test_a_request_for_the_sources_only_reaches_composition_as_it_is(tmp_path):
+    answers = {"catalog.series.get": card_of, "composition.get": LAYOUT}
+    async with serving(tmp_path, answers) as (client, owners, _, _):
+        await client.get("/api/series/1/composition?sources_only=true")
+    assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": False, "sources_only": True}]
+

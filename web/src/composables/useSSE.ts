@@ -22,6 +22,7 @@ export const SSE_EVENTS = [
   "composition_changed",
   "composition_failed",
   "reference_changed",
+  "series_sources_changed",
   "renaming_complete",
   "relocation_started",
   "relocation_finished",

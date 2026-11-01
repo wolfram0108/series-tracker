@@ -32,6 +32,8 @@ class SourceInput:
     table: ReleaseTable | None = None
     reply: RulesApplyReply | None = None
     failure: str | None = None
+    # The canonical address of the page as `sources` gave it, known before the first table arrives.
+    table_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -206,7 +208,8 @@ def _with_part_one(built: list[tuple[CompositionRow, str]]) -> list[CompositionR
 def _summary(item: SourceInput, groups: Mapping[str, str | None]) -> SourceSummary:
     table = item.table
     return SourceSummary(
-        source_id=item.source.id, url=item.source.url, status=_status_of(item),
+        source_id=item.source.id, url=item.source.url, canonical_url=table.url if table else item.table_url,
+        status=_status_of(item),
         reason=item.failure or None, read_at=table.read_at if table else None,
         players=_players_of(table, _results_of(item), groups) if table else [])
 
@@ -231,6 +234,7 @@ def _players_of(table: ReleaseTable, results: Mapping[str, RuleResult],
     return [PlayerSummary(
         player=player, player_label=next((row.player_label for row in rows if row.player_label), ""),
         rows=len(rows), groups=len({row.group for row in rows if row.group}),
+        group_names=list(dict.fromkeys(row.group for row in rows if row.group)),
         heights=sorted({height for row in rows if row.state == RowState.PLAYABLE for height in row.heights}),
         voices=_voices_of(rows, results, groups))
         for player, rows in by_player.items()]

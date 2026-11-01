@@ -41,7 +41,7 @@
 | `series.updated {series_id, …поля, statuses, is_busy}` | catalog, metadata | composition (сезон карточки), torrents (память исключений), gateway | `series_updated` (дельта) |
 | `series.deleted {series_id, delete_from_qb}` | catalog | все владельцы серийных таблиц (scan, torrents, downloads, slicing, renaming, library, metadata, voices, composition), gateway | `series_deleted {id}` |
 | `series.purged {series_id, owner}` | владельцы серийных таблиц | catalog (учёт отчётов о чистке) | — |
-| `series.source.added \| .updated \| .removed {series_id, source_id}` — `SourceEvent` | catalog | composition | — |
+| `series.source.added \| .updated \| .removed {series_id, source_id}` — `SourceEvent` | catalog | composition, gateway | `series_sources_changed` (`SourceChanged`: плюс `what`) |
 | `series.status.contribution {source, series_id, flags}` | scan, downloads, torrents, slicing | catalog | — |
 | `series.status.changed {series_id, statuses, is_busy}` | catalog | gateway | `series_updated` |
 | `series.busy.contribution` / `series.busy.changed` | library, renaming / catalog | catalog / gateway | `series_updated` |

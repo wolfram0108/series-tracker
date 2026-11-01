@@ -28,6 +28,7 @@ from .pages import (MAX_CONCURRENT_PAGES, EpisodePage, PageReader, episode_url, 
 class RuchimeSite:
     name = "ruchime"
     domains = ("ruchime.org",)
+    source_type = "web_video"
 
     def __init__(self, players: PlayerRegistry | None = None) -> None:
         self.players = players or PlayerRegistry.standard()

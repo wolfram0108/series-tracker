@@ -15,7 +15,7 @@ from .reference import Reference, ReferenceChanged, ReferenceMark
 from .release_table import (LINE_SEPARATOR, ReleaseTable, RowState, RowVoice, SiteResolveReply, SiteResolveRequest,
                             TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableRow, TableState, line_of)
 from .rules import RuleLine, RuleResult, RulesApplyReply, RulesApplyRequest, RulesProfileChanged
-from .series_sources import SeriesKind, SeriesSource, SourceEvent, SourceType
+from .series_sources import SeriesKind, SeriesSource, SourceChanged, SourceEvent, SourceType
 from .voice_groups import GroupsResolveReply, GroupsResolveRequest
 from .voices import (DubEvent, DubEventStatus, DubHint, DubItem, DubRecord, DubsSnapshot, DubState, DubStatus,
                      Reason, SettingProblem, SnapshotItem,
@@ -28,7 +28,7 @@ __all__ = ["AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitRep
            "LINE_SEPARATOR", "ReleaseTable", "RowState", "RowVoice", "SiteResolveReply", "SiteResolveRequest", "TableFailed", "TableGetReply", "TableGetRequest",
            "TableProgress", "TableReady", "TableRow", "TableState", "line_of",
            "RuleLine", "RuleResult", "RulesApplyReply", "RulesApplyRequest", "RulesProfileChanged",
-           "SeriesKind", "SeriesSource", "SourceEvent", "SourceType",
+           "SeriesKind", "SeriesSource", "SourceChanged", "SourceEvent", "SourceType",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
            "CompositionReply", "CompositionRow", "PreviewLine",
            "EpisodeRef", "Exclusion", "PlayerSummary", "SourceStatus", "SourceSummary", "VoiceSummary",

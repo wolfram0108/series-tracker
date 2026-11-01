@@ -19,6 +19,8 @@ export const useCompositionStore = defineStore("composition", () => {
   const layoutFailed = ref<Record<number, LayoutFailed>>({})
   // reference_changed: the whole reference of one episode, so the last packet per (season, episode) is the truth.
   const references = ref<Record<number, Record<string, ReferencePacket>>>({})
+  // series_sources_changed: only the fact that the sources of a series changed moves a counter; a screen asks again.
+  const sourcesChanged = ref<Record<number, number>>({})
 
   function applyChanged(packet: LayoutChanged): void {
     const known = layoutChanged.value[packet.series_id]
@@ -43,9 +45,16 @@ export const useCompositionStore = defineStore("composition", () => {
     }
   }
 
+  function applySourcesChanged(packet: Schemas["SourceChanged"]): void {
+    sourcesChanged.value = { ...sourcesChanged.value, [packet.series_id]: (sourcesChanged.value[packet.series_id] ?? 0) + 1 }
+  }
+
   function referenceOf(seriesId: number, season: number, episode: number): ReferencePacket | null {
     return references.value[seriesId]?.[slot(season, episode)] ?? null
   }
 
-  return { layoutChanged, layoutFailed, references, applyChanged, applyFailed, applyReference, referenceOf }
+  return {
+    layoutChanged, layoutFailed, references, sourcesChanged,
+    applyChanged, applyFailed, applyReference, applySourcesChanged, referenceOf,
+  }
 })

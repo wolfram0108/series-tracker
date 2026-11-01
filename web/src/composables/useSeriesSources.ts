@@ -105,6 +105,8 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
   onMounted(() => void load())
   // The layout of the series changed (a summary of a source too): the sources are read again.
   watch(() => composition.layoutChanged[seriesId]?.rev, () => void load())
+  // The sources themselves changed (a profile, a disabled player, a season of a catalog): the other window sees it too.
+  watch(() => composition.sourcesChanged[seriesId], () => void load())
   // A connection that came back may have missed events: the sources are read again.
   watch(useSSE().connected, (up) => {
     if (up) void load()

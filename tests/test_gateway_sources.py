@@ -133,7 +133,7 @@ async def test_the_last_source_of_a_series_is_refused_with_its_code(tmp_path):
 
 
 async def test_a_preview_carries_the_request_to_composition_whole_and_the_answer_back(tmp_path):
-    reply = {**PREVIEW, "state": "reading", "lines": [{"key": "k1", "line": "Т | VK | Серия 1", "result": None}]}
+    reply = {**PREVIEW, "state": "reading", "names": [], "lines": [{"key": "k1", "line": "Т | VK | Серия 1", "result": None}]}
     async with serving(tmp_path, {"composition.preview": reply}) as (client, owners, _, spy):
         response = await client.post("/api/sources/preview", json={
             "url": "https://x.test/p", "options": {"vk_search_mode": "get_all"}, "profile_id": 2,
@@ -162,10 +162,11 @@ async def test_a_preview_refused_by_composition_carries_the_reason(tmp_path):
 
 
 async def test_an_address_is_resolved_by_sources_and_the_answer_is_theirs(tmp_path):
-    answers = {"sources.site.resolve": {"site": "somesite", "canonical_url": "https://x.test/p"}}
+    answers = {"sources.site.resolve": {"site": "somesite", "canonical_url": "https://x.test/p",
+                                        "source_type": "web_video"}}
     async with serving(tmp_path, answers) as (client, owners, _, spy):
         response = await client.post("/api/sources/resolve", json={"url": "https://x.test/p?a=1"})
-    assert response.json() == {"site": "somesite", "canonical_url": "https://x.test/p"}
+    assert response.json() == {"site": "somesite", "canonical_url": "https://x.test/p", "source_type": "web_video"}
     assert owners.asked("sources.site.resolve") == [{"url": "https://x.test/p?a=1", "options": {}}]
     assert [t for t in topics(spy) if t != "sources.site.resolve"] == []
 
@@ -174,7 +175,7 @@ async def test_an_address_no_site_reads_is_resolved_to_nothing(tmp_path):
     async with serving(tmp_path, {"sources.site.resolve": {"site": None, "canonical_url": None}}
                        ) as (client, _, _, _):
         response = await client.post("/api/sources/resolve", json={"url": "http://kinozal.tv/details.php?id=1"})
-    assert response.json() == {"site": None, "canonical_url": None}
+    assert response.json() == {"site": None, "canonical_url": None, "source_type": None}
 
 
 # --- the test of rules ---------------------------------------------------------------------------

@@ -1301,3 +1301,33 @@ async def test_the_preview_of_a_page_a_series_reads_leaves_the_series_alone(syst
     reply = await preview(s, profile_id=7, refresh=False)
     assert reply.summary.status == SourceStatus.READY and len(reply.lines) == 7
     assert await s.get(series_id) == before and s.taken(s.changed) == [] and not s.composition._flights
+
+
+@pytest.mark.asyncio
+async def test_the_summary_names_the_groups_of_a_player_and_the_canonical_address_of_its_page(system):
+    s = system
+    series_id = await laid_out(s)
+    summary = (await s.get(series_id)).sources[0]
+    assert summary.canonical_url == PAGE
+    assert all(player.group_names == list(dict.fromkeys(player.group_names)) for player in summary.players)
+    assert sum(len(player.group_names) for player in summary.players) == sum(player.groups for player in summary.players)
+
+
+@pytest.mark.asyncio
+async def test_a_request_for_the_sources_only_gives_the_summaries_and_no_rows_levels_or_settings(system):
+    s = system
+    series_id = await laid_out(s)
+    full = await s.get(series_id)
+    light = await s.get(series_id, sources_only=True)
+    assert light.sources == full.sources and light.rev == full.rev
+    assert light.rows == [] and light.levels == [] and light.settings == []
+    assert full.rows and full.levels and full.settings
+
+
+@pytest.mark.asyncio
+async def test_the_preview_gives_the_names_of_the_release_as_the_table_has_them(system):
+    s = system
+    await laid_out(s)
+    reply = await preview(s, profile_id=None, refresh=False)
+    assert reply.names == list(standard().names) and reply.names
+

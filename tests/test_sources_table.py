@@ -53,6 +53,7 @@ class FakeSite:
 
     def __init__(self, name: str = "fake", host: str = "fake.test") -> None:
         self.name, self.domains = name, (host,)
+        self.source_type = "web_video"
         self.reads: list[str] = []
         self.entered: asyncio.Queue[str] = asyncio.Queue()
         self.go = asyncio.Event()
@@ -610,8 +611,8 @@ async def test_the_site_of_an_address_and_its_canonical_form_are_told_with_no_re
                                        timeout=STUCK_S)
     nowhere = await system.probe.request("sources.site.resolve", {"url": "https://nowhere.test/p/1"}, timeout=STUCK_S)
 
-    assert found == {"site": "fake", "canonical_url": PAGE + "?mode=all"}
-    assert nowhere == {"site": None, "canonical_url": None}
+    assert found == {"site": "fake", "canonical_url": PAGE + "?mode=all", "source_type": "web_video"}
+    assert nowhere == {"site": None, "canonical_url": None, "source_type": None}
     assert system.site.reads == []
 
 

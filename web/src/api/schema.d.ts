@@ -172,7 +172,7 @@ export interface paths {
          * Active Torrents
          * @description Прогресс торрент-загрузок с именами серий (таблица
          *     «Мониторинг» вкладки агентов; Р-23 — исправление маппинга
-         *     блока 2: источник download_tasks, не очередь конвейера).
+         *     блока 2: источник — torrent_progress модуля torrents, не очередь конвейера).
          */
         get: operations["active_torrents_api_series_active_torrents_get"];
         put?: never;
@@ -453,7 +453,8 @@ export interface paths {
         /**
          * Composition
          * @description The composition window: the layout of a video series (`composition`, rows the constructor excluded
-         *     only with `include_excluded`), or the composition of a torrent series (`torrents`; `refresh` fetches
+         *     only with `include_excluded`; `sources_only` leaves out the rows, levels and settings), or the composition of
+         *     a torrent series (`torrents`; `refresh` fetches
          *     the release first).
          */
         get: operations["composition_api_series__series_id__composition_get"];
@@ -1581,6 +1582,8 @@ export interface components {
             state: components["schemas"]["TableState"];
             /** Reason */
             reason?: string | null;
+            /** Names */
+            names?: string[];
             summary?: components["schemas"]["SourceSummary"] | null;
             /** Lines */
             lines?: components["schemas"]["PreviewLine"][];
@@ -1993,6 +1996,8 @@ export interface components {
              * @default 0
              */
             groups: number;
+            /** Group Names */
+            group_names?: string[];
             /** Heights */
             heights?: number[];
             /** Voices */
@@ -2297,6 +2302,8 @@ export interface components {
             site?: string | null;
             /** Canonical Url */
             canonical_url?: string | null;
+            /** Source Type */
+            source_type?: string | null;
         };
         /** SiteResolveRequest */
         SiteResolveRequest: {
@@ -2384,6 +2391,8 @@ export interface components {
             source_id: number;
             /** Url */
             url: string;
+            /** Canonical Url */
+            canonical_url?: string | null;
             status: components["schemas"]["SourceStatus"];
             /** Reason */
             reason?: string | null;
@@ -2676,6 +2685,18 @@ export interface components {
             reason: string | null;
             /** Series Id */
             series_id: number;
+        };
+        /**
+         * SourceChanged
+         * @description The packet of the event stream for the three: what happened to the source (`added`, `updated`, `removed`).
+         */
+        SourceChanged: {
+            /** Series Id */
+            series_id: number;
+            /** Source Id */
+            source_id: number;
+            /** What */
+            what: string;
         };
     };
     responses: never;
@@ -3948,6 +3969,7 @@ export interface operations {
             query?: {
                 refresh?: boolean;
                 include_excluded?: boolean;
+                sources_only?: boolean;
             };
             header?: never;
             path: {

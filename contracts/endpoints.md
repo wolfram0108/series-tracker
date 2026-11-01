@@ -201,7 +201,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 
 | Метод | Путь | Назначение | Панель |
 |---|---|---|---|
-| GET | `/api/series/{series_id}/composition` | Видео-сериал — раскладка (`composition.get`, query `include_excluded`); торрент — состав раздач (`torrents.composition`, query `refresh`) | `StatusComposition.vue`, `StatusVkComposition.vue` |
+| GET | `/api/series/{series_id}/composition` | Видео-сериал — раскладка (`composition.get`, query `include_excluded`, `sources_only` — только сводки источников); торрент — состав раздач (`torrents.composition`, query `refresh`) | `StatusComposition.vue` (торрент), `StatusOutput.vue`, `SourcesEditor.vue` (видео) |
 | GET | `/api/series/{series_id}/output` | Референс каждой серии и отметка (`scan.output.get`) | — |
 | PUT | `/api/series/{series_id}/output/settings` | Значение рычага на уровне сериала, сезона или серии (`composition.settings.set`) | — |
 | POST | `/api/series/{series_id}/output/settings/reset` | Вернуть рычаги уровня в наследование (`composition.settings.reset`) | — |
@@ -826,6 +826,7 @@ voice_group, height, reason}`; `mark` — `by_level` | `own` | `other_player` | 
 | `sources_table_failed` | `sources.table.failed` | `{url, reason}` |
 | `composition_changed` | `composition.changed` | `{series_id, rev, episodes, summary_only}` |
 | `composition_failed` | `composition.failed` | `{series_id, reason}` |
+| `series_sources_changed` | `series.source.added`, `.updated`, `.removed` | `{series_id, source_id, what}` (`SourceChanged`) |
 | `reference_changed` | `scan.reference.changed` | референс серии целиком и `series_id` (`ReferenceChanged`) |
 
 Подробный контракт событий — [sse_contract.md](sse_contract.md).

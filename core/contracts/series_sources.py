@@ -42,3 +42,9 @@ class SourceEvent(BaseModel):
 
     series_id: int
     source_id: int
+
+
+class SourceChanged(SourceEvent):
+    """The packet of the event stream for the three: what happened to the source (`added`, `updated`, `removed`)."""
+
+    what: str

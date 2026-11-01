@@ -44,6 +44,7 @@ def title_names(text: str) -> list[str]:
 class DunhuaTvSite:
     name = "dunhuatv"
     domains = ("dunhuatv.ru",)
+    source_type = "web_video"
 
     def __init__(self, players: PlayerRegistry | None = None) -> None:
         self.players = players or PlayerRegistry.standard()

@@ -187,6 +187,9 @@ class CompositionModule(BaseModule):
     async def on_get(self, env: Envelope) -> dict:
         request = CompositionGetRequest.model_validate(env.payload)
         stored = await self.repo.stored(request.series_id)
+        if request.sources_only:
+            return CompositionReply(series_id=request.series_id, rev=stored.rev,
+                                    sources=[each.summary for each in stored.sources]).model_dump(mode="json")
         records = settings.canonical(stored.records)
         episodes = project.layout_episodes(stored.rows)
         reply = CompositionReply(
@@ -217,7 +220,8 @@ class CompositionModule(BaseModule):
                 answer = None
                 if request.profile_id is not None:
                     answer = await self._answer(source, table, request.series_season)
-                item = SourceInput(source, table, answer, got.reason if got.state == TableState.FAILED else None)
+                item = SourceInput(source, table, answer, got.reason if got.state == TableState.FAILED else None,
+                                   got.url)
                 names = project.voice_names([item])
                 groups = await self._groups(names) if names else {}
                 summary = project.project([item], groups, {}).sources[0]
@@ -226,7 +230,8 @@ class CompositionModule(BaseModule):
                          for line in project.lines_for(source, table)]
         except _Unavailable as exc:
             raise ValueError(exc.reason) from exc
-        return CompositionPreviewReply(url=got.url, state=got.state, reason=got.reason, summary=summary,
+        return CompositionPreviewReply(url=got.url, state=got.state, reason=got.reason,
+                                       names=list(table.names) if table is not None else [], summary=summary,
                                        lines=lines).model_dump(mode="json")
 
     async def on_recompute(self, env: Envelope) -> dict:
@@ -406,16 +411,16 @@ class CompositionModule(BaseModule):
                    if each.get("source_type") != SourceType.TORRENT]
         inputs = []
         for source in sources:
-            table, failure = await self._table(series_id, flight, source, source.id in refresh)
+            table, failure, url = await self._table(series_id, flight, source, source.id in refresh)
             answer = None
             if table is not None and source.parser_profile_id is not None:
                 answer = await self._answer(source, table, card.get("season"))
-            inputs.append(SourceInput(source, table, answer, failure))
+            inputs.append(SourceInput(source, table, answer, failure, url))
         names = project.voice_names(inputs)
         return inputs, await self._groups(names) if names else {}
 
     async def _table(self, series_id: int, flight: _Flight, source: SeriesSource, begin: bool
-                     ) -> tuple[ReleaseTable | None, str | None]:
+                     ) -> tuple[ReleaseTable | None, str | None, str]:
         flight.pending += 1
         try:
             reply = await self._table_reply(source, begin)
@@ -428,7 +433,7 @@ class CompositionModule(BaseModule):
         finally:
             flight.pending -= 1
         table = reply.table if reply.table is not None and reply.table.complete else None
-        return table, reply.reason if reply.state == TableState.FAILED else None
+        return table, reply.reason if reply.state == TableState.FAILED else None, reply.url
 
     async def _table_reply(self, source: SeriesSource, begin: bool) -> TableGetReply:
         request = TableGetRequest(url=source.url, options=source.read_options(), refresh=begin)
