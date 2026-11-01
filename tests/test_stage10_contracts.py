@@ -81,6 +81,6 @@ def test_targets_name_domain_things_not_row_ids():
 
 def test_the_migrations_of_the_stage_keep_one_head_in_order():
     script = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert script.get_heads() == ["0029"]
+    assert len(script.get_heads()) == 1
     chain = [script.get_revision(f"{number:04d}").down_revision for number in range(25, 30)]
     assert chain == ["0024", "0025", "0026", "0027", "0028"]

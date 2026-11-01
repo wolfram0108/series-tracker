@@ -1,6 +1,6 @@
 import { ref } from "vue"
 
-/** 17 SSE-событий контракта (из gateway SSE_MAP). Бэк шлёт кадры
+/** SSE-события контракта (из gateway SSE_MAP). Бэк шлёт кадры
  *  `event: <name>\ndata: <json>\n\n`; keepalive-комментарии EventSource
  *  игнорирует сам. */
 export const SSE_EVENTS = [

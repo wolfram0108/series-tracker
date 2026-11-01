@@ -13,7 +13,8 @@ from proc_helpers import Spy, alive, stalled_downloader
 FFMPEG = """#!/bin/bash
 echo "$@" > "$FAKE_DIR/ffmpeg_args"
 out="${@: -1}"
-if [ -f "$FAKE_DIR/stall" ]; then sleep 30; fi
+# The stalled writer must be one process, as the real ffmpeg is: a child left by a killed shell keeps the pipe open.
+if [ -f "$FAKE_DIR/stall" ]; then exec sleep 30; fi
 echo "progress=end"
 echo data > "$out"
 exit $(cat "$FAKE_DIR/ffmpeg_rc" 2>/dev/null || echo 0)
