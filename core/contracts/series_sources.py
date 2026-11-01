@@ -13,7 +13,7 @@ class SourceType(StrEnum):
 
 
 class SeriesKind(StrEnum):
-    """What a series is to the rest of the system; any source that is not a torrent makes it `video`."""
+    """What a series is to the rest of the system: a series has sources of one kind, a torrent one or a video one."""
 
     TORRENT = "torrent"
     VIDEO = "video"

@@ -89,7 +89,7 @@ from core.reasons import reason
 
 from .aggregator import StatusAggregator
 from .repository import CatalogRepository
-from .series_sources import checked_fields, checked_sources, refuse_removed_fields
+from .series_sources import checked_fields, checked_sources, refuse_mixed_kinds, refuse_removed_fields
 
 # Columns that end up as path components on disk; the owner normalises
 # them on every write so no client can store an unusable name.
@@ -298,8 +298,10 @@ class CatalogModule(BaseModule):
     async def on_source_add(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
         await self._require_series(series_id)
-        source_id = await self.repo.add_source(
-            series_id, checked_fields(env.payload["source"]))
+        draft = checked_fields(env.payload["source"])
+        refuse_mixed_kinds([each["source_type"] for each in await self.repo.list_sources(series_id)]
+                           + [draft["source_type"]])
+        source_id = await self.repo.add_source(series_id, draft)
         self.log.info("сериал %d: добавлен источник %d", series_id, source_id)
         self._publish_source("added", series_id, source_id)
         return {"id": source_id}
@@ -308,6 +310,10 @@ class CatalogModule(BaseModule):
         source_id = env.payload["source_id"]
         stored = await self._require_source(source_id)
         values = checked_fields(env.payload["fields"], stored)
+        if "source_type" in values:
+            others = [each["source_type"] for each in await self.repo.list_sources(stored["series_id"])
+                      if each["id"] != source_id]
+            refuse_mixed_kinds(others + [values["source_type"]])
         # A value equal to the stored one is no change, so it raises no event and no recount downstream.
         applied = {name: value for name, value in values.items() if value != stored[name]}
         if applied:

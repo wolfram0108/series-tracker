@@ -253,6 +253,39 @@ async def test_sources_are_found_by_the_profile_that_reads_them(system):
 
 
 @pytest.mark.asyncio
+async def test_a_torrent_and_a_video_source_do_not_meet_in_one_series(system):
+    _, probe = system
+    torrent = source(url="https://kinozal.tv/details.php?id=1", source_type="torrent")
+    video = source(url=RUCHIME, source_type="web_video")
+    with pytest.raises(BusRequestError) as at_creation:
+        await probe.request("catalog.series.create", {"data": data(sources=[torrent, video])}, timeout=5)
+    assert code_of(at_creation.value) == "mixed_kinds"
+    assert await probe.request("catalog.series.list", {}, timeout=5) == []
+
+    made = await create_series(probe, sources=[torrent])
+    with pytest.raises(BusRequestError) as at_adding:
+        await probe.request("catalog.sources.add", {"series_id": made.series_id, "source": video}, timeout=5)
+    assert code_of(at_adding.value) == "mixed_kinds"
+    assert [each["source_type"] for each in await probe.request(
+        "catalog.sources.list", {"series_id": made.series_id}, timeout=5)] == ["torrent"]
+
+
+@pytest.mark.asyncio
+async def test_the_type_of_a_source_cannot_make_its_series_mixed(system):
+    _, probe = system
+    made = await create_series(probe, sources=[source(url=VK, source_type="vk_video"),
+                                               source(url=RUCHIME, source_type="web_video")])
+    first, second = made.source_ids
+    with pytest.raises(BusRequestError) as refused:
+        await probe.request("catalog.sources.update", {"source_id": second, "fields": {"source_type": "torrent"}},
+                            timeout=5)
+    assert code_of(refused.value) == "mixed_kinds"
+    changed = await probe.request("catalog.sources.update", {"source_id": first, "fields": {"source_type": "web_video"}},
+                                  timeout=5)
+    assert changed["applied"] == {"source_type": "web_video"}
+
+
+@pytest.mark.asyncio
 async def test_the_sources_of_a_missing_series_are_an_error_not_an_empty_list(system):
     _, probe = system
     with pytest.raises(BusRequestError, match="не найден"):
@@ -303,7 +336,7 @@ async def test_the_same_address_may_stand_in_two_series(system):
 @pytest.mark.asyncio
 async def test_a_source_of_a_missing_series_or_a_missing_profile_is_refused(system):
     _, probe = system
-    made = await create_series(probe)
+    made = await create_series(probe, sources=[source(url=RUCHIME, source_type="web_video")])
     with pytest.raises(BusRequestError, match="не найден"):
         await probe.request("catalog.sources.add", {"series_id": 99, "source": source()}, timeout=5)
     with pytest.raises(BusRequestError) as refused:
@@ -421,12 +454,12 @@ async def test_a_source_is_removed_and_announced_until_one_is_left(system):
 
 
 @pytest.mark.asyncio
-async def test_removing_the_torrent_makes_the_series_video(system):
+@pytest.mark.parametrize("types, kind", [(["torrent"], "torrent"), (["vk_video", "web_video"], "video")])
+async def test_the_kind_of_a_series_is_the_kind_of_its_sources(system, types, kind):
     _, probe = system
-    made = await create_series(probe, sources=[source(), source(url=VK, source_type="vk_video")])
-    assert (await probe.request("catalog.series.get", {"series_id": made.series_id}, timeout=5))["kind"] == "torrent"
-    await probe.request("catalog.sources.remove", {"source_id": made.source_id}, timeout=5)
-    assert (await probe.request("catalog.series.get", {"series_id": made.series_id}, timeout=5))["kind"] == "video"
+    made = await create_series(probe, sources=[source(url=f"https://example.org/{i}", source_type=each)
+                                               for i, each in enumerate(types)])
+    assert (await probe.request("catalog.series.get", {"series_id": made.series_id}, timeout=5))["kind"] == kind
 
 
 @pytest.mark.asyncio
