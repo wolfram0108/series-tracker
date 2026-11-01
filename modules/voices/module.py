@@ -292,6 +292,7 @@ class VoicesModule(BaseModule):
         self.handle("voices.settings.get", self.on_settings_get)
         self.handle("voices.settings.set", self.on_settings_set)
         self.handle("voices.dispatch", self.on_dispatch, concurrent=True)
+        self.handle("system.started", self.on_system_started)
         self.handle("composition.changed", self.on_composition_changed)
         self.handle("scan.reference.changed", self.on_reference_changed)
         self.handle("conform.settings.changed", self.on_conform_settings_changed)
@@ -312,10 +313,16 @@ class VoicesModule(BaseModule):
             return
         await self._generation()
         requeued = await self.repo.requeue_interrupted()
-        await self._release_files()
         pending = await self.repo.pending()
         if requeued or pending:
             self.log.info("озвучки: к докачке %d (прерванных %d)", len(pending), requeued)
+
+    async def on_system_started(self, env: Envelope) -> None:
+        """What the database says is unfinished is taken up once every module is up: the workspace is asked of conform and
+        the layout of composition, and both start after this module, so asking on its own start would fail the system's start."""
+        if self.repo is None:
+            return
+        await self._release_files()
         await self._admit()
         await self._sweep_cleanup()
         await self._resume_obligations()

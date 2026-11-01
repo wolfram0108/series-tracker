@@ -8,8 +8,8 @@ import pytest
 from core.contracts import CompositionRow, RowState
 from modules.voices import VoicesModule
 from core.db import Database
-from test_voices import (db_path, dubs, finish, job_result, layout_changed, linked, quiet, reference_on_disk, rows,  # noqa: F401
-                         settled, statuses_until, touch, until_true, downloads)
+from test_voices import (db_path, dubs, finish, job_result, layout_changed, linked, quiet, reference_on_disk, restarted,  # noqa: F401
+                         rows, settled, statuses_until, touch, until_true, downloads)
 
 LINK = "https://site/title.html#kodik-Red-1-3"
 CHANGED = "https://site/title.html#kodik-Red-1-4"
@@ -237,7 +237,7 @@ async def test_a_restart_in_the_middle_of_a_file_download_goes_on_with_the_same_
     await settled(neighbours, 1)
     await voices.stop()
     again = VoicesModule(bus, Database(db_path))
-    await again.start()
+    await restarted(again)
     try:
         await settled(neighbours, 2)
         await quiet(again)
@@ -272,7 +272,7 @@ async def test_a_restart_in_the_middle_of_alignment_keeps_the_file_until_the_las
     for number, submit in enumerate(neighbours.submits, start=1):  # the service ended the jobs while we were away
         neighbours.jobs[f"job-{number}"] = job_result(submit, f"job-{number}")
     again = VoicesModule(bus, Database(db_path))
-    await again.start()
+    await restarted(again)
     try:
         for _ in range(3):
             await asyncio.wait_for(settled_sub.queue.get(), 10)

@@ -325,6 +325,12 @@ async def build_system(db_path, tmp_path, daemon=None):
     return (probe, neighbours, voices, bus), runner
 
 
+async def restarted(module):
+    """What run.py does for a module: it starts, and when every module is up the signal reaches it."""
+    await module.start()
+    await module.on_system_started(Envelope("system.started", "event", {}))
+
+
 @pytest.fixture
 async def dubs(db_path, tmp_path):
     system_, runner = await build_system(db_path, tmp_path)
@@ -510,12 +516,27 @@ async def test_deleting_the_series_cancels_downloads_and_removes_its_files(dubs)
 
 
 @pytest.mark.asyncio
+async def test_a_module_with_interrupted_downloads_starts_when_the_modules_it_asks_are_not_up_yet(db_path, dubs):
+    """conform and composition start after voices: the start of the module asks nobody, or the system would not come up."""
+    probe, neighbours, voices, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    await voices.stop()
+    alone = VoicesModule(Bus(), Database(db_path))
+    await alone.start()
+    try:
+        assert await alone.repo.pending(), "the interrupted downloads wait in the database for the signal that all are up"
+    finally:
+        await alone.stop()
+
+
+@pytest.mark.asyncio
 async def test_after_a_restart_interrupted_downloads_are_sent_again(db_path, dubs):
     probe, neighbours, voices, bus = dubs
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
     again = VoicesModule(bus, Database(db_path))
-    await again.start()
+    await restarted(again)
     try:
         await settled(neighbours, 6)
         assert sorted(f["key"] for f in neighbours.fetches[3:]) == sorted(f["key"] for f in neighbours.fetches[:3])
@@ -841,7 +862,7 @@ async def test_after_a_restart_a_job_that_ended_meanwhile_is_applied(db_path, du
     neighbours.jobs["job-1"] = job_done(neighbours, "job-1")
     await voices.stop()
     again = VoicesModule(bus, Database(db_path))
-    await again.start()
+    await restarted(again)
     try:
         probe.publish_event("conform.daemon.up", {})
         await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
@@ -856,7 +877,7 @@ async def test_a_job_the_service_forgot_is_sent_again(db_path, dubs):
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     await voices.stop()
     again = VoicesModule(bus, Database(db_path))
-    await again.start()
+    await restarted(again)
     try:
         probe.publish_event("conform.daemon.up", {})
         await statuses_until(sub, ["aligning", "aligning"])
@@ -1545,7 +1566,7 @@ async def test_the_whole_series_still_arrives_when_the_module_restarts_midway(du
     progress["fetches"], progress["submits"] = len(neighbours.fetches), len(neighbours.submits)
     again = VoicesModule(bus, Database(db_path))
     holder[0] = again
-    await again.start()
+    await restarted(again)
     probe.publish_event("conform.daemon.up", {})
 
     async def all_placed():
@@ -1675,7 +1696,7 @@ async def test_a_move_begun_for_a_placed_track_is_finished_by_the_next_start(db_
     await voices.repo.begin_move(row["id"], expected, row["output_path"])  # the module stops right here
     await voices.stop()
     again = VoicesModule(bus, Database(db_path))
-    await again.start()
+    await restarted(again)
     try:
         deadline = asyncio.get_running_loop().time() + 5
         while (await again.repo.get(row["id"]))["move_from"] is not None:
@@ -2093,7 +2114,7 @@ async def test_a_later_start_of_the_module_outranks_an_earlier_one_whatever_the_
     await voices.stop()
     monkeypatch.setattr(time, "time_ns", lambda: 1)  # the clock is set far back between the two runs
     again = VoicesModule(bus, Database(db_path))
-    await again.start()
+    await restarted(again)
     try:
         packets = bus.subscribe("voices.dubs.snapshot")
         probe.publish_event("gateway.sse.clients", {"count": 1})
@@ -2288,7 +2309,7 @@ async def test_a_job_whose_ending_could_not_be_learned_is_asked_about_again_by_i
     neighbours.jobs["job-1"] = job_done(neighbours, "job-1")
     neighbours.job_get_failures = 2  # the service is up for the feed and does not answer the question twice
     again = VoicesModule(bus, Database(db_path))
-    await again.start()
+    await restarted(again)
     try:
         await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
         assert {r["status"] for r in await rows(probe)} == {"placed"} and neighbours.job_get_failures == 0
@@ -2523,7 +2544,7 @@ async def test_a_recovered_job_number_hands_its_job_to_the_duty_of_learning_its_
     neighbours.jobs["job-1"] = job_done(neighbours, "job-1")  # the job ended while the module was stopped
     neighbours.service_reachable = True
     again = VoicesModule(bus, Database(db_path))
-    await again.start()
+    await restarted(again)
     try:
         async def placed():
             return {r["status"] for r in await rows(probe)} == {"placed"}
@@ -2987,7 +3008,7 @@ async def test_a_restart_asks_no_neighbour_for_the_plan_and_the_sync_of_a_series
     asks = (neighbours.layout_asks, neighbours.output_asks)
     await voices.stop()
     again = VoicesModule(bus, Database(db_path))
-    await again.start()
+    await restarted(again)
     try:
         await settled(neighbours, 6)
         assert (neighbours.layout_asks, neighbours.output_asks) == asks
@@ -3004,7 +3025,7 @@ async def test_a_series_that_was_never_synced_stays_planned_after_a_restart(db_p
     await pass_over(voices, neighbours, 1)
     await voices.stop()
     again = VoicesModule(bus, Database(db_path))
-    await again.start()
+    await restarted(again)
     try:
         await asyncio.sleep(0.1)
         assert neighbours.fetches == [] and {r["status"] for r in await rows(probe)} == {"pending"}
