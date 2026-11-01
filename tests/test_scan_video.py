@@ -12,8 +12,8 @@ from dataclasses import dataclass
 import pytest
 
 from core import BaseModule, Bus, BusRequestError, Runner, ids
-from core.contracts import (REFERENCE_ALLOW, REFERENCE_CHOICE, Level, Reference, ReferenceChanged, ReferenceChoice,
-                            ReferenceMark, RowState, TableState, player_target)
+from core.contracts import (REFERENCE_CHOICE, VARIANT_ALLOW, Level, Reference, ReferenceChanged, ReferenceChoice,
+                            ReferenceMark, RowState, TableState, variant_target)
 from core.db import Database
 from core.reasons import parse, reason
 from modules.catalog import CatalogModule
@@ -621,7 +621,7 @@ async def test_a_new_order_of_players_recounts_the_references_of_video_series(ri
 async def test_a_player_left_out_of_the_choice_is_not_the_reference(rig):
     rig.world.rows = [rig.row("vk", 1, 1, player="vk", height=2160), rig.row("kodik", 1, 1, player="kodik", height=720)]
     rig.world.settings = [episode_settings(1, 1, lever(
-        REFERENCE_ALLOW, False, Level.SERIES, player_target(rig.source_ids[0], "vk")))]
+        VARIANT_ALLOW, False, Level.SERIES, variant_target("Ruchime", rig.source_ids[0], "vk")))]
     await rig.run()
     assert (await rig.output())[0].row_key == "kodik"
 

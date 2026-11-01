@@ -2,14 +2,14 @@
 
 M-18 (resolution, then the order of players, then the order of sources), M-19 (a compilation is never the reference),
 M-21 (a pick on the series, a season or an episode, inheritance, `other_player`), M-22 (no candidate, nothing swapped
-for the picked voice-over), the lever `reference.allow`, the strict order of the keys and the determinism of the answer.
+for the picked voice-over), the lever `variant.allow`, the strict order of the keys and the determinism of the answer.
 """
 import random
 
 import pytest
 
-from core.contracts import (REFERENCE_ALLOW, REFERENCE_CHOICE, Level, Reference, ReferenceChoice, ReferenceMark,
-                            RowState, player_target)
+from core.contracts import (REFERENCE_CHOICE, VARIANT_ALLOW, Level, Reference, ReferenceChoice, ReferenceMark,
+                            RowState, variant_target)
 from core.reasons import parse
 from core.voice_names import Groups
 from modules.scan import reference
@@ -34,8 +34,8 @@ def pick(group="Ruchime", source_id=1, player="vk", level=Level.SERIES):
                  level)
 
 
-def deny(source_id, player, level=Level.SERIES, value=False):
-    return lever(REFERENCE_ALLOW, value, level, player_target(source_id, player))
+def deny(source_id, player, level=Level.SERIES, value=False, group="Ruchime"):
+    return lever(VARIANT_ALLOW, value, level, variant_target(group, source_id, player))
 
 
 # --- M-18: the best single row ----------------------------------------------------------------
@@ -308,7 +308,7 @@ def test_a_pick_of_a_voice_that_has_vanished_from_the_layout_is_not_hidden_by_th
     assert chosen.reference.mark == ReferenceMark.NONE
 
 
-# --- the lever reference.allow -----------------------------------------------------------------------------
+# --- the lever variant.allow -----------------------------------------------------------------------------
 
 def test_a_player_left_out_of_the_choice_gives_no_candidate():
     rows = [row(S, 1, "vk", 1, 1, player="vk", height=2160), row(S, 2, "kodik", 1, 1, player="kodik", height=720)]
@@ -339,7 +339,7 @@ def test_a_setting_of_the_episode_about_participation_is_the_own_setting_of_the_
 def test_a_picked_player_that_is_left_out_is_replaced_by_the_next_one_of_its_voice():
     rows = [row(S, 1, "vk", 1, 1, player="vk", voice="AniLibria"),
             row(S, 2, "kodik", 1, 1, player="kodik", voice="AniLibria")]
-    chosen = only(choose(rows, [episode_settings(1, 1, pick("AniLibria", 2, "kodik"), deny(2, "kodik"))]))
+    chosen = only(choose(rows, [episode_settings(1, 1, pick("AniLibria", 2, "kodik"), deny(2, "kodik", group="AniLibria"))]))
     assert (chosen.row.row_key, chosen.reference.mark) == ("vk", ReferenceMark.OTHER_PLAYER)
 
 

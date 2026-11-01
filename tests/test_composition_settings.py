@@ -5,21 +5,22 @@ import random
 
 import pytest
 
-from core.contracts import EffectiveLever, Level, SettingRecord, SettingsReset, group_target, player_target
+from core.contracts import (EffectiveLever, Level, SettingRecord, SettingsReset, TargetKind, ValueShape, group_target,
+                            variant_target)
 from core.reasons import parse
 from modules.composition import levers
-from modules.composition.levers import Lever, TargetKind
+from modules.composition.levers import Lever, _picked_source
 from modules.composition.settings import (affected, apply_reset, apply_set, effective, levels, validate, validate_reset,
                                           without_source, within_episodes)
 
-VK = player_target(1, "vk")
-KODIK = player_target(2, "kodik")
+VK = variant_target("Ruchime", 1, "vk")
+KODIK = variant_target("Ruchime", 2, "kodik")
 GROUP = group_target("Ruchime")
 OTHER_GROUP = group_target("AniStar")
 CHOICE_VK = {"group": "Ruchime", "source_id": 1, "player": "vk"}
 CHOICE_KODIK = {"group": "Ruchime", "source_id": 2, "player": "kodik"}
 CHOICE = "reference.choice"
-ALLOW = "reference.allow"
+ALLOW = "variant.allow"
 TAKE = "voice.take"
 PLAYER = "voice.player"
 
@@ -37,8 +38,7 @@ def levers_of(records, season, episode):
 @pytest.fixture
 def volume():
     """A lever nobody wrote any code for: it comes only by registration and goes with the test."""
-    fake = Lever("fake.volume", TargetKind.GROUP, lambda value: isinstance(value, int) and 0 <= value <= 100, 50,
-                 "voices")
+    fake = Lever("fake.volume", TargetKind.GROUP, ValueShape.FLAG, False, "voices")
     levers.register(fake)
     yield fake
     levers.unregister(fake.name)
@@ -353,12 +353,11 @@ def test_a_source_that_leaves_takes_every_record_that_points_at_it_by_target_or_
 
 
 def test_a_source_that_leaves_takes_the_records_of_a_lever_registered_later_that_points_at_it(volume):
-    pointing = Lever("fake.pin", TargetKind.NONE, lambda value: isinstance(value, dict), None, "scan",
-                     lambda value: frozenset(value.get("sources", [])) if isinstance(value, dict) else frozenset())
+    pointing = Lever("fake.pin", TargetKind.NONE, ValueShape.VARIANT_PICK, None, "scan", _picked_source)
     levers.register(pointing)
     try:
-        records = [rec("fake.pin", {"sources": [1, 4]}), rec("fake.pin", {"sources": [4]}, season=1),
-                   rec("fake.volume", 10, target=GROUP)]
+        records = [rec("fake.pin", {"source_id": 1, "player": "vk"}), rec("fake.pin", {"source_id": 4, "player": "vk"}, season=1),
+                   rec("fake.volume", True, target=GROUP)]
         assert {(each.lever, each.season) for each in without_source(records, 1)} == {
             ("fake.pin", 1), ("fake.volume", None)}
     finally:
@@ -380,16 +379,16 @@ def test_an_episode_that_leaves_the_layout_takes_its_own_records_and_the_levels_
 
 
 def test_a_lever_added_by_registration_is_inherited_validated_set_reset_and_counted_without_other_changes(volume):
-    assert validate(rec("fake.volume", 80, season=1, target=GROUP)) is None
+    assert validate(rec("fake.volume", True, season=1, target=GROUP)) is None
     assert parse(validate(rec("fake.volume", 101, target=GROUP)))["code"] == "bad_value"
-    assert parse(validate(rec("fake.volume", 10)))["code"] == "bad_target"
+    assert parse(validate(rec("fake.volume", True)))["code"] == "bad_target"
 
-    before = apply_set([], rec("fake.volume", 80, season=1, target=GROUP))
-    assert levers_of(before, 1, 2)[("fake.volume", GROUP)] == (80, Level.SEASON)
+    before = apply_set([], rec("fake.volume", True, season=1, target=GROUP))
+    assert levers_of(before, 1, 2)[("fake.volume", GROUP)] == (True, Level.SEASON)
     assert ("fake.volume", GROUP) not in levers_of(before, 2, 2)
 
-    after = apply_set(before, rec("fake.volume", 20, season=1, episode=2, target=GROUP))
-    assert levers_of(after, 1, 2)[("fake.volume", GROUP)] == (20, Level.EPISODE)
+    after = apply_set(before, rec("fake.volume", False, season=1, episode=2, target=GROUP))
+    assert levers_of(after, 1, 2)[("fake.volume", GROUP)] == (False, Level.EPISODE)
     assert affected(before, after, EPISODES) == {(1, 2)}
 
     reset = apply_reset(after, SettingsReset(series_id=1, season=1, episode=2))
@@ -397,23 +396,23 @@ def test_a_lever_added_by_registration_is_inherited_validated_set_reset_and_coun
 
 
 def test_a_lever_without_a_target_registered_later_has_its_default_in_every_episode():
-    levers.register(Lever("fake.mode", TargetKind.NONE, lambda value: value in ("a", "b"), "a", "scan"))
+    levers.register(Lever("fake.mode", TargetKind.NONE, ValueShape.FLAG, True, "scan"))
     try:
-        assert levers_of([], 1, 1)[("fake.mode", None)] == ("a", Level.DEFAULT)
-        records = apply_set([], rec("fake.mode", "b", season=2))
-        assert levers_of(records, 2, 9)[("fake.mode", None)] == ("b", Level.SEASON)
+        assert levers_of([], 1, 1)[("fake.mode", None)] == (True, Level.DEFAULT)
+        records = apply_set([], rec("fake.mode", False, season=2))
+        assert levers_of(records, 2, 9)[("fake.mode", None)] == (False, Level.SEASON)
         assert affected([], records, EPISODES) == {pair for pair in EPISODES if pair[0] == 2}
     finally:
         levers.unregister("fake.mode")
 
 
 def test_records_of_a_lever_that_left_the_registry_wait_unseen_and_come_back_when_it_does(volume):
-    records = apply_set([], rec("fake.volume", 80, target=GROUP))
+    records = apply_set([], rec("fake.volume", True, target=GROUP))
     levers.unregister("fake.volume")
     assert ("fake.volume", GROUP) not in levers_of(records, 1, 1) and records
     assert parse(validate(records[0]))["code"] == "unknown_lever"
     levers.register(volume)
-    assert levers_of(records, 1, 1)[("fake.volume", GROUP)] == (80, Level.SERIES)
+    assert levers_of(records, 1, 1)[("fake.volume", GROUP)] == (True, Level.SERIES)
 
 
 # ---- the headers of the levels ------------------------------------------------------------------------------------

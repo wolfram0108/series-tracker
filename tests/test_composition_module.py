@@ -20,12 +20,13 @@ from composition_fakes import (HOST, OTHER_PAGE, PAGE, FakeCatalog, FakeRules, F
                                source)
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.contracts import (CompositionPreviewReply, CompositionReply, EffectiveLever, Level, ReleaseTable, RowState,
+                            TargetKind, ValueShape,
                             RowVoice, SettingsReset, SettingsSet, SourceStatus, TableRow, TableState, VoiceSummary,
-                            group_target, player_target)
+                            group_target, variant_target)
 from core.db import Database
 from core.reasons import parse, reason
 from modules.composition import CompositionModule, levers
-from modules.composition.levers import Lever, TargetKind
+from modules.composition.levers import Lever
 
 ROOT = Path(__file__).resolve().parent.parent
 MIGRATION = ROOT / "alembic" / "versions" / "0027_composition_tables.py"
@@ -475,7 +476,7 @@ async def test_a_season_value_reaches_the_episodes_that_follow_it_and_not_the_on
     assert s.taken(s.changed)[0]["episodes"] == season_one(1, 2, 3, 4, 5)
 
     await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=3)
-    await s.set(series_id, "reference.allow", False, season=1, episode=3, target=player_target(source_id, "vk"))
+    await s.set(series_id, "variant.allow", False, season=1, episode=3, target=variant_target("Ruchime", source_id, "vk"))
     assert [event["episodes"] for event in s.taken(s.changed)] == [season_one(3), season_one(3)]
 
     await s.set(series_id, "reference.choice", choice(source_id, "allvideo"), season=1)
@@ -540,8 +541,8 @@ async def test_a_source_that_is_removed_takes_the_settings_that_point_at_it_and_
     await s.counted(lambda: s.sources.finish(OTHER_PAGE, page(*season_rows(1, range(1, 4), player="kodik"),
                                                               url=OTHER_PAGE)))
     await s.set(series_id, "reference.choice", choice(second, "kodik"), season=1)
-    await s.set(series_id, "reference.allow", False, season=1, episode=2, target=player_target(second, "kodik"))
-    await s.set(series_id, "reference.allow", False, season=1, target=player_target(first, "vk"))
+    await s.set(series_id, "variant.allow", False, season=1, episode=2, target=variant_target("Ruchime", second, "kodik"))
+    await s.set(series_id, "variant.allow", False, season=1, target=variant_target("Ruchime", first, "vk"))
     s.taken(s.changed)
 
     await s.counted(lambda: s.catalog.remove_source(second))
@@ -550,7 +551,7 @@ async def test_a_source_that_is_removed_takes_the_settings_that_point_at_it_and_
     assert {r.source_id for r in reply.rows} == {first} and len(reply.rows) == 7
     assert event["episodes"] == season_one(1, 2, 3, 4, 5)
     assert s.sql("SELECT lever, target FROM output_settings WHERE series_id = ?", series_id) == [
-        ("reference.allow", player_target(first, "vk"))]
+        ("variant.allow", variant_target("Ruchime", first, "vk"))]
     assert s.sql("SELECT source_id FROM composition_sources WHERE series_id = ?", series_id) == [(first,)]
     assert levers_by_episode(reply)[1, 2]["reference.choice"].level == Level.DEFAULT
 
@@ -592,13 +593,13 @@ async def test_a_command_the_registry_refuses_is_refused_with_its_reason_and_sto
     s = system
     series_id = await laid_out(s)
     for lever, value, target, code in [("no.such", True, None, "unknown_lever"),
-                                       ("reference.allow", True, None, "bad_target"),
+                                       ("variant.allow", True, None, "bad_target"),
                                        ("voice.take", "yes", group_target("Рутина"), "bad_value")]:
         with pytest.raises(BusRequestError) as caught:
             await s.set(series_id, lever, value, season=1, target=target)
         assert code_of(caught.value) == code
     with pytest.raises(BusRequestError) as caught:
-        await s.reset(series_id, season=1, lever="reference.allow")
+        await s.reset(series_id, season=1, lever="variant.allow")
     assert code_of(caught.value) == "bad_target"
     with pytest.raises(BusRequestError) as caught:
         await s.set(999, "voice.take", True, target=group_target("Рутина"))
@@ -630,26 +631,26 @@ async def test_a_consumer_and_a_lever_that_are_only_registered_work_with_the_mod
     s = system
     consumer = Consumer(s.bus)
     await consumer.start()
-    levers.register(Lever("fake.volume", TargetKind.GROUP, lambda value: isinstance(value, int) and 0 <= value <= 100,
-                          50, "voices"))
+    levers.register(Lever("fake.mute", TargetKind.GROUP, ValueShape.FLAG, False, "voices"))
     try:
         series_id = await laid_out(s)
         for _ in range(2):
             await asyncio.wait_for(consumer.seen.get(), STUCK_S)
-        await s.set(series_id, "fake.volume", 80, season=2, target=group_target("Рутина"))
+        await s.set(series_id, "fake.mute", True, season=2, target=group_target("Рутина"))
         event, reply = await asyncio.wait_for(consumer.seen.get(), STUCK_S)
         assert event["episodes"] == refs((2, 1), (2, 2))
         at = levers_by_episode(reply)
-        assert at[2, 1]["fake.volume"] == EffectiveLever(lever="fake.volume", target=group_target("Рутина"), value=80,
-                                                         level=Level.SEASON)
-        assert "fake.volume" not in at[1, 1]
+        assert at[2, 1]["fake.mute"] == EffectiveLever(lever="fake.mute", target=group_target("Рутина"), value=True,
+                                                       level=Level.SEASON)
+        assert "fake.mute" not in at[1, 1]
+        assert any(each.name == "fake.mute" for each in reply.levers)  # a window is given the lever to draw
         with pytest.raises(BusRequestError) as caught:
-            await s.set(series_id, "fake.volume", 101, season=2, target=group_target("Рутина"))
+            await s.set(series_id, "fake.mute", 101, season=2, target=group_target("Рутина"))
         assert code_of(caught.value) == "bad_value"
     finally:
-        levers.unregister("fake.volume")
+        levers.unregister("fake.mute")
         await consumer.stop()
-    assert "fake.volume" not in {x.lever for e in (await s.get(series_id)).settings for x in e.levers}
+    assert "fake.mute" not in {x.lever for e in (await s.get(series_id)).settings for x in e.levers}
 
 
 # --- C-1, C-2: a cause that comes while the series is being counted --------------------------------------------------

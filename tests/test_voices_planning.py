@@ -1,6 +1,6 @@
 """The plan of voice-overs: which voices an episode gets and where each comes from (M-15, M-16, M-17, T-17)."""
 from core.contracts import (CompositionRow, EffectiveLever, EpisodeSettings, Level, Reference, ReferenceMark,
-                            RowState, group_target)
+                            RowState, group_target, variant_target)
 from core.voice_names import NO_GROUPS, Groups
 from modules.voices.planning import Candidate, PlannedDub, adopt, plan, rank
 from modules.voices.settings import DEFAULT_PRIORITY
@@ -54,6 +54,26 @@ def test_the_parts_of_one_episode_are_planned_apart_each_for_the_reference_of_it
     assert [(dub.part, dub.voice_key, dub.chain[0].url.rsplit("/", 1)[1]) for dub in result.dubs] == [
         (1, "A", "kodik:A:1:p1"), (2, "A", "kodik:A:1:p2")]
     assert result.with_reference == {(1, 1, 1), (1, 1, 2)}
+
+
+def test_a_variant_the_user_left_out_is_not_a_candidate_of_its_voice_and_the_others_are():
+    rows = [row(1, "cvh", "Ref", 1), row(1, "vk", "A", 1), row(2, "cvh", "A", 1), row(3, "kodik", "A", 1)]
+    leave_out = lambda source_id, player, voice="A": EpisodeSettings(season=1, episode=1, levers=[  # noqa: E731
+        EffectiveLever(lever="variant.allow", target=variant_target(voice, source_id, player), value=False,
+                       level=Level.SERIES)])
+    ref = reference_of(rows, "Ref", 1)
+    assert [each[0] for each in chains(planned(rows, [ref]))[(1, 1, "A")]] == ["cvh", "kodik", "vk"]
+    assert [each[0] for each in chains(planned(rows, [ref], [leave_out(2, "cvh")]))[(1, 1, "A")]] == ["kodik", "vk"]
+    # A variant of another voice-over is not this one's.
+    assert [each[0] for each in chains(planned(rows, [ref], [leave_out(2, "cvh", "B")]))[(1, 1, "A")]] == [
+        "cvh", "kodik", "vk"]
+
+
+def test_a_voice_over_whose_variants_are_all_left_out_is_planned_with_no_source():
+    rows = [row(1, "cvh", "Ref", 1), row(1, "vk", "A", 1)]
+    settings = [EpisodeSettings(season=1, episode=1, levers=[EffectiveLever(
+        lever="variant.allow", target=variant_target("A", 1, "vk"), value=False, level=Level.EPISODE)])]
+    assert chains(planned(rows, [reference_of(rows, "Ref", 1)], settings))[(1, 1, "A")] == []
 
 
 def test_the_voice_of_the_reference_is_planned_for_no_episode_it_is_the_reference_of():

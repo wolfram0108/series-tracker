@@ -5,7 +5,7 @@ from alembic.script import ScriptDirectory
 from pydantic import ValidationError
 
 from core.contracts import (CompositionRow, Level, ReleaseTable, RowState, RowVoice, SettingRecord, TableRow,
-                            group_target, line_of, player_target)
+                            group_target, line_of, parse_variant_target, variant_target)
 
 
 def table(*names: str) -> ReleaseTable:
@@ -75,8 +75,11 @@ def test_an_episode_is_set_within_a_season():
 
 
 def test_targets_name_domain_things_not_row_ids():
-    assert player_target(3, "vibix") == "source:3/player:vibix"
+    assert variant_target("Ruchime", 3, "vibix") == 'variant:["Ruchime",3,"vibix"]'
     assert group_target("Ruchime") == "group:Ruchime"
+    # No name, however odd, is taken for a part of another: the group may hold the separators of any other form.
+    for group, source_id, player in [("A / B", 3, "a/b"), ('Q"uote', 0, "p"), ("group:x", 1, "source:1/player:z"), ("Ё", 2, "я")]:
+        assert parse_variant_target(variant_target(group, source_id, player)) == (group, source_id, player)
 
 
 def test_the_migrations_of_the_stage_keep_one_head_in_order():

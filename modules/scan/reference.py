@@ -18,8 +18,8 @@ from typing import Callable, Iterable, Sequence
 
 from pydantic import ValidationError
 
-from core.contracts import (REFERENCE_ALLOW, REFERENCE_CHOICE, CompositionRow, EffectiveLever, EpisodeSettings, Level,
-                            Reference, ReferenceChoice, ReferenceMark, RowState, parse_player_target)
+from core.contracts import (REFERENCE_CHOICE, VARIANT_ALLOW, CompositionRow, EffectiveLever, EpisodeSettings, Level,
+                            Reference, ReferenceChoice, ReferenceMark, RowState, parse_variant_target)
 from core.reasons import reason
 from core.voice_names import NO_GROUPS, Groups, rank
 
@@ -87,10 +87,10 @@ class _Levers:
 
     choice: ReferenceChoice | None = None
     own: bool = False
-    denied: frozenset[tuple[int, str]] = frozenset()
+    denied: frozenset[tuple[str, int, str]] = frozenset()  # (group, source id, player) the user left out
 
     def allows(self, row: CompositionRow) -> bool:
-        return (row.source_id, row.player) not in self.denied
+        return (row.voice_label, row.source_id, row.player) not in self.denied
 
 
 def choose(rows: Sequence[CompositionRow], settings: Iterable[EpisodeSettings], players: Sequence[str],
@@ -189,13 +189,13 @@ def _best(pool: list[Candidate], order: Order, ranking: Sequence[RankKey]) -> Ca
 
 def _levers_of(levers: Iterable[EffectiveLever]) -> _Levers:
     choice, own = None, False
-    denied: set[tuple[int, str]] = set()
+    denied: set[tuple[str, int, str]] = set()
     for lever in levers:
         if lever.lever == REFERENCE_CHOICE:
             choice = _choice_of(lever.value)
             own = own or lever.level == Level.EPISODE
-        elif lever.lever == REFERENCE_ALLOW:
-            target = parse_player_target(lever.target) if isinstance(lever.target, str) else None
+        elif lever.lever == VARIANT_ALLOW:
+            target = parse_variant_target(lever.target) if isinstance(lever.target, str) else None
             if target is not None and lever.value is False:
                 denied.add(target)
             own = own or lever.level == Level.EPISODE

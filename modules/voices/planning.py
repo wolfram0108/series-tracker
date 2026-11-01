@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from typing import Any, Iterable, NamedTuple, Sequence
 
 from core.voice_names import rank
-from core.contracts import (VOICE_PLAYER, VOICE_TAKE, CompositionRow, EffectiveLever, EpisodeSettings, Reference,
-                            ReferenceMark, RowState, group_target)
+from core.contracts import (VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, CompositionRow, EffectiveLever, EpisodeSettings,
+                            Reference, ReferenceMark, RowState, group_target, parse_variant_target)
 
 
 # A reference with one of these marks is a video of the layout the voice-overs are aligned to.
@@ -89,28 +89,36 @@ def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settin
             undecided.add(slot)
             continue
         with_reference.add(slot)
-        take_off, picks = _levers(levers.get((ref.season, ref.episode), ()))
+        take_off, picks, denied = _levers(levers.get((ref.season, ref.episode), ()))
         for label in voices:
             if label == ref_row.voice_label or group_target(label) in take_off:
                 continue
-            covering = [row for row in by_voice.get((ref.season, label), ()) if _covers(row, ref.episode, ref_row.part)]
+            covering = [row for row in by_voice.get((ref.season, label), ())
+                        if _covers(row, ref.episode, ref_row.part) and (label, row.source_id, row.player) not in denied]
             dubs.append(PlannedDub(ref.season, ref.episode, slot[2], label, label,
                                    _chain(covering, picks.get(group_target(label)), priority, players)))
     return Plan(tuple(dubs), frozenset(with_reference), frozenset(undecided))
 
 
-def _levers(levers: Iterable[EffectiveLever]) -> tuple[set[str], dict[str, tuple[int, str]]]:
-    """(targets taken off, {target: (source id, player) the user picked}) of the levers of one episode."""
+def _levers(levers: Iterable[EffectiveLever]) -> tuple[set[str], dict[str, tuple[int, str]], set[tuple[str, int, str]]]:
+    """(targets taken off, {target: (source id, player) the user picked}, (group, source id, player) of the variants
+    the user left out) of the levers of one episode."""
     take_off: set[str] = set()
     picks: dict[str, tuple[int, str]] = {}
+    denied: set[tuple[str, int, str]] = set()
     for lever in levers:
         if lever.target is None:
+            continue
+        if lever.lever == VARIANT_ALLOW and lever.value is False:
+            variant = parse_variant_target(lever.target)
+            if variant is not None:
+                denied.add(variant)
             continue
         if lever.lever == VOICE_TAKE and lever.value is False:
             take_off.add(lever.target)
         elif lever.lever == VOICE_PLAYER and isinstance(lever.value, dict):
             picks[lever.target] = (lever.value.get("source_id"), lever.value.get("player"))
-    return take_off, picks
+    return take_off, picks, denied
 
 
 def _covers(row: CompositionRow, episode: int, part: int | None) -> bool:

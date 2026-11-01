@@ -2,9 +2,14 @@
 
 A record is kept in domain terms (numbers the constructor gave, the name of a voice-over group, a source of the series,
 a kind of player), so that it outlives a new reading of a table. No record means "as the level above".
+
+A variant is one place a voice-over of an episode can be had from: a voice-over group at a player of a source. The output
+of an episode is the variants of its voice-overs; a lever tells which of them is the reference, which take part, which
+is preferred.
 """
 from __future__ import annotations
 
+import json
 import re
 from enum import StrEnum
 from typing import Any
@@ -14,7 +19,7 @@ from pydantic import BaseModel, Field, model_validator
 
 # The levers every consumer reads by name; the registry that gives them meaning is the composition module's.
 REFERENCE_CHOICE = "reference.choice"
-REFERENCE_ALLOW = "reference.allow"
+VARIANT_ALLOW = "variant.allow"
 VOICE_TAKE = "voice.take"
 VOICE_PLAYER = "voice.player"
 
@@ -26,25 +31,49 @@ class Level(StrEnum):
     EPISODE = "episode"
 
 
-_PLAYER_TARGET = re.compile(r"source:(\d+)/player:(.+)", re.DOTALL)
+class TargetKind(StrEnum):
+    """What a lever's value is about: nothing in particular, a voice-over group, or a variant of one."""
+
+    NONE = "none"
+    GROUP = "group"
+    VARIANT = "variant"
+
+
+class ValueShape(StrEnum):
+    """The shape of the value of a lever: a flag, the pick of a variant of a group (or auto), or the pick of a
+    reference (a variant with its group, or auto). A window draws a lever by its target and its shape."""
+
+    FLAG = "flag"
+    VARIANT_PICK = "variant_pick"
+    REFERENCE_PICK = "reference_pick"
+
+
 _GROUP_TARGET = re.compile(r"group:(.+)", re.DOTALL)
-
-
-def player_target(source_id: int, player: str) -> str:
-    return f"source:{source_id}/player:{player}"
 
 
 def group_target(name: str) -> str:
     return f"group:{name}"
 
 
-def parse_player_target(target: str) -> tuple[int, str] | None:
-    """(source id, player) of a target made by `player_target`; None for anything else."""
-    found = _PLAYER_TARGET.fullmatch(target)
-    if found is None:
+def variant_target(group: str, source_id: int, player: str) -> str:
+    """The target of a variant: a JSON array, so that no name, however odd, can be taken for a part of another."""
+    return "variant:" + json.dumps([group, source_id, player], ensure_ascii=False, separators=(",", ":"))
+
+
+def parse_variant_target(target: str) -> tuple[str, int, str] | None:
+    """(group, source id, player) of a target made by `variant_target`; None for anything else."""
+    if not target.startswith("variant:"):
         return None
-    source_id, player = int(found.group(1)), found.group(2)
-    return (source_id, player) if player_target(source_id, player) == target else None
+    try:
+        found = json.loads(target[len("variant:"):])
+    except ValueError:
+        return None
+    if (not isinstance(found, list) or len(found) != 3 or not isinstance(found[0], str) or not found[0]
+            or isinstance(found[1], bool) or not isinstance(found[1], int) or not isinstance(found[2], str)
+            or not found[2]):
+        return None
+    group, source_id, player = found
+    return (group, source_id, player) if variant_target(group, source_id, player) == target else None
 
 
 def parse_group_target(target: str) -> str | None:
@@ -71,6 +100,17 @@ class _Scope(BaseModel):
         if self.episode is not None:
             return Level.EPISODE
         return Level.SEASON if self.season is not None else Level.SERIES
+
+
+class LeverSpec(BaseModel):
+    """What a lever is, as the registry of the composition module has it: its name, what its value is about, the
+    shape of its value, its default and the module that acts on it. A window needs nothing else to draw it."""
+
+    name: str
+    target: TargetKind
+    shape: ValueShape
+    default: Any = None
+    consumer: str
 
 
 class PlayerPick(BaseModel):

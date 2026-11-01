@@ -9,7 +9,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Collection, Iterable, Sequence
 
-from core.contracts import EffectiveLever, Level, LevelSettings, SettingRecord, SettingsReset, parse_player_target
+from core.contracts import EffectiveLever, Level, LevelSettings, SettingRecord, SettingsReset
 from core.reasons import reason
 
 from . import levers
@@ -78,9 +78,7 @@ def without_source(records: Sequence[SettingRecord], source_id: int) -> list[Set
     """The records after a source has left the series: those that point at it, by target or by value, are gone."""
     def points_at(each: SettingRecord) -> bool:
         lever = levers.get(each.lever)
-        target = parse_player_target(each.target) if isinstance(each.target, str) else None
-        return (target is not None and target[0] == source_id) or (
-            lever is not None and source_id in lever.sources_of(each.target, each.value))
+        return lever is not None and source_id in lever.sources_of(each.target, each.value)
 
     return canonical([each for each in records if not points_at(each)])
 

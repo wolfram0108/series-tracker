@@ -84,7 +84,7 @@ from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
 
-from . import project, settings
+from . import levers, project, settings
 from .project import SourceInput
 from .repository import CompositionRepository, StoredSource
 
@@ -201,7 +201,8 @@ class CompositionModule(BaseModule):
             levels=settings.levels(records, {season for season, _ in episodes}),
             settings=[EpisodeSettings(season=season, episode=episode,
                                       levers=settings.effective(records, season, episode))
-                      for season, episode in sorted(episodes)])
+                      for season, episode in sorted(episodes)],
+            levers=levers.specs())
         return reply.model_dump(mode="json")
 
     async def on_preview(self, env: Envelope) -> dict:

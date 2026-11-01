@@ -5,7 +5,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field, model_validator
 
-from .output_settings import EpisodeSettings, LevelSettings
+from .output_settings import EpisodeSettings, LeverSpec, LevelSettings
 from .release_table import RowState, TableState
 from .rules import RuleResult
 
@@ -114,6 +114,8 @@ class CompositionReply(BaseModel):
     sources: list[SourceSummary] = Field(default_factory=list)
     levels: list[LevelSettings] = Field(default_factory=list)
     settings: list[EpisodeSettings] = Field(default_factory=list)
+    # The levers there are, as the registry has them: a window draws the controls of the output from them.
+    levers: list[LeverSpec] = Field(default_factory=list)
 
 
 class EpisodeRef(BaseModel):

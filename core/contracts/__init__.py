@@ -9,8 +9,9 @@ from .composition import (CompositionChanged, CompositionFailed, CompositionGetR
                           CompositionRow, EpisodeRef, Exclusion, PlayerSummary, SourceStatus, SourceSummary,
                           VoiceSummary)
 from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
-from .output_settings import (REFERENCE_ALLOW, REFERENCE_CHOICE, VOICE_PLAYER, VOICE_TAKE, EffectiveLever, EpisodeSettings, Level, LevelSettings, PlayerPick, ReferenceChoice, SettingRecord, SettingsReset, SettingsSet,
-                              group_target, parse_group_target, parse_player_target, player_target)
+from .output_settings import (REFERENCE_CHOICE, VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, EffectiveLever, EpisodeSettings, LeverSpec,
+                              Level, LevelSettings, PlayerPick, ReferenceChoice, SettingRecord, SettingsReset, SettingsSet,
+                              TargetKind, ValueShape, group_target, parse_group_target, parse_variant_target, variant_target)
 from .reference import OutputSwitch, Reference, ReferenceChanged, ReferenceMark
 from .release_table import (LINE_SEPARATOR, ReleaseTable, RowState, RowVoice, SiteResolveReply, SiteResolveRequest,
                             TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableRow, TableState, line_of)
@@ -32,7 +33,8 @@ __all__ = ["AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitRep
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
            "CompositionReply", "CompositionRow", "PreviewLine",
            "EpisodeRef", "Exclusion", "PlayerSummary", "SourceStatus", "SourceSummary", "VoiceSummary",
-           "REFERENCE_ALLOW", "REFERENCE_CHOICE", "VOICE_PLAYER", "VOICE_TAKE", "EffectiveLever", "EpisodeSettings", "Level", "LevelSettings", "PlayerPick", "ReferenceChoice", "SettingRecord", "SettingsReset", "SettingsSet",
-           "group_target", "parse_group_target", "parse_player_target", "player_target",
+           "REFERENCE_CHOICE", "VARIANT_ALLOW", "VOICE_PLAYER", "VOICE_TAKE", "EffectiveLever", "EpisodeSettings", "LeverSpec", "Level", "LevelSettings", "PlayerPick", "ReferenceChoice", "SettingRecord", "SettingsReset", "SettingsSet",
+           "TargetKind", "ValueShape",
+           "group_target", "parse_group_target", "parse_variant_target", "variant_target",
            "OutputSwitch", "Reference", "ReferenceChanged", "ReferenceMark",
            "GroupsResolveReply", "GroupsResolveRequest"]
