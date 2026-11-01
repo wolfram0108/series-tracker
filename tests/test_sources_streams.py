@@ -1,10 +1,12 @@
 """The stream of a candidate link, asked for right before the download: the player that owns the link resolves it."""
+import json
 from pathlib import Path
 
 import httpx
 import pytest
 
 from core.reasons import parse
+from modules.sources.players import cdnvideohub
 from modules.sources.players.contract import StreamUnavailable
 from modules.sources.players.registry import PlayerRegistry
 from modules.sources.players.streams import resolve_stream
@@ -164,3 +166,101 @@ async def test_a_catalog_that_cannot_be_read_is_an_unavailable_stream_that_may_p
 
 async def test_a_page_of_the_site_is_not_a_vibix_link_and_is_left_to_nobody():
     assert await resolved(PAGE, manifests()) is None
+
+
+# --- CDN VideoHub and Kodik: an item of a list ---------------------------------------------------------------------------------
+
+DUNHUA = "https://dunhuatv.ru/28-x-smotret-onlajn.html"
+CVH_SOURCES = {
+    "v1s": {"mpegHighUrl": "https://okcdn.test/v1s/720", "mpegFullHdUrl": "https://okcdn.test/v1s/1080"},
+    "v2": {"mpegLowUrl": "https://okcdn.test/v2/360"},
+    "only4k": {"mpeg4kUrl": "https://okcdn.test/only4k/4k"},
+    "v4k": {"mpegHighUrl": "https://okcdn.test/v4k/720", "mpeg4kUrl": "https://okcdn.test/v4k/4k"},
+}
+
+
+def listed_web(failing: dict[str, int] | None = None) -> Web:
+    from test_sources_cvh_kodik import IFRAMES, ftor_links
+
+    def video(request):
+        vk_id = str(request.url).rsplit("/", 1)[1]
+        if vk_id in (failing or {}):
+            return failing[vk_id], ""
+        return (200, json.dumps({"sources": CVH_SOURCES[vk_id], "duration": 600})) if vk_id in CVH_SOURCES else (404, "")
+
+    web = Web().route("/player/sv/video/", video)
+    web.route("kodikplayer.com/serial/", lambda request: IFRAMES.get(str(request.url).split("/serial/")[1].split("/")[0], (404, "")))
+    web.route("kodikplayer.com/ftor", lambda request: json.dumps(ftor_links(360, 480, 720)), method="POST")
+    return web
+
+
+async def measured_at_1440(rung) -> int | None:
+    return 1440
+
+
+async def test_a_cvh_item_resolves_to_its_best_rung_with_the_agent_that_signed_it():
+    web = listed_web()
+
+    stream = await resolved(f"{DUNHUA}#cvh=v1s", web)
+
+    assert stream["stream_url"] == "https://okcdn.test/v1s/1080"
+    assert stream["headers"]["User-Agent"] == cdnvideohub.USER_AGENT and stream["headers"]["Referer"] == cdnvideohub.ORIGIN + "/"
+    asked = [request for request in web.requests if "/player/sv/video/" in str(request.url)]
+    assert asked and {request.headers["user-agent"] for request in asked} == {cdnvideohub.USER_AGENT}
+
+
+async def test_a_cvh_stream_takes_the_best_rung_within_the_cap():
+    link = f"{DUNHUA}#cvh=v1s"
+
+    assert (await resolved(link, listed_web(), 720))["stream_url"].endswith("/v1s/720")
+    # Nothing at or below 480: the lowest rung above it is better than losing the episode.
+    assert (await resolved(link, listed_web(), 480))["stream_url"].endswith("/v1s/720")
+    assert (await resolved(link, listed_web()))["stream_url"].endswith("/v1s/1080")
+    assert (await resolved(link, listed_web(), 2160))["stream_url"].endswith("/v1s/1080")
+
+
+async def test_unlabelled_rungs_are_measured_only_when_nothing_else_is_left_and_a_rung_is_measured_once():
+    calls = []
+
+    async def counting(rung) -> int:
+        calls.append(rung.key)
+        return 1440
+
+    players = PlayerRegistry.standard(measure=counting)
+    await resolved(f"{DUNHUA}#cvh=v4k", listed_web(), 720, players)
+    assert calls == []
+    stream = await resolved(f"{DUNHUA}#cvh=only4k", listed_web(), 720, players)
+    await resolved(f"{DUNHUA}#cvh=only4k", listed_web(), 720, players)
+
+    assert stream["stream_url"].endswith("/only4k/4k") and calls == ["mpeg4kUrl"]
+
+
+async def test_a_kodik_item_resolves_to_its_best_quality_within_the_cap_with_the_referer_of_the_player():
+    link = f"{DUNHUA}#kodik=50228/7bbb4c6b/102"
+
+    heights = {cap: (await resolved(link, listed_web(), cap))["stream_url"] for cap in (480, 300, None)}
+    stream = await resolved(link, listed_web())
+
+    assert heights[480].endswith("/480.mp4:hls:manifest.m3u8") and heights[300].endswith("/360.mp4:hls:manifest.m3u8")
+    assert heights[None].endswith("/720.mp4:hls:manifest.m3u8") and stream["headers"] == {"Referer": "https://kodikplayer.com/"}
+
+
+async def test_an_item_the_player_has_no_stream_for_is_an_unavailable_stream_that_may_come_later_only_when_the_host_was_busy():
+    link = f"{DUNHUA}#cvh="
+    with pytest.raises(StreamUnavailable) as gone:
+        await resolved(link + "missing", listed_web())
+    with pytest.raises(StreamUnavailable) as busy:
+        await resolved(link + "v2", listed_web({"v2": 503}))
+    with pytest.raises(StreamUnavailable) as no_item:
+        await resolved(f"{DUNHUA}#kodik=50228/7bbb4c6b/999", listed_web())
+
+    assert not gone.value.transient and parse(parse(gone.value.reason)["params"]["cause"])["code"] == "player_video_missing"
+    assert busy.value.transient and parse(gone.value.reason)["params"]["player"] == "CVH"
+    assert not no_item.value.transient and parse(no_item.value.reason)["params"]["player"] == "Kodik"
+
+
+async def test_the_old_name_of_the_cvh_player_in_a_link_is_not_a_link_and_a_page_is_nobodys():
+    web = listed_web()
+
+    assert await resolved(f"{DUNHUA}#vk=v1s", web) is None
+    assert await resolved(DUNHUA, web) is None

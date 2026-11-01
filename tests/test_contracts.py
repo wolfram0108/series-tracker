@@ -11,7 +11,8 @@ from core.contracts import (AlignmentJob, DubEvent, DubEventStatus, DubHint, Dub
                             JobStatus, LayoutRole, SubmitOutcome, SubmitReply)
 from modules.conform.module import finished_view
 from modules.gateway import GatewayModule
-from modules.sources.video_providers import get_default_registry
+from modules.sources.sites import SiteRegistry
+from modules.sources.sites.builtin import builtin_sites
 from modules.voices import alignment, lifecycle, repository
 from modules.voices.states import public_hint, public_state
 
@@ -147,10 +148,21 @@ def test_a_result_is_admitted_by_the_services_own_verdict_alone(result, code):
         assert parse(refusal)["code"] == code
 
 
-def test_every_registered_provider_declares_what_the_contract_asks():
-    providers = get_default_registry()._providers
-    assert providers
-    for provider in providers:
-        assert isinstance(provider.name, str) and provider.name
-        assert provider.domains and all(isinstance(domain, str) for domain in provider.domains)
-        assert isinstance(provider.has_voice_catalog, bool)
+A_PAGE_OF = {"ruchime": "https://1.ruchime.org/release/x/episode-3?off=vk#top",
+             "dunhuatv": "https://www.dunhuatv.ru/28-x-smotret-onlajn.html?a=1#cvh=2",
+             "vk_channel": "https://vk.com/@chan/videos|запрос"}
+
+
+def test_every_registered_site_declares_what_the_contract_asks():
+    sites = builtin_sites()
+    registry = SiteRegistry(sites)
+    assert sites and len({site.name for site in sites}) == len(sites)
+    for site in sites:
+        assert isinstance(site.name, str) and site.name
+        assert site.domains and all(isinstance(domain, str) for domain in site.domains)
+        assert inspect.iscoroutinefunction(site.read)
+        page = A_PAGE_OF[site.name]
+        # The registry finds the site of its own page, and the canonical address reads back as itself.
+        assert registry.find(page) is site and site.match_url(page)
+        canonical = site.canonical_url(page, {})
+        assert site.canonical_url(canonical, {}) == canonical and registry.find(canonical) is site

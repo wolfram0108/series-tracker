@@ -27,7 +27,7 @@ def _relaxed_paces():
         (f"{sites}.ruchime.pages", "PAGE_COOLDOWN_S", 0.0),
         (f"{sites}.ruchime.pages", "PAGE_BUDGET", Budget(attempts=4, pauses=(0.0,), limit_s=UNTIMED)),
         (f"{sites}.ruchime.pages", "RELEASE_BUDGET", Budget(attempts=3, pauses=(0.0,), limit_s=UNTIMED)),
-        (f"{sites}.ruchime.site", "CATALOG_BUDGET", Budget(attempts=2, pauses=(0.0,), limit_s=UNTIMED)),
+        ("modules.sources.players.catalog", "CATALOG_BUDGET", Budget(attempts=2, pauses=(0.0,), limit_s=UNTIMED)),
         (f"{sites}.vk_channel.site", "VK_PAGE_INTERVAL_S", 0.0),
     ]
 

@@ -8,7 +8,7 @@ from core.retry import UNTIMED, Budget, retrying
 
 ROOT = Path(__file__).resolve().parent.parent
 # Where asking again is decided by `core.retry`; a loop with its own attempts or its own sleep would be a second place.
-GUARDED = ["modules/downloads", "modules/sources/players", "modules/sources/policy.py", "modules/sources/sites", "modules/sources/table.py", "modules/sources/video_providers/dunhuatv.py", "modules/sources/video_providers/table.py", "modules/sources/video_providers/views.py", "modules/torrents/qbt_client.py"]
+GUARDED = ["modules/downloads", "modules/sources/players", "modules/sources/policy.py", "modules/sources/sites", "modules/sources/table.py", "modules/torrents/qbt_client.py"]
 # The torrents module also keeps periodic monitors, which wait on a timer by design; only its loops of attempts are guarded.
 LOOP_GUARDED = GUARDED + ["modules/torrents/module.py"]
 

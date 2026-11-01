@@ -60,6 +60,11 @@ def embed_by(known: dict, filler: str):
     return answer
 
 
+def kodik_iframe(request: httpx.Request):
+    """The iframe of Animy, the voice-over the pages of the release name: the snapshot of the iframe of dunhuatv."""
+    return text_of("run1/dunhuatv__kodik_voice0.html") if "/serial/50228/" in str(request.url) else (404, "")
+
+
 def web_of(release: str | None = None, *, episodes=episode_page) -> Web:
     web = Web()
     web.route(f"/release/{SLUG}/episode-", lambda request: episodes(int(str(request.url).rsplit("-", 1)[1])))
@@ -67,6 +72,8 @@ def web_of(release: str | None = None, *, episodes=episode_page) -> Web:
     web.route("video_ext.php", embed_by(RAW_VK, FILLER_VK))
     web.route("/embed/", embed_by(RAW_ALLVIDEO, FILLER_ALLVIDEO))
     web.route("al_video.php", DENIED, method="POST")
+    web.route("kodikplayer.com/serial/", kodik_iframe)
+    web.route("kodikplayer.com/ftor", text_of("run1/dunhuatv__kodik_ftor.json"), method="POST")
     web.route("kinescopecdn.net", lambda request: (200, encode_envelope(MANIFEST, KEY).decode()))
     return web
 
@@ -107,7 +114,7 @@ _READ: list = []
 
 @pytest.fixture
 async def whole():
-    """The one read of the whole release that the tests below look at from different sides (it is 1170 asks)."""
+    """The one read of the whole release that the tests below look at from different sides (it is 1532 asks)."""
     if not _READ:
         site, run, web = RuchimeSite(PlayerRegistry.standard()), Run(), web_of()
         pages = catalog_of(site, SLUG)
@@ -126,13 +133,13 @@ async def test_the_head_of_the_table_has_the_names_and_the_voice_the_site_gives(
     assert draft.site_voice == "Ruchime"
 
 
-async def test_every_entry_of_the_list_is_a_row_of_every_player_its_page_shows_and_vibix_adds_its_catalog(whole):
+async def test_every_entry_of_the_list_is_a_row_of_every_player_its_page_shows_and_the_catalogs_add_their_own(whole):
     draft, *_ = whole
-    by_player = {name: [row for row in draft.rows if row.player == name] for name in ("vk", "allvideo", "vibix")}
+    by_player = {name: [row for row in draft.rows if row.player == name] for name in ("vk", "allvideo", "vibix", "kodik")}
     listed = json_of("run1/ruchime__ALL_EPS.json")
 
-    assert {name: len(rows) for name, rows in by_player.items()} == {"vk": 390, "allvideo": 390, "vibix": 390}
-    assert len(listed) == 390 and len({row.key for row in draft.rows}) == len(draft.rows) == 1170
+    assert {name: len(rows) for name, rows in by_player.items()} == {"vk": 390, "allvideo": 390, "vibix": 390, "kodik": 362}
+    assert len(listed) == 390 and len({row.key for row in draft.rows}) == len(draft.rows) == 1532
     # The text of a row is the title of the list as the site gives it, in the order of the list.
     assert [row.text for row in by_player["vk"]] == [item["title"] for item in listed]
     assert [row.key for row in by_player["vk"]][:2] == [f"vk:{listed[0]['id']}", f"vk:{listed[1]['id']}"]
@@ -150,7 +157,7 @@ async def test_no_player_is_left_out_because_a_better_resolution_was_found_alrea
 async def test_the_voice_of_a_row_is_the_voice_of_the_site_for_the_pages_and_the_name_of_the_stream_for_vibix(whole):
     draft, *_ = whole
 
-    assert {row.voice.name for row in draft.rows if row.player != "vibix"} == {"Ruchime"}
+    assert {row.voice.name for row in draft.rows if row.player in ("vk", "allvideo")} == {"Ruchime"}
     assert {row.voice.name for row in draft.rows if row.player == "vibix"} == {"RuChiMe"}
 
 
@@ -198,8 +205,10 @@ async def test_a_link_is_the_stable_address_of_the_video_and_never_a_signed_stre
             assert row.link.startswith("https://vkvideo.ru/video_ext.php?oid=-") and "&hash=" in row.link
         elif row.player == "allvideo":
             assert re.fullmatch(r"https://(fsst|incvideo1)\.online/embed/\d+/", row.link)
-        else:
+        elif row.player == "vibix":
             assert re.fullmatch(re.escape(RELEASE) + r"/episode-1#vibix=1/\d+", row.link)
+        else:
+            assert re.fullmatch(re.escape(RELEASE) + r"/episode-1#kodik=50228/[0-9a-f]+/\d+", row.link)
 
 
 async def test_two_reads_of_the_same_answers_give_the_same_link_in_every_row(whole):
@@ -210,13 +219,25 @@ async def test_two_reads_of_the_same_answers_give_the_same_link_in_every_row(who
     assert [(row.key, row.link) for row in second.rows] == [(row.key, row.link) for row in first.rows]
 
 
-async def test_the_read_reports_the_release_the_pages_the_catalog_and_the_players_in_that_order(whole):
+async def test_kodik_on_the_pages_of_the_release_is_the_voice_the_address_of_its_iframe_names(whole):
+    draft, _progress, web, _pages = whole
+    kodik = [row for row in draft.rows if row.player == "kodik"]
+
+    # The iframe lists three voice-overs; the address limits it to the one the release has (`only_translations=1043`).
+    assert {(row.voice.name, row.voice.kind, row.group) for row in kodik} == {("Animy", "voice", "1 сезон")}
+    assert [row.text for row in kodik[:2]] == ["1 серия", "2 серия"] and any(row.text == "109-110 серия" for row in kodik)
+    assert (kodik[0].heights, kodik[0].state) == ([360, 480, 720], RowState.PLAYABLE)
+    # One iframe serves all the pages that show it.
+    assert web.count("kodikplayer.com/serial/") == 1
+
+
+async def test_the_read_reports_the_release_the_pages_the_catalogs_and_the_players_in_that_order(whole):
     _draft, progress, _web, pages = whole
 
     assert list(dict.fromkeys(phase for phase, _current, _total in progress)) == [
         PHASE_RELEASE, PHASE_EPISODES, PHASE_CATALOG, PHASE_PLAYERS]
     assert (PHASE_RELEASE, 1, 1) in progress and (PHASE_EPISODES, 390, 390) in progress
-    assert (PHASE_CATALOG, 1, 1) in progress and progress[-1] == (PHASE_PLAYERS, 1170, 1170)
+    assert (PHASE_CATALOG, 2, 2) in progress and progress[-1] == (PHASE_PLAYERS, 1532, 1532)
     # The catalog is asked through the first page that shows the player, and through no other.
     assert set(pages) == {f"{RELEASE}/episode-1"}
 
@@ -341,7 +362,7 @@ async def test_a_release_whose_pages_do_not_show_vibix_has_no_catalog_to_capture
     draft = await Run().read(site, web_of(release_with([entry(1)]),
                                           episodes=lambda number: episode_page(390).replace("vibix-embed", "other")))
 
-    assert asked == [] and {row.player for row in draft.rows} == {"vk", "allvideo"}
+    assert asked == [] and {row.player for row in draft.rows} == {"vk", "allvideo", "kodik"}
 
 
 # --- the choices of a source do not change the page ------------------------------------------------------------------------
@@ -367,3 +388,13 @@ def test_the_players_of_the_site_are_the_players_of_the_module_when_it_gives_the
     site.configure(players=given, vk_call=None)
 
     assert site.players is given and site.players.get("vibix") is given.get("vibix")
+
+
+async def test_a_kodik_iframe_that_cannot_be_opened_refuses_the_table_with_the_reason_of_the_player():
+    web = web_of(release_with([entry(1)]))
+    web.route("kodikplayer.com/serial/", (500, ""), first=True)
+
+    with pytest.raises(SiteError) as refused:
+        await Run().read(a_site(), web)
+
+    assert parse(refused.value.reason) == {"code": "player_status", "params": {"player": "Kodik", "status": 500}}

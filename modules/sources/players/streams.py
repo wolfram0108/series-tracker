@@ -5,12 +5,14 @@ owns the link resolves it; an address no player owns is not handled here.
 """
 from __future__ import annotations
 
+from urllib.parse import urldefrag
+
 import httpx
 
 from core.reasons import reason
 
 from ..policy import probe_from, settle
-from .contract import Kind, StreamUnavailable
+from .contract import Kind, PlayerRef, StreamUnavailable
 from .registry import PlayerRegistry
 from .vibix import VibixFailure
 from .vk_files import pick_file
@@ -33,7 +35,25 @@ async def resolve_stream(players: PlayerRegistry, url: str, http: httpx.AsyncCli
             return await players.get("vibix").resolve(url, http)
         except VibixFailure as exc:
             raise StreamUnavailable(exc.reason, transient=exc.transient) from exc
+    for name in ("cvh", "kodik"):
+        if name in players and players.get(name).owns(url):
+            return await _resolve_listed(players, name, url, http, max_height)
     return None
+
+
+async def _resolve_listed(players: PlayerRegistry, name: str, url: str, http: httpx.AsyncClient,
+                          max_height: int | None) -> dict:
+    """A link into a list (an item of CDN VideoHub or of Kodik) -> its best file within the cap now. The page the link is
+    a fragment of is the page that embeds the player: it is what the player is asked as."""
+    player = players.get(name)
+    asked = player.capped(max_height) if hasattr(player, "capped") else player
+    ref = PlayerRef(name, url)
+    verdict = await settle(asked, ref, http, urldefrag(url).url, pacer=players.pacer)
+    picked = pick_file(verdict.reading.files, max_height) if verdict.reading.kind is Kind.PLAYABLE else None
+    if picked is None:
+        probe = probe_from(verdict, ref, player.label)
+        raise StreamUnavailable(reason("player_failed", player=player.label, cause=probe.reason), probe.transient)
+    return {"stream_url": picked[1], "headers": dict(player.stream_headers)}
 
 
 async def _resolve_vk(players: PlayerRegistry, url: str, http: httpx.AsyncClient, max_height: int | None) -> dict:

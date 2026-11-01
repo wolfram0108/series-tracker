@@ -24,7 +24,7 @@ from .vk_files import (ApiContext, EmbedParts, api_context, call_form, chunks, e
                        read_page, read_single)
 from .vk_show import ENDPOINT, read_show
 
-logger = logging.getLogger("sources.video.players")
+logger = logging.getLogger("sources")
 
 NEUTRAL_AGENT = "Mozilla/5.0"
 DESKTOP_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"

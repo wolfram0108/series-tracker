@@ -1,38 +1,28 @@
-"""The site 1.ruchime.org: every entry of the list of episodes by every player its page shows, and the Vibix catalog.
+"""The site 1.ruchime.org: every entry of the list of episodes by every player its page shows, and the catalogs.
 
 The table is the whole page: the rows of VK and AllVideo for each entry of the list, and a row for each entry of the
-Vibix catalog, whatever the resolution already found and whatever the source of a series switches off (the choices are
-applied to the table afterwards). A row carries the text of the site as it is; no number of an episode or a season is made
-here. Kodik, which the page also shows, is read together with dunhuatv, where its code is shared.
+catalogs of the players that list a whole series (Vibix, Kodik), whatever the resolution already found and whatever the
+source of a series switches off (the choices are applied to the table afterwards). A row carries the text of the site as it
+is; no number of an episode or a season is made here.
 """
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Mapping
 from urllib.parse import urlparse
 
 import httpx
 
-from core.contracts import RowState, RowVoice, TableRow
+from core.contracts import RowVoice, TableRow
 from core.reasons import reason
-from core.retry import UNTIMED, Budget, retrying
 
 from ...players.asking import ask_many, outcome_of
 from ...players.contract import Player, PlayerRef
 from ...players.registry import PlayerRegistry
-from ...players.vibix import VibixPlayer, link_of
-from ...players.vibix_protocol import Episode, VibixProtocolError, VibixUnavailable
-from .. import (PHASE_CATALOG, PHASE_EPISODES, PHASE_PLAYERS, PHASE_RELEASE, ReadContext, SiteError, TableDraft,
-                on_domain)
+from .. import PHASE_EPISODES, PHASE_PLAYERS, PHASE_RELEASE, ReadContext, SiteError, TableDraft
+from ..catalogs import AskCount, read_catalogs, rows_of_catalogs
 from .pages import (MAX_CONCURRENT_PAGES, EpisodePage, PageReader, episode_url, extract_slug, published_of,
                     release_episodes, release_names, release_voice)
-
-logger = logging.getLogger("sources")
-
-# One more capture of the catalog after a failed one: the capture is a whole browser session and the table is the work of
-# minutes, so a passing failure is not allowed to throw it away.
-CATALOG_BUDGET = Budget(attempts=2, pauses=(3.0,), limit_s=UNTIMED)
 
 
 class RuchimeSite:
@@ -97,28 +87,21 @@ class RuchimeSite:
 
     async def _rows(self, slug: str, listed: list[dict], pages: list[EpisodePage | None], site_voice: str,
                     ctx: ReadContext) -> list[TableRow]:
-        """The rows of the players of the pages (one ref per entry), then the rows of the catalog of Vibix."""
-        every = list(self.players)
+        """The rows of the players of the pages (one ref per entry), then the rows of the catalogs the pages show."""
         pacer = self.players.pacer
-        page_players = [player for player in every if not player.series_scope]
+        page_players = [player for player in self.players if not player.series_scope]
         sources: dict[str, list[tuple[int, dict, EpisodePage]]] = {player.name: [] for player in page_players}
         for index, (entry, page) in enumerate(zip(listed, pages)):
             for player in page_players:
                 if page is not None and player.name in page.refs:
                     sources[player.name].append((index, entry, page))
 
-        catalog = await self._catalog(slug, pages, ctx)
+        catalogs = await read_catalogs(
+            self.players, [(page.url, page.refs) for page in pages if page is not None], ctx)
         # A video that two entries share (a compilation) is asked once.
-        total = (sum(len({page.refs[name] for _index, _entry, page in found}) for name, found in sources.items())
-                 + (len(catalog[1]) if catalog else 0))
-        done = 0
-
-        def asked() -> None:
-            nonlocal done
-            done += 1
-            ctx.progress(PHASE_PLAYERS, done, total)
-
-        ctx.progress(PHASE_PLAYERS, 0, total)
+        asked = AskCount(ctx, sum(len({page.refs[name] for _index, _entry, page in found}) for name, found in sources.items())
+                         + sum(len(catalog.entries) for catalog in catalogs))
+        ctx.progress(PHASE_PLAYERS, 0, asked.total)
         rows: list[TableRow] = []
         for player in page_players:
             found = sources[player.name]
@@ -127,9 +110,7 @@ class RuchimeSite:
             verdicts = await ask_many(player, refs, ctx.http, lambda ref: pages_of[ref], pacer, on_asked=asked)
             rows += [self._row(player, index, entry, page.refs[player.name], verdicts[page.refs[player.name]], site_voice)
                      for index, entry, page in found]
-        if catalog:
-            rows += await self._catalog_rows(catalog, ctx, pacer, asked)
-        return rows
+        return rows + await rows_of_catalogs(catalogs, ctx, pacer, asked)
 
     def _row(self, player: Player, index: int, entry: dict, ref: PlayerRef, verdict, site_voice: str) -> TableRow:
         outcome = outcome_of(verdict, ref, getattr(player, "label", player.name))
@@ -142,46 +123,3 @@ class RuchimeSite:
             state=outcome.state, reason=outcome.reason, published=published_of(entry.get("date")), link=link,
             site_fields={name: entry.get(name) for name in
                          ("id", "number", "compilation_from", "compilation_to", "is_trailer", "is_vip")})
-
-    async def _catalog(self, slug: str, pages: list[EpisodePage | None],
-                       ctx: ReadContext) -> tuple[str, list[Episode]] | None:
-        """The catalog of Vibix through the first page that shows its player: (that page, its entries); None when no page
-        shows it. A catalog that cannot be captured is a table that cannot be complete."""
-        if "vibix" not in self.players:
-            return None
-        vibix: VibixPlayer = self.players.get("vibix")
-        shown = next((page for page in pages if page is not None and "vibix" in page.refs), None)
-        if shown is None:
-            return None
-        ctx.progress(PHASE_CATALOG, 0, 1)
-
-        async def capture():
-            try:
-                return await vibix.playlist(shown.url)
-            except (VibixUnavailable, VibixProtocolError) as exc:
-                return exc
-
-        outcome, _attempts, _exhausted = await retrying(
-            capture, final=lambda got: not isinstance(got, Exception), budget=CATALOG_BUDGET)
-        if isinstance(outcome, Exception):
-            logger.warning("Vibix catalog unavailable for %s: %s", shown.url, outcome)
-            raise SiteError(reason("player_failed", player="Vibix", cause=str(outcome)))
-        ctx.progress(PHASE_CATALOG, 1, 1)
-        return shown.url, outcome[0]
-
-    async def _catalog_rows(self, catalog: tuple[str, list[Episode]], ctx: ReadContext, pacer, asked) -> list[TableRow]:
-        page_url, entries = catalog
-        vibix = self.players.get("vibix")
-        refs = {(entry.season_index, entry.position): PlayerRef("vibix", link_of(page_url, entry.season_index, entry.position))
-                for entry in entries}
-        verdicts = await ask_many(vibix, list(refs.values()), ctx.http, page_url, pacer, on_asked=asked)
-        rows = []
-        for entry in entries:
-            ref = refs[(entry.season_index, entry.position)]
-            outcome = outcome_of(verdicts[ref], ref, vibix.label)
-            rows.append(TableRow(
-                key=f"vibix:{entry.season_index}/{entry.position}", player=vibix.name, player_label=vibix.label,
-                group=entry.season, text=entry.title, voice=RowVoice(name=entry.voice), heights=outcome.heights,
-                state=outcome.state, reason=outcome.reason, link=ref.url,
-                site_fields={"season_index": entry.season_index, "position": entry.position}))
-        return rows

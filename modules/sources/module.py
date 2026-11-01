@@ -1,21 +1,12 @@
 """Модуль sources — источники раздач: парсеры трекеров (Р-9).
 
 Queries:
-  sources.parse {url}            → {service, title, releases[]}
+  sources.parse {url}            → {service, title, releases[]} — the releases of a tracker; a page of a site
+                                   (ruchime, dunhuatv, a VK channel) is read by `sources.table.get`, not parsed
   sources.torrent_file.get {url, torrent_id} → {content_b64} (Р-1, с кэшем)
   sources.torrent_file.drop {torrent_id} — чистка кэша (каскад Р-19)
   sources.trackers.list          → [{...}] (владелец таблицы trackers)
   sources.tracker.resolve {url}  → {tracker|null} (tracker_info деталей)
-  sources.provider.info {url}    → {provider|null, voices} — the web-video provider of an address and
-                                   whether it has a voice-over catalog (no network)
-  sources.video.layout {url}     → {sources, selected_source, reason} — the sources of a release that a
-                                   provider describes apart from the parse because reading them is slow
-                                   (`has_layout` in the parse reply tells whether to ask)
-  sources.video.coverage {url}   → {players, reason} — what each page player gives, episode by episode: the
-                                   resolution of each grouped by ranges, the episodes it shows but does not
-                                   play (`unavailable`) and those whose answer was not obtained (`not_obtained`);
-                                   slow, progress goes out as the event
-                                   sources.coverage.progress {url, current, total, phase, active}
 
 Tables of site pages (the one way to read a site page; sites are registered in `sites`, the core is `table.py`):
   sources.table.get {url, options?, refresh?} → TableGetReply {url, state: ready | reading | failed | absent,
@@ -36,7 +27,8 @@ Tables of site pages (the one way to read a site page; sites are registered in `
   sources.video.stream {url, max_height?} → {handled, stream_url, headers, progressive} | {handled, error,
                                    transient}: the stream of a candidate link, asked for right before the download.
                                    The player that owns the link (a VK player link with its key, an AllVideo embed,
-                                   a Vibix entry) resolves it; any other address is not handled
+                                   a Vibix entry, an item of CDN VideoHub or of Kodik) resolves it; any other
+                                   address is not handled
 Events (owner: sources):
   sources.table.progress {url, phase, current, total}   how far a read is
   sources.table.ready {url, read_at}                    a complete table is stored and served
@@ -65,14 +57,12 @@ import os
 import time
 from datetime import datetime
 from typing import Callable, Iterable
-from urllib.parse import urldefrag
 
 import httpx
-from pydantic import ValidationError
 
 from core import BaseModule, ids
 from core import storage
-from core.contracts import Release, SiteResolveRequest, TableGetRequest
+from core.contracts import SiteResolveRequest, TableGetRequest
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
@@ -81,13 +71,12 @@ from . import anilibria, delivery, parsers
 from .delivery import Delivery
 from .parsers import SourceParseError
 from .repository import SourcesRepository
+from .players.contract import StreamUnavailable
 from .players.registry import PlayerRegistry
 from .players.streams import resolve_stream
 from .sites import Site, SiteError, SiteRegistry
 from .sites.builtin import builtin_sites
 from .table import READ_SAFEGUARD_S, TableReader, utc_now
-from .video_providers import (StreamUnavailable, VideoProviderRegistry,
-                              get_default_registry)
 
 REQUEST_MIN_INTERVAL = 3.0  # секунд между запросами к одному трекеру
 VK_API_BASE = "https://api.vk.com/method/"
@@ -117,8 +106,6 @@ class SourcesModule(BaseModule):
                                                   "vibix-key.json")),
             manifest_dir=os.path.abspath(os.path.join(torrent_cache_dir,
                                                       "manifests")))
-        self.video_registry = get_default_registry()
-        self.video_registry.configure(**wiring)
         # One object per player for the whole module: the sites read with them and the streams are resolved by them.
         self.players = PlayerRegistry.standard(**wiring)
         # The sites belong to this instance, not to the process: a site is added by registering it (builtin.py).
@@ -143,11 +130,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.trackers.list", self.on_trackers_list)
         self.handle("sources.tracker.resolve", self.on_tracker_resolve)
         self.handle("sources.tracker.set_mirrors", self.on_set_mirrors)
-        self.handle("sources.video.scan", self.on_video_scan)
-        self.handle("sources.video.layout", self.on_video_layout)
-        self.handle("sources.video.coverage", self.on_video_coverage)
         self.handle("sources.video.stream", self.on_video_stream)
-        self.handle("sources.provider.info", self.on_provider_info)
         self.handle("sources.table.get", self.on_table_get)
         self.handle("sources.table.read", self.on_table_read)
         self.handle("sources.site.resolve", self.on_site_resolve)
@@ -206,41 +189,6 @@ class SourcesModule(BaseModule):
 
     async def on_parse(self, env: Envelope) -> dict:
         url = env.payload["url"]
-        provider = self.video_registry.find_provider(url)
-        if provider:
-            service = provider.name
-            lock = self._locks.setdefault(service, asyncio.Lock())
-            async with lock:
-                await self._polite(service)
-                parsed = await provider.parse_release(url, self._http)
-            try:
-                release = Release.model_validate(parsed)
-            except ValidationError as exc:
-                self.log.error("провайдер %s вернул разбор не по контракту: %s", service, exc)
-                raise ValueError(reason("release_off_contract", service=service)) from exc
-            sources = [source.model_dump(mode="json", exclude_unset=True) for source in release.sources]
-            if not env.payload.get("with_links"):
-                # Links of every episode are for the voices module; the form does not need them.
-                sources = [{k: v for k, v in source.items() if k != "links"} for source in sources]
-            return {
-                "service": service,
-                "source_type": "web_video",
-                "title": parsed["title"],
-                "titles": parsed.get("titles", []),
-                "episodes": parsed.get("episodes", []),
-                "resolution": parsed.get("resolution"),
-                "videos": parsed.get("videos", []),
-                "releases": parsed.get("releases", []),
-                "canonical_url": parsed.get("canonical_url", url),
-                "episodes_count": parsed.get("episodes_count", 0),
-                "players": parsed.get("players", {}),
-                "sources": sources,
-                "selected_source": parsed.get("selected_source"),
-                "has_layout": provider.has_layout,
-                "ui_features": {},
-                "tracker": None,
-            }
-
         tracker = await self.repo.resolve(url)
         if not tracker:
             raise SourceParseError(f"трекер не распознан по URL: {url}")
@@ -359,87 +307,6 @@ class SourcesModule(BaseModule):
                                    error_code=data["error"].get("error_code")))
         return data
 
-    async def on_video_scan(self, env: Envelope) -> dict:
-        """payload: {url, series: dict}
-        reply:   {videos: [{title, url, publication_date, resolution}],
-                  players: {name: {present, available, selected, ...}}}"""
-        url = env.payload["url"]
-        provider = self.video_registry.find_provider(url)
-        if not provider:
-            raise SourceParseError(f"видео-провайдер не найден по URL: {url}")
-        service = provider.name
-        lock = self._locks.setdefault(service, asyncio.Lock())
-        async with lock:
-            await self._polite(service)
-            series = env.payload.get("series") or {}
-            series_id = series.get("id")
-            started = time.monotonic()
-            state = {"current": 0, "total": 0}
-
-            def report(current: int, total: int, phase: str) -> None:
-                state["current"] = current
-                state["total"] = total
-                elapsed = time.monotonic() - started
-                self.publish_event("sources.video.progress", {
-                    "series_id": series_id, "current": current,
-                    "total": total,
-                    "rate": round(elapsed / current, 2) if current else 0.0,
-                    "phase": phase, "active": phase != "done",
-                    "kind": "episodes"})
-
-            try:
-                result = await provider.scan_episodes(
-                    url, self._http, series,
-                    episodes=env.payload.get("episodes"), progress=report)
-            except Exception:
-                self.publish_event("sources.video.progress", {
-                    "series_id": series_id, "current": state["current"],
-                    "total": state["total"], "rate": 0.0,
-                    "phase": "error", "active": False,
-                    "kind": "episodes"})
-                raise
-        videos = result.get("videos", []) if isinstance(result, dict) else result
-        players = result.get("players", {}) if isinstance(result, dict) else {}
-        self.log.info("Видео-скан %s (%s): серий %d", service, url, len(videos))
-        return {"videos": videos, "players": players}
-
-    async def on_video_layout(self, env: Envelope) -> dict:
-        """payload: {url}; reply: {sources, selected_source, reason}. The sources of a release that a
-        provider describes apart from the parse (a slow read); a provider without one answers empty."""
-        url = env.payload["url"]
-        provider = self.video_registry.find_provider(url)
-        if not provider or not provider.has_layout:
-            return {"sources": [], "selected_source": None, "reason": ""}
-        lock = self._locks.setdefault(provider.name, asyncio.Lock())
-        async with lock:
-            await self._polite(provider.name)
-            layout = await provider.layout(url, self._http)
-        return layout or {"sources": [], "selected_source": None, "reason": ""}
-
-    async def on_video_coverage(self, env: Envelope) -> dict:
-        """payload: {url}; reply: {players, reason}. What each page player gives, read episode by episode (slow);
-        the progress goes out as `sources.coverage.progress {url, current, total, phase, active}`, keyed by the
-        release page, apart from the progress of a scan."""
-        url = env.payload["url"]
-        provider = self.video_registry.find_provider(url)
-        if not provider or not provider.has_layout:
-            return {"players": {}, "reason": ""}
-        key = urldefrag(url).url.split("?")[0]
-
-        def report(current: int, total: int, phase: str) -> None:
-            self.publish_event("sources.coverage.progress", {
-                "url": key, "current": current, "total": total, "phase": phase, "active": True})
-
-        # Its own lock: a long read must not hold up the parses and scans of the same site.
-        lock = self._locks.setdefault(f"{provider.name}:coverage", asyncio.Lock())
-        async with lock:
-            try:
-                reply = await provider.coverage(url, self._http, progress=report)
-            finally:
-                self.publish_event("sources.coverage.progress", {
-                    "url": key, "current": 0, "total": 0, "phase": "done", "active": False})
-        return reply or {"players": {}, "reason": ""}
-
     async def on_table_get(self, env: Envelope) -> dict:
         """payload: TableGetRequest; reply: TableGetReply. Never waits for a read: the end of it comes as an event."""
         reply = await self.tables.get(TableGetRequest.model_validate(env.payload))
@@ -453,24 +320,16 @@ class SourcesModule(BaseModule):
         request = SiteResolveRequest.model_validate(env.payload)
         return self.tables.resolve(request.url, request.options).model_dump(mode="json")
 
-    async def on_provider_info(self, env: Envelope) -> dict:
-        """payload: {url}; reply: {provider: name | None, voices: bool}. No network: what the
-        provider declares about itself, so that callers do not parse a page to find out."""
-        provider = self.video_registry.find_provider(env.payload["url"])
-        return {"provider": provider.name if provider else None,
-                "voices": bool(provider and provider.has_voice_catalog)}
-
     async def on_video_stream(self, env: Envelope) -> dict:
         """payload: {url, max_height?}
         reply: {handled, stream_url, headers, progressive} | {handled, error, transient}.
         `progressive` marks one ready file that a server may be asked for in parts.
 
-        `error` means the URL belongs to a provider that has no stream for it:
+        `error` means the URL belongs to a player that has no stream for it:
         the caller must not hand the page to a generic downloader."""
         url, max_height = env.payload["url"], env.payload.get("max_height")
         try:
-            stream_info = (await resolve_stream(self.players, url, self._http, max_height)
-                           or await self.video_registry.resolve_stream(url, self._http, max_height))
+            stream_info = await resolve_stream(self.players, url, self._http, max_height)
         except StreamUnavailable as exc:
             return {"handled": True, "error": exc.reason,
                     "transient": exc.transient}

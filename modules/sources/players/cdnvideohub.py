@@ -1,8 +1,9 @@
 """CDN VideoHub aggregator: VK-hosted voice-overs of a title (used by dunhuatv.ru).
 
 The playlist lists every voice-over of a title; each item is a VK video whose signed
-mp4 links are bound to the User-Agent of the request that issued them. A player asks once and reads
-the answer; asking again is decided by `policy`.
+mp4 links are bound to the User-Agent of the request that issued them. An item has the numbers the player gives
+(`season`, `episode`) and no text: the text of its row is made of those numbers, and nothing is made up for what the player
+does not give. A player asks once and reads the answer; asking again is decided by `policy`.
 """
 from __future__ import annotations
 
@@ -16,9 +17,12 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from core.contracts import RowVoice
 from core.proc import run_capture
 from core.reasons import reason
 
+from ..policy import ask
+from .catalog import CatalogError, Entry
 from .contract import Answer, Kind, PlayerRef, Reading
 from .http import get_answer
 
@@ -43,7 +47,7 @@ LADDER_ORDER = {key: index for index, (key, _height) in enumerate(LADDER)}
 
 _WIDGET = re.compile(r"<video-player\b([^>]*)>", re.IGNORECASE)
 _ATTR = re.compile(r"""([\w-]+)\s*=\s*["']([^"']*)["']""")
-_LINK = re.compile(r"^(?:cvh|vk)=(.+)$")
+_LINK = re.compile(r"^cvh=(.+)$")
 
 
 class CdnVideoHubError(RuntimeError):
@@ -55,13 +59,15 @@ class CdnVideoHubError(RuntimeError):
 
 @dataclass(frozen=True)
 class VoiceVideo:
-    """One voice-over of one episode: the VK video behind it."""
+    """One item of the playlist: the VK video behind it, its voice-over, and the numbers the player gives it (empty or
+    None where it gives none)."""
 
+    cvh_id: str
     vk_id: str
     studio: str
     voice_type: str
-    season: int
-    episode: int
+    season: int | None
+    episode: str
 
 
 @dataclass(frozen=True)
@@ -87,7 +93,7 @@ def link_of(page_url: str, vk_id: str) -> str:
 
 
 def vk_id_of(url: str) -> str | None:
-    """The video behind a candidate link; links written while the player was called "vk" still work."""
+    """The video behind a candidate link."""
     found = _LINK.match(urlsplit(url).fragment)
     return found.group(1) if found else None
 
@@ -100,6 +106,15 @@ def _whole(value: object) -> int | None:
     return int(number) if number.is_integer() else None
 
 
+def _number_text(value: object) -> str:
+    """A number of the player as it reads: 5 for 5.0, 5.5 for 5.5, nothing for what is not a number."""
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return ""
+    return str(int(number)) if number.is_integer() else str(number)
+
+
 async def playlist_request(http: httpx.AsyncClient, title_id: int, publisher_id: int) -> Answer:
     """One request for the playlist of a title."""
     return await get_answer(http, f"{API}/player/sv/playlist", "", headers=REQUEST_HEADERS,
@@ -107,7 +122,8 @@ async def playlist_request(http: httpx.AsyncClient, title_id: int, publisher_id:
 
 
 def read_playlist(answer: Answer) -> list[VoiceVideo]:
-    """Every playable voice-over item of the title, in the order the aggregator lists them."""
+    """Every item of the title that has a video, in the order the aggregator lists them; none is dropped for a number it
+    lacks or for being a second upload of the same episode."""
     if answer.status is None:
         raise CdnVideoHubError(reason("player_unreachable", player="CVH", error=answer.error), transient=True)
     if answer.status >= 500 or answer.status == 429:
@@ -120,18 +136,16 @@ def read_playlist(answer: Answer) -> list[VoiceVideo]:
         data = json.loads(answer.text)
     except ValueError as exc:
         raise CdnVideoHubError(reason("player_not_json", player="CVH")) from exc
-    items: dict[tuple[str, str, int, int], VoiceVideo] = {}
+    items: list[VoiceVideo] = []
     for raw in (data or {}).get("items") or []:
-        vk_id, episode = raw.get("vkId"), _whole(raw.get("episode"))
-        if not vk_id or episode is None:
+        vk_id = raw.get("vkId")
+        if not vk_id:
             continue
-        item = VoiceVideo(
-            vk_id=str(vk_id), studio=str(raw.get("voiceStudio") or "").strip(),
-            voice_type=str(raw.get("voiceType") or "").strip(),
-            season=_whole(raw.get("season")) or 1, episode=episode)
-        # Several records for one studio and episode: the last one is the newer upload.
-        items[(item.studio, item.voice_type, item.season, item.episode)] = item
-    return list(items.values())
+        items.append(VoiceVideo(
+            cvh_id=str(raw.get("cvhId") or "").strip(), vk_id=str(vk_id), studio=str(raw.get("voiceStudio") or "").strip(),
+            voice_type=str(raw.get("voiceType") or "").strip(), season=_whole(raw.get("season")),
+            episode=_number_text(raw.get("episode"))))
+    return items
 
 
 def read_rungs(text: str) -> list[Rung]:
@@ -190,7 +204,8 @@ async def rung_within(rungs: list[Rung], cap: int, measure: Measure = measure_ru
 class CdnVideoHubPlayer:
     name = "cvh"
     label = "CVH"
-    series_scope = False
+    series_scope = True
+    stream_headers = STREAM_HEADERS
 
     def __init__(self, measure: Measure | None = None) -> None:
         self._measure = measure or measure_rung
@@ -204,6 +219,26 @@ class CdnVideoHubPlayer:
     @staticmethod
     def ref_of(page_url: str, vk_id: str) -> PlayerRef:
         return PlayerRef("cvh", link_of(page_url, vk_id))
+
+    @staticmethod
+    def owns(url: str) -> bool:
+        return vk_id_of(url) is not None
+
+    async def entries(self, source: PlayerRef, http: httpx.AsyncClient, page_url: str) -> list[Entry]:
+        """The playlist of the title, one entry for each item: the voice-over as the player names it, the season as
+        a "season N" group when the player gives one (and nothing when it gives none), the text made of the episode number."""
+        title, _, publisher = source.raw_url.partition("/")
+        answer = await ask(lambda: playlist_request(http, int(title), int(publisher or DEFAULT_PUBLISHER)))
+        try:
+            items = read_playlist(answer)
+        except CdnVideoHubError as exc:
+            raise CatalogError(exc.reason, exc.transient) from exc
+        return [Entry(
+            key=item.cvh_id or item.vk_id, ref=self.ref_of(page_url, item.vk_id),
+            text=f"{item.episode} серия" if item.episode else "",
+            group=f"{item.season} сезон" if item.season is not None else "",
+            voice=RowVoice(name=item.studio, kind=item.voice_type),
+            site_fields={"season": item.season, "episode": item.episode, "vk_id": item.vk_id}) for item in items]
 
     def capped(self, max_height: int | None) -> "_Capped":
         """The same player asked for the one file a download takes under a height limit."""

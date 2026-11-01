@@ -18,13 +18,15 @@ from urllib.parse import urldefrag, urljoin
 import httpx
 
 from core import storage
+from core.contracts import RowVoice
 from core.reasons import reason
 
+from .catalog import CatalogError, Entry
 from .contract import Answer, Kind, PlayerRef, Reading
 from .vibix_protocol import (Episode, KeyStore, Stream, VibixProtocolError, VibixUnavailable, capture_with_browser,
                              decode_playlist, parse_manifest, stream_expires)
 
-logger = logging.getLogger("sources.video.vibix")
+logger = logging.getLogger("sources")
 
 REFRESH_MARGIN_S = 600
 MANIFEST_TIMEOUT_S = 15.0
@@ -79,6 +81,8 @@ class VibixPlayer:
     name = "vibix"
     label = "Vibix"
     series_scope = True
+    # The catalog is one capture of a whole browser session: a failed one is asked once more.
+    asks_catalog_again = True
 
     def __init__(self, browser_getter: Callable | None = None, key_path: str | Path | None = None,
                  manifest_dir: str | Path | None = None) -> None:
@@ -129,6 +133,25 @@ class VibixPlayer:
             expires = min(expiries) if expiries else now + 3600
             self._cache[slug] = (expires, episodes, key)
             return episodes, key
+
+    @staticmethod
+    def catalog_id(source: PlayerRef) -> str:
+        """Every page of a series shows the same catalog: the series names it."""
+        found = re.search(r"/release/([^/?#]+)", source.url)
+        return found.group(1) if found else source.url
+
+    async def entries(self, source: PlayerRef, http: httpx.AsyncClient, page_url: str) -> list[Entry]:
+        """The entries of the catalog, season by season; the link of an entry names the page it is asked through."""
+        try:
+            playlist, _key = await self.playlist(source.url)
+        except (VibixUnavailable, VibixProtocolError) as exc:
+            raise CatalogError(reason("player_failed", player=self.label, cause=str(exc)),
+                               transient=isinstance(exc, VibixUnavailable)) from exc
+        return [Entry(key=f"{item.season_index}/{item.position}",
+                      ref=PlayerRef(self.name, link_of(page_url, item.season_index, item.position)),
+                      text=item.title, group=item.season, voice=RowVoice(name=item.voice),
+                      site_fields={"season_index": item.season_index, "position": item.position})
+                for item in playlist]
 
     async def _key_of(self, capture) -> bytes:
         """The decoder key, from the shared key file or recovered from the capture; the file is read and written as a

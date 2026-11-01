@@ -10,7 +10,9 @@ from typing import Callable, Iterable
 
 from ..policy import Pacer
 from .allvideo import AllVideoPlayer
+from .cdnvideohub import CdnVideoHubPlayer, Measure
 from .contract import Player
+from .kodik import KodikPlayer
 from .vibix import VibixPlayer
 from .vk import VkPlayer
 
@@ -28,9 +30,11 @@ class PlayerRegistry:
 
     @classmethod
     def standard(cls, browser_getter: Callable | None = None, key_path: str | Path | None = None,
-                 manifest_dir: str | Path | None = None) -> "PlayerRegistry":
-        """The players that stand on their own: VK, AllVideo, Vibix (which needs the browser pool and the cache paths)."""
-        return cls([VkPlayer(), AllVideoPlayer(), VibixPlayer(browser_getter, key_path, manifest_dir)])
+                 manifest_dir: str | Path | None = None, measure: Measure | None = None) -> "PlayerRegistry":
+        """All the players: VK, AllVideo, Vibix (which needs the browser pool and the cache paths), CDN VideoHub (which
+        measures the frame height of a stream the labels do not state) and Kodik."""
+        return cls([VkPlayer(), AllVideoPlayer(), VibixPlayer(browser_getter, key_path, manifest_dir),
+                    CdnVideoHubPlayer(measure), KodikPlayer()])
 
     def register(self, player: Player) -> None:
         if player.name in self._players:

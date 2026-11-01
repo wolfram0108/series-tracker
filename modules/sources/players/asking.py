@@ -12,10 +12,11 @@ from typing import Callable, Sequence
 
 import httpx
 
-from core.contracts import RowState
+from core.contracts import RowState, TableRow
 from core.reasons import reason
 
 from ..policy import Pacer, Verdict, probe_from, settle
+from .catalog import Entry
 from .contract import Player, PlayerRef, Reading
 
 logger = logging.getLogger("sources")
@@ -83,3 +84,17 @@ async def ask_many(player: Player, refs: Sequence[PlayerRef], http: httpx.AsyncC
         if isinstance(answer, Exception):
             logger.warning("%s ask failed for %s: %s", player.name, ref.url, answer)
     return dict(zip(unique, answers))
+
+
+async def catalog_rows(player, entries: Sequence[Entry], http: httpx.AsyncClient, page_url: str, pacer: Pacer, *,
+                       on_asked: Callable[[], None] | None = None) -> list[TableRow]:
+    """A row for each entry of a catalog: the entry as the player words it, with what the player says of its video."""
+    verdicts = await ask_many(player, [entry.ref for entry in entries], http, page_url, pacer, on_asked=on_asked)
+    rows = []
+    for entry in entries:
+        outcome = outcome_of(verdicts[entry.ref], entry.ref, player.label)
+        rows.append(TableRow(
+            key=f"{player.name}:{entry.key}", player=player.name, player_label=player.label, group=entry.group,
+            text=entry.text, voice=entry.voice, heights=outcome.heights, state=outcome.state, reason=outcome.reason,
+            link=entry.ref.url, site_fields=entry.site_fields))
+    return rows

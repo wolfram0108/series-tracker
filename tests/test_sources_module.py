@@ -1,5 +1,4 @@
-"""The module `sources` on the bus: the queries about the sites it reads, the stream of a candidate, the handlers the web
-providers still answer through, and the class guards of its code (phases worded, no blocking disk call in async code)."""
+"""The module `sources` on the bus: the queries about the sites it reads, the stream of a candidate, and the class guards of its code (phases worded, no blocking disk call in async code)."""
 import ast
 import re
 from pathlib import Path
@@ -40,14 +39,14 @@ def test_a_module_given_no_sites_reads_the_builtin_ones_and_each_module_has_its_
     path = tmp_path / "sources.db"
     first, second = (SourcesModule(Bus(), Database(str(path))) for _ in range(2))
 
-    assert [site.name for site in builtin_sites()] == ["ruchime", "vk_channel"]
+    assert [site.name for site in builtin_sites()] == ["ruchime", "dunhuatv", "vk_channel"]
     assert first.sites.find("https://1.ruchime.org/release/x").name == "ruchime"
     assert first.sites.find("https://vkvideo.ru/@chan|q").name == "vk_channel"
-    assert first.sites.find(DOLLS) is None
+    assert first.sites.find(DOLLS).name == "dunhuatv" and first.sites.find("https://example.org/x") is None
     assert first.sites.find("https://1.ruchime.org/release/x") is not second.sites.find("https://1.ruchime.org/release/x")
     # The players are the module's: one object of each, whatever the number of the sites that read with them.
     ruchime, channel = first.sites.find("https://1.ruchime.org/release/x"), first.sites.find("https://vk.com/@chan")
-    assert ruchime.players is channel.players is first.players
+    assert ruchime.players is channel.players is first.sites.find(DOLLS).players is first.players
 
 
 # --- the stream of a candidate ------------------------------------------------------------------------------------------------
@@ -75,18 +74,6 @@ async def test_a_vibix_link_the_module_cannot_resolve_is_an_error_and_never_a_pa
 
     # Without the pool the player is unavailable, which may pass.
     assert reply["handled"] is True and reply["transient"] is True and reply["error"]
-
-
-# --- the handlers the web providers still answer through ---------------------------------------------------------------------
-
-async def test_a_provider_without_a_layout_answers_an_empty_one_and_an_empty_coverage(stand):
-    _sources, probe = stand
-
-    layout = await probe.request("sources.video.layout", {"url": DOLLS}, timeout=5)
-    coverage = await probe.request("sources.video.coverage", {"url": DOLLS}, timeout=5)
-
-    assert layout == {"sources": [], "selected_source": None, "reason": ""}
-    assert coverage == {"players": {}, "reason": ""}
 
 
 # --- the class guards ---------------------------------------------------------------------------------------------------------
@@ -143,3 +130,14 @@ def test_the_guard_sees_a_write_in_an_async_body_and_not_in_a_helper_given_to_th
 
     assert blocking_calls_in_async_code(bad) == [3, 4, 5]
     assert blocking_calls_in_async_code(good) == []
+
+
+def test_every_log_of_the_module_is_in_the_group_of_the_module_and_none_in_the_group_of_a_site():
+    groups = {}
+    for path in (ROOT / "modules" / "sources").rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (isinstance(node, ast.Call) and getattr(node.func, "attr", getattr(node.func, "id", "")) in ("getLogger", "get_logger")
+                    and node.args and isinstance(node.args[0], ast.Constant)):
+                groups.setdefault(node.args[0].value, []).append(path.relative_to(ROOT).as_posix())
+
+    assert set(groups) == {"sources"}, f"the group of the log is the name of the module: {groups}"

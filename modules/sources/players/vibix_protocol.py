@@ -23,7 +23,7 @@ from core.reasons import reason
 if TYPE_CHECKING:
     from playwright.async_api import Browser
 
-logger = logging.getLogger("sources.video.vibix")
+logger = logging.getLogger("sources")
 
 # The key is not shipped with the code: it lives in the shared store and is
 # recovered from an encrypted manifest when the publisher rotates it.

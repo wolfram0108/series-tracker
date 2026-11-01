@@ -59,6 +59,7 @@ class Web:
     def __init__(self) -> None:
         self._routes: list[tuple[str, str, Answer | Callable[[httpx.Request], Answer]]] = []
         self.asked: list[tuple[str, str, str]] = []
+        self.requests: list[httpx.Request] = []
 
     def route(self, marker: str, answer: "Answer | Callable[[httpx.Request], Answer]" = "", *,
               method: str = "GET", first: bool = False) -> "Web":
@@ -76,6 +77,7 @@ class Web:
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
+        self.requests.append(request)
         self.asked.append((request.method, url, request.content.decode("utf-8", "replace")))
         for method, marker, answer in self._routes:
             if method == request.method and marker in url:

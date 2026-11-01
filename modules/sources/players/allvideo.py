@@ -15,7 +15,7 @@ import httpx
 from .contract import Answer, Kind, PlayerRef, Reading
 from .http import get_answer, read_answer
 
-logger = logging.getLogger("sources.video.players")
+logger = logging.getLogger("sources")
 
 # AllVideo answers a missing embed with status 404 and a Playerjs that plays this placeholder file.
 ERROR_FILE = "video_error"
