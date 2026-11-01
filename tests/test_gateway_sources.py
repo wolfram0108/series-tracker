@@ -143,7 +143,7 @@ async def test_a_preview_carries_the_request_to_composition_whole_and_the_answer
     assert response.status_code == 200 and response.json() == reply
     assert owners.asked("composition.preview") == [{
         "url": "https://x.test/p", "options": {"vk_search_mode": "get_all"}, "profile_id": 2,
-        "series_season": "s02", "refresh": False}]
+        "series_season": "s02", "refresh": False, "lines": None}]
     # The gateway reads no table and applies no rule itself.
     assert [t for t in topics(spy) if t != "composition.preview"] == []
 
@@ -152,7 +152,8 @@ async def test_a_preview_without_a_profile_asks_for_a_read_by_default(tmp_path):
     async with serving(tmp_path, {"composition.preview": PREVIEW}) as (client, owners, _, _):
         await client.post("/api/sources/preview", json={"url": "https://x.test/p"})
     assert owners.asked("composition.preview") == [{
-        "url": "https://x.test/p", "options": {}, "profile_id": None, "series_season": None, "refresh": True}]
+        "url": "https://x.test/p", "options": {}, "profile_id": None, "series_season": None, "refresh": True,
+        "lines": None}]
 
 
 async def test_a_preview_refused_by_composition_carries_the_reason(tmp_path):
@@ -204,13 +205,30 @@ async def test_the_test_of_rules_is_the_preview_of_the_page_with_the_profile_giv
     assert response.json()["lines"][0]["key"] == "k1" and response.json()["lines"][0]["result"]["start"] == 1
     assert owners.asked("composition.preview") == [{
         "url": "https://x.test/p", "options": {"vk_search_mode": "search"}, "profile_id": 5, "series_season": 2,
-        "refresh": True}]
+        "refresh": True, "lines": None}]
     assert "rules.test" not in topics(spy) and "rules.apply" not in topics(spy)
+
+
+async def test_the_test_of_rules_takes_lines_the_user_holds_instead_of_a_page(tmp_path):
+    line = {"key": "0", "line": "Тайтл s01e02", "result": {"excluded": False, "season": 1, "episode": 2,
+                                                          "events": [], "errors": []}}
+    async with serving(tmp_path, {"composition.preview": {**PREVIEW, "url": "", "lines": [line]}}) as (client, owners, _, _):
+        response = await client.post("/api/parser-profiles/test", json={"profile_id": 5, "lines": ["Тайтл s01e02"]})
+    assert response.status_code == 200 and response.json()["lines"][0]["result"]["episode"] == 2
+    assert owners.asked("composition.preview") == [{
+        "url": "", "options": {}, "profile_id": 5, "series_season": None, "refresh": True, "lines": ["Тайтл s01e02"]}]
+
+
+async def test_the_test_of_rules_asks_for_no_read_when_the_window_only_takes_the_table(tmp_path):
+    async with serving(tmp_path, {"composition.preview": PREVIEW}) as (client, owners, _, _):
+        await client.post("/api/parser-profiles/test", json={"url": "https://x.test/p", "profile_id": 5, "refresh": False})
+    assert owners.asked("composition.preview")[0]["refresh"] is False
 
 
 async def test_the_test_of_rules_needs_a_profile_and_a_page(tmp_path):
     async with serving(tmp_path, {"composition.preview": PREVIEW}) as (client, owners, _, _):
-        for body in ({"url": "https://x.test/p"}, {"profile_id": 5}, {"url": "u", "profile_id": 5, "videos": []}):
+        for body in ({"url": "https://x.test/p"}, {"profile_id": 5}, {"url": "u", "profile_id": 5, "videos": []},
+                     {"lines": ["x"]}):
             assert (await client.post("/api/parser-profiles/test", json=body)).status_code == 422
     assert owners.asked("composition.preview") == []
 

@@ -18,7 +18,7 @@ Queries:
       not the answer: the request sets the flag and waits for the next one. Refused with ValueError(reason) when a
       neighbour did not answer (the same reason goes out as composition.failed), with LookupError for a series the
       catalog no longer has.
-  composition.preview {url, options?, profile_id?, series_season?, refresh?} → CompositionPreviewReply {url, state,
+  composition.preview {url?, options?, profile_id?, series_season?, refresh?, lines?} → CompositionPreviewReply {url, state,
       reason?, summary?, lines}: an address that is no source of a series yet, as the add window and the test of rules
       show it. The table is asked of `sources.table.get` (refresh true begins a read, false reads nothing); `state`
       and `reason` are the sources' own. From the last complete table, when there is one (also while it is being read
@@ -26,7 +26,9 @@ Queries:
       profile: no_profile; a profile: ready; a failed read: failed), `lines` are the rows as the constructor gets
       them, each with its answer when `profile_id` is given (`series_season` is the fallback season). Without a table
       `summary` is empty and so are `lines`. Nothing is written and no source is made; a neighbour that does not answer
-      refuses the request with ValueError(reason).
+      refuses the request with ValueError(reason). With `lines` (typed, or the file names of a release) no table is
+      asked: the reply is `ready`, has no summary, and its lines are those given (key = their place in the list),
+      each with the answer of the profile when one is given.
   composition.settings.set {series_id, season?, episode?, lever, target?, value} → {ok}: sets the value of a lever
       at a level. Refused with ValueError(reason) — `unknown_lever`, `bad_target` or `bad_value` — and nothing is stored.
   composition.settings.reset {series_id, season?, episode?, lever?, target?} → {ok}: the levers of the level (or the
@@ -76,7 +78,7 @@ from core import BaseModule
 from core.contracts import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RulesApplyReply,
-                            RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
+                            RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
                             SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState)
 from core.db import Database
 from core.envelope import Envelope
@@ -207,6 +209,8 @@ class CompositionModule(BaseModule):
         the table, builds the summary and the lines of the constructor by the same code as for a series, and writes
         nothing: no row, no source, no revision."""
         request = CompositionPreviewRequest.model_validate(env.payload)
+        if request.lines is not None:
+            return await self._preview_lines(request, request.lines)
         try:
             got = await self._ask("sources.table.get", TableGetRequest(
                 url=request.url, options=request.options, refresh=request.refresh).model_dump(mode="json"),
@@ -233,6 +237,23 @@ class CompositionModule(BaseModule):
         return CompositionPreviewReply(url=got.url, state=got.state, reason=got.reason,
                                        names=list(table.names) if table is not None else [], summary=summary,
                                        lines=lines).model_dump(mode="json")
+
+    async def _preview_lines(self, request: CompositionPreviewRequest, texts: list[str]) -> dict:
+        """Lines the window holds itself: no page and no table, only the profile's answer to each line."""
+        lines = [RuleLine(key=str(place), text=text) for place, text in enumerate(texts)]
+        results = {}
+        if request.profile_id is not None and lines:
+            try:
+                answer = await self._ask("rules.apply", RulesApplyRequest(
+                    profile_id=request.profile_id, lines=lines, series_season=request.series_season,
+                ).model_dump(mode="json"), model=RulesApplyReply, timeout=RULES_TIMEOUT_S)
+            except _Unavailable as exc:
+                raise ValueError(exc.reason) from exc
+            results = answer.results
+        return CompositionPreviewReply(
+            url=request.url, state=TableState.READY,
+            lines=[PreviewLine(key=line.key, line=line.text, result=results.get(line.key)) for line in lines],
+        ).model_dump(mode="json")
 
     async def on_recompute(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]

@@ -422,6 +422,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sources/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read Source
+         * @description Read the page now, whatever the age of its table (the hour of a table is the term of a sync, not of a user).
+         */
+        post: operations["read_source_api_sources_read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/parser-profiles/test": {
         parameters: {
             query?: never;
@@ -1591,9 +1611,14 @@ export interface components {
         /**
          * CompositionPreviewRequest
          * @description What a window shows of an address before it belongs to a series. `refresh` False reads nothing.
+         *     With `lines` (typed by the user, or the file names of a release) no page is read: the profile is applied to
+         *     those lines as they are, and the address is not needed.
          */
         CompositionPreviewRequest: {
-            /** Url */
+            /**
+             * Url
+             * @default
+             */
             url: string;
             /** Options */
             options?: {
@@ -1608,6 +1633,8 @@ export interface components {
              * @default true
              */
             refresh: boolean;
+            /** Lines */
+            lines?: string[] | null;
         };
         /** CompositionReply */
         CompositionReply: {
@@ -2104,9 +2131,13 @@ export interface components {
         /**
          * RulesTestRequest
          * @description The test of a profile on a page: the rows of the page as the constructor gets them, each with its answer.
+         *     With `lines` (typed, or the file names of a release) the profile is tried on those lines and no page is read.
          */
         RulesTestRequest: {
-            /** Url */
+            /**
+             * Url
+             * @default
+             */
             url: string;
             /** Options */
             options?: {
@@ -2116,6 +2147,13 @@ export interface components {
             profile_id: number;
             /** Series Season */
             series_season?: string | number | null;
+            /**
+             * Refresh
+             * @default true
+             */
+            refresh: boolean;
+            /** Lines */
+            lines?: string[] | null;
         };
         /** ScannerStatus */
         ScannerStatus: {
@@ -2406,6 +2444,18 @@ export interface components {
          * @enum {string}
          */
         SourceType: "torrent" | "vk_video" | "web_video";
+        /**
+         * TableReadRequest
+         * @description Read the page of an address now; `options` are the choices of the source that change what is read.
+         */
+        TableReadRequest: {
+            /** Url */
+            url: string;
+            /** Options */
+            options?: {
+                [key: string]: string;
+            };
+        };
         /**
          * TableState
          * @description `absent`: no complete table exists and the request asked for no read.
@@ -3864,6 +3914,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SiteResolveReply"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    read_source_api_sources_read_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TableReadRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
                 };
             };
             /** @description Bad Request */

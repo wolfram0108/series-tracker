@@ -168,7 +168,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | PUT | `/api/parser-rules/{rule_id}` | Изменение правила | `SettingsParser.vue` |
 | DELETE | `/api/parser-rules/{rule_id}` | Удаление правила | `SettingsParser.vue` |
 | POST | `/api/parser-rules/reorder` | Перестановка правил | `SettingsParser.vue` |
-| POST | `/api/parser-profiles/test` | Тест профиля на странице: строки для конструктора и ответ на каждую (`composition.preview`); живёт в `api_sources.py` | `ParserTest.vue` |
+| POST | `/api/parser-profiles/test` | Тест профиля на странице или на строках, которые держит окно: строки для конструктора и ответ на каждую (`composition.preview`); живёт в `api_sources.py` | `ParserTest.vue` |
 | GET | `/api/logs` | Чтение логов из `logs/*.log` | `LogsModal.vue` |
 | GET | `/api/logs/groups` | Список групп логов (distinct по файлам) | `LogsModal.vue` |
 | GET | `/api/database/tables` | Список таблиц БД | `DatabaseViewerModal.vue`, `SettingsDebug.vue` |
@@ -775,9 +775,11 @@ lines: [{key, line, result?}]}`. `refresh: false` ничего не читает
 **POST `/api/sources/resolve`** — тело `{url, options?}`; ответ `{site, canonical_url}`, оба `null`, если адрес не читает
 ни один сайт; сети нет.
 
-**POST `/api/parser-profiles/test`** — тело `{url, options?, profile_id, series_season?}` (`profile_id` обязателен, иначе
-422); ответ — тот же `CompositionPreviewReply`, у каждой строки `result` — ответ конструктора (`excluded`, `season`,
-`episode`, `start`, `end`, `part`, `voiceover`, `events`, `errors`).
+**POST `/api/parser-profiles/test`** — тело `{url, options?, profile_id, series_season?, refresh?, lines?}` (`profile_id` обязателен,
+нужен и адрес, или `lines`, иначе 422); ответ — тот же `CompositionPreviewReply`, у каждой строки `result` — ответ
+конструктора (`excluded`, `season`, `episode`, `start`, `end`, `part`, `voiceover`, `events`, `errors`). С `lines`
+(названия, набранные вручную, или имена файлов раздачи) страница не читается, ответ — `ready`, ключ строки — её место в
+списке.
 
 ### 6.8 Выход
 

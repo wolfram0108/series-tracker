@@ -1223,6 +1223,31 @@ async def test_an_address_with_a_profile_shows_the_answer_of_the_constructor_for
 
 
 @pytest.mark.asyncio
+async def test_lines_the_window_holds_get_the_answer_of_the_profile_and_no_page_is_read(system):
+    s = system
+    reply = await s.probe.request("composition.preview", {
+        "lines": ["Серия 1 [Мой дубляж]", "Трейлер"], "profile_id": 7, "series_season": "4"}, timeout=STUCK_S)
+    reply = CompositionPreviewReply.model_validate(reply)
+    assert (reply.state, reply.summary, reply.names) == (TableState.READY, None, [])
+    assert [(each.key, each.line) for each in reply.lines] == [("0", "Серия 1 [Мой дубляж]"), ("1", "Трейлер")]
+    [call] = s.rules.calls
+    assert (call.profile_id, call.series_season, [(l.key, l.text) for l in call.lines]) == (
+        7, "4", [("0", "Серия 1 [Мой дубляж]"), ("1", "Трейлер")])
+    assert s.sources.requests == [] and s.sources.reads_begun == []
+    nothing_was_written(s)
+
+
+@pytest.mark.asyncio
+async def test_lines_without_a_profile_come_back_without_an_answer_and_nothing_is_asked(system):
+    s = system
+    reply = await s.probe.request("composition.preview", {"lines": ["Серия 1"]}, timeout=STUCK_S)
+    reply = CompositionPreviewReply.model_validate(reply)
+    assert [(each.line, each.result) for each in reply.lines] == [("Серия 1", None)]
+    assert s.rules.calls == [] and s.sources.requests == []
+    nothing_was_written(s)
+
+
+@pytest.mark.asyncio
 async def test_an_address_whose_page_is_being_read_for_the_first_time_has_a_state_and_nothing_else(system):
     s = system
     reply = await preview(s)

@@ -96,6 +96,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The test of a profile: the same preview of a page, with the profile given, so that every line comes
         with the constructor's answer."""
         return await _preview(CompositionPreviewRequest(
-            url=body.url, options=body.options, profile_id=body.profile_id, series_season=body.series_season))
+            url=body.url, options=body.options, profile_id=body.profile_id, series_season=body.series_season,
+            refresh=body.refresh, lines=body.lines))
 
     return r

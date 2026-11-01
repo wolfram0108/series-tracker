@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .output_settings import EpisodeSettings, LevelSettings
 from .release_table import RowState, TableState
@@ -147,13 +147,22 @@ class PreviewLine(BaseModel):
 
 
 class CompositionPreviewRequest(BaseModel):
-    """What a window shows of an address before it belongs to a series. `refresh` False reads nothing."""
+    """What a window shows of an address before it belongs to a series. `refresh` False reads nothing.
+    With `lines` (typed by the user, or the file names of a release) no page is read: the profile is applied to
+    those lines as they are, and the address is not needed."""
 
-    url: str
+    url: str = ""
     options: dict[str, str] = Field(default_factory=dict)
     profile_id: int | None = None
     series_season: str | int | None = None
     refresh: bool = True
+    lines: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _names_a_page_or_lines(self) -> "CompositionPreviewRequest":
+        if self.lines is None and not self.url:
+            raise ValueError("an address or lines are needed")
+        return self
 
 
 class CompositionPreviewReply(BaseModel):

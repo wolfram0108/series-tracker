@@ -253,8 +253,18 @@ class TableReadRequest(RequestModel):
 
 
 class RulesTestRequest(RequestModel):
-    """The test of a profile on a page: the rows of the page as the constructor gets them, each with its answer."""
-    url: str
+    """The test of a profile on a page: the rows of the page as the constructor gets them, each with its answer.
+    With `lines` (typed, or the file names of a release) the profile is tried on those lines and no page is read."""
+    url: str = ""
     options: dict[str, str] = Field(default_factory=dict)
     profile_id: int
     series_season: str | int | None = None
+    # False asks again after a read ended: the window reads nothing, it only takes the table that is there.
+    refresh: bool = True
+    lines: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _names_a_page_or_lines(self) -> "RulesTestRequest":
+        if self.lines is None and not self.url:
+            raise ValueError("an address or lines are needed")
+        return self
