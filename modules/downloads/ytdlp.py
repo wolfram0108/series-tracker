@@ -24,8 +24,6 @@ import shutil
 import time
 from typing import Awaitable, Callable
 
-import httpx
-
 from core import storage
 from core.ffprobe import duration_of
 from core.proc import run_capture, spawn
@@ -241,50 +239,6 @@ def download_artifacts(full_output_path: str) -> list[str]:
     return out
 
 
-def is_allvideo_url(url: str) -> bool:
-    # Match embed player pages, not direct stream URLs.
-    return "/embed/" in url and any(d in url for d in ("fsst.online", "incvideo1.online"))
-
-
-def _extract_best_stream_from_playerjs(file_val: str) -> str | None:
-    streams: list[tuple[int, str]] = []
-    for chunk in file_val.split(','):
-        chunk = chunk.strip()
-        if not chunk:
-            continue
-        m = re.search(r'\[(?:(\d+)p?|(4k))\]', chunk, re.IGNORECASE)
-        if m:
-            tag_num, tag_4k = m.group(1), m.group(2)
-            quality = 2160 if tag_4k else int(tag_num)
-            stream_url = re.sub(r'\[[^\]]+\]', '', chunk).strip()
-            if stream_url:
-                streams.append((quality, stream_url))
-        else:
-            cleaned = re.sub(r'\[[^\]]+\]', '', chunk).strip()
-            if cleaned:
-                streams.append((0, cleaned))
-    if streams:
-        streams.sort(key=lambda s: s[0], reverse=True)
-        return streams[0][1]
-    return file_val.split(',')[-1].split(']')[-1].strip() or None
-
-
-async def _resolve_allvideo_stream(embed_url: str) -> tuple[str, str] | None:
-    try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True,
-                                     headers={"Referer": "https://1.ruchime.org/"}) as client:
-            r = await client.get(embed_url)
-            m = re.search(r'file:\s*["\']([^"\']+)["\']', r.text)
-            if not m:
-                return None
-            mp4_url = _extract_best_stream_from_playerjs(m.group(1))
-            if not mp4_url:
-                return None
-            return mp4_url, "https://incvideo1.online/"
-    except Exception:
-        return None
-
-
 def _reconnect_args(stream_url: str) -> list[str]:
     """Network options do not apply to a local decoded manifest (same as the header options)."""
     return [] if stream_url.startswith("file:") else list(RECONNECT_ARGS)
@@ -443,19 +397,9 @@ async def _download_owned(video_url: str, full_output_path: str, on_progress: Pr
         return done if done is not None else await _download_direct_ffmpeg(video_url, headers or {}, full_output_path,
                                                                            on_progress)
 
-    # Direct stream download if headers (e.g. Referer) are provided or URL is already an mp4 stream
+    # A resolved stream carries the headers its player asked for; a bare mp4 link is read as it is.
     if headers or (video_url.startswith("http") and ".mp4" in video_url and "vk.com" not in video_url and "vkvideo.ru" not in video_url):
-        stream_headers = {"Referer": "https://incvideo1.online/", **(headers or {})}
-        return await _download_direct_ffmpeg(video_url, stream_headers, full_output_path,
-                                             on_progress)
-
-    if is_allvideo_url(video_url):
-        resolved = await _resolve_allvideo_stream(video_url)
-        if not resolved:
-            return False, "не удалось получить ссылку на поток AllVideo"
-        stream_url, referer = resolved
-        return await _download_direct_ffmpeg(stream_url, {"Referer": referer},
-                                             full_output_path, on_progress)
+        return await _download_direct_ffmpeg(video_url, headers or {}, full_output_path, on_progress)
 
     # длительность для процента remux — из yt-dlp (метаданные источника),
     # НЕ из промежуточного TS (находка 52)

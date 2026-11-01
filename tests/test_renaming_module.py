@@ -10,6 +10,7 @@ import pytest
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.db import Database
 from modules.renaming import RenamingModule
+from series_factory import insert_series
 
 
 class FakeNeighbours(BaseModule):
@@ -28,6 +29,8 @@ class FakeNeighbours(BaseModule):
         self.upserts: list[dict] = []
         self.active_torrents: list[dict] = []
         self.fail_format = False
+        self.torrent_profiles: list = []
+        self.format_series: list[dict] = []
         self.collide_name: str | None = None  # одно имя на все файлы
         self.files_block: "asyncio.Event | None" = None  # C9: блок files.get
         self.files_calls = 0
@@ -54,11 +57,13 @@ class FakeNeighbours(BaseModule):
     async def on_format(self, env):
         if self.fail_format:
             raise RuntimeError("профиль сломан (имитация)")
+        self.format_series.append(env.payload["series"])
         item = env.payload["media_item"]
         ep = env.payload.get("episode_override") or item["episode_start"]
         return {"filename": f"Show s01e{ep:02d}.mp4"}
 
     async def on_format_torrent(self, env):
+        self.torrent_profiles.append(env.payload["profile_id"])
         base = env.payload["file_basename"]
         if "skip" in base:
             return {"filename": None, "extracted": {}}
@@ -104,6 +109,17 @@ class Probe(BaseModule):
     name = "probe"
 
 
+def _source(source_type, profile_id=None, source_id=1):
+    """A source as catalog.series.get answers it."""
+    return {"id": source_id, "series_id": 2, "position": 0, "url": "u|q/2", "source_type": source_type,
+            "parser_profile_id": profile_id, "vk_search_mode": "search", "vibix_season": None, "players_off": []}
+
+
+def _torrent(series, profile_id=1):
+    """The same series as a torrent one: its single source is a torrent with the profile."""
+    return {**series, "kind": "torrent", "sources": [_source("torrent", profile_id)]}
+
+
 @pytest.fixture
 async def system(tmp_path):
     db_path = tmp_path / "test.db"
@@ -114,15 +130,11 @@ async def system(tmp_path):
     media = tmp_path / "media"
     media.mkdir()
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode) VALUES "
-            "(2, 'u|q/2', 'Show', 'Show', 'vk', ?, 'waiting', 'vk_video', "
-            "0, 'search')", (str(media),))
+        insert_series(conn, id=2, name="Show", name_en="Show", site="vk", save_path=str(media), state="waiting",
+                      url="u|q/2", source_type="vk_video")
         conn.commit()
-    series = {"id": 2, "name_en": "Show", "source_type": "vk_video",
-              "save_path": str(media), "parser_profile_id": 1,
-              "season": None}
+    series = {"id": 2, "name_en": "Show", "kind": "video", "save_path": str(media), "season": None,
+              "sources": [_source("vk_video", profile_id=1)]}
     bus = Bus()
     fake = FakeNeighbours(bus, series)
     renaming = RenamingModule(bus, Database(str(db_path)))
@@ -204,7 +216,7 @@ async def test_error_carrier_and_reset(system):
 @pytest.mark.asyncio
 async def test_process_torrent_renames_in_qbit(system):
     _, fake, probe, _, _ = system
-    fake.series = {**fake.series, "source_type": "torrent"}
+    fake.series = _torrent(fake.series)
     fake.qbt_files["h1"] = [{"name": "old/ep1.mkv"},
                             {"name": "readme.txt"},      # не видео
                             {"name": "skip это.mkv"}]    # сезон не определён
@@ -215,13 +227,14 @@ async def test_process_torrent_renames_in_qbit(system):
     assert [r["new_path"] for r in fake.renames] == ["Season 01/Show ep1.mkv"]
     saved = fake.upserts[0]["files"]
     assert [f["original_path"] for f in saved] == ["old/ep1.mkv"]
+    assert fake.torrent_profiles == [1, 1]  # the profile of the torrent source goes with every file
 
 
 @pytest.mark.asyncio
 async def test_dry_run_writes_composition_without_touching_qbit(system):
     """Состав раздачи нужен до закачки: правила применяются, qBit — нет."""
     _, fake, probe, _, _ = system
-    fake.series = {**fake.series, "source_type": "torrent"}
+    fake.series = _torrent(fake.series)
     fake.qbt_files["h3"] = [{"name": "old/ep1.mkv", "index": 4},
                             {"name": "cover.jpg", "index": 5}]
 
@@ -239,7 +252,7 @@ async def test_dry_run_writes_composition_without_touching_qbit(system):
 @pytest.mark.asyncio
 async def test_process_torrent_uses_original_path_from_db(system):
     _, fake, probe, _, _ = system
-    fake.series = {**fake.series, "source_type": "torrent"}
+    fake.series = _torrent(fake.series)
     # файл уже переименован ранее: текущий путь != original
     fake.qbt_files["h2"] = [{"name": "Season 01/Show ep1.mkv"}]
     fake.db_files["h2"] = [{"original_path": "old/ep1.mkv",
@@ -259,7 +272,7 @@ async def test_sim_C9_pipeline_rename_serializes_with_reprocess(system):
     делят per-series лок — НЕ переименовывают одни файлы параллельно
     (иначе кривые имена, как у «Путешествия»)."""
     _, fake, probe, _, media = system
-    fake.series = {**fake.series, "source_type": "torrent"}
+    fake.series = _torrent(fake.series)
     fake.active_torrents = [{"qb_hash": "h", "torrent_id": "t"}]
     fake.qbt_files["h"] = [{"name": "a.mkv"}]
     fake.db_files["h"] = [{"original_path": "a.mkv", "renamed_path": None,
@@ -294,7 +307,7 @@ async def test_process_torrent_collision_not_merged(system):
     и НЕ отправляется в qBit (qBit мог бы принять переименование в
     занятый путь и слить файлы, а БД соврала бы «renamed»)."""
     _, fake, probe, _, _ = system
-    fake.series = {**fake.series, "source_type": "torrent"}
+    fake.series = _torrent(fake.series)
     fake.collide_name = "Season 01/Show one.mkv"
     fake.qbt_files["hc"] = [{"name": "old/a.mkv"}, {"name": "old/b.mkv"}]
     reply = await probe.request("renaming.process_torrent", {
@@ -311,7 +324,7 @@ async def test_process_torrent_collision_not_merged(system):
 async def test_process_torrent_audio_subs_and_fonts(system):
     """Раздача со сложной структурой (дорожки озвучки, субтитры, шрифты)."""
     _, fake, probe, _, _ = system
-    fake.series = {**fake.series, "source_type": "torrent"}
+    fake.series = _torrent(fake.series)
     root = "Katainaka no Ossan [WEB-DL 1080p]"
     fake.qbt_files["h_complex"] = [
         {"name": f"{root}/[VARYG] Katainaka - 01 [1080p].mkv", "index": 0},
@@ -363,7 +376,7 @@ async def test_process_torrent_audio_subs_and_fonts(system):
 async def test_process_torrent_flat_with_subfolders(system):
     """Плоская раздача (без корневой папки торрента) с подкаталогами озвучки."""
     _, fake, probe, _, _ = system
-    fake.series = {**fake.series, "source_type": "torrent"}
+    fake.series = _torrent(fake.series)
     fake.qbt_files["h_flat"] = [
         {"name": "01.mkv", "index": 0},
         {"name": "rus/AniLiberty/01.mka", "index": 1},
@@ -385,3 +398,54 @@ async def test_process_torrent_flat_with_subfolders(system):
     assert saved["Fonts/font.ttf"]["renamed_path"] == "Fonts/font.ttf"
     assert saved["Fonts/font.ttf"]["extracted_metadata"]["is_extra"] is True
 
+
+@pytest.mark.asyncio
+async def test_the_profile_asked_for_is_the_one_of_the_torrent_source(system):
+    _, fake, probe, _, _ = system
+    web = _source("web_video", profile_id=7, source_id=3)
+    fake.series = {**_torrent(fake.series, profile_id=5), "sources": [web, _source("torrent", 5, source_id=4)]}
+    fake.qbt_files["hp"] = [{"name": "old/ep1.mkv"}]
+
+    await probe.request("renaming.process_torrent", {"series_id": 2, "qb_hash": "hp"}, timeout=10)
+
+    assert fake.torrent_profiles == [5]
+
+
+@pytest.mark.asyncio
+async def test_a_torrent_series_without_a_profile_is_skipped_by_the_reprocess(system):
+    _, fake, probe, _, _ = system
+    fake.series = _torrent(fake.series, profile_id=None)
+    fake.active_torrents = [{"qb_hash": "h", "torrent_id": "t"}]
+    fake.qbt_files["h"] = [{"name": "a.mkv"}]
+
+    reply = await probe.request("renaming.reprocess", {"series_id": 2}, timeout=10)
+
+    assert reply == {"renamed": 0, "skipped": True}
+    assert fake.torrent_profiles == [] and fake.renames == []
+
+
+@pytest.mark.asyncio
+async def test_a_video_series_is_renamed_by_its_numbers_without_any_profile(system):
+    """The rows carry the numbers of the constructor already; the profile of a source is not asked."""
+    _, fake, probe, _, media = system
+    fake.series = {**fake.series, "sources": [_source("vk_video", profile_id=None)]}
+    fake.media_items = [_item("u1", 1, "старое имя 1.mp4")]
+    open(os.path.join(media, "старое имя 1.mp4"), "wb").close()
+
+    reply = await probe.request("renaming.reprocess", {"series_id": 2}, timeout=10)
+
+    assert reply == {"renamed": 1}
+    assert os.path.exists(os.path.join(media, "Show s01e01.mp4"))
+    assert fake.format_series[0]["kind"] == "video"
+
+
+@pytest.mark.asyncio
+async def test_preview_names_the_rows_of_a_video_series(system):
+    _, fake, probe, _, _ = system
+    fake.media_items = [_item("u1", 1, "старое имя 1.mp4"), _item("u2", 2, "Show s01e02.mp4")]
+
+    reply = await probe.request("renaming.preview", {"series_id": 2}, timeout=10)
+
+    assert reply["needs_rename_count"] == 1
+    assert [(row["unique_id"], row["new_filename_preview"]) for row in reply["preview"]] == [
+        ("u1", "Show s01e01.mp4"), ("u2", "Show s01e02.mp4")]

@@ -63,13 +63,20 @@ class DownloadsRepository:
         return True
 
     async def drop_pending_outside_plan(self, series_id: int) -> int:
-        """Чистка pending- и error-задач, выпавших из плана (находка 32):
-        ошибка элемента вне плана никем не повторяется и только мусорит."""
+        """Чистка pending- и error-задач без строки плана (находка 32): строка либо вышла из плана, либо
+        удалена scan; ошибка элемента вне плана никем не повторяется и только мусорит."""
         return await self._db.execute(
             "DELETE FROM download_tasks WHERE series_id=? AND "
-            "task_type='vk_video' AND status IN ('pending', 'error') AND task_key IN "
-            "(SELECT unique_id FROM media_items WHERE series_id=? AND "
-            f"plan_status NOT IN {_IN_PLAN})", (series_id, series_id))
+            "task_type='vk_video' AND status IN ('pending', 'error') AND NOT EXISTS "
+            "(SELECT 1 FROM media_items mi WHERE mi.unique_id = download_tasks.task_key "
+            f"AND mi.plan_status IN {_IN_PLAN})", (series_id,))
+
+    async def tasks_without_row(self, series_id: int) -> list[dict]:
+        """Tasks of any state whose media_items row is gone (scan deletes the rows of a slot that lost)."""
+        return await self._db.fetch_all(
+            "SELECT id, save_path, status FROM download_tasks WHERE series_id=? AND task_type='vk_video' "
+            "AND NOT EXISTS (SELECT 1 FROM media_items mi WHERE mi.unique_id = download_tasks.task_key)",
+            (series_id,))
 
     async def mark_downloading(self, task_id: int) -> None:
         await self._db.execute(
@@ -138,6 +145,12 @@ class DownloadsRepository:
         row = await self._db.fetch_one(
             "SELECT series_id FROM media_items WHERE unique_id=?", (unique_id,))
         return row["series_id"] if row else None
+
+    async def source_of_item(self, unique_id: str) -> int | None:
+        """The source of the series a candidate was found by (scan's column, read only); NULL on earlier rows."""
+        row = await self._db.fetch_one(
+            "SELECT source_id FROM media_items WHERE unique_id=?", (unique_id,))
+        return row["source_id"] if row else None
 
     async def set_item_filename(self, unique_id: str,
                                 filename: str) -> None:

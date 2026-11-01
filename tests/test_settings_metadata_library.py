@@ -11,6 +11,7 @@ from core.db import Database
 from modules.library import LibraryModule
 from modules.metadata import MetadataModule
 from modules.settings import SettingsModule
+from series_factory import create_series, insert_series
 
 
 @pytest.fixture
@@ -142,18 +143,16 @@ async def test_metadata_mapping_persists_year(system):
     # год (миграция 0003) доезжает через map.set → map.get: нужен для
     # имени каталога «Имя (год) [tmdbid-XXXX]» в инфо-режиме.
     bus, db, modules = system
-    await db.execute(
-        "INSERT INTO series (id, url, name, name_en, site, save_path, "
-        "auto_scan_enabled, source_type, vk_search_mode) "
-        "VALUES (1, 'u', 'Очень странные дела', 'Stranger Things', "
-        "'kinozal', '/nas', 1, 'torrent', 'search')")
+    created = await create_series(db, name="Очень странные дела", name_en="Stranger Things", site="kinozal",
+                                  save_path="/nas", auto_scan_enabled=1, url="u", source_type="torrent")
+    series_id = created.series_id
     probe = _probe(modules)
     await probe.request("metadata.map.set", {
-        "series_id": 1,
+        "series_id": series_id,
         "tmdb_data": {"tmdb_id": 66732, "tmdb_season_number": 1,
                       "total_episodes": 8, "series_name": "Очень странные дела",
                       "year": "2016"}}, timeout=5)
-    reply = await probe.request("metadata.map.get", {"series_id": 1}, timeout=5)
+    reply = await probe.request("metadata.map.get", {"series_id": series_id}, timeout=5)
     assert reply["mapping"]["year"] == "2016"
 
 
@@ -210,19 +209,25 @@ class _Neighbour(BaseModule):
     name = "neigh"
 
     def __init__(self, bus):
-        self.series = {"id": 1, "source_type": "torrent", "season": ""}
+        self.series = {"id": 1, "kind": "torrent", "season": ""}
         self.seasons = {"seasons": []}
+        self.asked: list[str] = []
         super().__init__(bus)
 
     def register(self):
         self.handle("catalog.series.get", self._get)
-        self.handle("torrents.seasons", self._seasons)
-        self.handle("scan.seasons", self._seasons)
+        self.handle("torrents.seasons", self._torrent_seasons)
+        self.handle("scan.seasons", self._scan_seasons)
 
     async def _get(self, env):
         return self.series
 
-    async def _seasons(self, env):
+    async def _torrent_seasons(self, env):
+        self.asked.append("torrents.seasons")
+        return self.seasons
+
+    async def _scan_seasons(self, env):
+        self.asked.append("scan.seasons")
         return self.seasons
 
 
@@ -244,11 +249,8 @@ def _tmdb_details_stub(calls: list):
 async def agg_system(db_path):
     import sqlite3
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode) VALUES "
-            "(1, 'u', 'Т', 'T', 'kinozal', '/m', 'waiting', 'torrent', 0, "
-            "'search')")
+        insert_series(conn, id=1, name="Т", name_en="T", site="kinozal", save_path="/m", state="waiting",
+                      url="u", source_type="torrent")
         conn.commit()
     bus = Bus()
     db = Database(db_path)
@@ -348,6 +350,26 @@ async def test_seasons_recompute_skips_single_and_no_tmdb(agg_system):
     # одиночный режим (season задан) → skip, total не трогаем
     await probe.request("metadata.map.set", {"series_id": 1, "tmdb_data": {
         "tmdb_id": 42, "tmdb_season_number": 1, "total_episodes": 26}}, timeout=5)
-    neigh.series = {"id": 1, "source_type": "torrent", "season": "s01"}
+    neigh.series = {"id": 1, "kind": "torrent", "season": "s01"}
     assert (await probe.request("metadata.seasons.recompute",
                                 {"series_id": 1}, timeout=5))["skipped"] == "single_season"
+
+
+@pytest.mark.asyncio
+async def test_the_seasons_come_from_the_owner_of_the_kind_of_the_series(agg_system, monkeypatch):
+    bus, neigh, mods = agg_system
+    probe = mods[-1]
+    await probe.request("settings.value.set", {"key": "tmdb_token", "value": "x"}, timeout=5)
+    neigh.seasons = {"seasons": [1, 2]}
+    monkeypatch.setattr(httpx.AsyncClient, "get", _tmdb_details_stub([]))
+    sub = bus.subscribe("series.updated")
+
+    # the recompute that map.set starts by itself is the one of a video series
+    neigh.series = {"id": 1, "kind": "video", "season": ""}
+    await probe.request("metadata.map.set", {"series_id": 1, "tmdb_data": {
+        "tmdb_id": 42, "tmdb_season_number": 1}}, timeout=5)
+    await asyncio.wait_for(sub.queue.get(), 2)
+    neigh.series = {"id": 1, "kind": "torrent", "season": ""}
+    await probe.request("metadata.seasons.recompute", {"series_id": 1}, timeout=10)
+
+    assert neigh.asked == ["scan.seasons", "torrents.seasons"]

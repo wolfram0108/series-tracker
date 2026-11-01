@@ -58,17 +58,17 @@
 
 | Точка | Сейчас | Статус | Новое место / причина | Вызовы, которые меняются |
 |---|---|---|---|---|
-| `scan._included_episodes` | правила к быстрому списку, ответ сопоставляется с номером парсера | удалена | раскладка | `scan._scan_web_video` |
-| `scan._scan_web_video`, `scan._scan_vk` | отдельные ветки скана по виду источника | перепроектирована | синхронизация: таблицы источников → раскладка → план | `scan._run_series`, `scan.on_composition` |
-| `scan._process_video_candidates`, `_vk_candidates` (вызов `rules.apply`) | правила к заголовкам кандидатов | перепроектирована | кандидаты — строки раскладки одиночных серий | — |
+| `scan._included_episodes` | правила к быстрому списку, ответ сопоставляется с номером парсера | удалена | раскладка | `scan._scan_web_video` — сделано (П-6) |
+| `scan._scan_web_video`, `scan._scan_vk` | отдельные ветки скана по виду источника | перепроектирована | синхронизация: таблицы источников → раскладка → план | `scan._run_series`, `scan.on_composition` — сделано (П-6): `scan._sync_video`, `sync.py` |
+| `scan._process_video_candidates`, `_vk_candidates` (вызов `rules.apply`) | правила к заголовкам кандидатов | перепроектирована | кандидаты — строки раскладки одиночных серий | — сделано (П-6): `reference.py`, `candidates.py` |
 | `scan._resolve_part_ones` и повтор той же логики в `scan._reconstruct` | «часть 1» для серии, у которой есть части — в двух местах | перепроектирована | одно место: `composition/project.py` | `scan` — сделано (П-4) |
-| `scan._reconstruct` (`rules.apply` по сохранённым заголовкам) | номера для окна композиции вычисляются заново | удалена | `composition.get` | `scan.on_composition`, `gateway /composition` |
-| `scan.on_composition` (`refresh` запускает скан) | окно композиции и скан в одном запросе | перепроектирована | окно читает раскладку и план; синхронизация — отдельная команда | `web/StatusComposition`, `web/StatusVkComposition` |
-| `scan.save_availability`, `scan.availability`, таблица `video_availability` | отчёт о плеерах после скана | удалена | состояния строк таблицы, сводка `composition` | `gateway api_series`, `web` |
-| `scan/planner.py` шаги 3–5 (склейки закрывают дыры и вытесняют одиночки) | склейка может стать референсом | перепроектирована для веб- и VK-источников | Т-21, Д-32: склейка не референс; серия, покрытая только склейкой, — ошибка «референс не подходит» | `scan._rebuild_plan` |
-| `modules/slicing` (нарезка склейки VK по главам на серии) | работает со склейкой, стоящей в плане референса; на проде нарезанных файлов нет | подтверждена без изменений, в новой архитектуре не участвует | Д-34: код не трогается; склейка в план не попадает, нарезка не вызывается; вызовы из `scan.on_composition` уходят вместе с ним | `scan.on_composition` (`slicing.files.drop_for_source`, `slicing.verify`) |
-| `plan_with_supersession`, `superseded_by` (Р-37) | замена низкого разрешения высоким | подтверждена | Т-24 | — |
-| `core/ids.media_unique_id` (адрес + дата + сериал) | ключ кандидата | перепроектирована | ключ строки источника; скачанное сохраняет `unique_id` сопоставлением по адресу | `scan.repository`, `downloads` |
+| `scan._reconstruct` (`rules.apply` по сохранённым заголовкам) | номера для окна композиции вычисляются заново | удалена | `composition.get` | `scan.on_composition`, `gateway /composition` — сделано (П-6) со стороны `scan` |
+| `scan.on_composition` (`refresh` запускает скан) | окно композиции и скан в одном запросе | перепроектирована | окно читает раскладку и план; синхронизация — отдельная команда | `web/StatusComposition`, `web/StatusVkComposition` — `scan.composition` удалён (П-6), план отдаёт `scan.output.get`; окно — П-9 |
+| `scan.save_availability`, `scan.availability`, таблица `video_availability` | отчёт о плеерах после скана | удалена | состояния строк таблицы, сводка `composition` | `gateway api_series`, `web` — сделано (П-6) со стороны `scan`: запрос, таблица `video_availability` (миграция 0028) и сохранение отчёта удалены; шлюз и окно — П-8, П-9 |
+| `scan/planner.py` шаги 3–5 (склейки закрывают дыры и вытесняют одиночки) | склейка может стать референсом | перепроектирована для веб- и VK-источников | Т-21, Д-32: склейка не референс; серия, покрытая только склейкой, — ошибка «референс не подходит» | `scan._rebuild_plan` — сделано (П-6): склейка не попадает в план; победитель слота — референс `reference.py`, `planner.py` его только исполняет |
+| `modules/slicing` (нарезка склейки VK по главам на серии) | работает со склейкой, стоящей в плане референса; на проде нарезанных файлов нет | подтверждена без изменений, в новой архитектуре не участвует | Д-34: код не трогается; склейка в план не попадает, нарезка не вызывается; вызовы из `scan.on_composition` уходят вместе с ним | `scan.on_composition` (`slicing.files.drop_for_source`, `slicing.verify`) — сделано (П-6): вызовов `slicing` в `scan` нет |
+| `plan_with_supersession`, `superseded_by` (Р-37) | замена низкого разрешения высоким | подтверждена | Т-24 | — сделано (П-6): `plan_with_supersession` исполняет референс; не скачанные строки слота, не ставшие референсом, из `media_items` убираются |
+| `core/ids.media_unique_id` (адрес + дата + сериал) | ключ кандидата | перепроектирована | ключ строки источника; скачанное сохраняет `unique_id` сопоставлением по адресу | `scan.repository`, `downloads` — сделано (П-6): ключ — (сериал, источник, ключ строки), `core/ids.py::row_unique_id` и `upgrade_row_unique_id` рядом с прежними формулами (те не менялись); сопоставление по адресу — `scan/candidates.py` |
 
 ## 5. Озвучки (`modules/voices`)
 
@@ -82,7 +82,7 @@
 | `voices.layout` (запрос) | раскладка для окна добавления | удалена | `composition.get` | `gateway.parse_url` — сделано (П-5) |
 | `voices/identity.py` (`_fold`, `_SEPARATORS`, `tokens`, `voice_groups`, `group_key`, `same_voice`) | озвучки склеиваются без групп: по написанию и по составу имени «A / B» | перепроектирована | только группы пользователя (З-6); сравнение с триггером без регистра и пробелов сохраняется | `voices.layout`, `_adopted_keys`, тесты `test_voices_groups_effect` — сделано (П-5) |
 | `voices._adopted_keys` | ключ озвучки переживает смену правил | перепроектирована | ключ озвучки — группа либо «неизвестная N» из `composition` | сделано (П-5) |
-| `voice_dubs` (`site_episode`, `chain`, `temp_path` на строке серии) | файл озвучки принадлежит одной серии | перепроектирована | `voice_files`: файл строки источника, общий для серий диапазона (Т-18) | `voices.repository`, журнал очистки |
+| `voice_dubs` (`site_episode`, `chain`, `temp_path` на строке серии) | файл озвучки принадлежит одной серии | перепроектирована | `voice_files`: файл строки источника, общий для серий диапазона (Т-18) | `voices.repository`, журнал очистки — сделано (П-5) |
 | `voices/editor.py`, `voices/settings.py` (`voices.groups`, `voices.player_groups`, `voices.source_priority`) | группы и порядок источников | подтверждена | данные групп и приоритета — у `voices` | — |
 | `DUB_MAX_HEIGHT = 720`, conform, выход рядом, следование за референсом, журнал очистки, восстановление | Р-40 … Р-59 | подтверждена | Т-19, Т-27 | вход заменяется на раскладку |
 
@@ -94,8 +94,8 @@
 | `POST /api/web_video/coverage`, `POST /api/web_video/layout` | отдельные чтения | удалена | таблица страницы |
 | `POST /api/parser-profiles/scrape-titles` (ветвление VK / веб, повторный скан, фильтр по запросу) | бизнес-логика в шлюзе | перепроектирована | строки для конструктора из таблицы источника (`line_of`) |
 | `POST /api/parser-profiles/test` | `rules.test` | перепроектирована | `rules.apply` |
-| `GET /api/series/{id}/composition` | `scan.on_composition` | перепроектирована | `composition.get` + план `scan` |
-| `GET /api/series/{id}` (`scan.availability`) | отчёт о плеерах | перепроектирована | сводка источников `composition` |
+| `GET /api/series/{id}/composition` | `scan.on_composition` | перепроектирована | `composition.get` + план `scan` — `scan.on_composition` удалён (П-6); шлюз — П-8 |
+| `GET /api/series/{id}` (`scan.availability`) | отчёт о плеерах | перепроектирована | сводка источников `composition` — `scan.availability` удалён (П-6); шлюз — П-8 |
 | `SSE_MAP`: `video_scan_progress`, `coverage_progress` | ход старых чтений | удалена | `sources_table_progress`, `sources_table_ready`, `composition_changed`, `reference_changed` |
 
 ## 7. Интерфейс (`web/src`)
@@ -129,7 +129,7 @@
 
 | Точка | Сейчас | Статус | Новое место / причина | Вызовы, которые меняются |
 |---|---|---|---|---|
-| `downloads/ytdlp.py` (`is_allvideo_url`, `_resolve_allvideo_stream`, `_extract_best_stream_from_playerjs`, ветка в `download_video`) | собственный разбор плеера AllVideo с заголовком Referer ruchime — копия `sources/players/allvideo.py` | удалена | поток кандидата разрешает только `sources.video.stream` (З-5) | `ytdlp.download_video`, тесты `test_downloads_module.py` (`test_is_allvideo_url` и тест с `_resolve_allvideo_stream`) |
+| `downloads/ytdlp.py` (`is_allvideo_url`, `_resolve_allvideo_stream`, `_extract_best_stream_from_playerjs`, ветка в `download_video`) | собственный разбор плеера AllVideo с заголовком Referer ruchime — копия `sources/players/allvideo.py` | удалена | поток кандидата разрешает только `sources.video.stream` (З-5) | `ytdlp.download_video`, тесты `test_downloads_module.py` (`test_is_allvideo_url` и тест с `_resolve_allvideo_stream`) — сделано (П-7): разбор и ветка удалены вместе с заголовком Referer AllVideo по умолчанию для прямой ссылки; заголовки потока даёт `sources.video.stream` |
 | `RuchimeProvider.vibix` и `PLAYER_ORDER[2]` | два экземпляра плеера Vibix; браузер настроен только у одного | перепроектирована | один экземпляр плеера в реестре плееров `sources` | `ruchime`, `players.py` — сделано (П-3): `PlayerRegistry` модуля |
 | `video_providers/table.py::ReleaseTable.fill` (исключение пробы → `Cell(False)` без `transient`), `ruchime/provider.py` (`_quick_report`), `views.py` (ячейка без ответа) | исключение пробы даёт «нет», хотя Т-5 требует «не получено» | перепроектирована | исключение пробы → состояние «не получено» с причиной | `ruchime`, `views` — сделано (П-3): `players/asking.py::outcome_of` |
 | `video_providers/__init__.py::_DEFAULT_REGISTRY`, `players.py::PLAYER_ORDER` | глобальные реестры сайтов и плееров | перепроектирована | реестры принадлежат модулю `sources`; регистрация по `ARCHITECTURE.md`, раздел 12 | `run.py`, `tests/conftest.py`, `tests/test_contracts.py` — сделано (П-3): реестр сайтов и реестр плееров — у экземпляра модуля |
@@ -151,9 +151,10 @@
 
 | Точка | Сейчас | Статус | Новое место / причина | Вызовы, которые меняются |
 |---|---|---|---|---|
-| `renaming/module.py` (108, 167, 174, 179) | вид и профиль сериала | перепроектирована | `kind`, профиль источника | — |
-| `library/module.py` (147), `metadata/module.py` (175) | ветка «видео или торрент» по `source_type` | перепроектирована | `kind` | — |
-| `downloads/module.py` (144, 654) | `source_type` решает, есть ли запасной путь yt-dlp, для всей серии | перепроектирована | решение по плееру кандидата, не по сериалу: в серии с несколькими источниками виды смешаны | `ytdlp`, тесты `test_downloads_module.py` |
-| `torrents/module.py` (788), `rules/formatter.py` (103) | профиль торрента, расширение `.mp4` по виду | перепроектирована | профиль из источника; расширение по кандидату | — |
+| `renaming/module.py` (108, 167, 174, 179) | вид и профиль сериала | перепроектирована | `kind`, профиль источника | — сделано (П-7): профиль торрентного источника — `core.torrent_profile_id`; имена видео по номерам строк, профиль не нужен |
+| `library/module.py` (147), `metadata/module.py` (175) | ветка «видео или торрент» по `source_type` | перепроектирована | `kind` | — сделано (П-7) |
+| `downloads/module.py` (144, 654) | `source_type` решает, есть ли запасной путь yt-dlp, для всей серии | перепроектирована | решение по плееру кандидата, не по сериалу: в серии с несколькими источниками виды смешаны | `ytdlp`, тесты `test_downloads_module.py` — сделано (П-7): источник кандидата — `media_items.source_id`; без него — единственный источник серии, иначе `web_video`; задачи без строки `media_items` снимаются при `scan.plan.updated` |
+| `torrents/module.py` (788), `rules/formatter.py` (103) | профиль торрента, расширение `.mp4` по виду | перепроектирована | профиль из источника; расширение по кандидату | — сделано (П-7): `torrents/module.py`; `rules/formatter.py` — П-2 |
 | `voices/module.py` (383) | пропуск не-web серий | перепроектирована | вход озвучек — раскладка | сделано (П-5) |
+| `scan/module.py` (вид, адрес и профиль сериала, `vk_search_mode`, `vk_quality_priority`) | ветвление по `source_type`, адрес и профиль в самом сериале | перепроектирована | `kind`; адрес и профиль торрента — из источника сериала; веб- и VK-сериалы — синхронизация и референс | сделано (П-6) |
 | `gateway/api_series.py` (`list_series`, `add_series`, `series_details`, `update_series`, `set_state`), `api_media.py` (`composition`, `source_filenames`) | ветвление по виду, сборка ответов из нескольких модулей | перепроектирована | тело запросов с источниками; сборка ответов — в модулях-владельцах | `web`, `schema.d.ts` |

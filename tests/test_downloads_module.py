@@ -16,6 +16,8 @@ from core.db import Database
 from modules.catalog import CatalogModule
 from modules.downloads import DownloadsModule
 from modules.downloads import ytdlp
+from modules.downloads.module import source_of_candidate
+from series_factory import insert_series, source
 
 
 # --- чистые функции разбора yt-dlp ----------------------------------------------
@@ -172,36 +174,42 @@ def env_paths(tmp_path):
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO parser_profiles (id, name) "
                      "VALUES (1, 'профиль')")
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode, "
-            "parser_profile_id) VALUES (2, 'https://vkvideo.ru/@c|т', 'Т2', "
-            "'T2', 'vk', ?, 'waiting', 'vk_video', 0, 'get_all', 1)",
-            (str(media_dir),))
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode, "
-            "parser_profile_id) VALUES (3, 'https://1.ruchime.org/release/x', "
-            "'Т3', 'T3', '1.ruchime.org', ?, 'waiting', 'web_video', 0, "
-            "'get_all', 1)", (str(media_dir),))
+        # 2: a VK series; 3: a web one; 4: one series with both kinds of source (position 0 is VK, 1 is web).
+        insert_series(conn, id=2, name="Т2", name_en="T2", site="vk", save_path=str(media_dir), state="waiting",
+                      url="https://vkvideo.ru/@c|т", source_type="vk_video", vk_search_mode="get_all",
+                      parser_profile_id=1)
+        insert_series(conn, id=3, name="Т3", name_en="T3", site="1.ruchime.org", save_path=str(media_dir),
+                      state="waiting", url="https://1.ruchime.org/release/x", source_type="web_video",
+                      vk_search_mode="get_all", parser_profile_id=1)
+        insert_series(conn, id=4, name="Т4", name_en="T4", site="mixed", save_path=str(media_dir), state="waiting",
+                      sources=[source(url="https://vkvideo.ru/@c|т4", source_type="vk_video", parser_profile_id=1),
+                               source(url="https://1.ruchime.org/release/y", source_type="web_video",
+                                      parser_profile_id=1)])
         conn.commit()
     return str(db_path), str(media_dir)
 
 
 def _add_item(db_path, uid, episode, *, plan="in_plan_single",
               status="pending", filename=None, ignored=0, download_url=None,
-              series_id=2, source_url=None, superseded_by=None):
+              series_id=2, source_url=None, superseded_by=None, source_id=None):
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             "INSERT INTO media_items (series_id, unique_id, source_title, "
             "episode_start, plan_status, status, is_ignored_by_user, "
             "source_url, publication_date, slicing_status, is_available, "
-            "final_filename, download_url, superseded_by) VALUES (?, ?, ?, ?, ?, "
-            "?, ?, ?, '2026-01-01 00:00:00', 'none', 1, ?, ?, ?)",
+            "final_filename, download_url, superseded_by, source_id) VALUES (?, ?, ?, ?, ?, "
+            "?, ?, ?, '2026-01-01 00:00:00', 'none', 1, ?, ?, ?, ?)",
             (series_id, uid, f"Серия {episode}", episode, plan, status, ignored,
              source_url or f"https://vk.com/video-1_{episode}", filename,
-             download_url, superseded_by))
+             download_url, superseded_by, source_id))
         conn.commit()
+
+
+def _source_id(db_path, series_id, position=0):
+    """The id of the source of a series at a position, as the factory wrote it."""
+    with sqlite3.connect(db_path) as conn:
+        return conn.execute("SELECT id FROM series_sources WHERE series_id=? AND position=?",
+                            (series_id, position)).fetchone()[0]
 
 
 @pytest.fixture
@@ -533,33 +541,6 @@ async def test_cancel_unknown_task_errors(system):
         await probe.request("downloads.cancel", {"task_id": 999}, timeout=5)
 
 
-def test_is_allvideo_url():
-    assert ytdlp.is_allvideo_url("https://fsst.online/embed/992227/")
-    assert ytdlp.is_allvideo_url("https://incvideo1.online/embed/123/")
-    assert not ytdlp.is_allvideo_url("https://vk.com/video-170515668_456247993")
-    assert not ytdlp.is_allvideo_url("https://vkvideo.ru/video_ext.php")
-
-
-@pytest.mark.asyncio
-async def test_download_allvideo_route(tmp_path):
-    out_file = str(tmp_path / "test.mp4")
-    progress = []
-
-    async def on_progress(p):
-        progress.append(p)
-
-    with patch.object(ytdlp, "_resolve_allvideo_stream") as mock_resolve, \
-         patch.object(ytdlp, "_download_direct_ffmpeg") as mock_ffmpeg:
-        mock_resolve.return_value = ("https://cdn.example.com/test.mp4", "https://incvideo1.online/")
-        mock_ffmpeg.return_value = (True, "")
-
-        ok, err = await ytdlp.download("https://fsst.online/embed/992227/", out_file, on_progress)
-        assert ok is True
-        assert err == ""
-        mock_resolve.assert_called_once_with("https://fsst.online/embed/992227/")
-        mock_ffmpeg.assert_called_once_with("https://cdn.example.com/test.mp4", {"Referer": "https://incvideo1.online/"}, out_file, on_progress)
-
-
 @pytest.mark.asyncio
 async def test_download_direct_stream_with_headers(tmp_path):
     out_file = str(tmp_path / "direct.mp4")
@@ -584,6 +565,22 @@ async def test_download_direct_stream_with_headers(tmp_path):
             out_file,
             on_progress
         )
+
+
+@pytest.mark.asyncio
+async def test_a_bare_mp4_link_is_read_without_headers_of_any_site(tmp_path):
+    """Headers belong to the player that resolved the stream; the downloader adds none of its own."""
+    out_file = str(tmp_path / "bare.mp4")
+
+    async def on_progress(_data):
+        pass
+
+    with patch.object(ytdlp, "_download_direct_ffmpeg") as mock_ffmpeg:
+        mock_ffmpeg.return_value = (True, "")
+        ok, _ = await ytdlp.download("https://cdn.example.com/video_1080p.mp4", out_file, on_progress)
+
+    assert ok is True
+    mock_ffmpeg.assert_called_once_with("https://cdn.example.com/video_1080p.mp4", {}, out_file, on_progress)
 
 
 @pytest.mark.asyncio
@@ -743,12 +740,12 @@ async def test_transient_stream_error_is_retried(system, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_web_series_stream_request_failure_never_reaches_ytdlp(system, monkeypatch):
+async def test_candidate_of_a_web_source_never_reaches_ytdlp_when_the_stream_request_fails(system, monkeypatch):
     from modules.downloads import module as downloads_module
     monkeypatch.setattr(downloads_module, "RETRY_DELAY_S", 0.01)
     _, fake, dl, probe, db_path, _ = system
     fake.stream_raises.add(PAGE_URL)
-    _add_item(db_path, "web1", 1, series_id=3, source_url=PAGE_URL)
+    _add_item(db_path, "web1", 1, series_id=3, source_url=PAGE_URL, source_id=_source_id(db_path, 3))
 
     probe.publish_event("downloads.dispatch", {"series_id": 3})
 
@@ -757,15 +754,87 @@ async def test_web_series_stream_request_failure_never_reaches_ytdlp(system, mon
 
 
 @pytest.mark.asyncio
-async def test_vk_series_keeps_ytdlp_fallback_when_stream_request_fails(system):
+async def test_candidate_of_a_vk_source_keeps_the_ytdlp_fallback_when_the_stream_request_fails(system):
     _, fake, dl, probe, db_path, _ = system
     fake.stream_raises.add("https://vk.com/video-1_1")
-    _add_item(db_path, "uid1", 1)
+    _add_item(db_path, "uid1", 1, source_id=_source_id(db_path, 2))
 
     probe.publish_event("downloads.dispatch", {"series_id": 2})
 
     assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "completed")
     assert dl.started == ["https://vk.com/video-1_1"]
+
+
+@pytest.mark.asyncio
+async def test_in_one_series_the_fallback_follows_the_source_of_each_candidate(system, monkeypatch):
+    """The kind of the series is mixed (a VK source and a web one): the decision is made per candidate."""
+    from modules.downloads import module as downloads_module
+    monkeypatch.setattr(downloads_module, "RETRY_DELAY_S", 0.01)
+    _, fake, dl, probe, db_path, _ = system
+    vk_link, web_link = "https://vk.com/video-1_1", PAGE_URL
+    fake.stream_raises.update({vk_link, web_link})
+    _add_item(db_path, "vk", 1, series_id=4, source_url=vk_link, source_id=_source_id(db_path, 4, 0))
+    _add_item(db_path, "web", 2, series_id=4, source_url=web_link, source_id=_source_id(db_path, 4, 1))
+
+    probe.publish_event("downloads.dispatch", {"series_id": 4})
+
+    assert await _wait(lambda: _items(db_path)["vk"]["status"] == "completed"
+                       and _items(db_path)["web"]["status"] == "error")
+    assert dl.started == [vk_link]
+
+
+@pytest.mark.asyncio
+async def test_a_row_without_a_source_takes_the_type_of_the_only_source_of_its_series(system, monkeypatch):
+    from modules.downloads import module as downloads_module
+    monkeypatch.setattr(downloads_module, "RETRY_DELAY_S", 0.01)
+    _, fake, dl, probe, db_path, _ = system
+    fake.stream_raises.update({"https://vk.com/video-1_1", PAGE_URL})
+    _add_item(db_path, "vk", 1, series_id=2)
+    _add_item(db_path, "web", 2, series_id=3, source_url=PAGE_URL)
+
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
+    probe.publish_event("downloads.dispatch", {"series_id": 3})
+
+    assert await _wait(lambda: _items(db_path)["vk"]["status"] == "completed"
+                       and _items(db_path)["web"]["status"] == "error")
+    assert dl.started == ["https://vk.com/video-1_1"]
+
+
+@pytest.mark.asyncio
+async def test_a_row_without_a_source_in_a_series_of_several_sources_is_a_web_one(system, monkeypatch):
+    from modules.downloads import module as downloads_module
+    monkeypatch.setattr(downloads_module, "RETRY_DELAY_S", 0.01)
+    _, fake, dl, probe, db_path, _ = system
+    fake.stream_raises.add("https://vk.com/video-1_1")
+    _add_item(db_path, "old", 1, series_id=4)
+
+    probe.publish_event("downloads.dispatch", {"series_id": 4})
+
+    assert await _wait(lambda: _items(db_path)["old"]["status"] == "error")
+    assert dl.started == []
+
+
+@pytest.mark.asyncio
+async def test_a_removed_source_is_not_guessed_when_the_stream_request_fails(system, monkeypatch):
+    from modules.downloads import module as downloads_module
+    monkeypatch.setattr(downloads_module, "RETRY_DELAY_S", 0.01)
+    _, fake, dl, probe, db_path, _ = system
+    fake.stream_raises.add("https://vk.com/video-1_1")
+    _add_item(db_path, "gone", 1, series_id=2, source_id=9999)
+
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
+
+    assert await _wait(lambda: _items(db_path)["gone"]["status"] == "error")
+    assert dl.started == []
+
+
+def test_the_source_of_a_candidate():
+    vk, web = {"id": 5, "source_type": "vk_video"}, {"id": 6, "source_type": "web_video"}
+    assert source_of_candidate([vk, web], 6) is web
+    assert source_of_candidate([vk], None) is vk
+    assert source_of_candidate([vk, web], None) is None
+    assert source_of_candidate([vk], 7) is None
+    assert source_of_candidate([], None) is None
 
 
 def _touch(media_dir, name):
@@ -927,6 +996,86 @@ async def test_error_task_outside_plan_is_dropped(system):
     probe.publish_event("scan.plan.updated", {"series_id": 2})
 
     assert await _wait(lambda: _tasks(db_path) == [])
+
+
+def _add_task(db_path, uid, status, save_path):
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO download_tasks (task_key, series_id, video_url, save_path, status, task_type) "
+                     "VALUES (?, 2, 'u', ?, ?, 'vk_video')", (uid, save_path, status))
+        conn.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["pending", "error"])
+async def test_a_waiting_or_failed_task_without_a_row_goes_with_what_it_left(system, state):
+    _, _, _, probe, db_path, media_dir = system
+    save_path = os.path.join(media_dir, "ghost.mp4")
+    leftover = save_path + ".part"
+    open(leftover, "wb").close()
+    _add_task(db_path, "ghost", state, save_path)
+
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+
+    assert await _wait(lambda: _tasks(db_path) == [] and not os.path.exists(leftover))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["downloading", "processing"])
+async def test_an_active_task_without_a_row_is_cancelled_and_leaves_nothing_behind(system, state):
+    """Scan deleted the row of a slot that lost: the download would end with a file nobody registers."""
+    _, _, dl, probe, db_path, _ = system
+    dl.gate = asyncio.Event()  # the download is held in the middle
+    _add_item(db_path, "uid1", 1)
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
+    assert await _wait(lambda: dl.concurrent == 1)
+    task = _tasks(db_path)[0]
+    partial = task["save_path"] + ".download.mp4"
+    open(partial, "wb").close()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE download_tasks SET status=? WHERE id=?", (state, task["id"]))
+        conn.execute("DELETE FROM media_items WHERE unique_id='uid1'")
+        conn.commit()
+
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+
+    assert await _wait(lambda: _tasks(db_path) == [] and dl.concurrent == 0)
+    assert not os.path.exists(partial)
+    assert _items(db_path) == {}
+
+
+@pytest.mark.asyncio
+async def test_a_finished_file_of_a_task_without_a_row_stays(system):
+    _, _, _, probe, db_path, media_dir = system
+    finished = os.path.join(media_dir, "ghost.mp4")
+    open(finished, "wb").close()
+    _add_task(db_path, "ghost", "error", finished)
+
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+
+    assert await _wait(lambda: _tasks(db_path) == [])
+    assert os.path.exists(finished)
+
+
+@pytest.mark.asyncio
+async def test_an_active_task_whose_row_only_left_the_plan_is_left_to_finish(system):
+    """The row exists, so the file will be registered; only a task that has not begun goes with the plan."""
+    _, _, dl, probe, db_path, _ = system
+    dl.gate = asyncio.Event()
+    _add_item(db_path, "uid1", 1)
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
+    assert await _wait(lambda: dl.concurrent == 1)
+    _add_item(db_path, "uid2", 2, plan="redundant")
+    _add_task(db_path, "uid2", "pending", "/tmp/x")  # the sentinel: it goes when the update is handled
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE media_items SET plan_status='redundant' WHERE unique_id='uid1'")
+        conn.commit()
+
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+
+    assert await _wait(lambda: [t["task_key"] for t in _tasks(db_path)] == ["uid1"])
+    assert dl.concurrent == 1
+    dl.gate.set()
+    assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "completed")
 
 
 

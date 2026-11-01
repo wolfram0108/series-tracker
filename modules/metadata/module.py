@@ -17,7 +17,8 @@ import json
 
 import httpx
 
-from core import BaseModule, BusRequestError, is_video_source
+from core import BaseModule, BusRequestError
+from core.contracts import SeriesKind
 from core.db import Database
 from core.envelope import Envelope
 
@@ -172,7 +173,7 @@ class MetadataModule(BaseModule):
     async def _real_seasons(self, series: dict) -> set[int]:
         """Реальные сезоны из нейминга (≠0). Источник — владелец данных:
         торрент → torrents.seasons, VK → scan.seasons (Р-7, чужое — query)."""
-        topic = ("scan.seasons" if is_video_source(series.get("source_type"))
+        topic = ("scan.seasons" if series.get("kind") == SeriesKind.VIDEO
                  else "torrents.seasons")
         try:
             reply = await self.request(topic, {"series_id": series["id"]},

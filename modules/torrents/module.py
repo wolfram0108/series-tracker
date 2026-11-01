@@ -63,8 +63,7 @@ import base64
 import json
 import os
 
-from core import BaseModule, BusRequestError
-from core import storage
+from core import BaseModule, BusRequestError, storage, torrent_profile_id
 from core.db import Database
 from core.envelope import Envelope
 from core.retry import UNTIMED, Budget, retrying
@@ -785,7 +784,7 @@ class TorrentsModule(BaseModule):
                                     {"series_id": series_id})
         files = await self.repo.files_for_series(series_id)
         plan: list[dict] = []
-        has_profile = bool(series.get("parser_profile_id"))
+        profile_id = torrent_profile_id(series)
         for f in files:
             current = f.get("renamed_path") or f["original_path"]
             present = await storage.call(
@@ -797,7 +796,7 @@ class TorrentsModule(BaseModule):
             meta_dict = json.loads(meta) if meta else {}
             is_non_video = (meta_dict.get("is_extra")
                             or meta_dict.get("media_type") in ("audio", "subtitles", "extra"))
-            if not has_profile or is_non_video:
+            if profile_id is None or is_non_video:
                 # как в оригинале: без профиля или для не-видео — сохранённые метаданные
                 preview = f.get("renamed_path") or meta_dict.get("target_path") or current
                 plan.append({
@@ -810,7 +809,7 @@ class TorrentsModule(BaseModule):
                     "is_mismatch": False, **excluded})
                 continue
             reply = await self.request("rules.format_torrent_file", {
-                "series": series,
+                "series": series, "profile_id": profile_id,
                 "file_basename": os.path.basename(f["original_path"]),
                 "original_path": f["original_path"]}, timeout=60)
             preview = reply["filename"] or current

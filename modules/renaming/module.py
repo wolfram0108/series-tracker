@@ -1,11 +1,13 @@
 """Модуль renaming — приведение имён файлов к строгому формату (Р-15).
 
 Queries:
-  renaming.reprocess {series_id} — массовая переобработка имён по типу
-      сериала (контракт Р-12: сканер вызывает перед каждым сканом; тот
-      же запрос — «сохранили свойства сериала в UI», этап 5):
-      vk_video → переименование скачанных файлов и нарезанных детей на
-      диске; torrent → ревизия имён файлов всех активных раздач в qBit.
+  renaming.reprocess {series_id} — массовая переобработка имён по виду
+      сериала `kind` из catalog (контракт Р-12: сканер вызывает перед
+      каждым сканом; тот же запрос — «сохранили свойства сериала в UI»,
+      этап 5): video → переименование скачанных файлов и нарезанных детей
+      на диске по готовым номерам строк (профиль не нужен); torrent →
+      ревизия имён файлов всех активных раздач в qBit по профилю
+      торрентного источника (без профиля — пропуск).
   renaming.process_torrent {series_id, qb_hash, dry_run?} —
       переименование файлов одной раздачи (контракт Р-14: стадия
       'renaming' конвейера). dry_run — только разбор состава правилами
@@ -30,8 +32,8 @@ import asyncio
 import os
 import re
 
-from core import BaseModule, BusRequestError, is_video_source
-from core import storage
+from core import BaseModule, BusRequestError, storage, torrent_profile_id
+from core.contracts import SeriesKind
 from core.db import Database
 from core.envelope import Envelope
 
@@ -105,16 +107,12 @@ class RenamingModule(BaseModule):
         series_id = env.payload["series_id"]
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
-        if not series.get("parser_profile_id"):
-            return {"preview": [], "needs_rename_count": 0}
         items = await self.request("scan.media.list",
                                    {"series_id": series_id})
         items_map = {i["unique_id"]: i for i in items}
         preview = []
         needs = 0
         for item in items:
-            if not item.get("source_title"):
-                continue
             current = item.get("final_filename")
             reply = await self.request("rules.format_filename", {
                 "series": series, "media_item": item,
@@ -164,19 +162,20 @@ class RenamingModule(BaseModule):
         async with lock:  # повторный запрос дожидается и выполняется следом
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
-            if not series.get("parser_profile_id"):
+            video = series["kind"] == SeriesKind.VIDEO
+            # Video names come from the numbers of the rows; only a torrent file is named by a profile.
+            if not video and torrent_profile_id(series) is None:
                 self.log.warning("переобработка %d пропущена: профиль "
                                  "правил не назначен", series_id)
                 return {"renamed": 0, "skipped": True}
 
             await self.repo.delete_errors(series_id)
-            task_type = ("mass_vk_reprocess"
-                         if is_video_source(series["source_type"])
+            task_type = ("mass_vk_reprocess" if video
                          else "mass_torrent_reprocess")
             task_id = await self.repo.create(series_id, task_type)
             self._busy(series_id, True)
             try:
-                if is_video_source(series["source_type"]):
+                if video:
                     renamed = await self._reprocess_vk(series)
                 else:
                     renamed = await self._reprocess_torrents(series)
@@ -206,8 +205,7 @@ class RenamingModule(BaseModule):
 
         for item in items:
             if item.get("status") != "completed" \
-                    or not item.get("final_filename") \
-                    or not item.get("source_title"):
+                    or not item.get("final_filename"):
                 continue
             old_rel = item["final_filename"]
             reply = await self.request("rules.format_filename", {
@@ -343,10 +341,12 @@ class RenamingModule(BaseModule):
         matched_videos: list[dict] = []
 
         # 1. Сначала обрабатываем видеофайлы
+        profile_id = torrent_profile_id(series)
         video_items = [it for it in all_items if it["is_video"]]
         for v in video_items:
             reply = await self.request("rules.format_torrent_file", {
                 "series": series,
+                "profile_id": profile_id,
                 "file_basename": v["basename"],
                 "original_path": v["original_path"]})
             new_path = reply["filename"]

@@ -5,7 +5,10 @@ final_filename.
 
 События (входящие):
   scan.plan.updated {series_id} — план пересчитан: ТОЛЬКО усыновление
-      готовых на диске файлов + чистка pending вне плана + снос файлов,
+      готовых на диске файлов + чистка задач без строки плана (задача без
+      строки media_items останавливается в любом состоянии вместе с
+      недокачанным файлом; ждущая или упавшая, чья строка вышла из плана,
+      снимается; идущая, чья строка осталась, доканчивается) + снос файлов,
       вытесненных победителем слота. Загрузку НЕ запускает (инвариант:
       усыновление ≠ загрузка; открытие композиции и сохранение свойств не
       должны качать).
@@ -54,6 +57,12 @@ events downloads.fetch.started {key, series_id, path} (the download left the que
 downloads.fetch.finished {key, ok, error, transient, path, series_id}.
 It has a limit of its own, the setting max_parallel_dub_downloads (2 by default),
 independent of the queue of the library.
+
+The stream of a candidate is resolved by sources.video.stream only; this module knows no site. When that
+request fails, yt-dlp may take the link over only if the candidate belongs to a vk_video source of its
+series (media_items.source_id -> catalog.series.get sources); a web_video candidate fails with the error,
+since yt-dlp would scrape a foreign player. A row without source_id (earlier versions) takes the type of
+the only source of the series, and is a web_video one when the series has several.
 """
 from __future__ import annotations
 
@@ -61,8 +70,8 @@ import asyncio
 import os
 import time
 
-from core import BaseModule, BusRequestError, is_video_source
-from core import storage
+from core import BaseModule, BusRequestError, storage
+from core.contracts import SeriesKind, SourceType
 from core.db import Database
 from core.envelope import Envelope
 from core.retry import UNTIMED, Budget, retrying
@@ -85,6 +94,21 @@ _TRANSIENT_MARKERS = ("timed out", "timeout", "connection", "network", "обры
 def _inside(base: str, path: str) -> bool:
     root = os.path.realpath(base)
     return os.path.commonpath([root, os.path.realpath(path)]) == root
+
+
+async def _never() -> bool:
+    """The answer of a job that has no candidate behind it: yt-dlp is never the way out of a failed request."""
+    return False
+
+
+def source_of_candidate(sources: list[dict], source_id: int | None) -> dict | None:
+    """The source a candidate was found by; None when it is not known and not the only one of the series.
+
+    A row of an earlier version has no source_id: the only source of its series is its source. A source_id that
+    no source of the series has any more belongs to a removed source, so it is not guessed."""
+    if source_id is not None:
+        return next((source for source in sources if source["id"] == source_id), None)
+    return sources[0] if len(sources) == 1 else None
 
 
 def _transient_download_error(error: str) -> bool:
@@ -141,7 +165,7 @@ class DownloadsModule(BaseModule):
             all_series = await self.request("catalog.series.list", {},
                                             timeout=30)
             for s in all_series:
-                if is_video_source(s.get("source_type")):
+                if s.get("kind") == SeriesKind.VIDEO:
                     await self._contribute(s["id"])
         except BusRequestError as exc:
             self.log.warning("каталог недоступен при старте: %s", exc)
@@ -211,7 +235,7 @@ class DownloadsModule(BaseModule):
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
         adopted = await self._adopt_existing_files(series)
-        dropped = await self.repo.drop_pending_outside_plan(series_id)
+        dropped = await self._drop_tasks_without_plan_row(series_id)
         retired = await self._retire_superseded(series)
         self.log.info("план %d: усыновлено %d, вычищено вне плана %d, "
                       "вытесненных файлов снесено %d",
@@ -371,22 +395,39 @@ class DownloadsModule(BaseModule):
         принципу «удаление не удаляет файлы»), затем вычистить vk-задачи."""
         series_id = env.payload["series_id"]
         for task in await self.repo.tasks_for_series(series_id):
-            runner = self._active.get(task["id"])
-            if runner is not None and not runner.done():
-                runner.cancel()  # ytdlp в finally убьёт процесс и .download/.remux
-                try:
-                    await runner
-                except BaseException:  # noqa: BLE001 — ждём отмены
-                    pass
-            sp = task.get("save_path")
-            # final отсутствует → загрузка не закончена → снести полуфайлы;
-            # если final на месте — это законченный файл, не трогаем.
-            if sp and not await storage.call(os.path.exists, sp):
-                await storage.call(self._remove_partial, sp, timeout=storage.REMOVE_TIMEOUT_S, owns=sp)
+            await self._stop_task(task)
         await self.repo.delete_for_series(series_id)
         await self._broadcast_queue()
         self.publish_event("series.purged",
                            {"series_id": series_id, "owner": self.name})
+
+    async def _cancel_runner(self, task_id: int) -> None:
+        """Stops the running download of a task and waits for it; ytdlp kills its processes in a finally."""
+        runner = self._active.get(task_id)
+        if runner is not None and not runner.done():
+            runner.cancel()
+            try:
+                await runner
+            except BaseException:  # noqa: BLE001 — ждём завершения отмены
+                pass
+
+    async def _stop_task(self, task: dict) -> None:
+        """Stops a task and removes what its download left half-written; a finished file stays."""
+        await self._cancel_runner(task["id"])
+        path = task.get("save_path")
+        # final отсутствует → загрузка не закончена → снести полуфайлы;
+        # если final на месте — это законченный файл, не трогаем.
+        if path and not await storage.call(os.path.exists, path):
+            await storage.call(self._remove_partial, path, timeout=storage.REMOVE_TIMEOUT_S, owns=path)
+
+    async def _drop_tasks_without_plan_row(self, series_id: int) -> int:
+        """A task lives while its row does: one without a row is stopped whatever its state (its file would
+        land on disk with nobody to register it); a waiting or failed one whose row left the plan just goes."""
+        gone = await self.repo.tasks_without_row(series_id)
+        for task in gone:
+            await self._stop_task(task)
+            await self.repo.delete_task(task["id"])
+        return len(gone) + await self.repo.drop_pending_outside_plan(series_id)
 
     async def on_cancel(self, env: Envelope) -> dict:
         """Точечная отмена загрузки (приказ пользователя): убить активный
@@ -401,13 +442,7 @@ class DownloadsModule(BaseModule):
 
         # 1) остановить активную загрузку — cancel прерывает _run_download,
         # ytdlp.download в finally убивает процесс
-        runner = self._active.get(task_id)
-        if runner is not None and not runner.done():
-            runner.cancel()
-            try:
-                await runner
-            except BaseException:  # noqa: BLE001 — ждём завершения отмены
-                pass
+        await self._cancel_runner(task_id)
 
         # 2) удалить недокачанный файл и временные артефакты yt-dlp
         if task.get("save_path"):
@@ -501,7 +536,7 @@ class DownloadsModule(BaseModule):
                     await self._broadcast_queue()
 
             stream_url, stream_headers, stream_error, progressive = await self._resolve_stream(
-                task["video_url"], is_web=lambda: self._is_web_series(series_id))
+                task["video_url"], ytdlp_fallback=lambda: self._candidate_may_use_ytdlp(series_id, uid))
 
             if stream_error is not None:
                 ok, (error, transient) = False, stream_error
@@ -552,11 +587,12 @@ class DownloadsModule(BaseModule):
             await self._pump()
 
     async def _resolve_stream(self, url: str, *, max_height: int | None = None,
-                              is_web) -> tuple[str, dict | None, tuple[str, bool] | None, bool]:
+                              ytdlp_fallback) -> tuple[str, dict | None, tuple[str, bool] | None, bool]:
         """(stream url, headers, (error, transient), progressive) of a link, via the provider that owns it.
 
-        `is_web` is True or an async callable: a failed request is an error for a web link, since
-        its page is no stream and yt-dlp would scrape a foreign player."""
+        `ytdlp_fallback` is an async callable asked only when the request fails: True hands the link to
+        the downloader as it is, False makes the failure the error of the job, since a page of a web
+        player is no stream and yt-dlp would scrape a foreign player."""
         payload = {"url": url, **({"max_height": max_height} if max_height else {})}
         try:
             reply = await self.request("sources.video.stream", payload,
@@ -566,11 +602,10 @@ class DownloadsModule(BaseModule):
             if reply.get("handled"):
                 return reply["stream_url"], reply.get("headers"), None, bool(reply.get("progressive"))
         except Exception as exc:
-            if is_web is True or await is_web():
+            if not await ytdlp_fallback():
                 return url, None, (f"поток не получен: {exc}", True), False
             self.log.debug("sources.video.stream не обработан для %s: %s", url, exc)
         return url, None, None, False
-
 
     async def on_fetch(self, env: Envelope) -> None:
         job = {k: env.payload.get(k) for k in ("key", "url", "path", "max_height", "series_id")}
@@ -610,7 +645,7 @@ class DownloadsModule(BaseModule):
 
         async def attempt_once() -> tuple[bool, str, bool]:
             stream_url, headers, stream_error, progressive = await self._resolve_stream(
-                job["url"], max_height=job.get("max_height"), is_web=True)
+                job["url"], max_height=job.get("max_height"), ytdlp_fallback=_never)
             if stream_error is not None:
                 return (False, *stream_error)
             kw: dict = {"threads": self._threads}
@@ -645,13 +680,16 @@ class DownloadsModule(BaseModule):
             "path": path, "series_id": job.get("series_id")})
         self._fetch_pump()
 
-    async def _is_web_series(self, series_id: int) -> bool:
+    async def _candidate_may_use_ytdlp(self, series_id: int, unique_id: str) -> bool:
+        """Whether the downloader may take over a candidate whose stream request failed: only a VK one."""
         try:
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id}, timeout=10)
         except BusRequestError:
-            return False
-        return series.get("source_type") == "web_video"
+            return False  # the source is unknown: an error that is retried, not a scrape of a foreign player
+        source = source_of_candidate(series.get("sources") or [],
+                                     await self.repo.source_of_item(unique_id))
+        return source is not None and source["source_type"] == SourceType.VK_VIDEO
 
     # --- свёртка статусов (Р-11) -----------------------------------------------------
 

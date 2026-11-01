@@ -12,6 +12,7 @@ from core import BaseModule, Bus, BusRequestError, Runner
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.library import LibraryModule
+from series_factory import insert_series
 
 
 class FakeNeighbours(BaseModule):
@@ -68,11 +69,8 @@ async def system(tmp_path):
     old_dir.mkdir()
     new_dir.mkdir()
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode) VALUES "
-            "(2, 'u|q', 'Т', 'Show', 'vk', ?, 'waiting', 'vk_video', 0, "
-            "'get_all')", (str(old_dir),))
+        insert_series(conn, id=2, name="Т", name_en="Show", site="vk", save_path=str(old_dir), state="waiting",
+                      url="u|q", source_type="vk_video", vk_search_mode="get_all")
         conn.commit()
     db = Database(str(db_path))
     bus = Bus()
@@ -146,7 +144,7 @@ async def test_vk_relocation_moves_files_and_chains_renaming(system):
 async def test_torrent_relocation_uses_set_location(system):
     bus, fake, probe, db_path, old_dir, new_dir = system
     with sqlite3.connect(db_path) as conn:
-        conn.execute("UPDATE series SET source_type='torrent' WHERE id=2")
+        conn.execute("UPDATE series_sources SET source_type='torrent' WHERE series_id=2")
         conn.commit()
     fake.active_torrents = [{"qb_hash": "h1"}, {"qb_hash": "h2"}]
     sub = bus.subscribe("library.relocation.finished")
@@ -164,7 +162,7 @@ async def test_torrent_relocation_uses_set_location(system):
 async def test_error_keeps_carrier_and_releases_busy(system):
     bus, fake, probe, db_path, _, new_dir = system
     with sqlite3.connect(db_path) as conn:
-        conn.execute("UPDATE series SET source_type='torrent' WHERE id=2")
+        conn.execute("UPDATE series_sources SET source_type='torrent' WHERE series_id=2")
         conn.commit()
     fake.active_torrents = [{"qb_hash": "h1"}]
     fake.fail_set_location = True

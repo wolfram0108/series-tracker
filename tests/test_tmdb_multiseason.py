@@ -12,6 +12,7 @@ from core.db import Database
 from modules.downloads.repository import DownloadsRepository
 from modules.scan.repository import ScanRepository
 from modules.torrents.repository import TorrentsRepository
+from series_factory import insert_series
 
 
 @pytest.fixture
@@ -22,10 +23,8 @@ def db_path(tmp_path):
                         "PATH": "/usr/bin:/bin"},
                    cwd=".", check=True, capture_output=True)
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode) VALUES "
-            "(1, 'u', 'T', 'T', 'kinozal', '/m', 'w', 'torrent', 0, 'search')")
+        insert_series(conn, id=1, name="T", name_en="T", site="kinozal", save_path="/m", state="w", url="u",
+                      source_type="torrent")
         # активная раздача + неактивная (её сезоны не считаются)
         conn.execute("INSERT INTO torrents (id, series_id, torrent_id, link, "
                      "is_active) VALUES (10,1,'t1','l1',1),(11,1,'t2','l2',0)")

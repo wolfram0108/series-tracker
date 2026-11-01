@@ -15,6 +15,7 @@ from core.db import Database
 from modules.slicing import SlicingModule
 from modules.slicing import chapters as ch
 from modules.slicing.module import run_ffmpeg
+from series_factory import insert_series
 
 
 # --- фильтр глав (порт эвристик 1:1) -------------------------------------------------
@@ -214,15 +215,10 @@ async def system(tmp_path):
     media.mkdir()
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO parser_profiles (id, name) VALUES (1, 'p')")
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode, "
-            "parser_profile_id) VALUES (2, 'u|q', 'Т', 'Show', 'vk', ?, "
-            "'waiting', 'vk_video', 0, 'get_all', 1)", (str(media),))
+        insert_series(conn, id=2, name="Т", name_en="Show", site="vk", save_path=str(media), state="waiting",
+                      url="u|q", source_type="vk_video", vk_search_mode="get_all", parser_profile_id=1)
         conn.commit()
-    series = {"id": 2, "name_en": "Show", "source_type": "vk_video",
-              "save_path": str(media), "parser_profile_id": 1,
-              "season": None}
+    series = {"id": 2, "name_en": "Show", "kind": "video", "save_path": str(media), "season": None}
     bus = Bus()
     fake = FakeNeighbours(bus, series)
     ffmpeg = FakeFfmpeg()
@@ -674,17 +670,13 @@ async def test_chapters_check_does_not_block_slicing(tmp_path):
     media = tmp_path / "media"; media.mkdir()
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO parser_profiles (id, name) VALUES (1, 'p')")
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode, "
-            "parser_profile_id) VALUES (2, 'u|q', 'Т', 'Show', 'vk', ?, "
-            "'waiting', 'vk_video', 0, 'get_all', 1)", (str(media),))
+        insert_series(conn, id=2, name="Т", name_en="Show", site="vk", save_path=str(media), state="waiting",
+                      url="u|q", source_type="vk_video", vk_search_mode="get_all", parser_profile_id=1)
         conn.commit()
     _add_compilation(db_path, slicing_status="none")
     open(os.path.join(media, "компиляция.mp4"), "wb").close()
 
-    series = {"id": 2, "name_en": "Show", "source_type": "vk_video",
-              "save_path": str(media), "parser_profile_id": 1, "season": None}
+    series = {"id": 2, "name_en": "Show", "kind": "video", "save_path": str(media), "season": None}
     bus = Bus()
     fake = FakeNeighbours(bus, series)
 

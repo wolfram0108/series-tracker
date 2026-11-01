@@ -65,8 +65,8 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from core import BaseModule, BusRequestError, ids
-from core.contracts import (CompositionReply, ReferenceChanged, SeriesSource, SourceType, VoiceSettingsView)
+from core import BaseModule, BusRequestError, ids, torrent_source
+from core.contracts import CompositionReply, ReferenceChanged, SeriesSource, VoiceSettingsView
 from core.db import Database
 from core.envelope import Envelope
 from core.ignored import parse_memory
@@ -117,10 +117,10 @@ def _sources_of(series: dict) -> list[SeriesSource]:
 
 def _torrent_source(series: dict) -> SeriesSource:
     """The source of a torrent series: the address and the profile of a torrent live in the source (Д-38)."""
-    found = next((each for each in _sources_of(series) if each.source_type == SourceType.TORRENT), None)
+    found = torrent_source(series)
     if found is None:
         raise ScanError(f"у сериала «{series.get('name')}» нет торрент-источника")
-    return found
+    return SeriesSource.model_validate(found)
 
 
 class ScanModule(BaseModule):

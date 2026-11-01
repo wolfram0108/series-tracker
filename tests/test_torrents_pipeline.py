@@ -14,6 +14,7 @@ from core.db import Database
 from modules.catalog import CatalogModule
 from modules.torrents import TorrentsModule
 from modules.torrents import pipeline as pl
+from series_factory import insert_series
 
 
 # --- чистая машина -----------------------------------------------------------------
@@ -155,11 +156,8 @@ def db_path(tmp_path):
                         "PATH": "/usr/bin:/bin"},
                    cwd=".", check=True, capture_output=True)
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode) VALUES "
-            "(1, 'http://x', 'Т', 'T', 'kinozal', '/media/t', 'waiting', "
-            "'torrent', 0, 'search')")
+        insert_series(conn, id=1, name="Т", name_en="T", site="kinozal", save_path="/media/t", state="waiting",
+                      url="http://x", source_type="torrent")
         conn.commit()
     return str(path)
 
@@ -1046,3 +1044,67 @@ async def test_fully_excluded_release_is_not_ready(system):
 
     env = await asyncio.wait_for(sub.queue.get(), 3)
     assert env.payload["flags"]["ready"] is False
+
+
+# --- composition: the profile of the torrent source goes to the constructor ------------------
+
+class FakeRules(BaseModule):
+    name = "fake_rules"
+
+    def __init__(self, bus):
+        self.asked: list[dict] = []
+        super().__init__(bus)
+
+    def register(self):
+        self.handle("rules.format_torrent_file", self.on_format)
+
+    async def on_format(self, env):
+        self.asked.append(env.payload)
+        return {"filename": "Season 01/T e01.mkv", "extracted": {"episode": 1}}
+
+
+@pytest.fixture
+async def composition_system(db_path):
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO parser_profiles (id, name) VALUES (7, 'профиль')")
+        conn.execute("INSERT INTO torrents (id, series_id, torrent_id, link, is_active, qb_hash) "
+                     "VALUES (10, 1, 'tc', 'l', 1, 'hc')")
+        conn.execute("INSERT INTO torrent_files (torrent_db_id, original_path, status, extracted_metadata) "
+                     "VALUES (10, 'raw/01.mkv', 'renamed', '{\"episode\": 1}')")
+        conn.execute("INSERT INTO download_tasks (task_key, series_id, task_type, status, progress, attempts) "
+                     "VALUES ('hc', 1, 'torrent', 'pausedUP', 100, 0)")
+        conn.commit()
+    bus = Bus()
+    db = Database(db_path)
+    rules = FakeRules(bus)
+    qbt = FakeQbt()  # the release is there, or the start of the module drops it as lost
+    qbt.torrents["hc"] = {"state": "pausedUP", "progress": 1.0}
+    qbt.files["hc"] = [_qb_file("raw/01.mkv", 0)]
+    torrents = TorrentsModule(bus, db, qbt=qbt, pipeline_poll=0.02, monitor_active=0.05, monitor_idle=0.2)
+    runner = Runner(bus, [rules, CatalogModule(bus, db), torrents, Probe(bus)])
+    await runner.start()
+    yield rules, runner.modules[-1], db_path
+    await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_composition_asks_the_constructor_with_the_profile_of_the_torrent_source(composition_system):
+    rules, probe, db_path = composition_system
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE series_sources SET parser_profile_id=7 WHERE series_id=1")
+        conn.commit()
+
+    plan = await probe.request("torrents.composition", {"series_id": 1}, timeout=10)
+
+    assert [asked["profile_id"] for asked in rules.asked] == [7]
+    assert plan[0]["renamed_path_preview"] == "Season 01/T e01.mkv"
+
+
+@pytest.mark.asyncio
+async def test_composition_without_a_profile_keeps_the_stored_names_and_asks_nobody(composition_system):
+    rules, probe, _ = composition_system
+
+    plan = await probe.request("torrents.composition", {"series_id": 1}, timeout=10)
+
+    assert rules.asked == []
+    assert plan[0]["renamed_path_preview"] == "raw/01.mkv"
