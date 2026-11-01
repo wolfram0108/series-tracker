@@ -27,13 +27,20 @@ Queries/commands конвейера (контракты Р-12, их ждёт sca
   torrents.fs.verify {series_id}        → {missing, recheck_started}
       — проверка файлов на диске + recheck-задачи для пропавших
       (вызывается сканом и при открытии модалки — решение Р-13/Р-14)
-  torrents.preview.parse_torrent {torrent_id, content_b64}
-      — список файлов из .torrent ЛОКАЛЬНО (bencode), без qBit
-  torrents.preview.fetch_magnet {torrent_id, magnet}
-      — добор метаданных magnet через qBit (STARTED в категории
-        st-naming-preview → файлы → удаление); эфемерно, НЕ ресьюмится;
-        зомби-безопасность: cleanup по infohash + sweep категории в on_start.
-      Оба — fire-and-forget, результат событием preview.ready/failed
+      A series of kind `video` answers {0, 0} at once: it has no torrent files.
+  torrents.preview.fetch {items: [{torrent_id, magnet?, link?}]}
+      — command: the file lists of the releases of the add form, for the
+        preview of the naming. Each release ends with the event
+        torrents.preview.ready or .failed, both published by this module only;
+        there is no reply. The releases go in order: a magnet gets its
+        metadata through qBit (added STARTED in the category
+        st-naming-preview, files read, torrent deleted; ephemeral, not
+        resumed; zombie-safe: cleanup by infohash and a sweep of the category
+        in on_start); a link gets its .torrent from sources
+        (sources.torrent_file.get, with its cache) and the file list is read
+        locally (bencode), without qBit. A release with neither a magnet nor a
+        link, or whose .torrent was not got or not parsed, ends with
+        preview.failed and the reason.
 
 События: torrents.queue.changed {count, tasks} (контракт SSE
 agent_queue_update; count=0 — сигнал scan'у назначить следующий проход),
@@ -64,6 +71,7 @@ import json
 import os
 
 from core import BaseModule, BusRequestError, storage, torrent_profile_id
+from core.contracts import SeriesKind
 from core.db import Database
 from core.envelope import Envelope
 from core.retry import UNTIMED, Budget, retrying
@@ -138,10 +146,8 @@ class TorrentsModule(BaseModule):
         self.handle("torrents.add", self.on_add)
         self.handle("torrents.info.get", self.on_info)
         self.handle("torrents.files.get", self.on_files)
-        self.handle("torrents.preview.parse_torrent",
-                    self.on_preview_parse_torrent, concurrent=True)
-        self.handle("torrents.preview.fetch_magnet",
-                    self.on_preview_fetch_magnet, concurrent=True)
+        self.handle("torrents.preview.fetch", self.on_preview_fetch,
+                    concurrent=True)
         self.handle("torrents.pause", self.on_pause)
         self.handle("torrents.resume", self.on_resume)
         self.handle("torrents.recheck", self.on_recheck)
@@ -310,13 +316,38 @@ class TorrentsModule(BaseModule):
 
     # --- предпросмотр нейминга при добавлении (фоновый добор списка файлов) --------
 
-    async def on_preview_parse_torrent(self, env: Envelope) -> None:
-        """.torrent → список файлов ЛОКАЛЬНО (bencode), без qBit. Результат —
-        событием torrents.preview.ready (единый канал с magnet-веткой)."""
-        p = env.payload
-        tid = p.get("torrent_id")
+    async def on_preview_fetch(self, env: Envelope) -> None:
+        """The releases of the add form to file lists, by preview.ready/failed. The handler is concurrent:
+        waiting for a .torrent from sources does not hold the queue."""
+        for item in (env.payload or {}).get("items") or []:
+            tid = item.get("torrent_id")
+            if item.get("magnet"):
+                await self._preview_fetch_magnet(tid, item["magnet"])
+            elif item.get("link"):
+                await self._preview_fetch_file(tid, item["link"])
+            else:
+                self._emit_preview_failed(
+                    tid, None, "у раздачи нет ни magnet, ни ссылки на .torrent")
+
+    async def _preview_fetch_file(self, tid, link: str) -> None:
+        """A .torrent by its link: sources gives the file (cache, polite pauses to the tracker), the file
+        list is read locally."""
         try:
-            content = base64.b64decode(p["content_b64"])
+            reply = await self.request(
+                "sources.torrent_file.get",
+                {"url": link, "torrent_id": tid}, timeout=60)
+        except (BusRequestError, asyncio.TimeoutError) as exc:
+            self._emit_preview_failed(
+                tid, None, "не удалось скачать .torrent: "
+                + (str(exc).split(": ", 1)[-1] or "нет ответа"))
+            return
+        self._preview_parse_torrent(tid, reply["content_b64"])
+
+    def _preview_parse_torrent(self, tid, content_b64: str) -> None:
+        """A .torrent to its file list locally (bencode), without qBit; the result is torrents.preview.ready,
+        the one channel with the magnet branch."""
+        try:
+            content = base64.b64decode(content_b64)
             name, files = torrent_file_list(content)
             ih = infohash_candidates(content)[0]
             data = {"name": name, "files": files}
@@ -327,16 +358,13 @@ class TorrentsModule(BaseModule):
             self._emit_preview_failed(
                 tid, None, f"не удалось разобрать .torrent: {exc}")
 
-    async def on_preview_fetch_magnet(self, env: Envelope) -> None:
-        """magnet → добор метаданных из роя через qBit. paused их НЕ качает
-        (проверено), поэтому раздача добавляется STARTED в выделенной категории,
-        читается список файлов и раздача удаляется (контент ≈0 Б). Fire-and-
-        forget: спавним фоновую задачу, чтобы не блокировать шину; single-flight
-        по infohash; кэш переживает переоткрытия окна."""
-        p = env.payload
-        tid = p.get("torrent_id")
+    async def _preview_fetch_magnet(self, tid, magnet: str) -> None:
+        """A magnet gets its metadata from the swarm through qBit. A paused torrent does not fetch it (checked),
+        so the torrent is added STARTED in a category of its own, its files are read and it is deleted (about 0
+        bytes of content). A background task keeps the bus free; one fetch per infohash; the cache outlives
+        reopened windows."""
         try:
-            ih = infohash_from_magnet(p["magnet"])
+            ih = infohash_from_magnet(magnet)
         except TorrentParseError as exc:
             self._emit_preview_failed(tid, None, str(exc))
             return
@@ -345,10 +373,10 @@ class TorrentsModule(BaseModule):
             self._emit_preview_ready(tid, ih, cached)
             return
         if ih in self._preview_inflight:
-            return  # добор уже идёт — событие придёт по его итогу
+            return  # a fetch is already going: its outcome is the event
         self._preview_inflight.add(ih)
         task = asyncio.create_task(
-            self._preview_magnet_task(tid, p["magnet"], ih))
+            self._preview_magnet_task(tid, magnet, ih))
         self._preview_tasks.add(task)
         task.add_done_callback(self._preview_tasks.discard)
 
@@ -916,6 +944,9 @@ class TorrentsModule(BaseModule):
         series_id = env.payload["series_id"]
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
+        # A video series has no torrent files: nothing to check or to warn about here.
+        if series["kind"] == SeriesKind.VIDEO:
+            return {"missing": 0, "recheck_started": 0}
         # F7: путь/NAS недоступен → НЕ помечать всё ложно missing и не
         # запускать массовый recheck. Пропускаем сверку до восстановления.
         if not await storage.call(os.path.exists, series["save_path"]):

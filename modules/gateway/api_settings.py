@@ -54,14 +54,6 @@ LOGGING_MODULES = {
         {"name": "metadata", "description": "TMDB: поиск и привязки сериалов."},
     ],
 }
-FILE_DUMP_FLAGS = [
-    {"name": "save_html_kinozal", "description": "Kinozal (HTML)"},
-    {"name": "save_html_anilibria", "description": "Anilibria (HTML)"},
-    {"name": "save_html_anilibria_tv", "description": "Anilibria.TV (HTML)"},
-    {"name": "save_html_astar", "description": "Astar.bz (HTML)"},
-    {"name": "save_html_rutracker", "description": "RuTracker (HTML)"},
-    {"name": "save_json_vk_scraper", "description": "VK Scraper (JSON)"},
-]
 
 # Таблицы, закрытые от админ-вкладки БД: креды и живые куки трекеров.
 DB_EXCLUDED_TABLES = {"auth", "tracker_sessions"}
@@ -269,10 +261,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         logging_structure = {
             group: [{**m, "enabled": enabled(m["name"])} for m in mods]
             for group, mods in LOGGING_MODULES.items()}
-        dump_structure = [{**f, "enabled": enabled(f["name"])}
-                          for f in FILE_DUMP_FLAGS]
-        return {"logging_modules": logging_structure,
-                "file_dump_flags": dump_structure}
+        return {"logging_modules": logging_structure}
 
     # --- TMDB ----------------------------------------------------------------------
 

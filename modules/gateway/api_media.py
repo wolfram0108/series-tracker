@@ -7,7 +7,6 @@ POST /series/<id>/relocate (дубль сценария сохранения с�
 """
 from __future__ import annotations
 
-import asyncio
 import os
 
 from fastapi import APIRouter, Request
@@ -15,7 +14,8 @@ from fastapi.responses import JSONResponse
 
 from core import BusRequestError
 
-from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, OkResponse)
+from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, NamingPreviewAccepted, NamingPreviewRequest,
+                      OkResponse)
 
 # Документация веток ошибок (отдаются JSONResponse, response_model на них
 # не распространяется). _ERR — тело {success, error}; _ERR1 — {error}.
@@ -44,7 +44,6 @@ def _media_error(exc: BusRequestError):
 
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
     r = APIRouter()
-    _preview_dispatch: set[asyncio.Task] = set()  # ссылки на фоновые задачи префетча
 
     # --- media-items ------------------------------------------------------------
 
@@ -226,25 +225,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 "message": "Процесс глубокого усыновления запущен "
                            "в фоновом режиме."}
 
-    @r.get("/api/series/{series_id}/sliced-files",
-           response_model=list[DynamicObject])
-    async def sliced_files(series_id: int):
-        files = await gw.request("slicing.files.list",
-                                 {"series_id": series_id}, timeout=15)
-        items = await gw.request("scan.media.list",
-                                 {"series_id": series_id}, timeout=15)
-        parents = {i["unique_id"]: i for i in items}
-        for f in files:
-            parent = parents.get(f.get("source_media_item_unique_id"))
-            if parent:
-                f["parent_filename"] = (parent.get("final_filename")
-                                        or "Источник не найден")
-                f["season"] = parent.get("season") or 1
-            else:
-                f["parent_filename"] = "Источник не найден"
-                f["season"] = 1
-        return files
-
     # --- rename preview ---------------------------------------------------------------
 
     @r.get("/api/series/{series_id}/rename_preview",
@@ -258,7 +238,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     # --- переобработки ----------------------------------------------------------------
 
-    async def _reprocess(series_id: int, message: str):
+    @r.post("/api/series/{series_id}/reprocess", response_model=OkResponse,
+            response_model_exclude_none=True, responses=_ERR)
+    async def reprocess(series_id: int):
         active = await gw.request("renaming.tasks.active",
                                   {"series_id": series_id}, timeout=10)
         if active:
@@ -267,22 +249,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                  "error": "Задача на переобработку уже выполняется."},
                 status_code=409)
         gw.send_command("renaming.reprocess", {"series_id": series_id})
-        return {"success": True, "message": message}
-
-    @r.post("/api/series/{series_id}/reprocess", response_model=OkResponse,
-            response_model_exclude_none=True, responses=_ERR)
-    async def reprocess(series_id: int):
-        return await _reprocess(
-            series_id, "Задача на переобработку файлов создана и "
-                       "запущена в фоновом режиме.")
-
-    @r.post("/api/series/{series_id}/reprocess_vk_files",
-            response_model=OkResponse, response_model_exclude_none=True,
-            responses=_ERR)
-    async def reprocess_vk(series_id: int):
-        return await _reprocess(
-            series_id, "Задача на переобработку файлов видео-сериала "
-                       "создана.")
+        return {"success": True,
+                "message": "Задача на переобработку файлов создана и "
+                           "запущена в фоновом режиме."}
 
     # --- имена для теста парсера ----------------------------------------------------
 
@@ -298,42 +267,13 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return []
         return [os.path.basename(f["original_path"]) for f in files]
 
-    # --- префетч списков файлов для теста нейминга в окне добавления ---------------
+    # --- the file lists of releases for the naming preview of the add window ---------
 
-    @r.post("/api/preview/naming/fetch", response_model=DynamicObject,
-            responses=_ERR1)
-    async def preview_naming_fetch(request: Request):
-        """Фоновый префетч списков файлов раздач (для вкладки проверки нейминга
-        при добавлении). Отвечает сразу {accepted:[torrent_id...]}; сами списки
-        приходят по SSE (preview_naming_ready/failed). magnet → добор через qBit
-        (модуль torrents); .torrent (link) → скачать из sources и разобрать
-        локально. Побочно прогревает кэш .torrent."""
-        data = await request.json()
-        items = data.get("items") or []
-
-        async def dispatch():
-            for it in items:
-                tid = it.get("torrent_id")
-                if it.get("magnet"):
-                    gw.send_command("torrents.preview.fetch_magnet",
-                                    {"torrent_id": tid, "magnet": it["magnet"]})
-                elif it.get("link"):
-                    try:
-                        reply = await gw.request(
-                            "sources.torrent_file.get",
-                            {"url": it["link"], "torrent_id": tid}, timeout=60)
-                        gw.send_command("torrents.preview.parse_torrent", {
-                            "torrent_id": tid,
-                            "content_b64": reply["content_b64"]})
-                    except BusRequestError as exc:
-                        gw.publish_event("torrents.preview.failed", {
-                            "torrent_id": tid, "infohash": None,
-                            "reason": "не удалось скачать .torrent: "
-                                      + str(exc).split(": ", 1)[-1]})
-
-        task = asyncio.create_task(dispatch())
-        _preview_dispatch.add(task)
-        task.add_done_callback(_preview_dispatch.discard)
-        return {"accepted": [it.get("torrent_id") for it in items]}
+    @r.post("/api/preview/naming/fetch", response_model=NamingPreviewAccepted, responses=_ERR1)
+    async def preview_naming_fetch(body: NamingPreviewRequest):
+        """Starts the fetch of the file lists of the releases and answers at once with {accepted: [torrent_id]};
+        the lists come as the events preview_naming_ready and preview_naming_failed, published by the owner."""
+        gw.send_command("torrents.preview.fetch", {"items": body.model_dump(mode="json", exclude_unset=True)["items"]})
+        return {"accepted": [item.torrent_id for item in body.items]}
 
     return r

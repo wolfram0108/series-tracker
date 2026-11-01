@@ -97,6 +97,11 @@
 | `GET /api/series/{id}/composition` | `scan.on_composition` | перепроектирована | `composition.get` + план `scan` — `scan.on_composition` удалён (П-6); сделано (П-8): видео — `composition.get`, торрент — `torrents.composition`; план референсов — `GET /api/series/{id}/output` (`scan.output.get`), ответы не склеиваются |
 | `GET /api/series/{id}` (`scan.availability`) | отчёт о плеерах | перепроектирована | сводка источников `composition` — `scan.availability` удалён (П-6); сделано (П-8): ответ несёт `kind` и `sources` из `catalog` |
 | `SSE_MAP`: `video_scan_progress`, `coverage_progress` | ход старых чтений | удалена | `sources_table_progress`, `sources_table_ready`, `composition_changed`, `reference_changed` — сделано (П-8): добавлены также `sources_table_failed`, `composition_failed` |
+| `GET /api/series/{id}/sliced-files` | склейка ответов `slicing` и `scan` в шлюзе | удалена | бизнес-логика в шлюзе, `slicing` в этапе не участвует (Д-34) — сделано (П-8); панель — П-9 |
+| `POST /api/series/{id}/reprocess_vk_files` | дубль `POST /api/series/{id}/reprocess` | удалена | один вызов `renaming.reprocess`, вид сериала решает `renaming` — сделано (П-8); панель — П-9 |
+| `POST /api/preview/naming/fetch` (оркестровка `torrents` и `sources`, событие `torrents.preview.failed` из шлюза) | шлюз вёл три модуля и издавал чужое событие | перепроектирована | команда `torrents.preview.fetch {items}` у `torrents`, исходы издаёт он один; шлюз шлёт команду — сделано (П-8); темы `torrents.preview.parse_torrent` и `.fetch_magnet` стали внутренними |
+| `FILE_DUMP_FLAGS` (`save_html_*`, `save_json_vk_scraper`) в `GET /api/settings/debug_flags` | флаги, которых никто не читает | удалена | сканер VK удалён, потребителей нет — сделано (П-8); блок в панели — П-9 |
+| `downloads.fs.sync`, `torrents.fs.verify` для сериала чужого вида | сверка и предупреждение о пути впустую | перепроектирована | сразу `{0, 0}` по `kind` из `catalog.series.get`, ничего не публикуется — сделано (П-8) |
 
 ## 7. Интерфейс (`web/src`)
 

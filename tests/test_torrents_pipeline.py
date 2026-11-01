@@ -2,6 +2,7 @@
 сценарии с фейковым qBittorrent (стенд не нужен).
 """
 import asyncio
+import logging
 import json
 import sqlite3
 import subprocess
@@ -158,6 +159,9 @@ def db_path(tmp_path):
     with sqlite3.connect(path) as conn:
         insert_series(conn, id=1, name="Т", name_en="T", site="kinozal", save_path="/media/t", state="waiting",
                       url="http://x", source_type="torrent")
+        # 2: a video series whose path is not there; it has no torrent files, so the module has nothing to say of it
+        insert_series(conn, id=2, name="В", name_en="V", site="vk", save_path="/nonexistent/nas",
+                      url="https://vkvideo.ru/@c|q", source_type="vk_video")
         conn.commit()
     return str(path)
 
@@ -514,6 +518,18 @@ async def test_sim_F7_path_unavailable_no_false_missing(system, tmp_path):
         st = conn.execute("SELECT status FROM torrent_files WHERE "
                           "torrent_db_id=?", (tid,)).fetchone()[0]
     assert st == "renamed"  # файл НЕ помечен ложно missing
+
+
+@pytest.mark.asyncio
+async def test_fs_verify_of_a_video_series_answers_at_once_and_says_nothing(system, caplog):
+    """A video series has no torrent files: the module neither asks qBit nor warns about its path."""
+    _, qbt, _, probe, _ = system
+    calls_before = len(qbt.calls)
+    with caplog.at_level(logging.WARNING):
+        reply = await probe.request("torrents.fs.verify", {"series_id": 2}, timeout=5)
+    assert reply == {"missing": 0, "recheck_started": 0}
+    assert [record.getMessage() for record in caplog.records if record.levelno >= logging.WARNING] == []
+    assert len(qbt.calls) == calls_before
 
 
 @pytest.mark.asyncio

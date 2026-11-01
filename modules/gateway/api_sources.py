@@ -7,12 +7,10 @@ or player: what an address is, which table it has and what the constructor says 
 from __future__ import annotations
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
 
 from core import BusRequestError
 from core.contracts import (CompositionPreviewReply, CompositionPreviewRequest, SeriesSource, SiteResolveReply,
                             SiteResolveRequest)
-from core.reasons import reason
 
 from .routing import refusal
 from .schemas import (ChangedSource, CreatedSource, ErrorOnly, ErrorResponse, OkResponse, RulesTestRequest,
@@ -45,24 +43,13 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError as exc:
             return refusal(exc)
 
-    async def _own_source(series_id: int, source_id: int) -> JSONResponse | None:
-        """The path names a series and one of its sources; a source of another series is not found under this one."""
-        try:
-            own = await gw.request("catalog.sources.list", {"series_id": series_id}, timeout=10)
-        except BusRequestError as exc:
-            return refusal(exc)
-        if any(each["id"] == source_id for each in own):
-            return None
-        return JSONResponse({"success": False, "error": reason("source_not_found", source_id=source_id)},
-                            status_code=404)
-
     @r.put("/api/series/{series_id}/sources/{source_id}", response_model=ChangedSource, responses=_ERR)
     async def change_source(series_id: int, source_id: int, body: SourceChange):
-        if (missing := await _own_source(series_id, source_id)) is not None:
-            return missing
+        # The catalog refuses a source of another series than the one the path names.
         try:
             reply = await gw.request("catalog.sources.update", {
-                "source_id": source_id, "fields": body.model_dump(mode="json", exclude_unset=True)}, timeout=10)
+                "series_id": series_id, "source_id": source_id,
+                "fields": body.model_dump(mode="json", exclude_unset=True)}, timeout=10)
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True, "applied": reply["applied"]}
@@ -70,10 +57,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.delete("/api/series/{series_id}/sources/{source_id}", response_model=OkResponse,
               response_model_exclude_none=True, responses=_ERR)
     async def remove_source(series_id: int, source_id: int):
-        if (missing := await _own_source(series_id, source_id)) is not None:
-            return missing
         try:
-            await gw.request("catalog.sources.remove", {"source_id": source_id}, timeout=10)
+            await gw.request("catalog.sources.remove", {"series_id": series_id, "source_id": source_id}, timeout=10)
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}

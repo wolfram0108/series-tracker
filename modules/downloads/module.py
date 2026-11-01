@@ -26,7 +26,9 @@ Queries / commands:
       by voices); superseded_by of a displaced row names the winner of the slot
   downloads.queue.clear {} → {deleted} — всё, кроме идущих загрузок
   downloads.fs.sync {series_id} → {adopted, lost} — синхронизация с
-      диском (вызывается сканом и при открытии модалки статуса)
+      диском (вызывается сканом и при открытии модалки статуса). A series
+      of kind `torrent` answers {0, 0} at once: nothing is read, published
+      or logged for it.
 
 События (исходящие):
   downloads.item.renamed {series_id, unique_id, filename} — the file name of an episode changed
@@ -338,6 +340,9 @@ class DownloadsModule(BaseModule):
         series_id = env.payload["series_id"]
         series = await self.request("catalog.series.get",
                                     {"series_id": series_id})
+        # The files of a torrent series are the torrents module's: nothing to check, publish or warn about here.
+        if series["kind"] == SeriesKind.TORRENT:
+            return {"adopted": 0, "lost": 0}
         # F7/VF7: путь/NAS недоступен → НЕ сбрасывать всё ложно в pending.
         if not await storage.call(os.path.exists, series["save_path"]):
             self.log.warning("серия %d: путь %s недоступен — сверка диска "

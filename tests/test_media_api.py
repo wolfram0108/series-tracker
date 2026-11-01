@@ -270,7 +270,7 @@ async def test_rename_preview_shape(db_path, tmp_path):
 @pytest.mark.asyncio
 async def test_reprocess_409_and_command(system):
     _, _, client, neighbours = system
-    resp = await client.post("/api/series/2/reprocess_vk_files")
+    resp = await client.post("/api/series/2/reprocess")
     assert resp.status_code == 200
     for _ in range(100):
         if ("reprocess", {"series_id": 2}) in neighbours.calls:
@@ -303,3 +303,6 @@ async def test_removed_endpoints_gone(system):
     resp = await client.post("/api/series/1/relocate",
                              json={"new_path": "/x"})
     assert resp.status_code in (404, 405)
+    # stage 10: the merge of slicing and scan answers and the duplicate of reprocess are gone
+    assert (await client.get("/api/series/2/sliced-files")).status_code in (404, 405)
+    assert (await client.post("/api/series/2/reprocess_vk_files")).status_code in (404, 405)

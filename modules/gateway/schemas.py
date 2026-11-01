@@ -203,6 +203,21 @@ class SeriesUpdate(SeriesFields):
     """The properties of a series to save; only the fields sent change."""
 
 
+class NamingPreviewItem(RequestModel):
+    """A release of the add form: a magnet is fetched through qBit, a link is a .torrent."""
+    torrent_id: str | int | None = None
+    magnet: str | None = None
+    link: str | None = None
+
+
+class NamingPreviewRequest(RequestModel):
+    items: list[NamingPreviewItem] = Field(default_factory=list)
+
+
+class NamingPreviewAccepted(ApiModel):
+    accepted: list[str | int | None]
+
+
 class CreatedSeries(ApiModel):
     success: bool
     series_id: int

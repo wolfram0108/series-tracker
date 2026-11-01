@@ -876,23 +876,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/series/{series_id}/sliced-files": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Sliced Files */
-        get: operations["sliced_files_api_series__series_id__sliced_files_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/series/{series_id}/rename_preview": {
         parameters: {
             query?: never;
@@ -921,23 +904,6 @@ export interface paths {
         put?: never;
         /** Reprocess */
         post: operations["reprocess_api_series__series_id__reprocess_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/series/{series_id}/reprocess_vk_files": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reprocess Vk */
-        post: operations["reprocess_vk_api_series__series_id__reprocess_vk_files_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -976,11 +942,8 @@ export interface paths {
         put?: never;
         /**
          * Preview Naming Fetch
-         * @description Фоновый префетч списков файлов раздач (для вкладки проверки нейминга
-         *     при добавлении). Отвечает сразу {accepted:[torrent_id...]}; сами списки
-         *     приходят по SSE (preview_naming_ready/failed). magnet → добор через qBit
-         *     (модуль torrents); .torrent (link) → скачать из sources и разобрать
-         *     локально. Побочно прогревает кэш .torrent.
+         * @description Starts the fetch of the file lists of the releases and answers at once with {accepted: [torrent_id]};
+         *     the lists come as the events preview_naming_ready and preview_naming_failed, published by the owner.
          */
         post: operations["preview_naming_fetch_api_preview_naming_fetch_post"];
         delete?: never;
@@ -1910,6 +1873,30 @@ export interface components {
             /** Levers */
             levers?: components["schemas"]["EffectiveLever"][];
         };
+        /** NamingPreviewAccepted */
+        NamingPreviewAccepted: {
+            /** Accepted */
+            accepted: (string | number | null)[];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * NamingPreviewItem
+         * @description A release of the add form: a magnet is fetched through qBit, a link is a .torrent.
+         */
+        NamingPreviewItem: {
+            /** Torrent Id */
+            torrent_id?: string | number | null;
+            /** Magnet */
+            magnet?: string | null;
+            /** Link */
+            link?: string | null;
+        };
+        /** NamingPreviewRequest */
+        NamingPreviewRequest: {
+            /** Items */
+            items?: components["schemas"]["NamingPreviewItem"][];
+        };
         /**
          * OkResponse
          * @description Стандартный успех: {success: true[, message]}.
@@ -2641,10 +2628,12 @@ export interface components {
             /** Reason */
             reason: string;
         };
-        /** ReferenceChanged */
+        /**
+         * ReferenceChanged
+         * @description The event `scan.reference.changed`: the reference as it stands now, whole, so that a window needs no second
+         *     request to show it.
+         */
         ReferenceChanged: {
-            /** Series Id */
-            series_id: number;
             /** Season */
             season: number;
             /** Episode */
@@ -2655,6 +2644,38 @@ export interface components {
              */
             part: number | null;
             mark: components["schemas"]["ReferenceMark"];
+            /**
+             * Source Id
+             * @default null
+             */
+            source_id: number | null;
+            /**
+             * Row Key
+             * @default null
+             */
+            row_key: string | null;
+            /**
+             * Player
+             * @default null
+             */
+            player: string | null;
+            /**
+             * Voice Group
+             * @default null
+             */
+            voice_group: string | null;
+            /**
+             * Height
+             * @default null
+             */
+            height: number | null;
+            /**
+             * Reason
+             * @default null
+             */
+            reason: string | null;
+            /** Series Id */
+            series_id: number;
         };
     };
     responses: never;
@@ -5053,37 +5074,6 @@ export interface operations {
             };
         };
     };
-    sliced_files_api_series__series_id__sliced_files_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                series_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DynamicObject"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     rename_preview_api_series__series_id__rename_preview_get: {
         parameters: {
             query?: never;
@@ -5200,73 +5190,6 @@ export interface operations {
             };
         };
     };
-    reprocess_vk_api_series__series_id__reprocess_vk_files_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                series_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OkResponse"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     source_filenames_api_series__series_id__source_filenames_get: {
         parameters: {
             query?: never;
@@ -5305,7 +5228,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NamingPreviewRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -5313,7 +5240,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DynamicObject"];
+                    "application/json": components["schemas"]["NamingPreviewAccepted"];
                 };
             };
             /** @description Not Found */
@@ -5323,6 +5250,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Internal Server Error */

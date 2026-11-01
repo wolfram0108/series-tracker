@@ -73,55 +73,57 @@ async def test_a_source_of_an_unknown_kind_is_a_malformed_request(tmp_path):
 
 
 async def test_only_the_fields_sent_change_and_a_choice_can_be_taken_back(tmp_path):
-    answers = {"catalog.sources.list": [SOURCE], "catalog.sources.update": {"applied": {"parser_profile_id": None}}}
-    async with serving(tmp_path, answers) as (client, owners, _, _):
+    answers = {"catalog.sources.update": {"applied": {"parser_profile_id": None}}}
+    async with serving(tmp_path, answers) as (client, owners, _, spy):
         response = await client.put("/api/series/1/sources/4", json={"parser_profile_id": None})
     assert response.status_code == 200 and response.json() == {"success": True, "applied": {"parser_profile_id": None}}
-    assert owners.asked("catalog.sources.update") == [{"source_id": 4, "fields": {"parser_profile_id": None}}]
+    # The series of the path goes to the catalog, which refuses a source of another series; the gateway asks nothing else.
+    assert owners.asked("catalog.sources.update") == [{
+        "series_id": 1, "source_id": 4, "fields": {"parser_profile_id": None}}]
+    assert topics(spy) == ["catalog.sources.update"]
 
 
 async def test_every_changeable_field_of_a_source_reaches_the_catalog(tmp_path):
     fields = {"url": "https://x.test/q", "parser_profile_id": 3, "vk_search_mode": "get_all", "vibix_season": 2,
               "players_off": ["vk", "kodik"], "position": 1}
-    async with serving(tmp_path, {"catalog.sources.list": [SOURCE], "catalog.sources.update": {"applied": fields}}
-                       ) as (client, owners, _, _):
+    async with serving(tmp_path, {"catalog.sources.update": {"applied": fields}}) as (client, owners, _, _):
         assert (await client.put("/api/series/1/sources/4", json=fields)).status_code == 200
-    assert owners.asked("catalog.sources.update") == [{"source_id": 4, "fields": fields}]
+    assert owners.asked("catalog.sources.update") == [{"series_id": 1, "source_id": 4, "fields": fields}]
 
 
 @pytest.mark.parametrize("body", [{"source_type": "torrent"}, {"series_id": 2}, {"url": None}, {"position": None},
                                   {"players_off": None}])
 async def test_what_a_source_does_not_let_change_is_refused_by_the_model(tmp_path, body):
-    async with serving(tmp_path, {"catalog.sources.list": [SOURCE], "catalog.sources.update": {"applied": {}}}
-                       ) as (client, owners, _, _):
+    async with serving(tmp_path, {"catalog.sources.update": {"applied": {}}}) as (client, owners, _, _):
         response = await client.put("/api/series/1/sources/4", json=body)
     assert response.status_code == 422 and owners.asked("catalog.sources.update") == []
 
 
-async def test_a_source_of_another_series_is_not_found_under_this_one(tmp_path):
-    answers = {"catalog.sources.list": [SOURCE], "catalog.sources.update": {"applied": {}},
-               "catalog.sources.remove": {"ok": True}}
-    async with serving(tmp_path, answers) as (client, owners, _, _):
+async def test_a_source_of_another_series_is_not_found_under_this_one_by_the_catalog(tmp_path):
+    refusal = LookupError("источник 9 не найден у сериала 1")
+    answers = {"catalog.sources.update": refusal, "catalog.sources.remove": refusal}
+    async with serving(tmp_path, answers) as (client, owners, _, spy):
         changed = await client.put("/api/series/1/sources/9", json={"vibix_season": 2})
         removed = await client.delete("/api/series/1/sources/9")
     for response in (changed, removed):
-        assert response.status_code == 404 and code_of(response) == "source_not_found"
-        assert parse(response.json()["error"])["params"] == {"source_id": 9}
-    assert owners.asked("catalog.sources.update") == [] and owners.asked("catalog.sources.remove") == []
+        assert response.status_code == 404 and response.json() == {
+            "success": False, "error": "источник 9 не найден у сериала 1"}
+    # Whose source it is, is the catalog's to say: both commands carry the series of the path.
+    assert owners.asked("catalog.sources.update")[0]["series_id"] == 1
+    assert owners.asked("catalog.sources.remove") == [{"series_id": 1, "source_id": 9}]
+    assert "catalog.sources.list" not in topics(spy)
 
 
 async def test_a_source_is_removed_by_its_id(tmp_path):
-    async with serving(tmp_path, {"catalog.sources.list": [SOURCE], "catalog.sources.remove": {"ok": True}}
-                       ) as (client, owners, _, _):
+    async with serving(tmp_path, {"catalog.sources.remove": {"ok": True}}) as (client, owners, _, _):
         response = await client.delete("/api/series/1/sources/4")
     assert response.status_code == 200 and response.json() == {"success": True}
-    assert owners.asked("catalog.sources.remove") == [{"source_id": 4}]
+    assert owners.asked("catalog.sources.remove") == [{"series_id": 1, "source_id": 4}]
 
 
 async def test_the_last_source_of_a_series_is_refused_with_its_code(tmp_path):
     refusal = ValueError(reason("last_source", series_id=1, source_id=4))
-    async with serving(tmp_path, {"catalog.sources.list": [SOURCE], "catalog.sources.remove": refusal}
-                       ) as (client, _, _, _):
+    async with serving(tmp_path, {"catalog.sources.remove": refusal}) as (client, _, _, _):
         response = await client.delete("/api/series/1/sources/4")
     assert response.status_code == 400 and code_of(response) == "last_source"
     assert parse(response.json()["error"])["params"] == {"series_id": 1, "source_id": 4}
@@ -239,6 +241,27 @@ async def test_an_address_no_tracker_knows_is_refused_with_the_words_of_sources(
         response = await client.post("/api/parse_url", json={"url": "http://nowhere.test/"})
     assert response.status_code == 400
     assert response.json() == {"error": "трекер не распознан по URL: http://nowhere.test/"}
+
+
+# --- the naming preview of the add window ---------------------------------------------------------
+
+
+async def test_the_naming_preview_is_one_command_to_torrents_and_the_gateway_publishes_no_outcome(tmp_path):
+    items = [{"torrent_id": "t1", "link": "https://t.test/1.torrent"}, {"torrent_id": 2, "magnet": "magnet:?xt=urn:btih:ab"}]
+    async with serving(tmp_path, {"torrents.preview.fetch": None}) as (client, owners, _, spy):
+        response = await client.post("/api/preview/naming/fetch", json={"items": items})
+        sent = await owners.next("torrents.preview.fetch")
+        seen = published(spy)
+    assert response.status_code == 200 and response.json() == {"accepted": ["t1", 2]}
+    assert sent == {"items": items}
+    # One command and nothing else: no request to sources, no step per release, no event of torrents.
+    assert [(env.kind, env.topic) for env in seen] == [("command", "torrents.preview.fetch")]
+
+
+async def test_a_release_with_a_field_the_preview_does_not_know_is_refused(tmp_path):
+    async with serving(tmp_path, {"torrents.preview.fetch": None}) as (client, owners, _, _):
+        response = await client.post("/api/preview/naming/fetch", json={"items": [{"torrent_id": "t", "url": "x"}]})
+    assert response.status_code == 422 and owners.asked("torrents.preview.fetch") == []
 
 
 # --- what is gone ---------------------------------------------------------------------------------

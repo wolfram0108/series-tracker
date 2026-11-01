@@ -192,6 +192,8 @@ async def test_settings_flags_and_debug_groups(system):
     names = [m["name"] for g in body["logging_modules"].values()
              for m in g]
     assert "scan" in names and "torrents" in names
+    # the flags of page dumps had no reader: they are not offered
+    assert set(body) == {"logging_modules"}
     await client.post("/api/settings/debug_flags",
                       json={"module": "scan", "enabled": True})
     assert "scan" in core_logging.debug_groups()

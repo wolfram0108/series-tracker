@@ -2,6 +2,7 @@
 загрузчик — инжектированная корутина (yt-dlp не нужен).
 """
 import asyncio
+import logging
 import os
 import sqlite3
 import subprocess
@@ -185,6 +186,9 @@ def env_paths(tmp_path):
                       sources=[source(url="https://vkvideo.ru/@c|т4", source_type="vk_video", parser_profile_id=1),
                                source(url="https://1.ruchime.org/release/y", source_type="web_video",
                                       parser_profile_id=1)])
+        # 5: a torrent series on a path that is not there (a downed NAS), whose files are not this module's
+        insert_series(conn, id=5, name="Т5", name_en="T5", site="kinozal", save_path="/nonexistent/nas",
+                      url="http://kinozal.tv/details.php?id=5", source_type="torrent")
         conn.commit()
     return str(db_path), str(media_dir)
 
@@ -443,6 +447,18 @@ async def test_fs_sync_detects_lost_and_adopted(system):
     assert items["uid2"]["status"] == "completed"
     assert items["uid1"]["status"] in ("pending", "downloading")
     dl.gate.set()
+
+
+@pytest.mark.asyncio
+async def test_fs_sync_of_a_torrent_series_answers_at_once_and_says_nothing(system, caplog):
+    """The files of a torrent series are the torrents module's: no contribution, no warning about its path."""
+    bus, _, _, probe, _, _ = system
+    contributions = bus.subscribe("series.status.contribution")
+    with caplog.at_level(logging.WARNING):
+        reply = await probe.request("downloads.fs.sync", {"series_id": 5}, timeout=10)
+    assert reply == {"adopted": 0, "lost": 0}
+    assert contributions.queue.empty()
+    assert [record.getMessage() for record in caplog.records if record.levelno >= logging.WARNING] == []
 
 
 @pytest.mark.asyncio

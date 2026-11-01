@@ -13,21 +13,21 @@
 
 | | |
 |---|---|
-| Уникальных путей | 85 |
-| Метод-эндпоинтов (путь × метод) | 106 |
-| Путей под `/api` | 79 |
-| Метод-эндпоинтов под `/api` | 100 |
+| Уникальных путей | 83 |
+| Метод-эндпоинтов (путь × метод) | 104 |
+| Путей под `/api` | 77 |
+| Метод-эндпоинтов под `/api` | 98 |
 | Служебных путей вне `/api` | 5: `/`, `/legacy`, `/v2`, `/v2/`, `/favicon.svg` |
 
 Один маршрут условный: `POST /api/_diag/echo` существует только при запуске
-gateway с `diag=True` (в проде выключен) — в таблице 106 он учтён, в счёт
-100 метод-эндпоинтов под `/api` — нет.
+gateway с `diag=True` (в проде выключен) — в таблице 104 он учтён, в счёт
+98 метод-эндпоинтов под `/api` — нет.
 
 `/docs` и `/openapi.json` (собственные маршруты FastAPI) появляются только
 при `ST_DOCS_ENABLED=true` и в реестр не входят.
 
 Файлы-источники: `api_auth.py` (6 путей), `api_series.py` (10), `api_sources.py` (5), `api_output.py` (4),
-`api_system.py` (9), `api_media.py` (17), `api_settings.py` (27), `module.py` (5 служебных + `/api/stream` + диагностический).
+`api_system.py` (9), `api_media.py` (15), `api_settings.py` (27), `module.py` (5 служебных + `/api/stream` + диагностический).
 
 ---
 
@@ -115,13 +115,11 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | POST | `/api/media-items/{unique_id}/delete-source` | Удаление исходника нарезанной компиляции | `StatusSlicing.vue` |
 | POST | `/api/media-items/{unique_id}/verify-sliced-files` | Сверка нарезок с диском | — |
 | POST | `/api/series/{series_id}/deep-adoption` | Глубокое усыновление (фон) | `StatusVkComposition.vue` |
-| GET | `/api/series/{series_id}/sliced-files` | Нарезки с именем родителя и сезоном | `StatusVkComposition.vue` |
 | GET | `/api/series/{series_id}/voices` | Озвучки сериала: `{items: [DubItem]}` — `{season, episode, voice_key, voice_label, status, state, hint, detail: {code, params} \| null}` (Р-43, Р-44, Р-46, Р-47); интерфейс озвучки получает по SSE (`voice_dubs_snapshot`, `voice_dub_update`), точка нужна для диагностики | — |
 | GET | `/api/series/{series_id}/rename_preview` | Предпросмотр новых имён файлов | `StatusVkComposition.vue` |
 | POST | `/api/series/{series_id}/reprocess` | Переобработка имён файлов (торрент) | `StatusComposition.vue` |
-| POST | `/api/series/{series_id}/reprocess_vk_files` | Переобработка имён файлов (видео) | `StatusVkComposition.vue` |
 | GET | `/api/series/{series_id}/source-filenames` | Имена файлов раздач торрент-сериала для теста правил | `ParserTest.vue` |
-| POST | `/api/preview/naming/fetch` | Фоновый префетч списков файлов раздач | `AddSeriesModal.vue` |
+| POST | `/api/preview/naming/fetch` | Предпросмотр нейминга: команда `torrents.preview.fetch`, ответ сразу; списки — по SSE | `AddSeriesModal.vue` |
 
 ### 3.4 Скан и очереди — `api_system.py`
 
@@ -214,6 +212,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 
 > Раздел описывает панель **до интерфейсной части этапа 10 (П-9)**: вызовы `/api/web_video/layout`,
 > `/api/web_video/coverage`, `/api/parser-profiles/scrape-titles`, `/api/series/{series_id}/vk-quality-priority`
+> `GET /api/series/{series_id}/sliced-files`, `POST /api/series/{series_id}/reprocess_vk_files`
 > и прежние тела `POST /api/series`, `POST /api/series/{series_id}`, `POST /api/parser-profiles/test` остались в ней
 > и переводятся на эндпоинты разделов 3.7 и 3.8 в П-9. Эндпоинтов у этих вызовов больше нет.
 
@@ -264,7 +263,6 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | Статус-окно: вкладка «Композиция» (видео) | GET | `/api/series/{series_id}/composition` |
 | Статус-окно: вкладка «Композиция» (видео) | GET | `/api/series/{series_id}/rename_preview` |
 | Статус-окно: вкладка «Композиция» (видео) | GET | `/api/series/{series_id}` |
-| Статус-окно: вкладка «Композиция» (видео) | GET | `/api/series/{series_id}/sliced-files` |
 | Статус-окно: вкладка «Композиция» (видео) — приоритет качества | PUT | `/api/series/{series_id}/vk-quality-priority` |
 | Статус-окно: вкладка «Композиция» (видео) — игнор элемента | PUT | `/api/media-items/{unique_id}/ignore` |
 | Статус-окно: вкладка «Композиция» (видео) — игнор сезона | PUT | `/api/series/{series_id}/media-items/ignore-season` |
@@ -307,7 +305,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 
 ## 5. Эндпоинты, не используемые панелью
 
-17 из 100 метод-эндпоинтов под `/api` панель не вызывает: 8 прежних и 9 новых эндпоинтов этапа 10, под которые
+17 из 98 метод-эндпоинтов под `/api` панель не вызывает: 8 прежних и 9 новых эндпоинтов этапа 10, под которые
 интерфейс (П-9) ещё не перестроен.
 
 | Метод | Путь | Кто вызывает | Статус |
@@ -461,24 +459,20 @@ status_message}`.
 **POST `/api/series/{series_id}/deep-adoption`** — фоновая операция; ответ
 `{success, message}` сразу.
 
-**GET `/api/series/{series_id}/sliced-files`** — список нарезок: `id`,
-`series_id`, `source_media_item_unique_id`, `episode_number`, `file_path`,
-`status`, `parent_filename`, `season`.
-
 **GET `/api/series/{series_id}/rename_preview`** — ответ
 `{preview: [{unique_id, type, current_filename, new_filename_preview}],
 needs_rename_count}`; без профиля парсера — пустой превью.
 
-**POST `/api/series/{series_id}/reprocess`** и
-**`/reprocess_vk_files`** — ответ `{success, message}`; 409 — переименование
-уже выполняется.
+**POST `/api/series/{series_id}/reprocess`** — ответ `{success, message}`; 409 — переименование
+уже выполняется (что оно делает с видео и с торрентом, решает `renaming`).
 
 **GET `/api/series/{series_id}/source-filenames`** — список базовых имён файлов раздач
 торрент-сериала для теста правил; у видео-сериала пуст (строки для его теста даёт
 `POST /api/sources/preview`).
 
 **POST `/api/preview/naming/fetch`** — тело `{items: [{torrent_id, magnet?,
-link?}]}`; ответ сразу `{accepted: [torrent_id, ...]}`, сами списки файлов
+link?}]}` (неизвестное поле раздачи — 422); шлюз шлёт одну команду `torrents.preview.fetch` и отвечает сразу
+`{accepted: [torrent_id, ...]}`; magnet, ссылку на .torrent и события исхода ведёт `torrents`, сами списки файлов
 приходят по SSE (`preview_naming_ready` / `preview_naming_failed`).
 
 ### 6.4 Скан и очереди
@@ -539,8 +533,8 @@ POST: тело `{path}` (пустая строка игнорируется); DE
 передаётся в теле, не в query. Ответ — актуальный список `{paths}`.
 
 **GET|POST `/api/settings/debug_flags`** — GET:
-`{logging_modules: {<группа>: [{name, description, enabled}]},
-file_dump_flags: [{name, description, enabled}]}`; POST: тело `{module,
+`{logging_modules: {<группа>: [{name, description, enabled}]}}`
+(флаги дампов страниц `save_html_*`, `save_json_vk_scraper` убраны: их никто не читал); POST: тело `{module,
 enabled}` — `module` обязателен (иначе 400).
 
 **POST `/api/tmdb/search`** — тело `{query}`; ответ `{success, results}`; 400 —
@@ -832,7 +826,7 @@ voice_group, height, reason}`; `mark` — `by_level` | `own` | `other_player` | 
 | `sources_table_failed` | `sources.table.failed` | `{url, reason}` |
 | `composition_changed` | `composition.changed` | `{series_id, rev, episodes, summary_only}` |
 | `composition_failed` | `composition.failed` | `{series_id, reason}` |
-| `reference_changed` | `scan.reference.changed` | `{series_id, season, episode, part, mark}` |
+| `reference_changed` | `scan.reference.changed` | референс серии целиком и `series_id` (`ReferenceChanged`) |
 
 Подробный контракт событий — [sse_contract.md](sse_contract.md).
 
