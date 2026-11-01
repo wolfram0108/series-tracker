@@ -369,7 +369,7 @@ onMounted(() => {
       <div class="fieldset-header"><span class="fieldset-title">{{ t("sources.title") }}</span></div>
       <div class="fieldset-content">
         <SourcesEditor
-          :items="sources.items.value" :profiles="profiles" :error="sources.error.value" :busy="sources.busy.value"
+          :items="sources.items.value" :profiles="profiles" :error="sources.error.value || sources.layoutFailure.value" :busy="sources.busy.value"
           :editable="isVideo" :adder="sources.add" @remove="sources.remove" @change="sources.change" @reread="sources.reread"
         />
       </div>

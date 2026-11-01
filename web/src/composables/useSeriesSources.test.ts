@@ -97,6 +97,19 @@ describe("useSeriesSources", () => {
     expect(calls.readPageNow).toHaveBeenCalledTimes(2)
   })
 
+  it("words a recount of the layout that failed for the series, and for no other, until the next layout comes", async () => {
+    const sources = setup()
+    await flushPromises()
+    expect(sources.layoutFailure.value).toBe("")
+    const store = useCompositionStore()
+    store.applyFailed({ series_id: 2, reason: "{}" })
+    expect(sources.layoutFailure.value).toBe("")
+    store.applyFailed({ series_id: 1, reason: JSON.stringify({ code: "composition_error" }) })
+    expect(sources.layoutFailure.value).toContain("Раскладка не пересчитана, действует прежняя")
+    store.applyChanged({ series_id: 1, rev: 3, episodes: [], summary_only: false })
+    expect(sources.layoutFailure.value).toBe("")
+  })
+
   it("adds a source made of a site address and reads the list again", async () => {
     const sources = setup()
     await flushPromises()

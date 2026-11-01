@@ -8,6 +8,7 @@ import * as calls from "../../composables/outputCalls"
 import type { Composition } from "../../composables/outputCalls"
 import type { Answer } from "../../composables/sourceCalls"
 import { useSSE } from "../../composables/useSSE"
+import { useCompositionStore } from "../../stores/composition"
 import { t } from "../../i18n"
 import type { Reference, Row } from "../../lib/output"
 
@@ -65,6 +66,21 @@ describe("StatusOutput", () => {
       t("output.season", { n: 1 }), t("output.season", { n: 2 })])
     expect(w.findAll("article").map((each) => [each.attributes("data-season"), each.attributes("data-episode")])).toEqual([
       ["1", "1"], ["1", "2"], ["2", "1"]])
+  })
+
+  it("says that the layout was not counted and the earlier one stands, from the failure the core announced, until a newer layout comes", async () => {
+    const w = mountOutput()
+    await flushPromises()
+    expect(w.find(".output-layout-failure").exists()).toBe(false)
+    const store = useCompositionStore()
+    store.applyFailed({ series_id: 1, reason: JSON.stringify({ code: "composition_error" }) })
+    await flushPromises()
+    expect(w.find(".output-layout-failure").text()).toContain("Раскладка не пересчитана, действует прежняя")
+    expect(w.findAll("article")).toHaveLength(3) // the earlier layout is still shown
+    store.applyFailed({ series_id: 2, reason: "{}" })
+    store.applyChanged({ series_id: 1, rev: 2, episodes: [], summary_only: false })
+    await flushPromises()
+    expect(w.find(".output-layout-failure").exists()).toBe(false)
   })
 
   it("says that there are no episodes yet when the layout has none", async () => {

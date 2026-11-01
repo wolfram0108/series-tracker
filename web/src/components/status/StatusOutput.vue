@@ -62,6 +62,7 @@ const switchSeason = (season: number, off: boolean) => changed(output.switchTo(s
     </div>
 
     <p v-if="output.failure.value" class="output-failure" role="alert">{{ output.failure.value }}</p>
+    <p v-if="output.layoutFailure.value" class="output-failure output-layout-failure" role="alert">{{ output.layoutFailure.value }}</p>
 
     <div v-if="output.loading.value && seriesViews.length === 0" class="empty-state">{{ t("output.loading") }}</div>
     <div v-else-if="seriesViews.length === 0" class="empty-state">{{ t("output.empty") }}</div>

@@ -1,5 +1,6 @@
 import { computed, onMounted, ref, watch } from "vue"
 import { t } from "../i18n"
+import { reasonText } from "../lib/reason"
 import {
   draftBody, itemOfSource, readOptions, summaryOf, vkModeOf,
   type SeriesSource, type SourceItem, type SourceSummary,
@@ -27,6 +28,12 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
   const canonical = ref<Record<number, string>>({})
   const error = ref("")
   const busy = ref(false)
+
+  // A recount of the layout that failed leaves the earlier layout in force; the window says so until the next one arrives.
+  const layoutFailure = computed(() => {
+    const failed = composition.layoutFailed[seriesId]
+    return failed ? t("output.layoutFailed", { reason: reasonText(failed.reason) }) : ""
+  })
 
   const items = computed<SourceItem[]>(() => sources.value.map((source) => itemOfSource(
     source, summaryOf(summaries.value, source.id), tables.forUrl(canonical.value[source.id] ?? ""))))
@@ -128,5 +135,5 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     if (up) void load()
   })
 
-  return { items, error, busy, add, remove, change, reread, reload: load }
+  return { items, error, layoutFailure, busy, add, remove, change, reread, reload: load }
 }

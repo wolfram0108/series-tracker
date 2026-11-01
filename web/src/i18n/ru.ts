@@ -150,6 +150,7 @@ export const ru = {
   "output.loading": "Загрузка…",
   "output.empty": "Серий пока нет",
   "output.error.refused": "Не удалось выполнить действие",
+  "output.layoutFailed": "Раскладка не пересчитана, действует прежняя: {reason}",
   "output.error.network": "Нет связи с сервером",
   "output.lever.title.reference.choice": "Референс",
   "output.lever.title.variant.allow": "Участвует",
