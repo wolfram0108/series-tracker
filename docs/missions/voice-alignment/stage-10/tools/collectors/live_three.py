@@ -32,7 +32,7 @@ REMOTE = "/mnt/meganas/media/torrents/track-muxer/stage10-live3"
 LIBRARY = f"{LOCAL}/library/{SERIES_EN}"
 CUT = "1-207"  # the range filter: the episodes up to 207 are out, 208-217 stay
 FIRST, LAST = 208, 217
-KEEP = 217
+KEEP = 212  # the channel has this episode in 2160p, and all five voice-overs have a row for it
 TEXT_FIRST = [{"type": "text", "value": "Серия"}, {"type": "whitespace"}, {"type": "number"}]
 NUMBER_FIRST = [{"type": "number"}, {"type": "whitespace"}, {"type": "text", "value": "серия"}]
 OUT_TEXT_FIRST = [*TEXT_FIRST, {"type": "range", "value": CUT}]
@@ -43,8 +43,9 @@ GROUPS = {
     "Animy": ["Ruchime", "AniMy / RuChiMe"],
     "Anton Shanteau": [],
     "Студия Константина Исаева": [],
+    "AnimeVost": [],
 }
-WANTED_VOICES = {"AniStar", "Animy", "Anton Shanteau", "Студия Константина Исаева"}
+WANTED_VOICES = {"AniStar", "Animy", "Anton Shanteau", "Студия Константина Исаева", "AnimeVost"}
 
 
 def _rule(name: str, conditions: list[list[dict]], actions: list[dict]) -> dict:
@@ -124,20 +125,7 @@ def drop_unnamed(live: Live) -> list[str]:
     return labels
 
 
-def build_phase(live: Live) -> str:
-    address = conform_address()
-    saved = live.call("PUT", "/api/conform/settings", json={"url": address, "work_dir": LOCAL, "work_dir_remote": REMOTE})
-    assert saved.get("saved") is True, f"conform settings: {saved.get('problems')}"
-    if live.call("GET", "/api/series"):
-        live.step("сериал уже есть в базе стенда: безымянные озвучки отключены рычагом, ждём работу дальше", dropped=drop_unnamed(live))
-        live.watch({"voice_dub_update", "voice_dubs_snapshot", "conform_queue_update"},
-                   lambda name, data: name == "voice_dub_update" and data.get("state") in LIVE_STATES, live.left() - 10)
-        dubs = [dub for dub in live.dubs() if dub.get("status") != "removed"]
-        voices = {dub["voice_label"] for dub in dubs}
-        live.step("озвучки в работе", voices=sorted(voices), states=states(dubs))
-        ok = voices == WANTED_VOICES - {"AniStar"} and any(dub["state"] in LIVE_STATES for dub in dubs)
-        return f"{'PASS' if ok else 'FAIL'} озвучек {len(dubs)}: {sorted(voices)} {states(dubs)}"
-
+def create_series(live: Live) -> None:
     view = live.call("GET", "/api/voices/settings")
     answer = live.call("PUT", "/api/voices/settings", json={"priority": view["priority"], "voice_groups": GROUPS})
     assert answer.get("saved") is True, f"voice groups: {answer}"
@@ -151,7 +139,6 @@ def build_phase(live: Live) -> str:
             live.call("POST", f"/api/parser-profiles/{ids[name]}/rules", json=rule)
     live.step("профили созданы, правила записаны", profiles=ids)
 
-    kept: dict[str, list[int]] = {}
     for (url, options), name in zip(SOURCES, ("ruchime", "dunhuatv", "vk")):
         tested = live.call("POST", "/api/parser-profiles/test", json={
             "url": url, "options": options, "profile_id": ids[name], "refresh": False})
@@ -159,16 +146,14 @@ def build_phase(live: Live) -> str:
         excluded = [each for each in lines if (each.get("result") or {}).get("excluded")]
         episodes = sorted({each["result"]["episode"] for each in lines
                            if each.get("result") and not each["result"].get("excluded") and each["result"].get("episode") is not None})
-        kept[name] = episodes
-        live.step(f"диапазон {CUT} у источника {name}", lines=len(lines), excluded=len(excluded), kept_episodes=episodes[:3] + ["…"] + episodes[-3:],
-                  kept_count=len(episodes))
+        live.step(f"диапазон {CUT} у источника {name}", lines=len(lines), excluded=len(excluded),
+                  kept_episodes=episodes[:3] + ["…"] + episodes[-3:], kept_count=len(episodes))
         assert excluded, f"{name}: the range filter excluded nothing"
         assert episodes and min(episodes) >= FIRST and max(episodes) <= LAST, f"{name}: episodes {episodes}"
 
     seen: set[int] = set()
     watching = live.stand.listen({"reference_changed"}, lambda n, d: (seen.add(int(d["episode"])) or len(seen) >= LAST - FIRST + 1),
                                  min(90.0, live.left() - 60))
-    channel = SOURCES[2]
     live.call("POST", "/api/series", json={
         "name": SERIES, "name_en": SERIES_EN, "site": "1.ruchime.org", "save_path": LIBRARY, "season": "s05",
         "sources": [{"url": url, "source_type": "web_video", "parser_profile_id": ids[name],
@@ -178,19 +163,30 @@ def build_phase(live: Live) -> str:
     live.step("сериал создан из трёх источников; референсы пришли событиями", episodes=sorted(seen))
     assert min(seen) >= FIRST and max(seen) <= LAST, f"episodes {sorted(seen)}"
 
+
+def aim(live: Live) -> str:
+    """Everything that depends on the episode taken: the groups, the one episode on, the reference of the channel, the voice-overs
+    nobody named off; then the pass. Every step is the same when it is done again, so the phase may be run on the same database."""
+    view = live.call("GET", "/api/voices/settings")
+    if view["voice_groups"] != GROUPS:
+        # New groups name voice-overs in the layout only after it is counted again: its event is waited for.
+        rev = live.call("GET", "/api/series/1/composition")["rev"]
+        recount = live.stand.listen({"composition_changed"}, lambda name, data: data.get("rev", 0) > rev, 40)
+        answer = live.call("PUT", "/api/voices/settings", json={"priority": view["priority"], "voice_groups": GROUPS})
+        assert answer.get("saved") is True, f"voice groups: {answer}"
+        assert recount[1].wait(40), "the layout was not counted again after the groups"
+        live.step("группы озвучек изменены, раскладка пересчитана", groups=list(GROUPS))
     layout = live.call("GET", "/api/series/1/composition")
     labels = sorted({row["voice_label"] for row in layout["rows"] if row.get("episode_start") == KEEP and not row.get("excluded")})
     live.step(f"озвучки серии {KEEP} в раскладке (имя группы или неизвестная)", labels=labels)
     assert WANTED_VOICES <= set(labels), f"voices {labels}"
 
     for episode in range(FIRST, LAST + 1):
-        if episode != KEEP:
-            live.call("PUT", "/api/series/1/output/switch", json={"season": 5, "episode": episode, "off": True})
+        live.call("PUT", "/api/series/1/output/switch", json={"season": 5, "episode": episode, "off": episode != KEEP})
     sources = live.call("GET", "/api/series/1/sources")
     channel_id = next(each["id"] for each in sources if "vkvideo.ru" in each["url"])
-    answer = live.call("PUT", "/api/series/1/output/settings", json={
-        "lever": "reference.choice", "target": None,
-        "value": {"group": "AniStar", "source_id": channel_id, "player": "vk"}})
+    live.call("PUT", "/api/series/1/output/settings", json={
+        "lever": "reference.choice", "target": None, "value": {"group": "AniStar", "source_id": channel_id, "player": "vk"}})
     output = live.call("GET", "/api/series/1/output")
     wanted = [each for each in output if each["mark"] != "off"]
     assert [each["episode"] for each in wanted] == [KEEP], f"wanted {[each['episode'] for each in wanted]}"
@@ -198,29 +194,64 @@ def build_phase(live: Live) -> str:
     live.step("референс из канала VK выбран рычагом", mark=reference["mark"], group=reference["voice_group"],
               player=reference["player"], height=reference["height"], source_is_channel=reference["source_id"] == channel_id)
     assert reference["source_id"] == channel_id and reference["voice_group"] == "AniStar", f"reference {reference}"
-
     live.step("безымянные озвучки отключены рычагом «брать озвучку»", dropped=drop_unnamed(live))
+
     live.call("POST", "/api/series/1/scan", timeout=live.left() - 30)
     live.step("проход по сериалу выполнен (загрузка поставлена)")
     live.watch({"voice_dub_update", "voice_dubs_snapshot", "conform_queue_update"},
-               lambda name, data: name == "voice_dub_update" and data.get("state") in LIVE_STATES, live.left() - 10)
-    dubs = live.dubs()
-    live.step("озвучки", voices=sorted(dub["voice_label"] for dub in dubs), states=states(dubs))
-    ok = {dub["voice_label"] for dub in dubs} == WANTED_VOICES - {"AniStar"} and any(dub["state"] in LIVE_STATES for dub in dubs)
+               lambda name, data: name == "voice_dub_update" and data.get("episode") == KEEP and data.get("state") in LIVE_STATES,
+               live.left() - 10)
+    dubs = mine(live)
+    voices = {dub["voice_label"] for dub in dubs}
+    live.step("озвучки", voices=sorted(voices), states=states(dubs))
+    ok = voices == WANTED_VOICES - {"AniStar"} and any(dub["state"] in LIVE_STATES for dub in dubs)
     return (f"PASS три источника, диапазон {CUT}, референс AniStar из канала, озвучек {len(dubs)}: {states(dubs)}" if ok
-            else f"FAIL озвучки {sorted(dub['voice_label'] for dub in dubs)}: {states(dubs)}")
+            else f"FAIL озвучки {sorted(voices)}: {states(dubs)}")
+
+
+def build_phase(live: Live) -> str:
+    address = conform_address()
+    saved = live.call("PUT", "/api/conform/settings", json={"url": address, "work_dir": LOCAL, "work_dir_remote": REMOTE})
+    assert saved.get("saved") is True, f"conform settings: {saved.get('problems')}"
+    if live.call("GET", "/api/series"):
+        live.step("сериал уже есть в базе стенда: серия и озвучки нацеливаются заново")
+    else:
+        create_series(live)
+    return aim(live)
+
+
+def pairs_of_jobs(work: str) -> list[dict]:
+    """What the service says of each pair of the jobs of this series: read-only asks, the ids from the database of the stand."""
+    import sqlite3
+    ids = sorted({row[0] for row in sqlite3.connect(f"file:{work}/app.db?mode=ro", uri=True).execute(
+        "SELECT job_id FROM voice_dubs WHERE episode=? AND status != 'removed' AND job_id IS NOT NULL", (KEEP,))})
+    address = conform_address()
+    pairs = []
+    for job_id in ids:
+        job = httpx.get(f"{address}/conform/jobs/{job_id}", timeout=30).json()
+        for result in job.get("results", []):
+            pairs.append({"job": job_id, "elapsed_s": round(job.get("elapsed_s") or 0), **{
+                key: result.get(key) for key in ("dub", "ok", "suspect", "critical", "error", "audio_resid_ms",
+                                                 "assigned_pct", "dropped_intro_s") if key in result}})
+    return pairs
+
+
+def mine(live: Live) -> list[dict]:
+    """The voice-overs of the episode in work: the rows of episodes switched off and the removed ones are history."""
+    return [dub for dub in live.dubs() if dub.get("status") != "removed" and dub["episode"] == KEEP]
 
 
 def two_phase(live: Live) -> str:
     ended = {"done", "error"}
-    live.step("новый стенд на той же базе: работа подхвачена из базы", dubs=states(live.dubs()))
+    live.step("новый стенд на той же базе: работа подхвачена из базы", dubs=states(mine(live)))
     while live.left() > 30:
-        dubs = live.dubs()
+        dubs = mine(live)
         if dubs and all(dub["state"] in ended for dub in dubs):
             break
         live.watch({"voice_dub_update", "voice_dubs_snapshot", "conform_queue_update"},
-                   lambda name, data: name == "voice_dub_update" and data.get("state") in ended, min(60.0, live.left() - 30))
-    dubs = live.dubs()
+                   lambda name, data: name == "voice_dub_update" and data.get("episode") == KEEP and data.get("state") in ended,
+                   min(60.0, live.left() - 30))
+    dubs = mine(live)
     count = states(dubs)
     live.step("озвучки после ожидания", states=count)
     if not dubs or any(dub["state"] not in ended for dub in dubs):
@@ -230,16 +261,22 @@ def two_phase(live: Live) -> str:
     aligned = [name for name in files if name.endswith((".flac", ".mka", ".ac3", ".aac"))]
     temp = sorted(str(path.relative_to(LOCAL)) for path in Path(LOCAL).glob("downloads/**/*") if path.is_file())
     live.step("файлы рядом с референсом", files=files[:12], aligned=len(aligned), temporary_left=temp[:5])
+    pairs = pairs_of_jobs(live.work)
+    live.step("пары сервиса выравнивания", pairs=pairs)
+    suspect = [pair["dub"] for pair in pairs if pair.get("suspect")]
+    critical = [pair["dub"] for pair in pairs if pair.get("critical")]
+    failed = [pair["dub"] for pair in pairs if not pair.get("ok")]
     done = count.get("done", 0)
-    ok = done == len(dubs) and len(aligned) == len(dubs) and not temp
-    return (f"PASS озвучек {done}, дорожки рядом с референсом: {len(aligned)}, временная папка пуста" if ok
-            else f"FAIL озвучки {count}, дорожек рядом: {len(aligned)}, во временной папке осталось: {len(temp)}")
+    ok = done == len(dubs) and len(aligned) == len(dubs) and not temp and not failed and not critical and not suspect
+    detail = f"озвучек {done}, дорожек рядом с референсом {len(aligned)}, во временной папке {len(temp)}, пары: не ok {len(failed)}, suspect {len(suspect)}, critical {len(critical)}"
+    return f"PASS {detail}" if ok else f"FAIL {detail}"
 
 
 def run_live(phase, work: str, safeguard: float) -> str:
     verdict = "FAIL прибор"
     with Stand(credentials_from=REAL_DB, work=work) as stand:
         live = Live(stand, time.monotonic() + safeguard - 15)
+        live.work = work
         try:
             verdict = phase(live)
         except Exception as exc:  # noqa: BLE001 - the last line must come out in any outcome
