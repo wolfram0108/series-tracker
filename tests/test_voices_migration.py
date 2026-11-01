@@ -115,3 +115,54 @@ def test_the_rows_survive_the_way_back_the_files_are_journaled_and_the_unique_ke
     alembic(at_0028, "upgrade", "0029")
     assert dubs(at_0028, *[name for name in names if name not in ("file_id", "admitted")]) == [
         {**row, **({"status": "pending", "attempt": 0} if row["id"] == 2 else {})} for row in before]
+
+
+# ---- 0032: the part of an episode is a part of the key ---------------------------------------------------------------
+
+FULL = ["id", "series_id", "season", "episode", "voice_key", "voice_label", "chain", "attempt", "status", "temp_path",
+        "error", "updated_at", "job_id", "aligned_path", "output_path", "outcome", "ref_uid", "ref_path", "move_from",
+        "submit_key", "out_dir", "admitted", "file_id"]
+
+
+@pytest.fixture
+def at_0031(at_0028):
+    alembic(at_0028, "upgrade", "0031")
+    return at_0028
+
+
+def test_every_row_keeps_every_value_and_has_no_part_and_the_ids_are_kept(at_0031):
+    before = dubs(at_0031, *FULL)
+    alembic(at_0031, "upgrade", "0032")
+    assert dubs(at_0031, *FULL) == before and len(before) == len(ROWS)
+    assert {row["part"] for row in dubs(at_0031, "part")} == {0}
+    assert "part" in columns(at_0031)
+
+
+def test_two_parts_of_one_voice_over_are_two_rows_and_one_part_is_one_row(at_0031):
+    alembic(at_0031, "upgrade", "0032")
+    add = ("INSERT INTO voice_dubs (series_id, season, episode, part, voice_key, voice_label, chain, updated_at) "
+           "VALUES (7, 1, 1, ?, 'blackcat', 'BlackCat', '[]', 'now')")
+    with sqlite3.connect(at_0031) as conn:
+        conn.execute(add, (1,))
+        conn.execute(add, (2,))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(add, (2,))
+        with pytest.raises(sqlite3.IntegrityError):  # the rows that exist are part 0 and stay one row of their key
+            conn.execute(add, (0,))
+
+
+def test_the_way_back_keeps_the_first_row_of_a_key_and_journals_what_the_other_parts_own(at_0031):
+    alembic(at_0031, "upgrade", "0032")
+    with sqlite3.connect(at_0031) as conn:
+        conn.execute(
+            "INSERT INTO voice_dubs (series_id, season, episode, part, voice_key, voice_label, chain, updated_at, "
+            "temp_path, output_path) VALUES (7, 1, 1, 2, 'blackcat', 'BlackCat', '[]', 'now', '/w/p2.mp4', '/lib/p2.flac')")
+        conn.commit()
+    alembic(at_0031, "downgrade", "0031")
+    assert "part" not in columns(at_0031)
+    assert len(dubs(at_0031, "id")) == len(ROWS)
+    with sqlite3.connect(at_0031) as conn:
+        assert sorted(conn.execute("SELECT path, kind FROM voice_cleanup").fetchall()) == [
+            ("/lib/p2.flac", "artifact"), ("/w/p2.mp4", "path")]
+    alembic(at_0031, "upgrade", "0032")
+    assert len(dubs(at_0031, "id")) == len(ROWS)

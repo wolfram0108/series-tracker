@@ -14,7 +14,7 @@ Query:
       voice-overs of its rows. A combined credit "A / B" is one name.
   voices.settings.get {} -> VoiceSettingsView: the groups of voice-overs and the order of sources as they apply, the
       order to return to and the fields whose stored value was refused
-  voices.dubs.get {series_id} -> {items: [{season, episode, voice_key, voice_label, status,
+  voices.dubs.get {series_id} -> {items: [{season, episode, part, voice_key, voice_label, status,
       attempt, error, temp_path, job_id, aligned_path, output_path, outcome, ref_uid, ref_path,
       detail, state, hint}]}  (detail = {code, params} of the outcome or error, see reasons.py; the
       fields `error` and `outcome` hold the stored reason as it is)
@@ -50,12 +50,12 @@ Events in:  composition.changed {series_id, rev, episodes, summary_only} and sca
             jobs of the service), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished, conform.job.removed,
             conform.daemon.up, series.deleted.
-Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_label, status, state, hint, detail,
+Events out: voices.dub.changed {series_id, season, episode, part, voice_key, voice_label, status, state, hint, detail,
             epoch, rev} — epoch is the number of this start of the module, kept in the database and raised at every
             start; rev grows with every event of a run: the interface keeps the newest (epoch, rev) of two it
             receives out of order, and no clock takes part;
             every write to a row is announced, including the creation of a planned row and its removal;
-            voices.dubs.snapshot {epoch, rev, items: [{series_id, season, episode, voice_key, voice_label, status,
+            voices.dubs.snapshot {epoch, rev, items: [{series_id, season, episode, part, voice_key, voice_label, status,
             state, hint, detail}]} — every row, published when an interface connects (gateway.sse.clients);
             state is what the user sees (states.py: planned, download_queued, downloading, align_queued, running,
             done, error), hint names the sentence that tells apart the causes of one state, status the
@@ -68,7 +68,7 @@ Events out: voices.dub.changed {series_id, season, episode, voice_key, voice_lab
             series.purged,
             voices.settings.changed VoiceSettingsView — the settings as they apply after a save, so that every open
             settings screen shows them without asking back,
-            voices.episode.settled {series_id, season, episode} — every voice-over of the episode is
+            voices.episode.settled {series_id, season, episode, part} — every voice-over of the episode is
             placed, rejected or failed and its temporary files (the downloaded voice-overs and the copy of the
             reference) are gone or on the cleanup journal; the folders the service wrote in stay with the records of
             its jobs.
@@ -225,9 +225,14 @@ def _safe(name: str) -> str:
     return re.sub(r"[^\w.-]+", "_", name, flags=re.UNICODE).strip("._") or "dub"
 
 
-def dub_file(series_id: int, season: int, episode: int, voice_key: str) -> str:
-    """The name a voice-over is downloaded and sent to the service under: unique by series, episode and voice."""
-    return f"{series_id}_s{season:02d}e{episode:02d}_{_safe(voice_key)}.mp4"
+def slot_tag(season: int, episode: int, part: int) -> str:
+    """How an episode is named in file and folder names; the part follows where the episode has parts."""
+    return f"s{season:02d}e{episode:02d}" + (f"p{part}" if part else "")
+
+
+def dub_file(series_id: int, season: int, episode: int, part: int, voice_key: str) -> str:
+    """The name a voice-over is downloaded and sent to the service under: unique by series, episode, part and voice."""
+    return f"{series_id}_{slot_tag(season, episode, part)}_{_safe(voice_key)}.mp4"
 
 
 def file_path(root: str, series_id: int, file_id: int, studio: str) -> str:
@@ -240,20 +245,21 @@ def sent_as(row: dict) -> str:
     """The name a voice-over is sent to the service under: the name of the file it reads."""
     if row.get("file_id") is not None and row.get("temp_path"):
         return os.path.basename(row["temp_path"])
-    return dub_file(row["series_id"], row["season"], row["episode"], row["voice_key"])
+    return dub_file(row["series_id"], row["season"], row["episode"], row["part"], row["voice_key"])
 
 
-def reference_file(series_id: int, season: int, episode: int, reference: str) -> str:
+def reference_file(series_id: int, season: int, episode: int, part: int, reference: str) -> str:
     """The name the copy of a reference video is given for the service."""
-    return f"{series_id}_s{season:02d}e{episode:02d}_ref{os.path.splitext(reference)[1]}"
+    return f"{series_id}_{slot_tag(season, episode, part)}_ref{os.path.splitext(reference)[1]}"
 
 
-def episode_dir(root: str, series_id: int, season: int, episode: int) -> str:
-    return os.path.join(root, str(series_id), f"s{season:02d}e{episode:02d}")
+def episode_dir(root: str, series_id: int, season: int, episode: int, part: int) -> str:
+    return os.path.join(root, str(series_id), slot_tag(season, episode, part))
 
 
-def temp_path(root: str, series_id: int, season: int, episode: int, voice_key: str) -> str:
-    return os.path.join(episode_dir(root, series_id, season, episode), dub_file(series_id, season, episode, voice_key))
+def temp_path(root: str, series_id: int, season: int, episode: int, part: int, voice_key: str) -> str:
+    return os.path.join(episode_dir(root, series_id, season, episode, part),
+                        dub_file(series_id, season, episode, part, voice_key))
 
 
 class VoicesModule(BaseModule):
@@ -397,10 +403,10 @@ class VoicesModule(BaseModule):
     async def _downloads_root(self) -> str:
         return (await self._folders())["downloads"]
 
-    async def _conform_episode(self, series_id: int, season: int, episode: int) -> str:
+    async def _conform_episode(self, series_id: int, season: int, episode: int, part: int) -> str:
         """Where the service works for this episode; empty while the work folder is not named."""
         root = (await self._folders())["conform"]
-        return episode_dir(root, series_id, season, episode) if root else ""
+        return episode_dir(root, series_id, season, episode, part) if root else ""
 
 
     async def on_groups_resolve(self, env: Envelope) -> dict:
@@ -511,11 +517,11 @@ class VoicesModule(BaseModule):
                       layout.rev, len(plan.with_reference), len(plan.dubs))
         before = await self.repo.for_series(series_id)
         keys = planning.adopt(plan.dubs, before)
-        planned: set[tuple[int, int, str]] = set()
-        touched: set[tuple[int, int, str]] = set()
-        relabeled: set[tuple[int, int, str]] = set()
+        planned: set[tuple[int, int, int, str]] = set()
+        touched: set[tuple[int, int, int, str]] = set()
+        relabeled: set[tuple[int, int, int, str]] = set()
         for dub in plan.dubs:
-            key = (dub.season, dub.episode, keys[(dub.season, dub.episode, dub.voice_key)])
+            key = (dub.season, dub.episode, dub.part, keys[(dub.season, dub.episode, dub.part, dub.voice_key)])
             planned.add(key)
             if await self.repo.relabel(series_id, *key, dub.voice_label):
                 relabeled.add(key)
@@ -531,9 +537,9 @@ class VoicesModule(BaseModule):
         await self._work_off()
         after = await self.repo.for_series(series_id)
         await self._announce_difference(before, [row for row in after
-                                                 if (row["season"], row["episode"], row["voice_key"]) in touched])
+                                                 if (row["season"], row["episode"], row["part"], row["voice_key"]) in touched])
         for row in after:
-            if (row["season"], row["episode"], row["voice_key"]) in relabeled:
+            if (row["season"], row["episode"], row["part"], row["voice_key"]) in relabeled:
                 await self._announce(row)
         if relabeled:
             self._kick(series_id)  # a track that is placed follows the name of its voice-over
@@ -547,13 +553,13 @@ class VoicesModule(BaseModule):
     async def _drop_without_reference(self, series_id: int, plan: planning.Plan, rows: list[dict]) -> None:
         """An episode that has no reference loses the voice-overs it had begun, as an episode that left the plan does."""
         root = await self._downloads_root()
-        episodes = {(row["season"], row["episode"]) for row in rows} - plan.with_reference - plan.undecided
+        episodes = {(row["season"], row["episode"], row["part"]) for row in rows} - plan.with_reference - plan.undecided
         if episodes and not root:  # nowhere to look for what they hold: the naming of the folder brings them back
             self._deferred.add(series_id)
             return
-        for season, episode in sorted(episodes):
-            group = await self.repo.for_episode(series_id, season, episode)
-            if group and not await self._drop_orphans(series_id, season, episode, group, root):
+        for season, episode, part in sorted(episodes):
+            group = await self.repo.for_episode(series_id, season, episode, part)
+            if group and not await self._drop_orphans(series_id, season, episode, part, group, root):
                 self._deferred.add(series_id)
 
     async def _forget(self, series_id: int) -> None:
@@ -590,8 +596,8 @@ class VoicesModule(BaseModule):
             if not root:
                 return
             active = await self.repo.active_episodes() if cap else set()
-            for row in sorted(waiting, key=lambda r: (r["series_id"], r["season"], r["episode"], r["id"])):
-                episode = (row["series_id"], row["season"], row["episode"])
+            for row in sorted(waiting, key=lambda r: (r["series_id"], r["season"], r["episode"], r["part"], r["id"])):
+                episode = (row["series_id"], row["season"], row["episode"], row["part"])
                 if cap and episode not in active:
                     if len(active) >= cap:
                         continue
@@ -609,7 +615,7 @@ class VoicesModule(BaseModule):
         if chain[row["attempt"]].get("file"):
             await self._start_on_file(row, chain[row["attempt"]], root)
             return
-        path = temp_path(root, row["series_id"], row["season"], row["episode"], row["voice_key"])
+        path = temp_path(root, row["series_id"], row["season"], row["episode"], row["part"], row["voice_key"])
         if storage.busy(path):  # an earlier removal of this name has not ended: a file written now could be lost
             self._when_free(path, row["series_id"])
             return
@@ -789,7 +795,7 @@ class VoicesModule(BaseModule):
     def _publish_event(self, row: dict, status: E, detail: str | None, epoch: int, rev: int) -> None:
         state = public_state(status, self._job_status.get(row.get("job_id")), self._is_fetching(row))
         self.publish_event("voices.dub.changed", DubEvent(
-            series_id=row["series_id"], season=row["season"], episode=row["episode"],
+            series_id=row["series_id"], season=row["season"], episode=row["episode"], part=row["part"] or None,
             voice_key=row["voice_key"], voice_label=row["voice_label"], status=status, state=state,
             hint=public_hint(status, state, row.get("job_id")), detail=parse_reason(detail), epoch=epoch,
             rev=rev, job_id=row.get("job_id"),
@@ -797,18 +803,18 @@ class VoicesModule(BaseModule):
 
     async def _announce_difference(self, before: list[dict], after: list[dict]) -> None:
         """Rows that the planner created or took over are news for the interface like any other change."""
-        known = {(row["season"], row["episode"], row["voice_key"]): (row["status"], row["outcome"] or row["error"])
+        known = {(row["season"], row["episode"], row["part"], row["voice_key"]): (row["status"], row["outcome"] or row["error"])
                  for row in before}
         for row in after:
             seen = (row["status"], row["outcome"] or row["error"])
-            if known.get((row["season"], row["episode"], row["voice_key"])) != seen:
+            if known.get((row["season"], row["episode"], row["part"], row["voice_key"])) != seen:
                 await self._announce(row)
 
     def _record(self, row: dict) -> DubRecord:
         state = public_state(row["status"], self._job_status.get(row["job_id"]), self._is_fetching(row))
         return DubRecord(**{field: row[field] for field in DubRecord.model_fields
-                            if field in row and field not in ("state", "hint", "detail")},
-                         state=state, hint=public_hint(row["status"], state, row["job_id"]),
+                            if field in row and field not in ("state", "hint", "detail", "part")},
+                         part=row["part"] or None, state=state, hint=public_hint(row["status"], state, row["job_id"]),
                          detail=parse_reason(row["outcome"] or row["error"]))
 
     async def on_clients(self, env: Envelope) -> None:
@@ -885,32 +891,32 @@ class VoicesModule(BaseModule):
         root = await self._downloads_root()
         if not root:  # a folder made of nothing would be a path relative to wherever the service runs
             return False
-        episodes = sorted({(row["season"], row["episode"]) for row in rows})
+        episodes = sorted({(row["season"], row["episode"], row["part"]) for row in rows})
         restart = False
         owed = False
-        for season, episode in episodes:
-            group = await self.repo.for_episode(series_id, season, episode)
+        for season, episode, part in episodes:
+            group = await self.repo.for_episode(series_id, season, episode, part)
             for row in group:
                 if row["move_from"]:
                     await self._finish_move(row)
-            group = await self.repo.for_episode(series_id, season, episode)
-            current = references.get((season, episode))
+            group = await self.repo.for_episode(series_id, season, episode, part)
+            current = references.get((season, episode, part))
             if current is None:
-                if (season, episode) not in in_plan:
-                    await self._drop_orphans(series_id, season, episode, group, root)
+                if (season, episode, part) not in in_plan:
+                    await self._drop_orphans(series_id, season, episode, part, group, root)
                 continue
             reference, uid = current
-            if await self._follow(series_id, season, episode, group, reference, uid):
+            if await self._follow(series_id, season, episode, part, group, reference, uid):
                 restart = True
                 continue
             for row in group:
                 if row["status"] == S.ALIGNED:
                     await self._place(row, reference)
-            group = await self.repo.for_episode(series_id, season, episode)
+            group = await self.repo.for_episode(series_id, season, episode, part)
             ready = [row for row in group if row["status"] == S.READY]
             if ready and not any(row["status"] in WORKING for row in group):
-                owed = await self._submit(series, season, episode, reference, uid, ready) or owed
-            await self._tidy(series_id, season, episode, root)
+                owed = await self._submit(series, season, episode, part, reference, uid, ready) or owed
+            await self._tidy(series_id, season, episode, part, root)
         await self._admit()
         await self._work_off()
         await self._release_files()
@@ -929,14 +935,14 @@ class VoicesModule(BaseModule):
         except OSError:
             pass
 
-    async def _reference_state(self, series: dict) -> tuple[set, dict[tuple[int, int], tuple[str, str]]]:
-        """The planned episodes, and (file, media item) of the reference that is on disk, by episode.
+    async def _reference_state(self, series: dict) -> tuple[set, dict[tuple[int, int, int], tuple[str, str]]]:
+        """The planned episodes, and (file, media item) of the reference that is on disk, by episode and part.
 
         When a slot holds a superseded file and its winner, the winner is the reference."""
         reply = await self.request("downloads.episodes.get", {"series_id": series["id"]}, timeout=30)
         in_plan, found = set(), {}
         for item in reply["items"]:
-            slot = (item["season"], item["episode_start"])
+            slot = (item["season"], item["episode_start"], item["part"] or 0)
             in_plan.add(slot)
             if not item.get("final_filename"):
                 continue
@@ -947,7 +953,7 @@ class VoicesModule(BaseModule):
                 found[slot] = (path, item["unique_id"])
         return in_plan, found
 
-    async def _follow(self, series_id: int, season: int, episode: int, group: list[dict],
+    async def _follow(self, series_id: int, season: int, episode: int, part: int, group: list[dict],
                       reference: str, uid: str) -> bool:
         """Keep the tracks of an episode in step with its reference; True when they went stale."""
         stale = [row for row in group if row["ref_uid"] and row["ref_uid"] != uid]
@@ -992,7 +998,7 @@ class VoicesModule(BaseModule):
                       row["season"], row["episode"], row["voice_label"], expected)
         await self._announce(row, E.MOVED)
 
-    async def _drop_orphans(self, series_id: int, season: int, episode: int, group: list[dict],
+    async def _drop_orphans(self, series_id: int, season: int, episode: int, part: int, group: list[dict],
                             root: str) -> bool:
         """An episode left the plan: with its video gone, its set of tracks goes too. False when a download is under
         way: the episode is looked at again when it ends."""
@@ -1001,8 +1007,8 @@ class VoicesModule(BaseModule):
         for row in group:
             if row["ref_path"] and await self._io(os.path.isfile, row["ref_path"]):
                 return True
-        folders = await self._episode_folders(group, root, series_id, season, episode)
-        await self.repo.drop_episode(series_id, season, episode, folders)
+        folders = await self._episode_folders(group, root, series_id, season, episode, part)
+        await self.repo.drop_episode(series_id, season, episode, part, folders)
         await self._work_off()
         for row in group:
             await self._announce(row, E.REMOVED)
@@ -1140,20 +1146,21 @@ class VoicesModule(BaseModule):
             await self._io(self._prune, scope)
         return True
 
-    async def _episode_folders(self, group: list[dict], root: str, series_id: int, season: int, episode: int) -> list[str]:
+    async def _episode_folders(self, group: list[dict], root: str, series_id: int, season: int, episode: int,
+                               part: int) -> list[str]:
         """Everything of an episode that lies in the work folder: its voice-overs and the folder of the service."""
-        folders = self._folders_of(group, episode_dir(root, series_id, season, episode))
+        folders = self._folders_of(group, episode_dir(root, series_id, season, episode, part))
         # Where the service worked is read from the rows (<episode folder>/_aligned/<key>), not from the settings now.
         made = {os.path.dirname(os.path.dirname(row["out_dir"])) for row in group if row["out_dir"]}
-        return sorted({*folders, *made, await self._conform_episode(series_id, season, episode)} - {""})
+        return sorted({*folders, *made, await self._conform_episode(series_id, season, episode, part)} - {""})
 
-    async def _settle_folders(self, group: list[dict], root: str, series_id: int, season: int,
-                              episode: int) -> list[str]:
+    async def _settle_folders(self, group: list[dict], root: str, series_id: int, season: int, episode: int,
+                              part: int) -> list[str]:
         """What of a settled episode is of no use: its voice-overs and the copy of the reference. The folders of the
         jobs stay with their records."""
-        folders = self._folders_of(group, episode_dir(root, series_id, season, episode))
+        folders = self._folders_of(group, episode_dir(root, series_id, season, episode, part))
         service = {os.path.dirname(os.path.dirname(row["out_dir"])) for row in group if row["out_dir"]}
-        service.add(await self._conform_episode(series_id, season, episode))
+        service.add(await self._conform_episode(series_id, season, episode, part))
         return sorted({*folders, *(os.path.join(folder, REF_DIR) for folder in service if folder)})
 
     async def _clear_finished(self) -> bool:
@@ -1232,15 +1239,15 @@ class VoicesModule(BaseModule):
             await self.repo.set_output(row["id"], destination, ref_path)
         return True
 
-    async def _submit(self, series: dict, season: int, episode: int, reference: str, uid: str,
+    async def _submit(self, series: dict, season: int, episode: int, part: int, reference: str, uid: str,
                       ready: list[dict]) -> bool:
         """Send the ready voice-overs of an episode as one job; True when the service was certainly not reached
         and another try is owed. What may have reached it is carried by the recovery from the key."""
-        label = f"{series['name']} s{season:02d}e{episode:02d}"
+        label = f"{series['name']} {slot_tag(season, episode, part)}"
         ready = await self._with_files(ready, label)
         if not ready:
             return False
-        conform_dir = await self._conform_episode(series["id"], season, episode)
+        conform_dir = await self._conform_episode(series["id"], season, episode, part)
         if not conform_dir:
             self.log.warning("%s: выравнивание не начато: рабочая папка не задана в настройках сервера выравнивания", label)
             return False
@@ -1249,7 +1256,7 @@ class VoicesModule(BaseModule):
         # A job works in folders of its own: an earlier job that is not confirmed stopped can not reach its files.
         out_dir, cache_dir = os.path.join(folders["out_dir"], key), os.path.join(folders["cache_dir"], key)
         ref_dir = os.path.join(conform_dir, REF_DIR, key)
-        copy = os.path.join(ref_dir, reference_file(series["id"], season, episode, reference))
+        copy = os.path.join(ref_dir, reference_file(series["id"], season, episode, part, reference))
         for guarded in (out_dir, cache_dir, ref_dir, *[row["temp_path"] for row in ready]):
             if storage.busy(guarded):  # the service would work where an unfinished removal may still act
                 self._when_free(guarded, series["id"])
@@ -1427,7 +1434,7 @@ class VoicesModule(BaseModule):
             return
         result = result_for(job, row["temp_path"])
         verdict = refusal(result)
-        conform_dir = await self._conform_episode(row["series_id"], row["season"], row["episode"])
+        conform_dir = await self._conform_episode(row["series_id"], row["season"], row["episode"], row["part"])
         out_dir = row["out_dir"] or (await self._workspace(dub_folder=conform_dir))["out_dir"]
         track = track_of(out_dir, result) if verdict is None else None
         if verdict is None and not await self._io(os.path.isfile, track):
@@ -1466,23 +1473,23 @@ class VoicesModule(BaseModule):
                       row["season"], row["episode"], row["voice_label"], destination)
         await self._announce(row)
 
-    async def _tidy(self, series_id: int, season: int, episode: int, root: str) -> None:
+    async def _tidy(self, series_id: int, season: int, episode: int, part: int, root: str) -> None:
         """The episode is settled: its temporary files are of no use any more. What the service wrote stays while the
         record of its job is in the service's history, since the plots are shown from there."""
-        group = await self.repo.for_episode(series_id, season, episode)
+        group = await self.repo.for_episode(series_id, season, episode, part)
         if not group or any(row["status"] not in FINAL for row in group):
             return
-        folders = await self._settle_folders(group, root, series_id, season, episode)
+        folders = await self._settle_folders(group, root, series_id, season, episode, part)
         if not (any(row["temp_path"] or row["aligned_path"] for row in group)
                 or any([await self._io(os.path.isdir, folder) for folder in folders])):
             return
-        await self.repo.settle_episode(series_id, season, episode, folders)
+        await self.repo.settle_episode(series_id, season, episode, part, folders)
         if await self._clear_finished():
-            await self.repo.hand_over_jobs(series_id, season, episode)
+            await self.repo.hand_over_jobs(series_id, season, episode, part)
         await self._work_off()
-        await self._release_gone(await self.repo.for_episode(series_id, season, episode))
+        await self._release_gone(await self.repo.for_episode(series_id, season, episode, part))
         self.publish_event("voices.episode.settled",
-                           {"series_id": series_id, "season": season, "episode": episode})
+                           {"series_id": series_id, "season": season, "episode": episode, "part": part or None})
 
 
     async def on_series_deleted(self, env: Envelope) -> None:

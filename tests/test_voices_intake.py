@@ -73,7 +73,7 @@ async def test_a_group_renamed_gives_the_same_voice_over_a_new_name_and_two_voic
 async def test_a_row_recorded_under_an_old_key_is_the_voice_over_the_layout_now_calls_by_its_label(dubs):
     probe, neighbours, voices, bus = dubs
     link = "https://site/title.html#kodik-BlackCat-1"
-    await voices.repo.upsert(7, 1, 1, "blackcat", "BlackCat", [{"player": "kodik", "studio": "BlackCat", "url": link}],
+    await voices.repo.upsert(7, 1, 1, 0, "blackcat", "BlackCat", [{"player": "kodik", "studio": "BlackCat", "url": link}],
                              offer=True)
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
@@ -115,3 +115,16 @@ async def test_the_naming_of_the_work_folder_starts_what_waited_for_it(dubs):
                                                     "clear_finished": False})
     await settled(neighbours, 3)
     assert {r["status"] for r in await rows(probe)} == {"downloading"}
+
+
+@pytest.mark.asyncio
+async def test_two_parts_of_one_voice_over_are_two_rows_and_the_second_does_not_take_the_chain_of_the_first(dubs):
+    _probe, _neighbours, voices, _bus = dubs
+    first = [{"player": "kodik", "studio": "BlackCat", "url": "https://site/title.html#part-1"}]
+    second = [{"player": "kodik", "studio": "BlackCat", "url": "https://site/title.html#part-2"}]
+    await voices.repo.upsert(7, 1, 9, 1, "blackcat", "BlackCat", first, offer=True)
+    await voices.repo.upsert(7, 1, 9, 2, "blackcat", "BlackCat", second, offer=True)
+    one, two = await voices.repo.for_episode(7, 1, 9, 1), await voices.repo.for_episode(7, 1, 9, 2)
+    assert [row["chain"][0]["url"] for row in one] == [first[0]["url"]]
+    assert [row["chain"][0]["url"] for row in two] == [second[0]["url"]]
+    assert await voices.repo.for_episode(7, 1, 9, 0) == []

@@ -68,8 +68,11 @@ class Reason(BaseModel):
 
 
 class DubItem(BaseModel):
+    """`part` is None for an episode without parts: a voice-over belongs to one part of an episode."""
+
     season: int
     episode: int
+    part: int | None = None
     voice_key: str
     voice_label: str
     status: DubStatus
@@ -105,6 +108,7 @@ class DubEvent(BaseModel):
     series_id: int
     season: int
     episode: int
+    part: int | None = None
     voice_key: str
     voice_label: str
     status: DubEventStatus

@@ -42,7 +42,18 @@ def test_every_voice_but_the_one_in_the_reference_is_planned_for_an_episode_with
     rows = [row(1, "cvh", "Ref", 1), row(1, "kodik", "A", 1), row(1, "kodik", "B", 1)]
     result = planned(rows, [reference_of(rows, "Ref", 1)])
     assert sorted(chains(result)) == [(1, 1, "A"), (1, 1, "B")]
-    assert result.with_reference == {(1, 1)} and result.undecided == frozenset()
+    assert result.with_reference == {(1, 1, 0)} and result.undecided == frozenset()
+
+
+def test_the_parts_of_one_episode_are_planned_apart_each_for_the_reference_of_its_own_part():
+    rows = [row(1, "cvh", "Ref", 1, part=1), row(1, "cvh", "Ref", 1, part=2),
+            row(1, "kodik", "A", 1, part=1), row(1, "kodik", "A", 1, part=2)]
+    refs = [Reference(season=1, episode=1, part=part, mark=ReferenceMark.BY_LEVEL, source_id=1,
+                      row_key=f"cvh:Ref:1:p{part}", player="cvh") for part in (1, 2)]
+    result = planned(rows, refs)
+    assert [(dub.part, dub.voice_key, dub.chain[0].url.rsplit("/", 1)[1]) for dub in result.dubs] == [
+        (1, "A", "kodik:A:1:p1"), (2, "A", "kodik:A:1:p2")]
+    assert result.with_reference == {(1, 1, 1), (1, 1, 2)}
 
 
 def test_the_voice_of_the_reference_is_planned_for_no_episode_it_is_the_reference_of():
@@ -101,7 +112,7 @@ def test_a_reference_that_is_none_or_unfit_or_not_given_plans_no_voice_over_of_i
                   Reference(season=1, episode=2, mark=ReferenceMark.NONE),
                   Reference(season=1, episode=3, mark=ReferenceMark.UNFIT)]
     result = planned(rows, references)
-    assert sorted(chains(result)) == [(1, 1, "A")] and result.with_reference == {(1, 1)}
+    assert sorted(chains(result)) == [(1, 1, "A")] and result.with_reference == {(1, 1, 0)}
 
 
 def test_every_mark_that_has_a_reference_plans_the_voice_overs():
@@ -116,7 +127,7 @@ def test_a_reference_whose_row_the_layout_does_not_have_leaves_its_episode_undec
     rows = [row(1, "cvh", "Ref", 1), row(1, "kodik", "A", 1)]
     gone = Reference(season=1, episode=1, mark=ReferenceMark.BY_LEVEL, source_id=1, row_key="not-in-the-layout")
     result = planned(rows, [gone])
-    assert result.dubs == () and result.undecided == {(1, 1)} and result.with_reference == frozenset()
+    assert result.dubs == () and result.undecided == {(1, 1, 0)} and result.with_reference == frozenset()
 
 
 def test_the_part_of_a_voice_row_must_be_the_part_of_the_reference_and_none_matches_none():
@@ -214,35 +225,36 @@ def test_players_the_user_called_the_same_take_one_place_in_the_order_and_an_unk
     assert [each[0] for each in chain] == ["kodik", "vk"]
 
 
-def recorded(id, episode, key, *urls, season=1):
-    return {"id": id, "season": season, "episode": episode, "voice_key": key, "chain": [{"url": url} for url in urls]}
+def recorded(id, episode, key, *urls, season=1, part=0):
+    return {"id": id, "season": season, "episode": episode, "part": part, "voice_key": key,
+            "chain": [{"url": url} for url in urls]}
 
 
-def dub_of(episode, label, *urls, season=1):
-    return PlannedDub(season, episode, label, label, tuple(Candidate("kodik", label, url) for url in urls))
+def dub_of(episode, label, *urls, season=1, part=0):
+    return PlannedDub(season, episode, part, label, label, tuple(Candidate("kodik", label, url) for url in urls))
 
 
 def test_a_planned_voice_over_that_has_the_link_of_a_recorded_row_under_another_name_is_that_row():
     rows = [recorded(1, 1, "Неизвестная озвучка 2", "https://site/b1"), recorded(2, 1, "Неизвестная озвучка 3", "https://site/c1")]
     keys = adopt([dub_of(1, "Group", "https://site/b1")], rows)
-    assert keys == {(1, 1, "Group"): "Неизвестная озвучка 2"}
+    assert keys == {(1, 1, 0, "Group"): "Неизвестная озвучка 2"}
 
 
 def test_two_voice_overs_with_different_links_stay_different_whatever_their_names():
     rows = [recorded(1, 1, "Неизвестная озвучка 2", "https://site/b1")]
     keys = adopt([dub_of(1, "Group", "https://site/other"), dub_of(1, "Неизвестная озвучка 3", "https://site/c1")], rows)
-    assert keys == {(1, 1, "Group"): "Group", (1, 1, "Неизвестная озвучка 3"): "Неизвестная озвучка 3"}
+    assert keys == {(1, 1, 0, "Group"): "Group", (1, 1, 0, "Неизвестная озвучка 3"): "Неизвестная озвучка 3"}
 
 
 def test_a_row_is_adopted_by_one_voice_over_and_not_by_one_that_has_a_row_of_its_own_key():
     rows = [recorded(1, 1, "Old", "https://site/x"), recorded(2, 1, "New", "https://site/y")]
     keys = adopt([dub_of(1, "New", "https://site/x"), dub_of(1, "Other", "https://site/x")], rows)
-    assert keys == {(1, 1, "New"): "New", (1, 1, "Other"): "Old"}
+    assert keys == {(1, 1, 0, "New"): "New", (1, 1, 0, "Other"): "Old"}
     twice = adopt([dub_of(1, "A", "https://site/x"), dub_of(1, "B", "https://site/x")], [recorded(1, 1, "Old", "https://site/x")])
-    assert twice == {(1, 1, "A"): "Old", (1, 1, "B"): "B"}
+    assert twice == {(1, 1, 0, "A"): "Old", (1, 1, 0, "B"): "B"}
 
 
 def test_a_row_of_another_episode_is_not_adopted_and_a_voice_over_with_no_link_adopts_nothing():
     rows = [recorded(1, 2, "Old", "https://site/x")]
     assert adopt([dub_of(1, "New", "https://site/x"), dub_of(2, "Empty")], rows) == {
-        (1, 1, "New"): "New", (1, 2, "Empty"): "Empty"}
+        (1, 1, 0, "New"): "New", (1, 2, 0, "Empty"): "Empty"}

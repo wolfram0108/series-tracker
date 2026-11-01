@@ -235,7 +235,7 @@ class Neighbours(BaseModule):
     async def on_episodes(self, env):
         reference = next(s for s in self.sources if s["url"] == self.reference_url)
         items = [{"unique_id": self.uids.get(episode, f"u{episode}"), "season": season,
-                  "episode_start": episode, "source_url": reference["links"].get(str(episode), ""),
+                  "episode_start": episode, "part": None, "source_url": reference["links"].get(str(episode), ""),
                   "status": "pending", "final_filename": self.references.get(episode),
                   "superseded_by": None} for season, episode in self.plan]
         return {"items": items + self.extra_items}
@@ -690,7 +690,7 @@ async def test_an_episode_goes_to_alignment_and_its_tracks_land_next_to_the_vide
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
     await statuses_until(sub, ["aligned", "aligned", "placed", "placed"])
     assert (await asyncio.wait_for(settled_sub.queue.get(), 5)).payload == {
-        "series_id": 7, "season": 1, "episode": 1}
+        "series_id": 7, "season": 1, "episode": 1, "part": None}
     stem = os.path.splitext(ref)[0]
     assert os.path.isfile(f"{stem}.BlackCat.ru.flac") and os.path.isfile(f"{stem}.RedHeadSound.ru.flac")
     done = await rows(probe)
@@ -1066,7 +1066,7 @@ async def test_a_replaced_reference_removes_the_tracks_and_the_voices_start_over
     neighbours.uids[1] = "u1-new"
     neighbours.references[1] = "Series s01e01 2160p.mp4"
     # The old file is still there with the winner beside it: the winner is the reference.
-    neighbours.extra_items.append({"unique_id": "u1", "season": 1, "episode_start": 1,
+    neighbours.extra_items.append({"unique_id": "u1", "season": 1, "episode_start": 1, "part": None,
                                    "source_url": "x", "status": "completed", "superseded_by": "u1-new",
                                    "final_filename": os.path.basename(ref)})
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
@@ -1733,7 +1733,7 @@ async def test_a_failed_removal_hands_the_file_to_the_cleanup_journal_and_is_tri
     group = await voices.repo.for_series(7)
     paths = [row["output_path"] for row in group]
     with patch("modules.voices.module.os.remove", side_effect=PermissionError("read-only")):
-        assert await voices._follow(7, 1, 1, group, ref, "another-reference")
+        assert await voices._follow(7, 1, 1, 0, group, ref, "another-reference")
     assert all(os.path.exists(path) for path in paths)  # the tracks are still there...
     assert {entry["path"] for entry in await voices.repo.cleanup_list()} == set(paths)  # ...and not forgotten
     assert all(row["output_path"] is None for row in await voices.repo.for_series(7))
@@ -1753,7 +1753,7 @@ async def test_a_journaled_path_that_a_voice_over_holds_again_is_not_removed(dub
     group = await voices.repo.for_series(7)
     paths = [row["output_path"] for row in group]
     with patch("modules.voices.module.os.remove", side_effect=PermissionError("read-only")):
-        assert await voices._follow(7, 1, 1, group, ref, "another-reference")
+        assert await voices._follow(7, 1, 1, 0, group, ref, "another-reference")
     for row in group:  # the new reference got its tracks under the same names
         await voices.repo.set_output(row["id"], row["output_path"], ref)
     await voices._sweep_cleanup()
@@ -1874,7 +1874,7 @@ async def test_tracks_are_removed_with_their_reference_whatever_the_clock_of_the
     ahead = time.time_ns() + 3600 * 10**9  # the share and this server disagree about the time
     for path in paths:
         os.utime(path, ns=(ahead, ahead))
-    assert await voices._follow(7, 1, 1, group, ref, "another-reference")
+    assert await voices._follow(7, 1, 1, 0, group, ref, "another-reference")
     assert not any(os.path.exists(path) for path in paths) and await voices.repo.cleanup_list() == []
 
 
@@ -2237,7 +2237,7 @@ async def test_another_form_of_output_places_follows_and_removes_without_a_chang
     touch(new_ref)
     neighbours.uids[1] = "u1-new"
     neighbours.references[1] = "Series s01e01 2160p.mp4"
-    neighbours.extra_items.append({"unique_id": "u1", "season": 1, "episode_start": 1, "source_url": "x",
+    neighbours.extra_items.append({"unique_id": "u1", "season": 1, "episode_start": 1, "part": None, "source_url": "x",
                                    "status": "completed", "superseded_by": "u1-new",
                                    "final_filename": os.path.basename(ref)})
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
@@ -2520,7 +2520,7 @@ async def test_cleanup_does_not_forget_a_file_while_its_row_is_being_reset(dubs,
         return await real_reset(*args, **kwargs)
 
     monkeypatch.setattr(voices.repo, "reset", slow_reset)
-    await voices._follow(7, 1, 1, group, ref, "new-reference")
+    await voices._follow(7, 1, 1, 0, group, ref, "new-reference")
     await asyncio.sleep(0.2)
     assert os.path.exists(old) and old in {e["path"] for e in await voices.repo.cleanup_list()}
 
@@ -2761,8 +2761,9 @@ async def test_a_voice_over_in_alignment_tells_the_queue_its_job_and_the_file_it
 
 
 def test_the_file_a_voice_over_is_sent_as_is_named_in_one_place():
-    assert os.path.basename(temp_path("/w", 7, 1, 1, "BlackCat")) == dub_file(7, 1, 1, "BlackCat") == "7_s01e01_BlackCat.mp4"
-    assert dub_file(7, 1, 2, "BlackCat") != dub_file(8, 1, 1, "BlackCat") != dub_file(7, 1, 1, "BlackCat")
+    assert os.path.basename(temp_path("/w", 7, 1, 1, 0, "BlackCat")) == dub_file(7, 1, 1, 0, "BlackCat") == "7_s01e01_BlackCat.mp4"
+    assert dub_file(7, 1, 2, 0, "BlackCat") != dub_file(8, 1, 1, 0, "BlackCat") != dub_file(7, 1, 1, 0, "BlackCat")
+    assert dub_file(7, 1, 1, 2, "BlackCat") == "7_s01e01p2_BlackCat.mp4" != dub_file(7, 1, 1, 1, "BlackCat")
 
 
 async def settled_with_a_record(dubs, **per_dub):

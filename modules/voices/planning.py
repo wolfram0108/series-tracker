@@ -21,7 +21,7 @@ from core.contracts import (VOICE_PLAYER, VOICE_TAKE, CompositionRow, EffectiveL
 # A reference with one of these marks is a video of the layout the voice-overs are aligned to.
 _REFERENCED = frozenset({ReferenceMark.BY_LEVEL, ReferenceMark.OWN, ReferenceMark.OTHER_PLAYER})
 
-Slot = tuple[int, int]  # (season, episode)
+Slot = tuple[int, int, int]  # (season, episode, part); part 0 is an episode without parts
 
 
 class Candidate(NamedTuple):
@@ -47,6 +47,7 @@ class PlannedDub:
 
     season: int
     episode: int
+    part: int
     voice_key: str
     voice_label: str
     chain: tuple[Candidate, ...]
@@ -80,7 +81,7 @@ def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settin
     with_reference: set[Slot] = set()
     undecided: set[Slot] = set()
     for ref in sorted(references, key=lambda each: (each.season, each.episode)):
-        slot = (ref.season, ref.episode)
+        slot = (ref.season, ref.episode, ref.part or 0)
         if ref.mark not in _REFERENCED or ref.source_id is None or ref.row_key is None:
             continue
         ref_row = by_key.get((ref.source_id, ref.row_key))
@@ -88,12 +89,12 @@ def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settin
             undecided.add(slot)
             continue
         with_reference.add(slot)
-        take_off, picks = _levers(levers.get(slot, ()))
+        take_off, picks = _levers(levers.get((ref.season, ref.episode), ()))
         for label in voices:
             if label == ref_row.voice_label or group_target(label) in take_off:
                 continue
             covering = [row for row in by_voice.get((ref.season, label), ()) if _covers(row, ref.episode, ref_row.part)]
-            dubs.append(PlannedDub(ref.season, ref.episode, label, label,
+            dubs.append(PlannedDub(ref.season, ref.episode, slot[2], label, label,
                                    _chain(covering, picks.get(group_target(label)), priority, players)))
     return Plan(tuple(dubs), frozenset(with_reference), frozenset(undecided))
 
@@ -130,19 +131,19 @@ def _chain(rows: Sequence[CompositionRow], pick: tuple[int, str] | None, priorit
     return tuple(chain.values())
 
 
-def adopt(dubs: Iterable[PlannedDub], rows: Iterable[dict[str, Any]]) -> dict[tuple[int, int, str], str]:
+def adopt(dubs: Iterable[PlannedDub], rows: Iterable[dict[str, Any]]) -> dict[tuple[int, int, int, str], str]:
     """The key each planned voice-over is recorded under: its own, unless a row of the same episode under another key
     holds a link of its chain. That is the same voice-over called by another name (a group was made or renamed), so the
     row keeps its key and what it has downloaded. A row whose key another planned voice-over has is that voice-over."""
     dubs = list(dubs)
-    planned = {(each.season, each.episode, each.voice_key) for each in dubs}
+    planned = {(each.season, each.episode, each.part, each.voice_key) for each in dubs}
     by_episode: dict[Slot, list[dict[str, Any]]] = {}
     for row in rows:
-        by_episode.setdefault((row["season"], row["episode"]), []).append(row)
-    taken: set[tuple[int, int, str]] = set()
-    keys: dict[tuple[int, int, str], str] = {}
+        by_episode.setdefault((row["season"], row["episode"], row["part"]), []).append(row)
+    taken: set[tuple[int, int, int, str]] = set()
+    keys: dict[tuple[int, int, int, str], str] = {}
     for dub in dubs:
-        slot = (dub.season, dub.episode)
+        slot = (dub.season, dub.episode, dub.part)
         recorded = by_episode.get(slot, ())
         key = dub.voice_key
         if not any(row["voice_key"] == key for row in recorded):

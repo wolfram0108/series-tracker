@@ -142,23 +142,23 @@ class VoicesRepository:
 
     async def for_series(self, series_id: int) -> list[dict[str, Any]]:
         rows = await self._db.fetch_all(
-            f"{_ROWS} WHERE series_id=? ORDER BY season, episode, voice_key", (series_id,))
+            f"{_ROWS} WHERE series_id=? ORDER BY season, episode, part, voice_key", (series_id,))
         return [self._row(row) for row in rows]
 
     async def all_rows(self) -> list[dict[str, Any]]:
-        rows = await self._db.fetch_all(f"{_ROWS} ORDER BY series_id, season, episode, voice_key")
+        rows = await self._db.fetch_all(f"{_ROWS} ORDER BY series_id, season, episode, part, voice_key")
         return [self._row(row) for row in rows]
 
-    async def for_episode(self, series_id: int, season: int, episode: int) -> list[dict[str, Any]]:
+    async def for_episode(self, series_id: int, season: int, episode: int, part: int) -> list[dict[str, Any]]:
         rows = await self._db.fetch_all(
-            f"{_ROWS} WHERE series_id=? AND season=? AND episode=? ORDER BY voice_key",
-            (series_id, season, episode))
+            f"{_ROWS} WHERE series_id=? AND season=? AND episode=? AND part=? ORDER BY voice_key",
+            (series_id, season, episode, part))
         return [self._row(row) for row in rows]
 
     async def get(self, dub_id: int) -> dict[str, Any] | None:
         return self._row(await self._db.fetch_one(f"{_ROWS} WHERE id=?", (dub_id,)))
 
-    async def upsert(self, series_id: int, season: int, episode: int, voice_key: str, label: str,
+    async def upsert(self, series_id: int, season: int, episode: int, part: int, voice_key: str, label: str,
                      chain: list[dict[str, Any]], *, offer: bool) -> bool:
         """Plan a voice-over: a new row is created; an existing one takes the fresh chain only where nothing was done
         yet. A row that is downloading, ready or further is left alone. An empty chain is a failure.
@@ -179,28 +179,31 @@ class VoicesRepository:
                      "OR (voice_dubs.status = ? AND voice_dubs.error = ? AND excluded.status = ?))")
             extra = (S.PENDING.value, S.FAILED.value, NOT_IN_ANY_SOURCE, S.PENDING.value)
         return bool(await self._db.execute(
-            "INSERT INTO voice_dubs (series_id, season, episode, voice_key, "
-            "voice_label, chain, status, error, updated_at, admitted) VALUES (?,?,?,?,?,?,?,?,?,0) "
-            "ON CONFLICT (series_id, season, episode, voice_key) DO UPDATE SET "
+            "INSERT INTO voice_dubs (series_id, season, episode, part, voice_key, "
+            "voice_label, chain, status, error, updated_at, admitted) VALUES (?,?,?,?,?,?,?,?,?,?,0) "
+            "ON CONFLICT (series_id, season, episode, part, voice_key) DO UPDATE SET "
             "voice_label=excluded.voice_label, "
             "chain=excluded.chain, attempt=0, status=excluded.status, error=excluded.error, "
             "file_id=CASE WHEN voice_dubs.status = ? AND voice_dubs.chain = excluded.chain "
             "THEN voice_dubs.file_id END, "
             f"updated_at=excluded.updated_at WHERE {where}",
-            (series_id, season, episode, voice_key, label,
+            (series_id, season, episode, part, voice_key, label,
              json.dumps(chain, ensure_ascii=False), status, error, _now(), S.PENDING.value, *extra)))
 
-    async def admit(self, series_id: int, planned: Iterable[tuple[int, int, str]]) -> None:
+    async def admit(self, series_id: int, planned: Iterable[tuple[int, int, int, str]]) -> None:
         """A sync of the series was asked for: the voice-overs it plans may be downloaded."""
         await self._db.execute_many([(
-            "UPDATE voice_dubs SET admitted=1 WHERE series_id=? AND season=? AND episode=? AND voice_key=? "
-            "AND admitted=0", (series_id, season, episode, key)) for season, episode, key in planned])
+            "UPDATE voice_dubs SET admitted=1 WHERE series_id=? AND season=? AND episode=? AND part=? "
+            "AND voice_key=? AND admitted=0", (series_id, season, episode, part, key))
+            for season, episode, part, key in planned])
 
-    async def relabel(self, series_id: int, season: int, episode: int, voice_key: str, label: str) -> bool:
+    async def relabel(self, series_id: int, season: int, episode: int, part: int, voice_key: str,
+                      label: str) -> bool:
         """The layout calls a recorded voice-over by another name (a group was made or renamed): the key stays."""
         return bool(await self._db.execute(
             "UPDATE voice_dubs SET voice_label=?, updated_at=? WHERE series_id=? AND season=? AND episode=? "
-            "AND voice_key=? AND voice_label != ?", (label, _now(), series_id, season, episode, voice_key, label)))
+            "AND part=? AND voice_key=? AND voice_label != ?",
+            (label, _now(), series_id, season, episode, part, voice_key, label)))
 
     async def pending(self, series_id: int | None = None) -> list[dict[str, Any]]:
         """Waiting voice-overs that a sync admitted; a planned row that was not admitted waits for one."""
@@ -214,13 +217,13 @@ class VoicesRepository:
         """Take a waiting voice-over for download; False when someone else has already taken it."""
         return await self._move(lifecycle.CLAIM, "temp_path=?, error=NULL", (temp_path,), "id=?", (dub_id,))
 
-    async def active_episodes(self) -> set[tuple[int, int, int]]:
-        """Episodes that hold temporary files or are on their way to them: (series, season, episode)."""
+    async def active_episodes(self) -> set[tuple[int, int, int, int]]:
+        """Episodes that hold temporary files or are on their way to them: (series, season, episode, part)."""
         marks, steps = _in(lifecycle.HOLDS_FILES)
         rows = await self._db.fetch_all(
-            "SELECT DISTINCT series_id, season, episode FROM voice_dubs WHERE "
+            "SELECT DISTINCT series_id, season, episode, part FROM voice_dubs WHERE "
             f"status {marks} OR (status=? AND attempt>0)", (*steps, S.PENDING.value))
-        return {(row["series_id"], row["season"], row["episode"]) for row in rows}
+        return {(row["series_id"], row["season"], row["episode"], row["part"]) for row in rows}
 
     async def mark_ready(self, dub_id: int) -> bool:
         return await self._move(lifecycle.DOWNLOADED, "error=NULL", (), "id=?", (dub_id,))
@@ -249,15 +252,15 @@ class VoicesRepository:
             return _release_idle(conn) if files else []
         self._cancel_transfers(await self._db.transaction(work))
 
-    async def drop_unplanned(self, series_id: int, planned: set[tuple[int, int, str]],
-                             keep: Collection[tuple[int, int]] = ()) -> list[dict[str, Any]]:
+    async def drop_unplanned(self, series_id: int, planned: set[tuple[int, int, int, str]],
+                             keep: Collection[tuple[int, int, int]] = ()) -> list[dict[str, Any]]:
         """Rows of voice-overs that left the plan before any work was done on them, or after it failed; returns
         what was removed. Whatever such a row still points at goes to the cleanup journal with it. The rows of the
         episodes in `keep` stay: their plan is not known at the moment. A row that waits on a file whose transfer is
         under way leaves too: the transfer belongs to the file, which is released when it ends."""
         gone = [row for row in await self.for_series(series_id)
-                if (row["season"], row["episode"], row["voice_key"]) not in planned
-                and (row["season"], row["episode"]) not in keep
+                if (row["season"], row["episode"], row["part"], row["voice_key"]) not in planned
+                and (row["season"], row["episode"], row["part"]) not in keep
                 and (row["status"] in lifecycle.OFFER.sources
                      or (row["status"] == S.DOWNLOADING and row["file_id"] is not None))]
         for row in gone:
@@ -393,22 +396,25 @@ class VoicesRepository:
             await self._db.execute("UPDATE voice_cleanup SET error=?, updated_at=? WHERE path=? AND error=?",
                                    (error, _now(), path, only_if))
 
-    async def drop_episode(self, series_id: int, season: int, episode: int, folders: Iterable[str]) -> None:
+    async def drop_episode(self, series_id: int, season: int, episode: int, part: int,
+                           folders: Iterable[str]) -> None:
         """An episode left the plan: its rows go, and everything they owned, with the `folders`, to the journal."""
-        where, args = "series_id=? AND season=? AND episode=?", (series_id, season, episode)
+        where, args = "series_id=? AND season=? AND episode=? AND part=?", (series_id, season, episode, part)
         await self._atomically([*_hand_over(where, args), *_folders(folders),
                                 (f"DELETE FROM voice_dubs WHERE {where}", args)])
 
-    async def hand_over_jobs(self, series_id: int, season: int, episode: int) -> None:
+    async def hand_over_jobs(self, series_id: int, season: int, episode: int, part: int) -> None:
         """The jobs of an episode that is settled go to the journal: the service drops their records and the
         folders they wrote in are removed."""
-        await self._db.execute_many(_jobs("series_id=? AND season=? AND episode=?", (series_id, season, episode)))
+        await self._db.execute_many(_jobs("series_id=? AND season=? AND episode=? AND part=?",
+                                          (series_id, season, episode, part)))
 
-    async def settle_episode(self, series_id: int, season: int, episode: int, folders: Iterable[str]) -> None:
+    async def settle_episode(self, series_id: int, season: int, episode: int, part: int,
+                             folders: Iterable[str]) -> None:
         """The episode is done: its temporary `folders` go to the journal as its rows let go of their files."""
         await self._atomically([*_folders(folders), (
             "UPDATE voice_dubs SET temp_path=NULL, aligned_path=NULL, file_id=NULL "
-            "WHERE series_id=? AND season=? AND episode=?", (series_id, season, episode))])
+            "WHERE series_id=? AND season=? AND episode=? AND part=?", (series_id, season, episode, part))])
 
     # --- the files of source rows that cover several episodes -------------------------------------------------------
 
