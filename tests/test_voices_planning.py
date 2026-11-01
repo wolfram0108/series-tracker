@@ -1,7 +1,7 @@
 """The plan of voice-overs: which voices an episode gets and where each comes from (M-15, M-16, M-17, T-17)."""
 from core.contracts import (CompositionRow, EffectiveLever, EpisodeSettings, Level, Reference, ReferenceMark,
                             RowState, group_target)
-from modules.voices.identity import NO_GROUPS, Groups
+from core.voice_names import NO_GROUPS, Groups
 from modules.voices.planning import Candidate, PlannedDub, adopt, plan, rank
 from modules.voices.settings import DEFAULT_PRIORITY
 

@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Mapping
 
-from .identity import NO_GROUPS, Groups, usable_groups
+from core.voice_names import NO_GROUPS, Groups, usable_groups
 
 # Source priority, most preferred first; empirical, by bitrate. The first one wins a resolution tie.
 DEFAULT_PRIORITY = ("alloha", "vk", "cvh", "allvideo", "vibix", "kodik")

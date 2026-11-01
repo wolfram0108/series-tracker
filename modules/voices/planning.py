@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, NamedTuple, Sequence
 
+from core.voice_names import rank
 from core.contracts import (VOICE_PLAYER, VOICE_TAKE, CompositionRow, EffectiveLever, EpisodeSettings, Reference,
                             ReferenceMark, RowState, group_target)
 
@@ -62,17 +63,9 @@ class Plan:
     undecided: frozenset[Slot] = frozenset()
 
 
-def rank(player: str, priority: Sequence[str], players) -> int:
-    """Place of a player in the order of the settings; players the user put into one group take one place and an
-    unknown player comes last."""
-    order = [players.canonical(kind) for kind in priority]
-    wanted = players.canonical(player)
-    return order.index(wanted) if wanted in order else len(order)
-
-
 def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settings: Iterable[EpisodeSettings],
          priority: Sequence[str], players) -> Plan:
-    """The voice-overs to plan; `players` is the user's groups of players (`identity.Groups`)."""
+    """The voice-overs to plan; `players` is the user's groups of players (`core.voice_names.Groups`)."""
     by_key: dict[tuple[int, str], CompositionRow] = {}
     by_voice: dict[tuple[int, str], list[CompositionRow]] = {}
     voices: dict[str, None] = {}

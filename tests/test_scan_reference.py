@@ -11,6 +11,7 @@ import pytest
 from core.contracts import (REFERENCE_ALLOW, REFERENCE_CHOICE, Level, Reference, ReferenceChoice, ReferenceMark,
                             RowState, player_target)
 from core.reasons import parse
+from core.voice_names import Groups
 from modules.scan import reference
 from modules.scan.reference import Candidate, Order
 from scan_support import episode_settings, lever, row
@@ -69,6 +70,15 @@ def test_a_player_the_settings_do_not_name_comes_after_every_one_they_name():
 def test_the_names_of_players_in_the_settings_are_read_without_case_and_spaces():
     rows = [row(S, 1, "a", 1, 1, player="vk", height=1080), row(S, 1, "b", 1, 1, player="kodik", height=1080)]
     assert only(choose(rows, priority=[" Kodik ", "VK"])).row.row_key == "b"
+
+
+def test_players_the_user_put_into_one_group_take_one_place_in_the_order():
+    rows = [row(S, 1, "a", 1, 1, player="cvh", height=1080), row(S, 1, "b", 1, 1, player="kodik", height=1080)]
+    groups = Groups.of({"mirror": ["cvh", "kodik"]})
+    # Alone, the order of the settings puts kodik first; with the two in one group they share a place and the
+    # source decides, which is the same row either way, so the tie is broken by the place in the layout.
+    assert only(choose(rows, priority=["kodik", "cvh"])).row.row_key == "b"
+    assert only(choose(rows, priority=["mirror"], player_groups=groups)).row.row_key == "a"
 
 
 def test_a_row_the_player_cannot_play_is_no_candidate():

@@ -10,7 +10,7 @@ is used.
 
 Query:
   voices.groups.resolve GroupsResolveRequest -> GroupsResolveReply: the user group of every name (None for a name no group
-      holds), by the folded name or trigger of the group (identity.py); asked by `composition` for the names of the
+      holds), by the folded name or trigger of the group (core/voice_names.py); asked by `composition` for the names of the
       voice-overs of its rows. A combined credit "A / B" is one name.
   voices.settings.get {} -> VoiceSettingsView: the groups of voice-overs and the order of sources as they apply, the
       order to return to and the fields whose stored value was refused

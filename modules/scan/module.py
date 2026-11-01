@@ -69,6 +69,7 @@ from core import BaseModule, BusRequestError, ids, torrent_source
 from core.contracts import CompositionReply, ReferenceChanged, SeriesSource, VoiceSettingsView
 from core.db import Database
 from core.envelope import Envelope
+from core.voice_names import Groups
 from core.ignored import parse_memory
 from core.reasons import reason
 from . import candidates, output, planner, reference, sync
@@ -523,7 +524,8 @@ class ScanModule(BaseModule):
             stored = await self.repo.references(series_id)
             chosen = reference.choose(layout.rows, layout.settings, voices.priority,
                                       [each.source_id for each in layout.sources],
-                                      previous=[output.reference_of(each) for each in stored])
+                                      previous=[output.reference_of(each) for each in stored],
+                                      player_groups=Groups.of(voices.player_groups))
             memory, seasons = self._ignored_episodes(series), self._ignored_seasons(series)
             placements = candidates.place(series_id, chosen, existing)
             winners = {each.slot: each.unique_id for each in placements}

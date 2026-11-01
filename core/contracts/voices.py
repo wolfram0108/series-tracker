@@ -144,6 +144,8 @@ class VoiceSettingsView(VoiceSettingsDraft):
 
     default_priority: list[str]
     rejected: list[str]
+    # Players the user put into one group take one place in the order; no screen edits them yet.
+    player_groups: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class VoiceSettingsSaved(BaseModel):

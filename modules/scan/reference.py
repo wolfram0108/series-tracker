@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from core.contracts import (REFERENCE_ALLOW, REFERENCE_CHOICE, CompositionRow, EffectiveLever, EpisodeSettings, Level,
                             Reference, ReferenceChoice, ReferenceMark, RowState, parse_player_target)
 from core.reasons import reason
+from core.voice_names import NO_GROUPS, Groups, rank
 
 Slot = tuple[int, int, int | None]
 
@@ -39,11 +40,11 @@ class Order:
 
     players: tuple[str, ...] = ()
     sources: dict[int, int] = field(default_factory=dict)
+    player_groups: Groups = NO_GROUPS
 
     def player_place(self, player: str) -> int:
-        """Place in the order of the settings; a player the settings do not name comes after all that they name."""
-        kind = _fold(player)
-        return self.players.index(kind) if kind in self.players else len(self.players)
+        """Place in the order of the settings (the one order the voice-overs follow too, `core.voice_names.rank`)."""
+        return rank(player, self.players, self.player_groups)
 
     def source_place(self, source_id: int) -> int:
         return self.sources.get(source_id, len(self.sources))
@@ -94,13 +95,13 @@ class _Levers:
 
 def choose(rows: Sequence[CompositionRow], settings: Iterable[EpisodeSettings], players: Sequence[str],
            sources: Sequence[int], ranking: Sequence[RankKey] = RANKING,
-           previous: Iterable[Reference] = ()) -> list[Chosen]:
+           previous: Iterable[Reference] = (), player_groups: Groups = NO_GROUPS) -> list[Chosen]:
     """One outcome per slot of every episode that has a row in the layout, in the order of season, episode, part.
 
     `players` is the order of players of the settings, best first; `sources` the ids of the sources of the series in
     their order; `previous` the references chosen last time, of which a slot may hold on to its own. An episode with no
     row in the layout has no outcome."""
-    order = Order(tuple(_fold(player) for player in players), {source_id: place for place, source_id in enumerate(sources)})
+    order = Order(tuple(players), {source_id: place for place, source_id in enumerate(sources)}, player_groups)
     singles: dict[tuple[int, int], list[Candidate]] = {}
     compilations: dict[tuple[int, int], list[Candidate]] = {}
     for position, row in enumerate(rows):
@@ -209,7 +210,3 @@ def _choice_of(value) -> ReferenceChoice | None:
         return ReferenceChoice.model_validate(value)
     except ValidationError:
         return None
-
-
-def _fold(player: str) -> str:
-    return player.strip().casefold()

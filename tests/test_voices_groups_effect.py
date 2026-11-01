@@ -1,5 +1,5 @@
 """Stored voice-over groups reach the matching: from the stored value to the group a name belongs to (law Z-6)."""
-from modules.voices.identity import NO_GROUPS, Groups, usable_groups
+from core.voice_names import NO_GROUPS, Groups, usable_groups
 from modules.voices.settings import parse
 
 STORED = {"voices.groups": '{"Studio One": ["S1 Team", "Studio 1"]}'}
