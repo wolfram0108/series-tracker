@@ -16,8 +16,8 @@ from core import BaseModule
 from core.contracts import (GroupsResolveReply, GroupsResolveRequest, ReleaseTable, RuleResult, RulesApplyReply,
                             RulesApplyRequest, TableFailed, TableGetReply, TableGetRequest, TableReady, TableState)
 from core.reasons import reason
-from core.season import resolve
 from core.voice_names import fold_name
+from modules.rules.numbering import season_of, settle_parts
 
 HOST = "https://fake.test"
 PAGE = f"{HOST}/p/1"
@@ -252,9 +252,9 @@ class FakeRules(BaseModule):
         for line in request.lines:
             found = extract(line.text)
             if not found.get("excluded"):
-                found["season"] = resolve(request.series_season, found.get("season"))
+                found["season"] = season_of(request.series_season, found.get("season"))
             results[line.key] = RuleResult(**found)
-        return RulesApplyReply(results=results).model_dump(mode="json")
+        return RulesApplyReply(results=settle_parts(request.lines, results)).model_dump(mode="json")
 
 
 class FakeVoices(BaseModule):

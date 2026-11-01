@@ -7,8 +7,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class RuleLine(BaseModel):
+    """`player` and `voice` are the player and the voice-over of the row the text was made from: the constructor tells
+    which lines name one episode of one voice-over by them, and does not read them out of the text."""
+
     key: str
     text: str
+    player: str = ""
+    voice: str = ""
 
 
 class RulesApplyRequest(BaseModel):

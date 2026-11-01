@@ -188,7 +188,7 @@ async def test_every_line_is_answered_under_its_own_key(system):
     reply = await apply(probe, profile, {"b": "серия 7", "a": "сезон 2 серия 5"})
     assert set(reply["results"]) == {"a", "b"}
     assert (reply["results"]["a"]["season"], reply["results"]["a"]["episode"]) == (2, 5)
-    assert (reply["results"]["b"]["season"], reply["results"]["b"]["episode"]) == (None, 7)
+    assert (reply["results"]["b"]["season"], reply["results"]["b"]["episode"]) == (1, 7)
     assert reply["invalid_rules"] == []
 
 
@@ -218,7 +218,21 @@ async def test_the_season_of_the_card_is_the_fallback_for_a_line_without_season(
                                series_season=card))["results"]
         assert results["none"]["season"] == 3
         assert results["own"]["season"] == 2, "a season the rules extracted beats the card"
-    assert (await apply(probe, profile, {"none": "серия 1"}))["results"]["none"]["season"] is None
+    assert (await apply(probe, profile, {"none": "серия 1"}))["results"]["none"]["season"] == 1, "the default season"
+
+
+@pytest.mark.asyncio
+async def test_a_single_without_a_part_is_part_one_where_the_player_and_the_voice_have_parts(system):
+    probe = system.probe
+    profile = await new_profile(probe)
+    await new_rule(probe, profile, "серия и часть", [extract("extract_single", "серия ", "N"),
+                                                      extract("extract_part", "часть ", "N")])
+    lines = [{"key": "whole", "text": "серия 1", "player": "vk", "voice": "V"},
+             {"key": "second", "text": "серия 1 часть 2", "player": "vk", "voice": "V"},
+             {"key": "other", "text": "серия 1", "player": "kodik", "voice": "V"}]
+    reply = await probe.request("rules.apply", {"profile_id": profile, "lines": lines}, timeout=5)
+    results = RulesApplyReply.model_validate(reply).results
+    assert [(key, results[key].part) for key in ("whole", "second", "other")] == [("whole", 1), ("second", 2), ("other", None)]
 
 
 @pytest.mark.asyncio

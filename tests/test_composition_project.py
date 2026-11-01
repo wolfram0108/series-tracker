@@ -1,5 +1,5 @@
 """The projection of a series: rows of all its sources with the numbers the constructor gave, voice-over groups and
-unknown voice-overs, the part-one rule, the summaries a window shows before any number exists."""
+unknown voice-overs, the summaries a window shows before any number exists."""
 import json
 import re
 from pathlib import Path
@@ -9,9 +9,8 @@ import pytest
 from core.contracts import (CompositionRow, PlayerSummary, ReleaseTable, RowState, RowVoice, RuleLine, RuleResult,
                             RulesApplyReply, SeriesSource, SourceStatus, SourceType, TableRow, VoiceSummary, line_of)
 from core.voice_names import fold_name
-from modules.composition.project import (DEFAULT_SEASON, UNKNOWN_VOICE_LABEL, SourceInput, layout_episodes,
-                                         lines_for, project, selected_rows, touched_episodes, voice_name_of,
-                                         voice_names)
+from modules.composition.project import (UNKNOWN_VOICE_LABEL, SourceInput, layout_episodes, lines_for, project,
+                                         selected_rows, touched_episodes, voice_name_of, voice_names)
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "docs" / "missions" / "voice-alignment" / "stage-10" / "raw"
@@ -69,19 +68,18 @@ def test_a_single_episode_is_a_range_of_one_and_numbers_are_copied_from_the_answ
 def test_the_row_and_its_site_fields_never_give_a_number():
     marked = row("a", "Серия 7", group="Сезон 3", site_fields={"number": 99, "season": 9, "compilation_to": 12})
     only = one(item(source(), table(marked), {"a": {"episode": 7}}))[0]
-    # Neither the season in the site fields (9) nor the one in the text of the group (3): the default season, 1.
-    assert (only.season, only.episode_start, only.episode_end) == (DEFAULT_SEASON, 7, 7)
-    assert DEFAULT_SEASON == 1
+    # Neither the season in the site fields (9) nor the one in the text of the group (3): the answer names none.
+    assert (only.season, only.episode_start, only.episode_end) == (None, 7, 7)
 
 
-def test_a_season_that_neither_the_rules_nor_the_card_gave_is_season_one_and_the_season_given_is_kept():
+def test_the_season_is_copied_from_the_answer_and_never_made_up():
     out = one(item(source(), table(row("a"), row("b"), row("c"), row("d")), {
         "a": {"episode": 1}, "b": {"episode": 2, "season": 3}, "c": {"episode": 3, "season": 0},
         "d": {"start": 4, "end": 5}}))
-    assert [r.season for r in out] == [1, 3, 0, 1]
+    assert [r.season for r in out] == [None, 3, 0, None]
 
 
-def test_a_row_the_constructor_excluded_has_no_season_even_when_it_would_have_the_default():
+def test_a_row_the_constructor_excluded_has_no_season():
     only = one(item(source(), table(row("t", "Трейлер")), {"t": {"excluded": True}}))[0]
     assert only.season is None
 
@@ -116,7 +114,7 @@ def test_a_row_without_an_episode_number_is_kept_as_excluded_for_the_lack_of_it(
     only = one(item(source(), table(row("a", "Спецвыпуск")), {"a": answer}))[0]
     assert only.excluded and only.exclusion == "no_number"
     assert (only.episode_start, only.episode_end) == (None, None)
-    assert (only.season, only.part) == (answer.get("season", DEFAULT_SEASON), answer.get("part"))
+    assert (only.season, only.part) == (answer.get("season"), answer.get("part"))
 
 
 def test_a_row_the_constructor_gave_no_answer_for_has_no_number():
@@ -248,7 +246,8 @@ def test_a_switched_off_player_is_neither_asked_about_nor_in_the_layout_but_stay
 def test_the_lines_are_those_of_line_of_with_the_key_of_the_row():
     tbl = table(row("a", "Серия 1", label="VK", heights=(1080,)), row("b", "Серия 2", state=RowState.ABSENT, label="VK"),
                 names=("Асура: Безумный король 2",))
-    assert lines_for(source(), tbl) == [RuleLine(key=r.key, text=line_of(tbl, r)) for r in tbl.rows]
+    assert lines_for(source(), tbl) == [
+        RuleLine(key=r.key, text=line_of(tbl, r), player=r.player, voice=r.voice.name) for r in tbl.rows]
     assert [line.text for line in lines_for(source(), tbl)] == [
         "Асура: Безумный король 2 | VK | 1080p | Серия 1", "Асура: Безумный король 2 | VK | Серия 2"]
 
@@ -419,49 +418,18 @@ def test_names_are_the_same_name_without_case_spaces_and_punctuation():
     assert fold_name("") == fold_name("  ") == ""
 
 
-# ---- part one ----------------------------------------------------------------------------------------------------
+# ---- parts: copied from the answer, never made ---------------------------------------------------------------------
 
 
-def parts(out):
-    return [(r.row_key, r.part) for r in out]
+def test_a_part_is_copied_from_the_answer_and_a_single_without_one_is_left_without():
+    tbl = table(row("a", "1 серия часть 2", voice="V"), row("b", "1 серия", voice="V"))
+    out = one(item(source(), tbl, {"a": {"season": 1, "episode": 1, "part": 2}, "b": {"season": 1, "episode": 1}}))
+    assert [(r.row_key, r.part) for r in out] == [("a", 2), ("b", None)]
 
 
-def test_a_single_without_a_part_takes_part_one_where_the_slot_has_parts():
-    tbl = table(row("a", "1 серия часть 2", voice="V"), row("b", "1 серия", voice="V"), row("c", "2 серия", voice="V"))
-    out = one(item(source(), tbl, {"a": {"season": 1, "episode": 1, "part": 2}, "b": {"season": 1, "episode": 1},
-                                   "c": {"season": 1, "episode": 2}}))
-    assert parts(out) == [("a", 2), ("b", 1), ("c", None)]
-
-
-def test_a_slot_is_a_source_a_player_a_voice_a_season_and_an_episode():
-    base = {"season": 1, "episode": 1}
-    tbl = table(row("p", voice="V", player="vk"),
-                row("same", voice="v ", player="vk"),
-                row("voice", voice="W", player="vk"),
-                row("player", voice="V", player="allvideo"),
-                row("season", voice="V", player="vk"),
-                row("episode", voice="V", player="vk"))
-    first = item(source(id=1, position=0), tbl, {"p": {**base, "part": 3}, "same": base, "voice": base, "player": base,
-                                                 "season": {"season": 2, "episode": 1}, "episode": {"season": 1, "episode": 2}})
-    other = item(source(id=2, position=1), table(row("src", voice="V")), {"src": base})
-    out = project([first, other], {}, {}).rows
-    assert parts(out) == [("p", 3), ("same", 1), ("voice", None), ("player", None), ("season", None),
-                          ("episode", None), ("src", None)]
-
-
-def test_a_compilation_neither_makes_a_slot_nor_takes_part_one():
-    tbl = table(row("c", "1-3 серия", voice="V"), row("c2", "1-3 серия часть 2", voice="V"), row("s", "1 серия", voice="V"))
-    out = one(item(source(), tbl, {"c": {"season": 1, "start": 1, "end": 3},
-                                   "c2": {"season": 1, "start": 1, "end": 3, "part": 2},
-                                   "s": {"season": 1, "episode": 1}}))
-    assert parts(out) == [("c", None), ("c2", 2), ("s", None)]
-
-
-def test_a_row_without_a_number_or_excluded_takes_no_part():
-    tbl = table(row("a", voice="V"), row("x", voice="V"), row("t", voice="V"))
-    out = one(item(source(), tbl, {"a": {"season": 1, "episode": 1, "part": 2}, "x": {"season": 1},
-                                   "t": {"excluded": True}}))
-    assert parts(out) == [("a", 2), ("x", None), ("t", None)]
+def test_the_line_asked_names_the_player_and_the_voice_of_its_row():
+    tbl = table(row("a", "1 серия", voice="V", player="kodik"))
+    assert [(line.player, line.voice) for line in lines_for(source(), tbl)] == [("kodik", "V")]
 
 
 # ---- purity ------------------------------------------------------------------------------------------------------

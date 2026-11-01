@@ -15,7 +15,6 @@ from core.voice_names import fold_name
 
 # One template for the name of a voice-over that belongs to no user group.
 UNKNOWN_VOICE_LABEL = "Неизвестная озвучка {number}"
-DEFAULT_SEASON = 1
 
 # The only player whose list holds several seasons of a catalog, one of which the user may pick for the source.
 CATALOG_PLAYER = "vibix"
@@ -65,7 +64,8 @@ def selected_rows(source: SeriesSource, table: ReleaseTable) -> list[TableRow]:
 
 def lines_for(source: SeriesSource, table: ReleaseTable) -> list[RuleLine]:
     """What the constructor is asked about the source: one line with its key for every row in play."""
-    return [RuleLine(key=row.key, text=line_of(table, row)) for row in selected_rows(source, table)]
+    return [RuleLine(key=row.key, text=line_of(table, row), player=row.player, voice=row.voice.name)
+            for row in selected_rows(source, table)]
 
 
 def voice_name_of(row: TableRow, result: RuleResult | None) -> str:
@@ -93,14 +93,13 @@ def project(inputs: Sequence[SourceInput], groups: Mapping[str, str | None],
 
     `groups` maps a voice-over name to the user group it belongs to, None for a name in no group."""
     numbering = dict(unknown)
-    built: list[tuple[CompositionRow, str]] = []
+    rows: list[CompositionRow] = []
     summaries: list[SourceSummary] = []
     for item in _ordered(inputs):
         summaries.append(_summary(item, groups))
         for row, result in _answered_rows(item):
-            name = voice_name_of(row, result)
-            built.append((_row_of(item.source, row, result, name, groups, numbering), fold_name(name)))
-    return Projection(_with_part_one(built), summaries, numbering)
+            rows.append(_row_of(item.source, row, result, voice_name_of(row, result), groups, numbering))
+    return Projection(rows, summaries, numbering)
 
 
 def layout_episodes(rows: Iterable[CompositionRow]) -> set[tuple[int, int]]:
@@ -170,8 +169,7 @@ def _numbers_of(result: RuleResult) -> dict:
     """A single episode wins over a range, as it has always done; a range without an end ends where it starts."""
     if result.excluded:
         return {"excluded": True, "exclusion": Exclusion.RULE}
-    # A season that neither the rules nor the card gave is season 1, as the plan and the file name have always read it.
-    numbers = {"season": result.season if result.season is not None else DEFAULT_SEASON, "part": result.part}
+    numbers = {"season": result.season, "part": result.part}
     if result.episode is not None:
         return {**numbers, "episode_start": result.episode, "episode_end": result.episode}
     if result.start is not None:
@@ -190,19 +188,6 @@ def _voice_of(name: str, groups: Mapping[str, str | None], numbering: dict[str, 
     if key not in numbering:
         numbering[key] = max(numbering.values(), default=0) + 1
     return None, UNKNOWN_VOICE_LABEL.format(number=numbering[key]), numbering[key]
-
-
-def _with_part_one(built: list[tuple[CompositionRow, str]]) -> list[CompositionRow]:
-    """A single episode without a part gets part 1 where its slot has single episodes with parts."""
-    def slot(row: CompositionRow, voice: str) -> tuple:
-        return row.source_id, row.player, voice, row.season, row.episode_start
-
-    def single(row: CompositionRow) -> bool:
-        return not row.excluded and row.episode_start is not None and not row.is_compilation
-
-    parted = {slot(row, voice) for row, voice in built if single(row) and row.part is not None}
-    return [row.model_copy(update={"part": 1}) if single(row) and row.part is None and slot(row, voice) in parted
-            else row for row, voice in built]
 
 
 def _summary(item: SourceInput, groups: Mapping[str, str | None]) -> SourceSummary:

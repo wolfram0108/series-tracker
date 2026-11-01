@@ -64,7 +64,6 @@ import sqlite3
 from collections import Counter
 
 from core import BaseModule
-from core import season as season_rule
 from core.contracts import (RuleResult, RulesApplyReply, RulesApplyRequest,
                             RulesProfileChanged)
 from core.db import Database
@@ -73,6 +72,7 @@ from core.reasons import reason
 
 from . import formatter
 from .engine import CompiledProfile, compile_profile, process_title, validate_rule
+from .numbering import season_of, settle_parts
 from .repository import RulesRepository
 
 # The numbers the answer names itself; every other extracted key rides along as an extra field.
@@ -85,7 +85,7 @@ def result_of(outcome: dict, series_season) -> RuleResult:
     if outcome.get("excluded"):
         return RuleResult(excluded=True, events=events, errors=errors)
     extracted = dict(outcome.get("extracted") or {})
-    season = season_rule.resolve(series_season, extracted.pop("season", None))
+    season = season_of(series_season, extracted.pop("season", None))
     voiceover = extracted.pop("voiceover", None)
     numbers = {key: extracted.pop(key, None) for key in _NUMBER_KEYS}
     return RuleResult(season=season, voiceover=voiceover, events=events,
@@ -153,9 +153,9 @@ class RulesModule(BaseModule):
         if repeated:
             raise ValueError(f"Ключи строк повторяются в одном запросе: {repeated}")
         profile = await self._profile(request.profile_id)
-        results = {line.key: result_of(process_title(profile, line.text),
-                                       request.series_season)
-                   for line in request.lines}
+        results = settle_parts(request.lines, {line.key: result_of(process_title(profile, line.text),
+                                                                     request.series_season)
+                                               for line in request.lines})
         return RulesApplyReply(
             results=results, invalid_rules=profile.invalid_rules).model_dump()
 
