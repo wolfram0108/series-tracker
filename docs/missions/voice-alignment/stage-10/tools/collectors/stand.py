@@ -36,13 +36,17 @@ class Stand:
     """An instance on a free port with a new database; leaves nothing behind but the journal in `raw/`."""
 
     def __init__(self, credentials_from: str | None = None, whole_db_from: str | None = None,
-                 profiles: list[dict] | None = None) -> None:
+                 profiles: list[dict] | None = None, work: str | None = None) -> None:
         self.whole_db_from = whole_db_from
         self.profiles = profiles or []
+        # A named work folder outlives the stand: the next one finds the database where the last left it.
+        self.kept = work is not None
         if whole_db_from and not credentials_from:
             credentials_from = whole_db_from
-        self.work = Path(tempfile.mkdtemp(prefix="stage10-stand-"))
+        self.work = Path(work) if work else Path(tempfile.mkdtemp(prefix="stage10-stand-"))
+        self.work.mkdir(parents=True, exist_ok=True)
         self.db = self.work / "app.db"
+        self.fresh = not self.db.exists()
         self.credentials_from = credentials_from
         self.proc: subprocess.Popen | None = None
         self.base = ""
@@ -63,7 +67,7 @@ class Stand:
             raise RuntimeError(f"migrations failed: {migrated.stderr[-300:]}")
         if self.credentials_from and not self.whole_db_from:
             self._copy_credentials()
-        if self.profiles:
+        if self.profiles and self.fresh:
             self._seed_profiles()
         if self.whole_db_from:
             self._silence_the_schedule()
@@ -76,7 +80,7 @@ class Stand:
         ready = threading.Event()
 
         def pump() -> None:
-            with open(self.journal, "w") as out:
+            with open(self.journal, "a") as out:
                 for line in self.proc.stdout:
                     out.write(line)
                     out.flush()
@@ -105,7 +109,8 @@ class Stand:
         for path in self.work.glob("*.log"):
             if path != self.journal:
                 shutil.copy(path, RAW / f"stand__{stamp}__{path.name}")
-        shutil.rmtree(self.work, ignore_errors=True)
+        if not self.kept:
+            shutil.rmtree(self.work, ignore_errors=True)
 
     def _keys_of_the_source(self) -> dict[str, str]:
         """ST_ENCRYPTION_KEY and ST_SECRET_KEY of the `.env` that stands next to the database the rows come from."""
