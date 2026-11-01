@@ -38,9 +38,9 @@
 
 | Точка | Сейчас | Статус | Новое место / причина | Вызовы, которые меняются |
 |---|---|---|---|---|
-| `series.url`, `series.source_type`, `series.parser_profile_id`, `series.vk_search_mode` | один источник и один профиль на сериал | перепроектирована | `series_sources` для всех сериалов (Д-38); торрент-сериал получает один источник, торрентный путь берёт адрес из него и в остальном не меняется | `scan`, `torrents`, `voices`, `rules.format_*`, `gateway`, `web` |
+| `series.url`, `series.source_type`, `series.parser_profile_id`, `series.vk_search_mode` | один источник и один профиль на сериал | перепроектирована | `series_sources` для всех сериалов (Д-38); торрент-сериал получает один источник, торрентный путь берёт адрес из него и в остальном не меняется | `scan`, `torrents`, `voices`, `rules.format_*`, `gateway`, `web` — сделано (П-1) |
 | `series.season`, `ignored_seasons`, `ignored_episodes` | сезон по умолчанию и память отключённого | подтверждена | термины серии, принадлежат сериалу | — |
-| `series.vk_quality_priority` (приоритет разрешений пользователя в планировщике) | на проде не задан ни у одного сериала с веб- или VK-источником | удалена | Д-36: действует Т-20 | `scan._quality_priority`, `planner._quality_key`, `gateway /vk-quality-priority`, `web/StatusVkComposition` |
+| `series.vk_quality_priority` (приоритет разрешений пользователя в планировщике) | на проде не задан ни у одного сериала с веб- или VK-источником | удалена | Д-36: действует Т-20 | `scan._quality_priority`, `planner._quality_key`, `gateway /vk-quality-priority`, `web/StatusVkComposition` — сделано (П-1) |
 
 ## 3. Конструктор (`modules/rules`)
 

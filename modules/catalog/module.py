@@ -1,4 +1,22 @@
-"""Модуль catalog — владелец таблицы series и агрегатор статусов (Р-11).
+"""Модуль catalog — владелец таблиц series и series_sources и агрегатор статусов (Р-11).
+
+Сериал и его источники (Д-38). Источник — адрес страницы или `channel|query`
+канала VK; он несёт вид (`torrent`, `vk_video`, `web_video`), профиль
+конструктора, режим поиска VK и выбор по источнику (сезон каталога Vibix,
+отключённые плееры). Поля источника — контракт SeriesSource. Торрентный
+сериал тоже имеет один источник. Адрес, вид и профиль у самого сериала
+исчезли; запись этих полей (url, source_type, parser_profile_id,
+vk_search_mode, vk_quality_priority) в catalog.series.create/update — отказ
+ValueError с названием поля.
+
+Вид сериала `kind` — `torrent`, если среди источников есть торрент, иначе
+`video`; считается одной функцией (series_sources.kind_of) и отдаётся рядом
+со списком источников `sources` (по position, затем id) в каждом ответе о
+сериале.
+
+Отказы — ValueError с кодом core/reasons: `no_source` (создание без
+источника), `last_source` (удаление единственного источника), `source_exists`
+(тот же адрес у сериала дважды), `profile_not_found` (профиля нет).
 
 Events (входящие):
   series.status.contribution {source, series_id, flags} — свёртка
@@ -15,19 +33,37 @@ Commands:
       — открытие/закрытие модалки (действия пользователя).
 
 Queries:
-  catalog.series.list           → [{...series, statuses: [...]}]
-  catalog.series.get {series_id} → {...series, statuses: [...]}
+  catalog.series.list           → [{...series, kind, sources, statuses: [...]}]
+  catalog.series.get {series_id} → {...series, kind, sources, statuses: [...]}
   catalog.status.get {series_id} → {series_id, statuses: [...]}
-  catalog.series.create {data}   → {...series} (+ событие series.added)
+  catalog.series.create {data}   → {...series} (+ событие series.added,
+      затем series.source.added на каждый начальный источник)
+      — data.sources: список источников (минимум один), каждый — поля
+      SeriesSource без id и series_id; position по умолчанию — порядок
+      в списке. Поля data, не входящие в схему series, игнорируются.
   catalog.series.update {series_id, fields} → {applied: {...}}
-      (+ событие series.updated с применёнными полями — дельта SSE)
+      (+ событие series.updated с применёнными полями — дельта SSE);
+      источники здесь не меняются
   catalog.series.delete {series_id, delete_from_qb?} → {ok}
-      — удаляет строку series и публикует series.deleted; владельцы
+      — удаляет строку series вместе с её источниками и публикует
+      series.deleted (отдельных series.source.removed нет); владельцы
       остальных таблиц чистят своё по подписке (Р-19, событийный каскад)
       и отчитываются series.purged — молчащий владелец означает
       оборванный каскад и попадает в лог
+  catalog.sources.list {series_id} → [source]  — по position, затем id
+  catalog.sources.by_url {url}     → [source]  — источники с этим адресом
+      во всех сериалах (по адресу страницы композиция находит сериалы)
+  catalog.sources.add {series_id, source} → {id}  — в конец списка, если
+      position не задан (+ событие series.source.added)
+  catalog.sources.update {source_id, fields} → {applied: {...}}  — только
+      изменившиеся поля; без изменений событие не публикуется
+      (+ событие series.source.updated)
+  catalog.sources.remove {source_id} → {ok}  — единственный источник
+      сериала удалить нельзя (`last_source`); +series.source.removed
 
 Events (исходящие):
+  series.source.added / .updated / .removed {series_id, source_id} —
+      модель SourceEvent; публикуются после записи в БД.
   series.status.changed {series_id, statuses, is_busy} — только при
       изменении набора; транслируется в SSE series_updated (Р-18;
       оживляет ветку фронта s.statuses, находка 24).
@@ -44,11 +80,14 @@ import os
 import time
 
 from core import BaseModule, sanitize_name, sanitize_path
+from core.contracts import SourceEvent
 from core.db import Database
 from core.envelope import Envelope
+from core.reasons import reason
 
 from .aggregator import StatusAggregator
 from .repository import CatalogRepository
+from .series_sources import checked_fields, checked_sources, refuse_removed_fields
 
 # Columns that end up as path components on disk; the owner normalises
 # them on every write so no client can store an unusable name.
@@ -107,6 +146,11 @@ class CatalogModule(BaseModule):
         self.handle("catalog.series.create", self.on_series_create)
         self.handle("catalog.series.update", self.on_series_update)
         self.handle("catalog.series.delete", self.on_series_delete)
+        self.handle("catalog.sources.list", self.on_sources_list)
+        self.handle("catalog.sources.by_url", self.on_sources_by_url)
+        self.handle("catalog.sources.add", self.on_source_add)
+        self.handle("catalog.sources.update", self.on_source_update)
+        self.handle("catalog.sources.remove", self.on_source_remove)
 
     # --- статусы: вклады и viewing ------------------------------------------
 
@@ -188,20 +232,29 @@ class CatalogModule(BaseModule):
     # --- CRUD (Р-19) ----------------------------------------------------------
 
     async def on_series_create(self, env: Envelope) -> dict:
-        series_id = await self.repo.create_series(fs_safe(env.payload["data"]))
+        data = env.payload["data"]
+        refuse_removed_fields(data)
+        sources = checked_sources(data.get("sources"))
+        series_id = await self.repo.create_series(fs_safe(data), sources)
         row = await self.repo.get_series(series_id)
         row["statuses"] = self.agg.statuses(series_id)
         row["is_busy"] = False
         self.log.info("добавлен сериал %d: %s", series_id, row.get("name"))
         self.publish_event("series.added", row)
+        # The first sources are sources that appeared like any added later, so consumers need no second rule.
+        for source in row["sources"]:
+            self._publish_source("added", series_id, source["id"])
         return row
 
     async def on_series_update(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
+        fields = env.payload["fields"]
+        refuse_removed_fields(fields)
+        if "sources" in fields:
+            raise ValueError("поле сериала 'sources' не пишется: источники меняются запросами catalog.sources.*")
         if await self.repo.get_series(series_id) is None:
             raise LookupError(f"сериал {series_id} не найден")
-        applied = await self.repo.update_series(
-            series_id, fs_safe(env.payload["fields"]))
+        applied = await self.repo.update_series(series_id, fs_safe(fields))
         if applied:
             # Дельта для SSE series_updated: применённые поля + обязательные
             # statuses/is_busy (находка 38).
@@ -225,6 +278,61 @@ class CatalogModule(BaseModule):
             "delete_from_qb": bool(env.payload.get("delete_from_qb"))})
         self._spawn(self._await_purge_reports(series_id))
         return {"ok": True}
+
+    # --- sources of a series (Д-38) -------------------------------------------
+
+    async def on_sources_list(self, env: Envelope) -> list[dict]:
+        series_id = env.payload["series_id"]
+        await self._require_series(series_id)
+        return await self.repo.list_sources(series_id)
+
+    async def on_sources_by_url(self, env: Envelope) -> list[dict]:
+        return await self.repo.sources_by_url(env.payload["url"])
+
+    async def on_source_add(self, env: Envelope) -> dict:
+        series_id = env.payload["series_id"]
+        await self._require_series(series_id)
+        source_id = await self.repo.add_source(
+            series_id, checked_fields(env.payload["source"]))
+        self.log.info("сериал %d: добавлен источник %d", series_id, source_id)
+        self._publish_source("added", series_id, source_id)
+        return {"id": source_id}
+
+    async def on_source_update(self, env: Envelope) -> dict:
+        source_id = env.payload["source_id"]
+        stored = await self._require_source(source_id)
+        values = checked_fields(env.payload["fields"], stored)
+        # A value equal to the stored one is no change, so it raises no event and no recount downstream.
+        applied = {name: value for name, value in values.items() if value != stored[name]}
+        if applied:
+            await self.repo.update_source(source_id, applied)
+            self._publish_source("updated", stored["series_id"], source_id)
+        return {"applied": applied}
+
+    async def on_source_remove(self, env: Envelope) -> dict:
+        source_id = env.payload["source_id"]
+        stored = await self._require_source(source_id)
+        if not await self.repo.remove_source(source_id):
+            # Either the last source, or the series took it along between the read and the delete.
+            await self._require_source(source_id)
+            raise ValueError(reason("last_source", series_id=stored["series_id"], source_id=source_id))
+        self.log.info("сериал %d: удалён источник %d", stored["series_id"], source_id)
+        self._publish_source("removed", stored["series_id"], source_id)
+        return {"ok": True}
+
+    async def _require_series(self, series_id: int) -> None:
+        if not await self.repo.series_exists(series_id):
+            raise LookupError(f"сериал {series_id} не найден")
+
+    async def _require_source(self, source_id: int) -> dict:
+        source = await self.repo.get_source(source_id)
+        if source is None:
+            raise LookupError(f"источник {source_id} не найден")
+        return source
+
+    def _publish_source(self, what: str, series_id: int, source_id: int) -> None:
+        self.publish_event(f"series.source.{what}",
+                           SourceEvent(series_id=series_id, source_id=source_id).model_dump())
 
     def on_series_purged(self, env: Envelope) -> None:
         """Отчёт владельца: его таблицы вычищены."""

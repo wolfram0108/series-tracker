@@ -44,3 +44,42 @@ async def test_parallel_connect_switches_to_wal(tmp_path):
     assert not any(isinstance(r, Exception) for r in results), results
     with sqlite3.connect(path) as check:
         assert check.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+@pytest.mark.asyncio
+async def test_a_transaction_keeps_its_statements_together_and_lets_a_later_one_use_an_earlier_id(tmp_path):
+    path = tmp_path / "tx.db"
+    setup = sqlite3.connect(path)
+    setup.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY AUTOINCREMENT)")
+    setup.execute("CREATE TABLE child (parent_id INTEGER NOT NULL UNIQUE)")
+    setup.commit()
+    setup.close()
+    db = Database(str(path))
+
+    def write(conn):
+        parent_id = conn.execute("INSERT INTO parent DEFAULT VALUES").lastrowid
+        conn.execute("INSERT INTO child VALUES (?)", (parent_id,))
+        return parent_id
+
+    assert await db.transaction(write) == 1
+    assert await db.fetch_all("SELECT parent_id FROM child") == [{"parent_id": 1}]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_statement_takes_back_the_whole_transaction(tmp_path):
+    path = tmp_path / "tx.db"
+    setup = sqlite3.connect(path)
+    setup.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY AUTOINCREMENT)")
+    setup.execute("CREATE TABLE child (parent_id INTEGER NOT NULL UNIQUE)")
+    setup.commit()
+    setup.close()
+    db = Database(str(path))
+
+    def write(conn):
+        parent_id = conn.execute("INSERT INTO parent DEFAULT VALUES").lastrowid
+        conn.execute("INSERT INTO child VALUES (?)", (parent_id,))
+        conn.execute("INSERT INTO child VALUES (?)", (parent_id,))
+
+    with pytest.raises(sqlite3.IntegrityError):
+        await db.transaction(write)
+    assert await db.fetch_all("SELECT id FROM parent") == []

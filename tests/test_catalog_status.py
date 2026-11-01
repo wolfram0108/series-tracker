@@ -15,6 +15,7 @@ from core import BaseModule, Bus, Runner
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.catalog.aggregator import StatusAggregator
+from series_factory import insert_series
 
 
 # --- агрегатор: чистая логика ----------------------------------------------------
@@ -152,11 +153,7 @@ def db_path(tmp_path):
                         "PATH": "/usr/bin:/bin"},
                    cwd=".", check=True, capture_output=True)
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode) VALUES "
-            "(1, 'http://x', 'Тайтл', 'Title', 'kinozal', '/media/t', "
-            "'error, scanning', 'torrent', 0, 'search')")
+        insert_series(conn, id=1, url="http://x", state="error, scanning")
         conn.commit()
     return str(path)
 

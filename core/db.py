@@ -11,7 +11,9 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import time
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, TypeVar
+
+T = TypeVar("T")
 
 # Сколько ждём переключения журнала в WAL: PRAGMA journal_mode требует
 # эксклюзивной блокировки и не ждёт busy-timeout.
@@ -111,6 +113,15 @@ class Database:
         """Statements in one transaction: readers never see a half-applied change.
         Returns the number of rows the last statement changed."""
         return await asyncio.to_thread(self._execute_many_sync, statements)
+
+    def _transaction_sync(self, work: Callable[[sqlite3.Connection], T]) -> T:
+        with self._connect() as conn:
+            return work(conn)
+
+    async def transaction(self, work: Callable[[sqlite3.Connection], T]) -> T:
+        """`work` runs on one connection in one transaction: its statements are kept together or none is,
+        and a later statement may use what an earlier one returned (the id of a row it has just inserted)."""
+        return await asyncio.to_thread(self._transaction_sync, work)
 
     async def execute(self, query: str, params: Iterable[Any] = (), *,
                       enforce_fk: bool = True) -> int:
