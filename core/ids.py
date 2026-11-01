@@ -56,6 +56,13 @@ def row_unique_id(series_id: int, source_id: int, row_key: str) -> str:
     return media_unique_id(_row_address(source_id, row_key), _ROW_ID_DATE, series_id)
 
 
+def version_row_unique_id(series_id: int, source_id: int, row_key: str, address: str) -> str:
+    """Id of the plan row for another video behind a row of the layout whose earlier video is already fetched: the
+    address of the video is a part of the identity, so each video of the row has its own file, and a row never carries
+    the file of a video it no longer shows."""
+    return media_unique_id(f"{_row_address(source_id, row_key)}@{address}", _ROW_ID_DATE, series_id)
+
+
 def upgrade_row_unique_id(series_id: int, source_id: int, row_key: str, resolution: int) -> str:
     """Id of the row of a better version of a candidate whose earlier version is already fetched (see
     `upgrade_unique_id`), for a row of the layout."""

@@ -78,8 +78,11 @@ def place(series_id: int, chosen: Iterable[Chosen], existing: list[dict[str, Any
         here = [item for item in existing if slot_of(item) == slot and not is_compilation(item)]
         known = [item for item in here if item.get("source_url") == row.link]
         moved = by_id.get(fresh)
-        if moved is not None and moved not in known:
-            known.append(moved)  # the same row of the layout, numbered or addressed otherwise now: it is kept in place
+        # The same row of the layout, numbered otherwise now, is kept in place. So is one that shows another video
+        # while nothing was fetched from the row: there is no file to mix up. A row with a fetched video that now
+        # shows another is the earlier video, which the new one displaces.
+        if moved is not None and moved not in known and (moved.get("source_url") == row.link or not is_settled(moved)):
+            known.append(moved)
         fields = {
             "season": each.reference.season, "episode_start": each.reference.episode, "episode_end": None,
             "part": each.reference.part, "source_url": row.link, "download_url": None, "source_id": row.source_id,
@@ -94,7 +97,12 @@ def place(series_id: int, chosen: Iterable[Chosen], existing: list[dict[str, Any
             target = max(open_ones, key=lambda item: item.get("resolution") or 0)
             placements.append(Placement(each, target["unique_id"], {**fields, "resolution": resolution}, False))
             continue
-        unique_id = ids.upgrade_row_unique_id(series_id, row.source_id, row.row_key, resolution) if known else fresh
+        if known:
+            unique_id = ids.upgrade_row_unique_id(series_id, row.source_id, row.row_key, resolution)
+        elif fresh in by_id:  # the id of the row holds the video fetched before: this video is a row of its own
+            unique_id = ids.version_row_unique_id(series_id, row.source_id, row.row_key, row.link)
+        else:
+            unique_id = fresh
         placements.append(Placement(each, unique_id, {**fields, "resolution": resolution}, unique_id not in by_id))
     return placements
 

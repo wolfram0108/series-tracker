@@ -146,6 +146,47 @@ def test_the_same_row_numbered_otherwise_now_is_renumbered_in_place():
     assert (placed.unique_id, placed.is_new, placed.fields["episode_start"]) == (moved["unique_id"], False, 1)
 
 
+def test_another_video_behind_a_row_whose_video_was_fetched_is_a_row_of_its_own_and_never_the_old_file():
+    fetched = item(ids.row_unique_id(S, SRC, "k"), "https://old", resolution=1080, status="completed", filename="old.mp4")
+    placed = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://new", height=1080)), [fetched])[0]
+    assert placed.is_new and placed.unique_id == ids.version_row_unique_id(S, SRC, "k", "https://new")
+    assert placed.unique_id != fetched["unique_id"] and placed.fields["source_url"] == "https://new"
+    # The next scan finds that row by its address and keeps it, while the old one stays for the plan to displace.
+    again = item(placed.unique_id, "https://new", resolution=1080)
+    kept = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://new", height=1080)), [fetched, again])[0]
+    assert (kept.unique_id, kept.is_new) == (placed.unique_id, False)
+
+
+def test_the_plan_displaces_the_old_video_by_the_new_one_of_the_row():
+    from modules.scan.planner import plan_with_supersession, slot_of
+    fetched = item(ids.row_unique_id(S, SRC, "k"), "https://old", resolution=1080, status="completed", filename="old.mp4")
+    placed = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://new", height=1080)), [fetched])[0]
+    rows = candidates.rows_after([fetched], [candidates.new_row(S, placed, None)], [], [])
+    statuses, superseded = plan_with_supersession(rows, {placed.slot: placed.unique_id})
+    assert statuses == {fetched["unique_id"]: "replaced", placed.unique_id: "in_plan_single"}
+    assert superseded == {fetched["unique_id"]: placed.unique_id}
+    assert slot_of(fetched) == placed.slot
+
+
+def test_another_video_behind_a_row_whose_video_is_being_fetched_is_a_row_of_its_own():
+    busy = item(ids.row_unique_id(S, SRC, "k"), "https://old", resolution=1080, status="downloading")
+    placed = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://new", height=1080)), [busy])[0]
+    assert placed.is_new and placed.unique_id == ids.version_row_unique_id(S, SRC, "k", "https://new")
+
+
+def test_another_video_behind_a_row_nothing_was_fetched_from_is_written_over_the_row():
+    waiting = item(ids.row_unique_id(S, SRC, "k"), "https://old", resolution=1080)
+    placed = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://new", height=1080)), [waiting])[0]
+    assert (placed.unique_id, placed.is_new, placed.fields["source_url"]) == (waiting["unique_id"], False, "https://new")
+
+
+def test_the_old_video_returning_to_a_row_is_the_row_that_has_it():
+    old = item(ids.row_unique_id(S, SRC, "k"), "https://old", resolution=1080, status="completed", filename="old.mp4")
+    new = item(ids.version_row_unique_id(S, SRC, "k", "https://new"), "https://new", resolution=1080)
+    placed = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://old", height=1080)), [old, new])[0]
+    assert (placed.unique_id, placed.is_new) == (old["unique_id"], False)
+
+
 def test_a_slot_with_no_row_has_no_placement():
     assert place(S, chosen_of(row(S, SRC, "c", 1, 1, 2)), []) == []
 
