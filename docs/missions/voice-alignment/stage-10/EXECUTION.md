@@ -72,11 +72,11 @@
 
 | Пакет | Состояние | Коммит |
 |---|---|---|
-| П-0 | не начат | — |
-| П-1 | не начат | — |
-| П-2 | не начат | — |
-| П-3 | не начат | — |
-| П-4 | не начат | — |
+| П-0 | закрыт | 3ac44b4 |
+| П-1 | закрыт | 65dac3c |
+| П-2 | в работе | — |
+| П-3 | ступень 1 закрыта; ступень 2 (ruchime, канал VK) в работе; ступень 3 (dunhuatv, Kodik) впереди | 1c24855 |
+| П-4 | ступень 1 закрыта; ступень 2 (модуль на шине) в работе | 5471e1b |
 | П-5 | не начат | — |
 | П-6 | не начат | — |
 | П-7 | не начат | — |
@@ -84,3 +84,13 @@
 | П-9 | не начат | — |
 | П-10 | не начат | — |
 | П-11 | не начат | — |
+
+## 6. Ожидаемо красные до закрытия пакета
+
+Красное из этого списка не чинится в чужом пакете: оно зелёнеет, когда владелец перестраивает свою сторону. К сведению (П-11)
+список должен стать пустым.
+
+| Тест или группа | Причина | Закрывает |
+|---|---|---|
+| `tests/test_series_cascade.py::test_delete_during_scan_leaves_no_rows` | scan читает `series["parser_profile_id"]` | П-6 |
+| тесты с голым `INSERT INTO series (… url, source_type …)`: `test_downloads_module`, `test_library_relocation`, `test_media_api`, `test_renaming_module`, `test_scan_module`, `test_series_api`, `test_settings_api`, `test_settings_metadata_library`, `test_slicing_module`, `test_system_api`, `test_tmdb_multiseason`, `test_torrents_pipeline`, `test_voices` | колонок удалены из `series` (миграция 0025); перевод на `tests/series_factory.py` | П-5…П-8 каждый в своём файле |

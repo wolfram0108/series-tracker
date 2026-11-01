@@ -32,6 +32,10 @@ class SeriesSource(BaseModel):
     vibix_season: int | None = None
     players_off: list[str] = Field(default_factory=list)
 
+    def read_options(self) -> dict[str, str]:
+        """The choices that change what the site is asked for; the others are applied to the table afterwards."""
+        return {"vk_search_mode": self.vk_search_mode}
+
 
 class SourceEvent(BaseModel):
     """`series.source.added`, `.updated` and `.removed`."""

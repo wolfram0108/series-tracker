@@ -54,15 +54,15 @@ class TableReader:
     async def get(self, url: str) -> TableGetReply:
         found = self._resolve(url)
         if found is None:
-            return TableGetReply(state=TableState.FAILED, reason=reason("site_not_found"))
+            return TableGetReply(url=url, state=TableState.FAILED, reason=reason("site_not_found"))
         site, key = found
         async with self._gate:
             table = await self._repo.last_table(key)
             if table is not None and self._fresh(table):
-                return TableGetReply(state=TableState.READY, table=table)
+                return TableGetReply(url=key, state=TableState.READY, table=table)
             if key not in self._reading:
                 self._launch(site, key)
-            return TableGetReply(state=TableState.READING, table=table)
+            return TableGetReply(url=key, state=TableState.READING, table=table)
 
     async def read(self, url: str) -> None:
         """Read the page now, term or not, unless a read of it is already going."""

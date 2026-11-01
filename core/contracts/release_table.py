@@ -79,21 +79,45 @@ def line_of(table: ReleaseTable, row: TableRow) -> str:
 
 
 class TableState(StrEnum):
+    """`absent`: no complete table exists and the request asked for no read."""
+
     READY = "ready"
     READING = "reading"
     FAILED = "failed"
+    ABSENT = "absent"
 
 
 class TableGetRequest(BaseModel):
+    """`options` are the choices of a source that change what is read (the search mode of a VK channel); a site
+    ignores those it does not know. `refresh` False reads nothing: the last complete table is returned as it is,
+    old or not, so that recounting a layout never costs a read of the site."""
+
     url: str
+    options: dict[str, str] = Field(default_factory=dict)
+    refresh: bool = True
 
 
 class TableGetReply(BaseModel):
-    """`table` is the last complete table: present with `reading` and `failed` when an earlier read finished."""
+    """`url` is the canonical address of the page: the one the events `ready` and `failed` carry.
 
+    `table` is the last complete table: present with `reading` and `failed` when an earlier read finished."""
+
+    url: str
     state: TableState
     table: ReleaseTable | None = None
     reason: str | None = None
+
+
+class SiteResolveRequest(BaseModel):
+    url: str
+    options: dict[str, str] = Field(default_factory=dict)
+
+
+class SiteResolveReply(BaseModel):
+    """Which site reads an address and the canonical form of it; both None when no site does."""
+
+    site: str | None = None
+    canonical_url: str | None = None
 
 
 class TableProgress(BaseModel):

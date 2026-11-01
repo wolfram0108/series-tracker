@@ -504,7 +504,8 @@ async def test_a_start_without_the_tables_still_serves_the_rest_of_the_module(tm
 async def test_an_address_of_no_site_is_refused_at_once_and_no_read_begins(system):
     reply = await system.get("https://nowhere.test/p/1")
 
-    assert reply == {"state": "failed", "table": None, "reason": reason("site_not_found")}
+    assert reply == {"url": "https://nowhere.test/p/1", "state": "failed", "table": None,
+                     "reason": reason("site_not_found")}
     assert system.site.reads == [] and system.failed.queue.empty()
 
 

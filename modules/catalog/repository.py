@@ -174,6 +174,12 @@ class CatalogRepository:
             (url,))
         return [_source(row) for row in rows]
 
+    async def sources_by_profile(self, profile_id: int) -> list[dict]:
+        rows = await self._db.fetch_all(
+            f"SELECT {_SOURCE_COLUMNS} FROM series_sources WHERE parser_profile_id=? ORDER BY series_id, position, id",
+            (profile_id,))
+        return [_source(row) for row in rows]
+
     async def get_source(self, source_id: int) -> dict | None:
         row = await self._db.fetch_one(
             f"SELECT {_SOURCE_COLUMNS} FROM series_sources WHERE id=?", (source_id,))

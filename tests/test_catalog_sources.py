@@ -242,6 +242,17 @@ async def test_sources_are_found_by_address_in_every_series(system):
 
 
 @pytest.mark.asyncio
+async def test_sources_are_found_by_the_profile_that_reads_them(system):
+    _, probe = system
+    first = await create_series(probe, name="1", sources=[source(url=RUCHIME, source_type="web_video",
+                                                                  parser_profile_id=1)])
+    await create_series(probe, name="2", sources=[source(url=VK, source_type="vk_video", parser_profile_id=2)])
+    found = await probe.request("catalog.sources.by_profile", {"profile_id": 1}, timeout=5)
+    assert [(s["series_id"], s["url"]) for s in found] == [(first.series_id, RUCHIME)]
+    assert await probe.request("catalog.sources.by_profile", {"profile_id": 99}, timeout=5) == []
+
+
+@pytest.mark.asyncio
 async def test_the_sources_of_a_missing_series_are_an_error_not_an_empty_list(system):
     _, probe = system
     with pytest.raises(BusRequestError, match="не найден"):

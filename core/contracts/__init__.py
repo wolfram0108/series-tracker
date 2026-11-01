@@ -12,8 +12,8 @@ from .output_settings import (EffectiveLever, EpisodeSettings, Level, SettingRec
                               group_target, parse_group_target, parse_player_target, player_target)
 from .reference import Reference, ReferenceChanged, ReferenceMark
 from .release import Release, ReleaseSource, ReleaseTitle
-from .release_table import (LINE_SEPARATOR, ReleaseTable, RowState, RowVoice, TableFailed, TableGetReply,
-                            TableGetRequest, TableProgress, TableReady, TableRow, TableState, line_of)
+from .release_table import (LINE_SEPARATOR, ReleaseTable, RowState, RowVoice, SiteResolveReply, SiteResolveRequest,
+                            TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableRow, TableState, line_of)
 from .rules import RuleLine, RuleResult, RulesApplyReply, RulesApplyRequest, RulesProfileChanged
 from .series_sources import SeriesKind, SeriesSource, SourceEvent, SourceType
 from .voice_groups import GroupsResolveReply, GroupsResolveRequest
@@ -26,7 +26,7 @@ __all__ = ["AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitRep
            "LayoutVoice", "Reason", "SnapshotItem", "SettingProblem", "SkippedSource", "VoiceSettingsDraft",
            "VoiceSettingsSaved", "VoiceSettingsView", "ConformSettingsDraft", "ConformSettingsSaved",
            "ConformSettingsView",
-           "LINE_SEPARATOR", "ReleaseTable", "RowState", "RowVoice", "TableFailed", "TableGetReply", "TableGetRequest",
+           "LINE_SEPARATOR", "ReleaseTable", "RowState", "RowVoice", "SiteResolveReply", "SiteResolveRequest", "TableFailed", "TableGetReply", "TableGetRequest",
            "TableProgress", "TableReady", "TableRow", "TableState", "line_of",
            "RuleLine", "RuleResult", "RulesApplyReply", "RulesApplyRequest", "RulesProfileChanged",
            "SeriesKind", "SeriesSource", "SourceEvent", "SourceType",

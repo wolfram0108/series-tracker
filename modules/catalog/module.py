@@ -52,7 +52,9 @@ Queries:
       оборванный каскад и попадает в лог
   catalog.sources.list {series_id} → [source]  — по position, затем id
   catalog.sources.by_url {url}     → [source]  — источники с этим адресом
-      во всех сериалах (по адресу страницы композиция находит сериалы)
+      во всех сериалах
+  catalog.sources.by_profile {profile_id} → [source]  — источники, читаемые этим
+      профилем правил (конструктор по нему отказывает в удалении профиля)
   catalog.sources.add {series_id, source} → {id}  — в конец списка, если
       position не задан (+ событие series.source.added)
   catalog.sources.update {source_id, fields} → {applied: {...}}  — только
@@ -148,6 +150,7 @@ class CatalogModule(BaseModule):
         self.handle("catalog.series.delete", self.on_series_delete)
         self.handle("catalog.sources.list", self.on_sources_list)
         self.handle("catalog.sources.by_url", self.on_sources_by_url)
+        self.handle("catalog.sources.by_profile", self.on_sources_by_profile)
         self.handle("catalog.sources.add", self.on_source_add)
         self.handle("catalog.sources.update", self.on_source_update)
         self.handle("catalog.sources.remove", self.on_source_remove)
@@ -288,6 +291,9 @@ class CatalogModule(BaseModule):
 
     async def on_sources_by_url(self, env: Envelope) -> list[dict]:
         return await self.repo.sources_by_url(env.payload["url"])
+
+    async def on_sources_by_profile(self, env: Envelope) -> list[dict]:
+        return await self.repo.sources_by_profile(int(env.payload["profile_id"]))
 
     async def on_source_add(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
