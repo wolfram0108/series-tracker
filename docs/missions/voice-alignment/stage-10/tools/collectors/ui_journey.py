@@ -36,7 +36,7 @@ PROFILE = "общий"
 QUIET_S = 12
 GROUP = "Ruchime"
 UNKNOWN_VOICE = "Неизвестная озвучка"  # the core words a voice-over of no group so
-# The line of the constructor ends with the episode ("… | 1080p | Серия 1"); the season comes from the series ("s01").
+# The line of the constructor ends with the word for the episode and its number; the season comes from the series.
 PROFILES = [{"name": PROFILE, "rules": [{
     "name": "серия", "conditions": [[{"type": "text", "value": "Серия"}]],
     "actions": [{"action_type": "extract_single", "action_pattern": json.dumps(
