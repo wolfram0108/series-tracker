@@ -1,0 +1,70 @@
+import { api } from "../api/client"
+import { t } from "../i18n"
+import { reasonText } from "../lib/reason"
+import type { PreviewReply, ResolveReply, SeriesSource, SourceDraft, SourceSummary } from "../lib/sources"
+
+/** The answer of a call to the core: the data, or the words for the refusal (the reason worded by the catalog). */
+export type Answer<T> = { ok: true; data: T } | { ok: false; text: string }
+
+function refusal(error: unknown): string {
+  const body = error as { error?: unknown } | null | undefined
+  const text = typeof body?.error === "string" ? reasonText(body.error) : ""
+  return text || t("sources.error.refused")
+}
+
+async function call<T>(send: () => Promise<{ data?: unknown; error?: unknown }>): Promise<Answer<T>> {
+  try {
+    const { data, error } = await send()
+    if (error || data === undefined) return { ok: false, text: refusal(error) }
+    return { ok: true, data: data as T }
+  } catch {
+    return { ok: false, text: t("sources.error.network") }
+  }
+}
+
+/** Which site reads an address and its canonical form; the core answers without the network. */
+export function resolveAddress(url: string, options: Record<string, string> = {}): Promise<Answer<ResolveReply>> {
+  return call(() => api.POST("/api/sources/resolve", { body: { url, options } }))
+}
+
+/** What the window shows of an address: the state of its table, the summary and the lines. `refresh: false` reads nothing. */
+export function previewAddress(body: {
+  url: string
+  options?: Record<string, string>
+  profile_id?: number | null
+  refresh?: boolean
+}): Promise<Answer<PreviewReply>> {
+  return call(() => api.POST("/api/sources/preview", { body: { refresh: true, ...body } }))
+}
+
+export async function fetchProfiles(): Promise<{ id: number; name: string }[]> {
+  const { data } = await api.GET("/api/parser-profiles")
+  return Array.isArray(data) ? (data as { id: number; name: string }[]) : []
+}
+
+export function fetchSources(seriesId: number): Promise<Answer<SeriesSource[]>> {
+  return call(() => api.GET("/api/series/{series_id}/sources", { params: { path: { series_id: seriesId } } }))
+}
+
+/** The summaries of the sources of a video series: the part of the layout a window of the sources needs. */
+export async function fetchSummaries(seriesId: number): Promise<Answer<SourceSummary[]>> {
+  const answer = await call<{ sources?: SourceSummary[] }>(() =>
+    api.GET("/api/series/{series_id}/composition", { params: { path: { series_id: seriesId } } }))
+  return answer.ok ? { ok: true, data: answer.data.sources ?? [] } : answer
+}
+
+export function createSource(seriesId: number, draft: SourceDraft): Promise<Answer<{ id: number }>> {
+  return call(() => api.POST("/api/series/{series_id}/sources", { params: { path: { series_id: seriesId } }, body: draft }))
+}
+
+export function changeSource(seriesId: number, sourceId: number, fields: Record<string, unknown>): Promise<Answer<unknown>> {
+  return call(() => api.PUT("/api/series/{series_id}/sources/{source_id}", {
+    params: { path: { series_id: seriesId, source_id: sourceId } }, body: fields,
+  }))
+}
+
+export function removeSource(seriesId: number, sourceId: number): Promise<Answer<unknown>> {
+  return call(() => api.DELETE("/api/series/{series_id}/sources/{source_id}", {
+    params: { path: { series_id: seriesId, source_id: sourceId } },
+  }))
+}

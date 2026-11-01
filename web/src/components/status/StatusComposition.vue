@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue"
+import { ref, computed, onBeforeUnmount, onMounted } from "vue"
 import { useToast } from "primevue/usetoast"
 import Button from "primevue/button"
 import Checkbox from "primevue/checkbox"
@@ -7,6 +7,7 @@ import ToggleSwitch from "primevue/toggleswitch"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
+import { useSSE } from "../../composables/useSSE"
 
 // Вкладка «Композиция» (торрент) — порт StatusTabTorrentComposition.
 // Файлы сериала, сгруппированные по сезонам, карточками card-torrent;
@@ -258,12 +259,17 @@ async function reprocess() {
     )
     if (ok !== null) {
       toast.add({ severity: "success", summary: "Переобработка", detail: "Задача принята в обработку", life: 3000 })
-      setTimeout(load, 2000)
     }
   } finally {
     reprocessing.value = false
   }
 }
+
+// The end of the renaming is announced by the core (renaming_complete); the composition is read again then.
+const stopRenaming = useSSE().on("renaming_complete", (data) => {
+  if ((data as { series_id?: number }).series_id === props.seriesId) void load()
+})
+onBeforeUnmount(stopRenaming)
 
 onMounted(async () => {
   await Promise.all([load(), loadSeries()])

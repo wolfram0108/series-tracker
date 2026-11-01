@@ -1,0 +1,7 @@
+/* The button of an action on a source: spacing from the tokens, the width from its content. */
+.source-action {
+  display: inline-flex; align-items: center; gap: var(--space); cursor: pointer;
+  padding: var(--space); border: var(--border-width) solid var(--border-color); border-radius: var(--border-radius);
+  background: var(--bg-white);
+}
+.source-action:disabled { cursor: default; opacity: 0.5; }

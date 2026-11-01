@@ -6,9 +6,9 @@ import { useApi } from "../../composables/useApi"
 // Вкладка «История» — порт StatusTabHistory. Торрент: таблица истории
 // торрентов (GET torrents/history). VK: таблица медиа-элементов в БД
 // (GET media-items). Только просмотр.
-const props = defineProps<{ seriesId: number; sourceType: string }>()
+const props = defineProps<{ seriesId: number; kind: string }>()
 const { request } = useApi()
-const isVideo = props.sourceType === "vk_video" || props.sourceType === "web_video"
+const isVideo = props.kind === "video"
 const isVk = isVideo
 
 interface TorrentRow {

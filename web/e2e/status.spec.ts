@@ -38,13 +38,15 @@ test.describe("Статус-окно", () => {
     ).toBeTruthy()
   })
 
-  test("VK: вкладка «Нарезка» присутствует, Композиция рендерит", async ({ page }) => {
+  test("видео: вкладка «Нарезка» присутствует, вместо «Композиции» — «Выход»", async ({ page }) => {
     await openApp(page)
     await page.locator(".series-card").last().locator("[title='Статус']").click()
     const titles = await page.locator(".st-tab").evaluateAll((els) => els.map((e) => e.getAttribute("title")))
     expect(titles).toContain("Нарезка")
-    await page.locator(".st-tab[title='Композиция']").click()
-    // карточки композиции или явный спиннер/пусто — проверяем, что вкладка ожила
+    expect(titles).toContain("Выход")
+    expect(titles).not.toContain("Композиция")
+    await page.locator(".st-tab[title='Выход']").click()
+    // the "Output" section shows a placeholder for now: the tab must open
     await expect(page.locator(".st-tabs")).toBeVisible()
     await page.locator(".modern-close").last().click()
   })

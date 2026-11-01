@@ -1,6 +1,7 @@
 import { defineStore } from "pinia"
 import { ref } from "vue"
 import { api } from "../api/client"
+import type { components } from "../api/schema"
 
 /** Серия. Контракт бэка — extra="allow", поэтому помимо явных полей могут
  *  приходить и другие (tmdb_info, tracker_info, …) — отсюда index-signature. */
@@ -13,6 +14,9 @@ export interface Series {
   is_busy?: boolean
   last_scan_time?: string | null
   season?: string | null
+  /** What the series is to the system: its sources are all torrent or all video ones. */
+  kind?: components["schemas"]["SeriesKind"]
+  sources?: components["schemas"]["SeriesSource"][]
   [key: string]: unknown
 }
 

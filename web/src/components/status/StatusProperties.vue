@@ -6,18 +6,17 @@ import StIcon from "../StIcon.vue"
 import StInput from "../StInput.vue"
 import StSelect from "../StSelect.vue"
 import SavedPathDropdown from "../SavedPathDropdown.vue"
-import WebSourcesEditor from "../WebSourcesEditor.vue"
+import SourcesEditor from "../SourcesEditor.vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
-import { useWebSources } from "../../composables/useWebSources"
+import { fetchProfiles } from "../../composables/sourceCalls"
+import { useSeriesSources } from "../../composables/useSeriesSources"
 import { t } from "../../i18n"
 import type { Series } from "../../stores/series"
 
-// Вкладка «Свойства» статус-окна (Шаг 1, торрент-путь + VK-поля).
-// Редактирует существующий сериал: имя/путь/сезон/качество-оверрайды/
-// профиль + TMDB-виджет (как в Add). Сохранение — POST /api/series/{id}
-// (catalog.update + metadata.map + relocate/renaming). save() вызывается
-// из футера StatusModal через ref и возвращает успех.
+// "Properties" tab of the status window. Saving is POST /api/series/{id}; the fields of the sources are not in it:
+// a source changes at once by its own request (the "Sources" block). save() is called from the footer of
+// StatusModal through a ref and returns the success.
 const props = defineProps<{ series: Series }>()
 const emit = defineEmits<{ (e: "saving", v: boolean): void }>()
 const { request } = useApi()
@@ -29,9 +28,7 @@ interface Torrent { torrent_id?: string | number; link?: string; date_time?: str
 type VState = "valid" | "invalid" | null
 
 const s = props.series
-const isVk = s.source_type === "vk_video"
-const isWebVideo = s.source_type === "web_video"
-const isVideo = isVk || isWebVideo
+const isVideo = s.kind === "video"
 
 // --- редактируемые поля (инициализация из серии) ---
 const form = reactive({
@@ -42,8 +39,6 @@ const form = reactive({
   quality: String((s as Record<string, unknown>).quality ?? ""),
   quality_override: String((s as Record<string, unknown>).quality_override ?? ""),
   resolution_override: String((s as Record<string, unknown>).resolution_override ?? ""),
-  parser_profile_id: ((s as Record<string, unknown>).parser_profile_id ?? null) as number | null,
-  vk_search_mode: String((s as Record<string, unknown>).vk_search_mode ?? "search"),
 })
 const site = String((s as Record<string, unknown>).site ?? "")
 const trackerInfo = (s as Record<string, unknown>).tracker_info as { ui_features?: { quality_selector?: string } } | null
@@ -123,7 +118,7 @@ async function refreshSiteTorrents() {
       allSiteTorrents.value = hist
       buildQualityOptions(hist)
     }
-    const { data } = await api.POST("/api/parse_url", { body: { url } } as never)
+    const { data } = await api.POST("/api/parse_url", { body: { url: torrentUrl } } as never)
     const res = (data ?? null) as { success?: boolean; torrents?: Torrent[]; error?: string } | null
     if (res?.success && Array.isArray(res.torrents)) {
       allSiteTorrents.value = res.torrents
@@ -137,33 +132,14 @@ async function refreshSiteTorrents() {
     siteTorrentsLoading.value = false
   }
 }
-const url = String((s as Record<string, unknown>).url ?? "")
-// The sources of a web release; the address is sent with the series only when the choice moved it.
-const web = useWebSources()
-const { hasLayout, rows: sourceRows, progress: sourcesProgress, parsing: sourcesParsing } = web
-let startAddress = ""
-// The address that will be saved: the one the sources editor stands on once it has moved it.
-const shownUrl = computed(() => (isWebVideo && web.address.value) || url)
-async function showSources(address: string): Promise<void> {
-  if (await web.pick(address) && !startAddress) startAddress = web.address.value
-}
+// The address of the one source of a torrent series: the tracker page its releases are listed on.
+const torrentUrl = s.sources?.[0]?.url ?? ""
+// The sources act at once (their own requests); the profiles are what their groups choose from.
+const sources = useSeriesSources(Number(s.id), isVideo ? "video" : "torrent", s.sources ?? [])
 const isSeasonless = ref(!form.season)
 const showValidation = ref(false)
 
-// VK: канал|запрос из url
-const vkChannelUrl = ref("")
-const vkQuery = ref("")
-if (isVk && url) {
-  const [ch, q] = url.split("|")
-  vkChannelUrl.value = ch ?? ""
-  vkQuery.value = q ?? ""
-}
-
 const profiles = ref<{ id: number; name: string }[]>([])
-const profileOptions = computed(() => [
-  { label: "Выберите профиль...", value: null as number | null },
-  ...profiles.value.map((p) => ({ label: p.name, value: p.id as number | null })),
-])
 
 // --- TMDB (как в Add) ---
 const tmdbSearchQuery = ref("")
@@ -226,11 +202,6 @@ const seasonState = computed<VState>(() => {
   return vstate(isSeasonValid.value)
 })
 
-async function loadProfiles() {
-  const { data } = await api.GET("/api/parser-profiles")
-  if (Array.isArray(data)) profiles.value = data as { id: number; name: string }[]
-}
-
 async function searchTMDB() {
   if (!tmdbSearchQuery.value) tmdbSearchQuery.value = form.name || form.name_en
   if (!tmdbSearchQuery.value) return
@@ -275,23 +246,9 @@ async function copyCatalogName() {
   }
 }
 
-// url-действия (торрент)
-async function copyUrl() {
-  try {
-    await navigator.clipboard.writeText(shownUrl.value)
-    toast.add({ severity: "success", summary: "Скопировано", detail: "Ссылка в буфере", life: 2000 })
-  } catch {
-    /* ignore */
-  }
-}
-function openUrl() {
-  window.open(shownUrl.value, "_blank")
-}
-
 const canSave = computed(() => {
   const base = !!form.name && !!form.name_en && isAbsolutePath(form.save_path)
-  if (isVk) return base && !!vkChannelUrl.value && !!form.parser_profile_id
-  if (isWebVideo) return base && !!form.parser_profile_id
+  if (isVideo) return base
   return base && isSeasonValid.value
 })
 
@@ -311,14 +268,8 @@ async function save(): Promise<boolean> {
       season: isSeasonless.value ? "" : form.season,
       quality_override: form.quality_override || null,
       resolution_override: form.resolution_override || null,
-      parser_profile_id: form.parser_profile_id,
-      vk_search_mode: form.vk_search_mode,
     }
-    if (isVk) {
-      payload.url = `${vkChannelUrl.value}|${vkQuery.value}`
-    } else if (isWebVideo) {
-      payload.url = web.address.value && web.address.value !== startAddress ? web.address.value : url
-    } else {
+    if (!isVideo) {
       // строка качества (как в оригинале): anilibria/rutracker → одно
       // значение; astar → версии мульти-групп + по одной из одиночных, ';'
       let quality = ""
@@ -361,50 +312,13 @@ async function save(): Promise<boolean> {
 
 defineExpose({ save })
 onMounted(() => {
-  void loadProfiles()
-  if (isWebVideo) void showSources(url)
+  void fetchProfiles().then((list) => { profiles.value = list })
   if (!isVideo) void refreshSiteTorrents() // автопарсинг доступных раздач + качество
 })
 </script>
 
 <template>
   <div class="status-properties">
-    <!-- VK-настройки -->
-    <div v-if="isVk" class="modern-fieldset">
-      <div class="fieldset-header"><span class="fieldset-title">Настройки для VK Video</span></div>
-      <div class="fieldset-content">
-        <label class="modern-label">Режим поиска</label>
-        <div class="vk-mode-group">
-          <button
-            type="button"
-            class="vk-mode-btn"
-            :class="{ active: form.vk_search_mode === 'search' }"
-            @click="form.vk_search_mode = 'search'"
-          >
-            <i class="pi pi-search" /> Быстрый поиск
-          </button>
-          <button
-            type="button"
-            class="vk-mode-btn"
-            :class="{ active: form.vk_search_mode === 'get_all' }"
-            @click="form.vk_search_mode = 'get_all'"
-          >
-            <i class="pi pi-list" /> Полное сканирование
-          </button>
-        </div>
-        <div class="add-grid-2 mt-3">
-          <StGroup>
-            <StIcon icon="pi pi-youtube" />
-            <StInput v-model="vkChannelUrl" label="Ссылка на канал" />
-          </StGroup>
-          <StGroup>
-            <StIcon icon="pi pi-search" />
-            <StInput v-model="vkQuery" label="Поисковые запросы (через /)" />
-          </StGroup>
-        </div>
-      </div>
-    </div>
-
     <!-- Информация -->
     <div class="modern-fieldset">
       <div class="fieldset-header"><span class="fieldset-title">Информация о сериале</span></div>
@@ -446,37 +360,17 @@ onMounted(() => {
           </StGroup>
         </div>
 
-        <!-- профиль правил (торрент и VK: оба используют parser_profile_id) -->
-        <div class="field-group mt-3">
-          <StGroup>
-            <div class="constructor-item item-label-text-icon" title="Профиль правил">
-              <i class="pi pi-filter" /><span>Профиль правил</span>
-            </div>
-            <StSelect v-model="form.parser_profile_id" :options="profileOptions" placeholder="Выберите профиль..." />
-          </StGroup>
-        </div>
-
-        <!-- url (торрент): readonly + копировать/открыть -->
-        <div v-if="!isVk && url" class="field-group mt-3">
-          <StGroup>
-            <StIcon icon="pi pi-link" />
-            <div class="constructor-item item-floating-label">
-              <input class="item-input" :value="shownUrl" readonly />
-            </div>
-            <div class="constructor-item url-actions">
-              <button type="button" class="url-action-btn" title="Скопировать" @click="copyUrl"><i class="pi pi-clipboard" /></button>
-              <button type="button" class="url-action-btn" title="Открыть" @click="openUrl"><i class="pi pi-external-link" /></button>
-            </div>
-          </StGroup>
-        </div>
       </div>
     </div>
 
-    <!-- Sources of a web release: its players, and the season of a shared catalog -->
-    <div v-if="isWebVideo && hasLayout" class="modern-fieldset">
-      <div class="fieldset-header"><span class="fieldset-title">{{ t("add.sources.title") }}</span></div>
+    <!-- Sources: a group per source; a torrent series shows the address and the profile of its one source -->
+    <div class="modern-fieldset">
+      <div class="fieldset-header"><span class="fieldset-title">{{ t("sources.title") }}</span></div>
       <div class="fieldset-content">
-        <WebSourcesEditor :rows="sourceRows" :busy="sourcesParsing" :progress="sourcesProgress" @pick="showSources($event)" />
+        <SourcesEditor
+          :items="sources.items.value" :profiles="profiles" :error="sources.error.value" :busy="sources.busy.value"
+          :editable="isVideo" :adder="sources.add" @remove="sources.remove" @change="sources.change"
+        />
       </div>
     </div>
 

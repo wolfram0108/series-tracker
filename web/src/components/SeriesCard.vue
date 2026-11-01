@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import type { Series } from "../stores/series"
-import { useVideoScanStore } from "../stores/videoScan"
 
 // Карточка сериала — кастом-островок. Порт логики из app.js
 // (getLayerStyle/getAnimationClass/seriesWithPills) на реальную модель серии.
@@ -34,8 +33,6 @@ const stateConfig: Record<string, { title: string; icon: string }> = {
 
 const states = computed(() => props.series.statuses ?? [])
 const busy = computed(() => Boolean(props.series.is_busy) || Boolean(props.saving))
-const videoScan = useVideoScanStore()
-const scanProgress = computed(() => videoScan.forSeries(props.series.id))
 
 function layerStyle(layer: string) {
   // idle рисуется зелёным слоем downloading (Р-24); остальное — по имени.
@@ -138,10 +135,6 @@ const scanTime = computed(() => {
             <span v-if="p.title">{{ p.title }}</span>
           </div>
         </TransitionGroup>
-        <div v-if="scanProgress" class="status-pill" :title="videoScan.label(scanProgress)">
-          <i class="pi pi-spin pi-spinner"></i>
-          <span>{{ videoScan.format(scanProgress) }}</span>
-        </div>
         <div v-if="tmdb" class="status-pill ms-auto" title="Прогресс эпизодов">
           <i class="pi pi-images"></i>
           <span>{{ tmdb.downloaded }} / {{ tmdb.total }}</span>

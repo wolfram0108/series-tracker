@@ -1,11 +1,11 @@
 {
   "App.vue": 10,
   "Gallery.vue": 161,
-  "components/AddSeriesModal.vue": 65,
+  "components/AddSeriesModal.vue": 54,
   "components/AppHeader.vue": 7,
   "components/ConfirmDialog.vue": 2,
   "components/LoginModal.vue": 7,
-  "components/LogsLoggingTab.vue": 10,
+  "components/LogsLoggingTab.vue": 6,
   "components/LogsModal.vue": 12,
   "components/ModalShell.vue": 1,
   "components/SavedPathDropdown.vue": 2,
@@ -18,7 +18,7 @@
   "components/settings/DatabaseViewerModal.vue": 7,
   "components/settings/ParserPatternEditor.vue": 17,
   "components/settings/ParserRuleCard.vue": 37,
-  "components/settings/ParserTest.vue": 31,
+  "components/settings/ParserTest.vue": 27,
   "components/settings/SettingsAccount.vue": 12,
   "components/settings/SettingsAgents.vue": 11,
   "components/settings/SettingsAuth.vue": 9,
@@ -27,12 +27,10 @@
   "components/settings/SettingsTrackers.vue": 5,
   "components/status/StatusComposition.vue": 27,
   "components/status/StatusHistory.vue": 21,
-  "components/status/StatusProperties.vue": 59,
+  "components/status/StatusProperties.vue": 46,
   "components/status/StatusSlicing.vue": 43,
-  "components/status/StatusVkComposition.vue": 43,
   "composables/useApi.ts": 3,
   "composables/useConfirm.ts": 2,
   "composables/useSSE.ts": 3,
-  "stores/queues.ts": 2,
-  "stores/videoScan.ts": 2
+  "stores/queues.ts": 2
 }

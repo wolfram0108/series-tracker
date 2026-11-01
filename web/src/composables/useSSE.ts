@@ -1,8 +1,7 @@
 import { ref } from "vue"
 
-/** SSE-события контракта (из gateway SSE_MAP). Бэк шлёт кадры
- *  `event: <name>\ndata: <json>\n\n`; keepalive-комментарии EventSource
- *  игнорирует сам. */
+/** SSE events of the contract (from the gateway SSE_MAP). The server sends frames
+ *  `event: <name>\ndata: <json>\n\n`; EventSource ignores the keepalive comments itself. */
 export const SSE_EVENTS = [
   "series_updated",
   "series_added",
@@ -17,8 +16,12 @@ export const SSE_EVENTS = [
   "voice_settings_update",
   "conform_settings_update",
   "scanner_status_update",
-  "video_scan_progress",
-  "coverage_progress",
+  "sources_table_progress",
+  "sources_table_ready",
+  "sources_table_failed",
+  "composition_changed",
+  "composition_failed",
+  "reference_changed",
   "renaming_complete",
   "relocation_started",
   "relocation_finished",

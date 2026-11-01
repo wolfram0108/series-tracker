@@ -1,0 +1,14 @@
+/* Intrinsic layout primitives: space and wrapping follow the content and the container, never a width of the window. */
+:root {
+  --space: clamp(0.5rem, 0.35rem + 0.6vw, 1rem);
+  --measure: clamp(14rem, 12rem + 10vw, 24rem);
+}
+.stack { display: flex; flex-direction: column; gap: var(--space); min-inline-size: 0; }
+.cluster { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space); min-inline-size: 0; }
+.sidebar { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space); }
+.sidebar > :first-child { flex: 1 1 var(--measure); }
+.sidebar > :last-child { flex: 999 1 0; min-inline-size: 50%; }
+.grid-fit {
+  display: grid; gap: var(--space);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--measure)), 1fr));
+}

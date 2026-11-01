@@ -9,20 +9,19 @@ import StInput from "./StInput.vue"
 import StSelect from "./StSelect.vue"
 import SavedPathDropdown from "./SavedPathDropdown.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
-import WebSourcesEditor from "./WebSourcesEditor.vue"
+import SourcesEditor from "./SourcesEditor.vue"
 import { api } from "../api/client"
 import { t } from "../i18n"
 import { reasonText } from "../lib/reason"
-import { useWebSources } from "../composables/useWebSources"
-import type { components } from "../api/schema"
+import { siteOf, sourceTypeOf } from "../lib/sources"
 import { useApi } from "../composables/useApi"
 import { useSSE } from "../composables/useSSE"
+import { useSourceDrafts } from "../composables/useSourceDrafts"
+import { fetchProfiles, resolveAddress } from "../composables/sourceCalls"
 
-// Модалка «Добавить сериал» — полный порт legacy addSeriesModal.js.
-// Поток: ввод URL → debounce-распознавание (vkvideo.ru → VK-режим без
-// отдельного API, парсинг ссылки в JS; иначе торрент-режим, POST
-// /api/parse_url) → инфо о сериале → выбор качества по трекеру → опц.
-// синхронизация с TMDB → сохранение POST /api/series.
+// Add-series window. An address is told by POST /api/sources/resolve: a site reads it, so it is a video source
+// and goes into the list; otherwise it is a tracker page (POST /api/parse_url). The series is created by
+// POST /api/series together with its sources.
 const emit = defineEmits<{ (e: "close"): void; (e: "created"): void }>()
 const { request } = useApi()
 const toast = useToast()
@@ -44,8 +43,8 @@ const newSeries = reactive({
   quality_override: "",
   resolution_override: "",
   qualityByEpisodes: {} as Record<string, string>,
+  // The profile of the one torrent source; a video source keeps its own in the list of sources.
   parser_profile_id: null as number | null,
-  vk_search_mode: "search",
 })
 const isSeasonless = ref(false)
 const urlError = ref("")
@@ -56,23 +55,15 @@ const parserData = ref<{ torrents: Torrent[] } | null>(null)
 const episodeQualityOptions = reactive<Record<string, string[]>>({})
 const isQualityOptionsReady = ref(false)
 const showValidation = ref(false)
-const sourceType = ref<"torrent" | "vk_video" | "web_video">("torrent")
-const webVideoTitles = ref<string[]>([])
-const canonicalUrl = ref("")
-const vkChannelUrl = ref("")
-const vkQuery = ref("")
+// Sources of a video series pile up here until "Add"; a torrent series has the one address of the field above.
+const {
+  items: sourceItems, bodies: sourceBodies, failed: sourcesFailed, error: sourcesError, busy: sourcesBusy,
+  add: addDraft, remove: removeDraft, change: changeDraft,
+} = useSourceDrafts()
+// The address of the field that a site reads: it becomes a source on the user's word, so a half-typed one makes none.
+const candidate = ref("")
+const kind = computed<"video" | "torrent">(() => (sourceItems.value.length ? "video" : "torrent"))
 const trackerInfo = ref<TrackerInfo | null>(null)
-type PlayerReport = { present: boolean; available: boolean | null; resolution: number | null; reason?: string; enabled?: boolean; toggle?: string }
-const parsePlayers = ref<Record<string, PlayerReport>>({})
-// The sources of a web release: a provider may read them apart from the parse because that is slow.
-const web = useWebSources()
-const { hasLayout, rows: sourceRowsView, progress: sourcesProgress } = web
-// Player/voice-over choices of a web source, delivered with the link parse.
-type WebSource = components["schemas"]["ReleaseSource"]
-type WebLayout = components["schemas"]["Layout"]
-const webSources = ref<WebSource[]>([])
-const webLayout = ref<WebLayout | null>(null)
-const selectedSource = ref("")
 const profiles = ref<{ id: number; name: string }[]>([])
 const saving = ref(false)
 
@@ -109,24 +100,15 @@ function sortEpisodeKeys(keys: string[]): string[] {
 // --- computed ---
 const shouldShowValidation = computed(() => {
   if (showValidation.value) return true
-  if (sourceType.value === "vk_video" || sourceType.value === "web_video") return true
-  if (sourceType.value === "torrent" && parsed.value) return true
-  return false
+  return kind.value === "video" || parsed.value
 })
 const isSeasonValid = computed(() => {
-  if (isSeasonless.value || sourceType.value === "vk_video" || sourceType.value === "web_video") return true
+  if (isSeasonless.value || kind.value === "video") return true
   return /^s\d{2}$/.test(newSeries.season.trim())
 })
 const canAddSeries = computed(() => {
   const base = !!newSeries.name && !!newSeries.name_en && isAbsolutePath(newSeries.save_path)
-  if (sourceType.value === "vk_video") {
-    const vkOk = !!vkChannelUrl.value && !!newSeries.parser_profile_id
-    const searchOk = newSeries.vk_search_mode === "search" ? !!vkQuery.value : true
-    return base && vkOk && searchOk
-  }
-  if (sourceType.value === "web_video") {
-    return parsed.value && base && !!newSeries.parser_profile_id && !web.blocks.value
-  }
+  if (kind.value === "video") return base && sourceItems.value.length > 0 && !sourcesFailed.value
   return parsed.value && base && isSeasonValid.value
 })
 const sortedQualityOptionsKeys = computed(() => {
@@ -172,19 +154,14 @@ function isAbsolutePath(value: string): boolean {
 const urlState = computed<VState>(() => {
   if (!shouldShowValidation.value) return null
   if (urlError.value) return "invalid"
-  return vstate(sourceType.value === "vk_video" ? !!vkChannelUrl.value : parsed.value)
-})
-const vkChannelState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!vkChannelUrl.value) : null))
-const vkQueryState = computed<VState>(() => {
-  if (!shouldShowValidation.value || newSeries.vk_search_mode !== "search") return null
-  return vstate(!!vkQuery.value)
+  return vstate(parsed.value)
 })
 const profileState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!newSeries.parser_profile_id) : null))
 const nameState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!newSeries.name) : null))
 const nameEnState = computed<VState>(() => (shouldShowValidation.value ? vstate(!!newSeries.name_en) : null))
 const savePathState = computed<VState>(() => (shouldShowValidation.value ? vstate(isAbsolutePath(newSeries.save_path)) : null))
 const seasonState = computed<VState>(() => {
-  if (!shouldShowValidation.value || isSeasonless.value || sourceType.value === "vk_video" || sourceType.value === "web_video") return null
+  if (!shouldShowValidation.value || isSeasonless.value || kind.value === "video") return null
   return vstate(isSeasonValid.value)
 })
 
@@ -200,7 +177,7 @@ const qualityOptionsAnilibria = computed(() => {
 const showQualityBlock = computed(() => !!trackerInfo.value?.ui_features?.quality_selector)
 const qualitySelector = computed(() => trackerInfo.value?.ui_features?.quality_selector || "")
 const showSeasonlessSwitch = computed(
-  () => sourceType.value === "vk_video" || sourceType.value === "web_video" || (!!site.value && (site.value.includes("kinozal") || site.value.includes("rutracker"))),
+  () => kind.value === "video" || (!!site.value && (site.value.includes("kinozal") || site.value.includes("rutracker"))),
 )
 const astarHasAlternatives = computed(() => Object.values(episodeQualityOptions).some((o) => o.length > 1))
 
@@ -228,56 +205,12 @@ const selectedTorrentIds = computed<string[]>(() => {
 })
 // имена файлов (basename) для поля шага 3 теста
 const namingTitles = computed<string[]>(() => {
-  if (sourceType.value === "web_video" && webVideoTitles.value.length) {
-    return webVideoTitles.value
-  }
   const out: string[] = []
   for (const id of selectedTorrentIds.value) {
     const r = previewResults.value[id]
     if (r?.files?.length) out.push(...r.files.map((f) => baseName(f.path)))
   }
   return out
-})
-
-// Player 1 is CVH, player 2 is Kodik: the numbering users go by.
-const playerLabel = (player: string) =>
-  player === "cvh" || player === "kodik" ? t(`add.source.player.${player}`) : player
-const kindLabel = (kind: string) =>
-  kind === "voice" || kind === "subtitles" ? t(`add.source.kind.${kind}`) : kind
-// `ranges` is the real coverage with holes, e.g. "1-10, 13-20".
-const coverageText = (s: WebSource) =>
-  s.count ? t("add.source.coverage", { ranges: s.ranges, count: s.count }) : t("add.source.none")
-const webSourceOptions = computed(() => webSources.value.map((s) => ({
-  value: s.url,
-  label: t("add.source.option", {
-    player: playerLabel(s.player), studio: s.studio,
-    kind: kindLabel(s.kind) ? ` · ${kindLabel(s.kind)}` : "", coverage: coverageText(s),
-  }),
-})))
-
-const selectedWebSource = computed(() => webSources.value.find((s) => s.url === selectedSource.value) ?? null)
-
-// отчёт о плеерах web-источника (приходит с разбором ссылки)
-const playerReportRows = computed(() => {
-  const labels: Record<string, string> = { vk: "VK", allvideo: "AllVideo", vibix: "Vibix", cvh: t("player.cvh") }
-  return Object.entries(parsePlayers.value).map(([name, report]) => {
-    let text = reasonText(report.reason) || t("player.state.unavailable")
-    if (!report.present) text = t("player.state.absent")
-    else if (report.available === null) text = t("player.state.pending")
-    else if (report.available) text = report.resolution ? `${report.resolution}p` : t("player.state.available")
-    return {
-      name,
-      label: labels[name] ?? name.toUpperCase(),
-      text,
-      ok: report.available === true,
-      off: report.available === false,
-    }
-  })
-})
-
-// A backslash in a pasted channel URL is a typo for a slash (legacy autoCorrectSlash).
-watch(vkChannelUrl, (v) => {
-  if (v.includes("\\")) vkChannelUrl.value = v.replace(/\\/g, "/")
 })
 
 // --- распознавание URL (debounce 500мс) ---
@@ -287,82 +220,46 @@ watch(() => newSeries.url, () => {
   debounceTimer = setTimeout(handleUrlInput, 500)
 })
 
-function handleUrlInput() {
+async function handleUrlInput() {
   urlError.value = ""
   parsed.value = false
-  webVideoTitles.value = []
-  canonicalUrl.value = ""
-  parsePlayers.value = {}
-  webSources.value = []
-  selectedSource.value = ""
-  webLayout.value = null
-  web.reset()
+  candidate.value = ""
   newSeries.resolution_override = ""
-  if (!newSeries.url) {
-    sourceType.value = "torrent"
+  const typed = newSeries.url.trim()
+  if (!typed) return
+  parsing.value = true
+  const answer = await resolveAddress(typed)
+  parsing.value = false
+  if (!answer.ok) {
+    urlError.value = answer.text
     return
   }
-  if (newSeries.url.includes("vkvideo.ru")) {
-    sourceType.value = "vk_video"
-    try {
-      const u = new URL(newSeries.url)
-      vkChannelUrl.value = `${u.protocol}//${u.hostname}${u.pathname}`
-      vkQuery.value = u.searchParams.get("q") || ""
-    } catch {
-      urlError.value = "Некорректный URL для VK Video"
-      vkChannelUrl.value = ""
-      vkQuery.value = ""
-    }
-  } else {
-    sourceType.value = "torrent"
-    void parseTorrentUrl()
+  if (sourceTypeOf(answer.data) !== null) {
+    candidate.value = typed
+    return
   }
+  await parseTorrentUrl()
 }
 
-interface WebParse {
-  titles?: string[]
-  canonical_url?: string
-  players?: Record<string, PlayerReport>
-  sources?: WebSource[]
-  selected_source?: string
-  layout?: WebLayout | null
-  has_layout?: boolean
-}
-function applyWebParse(res: WebParse) {
-  webVideoTitles.value = res.titles ?? []
-  canonicalUrl.value = res.canonical_url || ""
-  parsePlayers.value = res.players ?? {}
-  webSources.value = res.sources ?? []
-  selectedSource.value = res.selected_source ?? ""
-  webLayout.value = res.layout ?? null
-  web.apply(res)
+// The source goes into the list on the user's word; the field is free again for a tracker page or another source.
+async function addSource(address: string): Promise<boolean> {
+  const outcome = await addDraft(address)
+  if (outcome.kind === "added") return true
+  sourcesError.value = outcome.kind === "refused" ? outcome.text : t("sources.add.notSite")
+  return false
 }
 
-// Switching the choice re-parses the link; the form fields stay untouched.
-async function pickSource(address: string) {
-  const previous = selectedSource.value
-  selectedSource.value = address
-  urlError.value = ""
-  parsing.value = true
-  try {
-    const { data, error } = await api.POST("/api/parse_url", { body: { url: address } } as never)
-    const res = (data ?? null) as WebParse | null
-    if (error || !res) {
-      const err = (error ?? null) as { error?: string } | null
-      throw new Error(reasonText(err?.error) || t("add.error.parse"))
-    }
-    applyWebParse(res)
-  } catch (e) {
-    selectedSource.value = previous
-    urlError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    parsing.value = false
+async function addCandidate() {
+  if (!(await addSource(candidate.value))) {
+    urlError.value = sourcesError.value
+    return
   }
+  candidate.value = ""
+  newSeries.url = ""
 }
 
 async function parseTorrentUrl() {
   parsing.value = true
-  parsePlayers.value = {}
   try {
     site.value = new URL(newSeries.url).hostname.replace(/^www\./, "")
   } catch {
@@ -372,19 +269,10 @@ async function parseTorrentUrl() {
   }
   try {
     const { data, error } = await api.POST("/api/parse_url", { body: { url: newSeries.url } } as never)
-    const res = (data ?? null) as (ParseResult & {
-      source_type?: string
-      titles?: string[]
-      canonical_url?: string
-      resolution?: number | string | null
-    }) | null
+    const res = (data ?? null) as ParseResult | null
     if (error || !res) {
       const err = (error ?? null) as { error?: string } | null
       throw new Error(reasonText(err?.error) || t("add.error.parse"))
-    }
-    if (res.source_type === "web_video") {
-      sourceType.value = "web_video"
-      applyWebParse(res)
     }
     trackerInfo.value = res.tracker_info ?? null
     newSeries.name = res.title?.ru || ""
@@ -418,9 +306,7 @@ async function parseTorrentUrl() {
     isQualityOptionsReady.value = true
     parsed.value = true
     showValidation.value = true
-    if (res.source_type !== "web_video") {
-      void prefetchNamingFiles(torrents)  // фоновый добор списков файлов для вкладки проверки
-    }
+    void prefetchNamingFiles(torrents) // file lists for the naming tab arrive later by events
   } catch (e) {
     urlError.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -506,8 +392,9 @@ async function addSeries() {
   saving.value = true
   try {
     const payload: Record<string, unknown> = {
-      ...newSeries,
-      site: site.value,
+      name: newSeries.name,
+      name_en: newSeries.name_en,
+      save_path: newSeries.save_path,
       season: isSeasonless.value ? "" : newSeries.season,
       // пустой ручной ввод → null (как в edit-модалке), а не "" в БД
       quality_override: newSeries.quality_override || null,
@@ -525,17 +412,12 @@ async function addSeries() {
         year: tmdbSelected.value.year,
       }
     }
-    if (sourceType.value === "vk_video") {
-      payload.source_type = "vk_video"
-      payload.url = `${vkChannelUrl.value}|${vkQuery.value}`
-      payload.site = "vkvideo.ru"
-    } else if (sourceType.value === "web_video") {
-      payload.source_type = "web_video"
-      payload.url = canonicalUrl.value || newSeries.url
-      payload.site = site.value
-      payload.parser_profile_id = newSeries.parser_profile_id
+    if (kind.value === "video") {
+      payload.site = siteOf(sourceItems.value[0].url)
+      payload.sources = sourceBodies.value
     } else {
-      payload.source_type = "torrent"
+      payload.site = site.value
+      payload.sources = [{ url: newSeries.url, source_type: "torrent", parser_profile_id: newSeries.parser_profile_id }]
       let quality = ""
       if (site.value.includes("anilibria") || site.value.includes("aniliberty")) {
         quality = newSeries.qualityByEpisodes.all || ""
@@ -568,12 +450,8 @@ async function addSeries() {
   }
 }
 
-async function loadProfiles() {
-  const { data } = await api.GET("/api/parser-profiles")
-  if (Array.isArray(data)) profiles.value = data as { id: number; name: string }[]
-}
 onMounted(() => {
-  loadProfiles()
+  void fetchProfiles().then((list) => { profiles.value = list })
   unsubReady = sse.on("preview_naming_ready", (d) => {
     const p = d as { torrent_id?: string | number; files?: { path: string; size?: number }[] }
     if (p.torrent_id != null) previewResults.value[String(p.torrent_id)] = { files: p.files ?? [] }
@@ -608,56 +486,19 @@ onBeforeUnmount(() => {
 
     <div v-show="activeTab === 'add'">
     <!-- URL -->
-    <div class="field-group add-url-row">
+    <div v-if="kind === 'torrent'" class="field-group add-url-row">
       <StGroup :state="urlState">
         <StIcon icon="pi pi-link" />
         <StInput v-model="newSeries.url" label="URL для парсинга" />
       </StGroup>
       <div v-if="urlError" class="add-error">{{ urlError }}</div>
       <div v-if="parsing" class="add-hint">Распознаём ссылку…</div>
+      <button v-if="candidate" type="button" class="source-action" @click="addCandidate">
+        <i class="pi pi-plus" />{{ t("sources.add.button") }}
+      </button>
     </div>
 
-    <div v-if="parsed || sourceType === 'vk_video'">
-      <!-- VK -->
-      <div v-if="sourceType === 'vk_video'" class="modern-fieldset">
-        <div class="fieldset-header"><span class="fieldset-title">Настройки для VK Video</span></div>
-        <div class="fieldset-content">
-          <label class="modern-label">Режим поиска</label>
-          <div class="vk-mode-group">
-            <button
-              type="button"
-              class="vk-mode-btn"
-              :class="{ active: newSeries.vk_search_mode === 'search' }"
-              @click="newSeries.vk_search_mode = 'search'"
-            >
-              <i class="pi pi-search" /> Быстрый поиск
-            </button>
-            <button
-              type="button"
-              class="vk-mode-btn"
-              :class="{ active: newSeries.vk_search_mode === 'get_all' }"
-              @click="newSeries.vk_search_mode = 'get_all'"
-            >
-              <i class="pi pi-list" /> Полное сканирование
-            </button>
-          </div>
-          <small class="fieldset-hint">
-            <b>Быстрый поиск:</b> использует API поиска VK. Быстро, но может пропустить некоторые видео.<br />
-            <b>Полное сканирование:</b> загружает все видео канала, затем фильтрует. Медленнее, но надёжнее.
-          </small>
-          <div class="add-grid-2 mt-3">
-            <StGroup :state="vkChannelState">
-              <StIcon icon="pi pi-youtube" />
-              <StInput v-model="vkChannelUrl" label="Ссылка на канал" />
-            </StGroup>
-            <StGroup :state="vkQueryState">
-              <StIcon icon="pi pi-search" />
-              <StInput v-model="vkQuery" label="Поисковые запросы (через /)" />
-            </StGroup>
-          </div>
-        </div>
-      </div>
-
+    <div v-if="parsed || kind === 'video'">
       <!-- Информация о сериале -->
       <div class="modern-fieldset">
         <div class="fieldset-header"><span class="fieldset-title">Информация о сериале</span></div>
@@ -697,7 +538,7 @@ onBeforeUnmount(() => {
               <StInput v-model="newSeries.resolution_override" label="Разрешение (ручной ввод)" kind="filename" />
             </StGroup>
           </div>
-          <div class="field-group mt-3">
+          <div v-if="kind === 'torrent'" class="field-group mt-3">
             <StGroup :state="profileState">
               <div class="constructor-item item-label-icon item-label-text-icon" title="Профиль правил">
                 <i class="pi pi-filter" /><span>Профиль правил</span>
@@ -708,63 +549,14 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Источники web-видео -->
-      <div v-if="sourceType === 'web_video' && playerReportRows.length" class="modern-fieldset">
-        <div class="fieldset-header"><span class="fieldset-title">Источники</span></div>
+      <!-- Sources of a video series: a group per source, its players and voice-overs -->
+      <div v-if="kind === 'video'" class="modern-fieldset">
+        <div class="fieldset-header"><span class="fieldset-title">{{ t("sources.title") }}</span></div>
         <div class="fieldset-content">
-          <WebSourcesEditor v-if="hasLayout" :rows="sourceRowsView" :busy="parsing" :progress="sourcesProgress" @pick="pickSource" />
-          <template v-else>
-          <div v-if="webSourceOptions.length" class="field-group mb-3">
-            <StGroup>
-              <div class="constructor-item item-label-icon item-label-text-icon" :title="t('add.source.label')">
-                <i class="pi pi-volume-up" /><span>{{ t("add.source.label") }}</span>
-              </div>
-              <StSelect
-                :model-value="selectedSource"
-                :options="webSourceOptions"
-                @update:model-value="pickSource($event as string)"
-              />
-            </StGroup>
-            <!-- the list row is one line; the full coverage of the chosen voice-over wraps here -->
-            <div v-if="selectedWebSource?.count" class="fieldset-hint mt-2">
-              {{ t("add.source.coverageHint", { ranges: selectedWebSource.ranges, count: selectedWebSource.count }) }}
-            </div>
-          </div>
-          <div class="player-report">
-            <span
-              v-for="p in playerReportRows"
-              :key="p.name"
-              class="player-report-item"
-              :class="{ 'is-ok': p.ok, 'is-off': p.off }"
-            >
-              <b>{{ p.label }}</b><span>{{ p.text }}</span>
-            </span>
-          </div>
-          <div class="fieldset-hint">
-            Предварительная проверка по первой серии; точное качество — после скана.
-          </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- Layout of voice-overs: what is the reference, what is downloaded and aligned -->
-      <div v-if="sourceType === 'web_video' && webLayout?.voices.length" class="modern-fieldset">
-        <div class="fieldset-header"><span class="fieldset-title">{{ t("add.layout.title") }}</span></div>
-        <div class="fieldset-content">
-          <div v-for="row in webLayout.voices" :key="row.label" class="player-report">
-            <span class="player-report-item" :class="{ 'is-ok': row.role === 'reference' }">
-              <b>{{ row.label }}</b>
-              <span>{{ t("add.layout.row", { role: t(`add.layout.role.${row.role}`), player: playerLabel(row.source.player), coverage: coverageText(row.source) }) }}</span>
-            </span>
-            <span v-for="fallback in row.fallbacks" :key="fallback.url" class="player-report-item">
-              <b>{{ t("add.layout.fallback") }}</b>
-              <span>{{ t("add.layout.fallbackRow", { player: playerLabel(fallback.player), coverage: coverageText(fallback) }) }}</span>
-            </span>
-          </div>
-          <div v-for="skipped in webLayout.skipped" :key="skipped.url" class="fieldset-hint">
-            {{ t("add.layout.skipped", { studio: skipped.studio, player: playerLabel(skipped.player) }) }}
-          </div>
-          <div class="fieldset-hint">{{ t("add.layout.hint") }}</div>
+          <SourcesEditor
+            :items="sourceItems" :profiles="profiles" :error="sourcesError" :busy="sourcesBusy" :adder="addSource"
+            @remove="removeDraft" @change="changeDraft"
+          />
         </div>
       </div>
 
@@ -886,7 +678,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Доступные торренты -->
-      <div v-if="sourceType === 'torrent' && parserData && parserData.torrents.length" class="modern-fieldset">
+      <div v-if="kind === 'torrent' && parserData && parserData.torrents.length" class="modern-fieldset">
         <div class="fieldset-header"><span class="fieldset-title">Доступные торренты ({{ parserData.torrents.length }})</span></div>
         <div class="fieldset-content">
           <div class="div-table table-site-torrents">
@@ -916,9 +708,9 @@ onBeforeUnmount(() => {
       <SettingsParser
         :initial-profile-id="newSeries.parser_profile_id"
         :test-initial-titles="namingTitles"
-        :test-initial-url="sourceType === 'web_video' ? canonicalUrl : ''"
+        :test-initial-url="kind === 'video' ? sourceItems[0].url : ''"
         :test-first="true"
-        @update:profile-id="newSeries.parser_profile_id = $event"
+        @update:profile-id="kind === 'torrent' && (newSeries.parser_profile_id = $event)"
       />
     </div>
 

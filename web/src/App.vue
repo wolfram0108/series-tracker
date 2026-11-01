@@ -80,9 +80,9 @@ function onCloseStatus() {
 }
 async function onDelete(id: number) {
   const s = seriesStore.byId(id)
-  // Чекбокс qBittorrent — только для торрент-серий (у VK торрента нет).
+  // The qBittorrent checkbox is for torrent series only: video sources have no torrent.
   // delete_from_qb убирает запись из qB; файлы на диске остаются.
-  const isTorrent = String(s?.source_type ?? "torrent") === "torrent"
+  const isTorrent = (s?.kind ?? "torrent") === "torrent"
   const r = await confirm.open({
     title: "Удаление сериала",
     message: `Удалить сериал «${s?.name ?? id}»? Это действие необратимо.`,

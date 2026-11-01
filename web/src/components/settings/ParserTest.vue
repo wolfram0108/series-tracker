@@ -7,7 +7,6 @@ import StIcon from "../StIcon.vue"
 import StInput from "../StInput.vue"
 import { useApi } from "../../composables/useApi"
 import { api } from "../../api/client"
-import { useVideoScanStore } from "../../stores/videoScan"
 
 // Шаг 3: тестирование профиля. Сбор «сырых» названий с VK (или имён
 // файлов сериала по ID#N) + прогон правил профиля и карточки результата.
@@ -22,19 +21,12 @@ const props = defineProps<{ profileId: number; initialTitles?: string[]; initial
 
 const { request } = useApi()
 const toast = useToast()
-const videoScan = useVideoScanStore()
 
 const scrapeChannelUrl = ref("")
 const scrapeQuery = ref("")
 const scrapeSearchMode = ref<"search" | "get_all">("search")
 const isScraping = ref(false)
 const scrapedItems = ref<Array<Record<string, unknown>>>([])
-const scrapeProgress = computed(() => {
-  if (!isScraping.value) return null
-  const value = videoScan.progress
-  // The rules scrape has no series yet; a background series scan must not leak here.
-  return value && value.series_id === null ? value : null
-})
 const testTitles = ref("")
 const isTesting = ref(false)
 const testResults = ref<TestResult[]>([])
@@ -166,35 +158,8 @@ async function scrapeTestTitles(): Promise<void> {
     }
     return
   }
-  // Скрейп названий с VK-канала или веб-сайта видеопровайдера.
-  if (!scrapeChannelUrl.value) return
-  isScraping.value = true
-  const isWeb = isWebUrl.value
-  toast.add({
-    severity: "info",
-    summary: "Сбор названий",
-    detail: isWeb ? "Полный опрос серий с качеством — может занять минуты…" : "Запущен сбор через VK API…",
-    life: 2500,
-  })
-  try {
-    const data = (await request(
-      api.POST("/api/parser-profiles/scrape-titles", {
-        body: {
-          channel_url: scrapeChannelUrl.value,
-          query: scrapeQuery.value,
-          search_mode: scrapeSearchMode.value,
-        },
-      } as never),
-      { errorMessage: "Ошибка сбора названий" },
-    )) as Array<Record<string, unknown>> | null
-    if (data) {
-      scrapedItems.value = data
-      testTitles.value = data.map((it) => String(it.title ?? "")).join("\n")
-      toast.add({ severity: "success", summary: "Готово", detail: `Собрано ${data.length} записей`, life: 2500 })
-    }
-  } finally {
-    isScraping.value = false
-  }
+  // Lines of a site page or a VK channel come from the table of the page (/api/sources/preview); the test that shows
+  // them is rebuilt on it, so this field takes only an ID here.
 }
 
 async function runTest(): Promise<void> {
@@ -262,7 +227,7 @@ async function runTest(): Promise<void> {
             <div class="constructor-item item-button-group">
               <button
                 class="btn-icon btn-search btn-text-icon"
-                :disabled="!scrapeChannelUrl || isScraping"
+                :disabled="!isDbId || isScraping"
                 @click="scrapeTestTitles"
               >
                 <i class="pi" :class="fetchButtonIcon" />
@@ -282,10 +247,6 @@ async function runTest(): Promise<void> {
         placeholder="Название видео 1&#10;Название видео 2"
       />
     </StGroup>
-
-    <div v-if="scrapeProgress" class="scan-progress">
-      {{ videoScan.label(scrapeProgress) }}: {{ videoScan.format(scrapeProgress) }}
-    </div>
 
     <div class="parser-test-actions">
       <Button

@@ -1,0 +1,114 @@
+import { computed, onMounted, ref, watch } from "vue"
+import { t } from "../i18n"
+import {
+  draftBody, itemOfSource, joinVkAddress, readOptions, sourceTypeOf, splitVkAddress, summaryOf, vkModeOf,
+  type SeriesSource, type SourceItem, type SourceSummary,
+} from "../lib/sources"
+import { useCompositionStore } from "../stores/composition"
+import { useSourceTablesStore } from "../stores/sourceTables"
+import { useSSE } from "./useSSE"
+import { changeSource, createSource, fetchSources, fetchSummaries, removeSource, resolveAddress } from "./sourceCalls"
+import type { DraftPatch } from "./useSourceDrafts"
+
+/**
+ * The sources of a stored series for its properties. An action goes to the core at once; what the core makes of
+ * it (a new layout, a reading of a page) comes back as events, and the layout event is what reads the sources again.
+ * A torrent series has one source and no table: only its address and profile show.
+ */
+export function useSeriesSources(seriesId: number, kind: "torrent" | "video", initial: SeriesSource[]) {
+  const tables = useSourceTablesStore()
+  const composition = useCompositionStore()
+  const sources = ref<SeriesSource[]>(initial)
+  const summaries = ref<SourceSummary[]>([])
+  // The address the core names the page of a source with in its events, by source id.
+  const canonical = ref<Record<number, string>>({})
+  const error = ref("")
+  const busy = ref(false)
+
+  const items = computed<SourceItem[]>(() => sources.value.map((source) => itemOfSource(
+    source, summaryOf(summaries.value, source.id), tables.forUrl(canonical.value[source.id] ?? ""))))
+
+  async function nameThePage(source: SeriesSource): Promise<void> {
+    const answer = await resolveAddress(source.url, readOptions({ sourceType: source.source_type, vkSearchMode: source.vk_search_mode }))
+    if (answer.ok && answer.data.canonical_url) canonical.value = { ...canonical.value, [source.id]: answer.data.canonical_url }
+  }
+
+  async function load(): Promise<void> {
+    const listed = await fetchSources(seriesId)
+    if (listed.ok) sources.value = listed.data
+    if (kind !== "video") return
+    const summary = await fetchSummaries(seriesId)
+    if (summary.ok) summaries.value = summary.data
+    await Promise.all(sources.value.filter((source) => !(source.id in canonical.value)).map(nameThePage))
+  }
+
+  function refused(text: string): false {
+    error.value = text
+    return false
+  }
+
+  async function act(run: () => Promise<{ ok: true } | { ok: false; text: string }>): Promise<boolean> {
+    error.value = ""
+    busy.value = true
+    try {
+      const answer = await run()
+      return answer.ok ? true : refused(answer.text)
+    } finally {
+      busy.value = false
+    }
+  }
+
+  async function add(raw: string): Promise<boolean> {
+    const address = raw.trim()
+    if (!address) return false
+    error.value = ""
+    const resolved = await resolveAddress(address)
+    if (!resolved.ok) return refused(resolved.text)
+    const sourceType = sourceTypeOf(resolved.data)
+    if (sourceType === null) return refused(t("sources.add.notSite"))
+    const vk = sourceType === "vk_video" ? splitVkAddress(address) : null
+    const url = vk ? joinVkAddress(vk.channel, vk.query) : (resolved.data.canonical_url ?? address)
+    const done = await act(() => createSource(seriesId, draftBody({
+      url, sourceType, profileId: null, vkSearchMode: vkModeOf(null), vibixSeason: null, playersOff: [],
+    })))
+    if (done) await load()
+    return done
+  }
+
+  async function remove(id: string | number): Promise<void> {
+    if (await act(() => removeSource(seriesId, Number(id)))) await load()
+  }
+
+  /** The fields of a source that the core knows, from the choices of the window. */
+  const fieldsOf = (patch: DraftPatch): Record<string, unknown> => ({
+    ...(patch.url !== undefined && { url: patch.url }),
+    ...(patch.profileId !== undefined && { parser_profile_id: patch.profileId }),
+    ...(patch.vkSearchMode !== undefined && { vk_search_mode: patch.vkSearchMode }),
+    ...(patch.vibixSeason !== undefined && { vibix_season: patch.vibixSeason }),
+    ...(patch.playersOff !== undefined && { players_off: patch.playersOff }),
+  })
+
+  async function change(id: string | number, patch: DraftPatch): Promise<void> {
+    const source = sources.value.find((each) => each.id === Number(id))
+    if (!source) return
+    const done = await act(() => changeSource(seriesId, source.id, fieldsOf(patch)))
+    if (!done) return
+    Object.assign(source, fieldsOf(patch))
+    if (patch.url !== undefined || patch.vkSearchMode !== undefined) {
+      const rest = { ...canonical.value }
+      delete rest[source.id]
+      canonical.value = rest
+      await nameThePage(source)
+    }
+  }
+
+  onMounted(() => void load())
+  // The layout of the series changed (a summary of a source too): the sources are read again.
+  watch(() => composition.layoutChanged[seriesId]?.rev, () => void load())
+  // A connection that came back may have missed events: the sources are read again.
+  watch(useSSE().connected, (up) => {
+    if (up) void load()
+  })
+
+  return { items, error, busy, add, remove, change, reload: load }
+}

@@ -4,16 +4,16 @@ import Button from "primevue/button"
 import ModalShell from "./ModalShell.vue"
 import StatusProperties from "./status/StatusProperties.vue"
 import StatusComposition from "./status/StatusComposition.vue"
-import StatusVkComposition from "./status/StatusVkComposition.vue"
+import StatusOutput from "./status/StatusOutput.vue"
 import StatusSlicing from "./status/StatusSlicing.vue"
 import StatusHistory from "./status/StatusHistory.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
 import { useSeriesStore, type Series } from "../stores/series"
+import { t } from "../i18n"
 
-// Окно «Статус сериала» — та же оболочка, что у Настроек (ModalShell xl,
-// фикс-высота) + вкладки-сегмент (st-tabs). Вкладки зависят от source_type.
-// Футер: «Сохранить» только на «Свойствах».
+// Status window: the shell of the settings window (ModalShell xl, fixed height) with segment tabs (st-tabs); the
+// tabs depend on the kind of the series. The footer has "Save" on the Properties tab only.
 const props = defineProps<{ seriesId: number }>()
 const emit = defineEmits<{ (e: "close"): void; (e: "updated"): void }>()
 const { request } = useApi()
@@ -21,7 +21,6 @@ const { request } = useApi()
 const series = ref<Series | null>(null)
 const propsRef = ref<InstanceType<typeof StatusProperties> | null>(null)
 const compRef = ref<InstanceType<typeof StatusComposition> | null>(null)
-const vkCompRef = ref<InstanceType<typeof StatusVkComposition> | null>(null)
 const saving = ref(false)
 // Занятость берём из стора: он живёт на SSE, а локальная копия серии
 // читается один раз и застыла бы на «Обработка…» после сохранения.
@@ -29,16 +28,16 @@ const seriesStore = useSeriesStore()
 const isBusy = computed(
   () => saving.value || !!(seriesStore.byId(props.seriesId)?.is_busy ?? series.value?.is_busy),
 )
-const isVk = computed(() => series.value?.source_type === "vk_video" || series.value?.source_type === "web_video")
+const isVideo = computed(() => series.value?.kind === "video")
 
 type TabKey = "properties" | "composition" | "slicing" | "history"
 const tab = ref<TabKey>("properties")
 const tabs = computed(() => {
-  const t = [{ value: "properties" as TabKey, label: "Свойства", icon: "pi-info-circle" }]
-  t.push({ value: "composition", label: "Композиция", icon: "pi-sitemap" })
-  if (isVk.value) t.push({ value: "slicing", label: "Нарезка", icon: "pi-images" })
-  t.push({ value: "history", label: "История", icon: "pi-history" })
-  return t
+  const list = [{ value: "properties" as TabKey, label: "Свойства", icon: "pi-info-circle" }]
+  list.push({ value: "composition", label: isVideo.value ? t("output.tab") : "Композиция", icon: "pi-sitemap" })
+  if (isVideo.value) list.push({ value: "slicing", label: "Нарезка", icon: "pi-images" })
+  list.push({ value: "history", label: "История", icon: "pi-history" })
+  return list
 })
 
 async function load() {
@@ -67,8 +66,8 @@ async function save() {
 // поэтому сама не освежается. При переходе на вкладку «Композиция»
 // перечитываем её — иначе после «Сохранить» (фоновое усыновление меняет БД)
 // видны старые данные до закрытия/открытия модалки.
-watch(tab, (t) => {
-  if (t === "composition") (isVk.value ? vkCompRef.value : compRef.value)?.reload?.()
+watch(tab, (next) => {
+  if (next === "composition" && !isVideo.value) compRef.value?.reload?.()
 })
 
 onMounted(load)
@@ -97,27 +96,25 @@ onMounted(load)
     <template v-else>
       <StatusProperties v-show="tab === 'properties'" ref="propsRef" :series="series" @saving="saving = $event" />
       <StatusComposition
-        v-if="!isVk"
+        v-if="!isVideo"
         ref="compRef"
         v-show="tab === 'composition'"
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
       />
-      <StatusVkComposition
+      <StatusOutput
         v-else
-        ref="vkCompRef"
         v-show="tab === 'composition'"
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
-        :source-type="String(series.source_type ?? 'vk_video')"
       />
       <StatusSlicing
-        v-if="isVk"
+        v-if="isVideo"
         v-show="tab === 'slicing'"
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
       />
-      <StatusHistory v-show="tab === 'history'" :series-id="seriesId" :source-type="String(series.source_type ?? 'torrent')" />
+      <StatusHistory v-show="tab === 'history'" :series-id="seriesId" :kind="series.kind ?? 'torrent'" />
     </template>
 
     <template #footer>

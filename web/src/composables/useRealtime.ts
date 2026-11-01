@@ -1,10 +1,15 @@
+import { watch } from "vue"
 import { useSSE } from "./useSSE"
 import { useSeriesStore, type Series, type SeriesDelta } from "../stores/series"
 import { useQueuesStore, type ConformPicture, type QueueTask } from "../stores/queues"
 import { useScannerStore, type ScannerStatus } from "../stores/scanner"
-import { useVideoScanStore, type VideoScanProgress } from "../stores/videoScan"
+import { useSourceTablesStore } from "../stores/sourceTables"
+import { useCompositionStore } from "../stores/composition"
+import type { components } from "../api/schema"
 import { useConformStore, type ConformSettingsView } from "../stores/conform"
 import { useVoicesStore, type VoiceDubEvent, type VoiceDubsSnapshot, type VoiceSettingsView } from "../stores/voices"
+
+type Schemas = components["schemas"]
 
 /** Связывает SSE-события со сторами и открывает соединение. Вызывается один
  *  раз при старте приложения (после установки Pinia). Маппинг 1:1 с SSE_MAP
@@ -14,7 +19,8 @@ export function setupRealtime(): void {
   const series = useSeriesStore()
   const queues = useQueuesStore()
   const scanner = useScannerStore()
-  const videoScan = useVideoScanStore()
+  const tables = useSourceTablesStore()
+  const composition = useCompositionStore()
   const voices = useVoicesStore()
   const conform = useConformStore()
 
@@ -33,7 +39,14 @@ export function setupRealtime(): void {
   sse.on("conform_settings_update", (d) => conform.applySettings(d as ConformSettingsView))
 
   sse.on("scanner_status_update", (d) => scanner.set(d as ScannerStatus))
-  sse.on("video_scan_progress", (d) => videoScan.set(d as VideoScanProgress))
+
+  // Reading of site pages and the layout: packets are whole for their part of the screen, nothing is asked back.
+  sse.on("sources_table_progress", (d) => tables.applyProgress(d as Schemas["TableProgress"]))
+  sse.on("sources_table_ready", (d) => tables.applyReady(d as Schemas["TableReady"]))
+  sse.on("sources_table_failed", (d) => tables.applyFailed(d as Schemas["TableFailed"]))
+  sse.on("composition_changed", (d) => composition.applyChanged(d as Schemas["CompositionChanged"]))
+  sse.on("composition_failed", (d) => composition.applyFailed(d as Schemas["CompositionFailed"]))
+  sse.on("reference_changed", (d) => composition.applyReference(d as Schemas["ReferenceChanged"]))
 
   // relocation: бэк помечает серию занятой на старте и шлёт обновление в конце
   sse.on("relocation_started", (d) =>
@@ -43,6 +56,12 @@ export function setupRealtime(): void {
     void series.load()
   })
   // renaming_complete — обновление состава в статус-модалке (Ф4)
+
+  // A connection that came back may have missed the end of a read: the soft news of the pages are dropped and
+  // every open screen reads its API again (useSeriesSources / useSourceDrafts).
+  watch(sse.connected, (up) => {
+    if (up) tables.reset()
+  })
 
   sse.connect()
 }

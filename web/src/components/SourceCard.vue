@@ -1,0 +1,195 @@
+<script setup lang="ts">
+import { computed, ref, watch } from "vue"
+import { useToast } from "primevue/usetoast"
+import StGroup from "./StGroup.vue"
+import StIcon from "./StIcon.vue"
+import StInput from "./StInput.vue"
+import StSelect from "./StSelect.vue"
+import { t, type MessageKey } from "../i18n"
+import { reasonText } from "../lib/reason"
+import {
+  heightText, joinVkAddress, playerCaption, profileOptions, progressText, seasonPositions, sourceCaption, splitVkAddress,
+  stepsText, togglePlayer, type SourceItem,
+} from "../lib/sources"
+import type { DraftPatch } from "../composables/useSourceDrafts"
+
+// One source of a series: its address, its constructor profile, and what its table holds — players with their
+// voice-overs and the group of each. The numbers of episodes are not here: they exist only as the constructor's answer.
+const props = defineProps<{ item: SourceItem; profiles: { id: number; name: string }[]; busy?: boolean }>()
+const emit = defineEmits<{ (e: "change", patch: DraftPatch): void; (e: "remove"): void }>()
+const toast = useToast()
+
+const isTorrent = computed(() => props.item.sourceType === "torrent")
+const isChannel = computed(() => props.item.sourceType === "vk_video")
+const view = computed(() => props.item.view)
+const options = computed(() => profileOptions(props.profiles))
+const seasonOptions = (groups: number) => [
+  { label: t("sources.vibix.none"), value: null as number | null },
+  ...seasonPositions(groups).map((position) => ({ label: t("sources.vibix.option", { position }), value: position as number | null })),
+]
+
+const stateText = computed(() => {
+  const state = view.value.state
+  if (state === "reading" && view.value.progress) return progressText(view.value.progress)
+  return t(`sources.state.${state}` as MessageKey)
+})
+
+// The channel and its query are edited as text and sent when the field is left, so that typing starts no read.
+const channel = ref("")
+const query = ref("")
+watch(() => props.item.url, (url) => {
+  if (!isChannel.value) return
+  const parts = splitVkAddress(url)
+  channel.value = parts.channel
+  query.value = parts.query
+}, { immediate: true })
+
+function commitChannel(): void {
+  const url = joinVkAddress(channel.value, query.value)
+  if (url !== props.item.url) emit("change", { url })
+}
+
+async function copyAddress(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(props.item.url)
+    toast.add({ severity: "success", summary: t("sources.address.copied"), life: 2000 })
+  } catch {
+    /* the clipboard is not allowed: nothing to tell */
+  }
+}
+</script>
+
+<template>
+  <article class="source-card stack">
+    <header class="cluster source-head">
+      <b>{{ t(`sources.type.${item.sourceType}` as MessageKey) }}</b>
+      <template v-if="!isTorrent">
+        <span class="source-state" :class="`is-${view.state}`">
+          <i v-if="view.state === 'reading'" class="pi pi-spin pi-spinner" />{{ stateText }}
+        </span>
+        <span v-if="view.players.length" class="muted">{{ sourceCaption(view.players) }}</span>
+        <button type="button" class="source-remove" :disabled="busy" @click="emit('remove')">
+          <i class="pi pi-trash" />{{ t("sources.remove") }}
+        </button>
+      </template>
+    </header>
+
+    <div v-if="isChannel" class="stack">
+      <div class="cluster">
+        <span class="muted">{{ t("sources.vk.mode") }}</span>
+        <div class="vk-mode-group">
+          <button
+            v-for="mode in ['search', 'get_all'] as const" :key="mode" type="button" class="vk-mode-btn"
+            :class="{ active: item.vkSearchMode === mode }" :disabled="busy"
+            @click="item.vkSearchMode !== mode && emit('change', { vkSearchMode: mode })"
+          >{{ t(`sources.vk.mode.${mode}` as MessageKey) }}</button>
+        </div>
+      </div>
+      <small class="muted">{{ t("sources.vk.mode.hint") }}</small>
+      <div class="grid-fit" @focusout="commitChannel" @keyup.enter="commitChannel">
+        <StGroup>
+          <StIcon icon="pi pi-youtube" />
+          <StInput v-model="channel" :label="t('sources.vk.channel')" />
+        </StGroup>
+        <StGroup>
+          <StIcon icon="pi pi-search" />
+          <StInput v-model="query" :label="t('sources.vk.query')" />
+        </StGroup>
+      </div>
+    </div>
+    <StGroup v-else>
+      <StIcon icon="pi pi-link" />
+      <div class="constructor-item item-floating-label"><input class="item-input" :value="item.url" readonly /></div>
+      <div class="constructor-item url-actions">
+        <button type="button" class="url-action-btn" :title="t('sources.address.copy')" @click="copyAddress">
+          <i class="pi pi-clipboard" />
+        </button>
+        <a class="url-action-btn" :href="item.url" target="_blank" rel="noopener" :title="t('sources.address.open')">
+          <i class="pi pi-external-link" />
+        </a>
+      </div>
+    </StGroup>
+
+    <StGroup>
+      <div class="constructor-item item-label-icon item-label-text-icon" :title="t('sources.profile.label')">
+        <i class="pi pi-filter" /><span>{{ t("sources.profile.label") }}</span>
+      </div>
+      <StSelect
+        :model-value="item.profileId" :options="options" :placeholder="t('sources.profile.none')"
+        @update:model-value="emit('change', { profileId: $event as number | null })"
+      />
+    </StGroup>
+    <small v-if="item.profileId === null && !isTorrent" class="muted">{{ t("sources.profile.hint") }}</small>
+    <div v-if="view.reason" class="source-reason">{{ reasonText(view.reason) }}</div>
+
+    <ul v-if="!isTorrent && view.players.length" class="players grid-fit">
+      <li v-for="player in view.players" :key="player.player" class="player stack" :class="{ 'is-off': player.off }">
+        <div class="cluster">
+          <label class="cluster player-switch">
+            <input
+              type="checkbox" class="form-switch-input" :checked="!player.off" :disabled="busy"
+              :aria-label="t('sources.player.use', { player: player.title })"
+              @change="emit('change', { playersOff: togglePlayer(item.playersOff, player.player) })"
+            />
+            <b>{{ player.title }}</b>
+          </label>
+          <span v-if="player.off" class="muted">{{ t("sources.player.off") }}</span>
+        </div>
+        <div class="cluster muted">
+          <span>{{ playerCaption(player) }}</span>
+          <span v-if="player.topHeight !== null" :title="stepsText(player)">{{ heightText(player) }}</span>
+        </div>
+        <div v-if="player.chooseSeason" class="stack">
+          <StGroup>
+            <div class="constructor-item item-label-icon item-label-text-icon" :title="t('sources.vibix.season')">
+              <i class="pi pi-th-large" /><span>{{ t("sources.vibix.season") }}</span>
+            </div>
+            <StSelect
+              :model-value="item.vibixSeason" :options="seasonOptions(player.groups)" :placeholder="t('sources.vibix.none')"
+              @update:model-value="emit('change', { vibixSeason: $event as number | null })"
+            />
+          </StGroup>
+          <small v-if="item.vibixSeason === null" class="muted">{{ t("sources.vibix.hint") }}</small>
+        </div>
+        <ul v-if="player.voices.length" class="voices stack">
+          <li v-for="voice in player.voices" :key="voice.name" class="cluster voice">
+            <span class="voice-name">{{ voice.name }}</span>
+            <span class="voice-group" :class="{ 'is-none': voice.group === null }">{{
+              voice.group === null ? t("sources.voice.noGroup") : t("sources.voice.group", { group: voice.group })
+            }}</span>
+          </li>
+        </ul>
+      </li>
+    </ul>
+    <div v-else-if="!isTorrent && view.state === 'ready'" class="muted">{{ t("sources.player.none") }}</div>
+  </article>
+</template>
+
+<style scoped>
+.source-card {
+  padding: var(--space); border: var(--border-width) solid var(--border-color);
+  border-radius: var(--card-border-radius); background: var(--bg-white);
+}
+.source-head { justify-content: space-between; }
+.source-head > b { margin-inline-end: auto; }
+.source-state { display: inline-flex; align-items: center; gap: var(--space); color: var(--text-muted); }
+.source-state.is-ready { color: var(--color-green-1); }
+.source-state.is-failed { color: var(--color-red-1); }
+.source-state.is-reading { color: var(--color-blue); }
+.source-reason { color: var(--color-red-1); overflow-wrap: anywhere; }
+.muted { color: var(--text-muted); font-size: smaller; }
+.source-remove {
+  display: inline-flex; align-items: center; gap: var(--space); cursor: pointer;
+  background: none; border: none; color: var(--color-red-1);
+}
+.source-remove:disabled { cursor: default; opacity: 0.5; }
+.players { list-style: none; margin: 0; padding: 0; }
+.player { padding: var(--space); border: var(--border-width) solid var(--border-color); border-radius: var(--border-radius); }
+.player.is-off .voices, .player.is-off .player-switch b { opacity: 0.5; }
+.player-switch { cursor: pointer; }
+.voices { list-style: none; margin: 0; padding: 0; gap: calc(var(--space) / 2); }
+.voice { justify-content: space-between; }
+.voice-name { overflow-wrap: anywhere; }
+.voice-group { color: var(--color-green-1); font-size: smaller; }
+.voice-group.is-none { color: var(--text-muted); }
+</style>
