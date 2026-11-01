@@ -18,6 +18,15 @@ Queries:
       not the answer: the request sets the flag and waits for the next one. Refused with ValueError(reason) when a
       neighbour did not answer (the same reason goes out as composition.failed), with LookupError for a series the
       catalog no longer has.
+  composition.preview {url, options?, profile_id?, series_season?, refresh?} → CompositionPreviewReply {url, state,
+      reason?, summary?, lines}: an address that is no source of a series yet, as the add window and the test of rules
+      show it. The table is asked of `sources.table.get` (refresh true begins a read, false reads nothing); `state`
+      and `reason` are the sources' own. From the last complete table, when there is one (also while it is being read
+      or the last read failed): `summary` is the summary of a source made by the same code as for a series (no
+      profile: no_profile; a profile: ready; a failed read: failed), `lines` are the rows as the constructor gets
+      them, each with its answer when `profile_id` is given (`series_season` is the fallback season). Without a table
+      `summary` is empty and so are `lines`. Nothing is written and no source is made; a neighbour that does not answer
+      refuses the request with ValueError(reason).
   composition.settings.set {series_id, season?, episode?, lever, target?, value} → {ok}: sets the value of a lever
       at a level. Refused with ValueError(reason) — `unknown_lever`, `bad_target` or `bad_value` — and nothing is stored.
   composition.settings.reset {series_id, season?, episode?, lever?, target?} → {ok}: the levers of the level (or the
@@ -64,11 +73,11 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from core import BaseModule
-from core.contracts import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionReply,
-                            EpisodeRef, EpisodeSettings, GroupsResolveReply, GroupsResolveRequest,
-                            ReleaseTable, RulesApplyReply, RulesApplyRequest, RulesProfileChanged, SeriesSource,
-                            SettingsReset, SettingsSet, SourceStatus, SourceType, TableGetReply, TableGetRequest,
-                            TableState)
+from core.contracts import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
+                            CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
+                            GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RulesApplyReply,
+                            RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
+                            SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState)
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
@@ -132,6 +141,7 @@ class CompositionModule(BaseModule):
         self.handle("composition.get", self.on_get)
         # Waits for a whole count, so the requests for different series must not queue behind each other.
         self.handle("composition.recompute", self.on_recompute, concurrent=True)
+        self.handle("composition.preview", self.on_preview, concurrent=True)
         self.handle("composition.settings.set", self.on_settings_set)
         self.handle("composition.settings.reset", self.on_settings_reset)
         self.handle("series.added", self.on_series_added)
@@ -188,6 +198,36 @@ class CompositionModule(BaseModule):
                                       levers=settings.effective(records, season, episode))
                       for season, episode in sorted(episodes)])
         return reply.model_dump(mode="json")
+
+    async def on_preview(self, env: Envelope) -> dict:
+        """An address that is no source of a series yet, as the add window and the test of rules show it. It reads
+        the table, builds the summary and the lines of the constructor by the same code as for a series, and writes
+        nothing: no row, no source, no revision."""
+        request = CompositionPreviewRequest.model_validate(env.payload)
+        try:
+            got = await self._ask("sources.table.get", TableGetRequest(
+                url=request.url, options=request.options, refresh=request.refresh).model_dump(mode="json"),
+                model=TableGetReply)
+            table = got.table if got.table is not None and got.table.complete else None
+            summary, lines = None, []
+            if table is not None:
+                source = SeriesSource(id=0, series_id=0, url=request.url, source_type=SourceType.WEB_VIDEO,
+                                      parser_profile_id=request.profile_id,
+                                      vk_search_mode=request.options.get("vk_search_mode", "search"))
+                answer = None
+                if request.profile_id is not None:
+                    answer = await self._answer(source, table, request.series_season)
+                item = SourceInput(source, table, answer, got.reason if got.state == TableState.FAILED else None)
+                names = project.voice_names([item])
+                groups = await self._groups(names) if names else {}
+                summary = project.project([item], groups, {}).sources[0]
+                results = answer.results if answer is not None else {}
+                lines = [PreviewLine(key=line.key, line=line.text, result=results.get(line.key))
+                         for line in project.lines_for(source, table)]
+        except _Unavailable as exc:
+            raise ValueError(exc.reason) from exc
+        return CompositionPreviewReply(url=got.url, state=got.state, reason=got.reason, summary=summary,
+                                       lines=lines).model_dump(mode="json")
 
     async def on_recompute(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]

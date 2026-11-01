@@ -19,8 +19,9 @@ from sqlalchemy import create_engine, inspect
 from composition_fakes import (HOST, OTHER_PAGE, PAGE, FakeCatalog, FakeRules, FakeSources, FakeVoices, lecturer,
                                source)
 from core import BaseModule, Bus, BusRequestError, Runner
-from core.contracts import (CompositionReply, EffectiveLever, Level, ReleaseTable, RowState, RowVoice, SettingsReset,
-                            SettingsSet, SourceStatus, TableRow, VoiceSummary, group_target, player_target)
+from core.contracts import (CompositionPreviewReply, CompositionReply, EffectiveLever, Level, ReleaseTable, RowState,
+                            RowVoice, SettingsReset, SettingsSet, SourceStatus, TableRow, TableState, VoiceSummary,
+                            group_target, player_target)
 from core.db import Database
 from core.reasons import parse, reason
 from modules.composition import CompositionModule, levers
@@ -1166,3 +1167,137 @@ async def test_a_series_deleted_while_a_request_waits_refuses_the_request(system
     with pytest.raises(BusRequestError) as caught:
         await asyncio.wait_for(answer, STUCK_S)
     assert "LookupError" in str(caught.value)
+
+
+# --- composition.preview: an address before it is a source of a series -------------------------------------------------------
+
+COMPOSITION_TABLES = ("composition_rows", "composition_state", "composition_sources", "unknown_voices", "output_settings")
+
+
+async def preview(s: System, url: str = PAGE, **more) -> CompositionPreviewReply:
+    reply = await s.probe.request("composition.preview", {"url": url, **more}, timeout=STUCK_S)
+    return CompositionPreviewReply.model_validate(reply)
+
+
+def nothing_was_written(s: System) -> None:
+    assert all(s.sql(f"SELECT COUNT(*) FROM {table}") == [(0,)] for table in COMPOSITION_TABLES)
+    assert s.taken(s.changed) == [] and s.taken(s.failed) == [] and s.catalog.gets.empty() and not s.composition._flights
+
+
+@pytest.mark.asyncio
+async def test_an_address_without_a_profile_shows_the_summary_of_its_page_and_the_lines_of_the_constructor(system):
+    s = system
+    s.voices.groups = {"Рутина": ["Ruchime"]}
+    s.sources.tables[PAGE] = standard().model_copy(
+        update={"url": PAGE, "complete": True, "read_at": "2026-11-01T12:00:00+00:00"})
+    reply = await preview(s)
+    assert (reply.url, reply.state, reply.reason) == (PAGE, TableState.READY, None)
+    summary = reply.summary
+    assert (summary.source_id, summary.url, summary.status, summary.read_at) == (
+        0, PAGE, SourceStatus.NO_PROFILE, "2026-11-01T12:00:00+00:00")
+    [player] = summary.players
+    assert (player.player, player.rows, player.groups, player.heights) == ("vk", 7, 2, [720, 1080])
+    assert player.voices == [VoiceSummary(name="Ruchime", group="Рутина", rows=7)]
+    assert len(reply.lines) == 7 and all(each.result is None for each in reply.lines)
+    assert (reply.lines[0].key, reply.lines[0].line) == ("vk-1-1", "Асура | VK | Ruchime | Сезон 1 | 1080p | Серия 1")
+    assert s.rules.calls == [] and s.sources.requests[-1].refresh is True
+    nothing_was_written(s)
+
+
+@pytest.mark.asyncio
+async def test_an_address_with_a_profile_shows_the_answer_of_the_constructor_for_every_line(system):
+    s = system
+    s.sources.tables[PAGE] = page(
+        row("a", "Серия 1 [Мой дубляж]", group=""), row("b", "1-3 серия", group="Сезон 2"), row("t", "Трейлер", group=""),
+        row("n", "Спецвыпуск", group="")).model_copy(update={"url": PAGE, "complete": True})
+    reply = await preview(s, profile_id=7, series_season="4")
+    assert reply.summary.status == SourceStatus.READY
+    got = {each.key: each.result for each in reply.lines}
+    assert (got["a"].season, got["a"].episode, got["a"].voiceover) == (4, 1, "Мой дубляж")
+    assert (got["b"].season, got["b"].start, got["b"].end) == (2, 1, 3)
+    assert got["t"].excluded and got["n"].episode is None and not got["n"].excluded
+    [call] = s.rules.calls
+    assert (call.profile_id, call.series_season, [line.key for line in call.lines]) == (7, "4", ["a", "b", "t", "n"])
+    assert [(v.name, v.group) for v in reply.summary.players[0].voices] == [("Мой дубляж", None), ("Ruchime", None)]
+    nothing_was_written(s)
+
+
+@pytest.mark.asyncio
+async def test_an_address_whose_page_is_being_read_for_the_first_time_has_a_state_and_nothing_else(system):
+    s = system
+    reply = await preview(s)
+    assert (reply.state, reply.summary, reply.lines) == (TableState.READING, None, [])
+    assert s.sources.reads_begun == [PAGE] and s.rules.calls == []
+    nothing_was_written(s)
+
+
+@pytest.mark.asyncio
+async def test_a_page_read_again_shows_its_last_table_while_it_is_read(system):
+    s = system
+    s.sources.tables[PAGE] = standard().model_copy(update={"url": PAGE, "complete": True})
+    s.sources.stale = True
+    reply = await preview(s, profile_id=7)
+    assert reply.state == TableState.READING and reply.summary.status == SourceStatus.READY and len(reply.lines) == 7
+    assert s.sources.reads_begun == [PAGE]
+    nothing_was_written(s)
+
+
+@pytest.mark.asyncio
+async def test_a_page_whose_last_read_failed_shows_the_reason_and_the_table_it_had(system):
+    s = system
+    s.sources.finish(PAGE, standard())
+    why = reason("read_failed")
+    s.sources.fail(PAGE, why)
+    reply = await preview(s, refresh=False)
+    assert (reply.state, reply.reason) == (TableState.FAILED, why)
+    assert (reply.summary.status, reply.summary.reason) == (SourceStatus.FAILED, why)
+    assert len(reply.lines) == 7 and reply.summary.players[0].rows == 7
+    assert s.sources.reads_begun == []
+    nothing_was_written(s)
+
+
+@pytest.mark.asyncio
+async def test_a_request_that_asks_for_no_read_of_a_page_nothing_was_read_of_gives_the_state_alone(system):
+    s = system
+    reply = await preview(s, refresh=False)
+    assert (reply.state, reply.reason, reply.summary, reply.lines) == (TableState.ABSENT, None, None, [])
+    assert s.sources.reads_begun == [] and s.sources.requests[-1].refresh is False
+    nothing_was_written(s)
+
+
+@pytest.mark.asyncio
+async def test_an_address_no_site_reads_is_a_failed_state_with_the_reason_and_no_summary(system):
+    s = system
+    reply = await preview(s, "https://nowhere.test/x")
+    assert (reply.state, reply.summary, reply.lines) == (TableState.FAILED, None, [])
+    assert parse(reply.reason)["code"] == "site_not_found"
+    nothing_was_written(s)
+
+
+@pytest.mark.asyncio
+async def test_the_options_of_the_request_go_to_the_sources_as_they_are(system):
+    s = system
+    await preview(s, options={"vk_search_mode": "get_all"}, refresh=False)
+    assert s.sources.requests[-1].options == {"vk_search_mode": "get_all"}
+
+
+@pytest.mark.asyncio
+async def test_a_neighbour_that_does_not_answer_refuses_the_preview_and_nothing_is_written_or_told(system):
+    s = system
+    s.sources.tables[PAGE] = standard().model_copy(update={"url": PAGE, "complete": True})
+    s.rules.broken = True
+    with pytest.raises(BusRequestError) as caught:
+        await preview(s, profile_id=7)
+    assert parse(str(caught.value).split(": ", 1)[1]) == {
+        "code": "composition_request_failed", "params": {"topic": "rules.apply"}}
+    nothing_was_written(s)
+
+
+@pytest.mark.asyncio
+async def test_the_preview_of_a_page_a_series_reads_leaves_the_series_alone(system):
+    s = system
+    series_id = await laid_out(s)
+    before = await s.get(series_id)
+    reply = await preview(s, profile_id=7, refresh=False)
+    assert reply.summary.status == SourceStatus.READY and len(reply.lines) == 7
+    assert await s.get(series_id) == before and s.taken(s.changed) == [] and not s.composition._flights
