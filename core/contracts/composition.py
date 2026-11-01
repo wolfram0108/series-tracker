@@ -9,17 +9,24 @@ from .output_settings import EpisodeSettings
 from .release_table import RowState
 
 
+class Exclusion(StrEnum):
+    """Why a row is out of the layout: the constructor excluded it, or it gave the row no episode number."""
+
+    RULE = "rule"
+    NO_NUMBER = "no_number"
+
+
 class CompositionRow(BaseModel):
     """A table row of a source of the series with the answer of its profile and its voice-over group.
 
-    `episode_end` greater than `episode_start` is a compilation. A source without a profile has no rows."""
+    A single episode has `episode_end` equal to `episode_start`; `episode_end` greater than `episode_start` is a
+    compilation. A source without a profile has no rows."""
 
     series_id: int
     source_id: int
     row_key: str
     excluded: bool = False
-    # Why the row is excluded: `rule` (the constructor excluded it) or `no_number` (it gave no episode number).
-    exclusion: str | None = None
+    exclusion: Exclusion | None = None
     season: int | None = None
     episode_start: int | None = None
     episode_end: int | None = None
@@ -54,14 +61,23 @@ class SourceStatus(StrEnum):
     FAILED = "failed"
 
 
+class VoiceSummary(BaseModel):
+    """A voice-over of a player as the table names it and the user group it belongs to (None: no group)."""
+
+    name: str = ""
+    group: str | None = None
+    rows: int = 0
+
+
 class PlayerSummary(BaseModel):
-    """What a window may show before a profile is assigned: counts and resolutions, never numbers."""
+    """What a window may show before a profile is assigned: counts, resolutions and voices, never numbers."""
 
     player: str
     player_label: str = ""
     rows: int = 0
     groups: int = 0
     heights: list[int] = Field(default_factory=list)
+    voices: list[VoiceSummary] = Field(default_factory=list)
 
 
 class SourceSummary(BaseModel):

@@ -5,10 +5,11 @@ so the two cannot drift apart unnoticed. Modules import their contracts from her
 """
 from .alignment import AlignmentJob, DubResult, JobStatus, SubmitOutcome, SubmitReply
 from .composition import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionReply,
-                          CompositionRow, EpisodeRef, PlayerSummary, SourceStatus, SourceSummary)
+                          CompositionRow, EpisodeRef, Exclusion, PlayerSummary, SourceStatus, SourceSummary,
+                          VoiceSummary)
 from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
 from .output_settings import (EffectiveLever, EpisodeSettings, Level, SettingRecord, SettingsReset, SettingsSet,
-                              group_target, player_target)
+                              group_target, parse_group_target, parse_player_target, player_target)
 from .reference import Reference, ReferenceChanged, ReferenceMark
 from .release import Release, ReleaseSource, ReleaseTitle
 from .release_table import (LINE_SEPARATOR, ReleaseTable, RowState, RowVoice, TableFailed, TableGetReply,
@@ -30,8 +31,8 @@ __all__ = ["AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitRep
            "RuleLine", "RuleResult", "RulesApplyReply", "RulesApplyRequest", "RulesProfileChanged",
            "SeriesKind", "SeriesSource", "SourceEvent", "SourceType",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionReply", "CompositionRow",
-           "EpisodeRef", "PlayerSummary", "SourceStatus", "SourceSummary",
+           "EpisodeRef", "Exclusion", "PlayerSummary", "SourceStatus", "SourceSummary", "VoiceSummary",
            "EffectiveLever", "EpisodeSettings", "Level", "SettingRecord", "SettingsReset", "SettingsSet",
-           "group_target", "player_target",
+           "group_target", "parse_group_target", "parse_player_target", "player_target",
            "Reference", "ReferenceChanged", "ReferenceMark",
            "GroupsResolveReply", "GroupsResolveRequest"]

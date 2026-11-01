@@ -5,6 +5,7 @@ a kind of player), so that it outlives a new reading of a table. No record means
 """
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Any
 
@@ -18,12 +19,31 @@ class Level(StrEnum):
     EPISODE = "episode"
 
 
+_PLAYER_TARGET = re.compile(r"source:(\d+)/player:(.+)", re.DOTALL)
+_GROUP_TARGET = re.compile(r"group:(.+)", re.DOTALL)
+
+
 def player_target(source_id: int, player: str) -> str:
     return f"source:{source_id}/player:{player}"
 
 
 def group_target(name: str) -> str:
     return f"group:{name}"
+
+
+def parse_player_target(target: str) -> tuple[int, str] | None:
+    """(source id, player) of a target made by `player_target`; None for anything else."""
+    found = _PLAYER_TARGET.fullmatch(target)
+    if found is None:
+        return None
+    source_id, player = int(found.group(1)), found.group(2)
+    return (source_id, player) if player_target(source_id, player) == target else None
+
+
+def parse_group_target(target: str) -> str | None:
+    """The group name of a target made by `group_target`; None for anything else."""
+    found = _GROUP_TARGET.fullmatch(target)
+    return found.group(1) if found is not None and group_target(found.group(1)) == target else None
 
 
 class _Scope(BaseModel):
@@ -57,7 +77,13 @@ class SettingsSet(SettingRecord):
 
 
 class SettingsReset(_Scope):
-    """The command `composition.settings.reset`: every lever of the level goes back to the level above."""
+    """The command `composition.settings.reset`: the levers of the level go back to the level above.
+
+    Without `lever` every lever of the level goes back; with `lever` (and `target` for a lever that has one)
+    only that one does."""
+
+    lever: str | None = None
+    target: str | None = None
 
 
 class EffectiveLever(BaseModel):
