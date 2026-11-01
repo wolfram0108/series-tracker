@@ -296,6 +296,8 @@ class DownloadsModule(BaseModule):
         for item in await self.repo.planned_pending_items(series["id"]):
             filename = await self._format_filename(series, item)
             path = os.path.join(series["save_path"], filename)
+            if await self.repo.holders_of_file(series["id"], filename, except_uid=item["unique_id"]):
+                continue  # the file is another row's (the video this one displaces): this one is fetched, not adopted
             if await storage.call(os.path.exists, path):
                 await self.repo.register_downloaded(item["unique_id"],
                                                     filename)
@@ -524,6 +526,24 @@ class DownloadsModule(BaseModule):
                           task["id"], task["task_key"])
         await self._broadcast_queue()
 
+    async def _release_displaced_file(self, series_id: int, uid: str, path: str) -> None:
+        """Another video behind the same row is named as the one it displaces: the file under that name is the old
+        video's, and a download does not write over a file. It goes, and its row no longer holds it."""
+        holders = await self.repo.holders_of_file(series_id, os.path.basename(path), except_uid=uid, displaced_by=uid)
+        if not holders:
+            return
+        if await storage.call(os.path.isfile, path):
+            try:
+                await storage.call(os.remove, path, owns=path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                self.log.warning("файл вытесненного видео %s не удалён: %s", path, exc)
+                return
+        for holder in holders:
+            await self.repo.clear_item_filename(holder["unique_id"])
+        self.log.info("видео серии заменено другим под тем же именем: прежний файл убран: %s", os.path.basename(path))
+
     async def _run_download(self, task: dict) -> None:
         task_id, uid = task["id"], task["task_key"]
         series_id = task["series_id"]
@@ -539,6 +559,8 @@ class DownloadsModule(BaseModule):
                 if now - self._last_event > PROGRESS_EVENT_THROTTLE:
                     self._last_event = now
                     await self._broadcast_queue()
+
+            await self._release_displaced_file(series_id, uid, task["save_path"])
 
             stream_url, stream_headers, stream_error, progressive = await self._resolve_stream(
                 task["video_url"], ytdlp_fallback=lambda: self._candidate_may_use_ytdlp(series_id, uid))

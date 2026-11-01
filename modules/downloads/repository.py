@@ -209,6 +209,18 @@ class DownloadsRepository:
             "AND winner.status='completed' AND winner.is_ignored_by_user=0 "
             "AND winner.final_filename IS NOT NULL", (series_id,))
 
+    async def holders_of_file(self, series_id: int, filename: str, *, except_uid: str,
+                              displaced_by: str | None = None) -> list[dict]:
+        """The other rows of the series that hold a file of this name; with `displaced_by`, only those the plan displaced
+        by that row. A file one row holds is not an orphan that another row may take."""
+        query = ("SELECT unique_id, final_filename FROM media_items WHERE series_id=? AND final_filename=? "
+                 "AND unique_id != ?")
+        args: list = [series_id, filename, except_uid]
+        if displaced_by is not None:
+            query += " AND superseded_by=?"
+            args.append(displaced_by)
+        return await self._db.fetch_all(query, tuple(args))
+
     async def clear_item_filename(self, unique_id: str) -> None:
         """The file is gone but the row stays: it remembers the resolution that
         was already fetched, so the next scan does not download it again."""
