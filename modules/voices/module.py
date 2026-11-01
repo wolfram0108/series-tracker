@@ -530,8 +530,11 @@ class VoicesModule(BaseModule):
                 touched.add(key)
         if offer:
             await self.repo.admit(series_id, planned)
-        for gone in await self.repo.drop_unplanned(series_id, planned, plan.undecided):
+        for gone in await self.repo.drop_unplanned(series_id, planned, plan.undecided, plan.with_reference):
             self.log.info("сериал %d: озвучка %s серии %d вышла из плана", series_id, gone["voice_label"], gone["episode"])
+            if gone["status"] == S.DOWNLOADING and gone["file_id"] is None:  # its own download goes with it
+                self._fetching.discard(gone["id"])
+                self.send_command("downloads.fetch.cancel", {"key": f"{DUB_KEY}{gone['id']}", "series_id": series_id})
             await self._announce(gone, E.REMOVED)
         await self._drop_without_reference(series_id, plan, before)
         await self._work_off()

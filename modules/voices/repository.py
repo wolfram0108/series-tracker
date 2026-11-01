@@ -253,15 +253,21 @@ class VoicesRepository:
         self._cancel_transfers(await self._db.transaction(work))
 
     async def drop_unplanned(self, series_id: int, planned: set[tuple[int, int, int, str]],
-                             keep: Collection[tuple[int, int, int]] = ()) -> list[dict[str, Any]]:
-        """Rows of voice-overs that left the plan before any work was done on them, or after it failed; returns
-        what was removed. Whatever such a row still points at goes to the cleanup journal with it. The rows of the
-        episodes in `keep` stay: their plan is not known at the moment. A row that waits on a file whose transfer is
-        under way leaves too: the transfer belongs to the file, which is released when it ends."""
+                             keep: Collection[tuple[int, int, int]] = (),
+                             referenced: Collection[tuple[int, int, int]] = ()) -> list[dict[str, Any]]:
+        """Rows of voice-overs that left the plan; returns what was removed. Whatever such a row owns goes to the
+        cleanup journal with it: its files, the track placed for it, the job at the service.
+
+        A voice-over of an episode in `referenced` (the plan of that episode is known) leaves in whatever step it is
+        at: a download under way is cancelled by the caller, a track already placed is removed. In another episode,
+        which has no reference at the moment, only a row that had no work done on it, or whose work failed, leaves:
+        what else it holds is decided when the episode is seen without a reference. The rows of the episodes in `keep`
+        stay: their plan is not known at the moment."""
         gone = [row for row in await self.for_series(series_id)
                 if (row["season"], row["episode"], row["part"], row["voice_key"]) not in planned
                 and (row["season"], row["episode"], row["part"]) not in keep
-                and (row["status"] in lifecycle.OFFER.sources
+                and ((row["season"], row["episode"], row["part"]) in referenced
+                     or row["status"] in lifecycle.OFFER.sources
                      or (row["status"] == S.DOWNLOADING and row["file_id"] is not None))]
         for row in gone:
             await self._atomically([*_hand_over("id=?", (row["id"],)),
