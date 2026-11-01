@@ -11,6 +11,7 @@ from typing import Any, Collection, Iterable, Mapping
 
 from core.contracts import Reference, ReferenceMark
 from core.ignored import covered
+from core.reasons import reason
 
 Slot = tuple[int, int, int | None]
 
@@ -40,19 +41,21 @@ def visible(records: Iterable[Mapping[str, Any]], items: Mapping[str, Mapping[st
     return sorted(wanted, key=lambda each: (each["season"], each["episode"], each["part"] is not None, each["part"] or 0))
 
 
-def changes(before: Iterable[Mapping[str, Any]], after: Iterable[Mapping[str, Any]]
-            ) -> list[tuple[int, int, int | None, ReferenceMark]]:
-    """(season, episode, part, mark) of every slot whose record is not the same in the two outputs.
+def changes(before: Iterable[Mapping[str, Any]], after: Iterable[Mapping[str, Any]]) -> list[Reference]:
+    """The reference, whole, of every slot whose record is not the same in the two outputs.
 
-    A slot that left the output reports the mark `none`: the episode has no reference now."""
+    A slot that left the output is reported with the mark `none` and the reason of an episode with no reference."""
     old = {slot_key(each): each for each in before}
     new = {slot_key(each): each for each in after}
-    found: list[tuple[int, int, int | None, ReferenceMark]] = []
+    found: list[Reference] = []
     for slot in sorted(set(old) | set(new), key=lambda each: (each[0], each[1], each[2] is not None, each[2] or 0)):
         if old.get(slot) == new.get(slot):
             continue
-        mark = ReferenceMark(new[slot]["mark"]) if slot in new else ReferenceMark.NONE
-        found.append((*slot, mark))
+        if slot in new:
+            found.append(reference_of(new[slot]))
+        else:
+            found.append(Reference(season=slot[0], episode=slot[1], part=slot[2], mark=ReferenceMark.NONE,
+                                   reason=reason("reference_none")))
     return found
 
 

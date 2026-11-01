@@ -15,7 +15,7 @@ from core import BaseModule, Bus, BusRequestError, Runner, ids
 from core.contracts import (REFERENCE_ALLOW, REFERENCE_CHOICE, Level, Reference, ReferenceChanged, ReferenceChoice,
                             ReferenceMark, RowState, TableState, player_target)
 from core.db import Database
-from core.reasons import parse
+from core.reasons import parse, reason
 from modules.catalog import CatalogModule
 from modules.scan import ScanModule
 from modules.scan.candidates import NO_DATE
@@ -93,8 +93,18 @@ async def next_event(sub) -> dict:
     return (await asyncio.wait_for(sub.queue.get(), STUCK_S)).payload
 
 
-def change(series_id: int, season: int, episode: int, mark: ReferenceMark, part: int | None = None) -> ReferenceChanged:
-    return ReferenceChanged(series_id=series_id, season=season, episode=episode, part=part, mark=mark)
+def change(rig: "Rig", key: str, season: int, episode: int, *, mark: ReferenceMark = MARK.BY_LEVEL, part=None,
+           player: str = "vk", height: int | None = 1080, voice: str = "Ruchime", source: int = 0) -> ReferenceChanged:
+    """The event the reference of the row `key` gives: the whole reference and the series."""
+    return ReferenceChanged(series_id=rig.series_id, season=season, episode=episode, part=part, mark=mark,
+                            source_id=rig.source_ids[source], row_key=key, player=player, voice_group=voice,
+                            height=height)
+
+
+def gone(rig: "Rig", season: int, episode: int, part=None) -> ReferenceChanged:
+    """The event of a slot that left the output: no reference, and the reason of an episode with none."""
+    return ReferenceChanged(series_id=rig.series_id, season=season, episode=episode, part=part, mark=MARK.NONE,
+                            reason=reason("reference_none"))
 
 
 def changes_of(events: list[dict]) -> list[ReferenceChanged]:
@@ -361,9 +371,8 @@ async def test_the_parts_of_an_episode_are_both_in_the_plan_and_both_in_the_outp
     rig.world.rows = [rig.row("p1", 1, 8, part=1), rig.row("p2", 1, 8, part=2), rig.row("whole", 1, 9)]
     changes = rig.bus.subscribe("scan.reference.changed")
     await rig.run()
-    assert changes_of(drain(changes)) == [change(rig.series_id, 1, 8, MARK.BY_LEVEL, 1),
-                                          change(rig.series_id, 1, 8, MARK.BY_LEVEL, 2),
-                                          change(rig.series_id, 1, 9, MARK.BY_LEVEL)]
+    assert changes_of(drain(changes)) == [change(rig, "p1", 1, 8, part=1), change(rig, "p2", 1, 8, part=2),
+                                          change(rig, "whole", 1, 9)]
     assert [(each.episode, each.part, each.mark) for each in await rig.output()] == [
         (8, 1, MARK.BY_LEVEL), (8, 2, MARK.BY_LEVEL), (9, None, MARK.BY_LEVEL)]
     assert {key: each["plan_status"] for key, each in rig.media().items()} == {
@@ -520,7 +529,7 @@ async def test_a_reference_whose_page_gave_no_answer_this_time_keeps_its_place_a
                       rig.row("b", 1, 1, player="kodik", height=720)]
     await rig.run()
     assert (await rig.output())[0].row_key == "b"
-    assert changes_of(drain(changes)) == [change(rig.series_id, 1, 1, MARK.BY_LEVEL)]
+    assert changes_of(drain(changes)) == [change(rig, "b", 1, 1, player="kodik", height=720)]
 
 
 async def test_the_tag_of_the_file_is_the_group_of_the_voice_over_else_its_name_as_it_came(rig):
@@ -574,7 +583,7 @@ async def test_a_reset_of_the_setting_of_an_episode_recounts_its_reference_and_d
     downloads, voices = rig.bus.subscribe("downloads.dispatch"), rig.bus.subscribe("voices.dispatch")
     rig.world.settings = []
     rig.world.changed(rig.series_id, (1, 1))
-    assert await next_change(changes) == change(rig.series_id, 1, 1, MARK.BY_LEVEL)
+    assert await next_change(changes) == change(rig, "auto", 1, 1)
     assert drain(plan) == [{"series_id": rig.series_id}]
     assert list(rig.media()) == ["auto"]
     assert downloads.queue.empty() and voices.queue.empty()
@@ -588,7 +597,7 @@ async def test_a_change_that_only_touches_the_summaries_is_not_acted_on(rig):
     rig.world.changed(rig.series_id, summary_only=True)
     rig.world.rows = [rig.row("a", 1, 1), rig.row("b", 1, 2)]
     rig.world.changed(rig.series_id, (1, 2))
-    assert await next_change(changes) == change(rig.series_id, 1, 2, MARK.BY_LEVEL)
+    assert await next_change(changes) == change(rig, "b", 1, 2)
     assert rig.world.order.count("composition.get") == asked + 1
 
 
@@ -599,7 +608,7 @@ async def test_a_new_order_of_players_recounts_the_references_of_video_series(ri
     changes = rig.bus.subscribe("scan.reference.changed")
     rig.world.priority = ["kodik", "vk"]
     rig.world.publish_event("voices.settings.changed", {})
-    assert await next_change(changes) == change(rig.series_id, 1, 1, MARK.BY_LEVEL)
+    assert await next_change(changes) == change(rig, "kodik", 1, 1, player="kodik")
     assert (await rig.output())[0].row_key == "kodik"
 
 
@@ -641,10 +650,10 @@ async def test_a_row_of_the_plan_the_user_switches_off_leaves_the_output_and_ret
     unique_id = rig.media()["a"]["unique_id"]
     changes = rig.bus.subscribe("scan.reference.changed")
     await rig.probe.request("scan.item.set_ignored", {"unique_id": unique_id, "is_ignored": True}, timeout=STUCK_S)
-    assert changes_of(drain(changes)) == [change(rig.series_id, 1, 1, MARK.NONE)]
+    assert changes_of(drain(changes)) == [gone(rig, 1, 1)]
     assert await rig.output() == []
     await rig.probe.request("scan.item.set_ignored", {"unique_id": unique_id, "is_ignored": False}, timeout=STUCK_S)
-    assert changes_of(drain(changes)) == [change(rig.series_id, 1, 1, MARK.BY_LEVEL)]
+    assert changes_of(drain(changes)) == [change(rig, "a", 1, 1)]
     assert len(await rig.output()) == 1
 
 

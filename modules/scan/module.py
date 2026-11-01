@@ -34,8 +34,9 @@ Commands:
 Events (outgoing):
   scan.plan.updated {series_id} — the plan was counted again; downloads only adopts finished files on it (it does NOT
       download). The download is started by an explicit scan alone (downloads.dispatch).
-  scan.reference.changed {series_id, season, episode, part, mark} — the reference or the mark of a slot differs from
-      the stored one (a slot that left the output reports `none`); sent after the write. Voices follow it.
+  scan.reference.changed (ReferenceChanged: series_id and the whole Reference) — the reference or the mark of a slot
+      differs from the stored one (a slot that left the output reports `none` with the reason `reference_none`); sent
+      after the write. Voices follow it, a window shows it without a second request.
   scan.status.changed {scanner_enabled, scan_interval, is_scanning, is_awaiting_tasks, next_scan_time} — the state
       of the scheduler (the contract of the old scanner_status_update).
   series.status.contribution — the fold of scanning/error (R-11); the carrier of the error is scan_tasks.status='error'.
@@ -66,7 +67,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from core import BaseModule, BusRequestError, ids, torrent_source
-from core.contracts import CompositionReply, ReferenceChanged, SeriesSource, VoiceSettingsView
+from core.contracts import CompositionReply, Reference, ReferenceChanged, SeriesSource, VoiceSettingsView
 from core.db import Database
 from core.envelope import Envelope
 from core.voice_names import Groups
@@ -242,13 +243,13 @@ class ScanModule(BaseModule):
         except (BusRequestError, asyncio.TimeoutError):
             return await action
         result = await action
-        for season, episode, part, mark in output.changes(before, await self._output_of(series)):
-            self._announce(series_id, season, episode, part, mark)
+        for each in output.changes(before, await self._output_of(series)):
+            self._announce(series_id, each)
         return result
 
-    def _announce(self, series_id: int, season: int, episode: int, part: int | None, mark) -> None:
+    def _announce(self, series_id: int, changed: Reference) -> None:
         self.publish_event("scan.reference.changed", ReferenceChanged(
-            series_id=series_id, season=season, episode=episode, part=part, mark=mark).model_dump(mode="json"))
+            series_id=series_id, **changed.model_dump()).model_dump(mode="json"))
 
     async def on_downloaded_counts(self, env: Envelope) -> dict:
         """{counts: {series_id: n}} — скачанные VK-эпизоды (Р-19)."""
@@ -561,8 +562,8 @@ class ScanModule(BaseModule):
                       len(inserts), len(deletes))
         if announce or plan_changed:
             self.publish_event("scan.plan.updated", {"series_id": series_id})
-        for season, episode, part, mark in output.changes(shown_before, shown_after):
-            self._announce(series_id, season, episode, part, mark)
+        for each in output.changes(shown_before, shown_after):
+            self._announce(series_id, each)
         return Refreshed(sum(1 for each in statuses.values() if each == "in_plan_single"), shown_after, plan_changed)
 
     async def _leftovers(self, series_id: int, existing: list[dict], kept: set[str]) -> list[str]:
