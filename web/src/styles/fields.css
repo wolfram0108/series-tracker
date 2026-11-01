@@ -4,7 +4,8 @@
    Простые контролы (кнопки, switch, select, таблица) — PrimeVue. */
 
 .input-constructor-group {
-  height: 46px;
+  /* a group is not lower than its row, and grows when its text wraps instead of cutting it */
+  min-height: 46px;
   border-radius: var(--border-radius);
   border: var(--border-width) solid var(--color-gray-200);
   background-color: #fff;
@@ -15,7 +16,7 @@
   box-sizing: border-box;
   gap: 2px;
 }
-.input-constructor-group:has(.item-floating-label) { height: 64px; }
+.input-constructor-group:has(.item-floating-label) { min-height: 64px; }
 .input-constructor-group:focus-within {
   border-color: var(--color-blue);
   box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.25);
@@ -93,32 +94,28 @@
 }
 .item-input:focus, .item-input:active { outline: 0; }
 
-.item-floating-label { flex-grow: 1; flex-shrink: 1; min-width: 0; overflow: hidden; }
+/* The input and its label share one cell while the field is at rest (the label stands where the value will be). Raised,
+   the label takes the row above the input, so a long one wraps and makes the field higher, and is never cut. */
+.item-floating-label {
+  flex-grow: 1; flex-shrink: 1; min-width: 0; overflow: hidden;
+  display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); align-items: stretch;
+}
 .item-floating-label .item-input {
-  height: 100%;
-  width: 100%;
-  padding: 1.5rem 1rem 0.5rem;
+  grid-area: 2 / 1; min-width: 0; width: 100%; padding: 0.25rem 1rem 0.5rem; align-self: stretch;
 }
 .item-floating-label .item-input:has(~ .password-toggle-btn) { padding-right: 45px; }
 .item-floating-label label {
-  position: absolute; top: 50%;
-  transform: translateY(-50%);
-  left: 1rem; right: 1rem;
+  grid-area: 2 / 1; align-self: center; margin: 0 1rem;
   color: var(--color-gray-600);
-  pointer-events: none; transition: all 0.2s ease-in-out;
-  transform-origin: left center;
-  overflow: hidden;
-  /* at rest a long label wraps; raised above the value it stays on one line */
+  pointer-events: none; transition: color 0.2s ease-in-out;
+  /* at rest a long label wraps too */
   overflow-wrap: anywhere; line-height: 1.15;
-  --float-scale: 0.85;
 }
 .item-floating-label .item-input:focus + label,
 .item-floating-label .item-input:not(:placeholder-shown) + label {
-  transform: translateY(-1.3rem) scale(var(--float-scale));
+  grid-area: 1 / 1; align-self: start; margin: 0.4rem 1rem 0;
+  font-size: 0.85em;
   color: var(--color-blue);
-  white-space: nowrap; text-overflow: ellipsis;
-  /* the box is made as much wider as the scale shrinks the text, so that the text keeps the whole width of the field */
-  right: auto; width: calc((100% - 2rem) / var(--float-scale));
 }
 .is-valid .item-floating-label .item-input:focus + label,
 .is-valid .item-floating-label .item-input:not(:placeholder-shown) + label { color: var(--color-green-1); }
@@ -140,10 +137,9 @@
   padding: 0 1rem; min-width: 0; cursor: pointer;
   justify-content: space-between; flex-shrink: 1; flex-grow: 1;
 }
-/* the value wraps into the row instead of being cut; only a third line is cut */
+/* the value wraps and makes the field higher instead of being cut */
 .selected-value {
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
-  overflow: hidden; overflow-wrap: anywhere; line-height: 1.15; min-width: 0;
+  overflow-wrap: anywhere; line-height: 1.15; min-width: 0; padding: 0.3rem 0;
   color: var(--color-text); flex-grow: 1;
 }
 .chevron { color: var(--color-gray-600); transition: transform 0.2s ease, color 0.2s ease; margin-left: 0.5rem; }
