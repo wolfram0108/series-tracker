@@ -339,15 +339,26 @@ async def test_the_choice_made_for_a_source_is_counted(system):
 
 
 @pytest.mark.asyncio
-async def test_the_season_of_the_card_is_the_season_of_rows_the_constructor_gave_none(system):
+async def test_the_season_of_the_card_is_the_season_of_rows_the_constructor_gave_none_and_season_one_is_the_last_resort(
+        system):
     s = system
     s.rules.profiles[7] = lambda text: {key: value for key, value in lecturer(text).items() if key != "season"}
     series_id = await laid_out(s, page(*season_rows(1, range(1, 3))))
-    assert {r.season for r in (await s.get(series_id)).rows} == {None}
+    assert {r.season for r in (await s.get(series_id)).rows} == {1}  # the rules and the card are silent
     await s.counted(lambda: s.catalog.set_season(series_id, "2"))
-    assert {r.season for r in (await s.get(series_id)).rows} == {2}
+    assert {r.season for r in (await s.get(series_id)).rows} == {2}  # the card wins over the default
     last = s.taken(s.changed)[-1]
-    assert last["episodes"] == [] and last["summary_only"] is False  # rows changed, but none can be named as an episode
+    assert last["episodes"] == refs((1, 1), (1, 2), (2, 1), (2, 2)) and last["summary_only"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_series_whose_card_names_a_season_lays_out_the_rows_without_one_in_that_season(system):
+    s = system
+    s.rules.profiles[7] = lambda text: {key: value for key, value in lecturer(text).items() if key != "season"}
+    series_id = await s.counted(lambda: s.catalog.add_series([source()], season="3"))
+    await s.counted(lambda: s.sources.finish(PAGE, page(*season_rows(1, range(1, 3)))))
+    assert {r.season for r in (await s.get(series_id)).rows} == {3}
+    assert [e.season for e in (await s.get(series_id)).settings] == [3, 3]
 
 
 @pytest.mark.asyncio
@@ -430,6 +441,9 @@ async def test_the_name_the_constructor_assigned_beats_the_one_of_the_player_and
     reply = await s.get(series_id)
     assert [r.voice_group for r in reply.rows] == ["Моя", "Стар"]
     assert set(s.voices.asked[-1]) == {"AniStar", "Мой дубляж"}
+    assert [r.voice_name for r in reply.rows] == ["Мой дубляж", "AniStar"]
+    assert s.sql("SELECT voice_name FROM composition_rows WHERE series_id = ? ORDER BY seq", series_id) == [
+        ("Мой дубляж",), ("AniStar",)]
     assert [(v.name, v.group) for v in reply.sources[0].players[0].voices] == [("Мой дубляж", "Моя"), ("AniStar", "Стар")]
 
 
@@ -748,7 +762,7 @@ async def test_a_read_that_failed_leaves_the_layout_and_names_the_reason_until_t
     assert event["rev"] == before.rev + 1 and event["summary_only"] is True and event["episodes"] == []
     assert failed.rows == before.rows
     assert (failed.sources[0].status, failed.sources[0].reason) == (SourceStatus.FAILED, why)
-    assert s.sql("SELECT reason FROM composition_failures WHERE table_url = ?", PAGE) == [(why,)]
+    assert s.sources.requests[-1].refresh is False and s.sources.reads_begun == [PAGE]  # the verdict is read, not retried
 
     later = "2026-11-01T13:00:00+00:00"
     await s.counted(lambda: s.sources.finish(PAGE, page(*season_rows(1, range(1, 3))), read_at=later))
@@ -758,7 +772,6 @@ async def test_a_read_that_failed_leaves_the_layout_and_names_the_reason_until_t
     assert (healed.sources[0].status, healed.sources[0].reason, healed.sources[0].read_at) == (
         SourceStatus.READY, None, later)
     assert healed.rows == before.rows
-    assert s.sql("SELECT COUNT(*) FROM composition_failures") == [(0,)]
 
 
 @pytest.mark.asyncio
@@ -770,9 +783,41 @@ async def test_a_new_read_begun_for_a_source_forgets_the_verdict_of_the_one_befo
     await s.counted(lambda: s.catalog.update_source(only_source(s, series_id), vk_search_mode="get_all"))
     assert (await s.get(series_id)).sources[0].status == SourceStatus.WAITING
     assert s.sources.requests[-1].options == {"vk_search_mode": "get_all"} and s.sources.requests[-1].refresh
-    assert s.sql("SELECT COUNT(*) FROM composition_failures") == [(0,)]
     await s.counted(lambda: s.voices.set_groups({}))
     assert (await s.get(series_id)).sources[0].status == SourceStatus.WAITING
+
+
+@pytest.mark.asyncio
+async def test_a_read_that_failed_is_not_followed_by_another_read_of_a_recount_whatever_counts_the_series_again(system):
+    """The loop read, fail, read: a failed page is `failed`, not `absent`, so a recount never begins a read of it."""
+    s = system
+    series_id = await s.counted(lambda: s.catalog.add_series([source()]))
+    await s.counted(lambda: s.sources.fail(PAGE, reason("read_failed")))
+    await s.counted(lambda: s.voices.set_groups({}))
+    await s.counted(s.profile_changed)
+    await s.counted(lambda: s.catalog.update_source(only_source(s, series_id)))  # asks for a read: a fresh table is none
+    assert s.sources.reads_begun == [PAGE, PAGE]
+    await s.counted(lambda: s.sources.fail(PAGE, reason("read_failed")))
+    await s.counted(lambda: s.voices.set_groups({}))
+    assert s.sources.reads_begun == [PAGE, PAGE]
+    assert (await s.get(series_id)).sources[0].status == SourceStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_a_page_nothing_was_ever_read_of_is_read_once_when_the_series_is_counted_again(system):
+    s = system
+    series_id = await s.counted(lambda: s.catalog.add_series([source()]))
+    s.sources.reading.clear()  # the sources module came back with nothing stored of the page
+    await s.composition.stop()
+    again = CompositionModule(s.bus, Database(str(s.db_path)))
+    await again.start()
+    try:
+        await again.idle()
+        assert s.sources.reads_begun == [PAGE, PAGE]
+        assert [request.refresh for request in s.sources.requests[-2:]] == [False, True]
+        assert (await s.get(series_id)).sources[0].status == SourceStatus.WAITING
+    finally:
+        await again.stop()
 
 
 @pytest.mark.asyncio
@@ -926,7 +971,7 @@ async def test_an_event_of_a_page_that_overtakes_the_answer_that_names_it_makes_
 def test_the_migration_makes_the_tables_and_takes_them_away(tmp_path):
     path = tmp_path / "m.db"
     migrate(path, "upgrade")
-    expected = {"composition_rows", "composition_state", "composition_sources", "composition_failures",
+    expected = {"composition_rows", "composition_state", "composition_sources",
                 "unknown_voices", "output_settings"}
     engine = create_engine(f"sqlite:///{path}")
     assert expected <= set(inspect(engine).get_table_names())

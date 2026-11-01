@@ -40,3 +40,23 @@ def upgrade_unique_id(url: str, pub_date: datetime | str, series_id: int,
     date_str = _utc_date_str(pub_date)
     return hashlib.md5(
         f"{url}{date_str}{series_id}@{resolution}p".encode()).hexdigest()[:16]
+
+
+# The date inside the identity of a row of a layout is a constant: the date a site gives may change, the row stays the same.
+_ROW_ID_DATE = "1970-01-01 00:00:00"
+
+
+def _row_address(source_id: int, row_key: str) -> str:
+    return f"row:{source_id}/{row_key}"
+
+
+def row_unique_id(series_id: int, source_id: int, row_key: str) -> str:
+    """Id of the plan row made from a row of the layout of a series: the same formula as `media_unique_id`, with the
+    key of the row of the source in place of the address and a fixed date. The old formulas are unchanged."""
+    return media_unique_id(_row_address(source_id, row_key), _ROW_ID_DATE, series_id)
+
+
+def upgrade_row_unique_id(series_id: int, source_id: int, row_key: str, resolution: int) -> str:
+    """Id of the row of a better version of a candidate whose earlier version is already fetched (see
+    `upgrade_unique_id`), for a row of the layout."""
+    return upgrade_unique_id(_row_address(source_id, row_key), _ROW_ID_DATE, series_id, resolution)

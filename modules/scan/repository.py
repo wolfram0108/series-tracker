@@ -1,12 +1,14 @@
-"""Репозиторий scan: таблицы scan_tasks и media_items (строки +
-plan_status — владение согласовано вместо catalog; колонки
-status/final_filename принадлежат downloads, slicing_status/chapters* —
-slicing, сюда не пишутся).
+"""Repository of scan: the tables scan_tasks, scan_references and media_items.
 
-scan_tasks — журнал ресьюмабельности торрент-скана: план замен
-персистится ДО выполнения (task_data), результаты добавлений — по мере
-(results_data); status='error' с сообщением — носитель для свёртки
-error (Р-11).
+media_items: the rows and plan_status belong to scan (agreed in place of catalog); status and final_filename belong
+to downloads, slicing_status and chapters* to slicing and are never written here.
+
+scan_references: the outcome of the choice of the reference for every slot (season, episode, part), including the
+slots that have no row in media_items (`none`, `unfit`).
+
+scan_tasks: the journal that lets a torrent scan resume. The plan of replacements is persisted BEFORE it is carried
+out (task_data) and the results of the additions as they come (results_data); status='error' with a message is the
+carrier of the error flag of the status fold (R-11).
 """
 from __future__ import annotations
 
@@ -81,70 +83,6 @@ class ScanRepository:
 
     # --- media_items: строки и план ---------------------------------------------
 
-    async def upsert_candidates(self, series_id: int,
-                                items: list[dict]) -> dict:
-        """Апсерт кандидатов скана (семантика старого
-        add_or_update_media_items): обновлённым принудительно
-        переписываются распарсенные поля и plan_status='candidate';
-        «фантомы» (исчезли из выдачи) удаляются ТОЛЬКО в девственном
-        состоянии (pending, без нарезки, не ignored) — иначе остаются.
-        Чужие колонки (status, final_filename, slicing_*) не трогаются.
-        """
-        existing = await self._db.fetch_all(
-            "SELECT unique_id, status, slicing_status, is_ignored_by_user "
-            "FROM media_items WHERE series_id=?", (series_id,))
-        existing_ids = {r["unique_id"] for r in existing}
-        new_ids = {i["unique_id"] for i in items}
-
-        deleted = kept_phantoms = 0
-        for row in existing:
-            if row["unique_id"] in new_ids:
-                continue
-            pristine = (row["status"] == "pending"
-                        and row["slicing_status"] == "none"
-                        and not row["is_ignored_by_user"])
-            if pristine:
-                await self._db.execute(
-                    "DELETE FROM media_items WHERE unique_id=?",
-                    (row["unique_id"],))
-                deleted += 1
-            else:
-                kept_phantoms += 1
-
-        added = updated = 0
-        for item in items:
-            if item["unique_id"] in existing_ids:
-                await self._db.execute(
-                    "UPDATE media_items SET season=?, episode_start=?, "
-                    "episode_end=?, part=?, publication_date=?, voiceover_tag=?, "
-                    "resolution=?, source_title=?, download_url=?, "
-                    "plan_status='candidate' WHERE unique_id=?",
-                    (item.get("season"), item["episode_start"],
-                     item.get("episode_end"), item.get("part"),
-                     item["publication_date"], item.get("voiceover_tag"),
-                     item.get("resolution"), item.get("source_title"),
-                     item.get("download_url"), item["unique_id"]))
-                updated += 1
-            else:
-                await self._db.execute(
-                    "INSERT INTO media_items (series_id, unique_id, "
-                    "source_title, season, episode_start, episode_end, part, "
-                    "plan_status, status, is_ignored_by_user, source_url, "
-                    "publication_date, voiceover_tag, slicing_status, "
-                    "is_available, resolution, download_url) VALUES "
-                    "(?, ?, ?, ?, ?, ?, ?, 'candidate', 'pending', ?, ?, ?, ?, "
-                    "'none', 1, ?, ?)",
-                    (series_id, item["unique_id"], item.get("source_title"),
-                     item.get("season"), item["episode_start"],
-                     item.get("episode_end"), item.get("part"),
-                     int(bool(item.get("is_ignored_by_user"))),
-                     item["source_url"], item["publication_date"],
-                     item.get("voiceover_tag"), item.get("resolution"),
-                     item.get("download_url")))
-                added += 1
-        return {"added": added, "updated": updated, "deleted": deleted,
-                "kept_phantoms": kept_phantoms}
-
     _BOOLS = ("is_ignored_by_user", "is_available")
 
     async def items_for_series(self, series_id: int) -> list[dict]:
@@ -176,31 +114,7 @@ class ScanRepository:
         await self._db.execute(
             "DELETE FROM scan_tasks WHERE series_id=?", (series_id,))
         await self._db.execute(
-            "DELETE FROM video_availability WHERE series_id=?", (series_id,))
-
-    async def save_availability(self, series_id: int, report: dict) -> None:
-        """Remember the last player report; a failed scan keeps the old one."""
-        await self._db.execute(
-            "INSERT INTO video_availability (series_id, report, checked_at) "
-            "VALUES (?, ?, ?) ON CONFLICT(series_id) DO UPDATE SET "
-            "report=excluded.report, checked_at=excluded.checked_at",
-            (series_id, json.dumps(report, ensure_ascii=False),
-             datetime.now(timezone.utc).isoformat()))
-
-    async def get_availability(self, series_id: int) -> dict:
-        row = await self._db.fetch_one(
-            "SELECT report, checked_at FROM video_availability "
-            "WHERE series_id=?", (series_id,))
-        if not row:
-            return {"report": None, "checked_at": None}
-        return {"report": json.loads(row["report"] or "{}"),
-                "checked_at": row["checked_at"]}
-
-    async def plan_input(self, series_id: int) -> list[dict]:
-        """Every known row of the series: files left by earlier scans must stay
-        in the plan, or two generations of one episode both look like winners."""
-        return await self._db.fetch_all(
-            "SELECT * FROM media_items WHERE series_id=?", (series_id,))
+            "DELETE FROM scan_references WHERE series_id=?", (series_id,))
 
     async def set_ignored(self, unique_id: str, ignored: bool) -> None:
         await self._db.execute(
@@ -218,15 +132,45 @@ class ScanRepository:
         return await self._db.fetch_one(
             "SELECT * FROM media_items WHERE unique_id=?", (unique_id,))
 
-    async def replace_plan(self, series_id: int, statuses: dict[str, str],
-                           superseded: dict[str, str]) -> None:
-        """Whole plan in one transaction. Rows the planner skipped (ignored,
-        ignored seasons) fall back to 'candidate' instead of keeping stale statuses."""
-        statements: list[tuple[str, tuple]] = [(
-            "UPDATE media_items SET plan_status='candidate', "
-            "superseded_by=NULL WHERE series_id=?", (series_id,))]
+    async def references(self, series_id: int) -> list[dict]:
+        """Stored outcome of the choice, one record per slot; the slot with no part sorts first."""
+        return await self._db.fetch_all(
+            "SELECT season, episode, part, mark, source_id, row_key, unique_id, player, voice_group, height, reason "
+            "FROM scan_references WHERE series_id=? "
+            "ORDER BY season, episode, part IS NOT NULL, part", (series_id,))
+
+    async def save_outcome(self, series_id: int, *, inserts: list[dict], updates: list[tuple[str, dict]],
+                           deletes: list[str], statuses: dict[str, str], superseded: dict[str, str],
+                           references: list[dict]) -> None:
+        """Rows, plan and references of the series in one transaction: readers never see a plan that does not
+        match its references. Rows the planner skipped (switched off) fall back to 'candidate'; the columns that
+        belong to other modules (status, final_filename, slicing_*) are never written here."""
+        statements: list[tuple[str, tuple]] = [
+            ("DELETE FROM media_items WHERE unique_id=?", (unique_id,)) for unique_id in deletes]
+        for row in inserts:
+            statements.append((
+                "INSERT INTO media_items (series_id, unique_id, source_title, season, episode_start, episode_end, "
+                "part, plan_status, status, is_ignored_by_user, source_url, publication_date, voiceover_tag, "
+                "slicing_status, is_available, resolution, download_url, source_id, row_key) VALUES "
+                "(?, ?, ?, ?, ?, NULL, ?, 'candidate', 'pending', ?, ?, ?, ?, 'none', 1, ?, NULL, ?, ?)",
+                (series_id, row["unique_id"], row["source_title"], row["season"], row["episode_start"], row["part"],
+                 int(bool(row["is_ignored_by_user"])), row["source_url"], row["publication_date"],
+                 row["voiceover_tag"], row.get("resolution"), row["source_id"], row["row_key"])))
+        for unique_id, fields in updates:
+            columns = sorted(fields)
+            statements.append((
+                f"UPDATE media_items SET {', '.join(f'{name}=?' for name in columns)} WHERE unique_id=?",
+                (*(fields[name] for name in columns), unique_id)))
+        statements.append(("UPDATE media_items SET plan_status='candidate', superseded_by=NULL WHERE series_id=?",
+                           (series_id,)))
         statements.extend((
-            "UPDATE media_items SET plan_status=?, superseded_by=? "
-            "WHERE unique_id=?", (plan_status, superseded.get(unique_id), unique_id))
-            for unique_id, plan_status in statuses.items())
+            "UPDATE media_items SET plan_status=?, superseded_by=? WHERE unique_id=?",
+            (plan_status, superseded.get(unique_id), unique_id)) for unique_id, plan_status in statuses.items())
+        statements.append(("DELETE FROM scan_references WHERE series_id=?", (series_id,)))
+        statements.extend((
+            "INSERT INTO scan_references (series_id, season, episode, part, mark, source_id, row_key, unique_id, "
+            "player, voice_group, height, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (series_id, each["season"], each["episode"], each["part"], each["mark"], each["source_id"],
+             each["row_key"], each["unique_id"], each["player"], each["voice_group"], each["height"],
+             each["reason"])) for each in references)
         await self._db.execute_many(statements)

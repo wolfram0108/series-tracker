@@ -12,6 +12,7 @@ import sys
 import pytest
 
 from core import BaseModule, Bus, Runner
+from core.contracts import ReleaseTable, TableGetReply, TableState
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.catalog.repository import CatalogRepository
@@ -100,47 +101,37 @@ async def test_child_tables_reject_unknown_series(db_path):
 
 
 class SlowSource(BaseModule):
-    """Источник видео, отвечающий не сразу: удаление серии застаёт скан
-    на середине работы."""
+    """The table of a page that is read slowly: the deletion of a series finds the scan in the middle of its work."""
     name = "slow_source"
 
     def __init__(self, bus):
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
-        self.settings = {"debug_force_replace": "false"}
-        self.videos = [{"url": "https://vkvideo.ru/video-1_2",
-                        "title": "Т1 - 1 серия",
-                        "publication_date": "2026-03-17T20:13:16Z"}]
+        self.asked: list[str] = []
         super().__init__(bus)
 
     def register(self):
-        self.handle("sources.vk.scan", self.on_vk)
-        self.handle("rules.apply", self.on_rules)
+        self.handle("sources.table.get", self.on_table, concurrent=True)
         self.handle("renaming.reprocess", self.on_reprocess)
         self.handle("downloads.fs.sync", self.on_fs_sync)
-        self.handle("slicing.verify", self.on_verify)
         self.handle("settings.value.get", self.on_get)
 
     async def on_get(self, env):
-        return {"key": env.payload["key"],
-                "value": self.settings.get(env.payload["key"])}
+        return {"key": env.payload["key"], "value": None}
 
-    async def on_vk(self, env):
+    async def on_table(self, env):
+        self.asked.append(env.topic)
         self.entered.set()
         await self.release.wait()
-        return {"videos": self.videos}
-
-    async def on_rules(self, env):
-        return {"results": [{"extracted": {"episode": 1}}], "invalid_rules": []}
+        url = env.payload["url"]
+        table = ReleaseTable(url=url, site="vk_channel", complete=True)
+        return TableGetReply(url=url, state=TableState.READY, table=table).model_dump(mode="json")
 
     async def on_reprocess(self, env):
         return {"ok": True}
 
     async def on_fs_sync(self, env):
         return {"adopted": 0, "lost": 0}
-
-    async def on_verify(self, env):
-        return {"status": "completed"}
 
 
 @pytest.mark.asyncio
@@ -170,6 +161,7 @@ async def test_delete_during_scan_leaves_no_rows(db_path):
         source.release.set()
         result = await asyncio.wait_for(task, 15)
         assert result.get("aborted") is True
+        assert source.asked == ["sources.table.get"]  # the scan went no further than the step it was in
         assert await db.fetch_all("SELECT * FROM media_items WHERE series_id=?",
                                   (series_id,)) == []
         assert await db.fetch_all("SELECT * FROM scan_tasks WHERE series_id=?",

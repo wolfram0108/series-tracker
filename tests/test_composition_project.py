@@ -9,8 +9,9 @@ import pytest
 from core.contracts import (CompositionRow, PlayerSummary, ReleaseTable, RowState, RowVoice, RuleLine, RuleResult,
                             RulesApplyReply, SeriesSource, SourceStatus, SourceType, TableRow, VoiceSummary, line_of)
 from core.voice_names import fold_name
-from modules.composition.project import (UNKNOWN_VOICE_LABEL, SourceInput, layout_episodes, lines_for, project,
-                                         selected_rows, touched_episodes, voice_name_of, voice_names)
+from modules.composition.project import (DEFAULT_SEASON, UNKNOWN_VOICE_LABEL, SourceInput, layout_episodes,
+                                         lines_for, project, selected_rows, touched_episodes, voice_name_of,
+                                         voice_names)
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "docs" / "missions" / "voice-alignment" / "stage-10" / "raw"
@@ -68,7 +69,21 @@ def test_a_single_episode_is_a_range_of_one_and_numbers_are_copied_from_the_answ
 def test_the_row_and_its_site_fields_never_give_a_number():
     marked = row("a", "Серия 7", group="Сезон 3", site_fields={"number": 99, "season": 9, "compilation_to": 12})
     only = one(item(source(), table(marked), {"a": {"episode": 7}}))[0]
-    assert (only.season, only.episode_start, only.episode_end) == (None, 7, 7)
+    # Neither the season in the site fields (9) nor the one in the text of the group (3): the default season, 1.
+    assert (only.season, only.episode_start, only.episode_end) == (DEFAULT_SEASON, 7, 7)
+    assert DEFAULT_SEASON == 1
+
+
+def test_a_season_that_neither_the_rules_nor_the_card_gave_is_season_one_and_the_season_given_is_kept():
+    out = one(item(source(), table(row("a"), row("b"), row("c"), row("d")), {
+        "a": {"episode": 1}, "b": {"episode": 2, "season": 3}, "c": {"episode": 3, "season": 0},
+        "d": {"start": 4, "end": 5}}))
+    assert [r.season for r in out] == [1, 3, 0, 1]
+
+
+def test_a_row_the_constructor_excluded_has_no_season_even_when_it_would_have_the_default():
+    only = one(item(source(), table(row("t", "Трейлер")), {"t": {"excluded": True}}))[0]
+    assert only.season is None
 
 
 def test_a_compilation_stays_one_row_with_the_range_the_constructor_gave():
@@ -101,7 +116,7 @@ def test_a_row_without_an_episode_number_is_kept_as_excluded_for_the_lack_of_it(
     only = one(item(source(), table(row("a", "Спецвыпуск")), {"a": answer}))[0]
     assert only.excluded and only.exclusion == "no_number"
     assert (only.episode_start, only.episode_end) == (None, None)
-    assert (only.season, only.part) == (answer.get("season"), answer.get("part"))
+    assert (only.season, only.part) == (answer.get("season", DEFAULT_SEASON), answer.get("part"))
 
 
 def test_a_row_the_constructor_gave_no_answer_for_has_no_number():
@@ -378,6 +393,16 @@ def test_a_player_lists_its_voices_with_their_groups_before_a_profile_and_the_as
                                           "e": {"episode": 2, "voiceover": "Мой"}})], {"Мой": "Моя"}, {})
     assert after.sources[0].players[1].voices == [VoiceSummary(name="Мой", group="Моя", rows=2)]
     assert [voice.name for voice in after.sources[0].players[0].voices] == ["Animy", "animy", "AniStar"]
+
+
+def test_a_row_carries_the_name_of_its_voice_over_as_it_came_and_the_name_the_constructor_assigned_wins():
+    tbl = table(row("a", voice="AniStar"), row("b", voice="AniStar"), row("c"), row("d", voice="  "))
+    out = project([item(source(), tbl, {
+        "a": {"episode": 1}, "b": {"episode": 2, "voiceover": "Мой дубляж"}, "c": {"episode": 3, "voiceover": "VK-озвучка"},
+        "d": {"episode": 4, "voiceover": "  "}})], {"AniStar": "Стар"}, {}).rows
+    assert [(r.voice_name, r.voice_group, r.voice_label) for r in out] == [
+        ("AniStar", "Стар", "Стар"), ("Мой дубляж", None, "Неизвестная озвучка 1"),
+        ("VK-озвучка", None, "Неизвестная озвучка 2"), ("  ", None, "Неизвестная озвучка 3")]
 
 
 def test_the_name_of_a_voice_is_the_assigned_one_or_the_one_of_the_row():

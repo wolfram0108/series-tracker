@@ -15,6 +15,7 @@ from core.voice_names import fold_name
 
 # One template for the name of a voice-over that belongs to no user group.
 UNKNOWN_VOICE_LABEL = "Неизвестная озвучка {number}"
+DEFAULT_SEASON = 1
 
 # The only player whose list holds several seasons of a catalog, one of which the user may pick for the source.
 CATALOG_PLAYER = "vibix"
@@ -158,7 +159,7 @@ def _row_of(source: SeriesSource, row: TableRow, result: RuleResult, name: str, 
     group, label, number = _voice_of(name, groups, numbering)
     return CompositionRow(
         series_id=source.series_id, source_id=source.id, row_key=row.key, **_numbers_of(result),
-        voice_group=group, voice_label=label, voice_unknown=number, player=row.player,
+        voice_group=group, voice_label=label, voice_name=name, voice_unknown=number, player=row.player,
         player_label=row.player_label, group=row.group, text=row.text, heights=list(row.heights), state=row.state,
         published=row.published, link=row.link)
 
@@ -167,7 +168,8 @@ def _numbers_of(result: RuleResult) -> dict:
     """A single episode wins over a range, as it has always done; a range without an end ends where it starts."""
     if result.excluded:
         return {"excluded": True, "exclusion": Exclusion.RULE}
-    numbers = {"season": result.season, "part": result.part}
+    # A season that neither the rules nor the card gave is season 1, as the plan and the file name have always read it.
+    numbers = {"season": result.season if result.season is not None else DEFAULT_SEASON, "part": result.part}
     if result.episode is not None:
         return {**numbers, "episode_start": result.episode, "episode_end": result.episode}
     if result.start is not None:

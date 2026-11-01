@@ -112,7 +112,8 @@ class FakeCatalog(BaseModule):
 
 
 class FakeSources(BaseModule):
-    """The tables of pages. A read begins at a request that asks for one and ends when the test says so."""
+    """The tables of pages, as the sources module answers: a read begins at a request that asks for one and ends when
+    the test says so; a request that asks for no read says how the page stands, a failed read included."""
 
     name = "sources"
 
@@ -120,6 +121,7 @@ class FakeSources(BaseModule):
         self.tables: dict[str, ReleaseTable] = {}
         self.requests: list[TableGetRequest] = []
         self.reading: set[str] = set()
+        self.verdicts: dict[str, str] = {}
         self.reads_begun: list[str] = []
         # A table older than its term: a request that asks for a read begins one, whatever is stored.
         self.stale = False
@@ -155,9 +157,14 @@ class FakeSources(BaseModule):
             return TableGetReply(url=request.url, state=TableState.FAILED,
                                  reason=reason("site_not_found")).model_dump(mode="json")
         key = canonical(request.url)
-        table = self.tables.get(key)
+        table, why = self.tables.get(key), None
         if not request.refresh:
-            state = TableState.READY if table is not None else TableState.ABSENT
+            if key in self.reading:
+                state = TableState.READING
+            elif key in self.verdicts:
+                state, why = TableState.FAILED, self.verdicts[key]
+            else:
+                state = TableState.READY if table is not None else TableState.ABSENT
         elif table is not None and not self.stale:
             state = TableState.READY
         else:
@@ -165,9 +172,10 @@ class FakeSources(BaseModule):
             if key not in self.reading:
                 self.reading.add(key)
                 self.reads_begun.append(key)
+                self.verdicts.pop(key, None)
                 if key in self.finish_at_once:
                     asyncio.get_running_loop().call_soon(self.finish, key, self.finish_at_once.pop(key))
-        return TableGetReply(url=key, state=state, table=table).model_dump(mode="json")
+        return TableGetReply(url=key, state=state, table=table, reason=why).model_dump(mode="json")
 
     # --- the end of a read ------------------------------------------------------------------------
 
@@ -176,11 +184,13 @@ class FakeSources(BaseModule):
         read_at = read_at or datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc).isoformat()
         self.tables[key] = table.model_copy(update={"url": key, "complete": True, "read_at": read_at})
         self.reading.discard(key)
+        self.verdicts.pop(key, None)
         self.publish_event("sources.table.ready", TableReady(url=key, read_at=read_at).model_dump())
 
     def fail(self, url: str, why: str) -> None:
         key = canonical(url)
         self.reading.discard(key)
+        self.verdicts[key] = why
         self.publish_event("sources.table.failed", TableFailed(url=key, reason=why).model_dump())
 
 

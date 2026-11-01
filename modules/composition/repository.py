@@ -1,5 +1,5 @@
-"""All SQL of the composition module: the layout of a series, its sources, the numbers of unknown voice-overs, the
-verdicts of failed reads and the output settings.
+"""All SQL of the composition module: the layout of a series, its sources, the numbers of unknown voice-overs and the
+output settings.
 
 A series is read and written whole and in one transaction, so a reader never sees rows of one revision with the
 revision number of another.
@@ -14,8 +14,8 @@ from core.contracts import CompositionRow, SettingRecord, SourceSummary
 from core.db import Database
 
 _ROW_COLUMNS = ("series_id", "source_id", "row_key", "seq", "excluded", "exclusion", "season", "episode_start",
-                "episode_end", "part", "voice_group", "voice_label", "voice_unknown", "player", "player_label", "grp",
-                "text", "heights", "state", "published", "link")
+                "episode_end", "part", "voice_group", "voice_label", "voice_name", "voice_unknown", "player",
+                "player_label", "grp", "text", "heights", "state", "published", "link")
 
 
 @dataclass(frozen=True)
@@ -59,14 +59,6 @@ class CompositionRepository:
             "SELECT series_id FROM composition_state UNION SELECT series_id FROM composition_sources ORDER BY 1")
         return [row["series_id"] for row in rows]
 
-    async def failures(self, urls: list[str]) -> dict[str, str]:
-        if not urls:
-            return {}
-        marks = ", ".join("?" for _ in urls)
-        rows = await self._db.fetch_all(
-            f"SELECT table_url, reason FROM composition_failures WHERE table_url IN ({marks})", urls)
-        return {row["table_url"]: row["reason"] for row in rows}
-
     # --- writes ---------------------------------------------------------------------------
 
     async def write(self, series_id: int, *, rows: list[CompositionRow] | None = None,
@@ -74,20 +66,6 @@ class CompositionRepository:
                     records: list[SettingRecord] | None = None, rev: int | None = None) -> None:
         """Replaces the parts given, in one transaction; a part left out stays as it is."""
         await self._db.transaction(lambda conn: _write(conn, series_id, rows, sources, numbering, records, rev))
-
-    async def set_failure(self, url: str, reason: str) -> None:
-        await self._db.execute(
-            "INSERT INTO composition_failures (table_url, reason) VALUES (?, ?)"
-            " ON CONFLICT (table_url) DO UPDATE SET reason = excluded.reason", (url, reason))
-
-    async def clear_failure(self, url: str) -> None:
-        await self._db.execute("DELETE FROM composition_failures WHERE table_url = ?", (url,))
-
-    async def forget_unreferenced_failures(self) -> None:
-        """Verdicts of pages no source of ours reads any more; only safe while no event of a page is coming."""
-        await self._db.execute(
-            "DELETE FROM composition_failures WHERE table_url NOT IN"
-            " (SELECT table_url FROM composition_sources WHERE table_url IS NOT NULL)")
 
     async def purge(self, series_id: int) -> list[int]:
         """Takes everything the module keeps of a series; returns the sources it had."""

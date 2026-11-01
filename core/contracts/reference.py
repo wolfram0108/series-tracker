@@ -33,4 +33,5 @@ class ReferenceChanged(BaseModel):
     series_id: int
     season: int
     episode: int
+    part: int | None = None
     mark: ReferenceMark

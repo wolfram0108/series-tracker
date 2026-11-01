@@ -2,8 +2,7 @@
 
 `composition_rows` holds the layout in the order the projection gave it (`seq`); `composition_state` the revision of
 the last published layout; `composition_sources` what the window shows about each source and the canonical address of
-its page, by which the events of `sources` find it; `composition_failures` the verdict of the last failed read of a page;
-`unknown_voices` the number of a voice-over that is in no group; `output_settings` the values the user set, in the terms
+its page, by which the events of `sources` find it; `unknown_voices` the number of a voice-over that is in no group; `output_settings` the values the user set, in the terms
 of the domain, so that they outlive a new reading of a table (NULL season or episode is a level above).
 """
 from alembic import op
@@ -29,10 +28,6 @@ def upgrade() -> None:
     op.execute("CREATE INDEX composition_sources_series ON composition_sources (series_id)")
     op.execute("CREATE INDEX composition_sources_url ON composition_sources (table_url)")
     op.execute(
-        "CREATE TABLE composition_failures ("
-        " table_url TEXT PRIMARY KEY,"
-        " reason TEXT NOT NULL)")
-    op.execute(
         "CREATE TABLE composition_rows ("
         " series_id INTEGER NOT NULL,"
         " source_id INTEGER NOT NULL,"
@@ -46,6 +41,7 @@ def upgrade() -> None:
         " part INTEGER,"
         " voice_group TEXT,"
         " voice_label TEXT NOT NULL DEFAULT '',"
+        " voice_name TEXT NOT NULL DEFAULT '',"
         " voice_unknown INTEGER,"
         " player TEXT NOT NULL,"
         " player_label TEXT NOT NULL DEFAULT '',"
@@ -83,7 +79,6 @@ def downgrade() -> None:
     op.execute("DROP TABLE output_settings")
     op.execute("DROP TABLE unknown_voices")
     op.execute("DROP TABLE composition_rows")
-    op.execute("DROP TABLE composition_failures")
     op.execute("DROP INDEX composition_sources_url")
     op.execute("DROP INDEX composition_sources_series")
     op.execute("DROP TABLE composition_sources")

@@ -3,8 +3,7 @@
 The layout is the rows of the tables of all sources of a series, each with the numbers the constructor of rules gave it
 and the group of its voice-over; the pure rules are in `project.py`, the levers in `levers.py`, their inheritance in
 `settings.py`. The module owns the tables `composition_rows`, `composition_state`, `composition_sources`,
-`composition_failures`, `unknown_voices` and `output_settings`. It reads no site, picks no reference and downloads
-nothing. Torrent sources of a series are not its business.
+`unknown_voices` and `output_settings`. It reads no site, picks no reference and downloads nothing. Torrent sources of a series are not its business.
 
 Queries:
   composition.get {series_id, include_excluded?} → CompositionReply: the rows of the layout in the order of the sources
@@ -39,8 +38,8 @@ Events (incoming) — every one of them only asks for a recount of the series it
   series.source.added / .updated / .removed {series_id, source_id} — the source began, changed or ended; the table of
       an added or changed source is asked for with a read (the site is not read again within the term of the table)
   sources.table.ready {url, read_at} / sources.table.failed {url, reason} — the sources of ours that read that page,
-      found by the canonical address `sources.table.get` returned for them; the verdict of a failed read is kept
-      until the page is read again
+      found by the canonical address `sources.table.get` returned for them. How a page stands, a failed read
+      included, is what `sources.table.get` says of it at the recount; nothing of it is kept here
   rules.profile.changed {profile_id} — the series whose sources are read by that profile
   voices.settings.changed — the groups of voice-overs may have changed: every series is counted again
   series.updated {series_id, season?} — the season of the card is the constructor's fallback season
@@ -54,8 +53,8 @@ rules.apply (one request per source with a profile, all lines of its table at on
 names in one request). A source without a table or without a profile does not stop the others. Start this module
 after the modules it asks; a request that gets no answer fails the recount, not the start.
 
-Resumability: the layout, the numbers of unknown voice-overs, the settings and the verdicts of failed reads are in the
-database before an event goes out. At start every series is counted again, a series the catalog no longer has is
+Resumability: the layout, the numbers of unknown voice-overs and the settings are in the database before an event
+goes out. At start every series is counted again, a series the catalog no longer has is
 purged, and a failure there is logged, not raised.
 """
 from __future__ import annotations
@@ -150,7 +149,6 @@ class CompositionModule(BaseModule):
 
     async def on_start(self) -> None:
         try:
-            await self.repo.forget_unreferenced_failures()
             for series_id, source_id, url in await self.repo.pages():
                 self._remember(source_id, series_id, url)
             await self._resume()
@@ -263,12 +261,11 @@ class CompositionModule(BaseModule):
         refresh = () if env.topic.endswith(".removed") else (env.payload["source_id"],)
         self._schedule(env.payload["series_id"], refresh)
 
-    async def on_table_ready(self, env: Envelope) -> None:
-        await self.repo.clear_failure(env.payload["url"])
+    def on_table_ready(self, env: Envelope) -> None:
         self._wake(env.payload["url"])
 
-    async def on_table_failed(self, env: Envelope) -> None:
-        await self.repo.set_failure(env.payload["url"], env.payload["reason"])
+    def on_table_failed(self, env: Envelope) -> None:
+        # The verdict is in `sources` before the event goes out; the recount reads it there and asks for no new read.
         self._wake(env.payload["url"])
 
     async def on_profile_changed(self, env: Envelope) -> None:
@@ -383,24 +380,15 @@ class CompositionModule(BaseModule):
         try:
             reply = await self._table_reply(source, begin)
             self._remember(source.id, series_id, reply.url)
-            failure = reply.reason if reply.state == TableState.FAILED else (
-                await self.repo.failures([reply.url])).get(reply.url)
-            if reply.state == TableState.ABSENT and not begin and failure is None:
-                # Nothing was ever read for the page: the one read is begun here, then the events carry it on.
-                # A page whose last read failed is not asked for again by a recount, whatever the cause of it.
-                begin = True
+            if reply.state == TableState.ABSENT and not begin:
+                # Nothing was ever read for the page and no read failed: the one read is begun here, then the events
+                # carry it on. A page whose last read failed is `failed`, not `absent`, and a recount never reads it.
                 reply = await self._table_reply(source, True)
                 self._remember(source.id, series_id, reply.url)
         finally:
             flight.pending -= 1
-        if reply.state == TableState.FAILED:
-            failure = reply.reason
-        elif begin and reply.state == TableState.READING:
-            # A read of the page is on again, so the verdict of the one before is no longer the state of the page.
-            await self.repo.clear_failure(reply.url)
-            failure = None
         table = reply.table if reply.table is not None and reply.table.complete else None
-        return table, failure
+        return table, reply.reason if reply.state == TableState.FAILED else None
 
     async def _table_reply(self, source: SeriesSource, begin: bool) -> TableGetReply:
         request = TableGetRequest(url=source.url, options=source.read_options(), refresh=begin)

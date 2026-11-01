@@ -1,71 +1,79 @@
-"""Модуль scan — оркестратор сканирования (ревизия scanner.py +
-расписание из MonitoringAgent).
+"""Module scan — the orchestrator of scans: the schedule, the torrent scan, and, for a series of kind `video`, the
+synchronization of its sources and the choice of the reference of every episode (stage 10).
+
+A video series is not read here. The tables of its pages are read by `sources`, the numbers come from the constructor
+through `composition`; scan only waits for the tables, asks for the layout, chooses the reference of every slot
+(season, episode, part) from it (`reference.py`) and keeps the plan: the rows of media_items (`candidates.py`,
+`planner.py`) and the outcome of the choice in `scan_references`.
 
 Queries:
-  scan.series.run {series_id, force_replace?} → {changed, tasks_created |
-      vk-сводка}. changed — были ли реальные изменения (торрент: созданы
-      задачи; VK: изменился состав кандидатов); по нему фронт ручного скана
-      шлёт тост «Сканирование завершено» / «Обновлений нет»
-      Повторный запуск при идущем скане сериала — ошибка («уже запущен»,
-      находка 27).
-
-  scan.series.prepare {series_id} → сводка торрент-скана без запуска
-      закачки: раздача добавляется в qBittorrent, разбирается на состав
-      (torrent_files) и остаётся на паузе — пользователь отбирает серии
-      в композиции, закачку начинает следующий скан.
+  scan.series.run {series_id, force_replace?, download?} → {changed, ...}. changed tells whether anything was
+      actually changed: torrent — tasks were created; video — the references or the rows of the plan differ from
+      what they were before the run. A video series answers {kind: "video", changed, sources: [{source_id, url,
+      state: ready | stale | skipped, reason}], references: {by_level, own, other_player, none, unfit}, in_plan}.
+      `stale` — the read of the page failed and the last complete table stays in force; `skipped` — it failed and there is no table.
+      A scan of a series that is being scanned is refused ("уже запущен", finding 27). The steps of a video series
+      are tied by signals: renaming.reprocess, downloads.fs.sync, sources.table.get for every source at once and
+      the wait for sources.table.ready / .failed of its page, composition.recompute (its answer means the layout is
+      counted from these tables), composition.get with voices.settings.get, the choice and the plan, and with
+      download (the default) downloads.dispatch and voices.dispatch. A failed step is the one signal of failure:
+      the error carrier (scan_tasks.status='error') holds its reason. The wait for a table has a safeguard
+      (TABLE_WAIT_SAFEGUARD_S): when it runs out the source counts as failed, reason `table_wait_timeout`.
+  scan.series.prepare {series_id} → the summary of a torrent scan without a download: the torrent is added to
+      qBittorrent, split into its files (torrent_files) and left paused — the user picks the episodes in the
+      composition, the next scan starts the download.
+  scan.output.get {series_id} → [Reference]: the reference of every slot of the series that the user has not
+      switched off (an episode or a season switched off, or a row of the plan switched off, is not offered). One
+      Reference per slot: an episode with parts has one per part. Marks: by_level, own, other_player, none, unfit
+      (core/contracts/reference.py).
 
 Commands:
-  scan.all.start {} — проход по всем сериалам с auto_scan_enabled
-      (то же делает внутренний планировщик по расписанию из settings).
+  scan.all.start {} — a pass over all series with auto_scan_enabled (what the internal scheduler does by the
+      schedule from the settings).
 
-События (исходящие):
-  scan.plan.updated {series_id} — план VK-загрузок пересчитан; downloads
-      на него делает ТОЛЬКО усыновление готовых файлов (НЕ загрузку).
-      Загрузку запускает лишь явный скан: _run_series после _scan_vk
-      шлёт команду downloads.dispatch (открытие композиции — не шлёт).
-  After downloads.dispatch a web_video series gets voices.dispatch — the voice-overs of the
-      same episodes into a temporary directory.
-  The memory of switched-off episodes (series.ignored_episodes, the rule of core/ignored.py shared with the
-      torrents) holds for web and VK sources too: a row of such an episode is created switched off
-      (is_ignored_by_user=1), so the plan, the download and the voice-overs leave it out.
-  scan.status.changed {scanner_enabled, scan_interval, is_scanning,
-      is_awaiting_tasks, next_scan_time} — состояние планировщика
-      (контракт старого scanner_status_update).
-  series.status.contribution — свёртка scanning/error (Р-11); носитель
-      ошибки — scan_tasks.status='error'.
-  series.purged {series_id, owner} — отчёт: таблицы серии вычищены.
+Events (outgoing):
+  scan.plan.updated {series_id} — the plan was counted again; downloads only adopts finished files on it (it does NOT
+      download). The download is started by an explicit scan alone (downloads.dispatch).
+  scan.reference.changed {series_id, season, episode, part, mark} — the reference or the mark of a slot differs from
+      the stored one (a slot that left the output reports `none`); sent after the write. Voices follow it.
+  scan.status.changed {scanner_enabled, scan_interval, is_scanning, is_awaiting_tasks, next_scan_time} — the state
+      of the scheduler (the contract of the old scanner_status_update).
+  series.status.contribution — the fold of scanning/error (R-11); the carrier of the error is scan_tasks.status='error'.
+  series.purged {series_id, owner} — report: the tables of the series are cleaned.
 
-События (входящие):
-  torrents.queue.changed {count} — опустошение конвейера: после полного
-      прохода следующий скан назначается, когда count=0.
+Events (incoming):
+  composition.changed {series_id, rev, episodes, summary_only} — the layout or the levers changed: the references
+      and the plan of the series are counted again (the whole series: the count is a pure function, an episode the
+      change did not touch comes out the same). Never starts a download. `summary_only` is skipped.
+  voices.settings.changed — the order of players is an input of the choice: every video series is counted again.
+  sources.table.ready / .failed {url, ...} — the verdicts a synchronization waits for.
+  torrents.queue.changed {count} — the pipeline is empty: after a full pass the next scan is set when count=0.
 
-Контракты будущих модулей (тесты фиксируют их фейками):
-  renaming.reprocess {series_id} (query) — переобработка имён перед
-      сканом (вместо sleep-поллинга, находка 16);
-  torrents.db.active {series_id} (query) → активные торренты серии
-      (сверенные с qBittorrent);
-  torrents.db.deactivate_all {series_id} (query) — для force_replace;
-  torrents.register {series_id, torrent, qb_hash, link_type, replaces}
-      (query, идемпотентен) — фиксация раздачи + запуск конвейера +
-      замена старой.
+Neighbours (all over the bus): catalog.series.get / .list (kind, sources), composition.get / .recompute,
+voices.settings.get (the order of players), sources.table.get, downloads.dispatch / .fs.sync / .queue.get,
+voices.dispatch, renaming.reprocess. Scan asks nothing of composition at start: its state is its own database.
 
-Ресьюмабельность (настоящая, вместо находки 26): план замен — в
-scan_tasks ДО выполнения; добавления идемпотентны (локальный infohash,
-Р-2: повторное добавление = existed); on_start продолжает незавершённые
-задачи с места обрыва.
+Resumability: the plan of replacements of a torrent scan is in scan_tasks BEFORE it is carried out; additions are
+idempotent (local infohash, R-2: adding again = existed); on_start goes on with the unfinished tasks. A video series
+keeps its references and rows in the database; what a restart interrupted is brought back by the events of
+composition and by the next scan.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from core import BaseModule, BusRequestError, ids, is_video_source
+from core import BaseModule, BusRequestError, ids
+from core.contracts import (CompositionReply, ReferenceChanged, SeriesSource, SourceType, VoiceSettingsView)
 from core.db import Database
 from core.envelope import Envelope
-from core.ignored import covered, episodes_of, parse_memory
-from .planner import plan_with_supersession
+from core.ignored import parse_memory
+from core.reasons import reason
+from . import candidates, output, planner, reference, sync
 from .repository import ScanRepository
+from .sync import TABLE_WAIT_SAFEGUARD_S, TableSignals
 
 # Режим замены раздач по трекерам (ревизия находки 28 — вместо
 # подстроки в оркестраторе). fixed: новая раздача заменяет активную с
@@ -74,6 +82,11 @@ from .repository import ScanRepository
 REPLACE_MODE = {"astar": "fixed"}
 DEFAULT_REPLACE_MODE = "rolling"
 
+# Safeguards of requests, not syncs: an answer that is not there by then fails the step.
+STEP_TIMEOUT_S = 30.0
+# Counting a layout asks the constructor once per source, up to 300 s each.
+RECOMPUTE_TIMEOUT_S = 900.0
+
 _NO_HANDLER = "нет обработчика"
 
 
@@ -81,17 +94,45 @@ class ScanError(RuntimeError):
     pass
 
 
+class SyncFailed(ScanError):
+    """A step of a synchronization failed; the message is a reason (core/reasons), not a sentence."""
+
+
 class ScanAborted(RuntimeError):
     """Серию удалили во время скана — работа прекращается (Д2)."""
+
+
+@dataclass(frozen=True)
+class Refreshed:
+    """What a count of the references and the plan came to."""
+
+    in_plan: int
+    references: list[dict]
+    plan_changed: bool
+
+
+def _sources_of(series: dict) -> list[SeriesSource]:
+    return [SeriesSource.model_validate(each) for each in series.get("sources", [])]
+
+
+def _torrent_source(series: dict) -> SeriesSource:
+    """The source of a torrent series: the address and the profile of a torrent live in the source (Д-38)."""
+    found = next((each for each in _sources_of(series) if each.source_type == SourceType.TORRENT), None)
+    if found is None:
+        raise ScanError(f"у сериала «{series.get('name')}» нет торрент-источника")
+    return found
 
 
 class ScanModule(BaseModule):
     name = "scan"
 
-    def __init__(self, bus, db: Database, *,
-                 scheduler_tick: float | None = 10.0) -> None:
+    def __init__(self, bus, db: Database, *, scheduler_tick: float | None = 10.0,
+                 table_wait_s: float = TABLE_WAIT_SAFEGUARD_S) -> None:
         self.repo = ScanRepository(db)
         self._tick = scheduler_tick  # None — без планировщика (тесты)
+        self._table_wait_s = table_wait_s
+        self._signals = TableSignals()
+        self._locks: dict[int, asyncio.Lock] = {}
         self._running: set[int] = set()
         self._aborted: set[int] = set()
         self._scan_all_running = False
@@ -109,9 +150,12 @@ class ScanModule(BaseModule):
         self.handle("scan.seasons", self.on_seasons)
         self.handle("scan.item.set_ignored", self.on_set_ignored)
         self.handle("scan.items.set_ignored_bulk", self.on_set_ignored_bulk)
-        self.handle("scan.composition", self.on_composition, concurrent=True)
-        self.handle("scan.availability", self.on_availability)
+        self.handle("scan.output.get", self.on_output_get)
         self.handle("scan.status.get", self.on_status_get)
+        self.handle("composition.changed", self.on_composition_changed)
+        self.handle("voices.settings.changed", self.on_voice_settings_changed)
+        self.handle("sources.table.ready", self.on_table_ready)
+        self.handle("sources.table.failed", self.on_table_failed)
         self.handle("torrents.queue.changed", self.on_queue_changed)
         self.handle("series.deleted", self.on_series_deleted)
         self.handle("settings.changed", self.on_settings_changed)
@@ -152,18 +196,17 @@ class ScanModule(BaseModule):
         return await self.repo.items_for_series(env.payload["series_id"])
 
     async def on_set_ignored(self, env: Envelope) -> None:
-        """is_ignored_by_user — наша колонка; ставят UI (этап 5) и
-        slicing (нарезанная компиляция уходит из планов).
+        """is_ignored_by_user is our column; the UI and slicing set it.
 
-        Смена ignore меняет фактический план загрузки → публикуем
-        scan.plan.updated: диспетчер downloads пересчитает задачи и
-        свёртку статусов (Р-21; покрывает старый sync_vk_statuses)."""
-        await self.repo.set_ignored(env.payload["unique_id"],
-                                    bool(env.payload["is_ignored"]))
+        Switching a row off changes the real plan of the download, so scan.plan.updated goes out and downloads
+        counts its tasks and the fold of statuses again (R-21). The row also leaves the output, so the references
+        that changed with it are announced."""
         item = await self.repo.get_item(env.payload["unique_id"])
-        if item:
-            self.publish_event("scan.plan.updated",
-                               {"series_id": item["series_id"]})
+        if item is None:
+            return
+        ignored = bool(env.payload["is_ignored"])
+        await self._announcing(item["series_id"], self.repo.set_ignored(item["unique_id"], ignored))
+        self.publish_event("scan.plan.updated", {"series_id": item["series_id"]})
 
     async def on_set_ignored_bulk(self, env: Envelope) -> dict:
         """Второй, независимый от ignored_seasons контрол: разовая массовая
@@ -172,156 +215,39 @@ class ScanModule(BaseModule):
         эпизоды) не трогаем — здесь только снимок media_items на сейчас,
         новые эпизоды сезона по умолчанию останутся is_ignored_by_user=0."""
         series_id = env.payload["series_id"]
-        n = await self.repo.set_ignored_bulk_for_season(
-            series_id, int(env.payload["season"]),
-            bool(env.payload["is_ignored"]))
+        n = await self._announcing(series_id, self.repo.set_ignored_bulk_for_season(
+            series_id, int(env.payload["season"]), bool(env.payload["is_ignored"])))
         self.publish_event("scan.plan.updated", {"series_id": series_id})
         return {"updated": n}
 
-    async def on_availability(self, env: Envelope) -> dict:
-        """Last player availability report for a web series."""
-        return await self.repo.get_availability(int(env.payload["series_id"]))
+    async def on_output_get(self, env: Envelope) -> list[dict]:
+        """The references of the series that are wanted, in the order of season, episode, part."""
+        series_id = int(env.payload["series_id"])
+        series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=STEP_TIMEOUT_S)
+        shown = await self._output_of(series)
+        return [output.reference_of(each).model_dump(mode="json") for each in shown]
 
-    async def on_composition(self, env: Envelope) -> list[dict]:
-        """Контракт GET composition для VK-серий (Р-21): при refresh —
-        полный скан канала; всегда — чистка нарезки устаревших
-        компиляций, синк с диском, проверка детей, пересборка плана и
-        реконструкция элементов через движок правил."""
-        series_id = env.payload["series_id"]
-        refresh = bool(env.payload.get("refresh"))
-        series = await self.request("catalog.series.get",
-                                    {"series_id": series_id})
-        if refresh:
-            # полный цикл Р-12: кандидаты + план + scan.plan.updated
-            try:
-                if series.get("source_type") == "web_video":
-                    await self._scan_web_video(series)
-                else:
-                    await self._scan_vk(series)
-            except ScanAborted as exc:
-                self.log.info("композиция: скан прерван — %s", exc)
-                raise
-            except Exception as exc:
-                self.log.warning("композиция: скан источника при refresh завершился ошибкой: %s", exc)
-                raise
-        items = await self.repo.items_for_series(series_id)
-        # компиляции, выпавшие из плана, теряют записи о нарезке
-        for item in items:
-            if item.get("episode_end") and item.get("plan_status") in (
-                    "replaced", "redundant"):
-                self.send_command("slicing.files.drop_for_source",
-                                  {"unique_id": item["unique_id"]})
-        await self._neighbour_sync(series_id, items)
-        if not refresh:
-            # пересборка плана из всего известного (семантика старого
-            # reset_plan_status + SmartCollector.collect)
-            await self._rebuild_plan(series)
-            self.publish_event("scan.plan.updated",
-                               {"series_id": series_id})
-        # Построение композиции дало актуальный набор сезонов → пересчёт
-        # агрегата TMDB (число серий по реальным сезонам).
-        self.send_command("metadata.seasons.recompute",
-                          {"series_id": series_id})
-        return await self._reconstruct(series)
+    async def _output_of(self, series: dict) -> list[dict]:
+        items = {each["unique_id"]: each for each in await self.repo.items_for_series(series["id"])}
+        return output.visible(await self.repo.references(series["id"]), items, self._ignored_episodes(series),
+                              self._ignored_seasons(series))
 
-    async def _neighbour_sync(self, series_id: int,
-                              items: list[dict]) -> None:
-        """Синк с диском (downloads) и проверка нарезанных детей
-        (slicing) — как в старом composition; соседи опциональны."""
+    async def _announcing(self, series_id: int, action):
+        """Awaits `action` (a change of the rows that may switch a reference off) and announces what changed in the
+        output of the series. A series the catalog does not have, or a torrent one, has no output to announce."""
         try:
-            await self.request("downloads.fs.sync",
-                               {"series_id": series_id}, timeout=120)
-        except BusRequestError as exc:
-            self.log.warning("композиция: fs.sync недоступен: %s", exc)
-        await self._verify_compilations(series_id, items)
+            series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=STEP_TIMEOUT_S)
+            before = await self._output_of(series)
+        except (BusRequestError, asyncio.TimeoutError):
+            return await action
+        result = await action
+        for season, episode, part, mark in output.changes(before, await self._output_of(series)):
+            self._announce(series_id, season, episode, part, mark)
+        return result
 
-    async def _verify_compilations(self, series_id: int,
-                                   items: list[dict]) -> None:
-        """Сверка нарезанных детей с диском (slicing): пропавший ребёнок →
-        missing/completed_with_errors, исходник возвращается в дозагрузку.
-        downloads.fs.sync компиляции намеренно пропускает (владелец —
-        slicing), поэтому верификацию инициируем явно. F7-гард — в
-        slicing._verify_item."""
-        for item in items:
-            if (item.get("slicing_status") or "none") in (
-                    "pending", "completed", "completed_with_errors"):
-                try:
-                    await self.request("slicing.verify",
-                                       {"unique_id": item["unique_id"]},
-                                       timeout=120)
-                except BusRequestError as exc:
-                    self.log.warning("verify нарезки %s: %s",
-                                     item["unique_id"], exc)
-
-    async def _reconstruct(self, series: dict) -> list[dict]:
-        """Элементы серии в форме старого composition-ответа."""
-        items = await self.repo.items_for_series(series["id"])
-        profile_id = series.get("parser_profile_id")
-        results: list[dict] = [{} for _ in items]
-        if profile_id and items:
-            reply = await self.request("rules.apply", {
-                "profile_id": profile_id,
-                "titles": [i.get("source_title") or "" for i in items],
-                "series_season": series.get("season")},
-                timeout=300)
-            results = reply["results"]
-        enriched: list[dict] = []
-        for item, r in zip(items, results):
-            ext = dict(r.get("extracted") or {})
-            part = ext.get("part") if ext.get("part") is not None else item.get("part")
-            ep_start = ext.get("episode") if ext.get("episode") is not None else (
-                ext.get("start") if ext.get("start") is not None else item.get("episode_start"))
-            season = ext.get("season") if ext.get("season") is not None else item.get("season")
-            ep_end = ext.get("end") if ext.get("end") is not None else item.get("episode_end")
-            enriched.append({
-                "item": item,
-                "r": r,
-                "ext": ext,
-                "season": season,
-                "episode_start": ep_start,
-                "episode_end": ep_end,
-                "part": part,
-            })
-
-        parts_eps = {
-            (e["season"], e["episode_start"]) for e in enriched
-            if e["part"] is not None and not (e["episode_end"] and e["episode_end"] > e["episode_start"])
-        }
-        for e in enriched:
-            if (e["season"], e["episode_start"]) in parts_eps and e["part"] is None:
-                if not (e["episode_end"] and e["episode_end"] > e["episode_start"]):
-                    e["part"] = 1
-                    e["ext"]["part"] = 1
-            elif e["part"] is not None:
-                e["ext"]["part"] = e["part"]
-
-        plan = []
-        for e in enriched:
-            item, r, ext = e["item"], e["r"], e["ext"]
-            is_excluded = bool(r.get("excluded"))
-            plan_status = "excluded" if is_excluded else item.get("plan_status")
-            plan.append({
-                "source_data": {
-                    "title": item.get("source_title"),
-                    "url": item.get("source_url"),
-                    "publication_date": item.get("publication_date"),
-                    "resolution": item.get("resolution"),
-                },
-                "match_events": r.get("events") or [],
-                "result": {"extracted": ext, "excluded": is_excluded},
-                "season": e["season"],
-                "episode_start": e["episode_start"],
-                "episode_end": e["episode_end"],
-                "part": e["part"],
-                "plan_status": plan_status,
-                "status": item.get("status"),
-                "unique_id": item.get("unique_id"),
-                "final_filename": item.get("final_filename"),
-                "slicing_status": item.get("slicing_status") or "none",
-                "is_ignored_by_user": bool(item.get("is_ignored_by_user")),
-                "source_title": item.get("source_title"),
-            })
-        return plan
+    def _announce(self, series_id: int, season: int, episode: int, part: int | None, mark) -> None:
+        self.publish_event("scan.reference.changed", ReferenceChanged(
+            series_id=series_id, season=season, episode=episode, part=part, mark=mark).model_dump(mode="json"))
 
     async def on_downloaded_counts(self, env: Envelope) -> dict:
         """{counts: {series_id: n}} — скачанные VK-эпизоды (Р-19)."""
@@ -338,7 +264,10 @@ class ScanModule(BaseModule):
         скан серии прерывается (Д2 — как у загрузки, нарезки и переноса)."""
         series_id = env.payload["series_id"]
         self._aborted.add(series_id)
-        await self.repo.delete_for_series(series_id)
+        # A count of the plan that is writing finishes first; one that comes after sees the series aborted.
+        async with self._lock(series_id):
+            await self.repo.delete_for_series(series_id)
+        self._locks.pop(series_id, None)
         self.publish_event("series.purged",
                            {"series_id": series_id, "owner": self.name})
 
@@ -381,6 +310,62 @@ class ScanModule(BaseModule):
     async def _debug_force_replace(self) -> bool:
         return await self._setting("debug_force_replace", "false") == "true"
 
+    # --- сигналы соседей ---------------------------------------------------------------
+
+    def on_table_ready(self, env: Envelope) -> None:
+        self._signals.ready(env.payload["url"])
+
+    def on_table_failed(self, env: Envelope) -> None:
+        self._signals.failed(env.payload["url"], env.payload.get("reason"))
+
+    async def on_composition_changed(self, env: Envelope) -> None:
+        """The layout or the levers changed: the references and the plan follow, nothing is downloaded."""
+        if env.payload.get("summary_only"):
+            return  # no row and no lever moved, only what a window shows
+        await self._follow_layout(int(env.payload["series_id"]))
+
+    async def on_voice_settings_changed(self, env: Envelope) -> None:
+        """The order of players decides ties of the choice, so a new order may change references."""
+        try:
+            listing = await self.request("catalog.series.list", {}, timeout=STEP_TIMEOUT_S)
+        except (BusRequestError, asyncio.TimeoutError) as exc:
+            self.log.warning("порядок плееров изменён, список сериалов недоступен: %s", exc)
+            return
+        for series in listing:
+            if series.get("kind") == "video":
+                await self._follow_layout(series["id"])
+
+    async def _follow_layout(self, series_id: int) -> None:
+        """Counts the references of a video series again after an event; a failure is logged, the next event or the
+        next scan counts again."""
+        try:
+            series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=STEP_TIMEOUT_S)
+            if series.get("kind") == "video":
+                await self._refresh(series)
+        except ScanAborted as exc:
+            self.log.info("пересчёт референсов прерван: %s", exc)
+        except (BusRequestError, asyncio.TimeoutError, ScanError) as exc:
+            self.log.warning("сериал %d: референсы не пересчитаны: %s", series_id, exc)
+        except Exception:  # noqa: BLE001 — one series must not stop the handling of the events of the others
+            self.log.exception("сериал %d: сбой пересчёта референсов", series_id)
+
+    def _lock(self, series_id: int) -> asyncio.Lock:
+        return self._locks.setdefault(series_id, asyncio.Lock())
+
+    def _alive(self, series_id: int) -> None:
+        if series_id in self._aborted:
+            raise ScanAborted(f"сериал {series_id} удалён во время скана")
+
+    async def _step(self, topic: str, payload: dict, *, timeout: float = STEP_TIMEOUT_S):
+        """A request of a synchronization: any failure of it is the one signal that the step failed."""
+        try:
+            return await self.request(topic, payload, timeout=timeout)
+        except (BusRequestError, asyncio.TimeoutError) as exc:
+            if "LookupError" in str(exc):
+                raise ScanAborted(f"сериал {payload.get('series_id')} удалён во время скана") from exc
+            self.log.error("синхронизация: запрос %s не выполнен: %s: %s", topic, type(exc).__name__, exc)
+            raise SyncFailed(reason("scan_step_failed", step=topic)) from exc
+
     async def _run_series(self, series_id: int, force: bool = False,
                           download: bool = True) -> dict:
         if series_id in self._running:
@@ -390,50 +375,21 @@ class ScanModule(BaseModule):
         try:
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
-            if not series.get("parser_profile_id"):
+            video = series.get("kind") == "video"
+            if video:
+                if not any(each.parser_profile_id for each in _sources_of(series)):
+                    raise SyncFailed(reason("scan_no_profile"))
+            elif not _torrent_source(series).parser_profile_id:
                 raise ScanError(
                     f"для сериала «{series.get('name')}» не назначен "
                     "профиль правил")
             # Прошлая ошибка сбрасывается новым сканом (Р-11).
             await self.repo.delete_error_tasks(series_id)
             await self._reprocess_names(series_id)
-            if is_video_source(series["source_type"]):
-                # Сверка диска перед сканом (R4, ситуации VF1/VF3/VC1):
-                # пропавший скачанный .mp4 → сброс completed→pending, чтобы
-                # dispatch перекачал. Симметрично торрент-ветке, которая
-                # стартует с torrents.fs.verify. Без этого «удалил VK-файл →
-                # обычный скан не замечает». Гард недоступного пути (F7/VF7) —
-                # внутри downloads.on_fs_sync; композиция зовёт fs.sync сама.
-                try:
-                    await self.request("downloads.fs.sync",
-                                       {"series_id": series_id}, timeout=120)
-                except BusRequestError as exc:
-                    self.log.warning("сверка диска перед видео-сканом "
-                                     "пропущена: %s", exc)
-                if series["source_type"] == "vk_video":
-                    result = await self._scan_vk(series)
-                else:
-                    result = await self._scan_web_video(series)
-                # VF2: проверка нарезанных детей на КАЖДОМ скане (а не только
-                # при открытии композиции). Пропавший sliced-файл → missing/
-                # completed_with_errors + исходник назад в дозагрузку, который
-                # тут же подхватит dispatch. До скана — после _scan_vk, чтобы
-                # верификация шла по актуальному плану.
-                await self._verify_compilations(
-                    series_id, await self.repo.items_for_series(series_id))
-                # Явный скан — ЕДИНСТВЕННЫЙ путь к загрузке: после скрейпа
-                # и усыновления (scan.plan.updated) приказываем downloads
-                # докачать недостающее. Открытие композиции и «Сохранить»
-                # (download=False) этого НЕ делают — только усыновление.
-                if download:
-                    self.send_command("downloads.dispatch",
-                                      {"series_id": series_id})
-                    if series["source_type"] == "web_video":
-                        # Voice-overs of the same episodes follow the reference scan.
-                        self.send_command("voices.dispatch",
-                                          {"series_id": series_id})
+            if video:
+                result = await self._sync_video(series, download)
             else:
-                result = await self._scan_torrents(series, force)
+                result = await self._scan_torrents(series, _torrent_source(series), force)
             self._contribute(series_id, scanning=False, error=False)
             # Многосезонный агрегат TMDB: реальные сезоны могли измениться
             # (новый сезон/файлы) — пересчитать число серий по сезонам.
@@ -468,10 +424,10 @@ class ScanModule(BaseModule):
         try:
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
-            if is_video_source(series["source_type"]):
+            if series.get("kind") == "video":
                 raise ScanError("подготовка состава — только для торрентов")
             await self.repo.delete_error_tasks(series_id)
-            result = await self._scan_torrents(series, False, prepare=True)
+            result = await self._scan_torrents(series, _torrent_source(series), False, prepare=True)
             self._contribute(series_id, scanning=False, error=False)
             return result
         except ScanAborted as exc:
@@ -516,113 +472,114 @@ class ScanModule(BaseModule):
             else:
                 raise
 
-    # --- VK-ветка ---------------------------------------------------------------
+    # --- видео-ветка: синхронизация и план референсов ----------------------------------
 
-    async def _process_video_candidates(self, series: dict, videos: list[dict],
-                                        source_type: str) -> dict:
+    async def _sync_video(self, series: dict, download: bool) -> dict:
+        """Tables of all sources -> layout -> references and plan -> (with download) the download and the voice-overs.
+
+        Each step starts on the signal that the one before it ended, and any step that fails fails the scan."""
         series_id = series["id"]
-        if series_id in self._aborted:
-            raise ScanAborted(f"сериал {series_id} удалён во время скана")
-        applied = await self.request("rules.apply", {
-            "profile_id": series["parser_profile_id"],
-            "titles": [v["title"] for v in videos],
-            "series_season": series.get("season")}, timeout=300)
-        candidates = self._vk_candidates(series_id, videos, applied["results"],
-                                         self._ignored_episodes(series))
-        candidates = await self._skip_completed_downgrades(series_id, candidates)
+        # Сверка диска перед сканом (R4, ситуации VF1/VF3/VC1): пропавший скачанный файл → сброс completed→pending,
+        # чтобы dispatch перекачал. Недоступный путь (F7/VF7) гасится внутри downloads.on_fs_sync.
         try:
-            stats = await self.repo.upsert_candidates(series_id, candidates)
-        except Exception as exc:
-            if "FOREIGN KEY" in str(exc) or "not found" in str(exc).lower():
-                self.log.warning("Сериал %d удалён во время видео-сканирования: %s",
-                                 series_id, exc)
-                return {"source_type": source_type,
-                        "candidates": {"added": 0, "updated": 0, "deleted": 0},
-                        "in_plan": 0, "changed": False}
-            raise
-
-        self.log.info("Видео-скан %s %d: кандидатов %d (добавлено %d, обновлено "
-                      "%d, удалено фантомов %d)", source_type, series_id,
-                      len(candidates), stats["added"], stats["updated"],
-                      stats["deleted"])
-
-        plan = await self._rebuild_plan(
-            series, offered={c["unique_id"] for c in candidates})
-        in_plan = sum(1 for s in plan.values() if s.startswith("in_plan"))
-        self.publish_event("scan.plan.updated", {"series_id": series_id})
-        changed = bool(stats["added"] or stats["deleted"])
-        return {"source_type": source_type, "candidates": stats,
-                "in_plan": in_plan, "changed": changed}
-
-    async def _scan_vk(self, series: dict) -> dict:
-        channel_url, _, query = series["url"].partition("|")
-        reply = await self.request("sources.vk.scan", {
-            "channel_url": channel_url, "query": query,
-            "search_mode": series.get("vk_search_mode") or "search",
-            "series_id": series["id"]},
-            timeout=900)
-        return await self._process_video_candidates(series, reply["videos"], "vk_video")
-
-    async def _included_episodes(self, series: dict) -> list[int] | None:
-        """Fast release list + rules: excluded episodes are never fetched."""
-        try:
-            parsed = await self.request("sources.parse", {"url": series["url"]},
-                                        timeout=120)
+            await self.request("downloads.fs.sync", {"series_id": series_id}, timeout=120)
         except BusRequestError as exc:
-            self.log.warning("скан: быстрый список серий недоступен: %s", exc)
-            return None
-        titles = parsed.get("titles") or []
-        episodes = parsed.get("episodes") or []
-        profile_id = series.get("parser_profile_id")
-        if not titles or not episodes or not profile_id:
-            return None
-        try:
-            applied = await self.request("rules.apply", {
-                "profile_id": profile_id, "titles": titles,
-                "series_season": series.get("season")}, timeout=300)
-        except BusRequestError as exc:
-            self.log.warning("скан: правила не применились к списку: %s", exc)
-            return None
-        results = applied.get("results") or []
-        if len(results) != len(episodes):
-            return None
-        included = [episode["number"] for episode, outcome
-                    in zip(episodes, results) if not outcome.get("excluded")]
-        self.log.info("скан %d: быстрый список %d серий, после правил %d",
-                      series["id"], len(episodes), len(included))
-        return included
+            self.log.warning("сверка диска перед видео-сканом пропущена: %s", exc)
+        before = await self._fingerprint(series_id)
+        self._alive(series_id)
+        tables = await sync.sync_tables(_sources_of(series), self.request, self._signals, self._table_wait_s)
+        for each in tables:
+            if each.reason:
+                self.log.warning("сериал %d, источник %d: страница %s — %s, причина %s", series_id, each.source_id,
+                                 each.url, each.state, each.reason)
+        self._alive(series_id)
+        await self._step("composition.recompute", {"series_id": series_id}, timeout=RECOMPUTE_TIMEOUT_S)
+        self._alive(series_id)
+        refreshed = await self._refresh(series, announce=True)
+        changed = before != await self._fingerprint(series_id)
+        # Явный скан — ЕДИНСТВЕННЫЙ путь к загрузке: после плана приказываем downloads докачать недостающее, а
+        # voices — взять озвучки тех же серий. «Сохранить» (download=False) и пересчёт по событию этого НЕ делают.
+        if download:
+            self.send_command("downloads.dispatch", {"series_id": series_id})
+            self.send_command("voices.dispatch", {"series_id": series_id})
+        return {"kind": "video", "changed": changed, "sources": [each.as_dict() for each in tables],
+                "references": output.marks(refreshed.references), "in_plan": refreshed.in_plan}
 
-    async def _scan_web_video(self, series: dict) -> dict:
-        episodes = await self._included_episodes(series)
-        reply = await self.request("sources.video.scan", {
-            "url": series["url"], "series": series, "episodes": episodes},
-            timeout=900)
-        result = await self._process_video_candidates(series, reply["videos"],
-                                                      "web_video")
-        report = reply.get("players") or {}
-        if report:
+    async def _fingerprint(self, series_id: int) -> tuple:
+        """The references and the rows of the plan as stored: two equal fingerprints mean the run changed nothing."""
+        records = await self.repo.references(series_id)
+        rows = sorted(each["unique_id"] for each in await self.repo.items_for_series(series_id))
+        return tuple(tuple(each.items()) for each in records), tuple(rows)
+
+    async def _refresh(self, series: dict, *, announce: bool = False) -> Refreshed:
+        """Counts the references of the series from the layout as it stands, writes them with the plan in one
+        transaction and announces what changed. Counting twice with the same inputs changes nothing."""
+        series_id = series["id"]
+        async with self._lock(series_id):
+            self._alive(series_id)
+            layout = CompositionReply.model_validate(await self._step("composition.get", {"series_id": series_id}))
+            voices = VoiceSettingsView.model_validate(await self._step("voices.settings.get", {}))
+            existing = await self.repo.items_for_series(series_id)
+            stored = await self.repo.references(series_id)
+            chosen = reference.choose(layout.rows, layout.settings, voices.priority,
+                                      [each.source_id for each in layout.sources],
+                                      previous=[output.reference_of(each) for each in stored])
+            memory, seasons = self._ignored_episodes(series), self._ignored_seasons(series)
+            placements = candidates.place(series_id, chosen, existing)
+            winners = {each.slot: each.unique_id for each in placements}
+            by_id = {each["unique_id"]: each for each in existing}
+            inserts = [candidates.new_row(series_id, each, memory) for each in placements if each.is_new]
+            updates = []
+            for each in placements:
+                if not each.is_new:
+                    changed = {name: value for name, value in each.fields.items() if by_id[each.unique_id].get(name) != value}
+                    if changed:
+                        updates.append((each.unique_id, changed))
+            deletes = await self._leftovers(series_id, existing, set(winners.values()))
+            rows = candidates.rows_after(existing, inserts, updates, deletes)
+            statuses, superseded = planner.plan_with_supersession(rows, winners, seasons)
+            records = [{**each.reference.model_dump(mode="json"), "unique_id": winners.get(each.slot)}
+                       for each in chosen]
+            shown_before = output.visible(stored, by_id, memory, seasons)
+            shown_after = output.visible(records, {each["unique_id"]: each for each in rows}, memory, seasons)
+            plan_changed = bool(inserts or updates or deletes) or any(
+                (by_id[unique_id].get("plan_status"), by_id[unique_id].get("superseded_by"))
+                != (statuses.get(unique_id, "candidate"), superseded.get(unique_id))
+                for unique_id in by_id if unique_id not in deletes)
+            self._alive(series_id)
             try:
-                await self.repo.save_availability(series["id"], report)
-            except Exception as exc:  # noqa: BLE001 - deleted series must not fail the scan
-                self.log.warning("отчёт о плеерах не сохранён (%d): %s",
-                                 series["id"], exc)
-        return result
+                await self.repo.save_outcome(series_id, inserts=inserts, updates=updates, deletes=deletes,
+                                             statuses=statuses, superseded=superseded, references=records)
+            except Exception as exc:
+                if "FOREIGN KEY" in str(exc):
+                    raise ScanAborted(f"сериал {series_id} удалён во время скана") from exc
+                raise
+        self.log.info("сериал %d: раскладка %d, слотов %d, в плане %d, добавлено строк %d, убрано %d", series_id,
+                      layout.rev, len(chosen), sum(1 for each in statuses.values() if each == "in_plan_single"),
+                      len(inserts), len(deletes))
+        if announce or plan_changed:
+            self.publish_event("scan.plan.updated", {"series_id": series_id})
+        for season, episode, part, mark in output.changes(shown_before, shown_after):
+            self._announce(series_id, season, episode, part, mark)
+        return Refreshed(sum(1 for each in statuses.values() if each == "in_plan_single"), shown_after, plan_changed)
 
-    async def _rebuild_plan(self, series: dict,
-                            offered: set[str] | None = None) -> dict[str, str]:
-        """Plan over every row of the series, not only the rows this scan returned.
-
-        With `offered` (the scan's own candidates) a row nobody offers any more
-        and that was never fetched cannot hold a slot against a live source."""
-        rows = await self.repo.plan_input(series["id"])
-        if offered is not None:
-            rows = [row for row in rows
-                    if row["unique_id"] in offered or self._is_downloaded(row)
-                    or row.get("status") == "downloading"]
-        statuses, superseded = plan_with_supersession(
-            rows, self._quality_priority(series), self._ignored_seasons(series))
-        await self.repo.replace_plan(series["id"], statuses, superseded)
-        return statuses
+    async def _leftovers(self, series_id: int, existing: list[dict], kept: set[str]) -> list[str]:
+        """The rows to delete: those that stand for nothing and have no task in the queue of downloads. When the
+        queue cannot be told, nothing is deleted this time, so that no task is left without its row."""
+        if not candidates.obsolete(existing, kept, ()):
+            return []
+        try:
+            queue = await self.request("downloads.queue.get", {}, timeout=STEP_TIMEOUT_S)
+        except BusRequestError as exc:
+            if _NO_HANDLER not in str(exc):
+                self.log.warning("сериал %d: очередь загрузок недоступна, лишние строки оставлены: %s", series_id, exc)
+                return []
+            queue = {"tasks": []}
+        except asyncio.TimeoutError:
+            self.log.warning("сериал %d: очередь загрузок не ответила, лишние строки оставлены", series_id)
+            return []
+        busy = {task["task_key"] for task in queue.get("tasks", []) if task.get("series_id") == series_id}
+        return candidates.obsolete(existing, kept, busy)
 
     @staticmethod
     def _ignored_episodes(series: dict) -> dict[int, set[int]]:
@@ -634,13 +591,6 @@ class ScanModule(BaseModule):
             return {}
 
     @staticmethod
-    def _quality_priority(series: dict) -> list[int]:
-        try:
-            return json.loads(series.get("vk_quality_priority") or "[]")
-        except (json.JSONDecodeError, TypeError):
-            return []
-
-    @staticmethod
     def _ignored_seasons(series: dict) -> set[int]:
         """Сезоны, помеченные пользователем к игнору (VU11): их эпизоды в
         план не попадают."""
@@ -650,110 +600,9 @@ class ScanModule(BaseModule):
         except (json.JSONDecodeError, TypeError, ValueError):
             return set()
 
-    async def _skip_completed_downgrades(self, series_id: int,
-                                         candidates: list[dict]) -> list[dict]:
-        """Drop candidates that do not beat a downloaded file; give a better file
-        from an already downloaded URL its own row instead of overwriting that row."""
-        if not candidates:
-            return candidates
-        existing = await self.repo.items_for_series(series_id)
-        by_id = {row["unique_id"]: row for row in existing}
-        downloaded: dict[tuple, int] = {}
-        for row in existing:
-            if not self._is_downloaded(row):
-                continue
-            key = (row.get("season"), row["episode_start"], row.get("part"))
-            downloaded[key] = max(downloaded.get(key, 0), row.get("resolution") or 0)
-        if not downloaded:
-            return candidates
-
-        kept: list[dict] = []
-        for candidate in candidates:
-            key = (candidate.get("season"), candidate["episode_start"],
-                   candidate.get("part"))
-            resolution = candidate.get("resolution") or 0
-            old = downloaded.get(key)
-            if old is not None and old >= resolution:
-                self.log.info(
-                    "сериал %d: кандидат s%s e%s %sp пропущен — уже скачано в %sp",
-                    series_id, candidate.get("season"),
-                    candidate["episode_start"], candidate.get("resolution"), old)
-                continue
-            row = by_id.get(candidate["unique_id"])
-            if row is not None and self._is_downloaded(row):
-                candidate["unique_id"] = ids.upgrade_unique_id(
-                    candidate["source_url"], candidate["publication_date"],
-                    series_id, resolution)
-            kept.append(candidate)
-        return kept
-
-    @staticmethod
-    def _is_downloaded(row: dict) -> bool:
-        return row.get("status") == "completed" or bool(row.get("final_filename"))
-
-    @staticmethod
-    def _vk_candidates(series_id: int, videos: list[dict],
-                       results: list[dict],
-                       ignored: dict[int, set[int]] | None = None) -> list[dict]:
-        """Видео + извлечения правил -> строки media_items. Кандидат
-        обязан иметь извлечённый episode или start (семантика
-        оригинала); даты — naive UTC '%Y-%m-%d %H:%M:%S' (формат
-        хранения прод-БД)."""
-        candidates = []
-        for video, outcome in zip(videos, results):
-            extracted = outcome.get("extracted") or {}
-            if outcome.get("excluded"):
-                continue
-            if extracted.get("episode") is None \
-                    and extracted.get("start") is None:
-                continue
-            pub = datetime.fromisoformat(
-                video["publication_date"].replace("Z", "+00:00"))
-            item = {
-                "series_id": series_id,
-                "unique_id": ids.media_unique_id(video["url"], pub, series_id),
-                "source_url": video["url"],
-                "publication_date": pub.astimezone(timezone.utc)
-                                       .strftime("%Y-%m-%d %H:%M:%S"),
-                "resolution": video.get("resolution"),
-                "download_url": video.get("download_url"),
-                "source_title": video["title"],
-                "season": extracted.get("season"),
-                "part": extracted.get("part"),
-                "voiceover_tag": extracted.get("voiceover"),
-            }
-            if extracted.get("episode") is not None:
-                item["episode_start"] = extracted["episode"]
-            else:
-                item["episode_start"] = extracted["start"]
-                if extracted.get("end") is not None:
-                    item["episode_end"] = extracted["end"]
-            item["is_ignored_by_user"] = covered(item["season"], episodes_of(extracted), ignored or {})
-            candidates.append(item)
-        ScanModule._resolve_part_ones(candidates)
-        return candidates
-
-    @staticmethod
-    def _resolve_part_ones(items: list[dict]) -> None:
-        """Если в рамках (season, episode_start) у элемента задана часть,
-        то другие одиночные элементы этой серии без части получают Part 1."""
-        parts_by_ep: set[tuple[int | None, int]] = set()
-        for it in items:
-            if it.get("episode_end") and it["episode_end"] > it["episode_start"]:
-                continue
-            if it.get("part") is not None:
-                parts_by_ep.add((it.get("season"), it["episode_start"]))
-
-        for it in items:
-            if it.get("episode_end") and it["episode_end"] > it["episode_start"]:
-                continue
-            key = (it.get("season"), it["episode_start"])
-            if key in parts_by_ep and it.get("part") is None:
-                it["part"] = 1
-
     # --- торрент-ветка -------------------------------------------------------------
 
-    async def _scan_torrents(self, series: dict, force: bool,
+    async def _scan_torrents(self, series: dict, source: SeriesSource, force: bool,
                              prepare: bool = False) -> dict:
         series_id = series["id"]
         # Сверка файлов на диске (R1, ситуации F1/F2): пропавший renamed-файл
@@ -779,7 +628,7 @@ class ScanModule(BaseModule):
         active = await self.request("torrents.db.active",
                                     {"series_id": series_id}, timeout=60)
 
-        parsed = await self.request("sources.parse", {"url": series["url"]},
+        parsed = await self.request("sources.parse", {"url": source.url},
                                     timeout=300)
         if series_id in self._aborted:
             raise ScanAborted(f"сериал {series_id} удалён во время скана")

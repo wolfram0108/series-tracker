@@ -33,6 +33,8 @@ class CompositionRow(BaseModel):
     part: int | None = None
     voice_group: str | None = None
     voice_label: str = ""
+    # The name of the voice-over as it came (the constructor's name wins over the player's), before any grouping.
+    voice_name: str = ""
     # The number of an unknown voice-over, for the interface to word it by its own key.
     voice_unknown: int | None = None
     player: str

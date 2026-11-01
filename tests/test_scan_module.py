@@ -1,5 +1,5 @@
-"""Сквозные тесты оркестратора scan: catalog настоящий, остальные
-соседи — фейк (контракты будущих модулей фиксируются здесь).
+"""Сквозные тесты оркестратора scan, торрентная ветка и общие свойства: catalog настоящий, остальные соседи — фейк
+(контракты соседей фиксируются здесь). Серия видео-источника — tests/test_scan_video.py.
 """
 import asyncio
 import base64
@@ -15,32 +15,23 @@ from core.db import Database
 from modules.catalog import CatalogModule
 from modules.scan import ScanModule
 from core import ids
+from series_factory import insert_series, source
 
 
 class FakeBackend(BaseModule):
-    """sources + torrents + renaming + settings + rules одним фейком."""
+    """sources + torrents + renaming + settings одним фейком."""
     name = "fake_backend"
 
     def __init__(self, bus):
         self.service = "kinozal"
         self.releases: list[dict] = []
-        self.vk_videos: list[dict] = []
-        self.web_videos: list[dict] = []
-        self.web_players: dict = {}
-        self.web_scan_error: str | None = None
-        self.web_scan_payloads: list[dict] = []
-        self.parse_titles: list[str] = []
-        self.parse_episodes: list[dict] = []
-        self.rules_by_title: dict[str, dict] | None = None
-        self.rules_results: list[dict] = []
+        self.parsed_urls: list[str] = []
         self.active: list[dict] = []
         self.settings = {"scan_interval_minutes": "60"}
         self.registered: list[dict] = []
         self.register_existed = False  # ПУНКТ 3: тот же infohash → existed
         self.fs_verify_calls = 0       # R1: скан должен сверять файлы
         self.drive_calls = 0           # P10: скан гонит застрявших
-        self.fs_sync_calls = 0         # R4: VK-скан должен сверять диск
-        self.verify_calls: list[str] = []  # VF2: скан сверяет нарезку
         self.added: list[dict] = []
         self.deactivate_calls = 0
         self.reprocess_calls = 0
@@ -52,12 +43,7 @@ class FakeBackend(BaseModule):
         h = self.handle
         h("renaming.reprocess", self.on_reprocess)
         h("sources.parse", self.on_parse)
-        h("sources.video.scan", self.on_web_scan)
         h("sources.torrent_file.get", self.on_file)
-        h("sources.vk.scan", self.on_vk)
-        h("downloads.fs.sync", self.on_fs_sync_vk)
-        h("slicing.verify", self.on_slicing_verify)
-        h("rules.apply", self.on_rules)
         h("torrents.db.active", self.on_active)
         h("torrents.db.deactivate_all", self.on_deactivate)
         h("torrents.add", self.on_add)
@@ -75,40 +61,14 @@ class FakeBackend(BaseModule):
         return {"ok": True}
 
     async def on_parse(self, env):
+        self.parsed_urls.append(env.payload["url"])
         return {"service": self.service, "title": {"ru": "Т", "en": None},
-                "titles": self.parse_titles,
-                "episodes": self.parse_episodes,
                 "releases": self.releases}
 
     async def on_file(self, env):
         content = f"torrent:{env.payload['torrent_id']}".encode()
         return {"content_b64": base64.b64encode(content).decode(),
                 "from_cache": False}
-
-    async def on_vk(self, env):
-        return {"videos": self.vk_videos}
-
-    async def on_web_scan(self, env):
-        if self.web_scan_error:
-            raise RuntimeError(self.web_scan_error)
-        self.web_scan_payloads.append(env.payload)
-        return {"videos": self.web_videos, "players": self.web_players}
-
-    async def on_fs_sync_vk(self, env):
-        self.fs_sync_calls += 1
-        return {"adopted": 0, "lost": 0}
-
-    async def on_slicing_verify(self, env):
-        self.verify_calls.append(env.payload["unique_id"])
-        return {"status": "completed"}
-
-    async def on_rules(self, env):
-        titles = env.payload.get("titles") or []
-        if self.rules_by_title is not None and titles:
-            return {"results": [self.rules_by_title.get(
-                        title, {"excluded": False, "extracted": {}})
-                    for title in titles], "invalid_rules": []}
-        return {"results": self.rules_results, "invalid_rules": []}
 
     async def on_active(self, env):
         return self.active
@@ -158,6 +118,9 @@ class Probe(BaseModule):
     name = "probe"
 
 
+TORRENT_URL = "https://kinozal.me/details.php?id=7"
+
+
 @pytest.fixture
 def db_path(tmp_path):
     path = tmp_path / "test.db"
@@ -168,18 +131,11 @@ def db_path(tmp_path):
     with sqlite3.connect(path) as conn:
         conn.execute("INSERT INTO parser_profiles (id, name) "
                      "VALUES (1, 'профиль')")
-        conn.execute(
-            "INSERT INTO series (id, url, name, name_en, site, save_path, "
-            "state, source_type, auto_scan_enabled, vk_search_mode, "
-            "parser_profile_id, quality) VALUES "
-            "(1, 'https://kinozal.me/details.php?id=7', 'Т1', 'T1', "
-            "'kinozal.me', '/media/t1', 'waiting', 'torrent', 0, 'search', "
-            "1, NULL), "
-            "(2, 'https://vkvideo.ru/@chan|тайтл', 'Т2', 'T2', 'vk', "
-            "'/media/t2', 'waiting', 'vk_video', 0, 'get_all', 1, NULL), "
-            "(3, 'https://1.ruchime.org/release/test', 'Т3', 'T3', "
-            "'1.ruchime.org', '/media/t3', 'waiting', 'web_video', 0, "
-            "'search', 1, NULL)")
+        insert_series(conn, id=1, name="Т1", name_en="T1", site="kinozal.me", save_path="/media/t1",
+                      url=TORRENT_URL, source_type="torrent", parser_profile_id=1)
+        # Торрент-сериал без профиля: скан должен отказаться.
+        insert_series(conn, id=2, name="Т2", name_en="T2", site="kinozal.me", save_path="/media/t2",
+                      url="https://kinozal.me/details.php?id=8", source_type="torrent", parser_profile_id=None)
         conn.commit()
     return str(path)
 
@@ -413,502 +369,35 @@ async def test_resume_continues_from_journal(db_path):
         await runner.stop()
 
 
-# --- VK-ветка ---------------------------------------------------------------------
-
-def _vk_video(vid, title, date="2026-03-17T20:13:16Z", res=1080):
-    return {"title": title, "url": f"https://vk.com/video-1_{vid}",
-            "publication_date": date, "resolution": res}
-
-
 @pytest.mark.asyncio
-async def test_vk_scan_upserts_plans_and_publishes(system):
-    bus, fake, probe, db_path = system
-    fake.vk_videos = [_vk_video(1, "Тайтл 1 серия"),
-                      _vk_video(2, "Тайтл 1-3 серии"),
-                      _vk_video(3, "Трейлер")]
-    fake.rules_results = [
-        {"excluded": False, "extracted": {"episode": 1}},
-        {"excluded": False, "extracted": {"start": 1, "end": 3}},
-        {"excluded": True, "extracted": {}},  # исключён правилами
-    ]
-    sub = bus.subscribe("scan.plan.updated")
-
-    reply = await probe.request("scan.series.run", {"series_id": 2},
-                                timeout=10)
-    assert reply["candidates"] == {"added": 2, "updated": 0, "deleted": 0,
-                                   "kept_phantoms": 0}
-    assert reply["changed"] is True  # появились кандидаты → «завершено»
-    env = await asyncio.wait_for(sub.queue.get(), 2)
-    assert env.payload == {"series_id": 2}
-
-    # повторный скан тем же составом: added/deleted=0 (updated растёт сам по
-    # себе — он не «обновление») → changed=False → «Обновлений нет»
-    reply2 = await probe.request("scan.series.run", {"series_id": 2},
-                                 timeout=10)
-    assert reply2["candidates"]["added"] == 0
-    assert reply2["candidates"]["deleted"] == 0
-    assert reply2["changed"] is False
-
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = {r["source_title"]: dict(r) for r in conn.execute(
-            "SELECT * FROM media_items WHERE series_id=2")}
-    assert len(rows) == 2  # трейлер не прошёл
-    # компиляция 1-3 покрывает одиночку → план выбирает её
-    assert rows["Тайтл 1-3 серии"]["plan_status"] == "in_plan_compilation"
-    assert rows["Тайтл 1 серия"]["plan_status"] == "replaced"
-    # unique_id — по формуле-констрейнту
-    assert rows["Тайтл 1 серия"]["unique_id"] == ids.media_unique_id(
-        "https://vk.com/video-1_1", "2026-03-17T20:13:16Z", 2)
-
-
-@pytest.mark.asyncio
-async def test_sim_R4_vk_scan_syncs_disk(system):
-    """R4 (ситуации VF1/VF3/VC1): VK-скан ОБЯЗАН сверить диск
-    (downloads.fs.sync) — иначе пропавший скачанный .mp4 остаётся
-    «completed» навсегда и скан его не перекачивает. Поведение самой
-    сверки (lost→pending) доказано в test_downloads_module
-    (test_fs_sync_detects_lost_and_adopted); здесь — что скан её ЗОВЁТ,
-    симметрично торрент-ветке (fs_verify_calls)."""
+async def test_the_torrent_is_read_at_the_address_of_its_source(system):
+    """Д-38: адрес торрента лежит в источнике сериала, а не в самом сериале."""
     _, fake, probe, _ = system
-    fake.vk_videos = [_vk_video(1, "Тайтл 1 серия")]
-    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
-    await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
-    assert fake.fs_sync_calls == 1
-    # торрент-сверки на VK-сериале не зовутся
-    assert fake.fs_verify_calls == 0
+    fake.releases = []
+    await probe.request("scan.series.run", {"series_id": 1}, timeout=10)
+    assert fake.parsed_urls == [TORRENT_URL]
 
 
 @pytest.mark.asyncio
-async def test_sim_VF2_vk_scan_verifies_sliced_children(system):
-    """VF2: обычный VK-скан сверяет нарезанных детей (slicing.verify), не
-    только открытие композиции — иначе удалённый sliced-файл незаметен до
-    композиции. downloads.fs.sync компиляции пропускает (владелец slicing)."""
+async def test_a_torrent_series_without_a_profile_is_refused(system):
     _, fake, probe, db_path = system
-    # уже нарезанная компиляция (slicing_status=completed)
+    with pytest.raises(BusRequestError, match="не назначен профиль"):
+        await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
+    assert fake.parsed_urls == []
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "INSERT INTO media_items (series_id, unique_id, source_url, "
-            "source_title, publication_date, plan_status, status, "
-            "slicing_status, episode_start, episode_end, is_ignored_by_user, "
-            "is_available) VALUES "
-            "(2,'comp1','u','Компиляция 1-3','2026-03-17 20:13:16',"
-            "'in_plan_compilation','completed','completed',1,3,0,1)")
+        assert conn.execute("SELECT status FROM scan_tasks WHERE series_id=2").fetchone() == ("error",)
+
+
+@pytest.mark.asyncio
+async def test_prepare_refuses_a_series_of_video_sources(db_path):
+    with sqlite3.connect(db_path) as conn:
+        insert_series(conn, id=3, name="В", name_en="V", site="vk", save_path="/media/v",
+                      url="https://vkvideo.ru/@c|q", source_type="vk_video", parser_profile_id=1)
         conn.commit()
-    fake.vk_videos, fake.rules_results = [], []  # скрейп пуст: фантом не-виргин → остаётся
-    await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
-    assert "comp1" in fake.verify_calls
-
-
-@pytest.mark.asyncio
-async def test_sim_save_vk_full_process_without_download(system):
-    """«Сохранить» VK = полный процесс без загрузки (download=False): скан
-    идёт (fs.sync/usыновление), но downloads.dispatch НЕ шлётся."""
-    bus, fake, probe, _ = system
-    fake.vk_videos = [_vk_video(1, "Тайтл 1 серия")]
-    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
-    sub = bus.subscribe("downloads.dispatch")
-    await probe.request("scan.series.run",
-                        {"series_id": 2, "download": False}, timeout=10)
-    assert fake.fs_sync_calls == 1     # скан реально прошёл (R4-сверка)
-    assert sub.queue.empty()           # загрузка НЕ запускалась
-
-
-@pytest.mark.asyncio
-async def test_vk_scan_default_dispatches_download(system):
-    """По умолчанию (явный скан) загрузка ставится — контроль к download=False."""
-    bus, fake, probe, _ = system
-    fake.vk_videos = [_vk_video(1, "Тайтл 1 серия")]
-    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
-    sub = bus.subscribe("downloads.dispatch")
-    await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
-    assert not sub.queue.empty()       # dispatch отправлен
-
-
-@pytest.mark.asyncio
-async def test_sim_VU11_ignored_seasons_excluded_on_scan(system):
-    """VU11 (интеграция): scan читает series.ignored_seasons и исключает их
-    эпизоды из плана — не только визуально гасит в UI. Раньше ignored_seasons
-    нигде не применялся (только писался)."""
-    _, fake, probe, db_path = system
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("UPDATE series SET ignored_seasons='[2]' WHERE id=2")
-        conn.commit()
-    fake.vk_videos = [_vk_video(1, "Сезон1 эп1"), _vk_video(2, "Сезон2 эп5")]
-    fake.rules_results = [
-        {"excluded": False, "extracted": {"episode": 1, "season": 1}},
-        {"excluded": False, "extracted": {"episode": 5, "season": 2}}]
-    await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = {r["source_title"]: r["plan_status"] for r in conn.execute(
-            "SELECT source_title, plan_status FROM media_items WHERE "
-            "series_id=2")}
-    assert rows["Сезон1 эп1"].startswith("in_plan")       # сезон 1 — в плане
-    assert not rows["Сезон2 эп5"].startswith("in_plan")   # сезон 2 — исключён
-
-
-@pytest.mark.asyncio
-async def test_vk_phantom_rules(system):
-    _, fake, probe, db_path = system
-    fake.vk_videos = [_vk_video(1, "Тайтл 1 серия"),
-                      _vk_video(2, "Тайтл 2 серия")]
-    fake.rules_results = [
-        {"excluded": False, "extracted": {"episode": 1}},
-        {"excluded": False, "extracted": {"episode": 2}},
-    ]
-    await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
-
-    # вторая серия «скачана» (чужая колонка — имитируем downloads)
-    uid2 = ids.media_unique_id("https://vk.com/video-1_2",
-                               "2026-03-17T20:13:16Z", 2)
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("UPDATE media_items SET status='completed' "
-                     "WHERE unique_id=?", (uid2,))
-        conn.commit()
-
-    # следующий скан: оба видео исчезли из выдачи
-    fake.vk_videos, fake.rules_results = [], []
-    reply = await probe.request("scan.series.run", {"series_id": 2},
-                                timeout=10)
-    assert reply["candidates"]["deleted"] == 1        # девственный — удалён
-    assert reply["candidates"]["kept_phantoms"] == 1  # скачанный — оставлен
-    with sqlite3.connect(db_path) as conn:
-        left = conn.execute("SELECT unique_id FROM media_items "
-                            "WHERE series_id=2").fetchall()
-    assert left == [(uid2,)]
-
-
-@pytest.mark.asyncio
-async def test_vk_candidates_resolve_part_ones(system, db_path):
-    """Тест авторазрешения Part 1 и сохранения part в БД."""
-    _, fake, probe, _ = system
-    fake.vk_videos = [
-        _vk_video(1, "Тайтл 8 серия"),
-        _vk_video(2, "Тайтл 8 серия 2 часть"),
-        _vk_video(3, "Тайтл 9 серия"),
-    ]
-    fake.rules_results = [
-        {"excluded": False, "extracted": {"episode": 8, "part": None}},
-        {"excluded": False, "extracted": {"episode": 8, "part": 2}},
-        {"excluded": False, "extracted": {"episode": 9, "part": None}},
-    ]
-    await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
-
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT episode_start, part FROM media_items WHERE series_id=2 "
-            "ORDER BY episode_start, part").fetchall()
-    assert len(rows) == 3
-    # 8 серия часть 1 (авто-разрешилась)
-    assert rows[0]["episode_start"] == 8 and rows[0]["part"] == 1
-    # 8 серия часть 2
-    assert rows[1]["episode_start"] == 8 and rows[1]["part"] == 2
-    # 9 серия без частей (None)
-    assert rows[2]["episode_start"] == 9 and rows[2]["part"] is None
-
-
-
-@pytest.mark.asyncio
-async def test_web_video_scan_stores_availability(system, db_path):
-    """Отчёт о плеерах сохраняется и читается отдельным запросом."""
-    _, fake, probe, _ = system
-    fake.web_videos = [{
-        "title": "Т3 1 серия", "url": "https://vk.com/video-1_9",
-        "download_url": "https://vkvideo.ru/video_ext.php?oid=-1&id=9&hash=abc",
-        "publication_date": "2026-10-20T12:00:00Z", "resolution": 1080,
-    }]
-    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
-    fake.web_players = {
-        "episodes": 2,
-        "sources": {"vk": 1},
-        "players": {
-            "vk": {"present": 2, "available": 1, "selected": 1,
-                   "max_resolution": 1080, "reason": "закрыто"},
-            "allvideo": {"present": 0, "available": 0, "selected": 0,
-                         "max_resolution": None, "reason": ""},
-            "vibix": {"present": 2, "available": 1, "selected": 1,
-                      "max_resolution": 1080, "reason": ""},
-        },
-        "holes": [{"episode": 2, "reason": "нет источника"}],
-    }
-
-    reply = await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
-    assert reply["candidates"]["added"] == 1
-
-    availability = await probe.request("scan.availability",
-                                       {"series_id": 3}, timeout=10)
-    assert availability["checked_at"]
-    assert availability["report"]["episodes"] == 2
-    assert availability["report"]["players"]["vibix"]["selected"] == 1
-    assert availability["report"]["holes"] == [{"episode": 2, "reason": "нет источника"}]
-    with sqlite3.connect(db_path) as conn:
-        url = conn.execute(
-            "SELECT download_url FROM media_items WHERE series_id=3 "
-            "AND episode_start=1").fetchone()[0]
-    assert url.endswith("hash=abc")
-
-
-@pytest.mark.asyncio
-async def test_web_video_scan_does_not_downgrade_completed(system, db_path):
-    """Скачанный 2160p не заменяется новым кандидатом в 1080p."""
-    _, fake, probe, _ = system
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "INSERT INTO media_items (series_id, unique_id, source_title, season, "
-            "episode_start, episode_end, part, plan_status, status, "
-            "is_ignored_by_user, source_url, publication_date, voiceover_tag, "
-            "slicing_status, is_available, resolution) VALUES "
-            "(3, 'old', 'Т3 1 серия', NULL, 1, NULL, NULL, 'in_plan_single', "
-            "'completed', 0, 'https://vk.com/video-1_1', "
-            "'2026-10-19 12:00:00', NULL, 'none', 1, 2160)")
-        conn.commit()
-    fake.web_videos = [{
-        "title": "Т3 1 серия", "url": "https://fsst.online/embed/1/",
-        "publication_date": "2026-10-20T12:00:00Z", "resolution": 1080,
-    }]
-    fake.web_players = {"episodes": 1, "sources": {"allvideo": 1},
-                        "players": {}, "holes": []}
-    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
-
-    reply = await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
-
-    assert reply["candidates"]["added"] == 0
-    with sqlite3.connect(db_path) as conn:
-        rows = conn.execute(
-            "SELECT resolution, status FROM media_items WHERE series_id=3").fetchall()
-    assert rows == [(2160, "completed")]
-
-
-@pytest.mark.asyncio
-async def test_web_video_scan_skips_excluded_episodes(system):
-    """Правила применяются до обхода: исключённые серии не запрашиваются."""
-    _, fake, probe, _ = system
-    fake.parse_titles = ["Т3 1 серия", "Т3 2 серия", "Т3 3 серия"]
-    fake.parse_episodes = [{"number": 1}, {"number": 2}, {"number": 3}]
-    fake.rules_by_title = {
-        "Т3 1 серия": {"excluded": True, "extracted": {}},
-        "Т3 2 серия": {"excluded": False, "extracted": {"episode": 2}},
-        "Т3 3 серия": {"excluded": True, "extracted": {}},
-    }
-    fake.web_videos = [{
-        "title": "Т3 2 серия", "url": "https://fsst.online/embed/2/",
-        "publication_date": "2026-10-20T12:00:00Z", "resolution": 1080,
-    }]
-    fake.web_players = {"episodes": 1, "sources": {"allvideo": 1},
-                        "players": {}, "holes": []}
-
-    reply = await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
-
-    assert fake.web_scan_payloads[-1]["episodes"] == [2]
-    assert reply["candidates"]["added"] == 1
-
-
-@pytest.mark.asyncio
-async def test_a_web_video_episode_switched_off_in_advance_is_created_switched_off_and_not_planned(system, db_path):
-    """The memory of the series (ignored_episodes) holds for web sources as for torrents: the row of a
-    switched-off episode is created switched off, so neither the download nor the voice-overs take it."""
-    _, fake, probe, _ = system
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("UPDATE series SET ignored_episodes='{\"1\": [2, 3]}' WHERE id=3")
-        conn.commit()
-    titles = ["Т3 1 серия", "Т3 2 серия", "Т3 3 серия"]
-    fake.parse_titles = titles
-    fake.parse_episodes = [{"number": 1}, {"number": 2}, {"number": 3}]
-    fake.rules_by_title = {title: {"excluded": False, "extracted": {"episode": n, "season": 1}}
-                           for n, title in enumerate(titles, 1)}
-    fake.web_videos = [{"title": title, "url": f"https://fsst.online/embed/{n}/",
-                        "publication_date": "2026-10-20T12:00:00Z", "resolution": 720}
-                       for n, title in enumerate(titles, 1)]
-    fake.web_players = {"episodes": 3, "sources": {"allvideo": 3}, "players": {}, "holes": []}
-
-    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
-
-    with sqlite3.connect(db_path) as conn:
-        rows = {r[0]: (r[1], r[2]) for r in conn.execute(
-            "SELECT episode_start, is_ignored_by_user, plan_status FROM media_items WHERE series_id=3")}
-    assert rows[1][0] == 0 and rows[1][1].startswith("in_plan")
-    assert rows[2][0] == 1 and not rows[2][1].startswith("in_plan")
-    assert rows[3][0] == 1 and not rows[3][1].startswith("in_plan")
-
-
-def test_a_compilation_row_is_switched_off_in_advance_only_when_none_of_its_episodes_is_wanted():
-    videos = [{"title": "Т 2-3", "url": "https://x/1", "publication_date": "2026-10-20T12:00:00Z"}]
-    results = [{"excluded": False, "extracted": {"start": 2, "end": 3, "season": 1}}]
-    some = ScanModule._vk_candidates(1, videos, results, {1: {2}})
-    every = ScanModule._vk_candidates(1, videos, results, {1: {2, 3}})
-    assert some[0]["is_ignored_by_user"] is False and every[0]["is_ignored_by_user"] is True
-    assert ScanModule._vk_candidates(1, videos, results)[0]["is_ignored_by_user"] is False
-
-
-@pytest.mark.asyncio
-async def test_composition_refresh_surfaces_scan_error(system):
-    """Ошибка скана при refresh не маскируется старыми данными."""
-    _, fake, probe, _ = system
-    fake.web_scan_error = "сайт недоступен"
-
-    with pytest.raises(BusRequestError):
-        await probe.request("scan.composition",
-                            {"series_id": 3, "refresh": True}, timeout=10)
-
-
-PAGE_P = "https://1.ruchime.org/release/test/episode-1"
-
-
-def _seed_web_row(db_path, url, resolution, *, plan="in_plan_single",
-                  status="completed", filename=None):
-    uid = ids.media_unique_id(url, "2026-10-20 12:00:00", 3)
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "INSERT INTO media_items (series_id, unique_id, source_title, season, "
-            "episode_start, plan_status, status, is_ignored_by_user, source_url, "
-            "publication_date, slicing_status, is_available, resolution, "
-            "final_filename) VALUES (3, ?, 'Т3 1 серия', 1, 1, ?, ?, 0, ?, "
-            "'2026-10-20 12:00:00', 'none', 1, ?, ?)",
-            (uid, plan, status, url, resolution, filename))
-        conn.commit()
-    return uid
-
-
-def _web_rows(db_path):
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        return {r["unique_id"]: dict(r) for r in conn.execute(
-            "SELECT * FROM media_items WHERE series_id=3")}
-
-
-def _web_scan_result(fake, url, resolution):
-    fake.web_videos = [{"title": "Т3 1 серия", "url": url,
-                        "publication_date": "2026-10-20T12:00:00Z",
-                        "resolution": resolution}]
-    fake.web_players = {"episodes": 1, "sources": {}, "players": {}, "holes": []}
-    fake.rules_results = [{"excluded": False,
-                           "extracted": {"season": 1, "episode": 1}}]
-
-
-@pytest.mark.asyncio
-async def test_better_source_supersedes_downloaded_lower_one(system, db_path):
-    """The earlier row is not in this scan's result, yet it must leave the plan."""
-    _, fake, probe, _ = system
-    old = _seed_web_row(db_path, "https://fsst.online/embed/1/", 360,
-                        filename="e01 360p.mp4")
-    _web_scan_result(fake, PAGE_P, 1080)
-
-    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
-
-    rows = _web_rows(db_path)
-    new = ids.media_unique_id(PAGE_P, "2026-10-20 12:00:00", 3)
-    assert rows[new]["plan_status"] == "in_plan_single"
-    assert rows[new]["superseded_by"] is None
-    assert rows[old]["plan_status"] == "replaced"
-    assert rows[old]["superseded_by"] == new
-    assert [r["plan_status"] for r in rows.values()].count("in_plan_single") == 1
-
-
-@pytest.mark.asyncio
-async def test_better_file_from_downloaded_url_gets_its_own_row(system, db_path):
-    _, fake, probe, _ = system
-    old = _seed_web_row(db_path, PAGE_P, 480, filename="e01 480p.mp4")
-    _web_scan_result(fake, PAGE_P, 1080)
-
-    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
-    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
-
-    rows = _web_rows(db_path)
-    upgrade = ids.upgrade_unique_id(PAGE_P, "2026-10-20 12:00:00", 3, 1080)
-    assert set(rows) == {old, upgrade}
-    assert rows[old]["resolution"] == 480 and rows[old]["status"] == "completed"
-    assert rows[upgrade]["resolution"] == 1080
-    assert rows[upgrade]["plan_status"] == "in_plan_single"
-    assert rows[old]["superseded_by"] == upgrade
-
-
-@pytest.mark.asyncio
-async def test_scan_repairs_stale_double_winner(system, db_path):
-    """Two rows left in the plan by earlier scans collapse to one winner."""
-    _, fake, probe, _ = system
-    low = _seed_web_row(db_path, "https://fsst.online/embed/1/", 360,
-                        filename="e01 360p.mp4")
-    high = _seed_web_row(db_path, PAGE_P, 1080, filename="e01 1080p.mp4")
-    fake.web_videos = []
-    fake.web_players = {}
-
-    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
-
-    rows = _web_rows(db_path)
-    assert rows[high]["plan_status"] == "in_plan_single"
-    assert rows[low]["plan_status"] == "replaced"
-    assert rows[low]["superseded_by"] == high
-
-
-@pytest.mark.asyncio
-async def test_stale_unfetched_row_does_not_block_live_source(system, db_path):
-    """An announced-but-dead candidate stays in the table as an error row;
-    once nobody offers it, it must not outrank the live lower source."""
-    _, fake, probe, _ = system
-    stale = _seed_web_row(db_path, PAGE_P, 480, status="error")
-    _web_scan_result(fake, "https://fsst.online/embed/1/", 360)
-
-    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
-
-    rows = _web_rows(db_path)
-    live = ids.media_unique_id("https://fsst.online/embed/1/", "2026-10-20 12:00:00", 3)
-    assert rows[live]["plan_status"] == "in_plan_single"
-    assert rows[stale]["plan_status"] == "candidate"
-    assert rows[live]["superseded_by"] is None
-
-
-@pytest.mark.asyncio
-async def test_offered_error_row_keeps_its_slot(system, db_path):
-    """A candidate the source still offers is retried, not silently dropped."""
-    _, fake, probe, _ = system
-    stale = _seed_web_row(db_path, PAGE_P, 480, status="error")
-    _web_scan_result(fake, PAGE_P, 480)
-
-    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
-
-    assert _web_rows(db_path)[stale]["plan_status"] == "in_plan_single"
-
-
-def _web_scan(fake):
-    fake.web_videos = [{
-        "title": "Т3 1 серия", "url": "https://vk.com/video-1_9",
-        "download_url": "https://vkvideo.ru/video_ext.php?oid=-1&id=9&hash=abc",
-        "publication_date": "2026-10-20T12:00:00Z", "resolution": 1080}]
-    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
-
-
-@pytest.mark.asyncio
-async def test_a_web_video_scan_asks_for_the_voice_overs_after_the_media_download(system):
-    bus, fake, probe, _ = system
-    _web_scan(fake)
-    order = bus.subscribe("downloads.dispatch")
-    voices = bus.subscribe("voices.dispatch")
-    await probe.request("scan.series.run", {"series_id": 3}, timeout=10)
-    assert not order.queue.empty()
-    assert (await asyncio.wait_for(voices.queue.get(), 3)).payload == {"series_id": 3}
-
-
-@pytest.mark.asyncio
-async def test_only_a_scan_that_downloads_asks_for_voice_overs_and_only_for_web_video(system):
-    bus, fake, probe, _ = system
-    _web_scan(fake)
-    voices = bus.subscribe("voices.dispatch")
-    await probe.request("scan.series.run", {"series_id": 3, "download": False}, timeout=10)
-    fake.vk_videos = [_vk_video(1, "Тайтл 1 серия")]
-    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
-    await probe.request("scan.series.run", {"series_id": 2}, timeout=10)  # a VK series
-    assert voices.queue.empty()
-
-
-@pytest.mark.asyncio
-async def test_the_scheduled_pass_over_all_series_asks_for_voice_overs_too(system, db_path):
-    bus, fake, probe, _ = system
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("UPDATE series SET auto_scan_enabled=1 WHERE id=3")
-        conn.commit()
-    _web_scan(fake)
-    voices = bus.subscribe("voices.dispatch")
-    await probe.request("scan.all.start", {}, timeout=10)
-    assert (await asyncio.wait_for(voices.queue.get(), 10)).payload == {"series_id": 3}
+    bus, fake, scan, probe, runner = _system_factory(db_path)
+    await runner.start()
+    try:
+        with pytest.raises(BusRequestError, match="только для торрентов"):
+            await probe.request("scan.series.prepare", {"series_id": 3}, timeout=10)
+    finally:
+        await runner.stop()
