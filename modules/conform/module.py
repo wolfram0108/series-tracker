@@ -9,7 +9,6 @@ without a restart. The work folder is two settings, `conform.work_dir` (as this 
 daemon is given or writes lies inside it, and the paths cross the boundary through these two names.
 
 Query:
-  conform.status {} -> {configured, daemon: {up, version, device, gpu, gpu_name, error}, tasks: [...]}
   conform.submit {ref, dubs: [path], out_dir, cache_dir, label?, key?} -> SubmitReply (core/contracts):
       {outcome, job_id?, reason?, retry}
       One episode: a reference video and the voice-over files to align to it, local paths. `key`
@@ -162,7 +161,6 @@ class ConformModule(BaseModule):
         super().__init__(bus)
 
     def register(self) -> None:
-        self.handle("conform.status", self.on_status)
         self.handle("conform.submit", self.on_submit)
         self.handle("conform.job.get", self.on_job_get)
         self.handle("conform.workspace", self.on_workspace)
@@ -175,11 +173,7 @@ class ConformModule(BaseModule):
 
     def snapshot(self) -> dict[str, Any]:
         tasks = sorted(self._jobs.values(), key=lambda job: job.get("seq") or 0)
-        return {"configured": self._client is not None, "daemon": dict(self._daemon),
-                "tasks": [compact_job(job) for job in tasks]}
-
-    async def on_status(self, env: Envelope) -> dict:
-        return self.snapshot()
+        return {"daemon": dict(self._daemon), "tasks": [compact_job(job) for job in tasks]}
 
     async def _stored(self, key: str) -> str | None:
         try:

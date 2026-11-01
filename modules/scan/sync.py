@@ -17,7 +17,8 @@ from core.reasons import reason
 
 log = get_logger("scan")
 
-# Safeguard of the wait for a table: twice the measured price of a full read (VERIFICATION M-2, not measured yet).
+# Safeguard of the wait for a table: twice the safeguard of a read in `sources` (1800 s), which itself is twice the price
+# of the largest release known (VERIFICATION M-2).
 TABLE_WAIT_SAFEGUARD_S = 3600.0
 # Safeguard of the request itself: it only starts a read or answers from the store.
 TABLE_REQUEST_TIMEOUT_S = 60.0

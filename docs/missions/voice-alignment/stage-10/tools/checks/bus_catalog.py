@@ -43,11 +43,11 @@ _ENVELOPE_KINDS = {"event": PUBLISH, "command": COMMAND, "query": REQUEST}
 UNSENT_ALLOWED: list[tuple[str, str]] = [
     ("slicing.files.drop_for_source", "slicing вне архитектуры этапа, Д-34"),
     ("slicing.queue.get", "slicing вне архитектуры этапа, Д-34"),
-    ("torrents.info.get", "публичный контракт управления торрентами, записан в contracts/bus_topics.md"),
-    ("torrents.pause", "публичный контракт управления торрентами, записан в contracts/bus_topics.md"),
-    ("torrents.resume", "публичный контракт управления торрентами, записан в contracts/bus_topics.md"),
-    ("torrents.recheck", "публичный контракт управления торрентами, записан в contracts/bus_topics.md"),
-    ("torrents.delete", "публичный контракт управления торрентами, записан в contracts/bus_topics.md"),
+    ("torrents.info.get", "публичный контракт управления торрентами, записан в докстринге модуля torrents и в contracts/bus_topics.md"),
+    ("torrents.pause", "публичный контракт управления торрентами, записан в докстринге модуля torrents и в contracts/bus_topics.md"),
+    ("torrents.resume", "публичный контракт управления торрентами, записан в докстринге модуля torrents и в contracts/bus_topics.md"),
+    ("torrents.recheck", "публичный контракт управления торрентами, записан в докстринге модуля torrents и в contracts/bus_topics.md"),
+    ("torrents.delete", "публичный контракт управления торрентами, записан в докстринге модуля torrents и в contracts/bus_topics.md"),
 ]
 _TOPIC = re.compile(r"^[a-z_][a-z0-9_]*(?:\.[a-z0-9_*#]+)+$")
 _TOKEN = re.compile(r"(?<![A-Za-z0-9_.*#])(\.?[a-z_][a-z0-9_]*(?:\.[a-z0-9_*#]+)*(?:/[a-z0-9_]+(?:\.[a-z0-9_]+)*)*)(?![A-Za-z0-9_])")

@@ -35,7 +35,6 @@ Commands:
 Queries:
   catalog.series.list           → [{...series, kind, sources, statuses: [...]}]
   catalog.series.get {series_id} → {...series, kind, sources, statuses: [...]}
-  catalog.status.get {series_id} → {series_id, statuses: [...]}
   catalog.series.create {data}   → {...series} (+ событие series.added,
       затем series.source.added на каждый начальный источник)
       — data.sources: список источников (минимум один), каждый — поля
@@ -51,8 +50,6 @@ Queries:
       и отчитываются series.purged — молчащий владелец означает
       оборванный каскад и попадает в лог
   catalog.sources.list {series_id} → [source]  — по position, затем id
-  catalog.sources.by_url {url}     → [source]  — источники с этим адресом
-      во всех сериалах
   catalog.sources.by_profile {profile_id} → [source]  — источники, читаемые этим
       профилем правил (конструктор по нему отказывает в удалении профиля)
   catalog.sources.add {series_id, source} → {id}  — в конец списка, если
@@ -143,13 +140,11 @@ class CatalogModule(BaseModule):
         self.handle("catalog.viewing.stop", self.on_viewing_stop)
         self.handle("catalog.series.list", self.on_series_list)
         self.handle("catalog.series.get", self.on_series_get)
-        self.handle("catalog.status.get", self.on_status_get)
         self.handle("catalog.series.touch_scan_time", self.on_touch)
         self.handle("catalog.series.create", self.on_series_create)
         self.handle("catalog.series.update", self.on_series_update)
         self.handle("catalog.series.delete", self.on_series_delete)
         self.handle("catalog.sources.list", self.on_sources_list)
-        self.handle("catalog.sources.by_url", self.on_sources_by_url)
         self.handle("catalog.sources.by_profile", self.on_sources_by_profile)
         self.handle("catalog.sources.add", self.on_source_add)
         self.handle("catalog.sources.update", self.on_source_update)
@@ -289,9 +284,6 @@ class CatalogModule(BaseModule):
         await self._require_series(series_id)
         return await self.repo.list_sources(series_id)
 
-    async def on_sources_by_url(self, env: Envelope) -> list[dict]:
-        return await self.repo.sources_by_url(env.payload["url"])
-
     async def on_sources_by_profile(self, env: Envelope) -> list[dict]:
         return await self.repo.sources_by_profile(int(env.payload["profile_id"]))
 
@@ -380,10 +372,6 @@ class CatalogModule(BaseModule):
 
     def _spawn(self, coro) -> None:
         self._tasks.append(asyncio.create_task(coro))
-
-    async def on_status_get(self, env: Envelope) -> dict:
-        series_id = env.payload["series_id"]
-        return {"series_id": series_id, "statuses": self.agg.statuses(series_id)}
 
     async def on_touch(self, env: Envelope) -> None:
         """Обновление last_scan_time («время жизни» карточки) после

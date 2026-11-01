@@ -5,7 +5,6 @@
       (существование путей, один диск), отказ при активной задаче;
       исполнение асинхронно, по завершении library сам вызывает
       renaming.reprocess (цепочка «переместили → переименовали»).
-  query library.relocation.active {series_id} — задачи для UI.
 События: library.relocation.started/finished (контракты SSE),
 series.busy.contribution {source: library} — карточка занята на время
 перемещения (и только на время работы — находка 36).
@@ -53,7 +52,6 @@ class LibraryModule(BaseModule):
     def register(self) -> None:
         self.handle("library.directories.list", self.on_list_directories)
         self.handle("library.relocate", self.on_relocate)
-        self.handle("library.relocation.active", self.on_relocation_active)
         self.handle("series.deleted", self.on_series_deleted)
 
     async def on_start(self) -> None:
@@ -97,9 +95,6 @@ class LibraryModule(BaseModule):
         return {"path": path, "items": items}
 
     # --- перемещение (Р-17) ----------------------------------------------------------
-
-    async def on_relocation_active(self, env: Envelope) -> list[dict]:
-        return await self.repo.active_for_series(env.payload["series_id"])
 
     async def on_relocate(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]

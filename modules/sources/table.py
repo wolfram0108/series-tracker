@@ -27,7 +27,9 @@ FAILED_TOPIC = "sources.table.failed"
 
 # The term of a table is a requirement (a page is not read again within the hour); it is the subject of the task.
 TABLE_TERM = timedelta(hours=1)
-# A safeguard, not a sync: a hung site must not hold its page for ever; its expiry is a failed read.
+# A safeguard, not a sync: a hung site must not hold its page for ever; its expiry is a failed read. Measured on small
+# releases (M-7, M-8): 0.42 s a row at ruchime, 0.14 s at dunhuatv; the largest release known, about 1200 rows, is
+# about 8 minutes, so twice that is under this value.
 READ_SAFEGUARD_S = 1800.0
 
 Publish = Callable[[str, dict], None]

@@ -87,9 +87,9 @@ async def test_a_stored_address_beats_the_environment_and_a_stored_empty_one_mea
         assert [c.base_url for c in made] == ["http://stored:1"]
     finally:
         await runner.stop()
-    _, _, probe, made, runner = await bridge({"conform.url": ""}, default_url="http://env:8787")
+    _, _, _, made, runner = await bridge({"conform.url": ""}, default_url="http://env:8787")
     try:
-        assert made == [] and (await probe.request("conform.status", {}, timeout=3))["configured"] is False
+        assert made == []
     finally:
         await runner.stop()
 
@@ -107,7 +107,6 @@ async def test_a_saved_address_is_written_announced_and_taken_at_once():
         assert [c.base_url for c in made] == ["http://env:8787", "http://new:9000"]
         assert made[0].closed is True and made[1].closed is False
         assert (await changed.queue.get()).payload["url"] == "http://new:9000"
-        assert (await probe.request("conform.status", {}, timeout=3))["configured"] is True
         assert await probe.request("conform.workspace", {}, timeout=3) == {
             "downloads": f"{HERE}/downloads", "conform": f"{HERE}/conform"}
     finally:
@@ -134,7 +133,7 @@ async def test_saving_an_empty_address_puts_the_bridge_to_rest():
     try:
         saved = await probe.request("conform.settings.set", draft(url="").model_dump(), timeout=5)
         assert saved["saved"] is True and settings.values["conform.url"] == ""
-        assert (await probe.request("conform.status", {}, timeout=3))["configured"] is False
+        assert made[0].closed is True
     finally:
         await runner.stop()
 

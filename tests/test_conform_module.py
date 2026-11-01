@@ -49,8 +49,8 @@ class Probe(BaseModule):
 async def started(client, settings=None, **options):
     bus = Bus()
     probe = Probe(bus)
-    runner = Runner(bus, [ConformModule(bus, client, backoff_start=0.01, **options),
-                          Settings(bus, settings), probe])
+    probe.bridge = ConformModule(bus, client, backoff_start=0.01, **options)
+    runner = Runner(bus, [probe.bridge, Settings(bus, settings), probe])
     await runner.start()
     return bus, probe, runner
 
@@ -59,7 +59,8 @@ async def until(probe, condition, seconds=3.0):
     """The bridge pushes; the test only waits for the picture it expects."""
     end = asyncio.get_running_loop().time() + seconds
     while True:
-        status = await probe.request("conform.status", {}, timeout=2)
+        # The bus carries the picture only as a push; the test reads the bridge's copy.
+        status = probe.bridge.snapshot()
         if condition(status):
             return status
         assert asyncio.get_running_loop().time() < end, status
@@ -103,7 +104,6 @@ async def test_snapshot_changes_and_progress_build_the_picture():
     try:
         status = await until(probe, lambda s: [t["id"] for t in s["tasks"]] == ["j2"]
                              and s["tasks"][0]["stage"] == "band")
-        assert status["configured"] is True
         assert status["daemon"] == {"up": True, "error": None, "version": "0.1.0", "device": "cuda",
                                     "gpu": True, "gpu_name": "RTX"}
         assert status["tasks"][0]["progress"] == 0.5
@@ -189,21 +189,6 @@ async def test_lost_jobs_are_not_shown_as_current_while_the_daemon_is_down():
         assert seen[-1]["tasks"] == [] and "lost" in seen[-1]["daemon"]["error"]
     finally:
         await runner.stop()
-
-
-@pytest.mark.asyncio
-async def test_without_an_address_the_module_is_idle():
-    bus = Bus()
-    probe = Probe(bus)
-    runner = Runner(bus, [Settings(bus), ConformModule(bus, None), probe])
-    await runner.start()
-    try:
-        status = await probe.request("conform.status", {}, timeout=2)
-        assert status == {"configured": False, "daemon": {"up": False, "error": None}, "tasks": []}
-    finally:
-        await runner.stop()
-
-
 
 
 def stream_of(frames: str) -> DaemonClient:
@@ -447,7 +432,7 @@ async def test_cancel_reaches_the_daemon_and_says_whether_it_was_done():
         client.refuse = httpx.ConnectError("lost")
         assert await probe.request("conform.cancel", {"job_id": "j1"}, timeout=5) == {"done": False}
         assert client.cancelled == ["j1", "nope", "j1"]
-        assert (await probe.request("conform.status", {}, timeout=2))["daemon"]["up"] is True
+        assert probe.bridge.snapshot()["daemon"]["up"] is True
     finally:
         await runner.stop()
 

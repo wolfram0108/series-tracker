@@ -8,6 +8,12 @@
 (ресьюмабельно: задачи восстанавливаются из БД и сверяются с qBit).
 ИНВАРИАНТ ЯДРА — пауза до завершения переименования, см. pipeline.py.
 
+Управление клиентом qBittorrent (публичный контракт модуля; вызывающих внутри системы сейчас нет — их ждёт
+интерфейс и другие модули):
+  torrents.info.get {hashes?}           → список раздач клиента (все, если hashes не заданы)
+  torrents.pause / .resume / .recheck {hashes} — команды клиенту
+  torrents.delete {hashes, delete_files?} — убрать раздачи из клиента (файлы — по флагу)
+
 Queries/commands конвейера (контракты Р-12, их ждёт scan):
   torrents.db.active {series_id}        → активные раздачи, сверенные с qBit
   torrents.db.deactivate_all {series_id} → для force_replace

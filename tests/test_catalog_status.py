@@ -239,18 +239,12 @@ async def test_series_list_no_state_column_and_statuses(system):
     _, probe = system
     probe.publish_event("series.status.contribution", {
         "source": "scan", "series_id": 1, "flags": {"scanning": True}})
-    reply = await probe.request("catalog.status.get", {"series_id": 1},
-                                timeout=5)
     # запрос после события могла обогнать очередь — дождёмся вклада
     for _ in range(50):
-        if reply["statuses"] == ["scanning"]:
+        rows = await probe.request("catalog.series.list", {}, timeout=5)
+        if rows[0]["statuses"] == ["scanning"]:
             break
         await asyncio.sleep(0.02)
-        reply = await probe.request("catalog.status.get", {"series_id": 1},
-                                    timeout=5)
-    assert reply["statuses"] == ["scanning"]
-
-    rows = await probe.request("catalog.series.list", {}, timeout=5)
     assert len(rows) == 1
     row = rows[0]
     assert row["name"] == "Тайтл"

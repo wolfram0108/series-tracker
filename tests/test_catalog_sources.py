@@ -195,7 +195,7 @@ async def test_an_unknown_profile_leaves_no_series_behind(system):
     assert code_of(refused.value) == "profile_not_found"
     assert parse(str(refused.value).split(": ", 1)[1])["params"] == {"profile_id": 77}
     assert await probe.request("catalog.series.list", {}, timeout=5) == []
-    assert await probe.request("catalog.sources.by_url", {"url": VK}, timeout=5) == []
+    assert await probe.request("catalog.sources.by_profile", {"profile_id": 1}, timeout=5) == []
 
 
 @pytest.mark.asyncio
@@ -226,19 +226,6 @@ async def test_sources_are_listed_by_position_then_id(system):
     listed = await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5)
     assert [s["id"] for s in listed] == [added["id"], *made.source_ids]
     assert [s["position"] for s in listed] == [-5, 0, 1]
-
-
-@pytest.mark.asyncio
-async def test_sources_are_found_by_address_in_every_series(system):
-    _, probe = system
-    first = await create_series(probe, name="1", sources=[source(url=RUCHIME, source_type="web_video",
-                                                                  parser_profile_id=1)])
-    second = await create_series(probe, name="2", sources=[source(url=VK, source_type="vk_video"),
-                                                           source(url=RUCHIME, source_type="web_video",
-                                                                  parser_profile_id=2)])
-    found = await probe.request("catalog.sources.by_url", {"url": RUCHIME}, timeout=5)
-    assert [(s["series_id"], s["parser_profile_id"]) for s in found] == [(first.series_id, 1), (second.series_id, 2)]
-    assert await probe.request("catalog.sources.by_url", {"url": "https://nowhere"}, timeout=5) == []
 
 
 @pytest.mark.asyncio
@@ -513,8 +500,6 @@ async def test_deleting_a_series_takes_its_sources_and_only_its_own(system, db_p
     assert [row["id"] for row in await db.fetch_all("SELECT id FROM series")] == [stays.series_id]
     # the series is announced gone once; its sources do not each announce theirs
     assert [topic for topic, _ in drain(sub)] == ["series.deleted"]
-    assert await probe.request("catalog.sources.by_url", {"url": VK}, timeout=5) == []
-    assert len(await probe.request("catalog.sources.by_url", {"url": RUCHIME}, timeout=5)) == 1
 
 
 @pytest.mark.asyncio
