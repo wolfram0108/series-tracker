@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     import httpx
@@ -64,6 +64,25 @@ class Player(Protocol):
         ...
 
     def read(self, answer: Answer) -> Reading: ...
+
+
+# The page that embeds the players, as the hosts see it: VK asks the API on behalf of this domain.
+EMBED_PAGE = "https://1.ruchime.org/"
+
+
+@runtime_checkable
+class StreamPlayer(Protocol):
+    """A player that gives the stream of a link it owns. A download asks the player right before it begins: the
+    addresses of the files expire, so they are not kept."""
+
+    name: str
+
+    def owns(self, url: str) -> bool: ...
+
+    async def stream(self, url: str, http: "httpx.AsyncClient", max_height: int | None, pacer: Any) -> dict:
+        """{stream_url, headers, progressive?} of the best file within `max_height` (the best of all without it).
+        Raises StreamUnavailable when the player owns the link but has no stream for it now."""
+        ...
 
 
 class StreamUnavailable(RuntimeError):

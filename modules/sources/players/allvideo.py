@@ -11,8 +11,12 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .contract import Answer, Kind, PlayerRef, Reading
+from core.reasons import reason
+
+from ..policy import probe_from, settle
+from .contract import EMBED_PAGE, Answer, Kind, PlayerRef, Reading, StreamUnavailable
 from .http import get_answer, read_answer
+from .vk_files import pick_file
 
 # AllVideo answers a missing embed with status 404 and a Playerjs that plays this placeholder file.
 ERROR_FILE = "video_error"
@@ -88,6 +92,16 @@ class AllVideoPlayer:
 
     def read(self, answer: Answer) -> Reading:
         return read_answer(answer, read_playerjs)
+
+    async def stream(self, url: str, http: httpx.AsyncClient, max_height: int | None, pacer) -> dict:
+        """An embed -> its best stream within the cap now, asked with the origin the embed answered from."""
+        asked, ref = self.resolving(), PlayerRef(self.name, url)
+        verdict = await settle(asked, ref, http, EMBED_PAGE, pacer=pacer)
+        picked = pick_file(verdict.reading.files, max_height) if verdict.reading.kind is Kind.PLAYABLE else None
+        if picked is None:
+            probe = probe_from(verdict, ref, self.label)
+            raise StreamUnavailable(reason("player_failed", player=self.label, cause=probe.reason), probe.transient)
+        return {"stream_url": picked[1], "headers": {"Referer": asked.origin} if asked.origin else {}}
 
     def resolving(self) -> "_Resolving":
         """The same player asked for the files of an embed, which says where the embed finally answered from."""

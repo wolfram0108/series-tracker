@@ -22,7 +22,7 @@ from core.contracts import RowVoice
 from core.reasons import reason
 
 from .catalog import CatalogError, Entry
-from .contract import Answer, Kind, PlayerRef, Reading
+from .contract import Answer, Kind, PlayerRef, Reading, StreamUnavailable
 from .vibix_protocol import (Episode, KeyStore, Stream, VibixProtocolError, VibixUnavailable, capture_with_browser,
                              decode_playlist, parse_manifest, stream_expires)
 
@@ -32,6 +32,16 @@ REFRESH_MARGIN_S = 600
 MANIFEST_TIMEOUT_S = 15.0
 _LINK = re.compile(r"^vibix=(\d+)/(\d+)$")
 _ABSOLUTE_URL = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
+
+
+def within_cap(streams, max_height: int | None) -> list:
+    """The streams in the order they are tried: the best not above the cap first, then the lower ones, then, when
+    nothing fits, the lowest above it. Without a cap, the best first."""
+    best_first = sorted(streams, key=lambda item: item.quality, reverse=True)
+    if not max_height:
+        return best_first
+    return [item for item in best_first if item.quality <= max_height] + [
+        item for item in reversed(best_first) if item.quality > max_height]
 
 
 class VibixFailure(RuntimeError):
@@ -212,8 +222,15 @@ class VibixPlayer:
         """A candidate link of this player: a page address with the catalog entry named in its fragment."""
         return parse_link(url) is not None
 
-    async def resolve(self, url: str, http: httpx.AsyncClient) -> dict:
-        """Candidate link -> a local manifest with absolute addresses; a page is no stream, so a failure is explicit."""
+    async def stream(self, url: str, http: httpx.AsyncClient, max_height: int | None, pacer) -> dict:
+        try:
+            return await self.resolve(url, http, max_height)
+        except VibixFailure as exc:
+            raise StreamUnavailable(exc.reason, transient=exc.transient) from exc
+
+    async def resolve(self, url: str, http: httpx.AsyncClient, max_height: int | None = None) -> dict:
+        """Candidate link -> a local manifest with absolute addresses of the best stream within the cap (the best of
+        all without one); a page is no stream, so a failure is explicit."""
         target = parse_link(url)
         if target is None:
             raise VibixFailure(reason("player_failed", player="Vibix", cause=reason("link_no_episode")))
@@ -233,7 +250,7 @@ class VibixPlayer:
             logger.warning("Entry %s of season %s is missing from the Vibix playlist", position, season)
             raise VibixFailure(reason("player_failed", player="Vibix", cause=reason("vibix_no_episode")))
         failure: VibixFailure | None = None
-        for stream in sorted(episode.streams, key=lambda item: item.quality, reverse=True):
+        for stream in within_cap(episode.streams, max_height):
             reading, text = await self._manifest(stream, key, http)
             if text is not None:
                 path = self._manifest_path(slug, season, position, stream.quality)

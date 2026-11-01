@@ -26,6 +26,7 @@ from ..policy import ask
 from .catalog import CatalogError, Entry
 from .contract import Answer, Kind, PlayerRef, Reading
 from .http import get_answer, post_answer, read_answer
+from .streaming import listed_stream
 
 logger = logging.getLogger("sources")
 
@@ -262,6 +263,13 @@ class KodikPlayer:
     @staticmethod
     def owns(url: str) -> bool:
         return parse_link(url) is not None
+
+    async def stream(self, url: str, http: httpx.AsyncClient, max_height: int | None, pacer) -> dict:
+        return await listed_stream(self, url, http, max_height, pacer)
+
+    def capped(self, max_height: int | None) -> "KodikPlayer":
+        """Kodik lists every file of an item, so the cap is applied when one is picked, not when it is asked for."""
+        return self
 
     async def open_page(self, http: httpx.AsyncClient, url: str, referer: str) -> Answer:
         """One request for an iframe, the way the embedding site loads it (its Referer signs the page)."""

@@ -25,6 +25,7 @@ from ..policy import ask
 from .catalog import CatalogError, Entry
 from .contract import Answer, Kind, PlayerRef, Reading
 from .http import get_answer
+from .streaming import listed_stream
 
 API = "https://plapi.cdnvideohub.com/api/v1"
 ORIGIN = "https://player.cdnvideohub.com"
@@ -239,6 +240,9 @@ class CdnVideoHubPlayer:
             group=f"{item.season} сезон" if item.season is not None else "",
             voice=RowVoice(name=item.studio, kind=item.voice_type),
             site_fields={"season": item.season, "episode": item.episode, "vk_id": item.vk_id}) for item in items]
+
+    async def stream(self, url: str, http: httpx.AsyncClient, max_height: int | None, pacer) -> dict:
+        return await listed_stream(self, url, http, max_height, pacer)
 
     def capped(self, max_height: int | None) -> "_Capped":
         """The same player asked for the one file a download takes under a height limit."""

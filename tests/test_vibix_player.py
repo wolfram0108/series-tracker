@@ -218,3 +218,33 @@ async def test_the_entry_the_link_names_is_the_entry_that_resolves_and_a_missing
     assert second["stream_url"].endswith("-s2-0001-480.m3u8")
     assert parse(parse(missing.value.reason)["params"]["cause"])["code"] == "vibix_no_episode"
     assert parse(parse(foreign.value.reason)["params"]["cause"])["code"] == "link_no_episode"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cap, qualities, expected", [
+    (720, (1080, 720), 720), (1080, (1080, 720), 1080), (None, (720, 1080), 1080), (0, (720, 1080), 1080),
+    (300, (720, 1080, 360), 360), (720, (480, 1080, 720, 360), 720)])
+async def test_the_stream_is_the_best_not_above_the_cap_and_the_lowest_above_it_when_nothing_fits(
+        cap, qualities, expected, monkeypatch, tmp_path):
+    Calls(monkeypatch)
+    player = VibixPlayer(manifest_dir=tmp_path)
+    catalog(player, monkeypatch, episode(1, *[Stream(quality, f"https://cdn.test/hls/q{quality}.m3u8")
+                                              for quality in qualities]))
+    async with client({f"q{quality}.m3u8": 200 for quality in qualities}) as http:
+        found = await within(player.stream(link_of(PAGE, 1, 1), http, cap, None), STEP_LIMIT_S, "the stream of Vibix")
+
+    assert found["stream_url"].endswith(f"-{expected}.m3u8")
+
+
+@pytest.mark.asyncio
+async def test_a_stream_within_the_cap_that_does_not_play_gives_way_to_a_lower_one_and_never_to_one_above(
+        monkeypatch, tmp_path):
+    Calls(monkeypatch)
+    player = VibixPlayer(manifest_dir=tmp_path)
+    catalog(player, monkeypatch, episode(1, Stream(1080, "https://cdn.test/hls/q1080.m3u8"),
+                                         Stream(720, "https://cdn.test/hls/q720.m3u8"),
+                                         Stream(480, "https://cdn.test/hls/q480.m3u8")))
+    async with client({"q1080.m3u8": 200, "q720.m3u8": 404, "q480.m3u8": 200}) as http:
+        found = await within(player.stream(link_of(PAGE, 1, 1), http, 720, None), STEP_LIMIT_S, "the stream of Vibix")
+
+    assert found["stream_url"].endswith("-480.m3u8")

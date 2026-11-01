@@ -18,9 +18,12 @@ from weakref import WeakKeyDictionary
 
 import httpx
 
-from .contract import Answer, Kind, PlayerRef, Reading
+from core.reasons import reason
+
+from ..policy import probe_from, settle
+from .contract import EMBED_PAGE, Answer, Kind, PlayerRef, Reading, StreamUnavailable
 from .http import USER_AGENT, get_answer, post_answer
-from .vk_files import (ApiContext, EmbedParts, api_context, call_form, chunks, embed_parts, read_call, read_item,
+from .vk_files import (ApiContext, EmbedParts, api_context, call_form, chunks, embed_parts, pick_file, read_call, read_item,
                        read_page, read_single)
 from .vk_show import ENDPOINT, read_show
 
@@ -86,6 +89,17 @@ class VkPlayer:
     def download_address(self, ref: PlayerRef) -> str | None:
         """What the downloader is given: the player link with its key, asked again for fresh files when the download starts."""
         return ref.raw_url if self.owns(ref.raw_url) else None
+
+    async def stream(self, url: str, http: httpx.AsyncClient, max_height: int | None, pacer) -> dict:
+        """A player link with its key -> the address of one file now."""
+        ref = self.ref_of(url)
+        verdict = await settle(self.with_files(), ref, http, EMBED_PAGE, pacer=pacer)
+        probe = probe_from(verdict, ref, "VK")
+        picked = pick_file(verdict.reading.files, max_height) if verdict.reading.kind is Kind.PLAYABLE else None
+        if picked is None:
+            raise StreamUnavailable(probe.reason or reason("player_unconfirmed", player="VK"),
+                                    transient=probe.transient or probe.available)
+        return {"stream_url": picked[1], "headers": {}, "progressive": True}
 
     def with_files(self) -> "_WithFiles":
         """The same player asked for the addresses of the files too, which a download needs and a probe does not."""

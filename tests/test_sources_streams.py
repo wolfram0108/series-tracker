@@ -67,6 +67,32 @@ async def test_an_address_no_player_owns_is_not_handled():
     assert web.asked == []
 
 
+# --- a player registered is found, with nothing else named ------------------------------------------------------------------------
+
+class NewPlayer:
+    """A player no module knows by name: it owns an address and gives its stream, within the cap it is given."""
+
+    name = "newcomer"
+    label = "Newcomer"
+    series_scope = False
+
+    @staticmethod
+    def owns(url: str) -> bool:
+        return url.startswith("https://newcomer.test/")
+
+    async def stream(self, url, http, max_height, pacer):
+        return {"stream_url": f"{url}?cap={max_height}", "headers": {}}
+
+
+async def test_a_player_that_is_registered_resolves_the_links_it_owns_and_gets_the_cap():
+    players = PlayerRegistry.standard()
+    players.register(NewPlayer())
+
+    assert await resolved("https://newcomer.test/v/1", Web(), 720, players) == {
+        "stream_url": "https://newcomer.test/v/1?cap=720", "headers": {}}
+    assert await resolved("https://newcomer.test/v/1", Web(), None, PlayerRegistry.standard()) is None
+
+
 # --- VK -----------------------------------------------------------------------------------------------------------------------
 
 async def test_a_player_link_with_a_key_resolves_to_one_fresh_file_asked_for_in_parts():
