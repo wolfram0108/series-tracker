@@ -19,7 +19,7 @@ import shutil
 import sqlite3
 from pathlib import Path
 
-from core import Bus, Runner
+from core import Bus, Runner, storage
 from core.db import Database
 from core.envelope import Envelope
 from modules.catalog import CatalogModule
@@ -27,7 +27,7 @@ from modules.downloads import DownloadsModule
 from modules.scan import ScanModule
 from scan_support import STUCK_S, row
 from series_factory import create_series, source
-from settle import settle, wait_until
+from settle import path_free, settle, wait_until
 from test_downloads_module import FakeDownloader
 from test_stage10_boundaries import URL, Neighbours, Probe
 
@@ -184,8 +184,12 @@ class Harness:
             return not [task for task in self.tasks() if task["status"] in LIVE and not self.waits_for_name(task, items)] \
                 and not self.downloader.concurrent
 
-        await wait_until(calm, self.bus, *self.runner.modules, seconds=STUCK_S * 2)
-        await settle(self.bus, *self.runner.modules, seconds=STUCK_S * 2)
+        while True:
+            await path_free(str(self.media), seconds=STUCK_S * 2)  # a replacement that did not answer in time has ended
+            await wait_until(calm, self.bus, *self.runner.modules, seconds=STUCK_S * 2)
+            await settle(self.bus, *self.runner.modules, seconds=STUCK_S * 2)
+            if not storage.busy(str(self.media)):
+                return
 
 
 def video_of(item: dict) -> bytes:
