@@ -129,7 +129,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | GET | `/api/agent/queue` | Очередь торрент-конвейера | — |
 | GET | `/api/downloads/queue` | Очередь загрузок видео | — |
 | POST | `/api/downloads/queue/clear` | Очистка очереди загрузок | — |
-| POST | `/api/downloads/{task_id}/cancel` | Отмена загрузки: процесс + файл + задача | — |
+| POST | `/api/downloads/{task_id}/cancel` | Отмена загрузки: процесс + файл + задача; допустима у задачи в очереди, идущей и обрабатываемой, иначе 409 с причиной `not_allowed` | — |
 
 ### 3.5 Настройки, справочники, логи, БД — `api_settings.py`
 
@@ -201,9 +201,9 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 
 | Метод | Путь | Назначение | Панель |
 |---|---|---|---|
-| GET | `/api/series/{series_id}/composition` | Видео-сериал — раскладка (`composition.get`, query `include_excluded`, `sources_only` — только сводки источников); торрент — состав раздач (`torrents.composition`, query `refresh`) | `StatusComposition.vue` (торрент), `StatusOutput.vue`, `SourcesEditor.vue` (видео) |
+| GET | `/api/series/{series_id}/composition` | Видео-сериал — раскладка (`composition.get`, query `include_excluded`, `sources_only` — только сводки источников; в ответе `levers` — описания рычагов и `availability` — таблица допустимого по состояниям, по которой окно включает управление); торрент — состав раздач (`torrents.composition`, query `refresh`) | `StatusComposition.vue` (торрент), `StatusOutput.vue`, `SourcesEditor.vue` (видео) |
 | GET | `/api/series/{series_id}/output` | Референс каждой серии и отметка (`scan.output.get`) | — |
-| PUT | `/api/series/{series_id}/output/settings` | Значение рычага на уровне сериала, сезона или серии (`composition.settings.set`) | — |
+| PUT | `/api/series/{series_id}/output/settings` | Значение рычага на уровне сериала, сезона или серии (`composition.settings.set`); выбор референса у варианта без видео или одних компиляций и выбор предпочтительного варианта без видео — отказ `not_allowed` | — |
 | PUT | `/api/series/{series_id}/output/switch` | Отключить или включить серию, а сезон целиком — без `episode` (`scan.output.switch`) | — |
 | POST | `/api/series/{series_id}/output/settings/reset` | Вернуть рычаги уровня в наследование (`composition.settings.reset`) | — |
 
