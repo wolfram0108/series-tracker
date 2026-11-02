@@ -1,6 +1,7 @@
 """Acceptance of the levers of the output through the interface, on the tables of two sources of one series (the dunhuatv.ru
 page and the VK channel of «Расколотая битвой синева небес»; ruchime joins when it answers).
 
+    ui_levers.py reset  --work <dir>                     the series and the groups of voice-overs are taken away (the tables stay)
     ui_levers.py setup  --work <dir> [--safeguard 170]   the profiles, the series with its two sources, made in the browser
     ui_levers.py levers --work <dir> [--safeguard 170]   every lever at every level, one scenario after another, in the browser
 
@@ -184,6 +185,14 @@ def setup(c: Campaign, page: Page) -> None:
     c.scenario("сериал с двумя источниками создан в окне добавления", page, series)
 
 
+PLAYER = {"vk": "VK", "cvh": "CVH", "kodik": "Kodik"}
+GROUPS = ["AniStar", "Anton Shanteau", "Animy", "Студия Константина Исаева", "AnimeVost"]
+# raw name of a voice-over -> the group the user makes of it and whether it is the group's own name
+MAKE = [("AniStar", "AniStar"), ("Anton Shanteau", "Anton Shanteau"), ("AniMy / RuChiMe", "Animy"),
+        ("Студия Константина Исаева", "Студия Константина Исаева"), ("AnimeVost", "AnimeVost"),
+        ("AniStar Многоголосый", "AniStar")]
+
+
 def open_output(page: Page, base: str | None = None) -> None:
     if base:
         page.goto(base + "/", wait_until="domcontentloaded")
@@ -193,33 +202,351 @@ def open_output(page: Page, base: str | None = None) -> None:
     page.wait_for_selector(".output-episode .episode-marks li", timeout=60000)
 
 
-def series_levers(page: Page):
-    """The levers of the whole series, opened."""
-    level = page.locator("section.output-level[data-scope='series']")
-    if not level.locator(":scope > .output-levers").count():
-        level.locator(":scope > header .level-levers").click()
-    return level.locator(":scope > .output-levers")
+def level_root(page: Page, scope: str, episode: int | None = None):
+    if scope == "series":
+        return page.locator("section.output-level[data-scope='series']")
+    if scope == "season":
+        return page.locator(f"section.output-level[data-scope='season'][data-season='{SEASON}']")
+    return page.locator(f"article.output-episode[data-season='{SEASON}'][data-episode='{episode}']")
 
 
-def explore(c: Campaign, page: Page) -> dict:
-    grid = series_levers(page)
-    columns = {}
-    for column in grid.locator(".voice-column").all():
-        columns[column.get_attribute("data-group")] = [each.inner_text().split("\n")[0] for each in column.locator(".variant-name").all()]
-    return {"columns": columns, "episodes": page.locator(".output-episode").count()}
+def grid(page: Page, scope: str, episode: int | None = None):
+    """The levers of a level, opened: of the series, of its season, or of one episode."""
+    root = level_root(page, scope, episode)
+    levers = root.locator(":scope > .output-levers")
+    if not levers.count():
+        (root.locator(".episode-toggle:not(.episode-switch)") if scope == "episode" else root.locator(":scope > header .level-levers")).first.click()
+        levers.first.wait_for(timeout=15000)
+    return levers.first
+
+
+def column(page: Page, root, group: str):
+    return root.locator(f'.voice-column[data-group="{group}"]')
+
+
+def variant(page: Page, root, group: str, player: str, source_id: int):
+    return column(page, root, group).locator(".variant").filter(
+        has=page.locator(".variant-name", has_text=f"{PLAYER[player]} — источник {source_id}"))
+
+
+def source_ids(c: Campaign) -> dict[str, int]:
+    found = {"site": 0, "channel": 0}
+    for each in c.api(f"/api/series/{c.series_id}/sources"):
+        found["channel" if "vkvideo" in each["url"] else "site"] = each["id"]
+    return found
+
+
+def refs(c: Campaign) -> dict[int, dict]:
+    return {each["episode"]: each for each in c.api(f"/api/series/{c.series_id}/output")}
+
+
+def layout_rows(c: Campaign) -> list[dict]:
+    return c.api(f"/api/series/{c.series_id}/composition")["rows"]
+
+
+def chain_of(c: Campaign, episode: int, group: str) -> list[str] | None:
+    """The players of the sources a voice-over of an episode may be had from, in the order they are tried (None: no such voice-over)."""
+    found = c.db("SELECT chain FROM voice_dubs WHERE series_id=? AND season=? AND episode=? AND voice_label=?",
+                 (c.series_id, SEASON, episode, group))
+    return [each["player"] for each in json.loads(found[0]["chain"])] if found else None
+
+
+def eventually(c: Campaign, check, what: str):
+    """The database is read from outside and gives no signal: it is looked at until the check holds or the run's time is out."""
+    while True:
+        value = check()
+        if value:
+            return value
+        if c.left_ms() <= 1500:
+            raise AssertionError(f"not reached: {what}")
+        time.sleep(0.25)
+
+
+def clean(c: Campaign) -> None:
+    """A run that comes after another starts from the series as set up: every lever of every level goes back to the level above
+    (the names of the voice-overs and the groups are the user's setup and stay)."""
+    c.http.post(f"/api/series/{c.series_id}/output/settings/reset", json={}).raise_for_status()
+    c.http.post(f"/api/series/{c.series_id}/output/settings/reset", json={"season": SEASON}).raise_for_status()
+    for episode in range(FIRST, LAST + 1):
+        c.http.post(f"/api/series/{c.series_id}/output/settings/reset", json={"season": SEASON, "episode": episode}).raise_for_status()
 
 
 def levers(c: Campaign, page: Page, context) -> None:
     c.series_id = next(each["id"] for each in c.api("/api/series") if each["name"] == SERIES)
+    ids = source_ids(c)
+    site, channel = ids["site"], ids["channel"]
     page.goto(c.stand.base + "/", wait_until="domcontentloaded")
     first_run(page)
-    c.scenario("«Выход» открыт: серии с референсом по событиям", page, lambda: (open_output(page), {"episodes": page.locator(".output-episode").count()})[1])
-    c.scenario("разведка сетки рычагов сериала", page, lambda: explore(c, page))
+    clean(c)
+
+    c.scenario("«Выход» открыт: десять серий 208–217 с референсом, пришедшим событиями", page,
+               lambda: (open_output(page), {"episodes": page.locator(".output-episode").count()})[1])
+
+    # --- the names: a name for the voice-over of the channel, the groups made where the voice-overs are shown ---------
+
+    def name_the_channel() -> dict:
+        page.locator(".st-tab[title='Свойства']").click()
+        card = page.locator(".source-card").filter(has=page.locator(".vk-mode-group"))
+        field = card.locator(".source-voice-name input")
+        field.fill("AniStar")
+        field.press("Tab")
+        page.locator(".st-tab[title='Выход']").click()
+        eventually(c, lambda: any(r["source_id"] == channel and r["voice_name"] == "AniStar" for r in layout_rows(c)), "the name of the channel")
+        labels = {r["voice_label"] for r in layout_rows(c) if r["voice_name"] == "AniStar"}
+        assert len(labels) == 1, f"the channel and the CVH voice AniStar are one voice-over: {labels}"
+        return {"label": sorted(labels)[0]}
+
+    c.scenario("озвучка канала VK названа в карточке источника «AniStar» и слилась с озвучкой AniStar плеера CVH", page, name_the_channel)
+
+    def make_groups() -> dict:
+        made = {}
+        for raw, group in MAKE:
+            label = next(r["voice_label"] for r in layout_rows(c) if r["voice_name"] == raw)
+            root = grid(page, "series")
+            box = column(page, root, label)
+            if not box.locator(".group-maker-name").count():
+                made[raw] = group  # the voice-over is in a group already (the name of the group covers it)
+                continue
+            box.locator(".group-maker-name").fill(group)
+            box.locator(".group-maker-make").click()
+            # The column of the new group is there, and the column the voice-over left is gone.
+            page.wait_for_function(
+                "(a) => { const r = document.querySelector('section.output-level[data-scope=series] > .output-levers');"
+                " const has = (g) => r.querySelector('.voice-column[data-group=\"' + g + '\"]');"
+                " return has(a.group) && (a.label === a.group || !has(a.label)) }",
+                arg={"group": group, "label": label}, timeout=c.left_ms())
+            made[raw] = group
+        columns = sorted(each.get_attribute("data-group") for each in grid(page, "series").locator(".voice-column").all())
+        assert columns == sorted(GROUPS), f"columns {columns}"
+        return {"columns": columns}
+
+    c.scenario("пять групп озвучек заведены кнопкой «Завести группу» в колонках «Выхода», без настроек", page, make_groups)
+
+    def variants_of_groups() -> dict:
+        root = grid(page, "series")
+        found = {group: [each.inner_text().split("\n")[0] for each in column(page, root, group).locator(".variant-name").all()] for group in GROUPS}
+        assert len(found["AniStar"]) == 3, found["AniStar"]
+        assert found["Anton Shanteau"] and found["Animy"] and len(found["Студия Константина Исаева"]) == 1 and len(found["AnimeVost"]) == 1, found
+        return {"variants": {group: len(names) for group, names in found.items()}, "AniStar": found["AniStar"]}
+
+    c.scenario("в колонке AniStar три варианта (канал VK, CVH, Kodik), в остальных — по своим плеерам", page, variants_of_groups)
+
+    # --- the reference ------------------------------------------------------------------------------------------------
+
+    channel_episodes = sorted({r["episode_start"] for r in layout_rows(c) if r["source_id"] == channel and not r["excluded"]})
+
+    def series_reference() -> dict:
+        root = grid(page, "series")
+        variant(page, root, "AniStar", "vk", channel).locator(".variant-reference").click()
+        others = [e for e in refs(c) if e not in channel_episodes]
+        eventually(c, lambda: all(refs(c)[e]["source_id"] == channel for e in channel_episodes)
+                   and all(refs(c)[e]["mark"] == "other_player" for e in others), "the reference of the channel and the others by another player")
+        now = refs(c)
+        assert all(now[e]["voice_group"] == "AniStar" and now[e]["mark"] == "other_player" for e in others), {e: now[e]["mark"] for e in others}
+        assert variant(page, root, "AniStar", "vk", channel).locator(".variant-reference").get_attribute("aria-pressed") == "true"
+        root.locator(".lever-reference .lever-level", has_text=text_of("output.level.series")).wait_for(timeout=20000)
+        return {"channel_episodes": channel_episodes, "others_mark": "other_player", "level_text": text_of("output.level.series")}
+
+    c.scenario("референс сериала: AniStar из канала VK; серии без него берут AniStar другого плеера с отметкой «другой плеер»", page, series_reference)
+
+    def episode_reference() -> dict:
+        root = grid(page, "episode", 210)
+        variant(page, root, "Animy", "cvh", site).locator(".variant-reference").click()
+        page.locator("article.output-episode[data-episode='210'] .episode-marks li", has_text=text_of("output.mark.own")).wait_for(timeout=20000)
+        now = refs(c)[210]
+        assert now["voice_group"] == "Animy" and now["source_id"] == site and now["mark"] == "own", now
+        return {"mark": now["mark"], "group": now["voice_group"], "player": now["player"]}
+
+    c.scenario("референс серии 210: Animy из CVH своей настройкой; отметка «своя настройка серии»", page, episode_reference)
+
+    def second_window() -> dict:
+        other = context.new_page()
+        open_output(other, c.stand.base)
+        marks = other.locator("article.output-episode[data-episode='210'] .episode-marks li").all_inner_texts()
+        assert text_of("output.mark.own") in " ".join(marks), marks
+        root = grid(page, "episode", 210)
+        variant(page, root, "AniStar", "kodik", site).locator(".variant-reference").click()
+        other.locator("article.output-episode[data-episode='210'] .episode-marks li", has_text=text_of("output.mark.own")).wait_for(timeout=20000)
+        eventually(c, lambda: refs(c)[210]["player"] == "kodik", "the pick of the first window")
+        # the other window follows the pick by the event and shows the reference of the episode
+        # The window of the second page shows the player of the reference in the head of the episode, by the event.
+        other.locator("article.output-episode[data-episode='210'] header .episode-reference", has_text="Kodik").wait_for(timeout=20000)
+        other.close()
+        return {"player": refs(c)[210]["player"]}
+
+    c.scenario("второе окно видит выбор референса серии 210 событием, без перезагрузки", page, second_window)
+
+    def episode_reset() -> dict:
+        root = grid(page, "episode", 210)
+        root.locator(".lever-reference .lever-reset").click()
+        page.locator("article.output-episode[data-episode='210'] .episode-marks li", has_text=text_of("output.mark.other_player")).wait_for(timeout=20000)
+        now = refs(c)[210]
+        assert now["mark"] == "other_player" and now["voice_group"] == "AniStar", now
+        return {"mark": now["mark"]}
+
+    c.scenario("«как уровнем выше» у серии 210 возвращает референс сериала", page, episode_reset)
+
+    def episode_auto() -> dict:
+        root = grid(page, "episode", 208)
+        variant(page, root, "Animy", "cvh", site).locator(".variant-reference").click()
+        page.locator("article.output-episode[data-episode='208'] .episode-marks li", has_text=text_of("output.mark.own")).wait_for(timeout=20000)
+        root.locator(".lever-reference .lever-auto").click()
+        eventually(c, lambda: refs(c)[208]["mark"] == "own" and refs(c)[208]["voice_group"] != "Animy", "explicit auto of the episode")
+        now = refs(c)[208]
+        root.locator(".lever-reference .lever-reset").click()
+        eventually(c, lambda: refs(c)[208]["source_id"] == channel and refs(c)[208]["mark"] == "by_level", "reset after auto")
+        return {"auto": {"mark": now["mark"], "group": now["voice_group"], "source": now["source_id"]}, "after_reset": refs(c)[208]["mark"]}
+
+    c.scenario("серия 208: выбор варианта, затем «авто» (не наследует сериал), затем «как уровнем выше»", page, episode_auto)
+
+    def season_reference() -> dict:
+        root = grid(page, "season")
+        variant(page, root, "Anton Shanteau", "kodik", site).locator(".variant-reference").click()
+        eventually(c, lambda: refs(c)[209]["voice_group"] == "Anton Shanteau", "the reference of the season")
+        now = refs(c)
+        assert all(now[e]["voice_group"] == "Anton Shanteau" for e in now if e != 210), {e: now[e]["voice_group"] for e in now}
+        assert now[210]["voice_group"] == "Anton Shanteau" and now[210]["mark"] != "own"
+        root.locator(".lever-reference .lever-level", has_text=text_of("output.level.season")).wait_for(timeout=20000)
+        text = text_of("output.level.season")
+        root.locator(".lever-reference .lever-reset").click()
+        eventually(c, lambda: refs(c)[209]["voice_group"] == "AniStar", "the season handed back to the series")
+        return {"after_pick": "Anton Shanteau во всех сериях сезона", "badge": text}
+
+    c.scenario("референс сезона: Anton Shanteau из Kodik для всех серий; уровень «из сезона»; сброс возвращает сериал", page, season_reference)
+
+    # --- the participation of a variant ---------------------------------------------------------------------------------
+
+    def exclude_series_level() -> dict:
+        root = grid(page, "series")
+        box = variant(page, root, "AniStar", "vk", channel).locator("input[type=checkbox]")
+        box.uncheck()
+        eventually(c, lambda: refs(c)[212]["source_id"] != channel, "the excluded channel is no reference")
+        now = refs(c)
+        assert all(now[e]["source_id"] != channel for e in channel_episodes), {e: now[e]["source_id"] for e in channel_episodes}
+        variant(page, root, "AniStar", "vk", channel).locator(".lever-level", has_text=text_of("output.level.series")).wait_for(timeout=20000)
+        return {"ep212": {"mark": now[212]["mark"], "player": now[212]["player"]}}
+
+    c.scenario("вариант «AniStar — канал VK» исключён на сериал: он больше не референс, у серий 208/212/217 другой плеер", page, exclude_series_level)
+
+    def dubs_without_excluded() -> dict:
+        # Another voice-over is the reference of the season now, so AniStar is a voice-over to be had: from the variants left.
+        root = grid(page, "season")
+        variant(page, root, "Animy", "cvh", site).locator(".variant-reference").click()
+        chain = eventually(c, lambda: chain_of(c, 212, "AniStar"), "the plan of the voice-over AniStar of the episode 212")
+        assert "vk" not in chain and set(chain) == {"cvh", "kodik"}, chain
+        return {"chain 212 AniStar": chain}
+
+    c.scenario("озвучка AniStar серии 212 планируется только из CVH и Kodik: исключённый вариант в цепочку не входит", page, dubs_without_excluded)
+
+    def allow_episode() -> dict:
+        root = grid(page, "episode", 212)
+        box = variant(page, root, "AniStar", "vk", channel).locator("input[type=checkbox]")
+        box.check()
+        chain = eventually(c, lambda: (lambda ch: ch if ch and "vk" in ch else None)(chain_of(c, 212, "AniStar")), "the channel is back for the episode 212")
+        assert "vk" not in (chain_of(c, 208, "AniStar") or []), "the episode 208 keeps the exclusion"
+        variant(page, root, "AniStar", "vk", channel).locator(".lever-level", has_text=text_of("output.level.episode")).wait_for(timeout=20000)
+        badge = text_of("output.level.episode")
+        return {"chain 212": chain, "chain 208": chain_of(c, 208, "AniStar"), "badge": badge}
+
+    c.scenario("на серию 212 вариант включён обратно: в её цепочке канал VK снова есть, у серии 208 — нет; уровень «из серии»", page, allow_episode)
+
+    def reset_allow() -> dict:
+        root = grid(page, "episode", 212)
+        variant(page, root, "AniStar", "vk", channel).locator(".lever-reset").click()
+        eventually(c, lambda: "vk" not in (chain_of(c, 212, "AniStar") or ["vk"]), "the episode 212 inherits the exclusion again")
+        top = grid(page, "series")
+        variant(page, top, "AniStar", "vk", channel).locator(".lever-reset").click()
+        eventually(c, lambda: "vk" in (chain_of(c, 208, "AniStar") or []), "the series lets the channel in again")
+        return {"chain 208": chain_of(c, 208, "AniStar")}
+
+    c.scenario("сброс у серии 212 возвращает исключение сериала; сброс у сериала возвращает вариант всем", page, reset_allow)
+
+    # --- taking a voice-over and preferring a source ----------------------------------------------------------------------
+
+    def take_off_series() -> dict:
+        root = grid(page, "series")
+        column(page, root, "AnimeVost").locator(".voice-head input[type=checkbox]").uncheck()
+        eventually(c, lambda: chain_of(c, 212, "AnimeVost") is None, "AnimeVost is not planned")
+        assert chain_of(c, 208, "AnimeVost") is None
+        return {"AnimeVost planned": False}
+
+    c.scenario("«Брать озвучку» у AnimeVost выключено на сериал: её нет в плане ни у одной серии", page, take_off_series)
+
+    def take_on_episode() -> dict:
+        root = grid(page, "episode", 212)
+        column(page, root, "AnimeVost").locator(".voice-head input[type=checkbox]").check()
+        chain = eventually(c, lambda: chain_of(c, 212, "AnimeVost"), "AnimeVost is planned for the episode 212")
+        assert chain_of(c, 208, "AnimeVost") is None
+        return {"chain 212 AnimeVost": chain, "208": None}
+
+    c.scenario("у серии 212 озвучка AnimeVost включена: она в плане этой серии и только её", page, take_on_episode)
+
+    def prefer_season() -> dict:
+        root = grid(page, "season")
+        variant(page, root, "Anton Shanteau", "kodik", site).locator(".variant-prefer").click()
+        # Anton Shanteau is the reference's voice-over, so the order is read from another episode: give the reference to Animy first
+        chain = eventually(c, lambda: (lambda ch: ch if ch and ch[0] == "kodik" else None)(chain_of(c, 212, "Anton Shanteau")), "Kodik is first")
+        return {"chain 212 Anton Shanteau": chain}
+
+    c.scenario("предпочтительный источник Anton Shanteau на сезон — Kodik: он первый в цепочке", page, prefer_season)
+
+    def prefer_episode() -> dict:
+        root = grid(page, "episode", 212)
+        variant(page, root, "Anton Shanteau", "cvh", site).locator(".variant-prefer").click()
+        chain = eventually(c, lambda: (lambda ch: ch if ch and ch[0] == "cvh" else None)(chain_of(c, 212, "Anton Shanteau")), "CVH is first")
+        other = chain_of(c, 209, "Anton Shanteau")
+        column(page, root, "Anton Shanteau").locator(".voice-head .lever-value", has_text="CVH").wait_for(timeout=20000)
+        head = column(page, root, "Anton Shanteau").locator(".voice-head .lever-value").inner_text()
+        return {"chain 212": chain, "chain 209": other, "head": head}
+
+    c.scenario("на серию 212 предпочтителен CVH: у неё он первый, у остальных серий — Kodik сезона", page, prefer_episode)
+
+    # --- switching off, the filter, the names, the narrow screen ----------------------------------------------------------
+
+    def switch_episode() -> dict:
+        card = page.locator("article.output-episode[data-episode='215']")
+        card.locator(".episode-switch").click()
+        card.locator(".episode-marks li", has_text=text_of("output.mark.off")).wait_for(timeout=20000)
+        assert refs(c)[215]["mark"] == "off"
+        card.locator(".episode-switch").click()
+        card.locator(".episode-marks li", has_text=text_of("output.mark.by_level")).wait_for(timeout=20000)
+        return {"off_and_on": 215}
+
+    c.scenario("серия 215 отключена и включена кнопкой; отметка «серия отключена» и возврат референса", page, switch_episode)
+
+    def switch_season() -> dict:
+        level = level_root(page, "season")
+        level.locator(":scope > header .level-switch").click()
+        eventually(c, lambda: all(each["mark"] == "off" for each in refs(c).values()), "the season is off")
+        level.locator(":scope > header .level-switch").click()
+        eventually(c, lambda: all(each["mark"] != "off" for each in refs(c).values()), "the season is on")
+        return {"season": SEASON}
+
+    c.scenario("сезон отключён целиком и включён обратно", page, switch_season)
+
+    def deviations() -> dict:
+        box = page.locator(".output-deviations input")
+        box.check()
+        shown = page.locator(".output-episode").count()
+        box.uncheck()
+        assert shown == 1, shown
+        return {"shown": shown, "of": 10}
+
+    c.scenario("фильтр «только отклонения» показывает серию со своими настройками (212), остальные скрывает", page, deviations)
+
+    def narrow() -> dict:
+        page.set_viewport_size({"width": 360, "height": 900})
+        scroll = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
+        page.set_viewport_size({"width": 1280, "height": 1000})
+        assert scroll <= 1, scroll
+        return {"overflow_px": scroll}
+
+    c.scenario("при ширине 360 px окно «Выход» с открытыми рычагами не выходит за экран", page, narrow)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("phase", choices=("setup", "levers"))
+    parser.add_argument("phase", choices=("reset", "setup", "levers"))
     parser.add_argument("--work", required=True)
     parser.add_argument("--safeguard", type=float, default=170)
     args = parser.parse_args()
@@ -232,7 +559,14 @@ def main() -> int:
             page = context.new_page()
             campaign = Campaign(stand, Path(args.work), args.safeguard - 15)
             try:
-                if args.phase == "setup":
+                if args.phase == "reset":
+                    for each in campaign.api("/api/series"):
+                        campaign.http.delete(f"/api/series/{each['id']}").raise_for_status()
+                    view = campaign.api("/api/voices/settings")
+                    saved = campaign.http.put("/api/voices/settings", json={"priority": view["priority"], "voice_groups": {}}).json()
+                    assert saved.get("saved") is True, saved
+                    campaign.results.append({"scenario": "сериал и группы озвучек сняты", "ok": True, "detail": {}, "shot": None, "seconds": 0})
+                elif args.phase == "setup":
                     setup(campaign, page)
                 else:
                     levers(campaign, page, context)  # noqa: F821
