@@ -166,3 +166,22 @@ def test_the_way_back_keeps_the_first_row_of_a_key_and_journals_what_the_other_p
             ("/lib/p2.flac", "artifact"), ("/w/p2.mp4", "path")]
     alembic(at_0031, "upgrade", "0032")
     assert len(dubs(at_0031, "id")) == len(ROWS)
+
+
+def test_the_way_back_keeps_the_row_of_the_whole_episode_whatever_the_order_the_parts_were_made_in_and_journals_all_the_rest(at_0031):
+    alembic(at_0031, "upgrade", "0032")
+    add = ("INSERT INTO voice_dubs (series_id, season, episode, part, voice_key, voice_label, chain, updated_at, status, "
+           "output_path, temp_path, job_id, out_dir, submit_key) VALUES (7, 1, 1, ?, 'cat', 'Cat', '[]', 'now', ?, ?, ?, ?, ?, ?)")
+    with sqlite3.connect(at_0031) as conn:
+        conn.execute(add, (1, "placed", "/lib/p1.flac", "/w/p1.mp4", "job-p1", "/w/out/p1", None))
+        conn.execute(add, (0, "placed", "/lib/whole.flac", "/w/whole.mp4", "job-whole", "/w/out/whole", None))
+        conn.execute(add, (2, "aligning", "/lib/p2.flac", "/w/p2.mp4", None, "/w/out/p2", "send-p2"))
+        conn.commit()
+    alembic(at_0031, "downgrade", "0031")
+    with sqlite3.connect(at_0031) as conn:
+        kept = conn.execute("SELECT output_path FROM voice_dubs WHERE voice_key='cat'").fetchall()
+        journal = {(path, kind) for path, kind in conn.execute("SELECT path, kind FROM voice_cleanup")}
+    assert kept == [("/lib/whole.flac",)]
+    assert {("/lib/p1.flac", "artifact"), ("/w/p1.mp4", "path"), ("job-p1", "job"),
+            ("/lib/p2.flac", "artifact"), ("/w/p2.mp4", "path"), ("send-p2", "submission")} <= journal
+    assert not any(path in ("/lib/whole.flac", "/w/whole.mp4", "job-whole") for path, _ in journal)
