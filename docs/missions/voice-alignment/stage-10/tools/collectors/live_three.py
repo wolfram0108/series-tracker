@@ -119,10 +119,10 @@ def read_phase(work: str, safeguard: float) -> str:
 def drop_unnamed(live: Live) -> list[str]:
     """The voice-overs nobody named a group for (a row with no name, a voice of other episodes) are not taken: the lever
     `voice.take` of their group is off for the whole series, as a user turns them off."""
-    layout = live.call("GET", "/api/series/1/composition")
+    layout = live.call("GET", f"{live.series_path()}/composition")
     labels = sorted({row["voice_label"] for row in layout["rows"] if not row.get("excluded")} - WANTED_VOICES)
     for label in labels:
-        live.call("PUT", "/api/series/1/output/settings", json={"lever": "voice.take", "target": f"group:{label}", "value": False})
+        live.call("PUT", f"{live.series_path()}/output/settings", json={"lever": "voice.take", "target": f"group:{label}", "value": False})
     return labels
 
 
@@ -132,8 +132,12 @@ def create_series(live: Live) -> None:
     assert answer.get("saved") is True, f"voice groups: {answer}"
     live.step("группы озвучек заведены", groups=list(GROUPS))
 
+    # A profile left by an earlier run on this database is replaced: its rules would double up otherwise.
+    left = {each["name"]: each["id"] for each in live.call("GET", "/api/parser-profiles")}
     ids: dict[str, int] = {}
     for name, rules in PROFILES.items():
+        if f"{name} 5" in left:
+            live.call("DELETE", f"/api/parser-profiles/{left[f'{name} 5']}")
         made = live.call("POST", "/api/parser-profiles", json={"name": f"{name} 5"})
         ids[name] = made["id"]
         for rule in rules:
@@ -171,24 +175,24 @@ def aim(live: Live) -> str:
     view = live.call("GET", "/api/voices/settings")
     if view["voice_groups"] != GROUPS:
         # New groups name voice-overs in the layout only after it is counted again: its event is waited for.
-        rev = live.call("GET", "/api/series/1/composition")["rev"]
+        rev = live.call("GET", f"{live.series_path()}/composition")["rev"]
         recount = live.stand.listen({"composition_changed"}, lambda name, data: data.get("rev", 0) > rev, 40)
         answer = live.call("PUT", "/api/voices/settings", json={"priority": view["priority"], "voice_groups": GROUPS})
         assert answer.get("saved") is True, f"voice groups: {answer}"
         assert recount[1].wait(40), "the layout was not counted again after the groups"
         live.step("группы озвучек изменены, раскладка пересчитана", groups=list(GROUPS))
-    layout = live.call("GET", "/api/series/1/composition")
+    layout = live.call("GET", f"{live.series_path()}/composition")
     labels = sorted({row["voice_label"] for row in layout["rows"] if row.get("episode_start") == KEEP and not row.get("excluded")})
     live.step(f"озвучки серии {KEEP} в раскладке (имя группы или неизвестная)", labels=labels)
     assert WANTED_VOICES <= set(labels), f"voices {labels}"
 
     for episode in range(FIRST, LAST + 1):
-        live.call("PUT", "/api/series/1/output/switch", json={"season": 5, "episode": episode, "off": episode != KEEP})
-    sources = live.call("GET", "/api/series/1/sources")
+        live.call("PUT", f"{live.series_path()}/output/switch", json={"season": 5, "episode": episode, "off": episode != KEEP})
+    sources = live.call("GET", f"{live.series_path()}/sources")
     channel_id = next(each["id"] for each in sources if "vkvideo.ru" in each["url"])
-    live.call("PUT", "/api/series/1/output/settings", json={
+    live.call("PUT", f"{live.series_path()}/output/settings", json={
         "lever": "reference.choice", "target": None, "value": {"group": "AniStar", "source_id": channel_id, "player": "vk"}})
-    output = live.call("GET", "/api/series/1/output")
+    output = live.call("GET", f"{live.series_path()}/output")
     wanted = [each for each in output if each["mark"] != "off"]
     assert [each["episode"] for each in wanted] == [KEEP], f"wanted {[each['episode'] for each in wanted]}"
     reference = wanted[0]
@@ -197,7 +201,7 @@ def aim(live: Live) -> str:
     assert reference["source_id"] == channel_id and reference["voice_group"] == "AniStar", f"reference {reference}"
     live.step("безымянные озвучки отключены рычагом «брать озвучку»", dropped=drop_unnamed(live))
 
-    live.call("POST", "/api/series/1/scan", timeout=live.left() - 30)
+    live.call("POST", f"{live.series_path()}/scan", timeout=live.left() - 30)
     live.step("проход по сериалу выполнен (загрузка поставлена)")
     live.watch({"voice_dub_update", "voice_dubs_snapshot", "conform_queue_update"},
                lambda name, data: name == "voice_dub_update" and data.get("episode") == KEEP and data.get("state") in LIVE_STATES,
@@ -242,6 +246,10 @@ def mine(live: Live) -> list[dict]:
     return [dub for dub in live.dubs() if dub.get("status") != "removed" and dub["episode"] == KEEP]
 
 
+def temporary_files() -> list[str]:
+    return sorted(str(path.relative_to(LOCAL)) for path in Path(LOCAL).glob("downloads/**/*") if path.is_file())
+
+
 def two_phase(live: Live) -> str:
     ended = {"done", "error"}
     live.step("новый стенд на той же базе: работа подхвачена из базы", dubs=states(mine(live)))
@@ -260,7 +268,13 @@ def two_phase(live: Live) -> str:
     library = Path(LIBRARY)
     files = sorted(str(path.relative_to(library)) for path in library.rglob("*") if path.is_file()) if library.exists() else []
     aligned = [name for name in files if name.endswith((".flac", ".mka", ".ac3", ".aac"))]
-    temp = sorted(str(path.relative_to(LOCAL)) for path in Path(LOCAL).glob("downloads/**/*") if path.is_file())
+    temp = temporary_files()
+    # The folder is cleared after the last row is placed, in the same second: the stream has no event for it, so the condition is awaited.
+    for _ in range(60):
+        if not temp:
+            break
+        time.sleep(0.5)
+        temp = temporary_files()
     live.step("файлы рядом с референсом", files=files[:12], aligned=len(aligned), temporary_left=temp[:5])
     pairs = pairs_of_jobs(live.work)
     live.step("пары сервиса выравнивания", pairs=pairs)
@@ -279,6 +293,7 @@ def run_live(phase, work: str, safeguard: float) -> str:
     verdict = "FAIL прибор"
     with Stand(credentials_from=REAL_DB, work=work) as stand:
         live = Live(stand, time.monotonic() + safeguard - 15)
+        live.series_name = SERIES
         live.work = work
         try:
             verdict = phase(live)

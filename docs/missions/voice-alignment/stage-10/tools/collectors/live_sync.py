@@ -58,6 +58,13 @@ class Live:
         self.steps: list[dict] = []
         self.began = time.monotonic()
         self.events: dict[str, dict] = {}
+        self.series_name: str | None = None
+
+    def series_path(self) -> str:
+        """The series is found on the stand, not assumed to be number 1: a database that held other series numbers new ones on."""
+        found = [each["id"] for each in self.call("GET", "/api/series") if self.series_name in (None, each.get("name"))]
+        assert len(found) == 1, f"series {self.series_name!r} in the stand: {found}"
+        return f"/api/series/{found[0]}"
 
     def left(self) -> float:
         return max(1.0, self.deadline - time.monotonic())
@@ -73,7 +80,7 @@ class Live:
         return answer.json() if answer.content else None
 
     def dubs(self) -> list[dict]:
-        return self.call("GET", "/api/series/1/voices").get("items", [])
+        return self.call("GET", f"{self.series_path()}/voices").get("items", [])
 
     def watch(self, names: set[str], match, seconds: float):
         """Events of the stream until `match` says so or the seconds are out; the last of each name is kept."""
@@ -121,19 +128,19 @@ def phase_one(live: Live) -> str:
     live.step("сериал создан; референсы пришли событиями", episodes=len(seen))
     assert len(seen) >= EPISODES, f"references for {len(seen)} episodes"
     for episode in range(KEEP + 1, EPISODES + 1):
-        live.call("PUT", "/api/series/1/output/switch", json={"season": 1, "episode": episode, "off": True})
-    output = live.call("GET", "/api/series/1/output")
+        live.call("PUT", f"{live.series_path()}/output/switch", json={"season": 1, "episode": episode, "off": True})
+    output = live.call("GET", f"{live.series_path()}/output")
     wanted = [each for each in output if each["mark"] != "off"]
     assert [each["episode"] for each in wanted] == [KEEP], f"wanted: {[each['episode'] for each in wanted]}"
     reference = wanted[0]
     live.step("одна серия в работе, остальные отключены", reference=f"{reference['voice_group']} {reference['player']} {reference['height']}p")
 
-    live.call("POST", "/api/series/1/scan", timeout=live.left() - 30)
+    live.call("POST", f"{live.series_path()}/scan", timeout=live.left() - 30)
     live.step("проход по сериалу выполнен (загрузка поставлена)")
     live.watch({"voice_dub_update", "voice_dubs_snapshot", "conform_queue_update"},
                lambda name, data: name == "voice_dub_update" and data.get("state") in LIVE_STATES, live.left() - 10)
     dubs = live.dubs()
-    items = live.call("GET", "/api/series/1/media-items")
+    items = live.call("GET", f"{live.series_path()}/media-items")
     downloaded = [item for item in items if item.get("status") == "completed" and not item.get("is_ignored_by_user")]
     live.step("озвучки", states=states(dubs), downloaded_items=len(downloaded))
     ok = bool(downloaded) and any(dub["state"] in LIVE_STATES for dub in dubs)
