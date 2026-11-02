@@ -10,6 +10,10 @@ from .proc import run_capture
 DEFAULT_TIMEOUT_S = 30.0
 # A pause is a hole only when it is also long against the pace of the video: a video of a frame in two seconds has no hole.
 PACE_FACTOR = 8
+# Fewer timed frames than this cannot tell the usual interval, and the look is not made. A pause is told from the pace of
+# 118 finished files of a library (24 to 30 frames a second): the longest pause of any was 0.2 s and 5 usual intervals at
+# most, so HOLE_S (1 s) is five times above the one and PACE_FACTOR (8) is above the other by more than half.
+MIN_TIMED_FRAMES = 3
 
 
 async def duration_of(target: str, *, input_args: list[str] | None = None,
@@ -54,12 +58,21 @@ async def video_gaps(path: str, *, longer_than: float, timeout: float = 120.0) -
         return Gaps(False, reason=f"ffprobe не ответил: {exc}")
     if code != 0:
         return Gaps(False, reason="файл не читается")
-    times = sorted(float(word) for word in out.decode().split() if _is_number(word))
-    if not times:
+    if not out.strip():
         return Gaps(False, reason="в файле нет видео")
+    times = frame_times(out.decode())
+    if len(times) < MIN_TIMED_FRAMES:
+        return Gaps(False, reason="у кадров файла нет меток времени")
     intervals = [after - before for before, after in zip(times, times[1:])]
     limit = max(longer_than, PACE_FACTOR * (statistics.median(intervals) if intervals else 0.0))
     return Gaps(True, tuple((before, after - before) for before, after in zip(times, times[1:]) if after - before > limit))
+
+
+def frame_times(text: str) -> list[float]:
+    """The times of the packets ffprobe printed, one for each line. A packet with side data has an empty field after its
+    time ("0.080000,"), and a packet without a time says N/A: the first is a time, the second is not."""
+    times = (line.split(",", 1)[0].strip() for line in text.splitlines())
+    return sorted(float(each) for each in times if _is_number(each))
 
 
 def _is_number(word: str) -> bool:

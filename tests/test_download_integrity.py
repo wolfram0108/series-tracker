@@ -142,3 +142,36 @@ async def test_a_file_that_is_already_there_is_looked_at_too_and_a_look_that_fai
     ok, error = await ytdlp.download("https://cdn.test/v.m3u8", target, lambda _data: None, whole_video=True)
     assert not ok and "обрыв" in error and "не выполнена" in error and _transient_download_error(error)
     assert os.path.exists(target)  # nothing was proved against it: the next try looks again
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("0.00\n0.04\n0.08\n", [0.0, 0.04, 0.08]),
+    ("0.080000,\n0.000000,\n0.040000,\n", [0.0, 0.04, 0.08]),  # a packet with side data adds an empty field
+    ("N/A\n0.04\nN/A,\n", [0.04]),
+    ("0.04,0.00,\n", [0.04]),
+    ("", []),
+    ("\n\n", []),
+])
+def test_the_times_of_the_frames_are_read_from_each_form_ffprobe_prints(text, expected):
+    assert ffprobe.frame_times(text) == expected
+
+
+@pytest.mark.asyncio
+async def test_a_file_whose_packets_carry_side_data_is_looked_at_and_a_file_without_times_is_not_taken_for_whole(monkeypatch, tmp_path):
+    target = tmp_path / "x.mp4"
+    target.write_bytes(b"x")
+
+    def answer(text):
+        async def run(cmd, timeout):
+            return 0, text.encode(), b""
+        return run
+
+    monkeypatch.setattr(ffprobe, "run_capture", answer("".join(f"{index * 0.04:.6f},\n" for index in range(50))))
+    assert (await video_gaps(str(target), longer_than=1.0)).checked
+    monkeypatch.setattr(ffprobe, "run_capture", answer("".join(f"{index * 0.04:.6f},\n" for index in range(25))
+                                                       + "".join(f"{2 + index * 0.04:.6f},\n" for index in range(25))))
+    seen = await video_gaps(str(target), longer_than=1.0)
+    assert seen.checked and len(seen.holes) == 1 and round(seen.holes[0][1], 2) == 1.04
+    monkeypatch.setattr(ffprobe, "run_capture", answer("N/A\nN/A,\n0.04\n"))
+    seen = await video_gaps(str(target), longer_than=1.0)
+    assert not seen.checked and "меток времени" in seen.reason
