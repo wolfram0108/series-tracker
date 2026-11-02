@@ -7,7 +7,7 @@ is the absence of a record, so it is asked for by a reset of the lever, never by
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Collection, Iterable, Mapping, Sequence
+from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 
 from core.contracts import (EffectiveLever, Level, LevelSettings, SettingRecord, SettingsReset, ValueShape, group_target,
                             parse_group_target, parse_variant_target, variant_target)
@@ -84,10 +84,13 @@ def without_source(records: Sequence[SettingRecord], source_id: int) -> list[Set
     return canonical([each for each in records if not points_at(each)])
 
 
-def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str]) -> list[SettingRecord]:
+def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
+             on_conflict: Callable[[list[SettingRecord]], None] | None = None) -> list[SettingRecord]:
     """The records after voice-over groups changed their names: what was set for a group (or for a variant of it, or as
     the group of the reference) is set for the group it became. A record that would meet one the new name has already
-    set at the same level gives way to it."""
+    set at the same level gives way to it. Records of several groups that became one meet each other: a flag that is off
+    stands over one that is on (what the user switched off is not switched on by a merge); picks that are the same are
+    one, and picks that differ go back to the level above, which `on_conflict` is told."""
     if not renames:
         return list(records)
 
@@ -106,12 +109,32 @@ def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str]) -> li
 
     own = {_slot(each) for each in records}
     kept: list[SettingRecord] = []
+    arrived: dict[tuple, list[SettingRecord]] = {}
     for record in records:
         shifted = moved(record)
-        if shifted is not record and _slot(shifted) in own and shifted.target != record.target:
+        if shifted is record:
+            kept.append(shifted)
+        elif _slot(shifted) in own and shifted.target != record.target:
             continue  # the new name has this record already: its own stands
-        kept.append(shifted)
+        else:
+            arrived.setdefault(_slot(shifted), []).append(shifted)
+    for group in arrived.values():
+        merged = _merged(group)
+        if merged is not None:
+            kept.append(merged)
+        elif on_conflict is not None:
+            on_conflict(group)
     return canonical(kept)
+
+
+def _merged(group: list[SettingRecord]) -> SettingRecord | None:
+    """One record for records that came to one place; None when they cannot be one and the place is left to the level above."""
+    if len(group) == 1:
+        return group[0]
+    lever = levers.get(group[0].lever)
+    if lever is not None and lever.shape == ValueShape.FLAG:
+        return next((each for each in group if each.value is False), group[0])
+    return group[0] if all(each.value == group[0].value for each in group) else None
 
 
 def within_episodes(records: Sequence[SettingRecord], episodes: Collection[tuple[int, int]]) -> list[SettingRecord]:

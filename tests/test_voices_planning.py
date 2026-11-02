@@ -245,9 +245,9 @@ def test_players_the_user_called_the_same_take_one_place_in_the_order_and_an_unk
     assert [each[0] for each in chain] == ["kodik", "vk"]
 
 
-def recorded(id, episode, key, *urls, season=1, part=0):
+def recorded(id, episode, key, *urls, season=1, part=0, status="pending", attempt=0):
     return {"id": id, "season": season, "episode": episode, "part": part, "voice_key": key,
-            "chain": [{"url": url} for url in urls]}
+            "chain": [{"url": url} for url in urls], "status": status, "attempt": attempt}
 
 
 def dub_of(episode, label, *urls, season=1, part=0):
@@ -278,3 +278,20 @@ def test_a_row_of_another_episode_is_not_adopted_and_a_voice_over_with_no_link_a
     rows = [recorded(1, 2, "Old", "https://site/x")]
     assert adopt([dub_of(1, "New", "https://site/x"), dub_of(2, "Empty")], rows) == {
         (1, 1, 0, "New"): "New", (1, 2, 0, "Empty"): "Empty"}
+
+
+def test_two_voice_overs_that_became_one_leave_the_row_whose_source_comes_first_in_the_chain_of_the_voice_over():
+    rows = [recorded(1, 1, "A", "https://site/a", status="placed"), recorded(2, 1, "B", "https://site/b", status="placed")]
+    assert adopt([dub_of(1, "C", "https://site/b", "https://site/a")], rows) == {(1, 1, 0, "C"): "B"}
+    assert adopt([dub_of(1, "C", "https://site/a", "https://site/b")], rows) == {(1, 1, 0, "C"): "A"}
+
+
+def test_a_row_that_has_its_track_stays_over_one_that_has_not_whatever_the_order_of_the_chain():
+    rows = [recorded(1, 1, "A", "https://site/a", status="placed"), recorded(2, 1, "B", "https://site/b", status="downloading")]
+    assert adopt([dub_of(1, "C", "https://site/b", "https://site/a")], rows) == {(1, 1, 0, "C"): "A"}
+
+
+def test_the_row_that_works_from_a_later_source_of_its_chain_is_ranked_by_the_source_it_works_from():
+    rows = [recorded(1, 1, "A", "https://site/z", "https://site/a", status="placed", attempt=1),
+            recorded(2, 1, "B", "https://site/b", status="placed")]
+    assert adopt([dub_of(1, "C", "https://site/b", "https://site/a")], rows) == {(1, 1, 0, "C"): "B"}

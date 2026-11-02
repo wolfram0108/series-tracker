@@ -116,3 +116,25 @@ async def test_a_track_made_from_a_variant_the_user_leaves_out_is_removed_and_th
     black = next(r for r in await voices.repo.for_series(7) if r["voice_key"] == "BlackCat")
     assert black["status"] == "pending" and used not in players_of(black) and players_of(black)
     assert any("RedHeadSound" in name for name in library_files(neighbours))  # the other voice-over is not touched
+
+
+@pytest.mark.asyncio
+async def test_two_voice_overs_the_user_makes_one_leave_one_track_under_the_name_of_the_group_and_remove_the_other(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    voices = dubs[2]
+    before = {r["voice_key"]: r for r in await voices.repo.for_series(7)}
+    assert set(before) == {"BlackCat", "RedHeadSound"}
+    for source in neighbours.sources:  # the user says RedHeadSound is BlackCat: one group, one name
+        if source["studio"] == "RedHeadSound":
+            source["studio"] = "BlackCat"
+    asks = neighbours.layout_asks + 1
+    layout_changed(probe)
+    await pass_over(voices, neighbours, asks)
+
+    async def one_track():
+        return [name for name in library_files(neighbours) if name.endswith(".flac")] == ["Series s01e01.BlackCat.ru.flac"]
+
+    await until_true(one_track, ("tracks", library_files(neighbours)))
+    [kept] = await voices.repo.for_series(7)
+    assert kept["voice_key"] in before and kept["id"] in {each["id"] for each in before.values()}
+    assert kept["status"] == "placed" and os.path.isfile(kept["output_path"]) and "BlackCat" in kept["output_path"]

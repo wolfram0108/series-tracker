@@ -486,7 +486,10 @@ class CompositionModule(BaseModule):
             gone = [each.source_id for each in stored.sources if each.source_id not in {i.source.id for i in inputs}]
             before = settings.canonical(stored.records)
             # What was set for a voice-over group follows the voice-over when the user names it, renames it or dissolves its group.
-            records = settings.retarget(before, project.group_renames(stored.rows, result.rows))
+            records = settings.retarget(
+                before, project.group_renames(stored.rows, result.rows),
+                lambda group: self.log.info("сериал %d: у слитых групп расходящиеся настройки %s — выбор возвращён уровню выше",
+                                            series_id, group[0].lever))
             for source_id in gone:
                 records = settings.without_source(records, source_id)
             layout = project.layout_episodes(result.rows)

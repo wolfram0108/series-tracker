@@ -468,3 +468,50 @@ def test_a_record_the_new_name_already_has_at_the_same_level_stands_and_the_move
 def test_no_renames_leave_the_records_as_they_are():
     records = [rec(TAKE, False, target=GROUP)]
     assert retarget(records, {}) == records
+
+
+# ---- two groups became one: what was set for each is one setting of the group they became --------------------------------
+
+
+def test_two_groups_that_became_one_have_one_record_and_a_switch_off_stands_over_a_switch_on():
+    records = [rec(TAKE, False, season=1, target=group_target("A")), rec(TAKE, True, season=1, target=group_target("B"))]
+    after = retarget(records, {"A": "C", "B": "C"})
+    assert [(each.season, each.target, each.value) for each in after] == [(1, group_target("C"), False)]
+    assert [(each.target, each.value) for each in retarget(list(reversed(records)), {"A": "C", "B": "C"})] == [(group_target("C"), False)]
+
+
+def test_two_equal_settings_of_groups_that_became_one_are_one_setting():
+    records = [rec(TAKE, True, target=group_target("A")), rec(TAKE, True, target=group_target("B"))]
+    assert [(each.target, each.value) for each in retarget(records, {"A": "C", "B": "C"})] == [(group_target("C"), True)]
+
+
+def test_two_different_picks_of_groups_that_became_one_go_back_to_the_level_above_and_equal_ones_stay():
+    different = [rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("A")),
+                 rec(PLAYER, {"source_id": 2, "player": "kodik"}, target=group_target("B"))]
+    assert retarget(different, {"A": "C", "B": "C"}) == []
+    equal = [rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("A")),
+             rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("B"))]
+    assert [(each.target, each.value) for each in retarget(equal, {"A": "C", "B": "C"})] == [
+        (group_target("C"), {"source_id": 1, "player": "vk"})]
+
+
+def test_the_variants_of_groups_that_became_one_meet_only_where_the_source_and_the_player_are_the_same():
+    records = [rec(ALLOW, False, target=variant_target("A", 1, "vk")), rec(ALLOW, True, target=variant_target("B", 1, "vk")),
+               rec(ALLOW, False, target=variant_target("B", 2, "kodik"))]
+    after = retarget(records, {"A": "C", "B": "C"})
+    assert sorted((each.target, each.value) for each in after) == sorted([
+        (variant_target("C", 1, "vk"), False), (variant_target("C", 2, "kodik"), False)])
+
+
+def test_a_record_the_new_name_has_stands_over_two_that_came_to_it():
+    records = [rec(TAKE, True, target=group_target("C")), rec(TAKE, False, target=group_target("A")),
+               rec(TAKE, False, target=group_target("B"))]
+    assert [(each.target, each.value) for each in retarget(records, {"A": "C", "B": "C"})] == [(group_target("C"), True)]
+
+
+def test_a_conflict_that_cannot_be_settled_is_told_to_whoever_asks():
+    told = []
+    records = [rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("A")),
+               rec(PLAYER, {"source_id": 2, "player": "kodik"}, target=group_target("B"))]
+    retarget(records, {"A": "C", "B": "C"}, told.append)
+    assert len(told) == 1 and sorted(each.target for each in told[0]) == [group_target("C")] * 2

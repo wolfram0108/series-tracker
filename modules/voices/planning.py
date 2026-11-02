@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, NamedTuple, Sequence
 
 from core.voice_names import rank
-from core.contracts import (VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, CompositionRow, EffectiveLever, EpisodeSettings,
+from core.contracts import (DubStatus as S, VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, CompositionRow, EffectiveLever, EpisodeSettings,
                             Reference, ReferenceMark, RowState, group_target, parse_variant_target)
 
 
@@ -143,6 +143,15 @@ def _chain(rows: Sequence[CompositionRow], pick: tuple[int, str] | None, priorit
     return tuple(chain.values())
 
 
+def _standing(row: dict[str, Any], order: dict[str, int]) -> tuple[int, int, int]:
+    """Which of the rows of one voice-over stays when several became it: the one that has its track first, then the one
+    whose source stands first in the chain of the voice-over, then the older one."""
+    chain = row["chain"]
+    used = chain[row.get("attempt", 0)]["url"] if row.get("attempt", 0) < len(chain) else None
+    has_track = row.get("status") in (S.PLACED, S.ALIGNED)
+    return (0 if has_track else 1, order.get(used, len(order)), row["id"])
+
+
 def adopt(dubs: Iterable[PlannedDub], rows: Iterable[dict[str, Any]]) -> dict[tuple[int, int, int, str], str]:
     """The key each planned voice-over is recorded under: its own, unless a row of the same episode under another key
     holds a link of its chain. That is the same voice-over called by another name (a group was made or renamed), so the
@@ -159,10 +168,11 @@ def adopt(dubs: Iterable[PlannedDub], rows: Iterable[dict[str, Any]]) -> dict[tu
         recorded = by_episode.get(slot, ())
         key = dub.voice_key
         if not any(row["voice_key"] == key for row in recorded):
-            links = {each.url for each in dub.chain}
-            same = next((row for row in sorted(recorded, key=lambda each: each["id"])
-                         if (*slot, row["voice_key"]) not in planned | taken
-                         and links & {each["url"] for each in row["chain"]}), None)
+            order = {each.url: place for place, each in enumerate(dub.chain)}
+            same = min((row for row in recorded
+                        if (*slot, row["voice_key"]) not in planned | taken
+                        and order.keys() & {each["url"] for each in row["chain"]}),
+                       key=lambda row: _standing(row, order), default=None)
             if same is not None:
                 key = same["voice_key"]
                 taken.add((*slot, key))
