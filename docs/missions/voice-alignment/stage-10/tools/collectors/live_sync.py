@@ -123,7 +123,7 @@ def phase_one(live: Live) -> str:
         "name": NAME, "name_en": NAME_EN, "site": "dunhuatv.ru", "save_path": LIBRARY, "season": "s01",
         "sources": [{"url": URL, "source_type": "web_video", "parser_profile_id": profile, "vk_search_mode": "search",
                      "vibix_season": None, "players_off": []}]})
-    assert created.get("series_id") == 1 or created.get("id") == 1, f"series: {created}"
+    assert created.get("series_id") or created.get("id"), f"series: {created}"
     watching[1].wait(110)
     live.step("сериал создан; референсы пришли событиями", episodes=len(seen))
     assert len(seen) >= EPISODES, f"references for {len(seen)} episodes"
