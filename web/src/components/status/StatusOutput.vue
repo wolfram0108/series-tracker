@@ -3,7 +3,8 @@ import { computed, ref } from "vue"
 import Button from "primevue/button"
 import { useSeriesOutput } from "../../composables/useSeriesOutput"
 import { t } from "../../i18n"
-import { fileNamesOf, isDeviation, type Scope } from "../../lib/output"
+import { allowedIn, fileNamesOf, isDeviation, type Scope } from "../../lib/output"
+import { useSeriesStore } from "../../stores/series"
 import OutputEpisode from "./OutputEpisode.vue"
 import OutputLevel from "./OutputLevel.vue"
 
@@ -12,6 +13,15 @@ import OutputLevel from "./OutputLevel.vue"
 const props = defineProps<{ seriesId: number; seriesName: string }>()
 
 const output = useSeriesOutput(props.seriesId, "video")
+const series = useSeriesStore()
+// The state of the series for the table of what is allowed: a pass is on when the core reports it (every window hears it)
+// or when the call of this window has not been answered yet.
+const passing = computed(() => output.syncing.value || (series.byId(props.seriesId)?.statuses ?? []).includes("scanning"))
+// While the table is not known the core decides; a layout that did not load can be mended by a pass.
+const canSync = computed(() => {
+  const table = output.composition.value?.availability
+  return table ? allowedIn(table, "sync", passing.value ? "scanning" : "idle") : !passing.value
+})
 const onlyDeviations = ref(false)
 // A refusal of the core leaves the controls as the user set them; rendering them anew brings back what the core holds.
 const renders = ref(0)
@@ -48,8 +58,8 @@ const switchSeason = (season: number, off: boolean) => changed(output.switchTo(s
         <i v-if="output.naming.value" class="pi pi-spin pi-spinner" />
       </label>
       <Button
-        :label="t('output.sync')" :icon="output.syncing.value ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'"
-        size="small" :disabled="output.syncing.value" @click="output.sync()"
+        :label="t('output.sync')" :icon="passing ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'"
+        size="small" :disabled="!canSync" @click="output.sync()"
       />
       <Button
         :label="t('output.reprocess')" :icon="output.reprocessing.value ? 'pi pi-spin pi-spinner' : 'pi pi-pencil'"

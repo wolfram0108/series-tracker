@@ -328,7 +328,7 @@ async def test_concurrent_scan_rejected(system):
     first = asyncio.create_task(
         probe.request("scan.series.run", {"series_id": 1}, timeout=10))
     await asyncio.sleep(0.05)  # первый скан повис на переобработке
-    with pytest.raises(BusRequestError, match="уже запущен"):
+    with pytest.raises(BusRequestError, match="not_allowed"):
         await probe.request("scan.series.run", {"series_id": 1}, timeout=10)
     fake.hold_reprocess.set()
     await first

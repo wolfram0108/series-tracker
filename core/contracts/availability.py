@@ -59,6 +59,19 @@ def table() -> dict[str, list[str]]:
     return {str(action): sorted(states) for action, states in ALLOWED.items()}
 
 
+def lines_of_level(rows: Iterable[CompositionRow], season: int | None = None, episode: int | None = None) -> list[CompositionRow]:
+    """The lines a level of the window shows: those that cover an episode of the level (the whole series, a season, or one
+    episode). An excluded line, or one with no number, covers no episode and is on no level."""
+    found = []
+    for row in rows:
+        if row.excluded or row.season is None or row.episode_start is None:
+            continue
+        end = row.episode_end if row.episode_end is not None else row.episode_start
+        if (season is None or row.season == season) and (episode is None or row.episode_start <= episode <= end):
+            found.append(row)
+    return found
+
+
 def variant_state(rows: Iterable[CompositionRow]) -> str:
     """The state of a variant (a voice-over group at a player of a source) by its lines."""
     playing = [row for row in rows if row.state == RowState.PLAYABLE]

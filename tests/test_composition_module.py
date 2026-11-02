@@ -1433,3 +1433,22 @@ async def test_the_layout_carries_the_table_of_what_is_allowed(system):
     series_id = await laid_out(s)
     from core.contracts import availability
     assert (await s.get(series_id)).availability == availability.table()
+
+
+@pytest.mark.asyncio
+async def test_a_variant_is_judged_by_the_lines_of_the_level_it_is_set_for_as_the_window_judges_it(system):
+    """The variant has a line that plays in episode 1 and none in episode 2: it may be the reference of the season and of
+    episode 1, and is refused as the reference of episode 2, whatever the other episodes have."""
+    s = system
+    series_id = await laid_out(s, page(row("a", "Серия 1"), row("b", "Серия 2"), row("c", "Серия 1", player="kodik")))
+    source_id = only_source(s, series_id)
+    assert await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=1) == {"ok": True}
+    assert await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1) == {"ok": True}
+    assert await s.set(series_id, "reference.choice", choice(source_id, "kodik")) == {"ok": True}
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=2)
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await s.set(series_id, "voice.player", {"source_id": source_id, "player": "kodik"},
+                    target=group_target(choice(source_id)["group"]), season=1, episode=2)
+    with pytest.raises(BusRequestError, match="not_allowed"):  # a season that has no line of the variant
+        await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=2)

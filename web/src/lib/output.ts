@@ -194,9 +194,14 @@ export interface Variant extends PlayerOption {
   state: "referable" | "playable" | "absent"
 }
 
+/** Whether a table of what is allowed (as the core gives it with the layout) allows the action in the state. */
+export function allowedIn(table: Record<string, string[]> | undefined, action: string, state: string): boolean {
+  return (table?.[action] ?? []).includes(state)
+}
+
 /** Whether the table of the core allows the action in the state: a control is drawn enabled only where it does. */
 export function canDo(view: EpisodeView, action: string, state: string): boolean {
-  return (view.availability?.[action] ?? []).includes(state)
+  return allowedIn(view.availability, action, state)
 }
 
 /** One voice-over group and its variants: a column of the output. */

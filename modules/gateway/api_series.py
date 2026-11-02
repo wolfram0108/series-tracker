@@ -33,7 +33,7 @@ def _error_response(exc: BusRequestError, *, with_success: bool = True):
     msg = str(exc)
     if "LookupError" in msg:
         code, text = 404, "Сериал не найден"
-    elif "уже выполняется" in msg or "уже запущен" in msg:
+    elif "уже выполняется" in msg or "not_allowed" in msg:
         code, text = 409, msg.split(": ", 1)[-1]
     elif "LibraryError" in msg:
         code, text = 400, msg.split(": ", 1)[-1]
@@ -291,7 +291,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                                       {"series_id": series_id}, timeout=900)
         except BusRequestError as exc:
             msg = str(exc).split(": ", 1)[-1]
-            code = 409 if "уже запущен" in msg else 500
+            code = 409 if "not_allowed" in msg else 500
             return JSONResponse({"success": False, "error": msg},
                                 status_code=code)
         return {"success": True, **result}

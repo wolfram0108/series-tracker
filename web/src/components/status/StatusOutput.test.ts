@@ -9,8 +9,10 @@ import type { Composition } from "../../composables/outputCalls"
 import type { Answer } from "../../composables/sourceCalls"
 import { useSSE } from "../../composables/useSSE"
 import { useCompositionStore } from "../../stores/composition"
+import { useSeriesStore } from "../../stores/series"
 import { t } from "../../i18n"
 import type { Reference, Row } from "../../lib/output"
+import { AVAILABILITY } from "../../lib/output.fixtures"
 
 vi.mock("../../composables/outputCalls")
 
@@ -30,6 +32,7 @@ const composition = (): Composition => ({
   rows: [row(1, 1), row(1, 2), row(2, 1)],
   levels: [{ season: null, levers: [] }, { season: 1, levers: [] }, { season: 2, levers: [] }],
   levers: SPECS,
+  availability: AVAILABILITY,
 })
 
 let mounted: VueWrapper[] = []
@@ -152,5 +155,26 @@ describe("StatusOutput", () => {
     expect(calls.syncSeries).toHaveBeenCalledWith(1)
     expect(calls.reprocessSeries).toHaveBeenCalledWith(1)
     expect(calls.adoptSeries).toHaveBeenCalledWith(1)
+  })
+
+  it("draws the button of the pass by the table of the core and the state the core reports, not only by its own call", async () => {
+    const store = useSeriesStore()
+    store.upsert({ id: 1, name: "Тайтл", site: "x", auto_scan_enabled: true, statuses: ["scanning"] })
+    const w = mountOutput()
+    await flushPromises()
+    const [sync] = w.findAll(".output-bar button")
+    expect(sync.attributes("disabled")).toBeDefined() // a pass that another window began is a pass that is on
+    await sync.trigger("click")
+    expect(calls.syncSeries).not.toHaveBeenCalled()
+    store.applyDelta({ id: 1, statuses: [], is_busy: false }) // the core says the pass ended
+    await flushPromises()
+    expect(sync.attributes("disabled")).toBeUndefined()
+  })
+
+  it("leaves the pass to the core while the table is not known, so that a layout that did not load can be mended by it", async () => {
+    vi.mocked(calls.fetchComposition).mockResolvedValue({ ok: false, text: "x" } as Answer<Composition>)
+    const w = mountOutput()
+    await flushPromises()
+    expect(w.find(".output-bar button").attributes("disabled")).toBeUndefined()
   })
 })

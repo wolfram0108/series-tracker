@@ -394,7 +394,7 @@ async def test_a_scan_of_a_series_that_is_being_scanned_is_refused(rig):
     rig.world.pages[URL1] = Page(TableState.READING, held=False)
     run = rig.start_run()
     await rig.world.asked.get()
-    with pytest.raises(BusRequestError, match="уже запущен"):
+    with pytest.raises(BusRequestError, match="not_allowed"):
         await rig.run()
     rig.world.finish(URL1)
     await asyncio.wait_for(run, STUCK_S)
@@ -740,7 +740,7 @@ async def test_a_season_switched_off_is_neither_planned_nor_taken(rig):
     rig.world.rows = [rig.row("s1", 1, 1), rig.row("s2", 2, 5)]
     await rig.run()
     assert {key: each["plan_status"] for key, each in rig.media().items()} == {
-        "s1": "in_plan_single", "s2": "candidate"}
+        "s1": "in_plan_single", "s2": "removed"}  # a season the user switched off is named as taken out by the configuration
     assert [(each.season, each.episode, each.mark) for each in await rig.output()] == [
         (1, 1, MARK.BY_LEVEL), (2, 5, MARK.OFF)]
 
@@ -818,7 +818,7 @@ async def test_switching_off_takes_the_rows_out_of_the_plan_and_switching_on_put
     await switch(rig, 1, 2, False)
     assert plan()["b"] == "in_plan_single" and drain(updates)
     await switch(rig, 1, None, True)
-    assert plan() == {"a": "candidate", "b": "candidate", "c": "in_plan_single"}
+    assert plan() == {"a": "removed", "b": "removed", "c": "in_plan_single"}
     await switch(rig, 1, None, False)
     assert set(plan().values()) == {"in_plan_single"}
 

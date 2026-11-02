@@ -288,8 +288,10 @@ class CompositionModule(BaseModule):
         group = record.value.get("group") if record.lever == REFERENCE_CHOICE else parse_group_target(record.target or "")
         action = availability.Action.CHOOSE_REFERENCE if record.lever == REFERENCE_CHOICE else availability.Action.PREFER_VARIANT
         stored = await self.repo.stored(record.series_id)
-        found = [row for row in stored.rows if not row.excluded and row.voice_label == group
-                 and row.source_id == record.value.get("source_id") and row.player == record.value.get("player")]
+        # The state is that of the level the setting is for, as the window shows it: the lines of that season or episode.
+        found = [row for row in availability.lines_of_level(stored.rows, record.season, record.episode)
+                 if row.voice_label == group and row.source_id == record.value.get("source_id")
+                 and row.player == record.value.get("player")]
         availability.require(action, availability.variant_state(found))
 
     async def on_settings_reset(self, env: Envelope) -> dict:

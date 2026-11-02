@@ -123,7 +123,7 @@ async def test_series_scan_409_when_running(system):
     scan._running.add(1)
     resp = await client.post("/api/series/1/scan")
     assert resp.status_code == 409
-    assert "уже запущен" in resp.json()["error"]
+    assert "not_allowed" in resp.json()["error"] and "scanning" in resp.json()["error"]
 
 
 @pytest.mark.asyncio

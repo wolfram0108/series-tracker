@@ -12,7 +12,8 @@ Queries:
       what they were before the run. A video series answers {kind: "video", changed, sources: [{source_id, url,
       state: ready | stale | skipped, reason}], references: {by_level, own, other_player, none, unfit}, in_plan}.
       `stale` — the read of the page failed and the last complete table stays in force; `skipped` — it failed and there is no table.
-      A scan of a series that is being scanned is refused ("уже запущен", finding 27). The steps of a video series
+      A scan of a series that is being scanned is refused by the table of what is allowed (`not_allowed`, the state
+      `scanning`; finding 27) with the code every module refuses by. The steps of a video series
       are tied by signals: renaming.reprocess, downloads.fs.sync, sources.table.get for every source at once and
       the wait for sources.table.ready / .failed of its page, composition.recompute (its answer means the layout is
       counted from these tables), composition.get with voices.settings.get, the choice and the plan, and with
@@ -593,9 +594,8 @@ class ScanModule(BaseModule):
 
     def _require_idle(self, series_id: int) -> None:
         """A scan of a series that is being scanned is refused by the table of what is allowed, as every module refuses."""
-        state = availability.SERIES_SCANNING if series_id in self._running else availability.SERIES_IDLE
-        if not availability.allowed(availability.Action.SYNC, state):
-            raise ScanError(f"скан сериала {series_id} уже запущен")
+        availability.require(availability.Action.SYNC,
+                             availability.SERIES_SCANNING if series_id in self._running else availability.SERIES_IDLE)
 
     async def _fingerprint(self, series_id: int) -> tuple:
         """The references and the rows of the plan as stored: two equal fingerprints mean the run changed nothing."""
