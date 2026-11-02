@@ -1,5 +1,6 @@
 """The verdict of a live run of the alignment (tools/collectors/verdicts.py): a pass needs positive evidence of each
 voice-over, one result and one track for each, and what a bad run leaves behind never makes one."""
+import itertools
 import sys
 from pathlib import Path
 
@@ -139,3 +140,50 @@ def test_the_evidence_is_read_from_the_database_by_the_key_of_each_voice_over_an
     assert tracks == {"1/1/0/BlackCat": "/lib/a.flac", "1/1/2/BlackCat": "/lib/b.flac"}
     assert inputs == {"1/1/0/BlackCat": "7_s01e01_BlackCat.mp4", "1/1/0/RedHead": "7_s01e01_RedHead.mp4",
                       "1/1/2/BlackCat": "7_s01e01p2_BlackCat.mp4"}
+
+
+def test_one_track_is_not_counted_for_two_voice_overs(library):
+    reference, tracks = library
+    both = dubs_of("BlackCat", "RedHead")
+    same = {slot_key(each): next(iter(tracks.values())) for each in both}
+    problems = judged(both, same, inputs_of("BlackCat", "RedHead"), reference, pairs_of("BlackCat", "RedHead"))
+    assert any("уже засчитана" in each for each in problems)
+
+
+def test_a_track_of_a_compilation_that_begins_like_the_reference_does_not_lie_beside_it(library):
+    reference, tracks = library
+    compilation = reference.parent / f"{reference.stem[:-len(' [AniStar] 2160p')]}-e02 [AniStar] 2160p.BlackCat.ru.flac"
+    longer = reference.parent / f"{reference.stem}-e02.BlackCat.ru.flac"
+    longer.write_bytes(b"flac")
+    problems = judged(dubs_of("BlackCat"), {slot_key(dubs_of("BlackCat")[0]): str(longer)}, inputs_of("BlackCat"), reference,
+                      pairs_of("BlackCat"))
+    assert any("не рядом" in each for each in problems) and not compilation.exists()
+
+
+def test_the_evidence_is_judged_for_every_small_run_and_only_a_run_with_all_of_it_passes(library):
+    """Up to three voice-overs; each may lack its result, its track, or share its track with another: only the whole passes."""
+    reference, tracks = library
+    base = next(iter(tracks.values()))
+    extra = reference.parent / f"{reference.stem}.Extra.ru.flac"
+    extra.write_bytes(b"flac")
+    for size in (1, 2, 3):
+        labels = [f"V{number}" for number in range(size)]
+        dubs = dubs_of(*labels)
+        for results in itertools.product((True, False), repeat=size):
+            for placed in itertools.product(("own", "none", "shared"), repeat=size):
+                outputs = {}
+                for each, how in zip(dubs, placed):
+                    if how == "own":
+                        own = reference.parent / f"{reference.stem}.{each['voice_key']}.ru.flac"
+                        own.write_bytes(b"flac")
+                        outputs[slot_key(each)] = str(own)
+                    elif how == "shared":
+                        outputs[slot_key(each)] = base
+                pairs = pairs_of(*[label for label, there in zip(labels, results) if there])
+                problems = judged(dubs, outputs, inputs_of(*labels), reference, pairs)
+                paths = list(outputs.values())
+                sharing = len(paths) != len(set(paths))
+                whole = all(results) and "none" not in placed and not sharing
+                assert (problems == []) == whole, (size, results, placed, problems)
+                if sharing and all(results) and "none" not in placed:
+                    assert any("уже засчитана" in each for each in problems), (size, results, placed, problems)

@@ -90,7 +90,7 @@ def evidence_of(work: str, episode: int) -> tuple[dict[str, str], dict[str, str]
 def reference_beside(library: Path, outputs: dict[str, str]) -> Path | None:
     """The video the tracks lie beside: the one file of the library whose name begins the name of every track."""
     names = [Path(path).name for path in outputs.values()]
-    found = [path for path in library.rglob("*.mp4") if names and all(name.startswith(path.stem) for name in names)] if library.exists() else []
+    found = [path for path in library.rglob("*.mp4") if names and all(name.startswith(path.stem + ".") for name in names)] if library.exists() else []
     return found[0] if len(found) == 1 else None
 
 

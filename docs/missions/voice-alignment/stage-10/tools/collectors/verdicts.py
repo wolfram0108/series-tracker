@@ -4,7 +4,8 @@ Pure functions over what the instrument has read (the voice-overs of the window,
 that the rule is tested without a stand: a pass needs, for each voice-over, a result of the service for the file it was
 sent as and a track at the path the database names, beside a reference video that exists, and nothing left in the
 temporary folder. A result and a track are counted for one voice-over only. The instrument looks at one episode as a whole
-(one reference); a run with parts is refused, not passed.
+(one reference); a run with parts is refused, not passed. A track lies beside the reference when its name is the name of the
+reference without its extension, a dot, and what follows: the name of a compilation that begins like it is another file.
 """
 from __future__ import annotations
 
@@ -38,6 +39,7 @@ def judge_alignment(dubs: Iterable[Mapping[str, Any]], outputs: Mapping[str, str
     if reference is None or not reference.is_file():
         problems.append("референса нет на диске")
     counted: set[int] = set()
+    tracks: dict[str, str] = {}  # the path of a track -> the voice-over it was counted for
     for dub in dubs:
         label, key = dub.get("voice_label"), slot_key(dub)
         name = inputs.get(key)
@@ -55,8 +57,12 @@ def judge_alignment(dubs: Iterable[Mapping[str, Any]], outputs: Mapping[str, str
         path = outputs.get(key)
         if not path or not Path(path).is_file():
             problems.append(f"дорожки озвучки {label!r} нет по пути базы: {path!r}")
-        elif reference is not None and not (Path(path).parent == reference.parent and Path(path).name.startswith(reference.stem)):
+        elif reference is not None and not (Path(path).parent == reference.parent and Path(path).name.startswith(reference.stem + ".")):
             problems.append(f"дорожка озвучки {label!r} лежит не рядом с референсом: {path}")
+        elif path in tracks:
+            problems.append(f"дорожка {path} уже засчитана озвучке {tracks[path]!r}, а не {label!r}")
+        else:
+            tracks[path] = label
     if temporary:
         problems.append(f"во временной папке осталось {len(temporary)}")
     return problems
