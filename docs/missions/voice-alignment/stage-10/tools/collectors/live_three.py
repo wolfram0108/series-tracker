@@ -21,7 +21,7 @@ from pathlib import Path
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from live_sync import (Live, LIVE_STATES, conform_address, outputs_of, pairs_of_jobs, reference_beside,  # noqa: E402
+from live_sync import (Live, LIVE_STATES, conform_address, evidence_of, pairs_of_jobs, reference_beside,  # noqa: E402
                        states)
 from stand import RAW, Stand  # noqa: E402
 from verdicts import judge_alignment  # noqa: E402
@@ -262,13 +262,13 @@ def two_phase(live: Live) -> str:
         time.sleep(0.5)
         temp = temporary_files()
     live.step("файлы рядом с референсом", files=files[:12], aligned=len(aligned), temporary_left=temp[:5])
-    outputs = outputs_of(live.work, KEEP)
+    outputs, inputs = evidence_of(live.work, KEEP)
     pairs = pairs_of_jobs(live.work, KEEP)
-    live.step("пары сервиса выравнивания", pairs=pairs, outputs=outputs)
+    live.step("пары сервиса выравнивания", pairs=pairs, outputs=outputs, inputs=inputs)
     suspect = [pair["dub"] for pair in pairs if pair.get("suspect")]
     critical = [pair["dub"] for pair in pairs if pair.get("critical")]
     # The verdict of a pair is the service's `ok`; `suspect` and `critical` tell what it found and put right.
-    problems = judge_alignment(dubs, outputs, reference_beside(library, outputs), pairs, temp)
+    problems = judge_alignment(dubs, outputs, inputs, reference_beside(library, outputs), pairs, temp)
     detail = (f"озвучек {len(dubs)}, результатов сервиса {len(pairs)}, дорожки по путям базы рядом с референсом, во временной папке {len(temp)}; "
               f"сообщения сервиса: suspect {len(suspect)}, critical {len(critical)}")
     return f"PASS {detail}" if not problems else f"FAIL {'; '.join(problems)}"

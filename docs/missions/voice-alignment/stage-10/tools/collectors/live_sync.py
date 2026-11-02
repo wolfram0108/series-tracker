@@ -29,7 +29,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from stand import RAW, ROOT, Stand  # noqa: E402
-from verdicts import judge_alignment  # noqa: E402
+from verdicts import judge_alignment, slot_key  # noqa: E402
 
 URL = "https://dunhuatv.ru/500-stat-pobeditelem.html"
 NAME, NAME_EN = "Стать победителем", "Stat Pobeditelem"
@@ -69,11 +69,22 @@ def pairs_of_jobs(work: str, episode: int) -> list[dict]:
     return pairs
 
 
-def outputs_of(work: str, episode: int) -> dict[str, str]:
-    """{label of the voice-over: the path of its track} for the voice-overs of the episode that are placed, as the database holds them."""
+def evidence_of(work: str, episode: int) -> tuple[dict[str, str], dict[str, str]]:
+    """(tracks, inputs) of the voice-overs of the episode as the database of the stand holds them, both by `slot_key`: the
+    path of the track of each that is placed, and the name each was sent to the service as."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from modules.voices.module import dub_file
     with sqlite3.connect(f"file:{work}/app.db?mode=ro", uri=True) as conn:
-        return dict(conn.execute("SELECT voice_label, output_path FROM voice_dubs WHERE episode=? AND status='placed' "
-                                 "AND output_path IS NOT NULL", (episode,)).fetchall())
+        rows = conn.execute("SELECT series_id, season, episode, part, voice_key, status, output_path FROM voice_dubs "
+                            "WHERE episode=?", (episode,)).fetchall()
+    tracks, inputs = {}, {}
+    for series_id, season, number, part, voice_key, status, output_path in rows:
+        key = slot_key({"season": season, "episode": number, "part": part, "voice_key": voice_key})
+        inputs[key] = dub_file(series_id, season, number, part, voice_key)
+        if status == "placed" and output_path:
+            tracks[key] = output_path
+    return tracks, inputs
 
 
 def reference_beside(library: Path, outputs: dict[str, str]) -> Path | None:
@@ -198,11 +209,11 @@ def phase_two(live: Live) -> str:
     library = Path(LIBRARY)
     files = sorted(str(path.relative_to(library)) for path in library.rglob("*") if path.is_file()) if library.exists() else []
     temp = sorted(str(path.relative_to(LOCAL)) for path in Path(LOCAL).glob("downloads/**/*") if path.is_file())
-    outputs = outputs_of(live.work, KEEP)
+    outputs, inputs = evidence_of(live.work, KEEP)
     pairs = pairs_of_jobs(live.work, KEEP)
     live.step("файлы рядом с референсом", files=files[:12], outputs=outputs, temporary_left=temp[:5])
-    live.step("пары сервиса выравнивания", pairs=pairs)
-    problems = judge_alignment(dubs, outputs, reference_beside(library, outputs), pairs, temp)
+    live.step("пары сервиса выравнивания", pairs=pairs, inputs=inputs)
+    problems = judge_alignment(dubs, outputs, inputs, reference_beside(library, outputs), pairs, temp)
     return (f"PASS озвучек {len(dubs)}, результатов сервиса {len(pairs)}, дорожки по путям базы рядом с референсом, временная папка пуста"
             if not problems else f"FAIL {'; '.join(problems)}")
 
