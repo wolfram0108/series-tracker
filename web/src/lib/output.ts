@@ -11,6 +11,18 @@ export type Row = Schemas["CompositionRow"]
 export type Lever = Schemas["EffectiveLever"]
 export type LeverSpec = Schemas["LeverSpec"]
 
+/** The forms of lever (target/shape) the window draws. The core refuses to register any other (core/contracts
+ *  output_settings.py: LEVER_FORMS); a test keeps the two lists one list. A lever of another form is not hidden: the
+ *  window says it cannot draw it. */
+export const RENDERED_FORMS = [
+  "none/reference_pick", "none/flag", "group/flag", "group/variant_pick", "variant/flag",
+] as const
+
+const RENDERED = new Set<string>(RENDERED_FORMS)
+
+/** Whether the window draws a lever of this description. */
+export const isDrawn = (spec: LeverSpec): boolean => RENDERED.has(`${spec.target}/${spec.shape}`)
+
 // --- the targets of the levers --------------------------------------------------------------------------------------
 
 /** The target of a lever that concerns one voice-over group. */

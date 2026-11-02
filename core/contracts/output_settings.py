@@ -48,6 +48,14 @@ class ValueShape(StrEnum):
     REFERENCE_PICK = "reference_pick"
 
 
+# The forms a window knows how to draw. A lever of another form is refused when it is registered, so that no registered
+# lever can be missing from a window; a form joins by a control in the window (web/src/lib/output.ts: RENDERED_FORMS)
+# and a line here.
+LEVER_FORMS: frozenset[tuple[TargetKind, ValueShape]] = frozenset({
+    (TargetKind.NONE, ValueShape.REFERENCE_PICK), (TargetKind.NONE, ValueShape.FLAG),
+    (TargetKind.GROUP, ValueShape.FLAG), (TargetKind.GROUP, ValueShape.VARIANT_PICK),
+    (TargetKind.VARIANT, ValueShape.FLAG)})
+
 _GROUP_TARGET = re.compile(r"group:(.+)", re.DOTALL)
 
 

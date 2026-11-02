@@ -166,6 +166,7 @@ export const ru = {
   "output.lever.referenceLabel": "{group} — {player}",
   "output.lever.referenceLabelHeight": "{group} — {player} {height}p",
   "output.lever.noGroup": "без группы",
+  "output.lever.unsupported": "Рычаг «{name}» этой формы окно не рисует",
   "output.lever.missing": "{label} (недоступен)",
   "output.lever.reset": "как уровнем выше",
   "output.level.default": "по умолчанию",

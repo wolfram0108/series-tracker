@@ -353,10 +353,11 @@ def test_a_source_that_leaves_takes_every_record_that_points_at_it_by_target_or_
 
 
 def test_a_source_that_leaves_takes_the_records_of_a_lever_registered_later_that_points_at_it(volume):
-    pointing = Lever("fake.pin", TargetKind.NONE, ValueShape.VARIANT_PICK, None, "scan", _picked_source)
+    pointing = Lever("fake.pin", TargetKind.GROUP, ValueShape.VARIANT_PICK, None, "scan", _picked_source)
     levers.register(pointing)
     try:
-        records = [rec("fake.pin", {"source_id": 1, "player": "vk"}), rec("fake.pin", {"source_id": 4, "player": "vk"}, season=1),
+        records = [rec("fake.pin", {"source_id": 1, "player": "vk"}, target=GROUP),
+                   rec("fake.pin", {"source_id": 4, "player": "vk"}, season=1, target=GROUP),
                    rec("fake.volume", True, target=GROUP)]
         assert {(each.lever, each.season) for each in without_source(records, 1)} == {
             ("fake.pin", 1), ("fake.volume", None)}

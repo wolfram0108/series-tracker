@@ -138,3 +138,29 @@ def test_a_lever_that_is_taken_out_is_gone_and_taking_out_a_missing_one_is_harml
     levers.unregister("fake.volume")
     assert levers.get("fake.volume") is None
     assert [each.name for each in levers.all()] == ["reference.choice", "variant.allow", "voice.take", "voice.player"]
+
+
+def test_a_lever_of_a_form_no_window_draws_is_refused_when_it_is_registered():
+    from core.contracts import LEVER_FORMS
+    for target in TargetKind:
+        for shape in ValueShape:
+            lever = Lever(f"fake.{target}.{shape}", target, shape, None, "voices")
+            if (target, shape) in LEVER_FORMS:
+                levers.register(lever)
+                levers.unregister(lever.name)
+            else:
+                with pytest.raises(ValueError, match="no window draws"):
+                    levers.register(lever)
+                assert levers.get(lever.name) is None
+
+
+def test_the_forms_the_core_allows_are_the_forms_the_window_draws():
+    """The two lists are written once on each side; this keeps them one list."""
+    import re
+    from pathlib import Path
+    from core.contracts import LEVER_FORMS
+    text = (Path(__file__).resolve().parent.parent / "web" / "src" / "lib" / "output.ts").read_text(encoding="utf-8")
+    block = re.search(r"RENDERED_FORMS[^=]*=\s*\[(.*?)\]\s*as const", text, re.S)
+    assert block, "web/src/lib/output.ts names no RENDERED_FORMS"
+    drawn = {(each.group(1), each.group(2)) for each in re.finditer(r'"(\w+)/(\w+)"', block.group(1))}
+    assert drawn == {(str(target), str(shape)) for target, shape in LEVER_FORMS}

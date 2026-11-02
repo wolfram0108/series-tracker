@@ -3,7 +3,7 @@ import { computed } from "vue"
 import { hasMessage, t, type MessageKey } from "../../i18n"
 import VoiceGroupMaker from "../VoiceGroupMaker.vue"
 import {
-  groupTarget, isOwn, leverState, variantTarget, voiceColumns,
+  groupTarget, isDrawn, isOwn, leverState, variantTarget, voiceColumns,
   type EpisodeView, type Lever, type LeverSpec, type LeverState, type Variant,
 } from "../../lib/output"
 
@@ -41,6 +41,8 @@ const LEVEL_TEXT: Record<LeverState["level"], MessageKey> = {
 const specsBy = (target: LeverSpec["target"], shape: LeverSpec["shape"]) =>
   computed(() => props.specs.filter((spec) => spec.target === target && spec.shape === shape))
 const referencePicks = specsBy("none", "reference_pick")
+const generalFlags = specsBy("none", "flag")
+const undrawn = computed(() => props.specs.filter((spec) => !isDrawn(spec)))
 const groupFlags = specsBy("group", "flag")
 const groupPicks = specsBy("group", "variant_pick")
 const variantFlags = specsBy("variant", "flag")
@@ -109,6 +111,23 @@ const preferVariant = (spec: LeverSpec, variant: Variant): void =>
 
 <template>
   <div class="output-levers stack">
+    <p v-for="spec in undrawn" :key="spec.name" class="lever-unsupported" role="status">{{ t("output.lever.unsupported", { name: titleOf(spec) }) }}</p>
+    <section v-for="spec in generalFlags" :key="spec.name" class="lever-block lever-general">
+      <div class="cluster lever-row">
+        <label class="cluster lever-pick">
+          <input
+            type="checkbox" :checked="stateOf(spec, null).value !== false" :disabled="busy"
+            @change="emit('set', spec.name, null, pickedFlag($event))"
+          />
+          <span>{{ titleOf(spec) }}</span>
+        </label>
+        <span class="lever-level">{{ levelText(stateOf(spec, null)) }}</span>
+        <button
+          v-if="own(stateOf(spec, null))" type="button" class="lever-reset" :disabled="busy"
+          @click="emit('reset', spec.name, null)"
+        >{{ t("output.lever.reset") }}</button>
+      </div>
+    </section>
     <section v-for="spec in referencePicks" :key="spec.name" class="lever-block lever-reference">
       <h3 class="lever-title">{{ titleOf(spec) }}</h3>
       <div class="cluster">

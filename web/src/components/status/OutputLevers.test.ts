@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { mount, type DOMWrapper } from "@vue/test-utils"
 import OutputLevers from "./OutputLevers.vue"
 import { t } from "../../i18n"
-import { groupTarget, variantTarget, type EpisodeView, type Lever, type LeverSpec, type Row } from "../../lib/output"
+import { groupTarget, isDrawn, variantTarget, type EpisodeView, type Lever, type LeverSpec, type Row } from "../../lib/output"
 import { SPECS } from "../../lib/output.fixtures"
 
 // A playable single-episode line; each test changes only the fields it is about.
@@ -180,10 +180,45 @@ describe("OutputLevers", () => {
     }
   })
 
-  it("draws nothing for the levers of a kind it cannot draw, and nothing at all for a view without lines", () => {
+  it("says so when it cannot draw a lever of a form, and draws nothing for a view without lines", () => {
     const odd: LeverSpec = { name: "odd.lever", target: "group", shape: "reference_pick", default: null, consumer: "scan" }
     const w = mountLevers({ specs: [odd], view: viewOf([]) })
     expect(w.findAll(".voice-column").length).toBe(0)
     expect(w.findAll("input, button").length).toBe(0)
+    expect(w.find(".lever-unsupported").text()).toBe(t("output.lever.unsupported", { name: "odd.lever" }))
+  })
+
+  it("draws a lever of the form without a target and with a flag once, with its level, and sets it with no target", async () => {
+    const flag: LeverSpec = { name: "review.flag", target: "none", shape: "flag", default: false, consumer: "scan" }
+    const w = mountLevers({ specs: [...SPECS, flag] })
+    const box = w.find(".lever-general input")
+    expect(checkedOf(box)).toBe(false)
+    expect(w.find(".lever-general .lever-level").text()).toBe(t("output.level.default"))
+    await box.setValue(true)
+    expect(w.emitted("set")).toEqual([["review.flag", null, true]])
+  })
+
+  it("shows the flag without a target as it stands at the level and offers its own value to be reset", async () => {
+    const flag: LeverSpec = { name: "review.flag", target: "none", shape: "flag", default: false, consumer: "scan" }
+    const w = mountLevers({ specs: [flag], levers: [leverOf({ lever: "review.flag", value: true, level: "season" })] })
+    expect(checkedOf(w.find(".lever-general input"))).toBe(true)
+    await w.find(".lever-general .lever-reset").trigger("click")
+    expect(w.emitted("reset")).toEqual([["review.flag", null]])
+  })
+
+  it("never leaves a lever of any form out without a word: each is drawn as a control or named as not drawn", () => {
+    const targets: LeverSpec["target"][] = ["none", "group", "variant"]
+    const shapes: LeverSpec["shape"][] = ["flag", "variant_pick", "reference_pick"]
+    for (const target of targets) {
+      for (const shape of shapes) {
+        const spec: LeverSpec = { name: `form.${target}.${shape}`, target, shape, default: null, consumer: "scan" }
+        const w = mountLevers({ specs: [spec] })
+        const controls = w.findAll(".lever-pick input, .variant-mark").length  // the controls of levers, not the other fields
+        const said = w.find(".lever-unsupported").exists()
+        expect(controls > 0 || said, `${target}/${shape}`).toBe(true)
+        expect(controls > 0 && said, `${target}/${shape}`).toBe(false)
+        expect(said, `${target}/${shape}`).toBe(!isDrawn(spec))
+      }
+    }
   })
 })

@@ -9,7 +9,7 @@ from .composition import (CompositionChanged, CompositionFailed, CompositionGetR
                           CompositionRow, EpisodeRef, Exclusion, PlayerSummary, SourceStatus, SourceSummary,
                           VoiceSummary)
 from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
-from .output_settings import (REFERENCE_CHOICE, VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, EffectiveLever, EpisodeSettings, LeverSpec,
+from .output_settings import (LEVER_FORMS, REFERENCE_CHOICE, VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, EffectiveLever, EpisodeSettings, LeverSpec,
                               Level, LevelSettings, PlayerPick, ReferenceChoice, SettingRecord, SettingsReset, SettingsSet,
                               TargetKind, ValueShape, group_target, parse_group_target, parse_variant_target, variant_target)
 from .reference import OutputSwitch, Reference, ReferenceChanged, ReferenceMark
@@ -23,7 +23,7 @@ from .voices import (DubEvent, DubEventStatus, DubHint, DubItem, DubRecord, Dubs
                      Reason, SettingProblem, SnapshotItem,
                      VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView)
 
-__all__ = ["WORK_WITHDRAWN", "WorkWithdrawn", "AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitReply", "DubEvent",
+__all__ = ["LEVER_FORMS", "WORK_WITHDRAWN", "WorkWithdrawn", "AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitReply", "DubEvent",
            "DubEventStatus", "DubHint", "DubItem", "DubRecord", "DubsSnapshot", "DubState", "DubStatus", "Reason", "SnapshotItem", "SettingProblem", "VoiceSettingsDraft",
            "VoiceSettingsSaved", "VoiceSettingsView", "ConformSettingsDraft", "ConformSettingsSaved",
            "ConformSettingsView",

@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from core.contracts import (REFERENCE_CHOICE, VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, LeverSpec, TargetKind, ValueShape,
+from core.contracts import (LEVER_FORMS, REFERENCE_CHOICE, VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, LeverSpec, TargetKind, ValueShape,
                             parse_group_target, parse_variant_target)
 
 
@@ -104,6 +104,8 @@ def register(lever: Lever) -> None:
     """Adds a lever; a name is taken once, so two owners cannot give one name two meanings."""
     if lever.name in _levers:
         raise ValueError(f"lever {lever.name!r} is already registered")
+    if (lever.target, lever.shape) not in LEVER_FORMS:
+        raise ValueError(f"lever {lever.name!r}: no window draws a lever with the target {lever.target} and the value {lever.shape}")
     _levers[lever.name] = lever
 
 
