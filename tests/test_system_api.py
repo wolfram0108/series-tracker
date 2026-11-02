@@ -17,6 +17,7 @@ from modules.gateway import GatewayModule
 from modules.scan import ScanModule
 from modules.settings import SettingsModule
 from series_factory import insert_series
+from settle import settle
 
 
 @pytest.fixture
@@ -92,15 +93,11 @@ async def test_settings_reschedule_instead_of_immediate_scan(system):
                              json={"enabled": True, "interval": 30})
     assert resp.status_code == 200
 
-    next_ts = None
-    for _ in range(100):  # пересчёт — реакция на событие, дожидаемся
-        row = await db.fetch_one(
-            "SELECT value FROM settings WHERE key='next_scan_timestamp'")
-        if row and row["value"]:
-            next_ts = datetime.fromisoformat(row["value"])
-            break
-        await asyncio.sleep(0.02)
-    assert next_ts is not None
+    await settle(bus, scan)  # the recount is the reaction of scan to the event of the change
+    row = await db.fetch_one(
+        "SELECT value FROM settings WHERE key='next_scan_timestamp'")
+    assert row and row["value"]
+    next_ts = datetime.fromisoformat(row["value"])
     delta = next_ts - before
     assert timedelta(minutes=29) < delta < timedelta(minutes=31)
     assert scan._scan_all_running is False  # немедленного скана нет

@@ -16,6 +16,7 @@ from modules.catalog import CatalogModule
 from modules.torrents import TorrentsModule
 from modules.torrents import pipeline as pl
 from series_factory import insert_series
+from settle import settle, wait_until
 
 
 # --- чистая машина -----------------------------------------------------------------
@@ -177,8 +178,10 @@ async def system(db_path):
     runner = Runner(bus, [renaming, CatalogModule(bus, db), torrents,
                           Probe(bus)])
     await runner.start()
+    _watch(bus, runner)
     yield bus, qbt, renaming, runner.modules[-1], db_path
     await runner.stop()
+    _watch()
 
 
 def _agent_tasks(db_path):
@@ -188,12 +191,17 @@ def _agent_tasks(db_path):
             "SELECT * FROM agent_tasks")}
 
 
+_watched: tuple = ()  # the bus and the modules of the running system, whose steps `_wait` waits for
+
+
+def _watch(bus=None, runner=None) -> None:
+    global _watched
+    _watched = (bus, *runner.modules) if runner is not None else ()
+
+
 async def _wait(predicate, timeout=3.0):
-    for _ in range(int(timeout / 0.02)):
-        if predicate():
-            return True
-        await asyncio.sleep(0.02)
-    return False
+    bus, *modules = _watched
+    return await wait_until(predicate, bus, *modules, seconds=timeout)
 
 
 def _torrent(torrent_id="tid1"):
@@ -608,15 +616,7 @@ async def test_monitor_progress_and_contribution(system):
     assert await _wait(lambda: _progress_row() == (100, "uploading"))
 
     # финальная свёртка публикуется следующим тактом монитора — ждём её
-    flags = None
-    for _ in range(100):
-        while not sub.queue.empty():
-            env = sub.queue.get_nowait()
-            if env.payload["source"] == "torrents":
-                flags = env.payload["flags"]
-        if flags and flags["ready"]:
-            break
-        await asyncio.sleep(0.02)
+    flags = await asyncio.wait_for(_flags_until(sub, lambda each: each["ready"]), 3)
     assert flags["ready"] is True and flags["downloading"] is False
 
 
@@ -645,6 +645,14 @@ async def test_progress_lives_in_the_table_of_torrents_and_downloads_never_sees_
         assert conn.execute("SELECT COUNT(*) FROM download_tasks").fetchone()[0] == 0
     queue = await probe.request("torrents.db.progress.list", {}, timeout=5)
     assert [t["qb_hash"] for t in queue["tasks"]] == ["h5"]
+
+
+async def _flags_until(sub, condition):
+    """The flags of the next contribution of the module that satisfy `condition`: the monitor publishes them."""
+    while True:
+        env = await sub.queue.get()
+        if env.payload["source"] == "torrents" and condition(env.payload["flags"]):
+            return env.payload["flags"]
 
 
 def _progress_count(db_path):
@@ -690,14 +698,11 @@ async def test_sim_P3_P4_P6_states_map_to_flags(system):
     async def _has_flag(state, flag):
         qbt.torrents["hst"] = {"state": state, "progress": 0.5,
                                "dlspeed": 0, "eta": 0}
-        for _ in range(150):
-            while not sub.queue.empty():
-                env = sub.queue.get_nowait()
-                if env.payload["source"] == "torrents" and \
-                        env.payload["flags"].get(flag):
-                    return True
-            await asyncio.sleep(0.02)
-        return False
+        try:
+            await asyncio.wait_for(_flags_until(sub, lambda each: each.get(flag)), 3)
+        except asyncio.TimeoutError:
+            return False
+        return True
 
     assert await _has_flag("stalledDL", "idle")
     assert await _has_flag("queuedDL", "queued")
@@ -718,15 +723,7 @@ async def test_qbit_error_state_is_error_not_downloading(system):
                           "dlspeed": 0, "eta": 0}
     sub = bus.subscribe("series.status.contribution")
 
-    flags = None
-    for _ in range(100):
-        while not sub.queue.empty():
-            env = sub.queue.get_nowait()
-            if env.payload["source"] == "torrents":
-                flags = env.payload["flags"]
-        if flags and flags["error"]:
-            break
-        await asyncio.sleep(0.02)
+    flags = await asyncio.wait_for(_flags_until(sub, lambda each: each["error"]), 3)
     assert flags["error"] is True
     assert flags["downloading"] is False
     with sqlite3.connect(db_path) as conn:
@@ -820,11 +817,13 @@ async def test_sim_L3_pipeline_task_recovered_on_start(db_path):
     runner = Runner(bus, [renaming, CatalogModule(bus, db), torrents,
                           Probe(bus)])
     await runner.start()
+    _watch(bus, runner)
     try:
         assert await _wait(lambda: not _agent_tasks(db_path))  # доведена
         assert renaming.calls  # переименование отработало после рестарта
     finally:
         await runner.stop()
+        _watch()
 
 
 @pytest.mark.asyncio
@@ -1062,6 +1061,7 @@ async def test_no_resume_while_task_in_pipeline(system):
     await _memory(probe, 1, episodes={})
 
     assert await _wait(lambda: qbt.files["hq"][0]["priority"] == 1)
+    await settle(*_watched)  # quiet: the handler of the change has ended, so a resume it might make is made
     assert ("resume", ("hq",)) not in qbt.calls
 
 

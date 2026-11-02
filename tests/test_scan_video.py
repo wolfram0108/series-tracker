@@ -22,6 +22,7 @@ from modules.scan import ScanModule
 from modules.scan.candidates import NO_DATE
 from scan_support import STUCK_S, Page, World, episode_settings, lever, migrated_db, row
 from series_factory import create_series, source
+from settle import wait_until
 
 URL1 = "https://fake.test/p/1"
 URL2 = "https://fake.test/p/2"
@@ -195,11 +196,7 @@ def tasks_of(rig: "Rig") -> list[dict]:
 
 async def no_task_left(rig: "Rig") -> None:
     """The command is gone from the database: it goes when the scan ends, a moment after the last signal it sent."""
-    for _ in range(200):
-        if not tasks_of(rig):
-            return
-        await asyncio.sleep(0.02)
-    raise AssertionError(("the command stayed", tasks_of(rig)))
+    assert await wait_until(lambda: not tasks_of(rig), rig.bus, rig.scan), ("the command stayed", tasks_of(rig))
 
 
 async def test_the_command_of_a_synchronization_is_written_before_its_table_is_waited_for_and_gone_when_it_ends(rig):
@@ -269,11 +266,16 @@ async def test_a_command_found_at_a_restart_for_a_series_already_being_scanned_i
         conn.execute("INSERT INTO scan_tasks (series_id, status, task_data, results_data) VALUES (?, 'processing', '[]', ?)",
                      (rig.series_id, json.dumps({"video_sync": True, "download": True})))
         conn.commit()
+    dropped = asyncio.Event()
+    delete = rig.scan.repo.delete_task
+
+    async def delete_and_tell(task_id: int) -> None:
+        await delete(task_id)
+        dropped.set()  # the restarted command is deleted by a task of scan that no bus step follows
+
+    rig.scan.repo.delete_task = delete_and_tell
     rig.bus.publish(Envelope(topic="system.started", kind="event"))
-    for _ in range(200):
-        if len(tasks_of(rig)) == 1:
-            break
-        await asyncio.sleep(0.02)
+    await asyncio.wait_for(dropped.wait(), STUCK_S)
     assert len(tasks_of(rig)) == 1
     rig.world.finish(URL1)
     await asyncio.wait_for(run, STUCK_S)

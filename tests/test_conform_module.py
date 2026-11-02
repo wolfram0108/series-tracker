@@ -13,6 +13,7 @@ from modules.conform.module import compact_job, job_label, split_label
 from modules.conform.paths import translate
 from conform_fakes import FakeClient
 from core.reasons import parse
+from settle import settle, wait_until
 
 
 def job(job_id, seq=1, status="running", **fields):
@@ -57,14 +58,10 @@ async def started(client, settings=None, **options):
 
 async def until(probe, condition, seconds=3.0):
     """The bridge pushes; the test only waits for the picture it expects."""
-    end = asyncio.get_running_loop().time() + seconds
-    while True:
-        # The bus carries the picture only as a push; the test reads the bridge's copy.
-        status = probe.bridge.snapshot()
-        if condition(status):
-            return status
-        assert asyncio.get_running_loop().time() < end, status
-        await asyncio.sleep(0.01)
+    # The bus carries the picture only as a push; the test reads the bridge's copy after every step.
+    assert await wait_until(lambda: condition(probe.bridge.snapshot()), probe.bus, probe.bridge, seconds=seconds), \
+        probe.bridge.snapshot()
+    return probe.bridge.snapshot()
 
 
 
@@ -141,7 +138,7 @@ async def test_a_new_interface_gets_the_picture_without_asking():
         picture = (await asyncio.wait_for(sub.queue.get(), 3)).payload
         assert [t["id"] for t in picture["tasks"]] == ["j1"]
         probe.publish_event("gateway.sse.clients", {"count": 0})
-        await asyncio.sleep(0.05)
+        await settle(bus, probe.bridge)  # quiet: the last client leaving is handled
         assert sub.queue.empty()
     finally:
         await runner.stop()
@@ -351,7 +348,7 @@ async def test_a_finished_job_is_announced_once_with_local_paths():
         assert first["results"][0]["out_path"] == "/nas/torrents/series-tracker/7/s01e01/_aligned/a.flac"
         assert first["results"][0]["resid_ms"] == 11.0 and first["results"][0]["suspect"] is False
         assert (second["job_id"], second["status"], second["error"]) == ("j2", "failed", "boom")
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(client.drained.wait(), 3)  # the whole script is taken in and announced
         assert sub.queue.empty()
     finally:
         await runner.stop()
@@ -653,7 +650,7 @@ async def test_a_record_the_daemon_drops_is_announced_once_for_each_job():
         first = (await asyncio.wait_for(sub.queue.get(), 3)).payload
         second = (await asyncio.wait_for(sub.queue.get(), 3)).payload
         assert {first["job_id"], second["job_id"]} == {"j1", "j2"}
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(client.drained.wait(), 3)  # the whole script is taken in and announced
         assert sub.queue.empty()
     finally:
         await runner.stop()

@@ -16,6 +16,7 @@ from modules.slicing import SlicingModule
 from modules.slicing import chapters as ch
 from modules.slicing.module import run_ffmpeg
 from series_factory import insert_series
+from settle import wait_until
 
 
 # --- фильтр глав (порт эвристик 1:1) -------------------------------------------------
@@ -116,22 +117,37 @@ async def test_run_ffmpeg_publishes_final_on_success(tmp_path, monkeypatch):
 async def test_run_ffmpeg_owns_the_output_while_ffmpeg_writes(tmp_path, monkeypatch):
     """The cut writes beside its target for as long as ffmpeg lives: no other change may take that name then."""
     from core import storage
+    from modules.slicing import module as slicing_module
     binp = tmp_path / "bin"
     binp.mkdir()
     gate = tmp_path / "gate"
+    os.mkfifo(gate)
+    release = os.open(gate, os.O_RDWR)  # the stub reads the gate until the test writes to it
     stub = binp / "ffmpeg"
-    stub.write_text("#!/bin/bash\nwhile [ ! -e \"%s\" ]; do sleep 0.02; done\necho cut > \"${@: -1}\"\n" % gate)
+    stub.write_text("#!/bin/bash\nread -r _ < \"%s\"\necho cut > \"${@: -1}\"\n" % gate)
     stub.chmod(0o755)
     monkeypatch.setenv("PATH", f"{binp}:/usr/bin:/bin")
+    spawned = asyncio.Event()
+    spawn = slicing_module.spawn
+
+    async def spawn_and_tell(*args, **kwargs):
+        process = await spawn(*args, **kwargs)
+        spawned.set()  # ffmpeg is alive from here on
+        return process
+
+    monkeypatch.setattr(slicing_module, "spawn", spawn_and_tell)
     out = str(tmp_path / "Show s01e03.mp4")
     cut = asyncio.create_task(run_ffmpeg("src.mp4", "00:00:00", None, out))
-    await asyncio.sleep(0.3)
-    assert storage.busy(out) and storage.busy(out + ".slicing.mp4")
-    with pytest.raises(storage.StorageBusy):
-        await storage.call(lambda: None, owns=out)
-    gate.write_text("go")
-    assert await asyncio.wait_for(cut, 10) == (True, "")
-    assert not storage.busy(out)
+    try:
+        await asyncio.wait_for(spawned.wait(), 10)
+        assert storage.busy(out) and storage.busy(out + ".slicing.mp4")
+        with pytest.raises(storage.StorageBusy):
+            await storage.call(lambda: None, owns=out)
+        os.write(release, b"go\n")
+        assert await asyncio.wait_for(cut, 10) == (True, "")
+        assert not storage.busy(out)
+    finally:
+        os.close(release)
 
 
 # --- сквозные сценарии ----------------------------------------------------------------
@@ -231,8 +247,10 @@ async def system(tmp_path):
     probe = Probe(bus)
     runner = Runner(bus, [fake, slicing, probe])
     await runner.start()
+    _watch(bus, runner)
     yield bus, fake, ffmpeg, probe, str(db_path), str(media)
     await runner.stop()
+    _watch()
 
 
 # Первая глава всегда мусор у автофильтра (эвристика оригинала
@@ -266,6 +284,11 @@ def _item(db_path, uid):
             "SELECT * FROM media_items WHERE unique_id=?", (uid,)).fetchone())
 
 
+def _task_count(db_path):
+    with sqlite3.connect(db_path) as conn:
+        return conn.execute("SELECT COUNT(*) FROM slicing_tasks").fetchone()[0]
+
+
 def _sliced(db_path, uid):
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
@@ -274,12 +297,17 @@ def _sliced(db_path, uid):
             "ORDER BY episode_number", (uid,))]
 
 
+_watched: tuple = ()  # the bus and the modules of the running system, whose steps `_wait` waits for
+
+
+def _watch(bus=None, runner=None) -> None:
+    global _watched
+    _watched = (bus, *runner.modules) if runner is not None else ()
+
+
 async def _wait(predicate, timeout=3.0):
-    for _ in range(int(timeout / 0.02)):
-        if predicate():
-            return True
-        await asyncio.sleep(0.02)
-    return False
+    bus, *modules = _watched
+    return await wait_until(predicate, bus, *modules, seconds=timeout)
 
 
 @pytest.mark.asyncio
@@ -301,9 +329,8 @@ async def test_sim_C5_slicing_aborts_removes_partial(system):
                         {"series_id": 2, "delete_from_qb": False})
 
     assert await _wait(lambda: not os.path.exists(partial))  # снесён
-    with sqlite3.connect(db_path) as conn:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM slicing_tasks").fetchone()[0] == 0
+    # the cascade of the owner takes the task away on its own course, apart from the removal of the partial
+    assert await _wait(lambda: _task_count(db_path) == 0)
 
 
 @pytest.mark.asyncio
@@ -329,10 +356,8 @@ async def test_full_slice_flow(system):
     # асинхронная — дожидаемся
     assert await _wait(lambda: fake.ignored_calls == [
         {"unique_id": "comp1", "is_ignored": True}])
-    # задача удалена
-    with sqlite3.connect(db_path) as conn:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM slicing_tasks").fetchone()[0] == 0
+    # задача удалена: последний шаг воркера, после команды ignore
+    assert await _wait(lambda: _task_count(db_path) == 0)
 
 
 @pytest.mark.asyncio

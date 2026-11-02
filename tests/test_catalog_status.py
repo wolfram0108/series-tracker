@@ -16,6 +16,7 @@ from core.db import Database
 from modules.catalog import CatalogModule
 from modules.catalog.aggregator import StatusAggregator
 from series_factory import insert_series
+from settle import settle
 
 
 # --- агрегатор: чистая логика ----------------------------------------------------
@@ -236,15 +237,11 @@ async def test_viewing_commands_and_sse_guard(system):
 
 @pytest.mark.asyncio
 async def test_series_list_no_state_column_and_statuses(system):
-    _, probe = system
+    bus, probe = system
     probe.publish_event("series.status.contribution", {
         "source": "scan", "series_id": 1, "flags": {"scanning": True}})
-    # запрос после события могла обогнать очередь — дождёмся вклада
-    for _ in range(50):
-        rows = await probe.request("catalog.series.list", {}, timeout=5)
-        if rows[0]["statuses"] == ["scanning"]:
-            break
-        await asyncio.sleep(0.02)
+    await settle(bus)  # the request could overtake the event in the queue: the contribution is folded first
+    rows = await probe.request("catalog.series.list", {}, timeout=5)
     assert len(rows) == 1
     row = rows[0]
     assert row["name"] == "Тайтл"

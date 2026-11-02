@@ -75,8 +75,10 @@ async def test_bus_event_reaches_sse_with_mapped_name(system, monkeypatch):
             if chunk.startswith("event:"):
                 break
 
+    announced = bus.subscribe("gateway.sse.clients")  # the stream announces itself once it is subscribed
     consumer = asyncio.create_task(consume())
-    await asyncio.sleep(0.05)  # дать генератору подписаться на шину
+    await asyncio.wait_for(announced.queue.get(), 5)
+    bus.unsubscribe(announced)
     bus.publish(Envelope(topic="внутренний.топик", kind="event",
                          payload={"секрет": True}))
     bus.publish(Envelope(topic="demo.things.changed", kind="event",
@@ -106,8 +108,10 @@ async def _collect_sse_events(gateway, bus, envelopes, expected):
                 if events >= expected:
                     break
 
+    announced = bus.subscribe("gateway.sse.clients")  # the stream announces itself once it is subscribed
     consumer = asyncio.create_task(consume())
-    await asyncio.sleep(0.05)
+    await asyncio.wait_for(announced.queue.get(), 5)
+    bus.unsubscribe(announced)
     for env in envelopes:
         bus.publish(env)
     await asyncio.wait_for(consumer, timeout=5)

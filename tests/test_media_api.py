@@ -1,7 +1,6 @@
 """Тесты блока «media-items и операции серии» этапа 5 (Р-21):
 главы/нарезка через готовые контракты slicing, ignore → пересборка
 плана, композиция по владельцам, rename_preview, переобработки."""
-import asyncio
 import os
 import sqlite3
 import subprocess
@@ -18,6 +17,7 @@ from modules.renaming import RenamingModule
 from modules.scan import ScanModule
 from modules.slicing import SlicingModule
 from series_factory import insert_series
+from settle import settle
 
 CHAPTERS = [
     {"time": "00:01:00", "title": "Серия 1"},
@@ -252,13 +252,10 @@ async def test_rename_preview_shape(db_path, tmp_path):
 
 @pytest.mark.asyncio
 async def test_reprocess_409_and_command(system):
-    _, _, client, neighbours = system
+    bus, _, client, neighbours = system
     resp = await client.post("/api/series/2/reprocess")
     assert resp.status_code == 200
-    for _ in range(100):
-        if ("reprocess", {"series_id": 2}) in neighbours.calls:
-            break
-        await asyncio.sleep(0.02)
+    await settle(bus, neighbours)  # the command is background work of the gateway: it is done when the bus is quiet
     assert ("reprocess", {"series_id": 2}) in neighbours.calls
 
     neighbours.active_renaming = [{"id": 9, "status": "in_progress"}]

@@ -16,6 +16,7 @@ import pytest
 
 from core import Bus, Runner
 from modules.torrents import TorrentsModule, infohash_candidates
+from settle import settle
 
 QBIT_URL = os.environ.get("ST_QBIT_URL")
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "torrents")
@@ -92,8 +93,7 @@ async def test_add_inspect_delete_roundtrip(torrents_module):
     probe.send_command("torrents.delete",
                        {"hashes": list(_fixtures().values()),
                         "delete_files": True})
-    import asyncio
-    await asyncio.sleep(1)
+    await settle(probe.bus)  # the handler of the command returns after qBittorrent has answered the deletion
     info = await probe.request("torrents.info.get",
                                {"hashes": list(_fixtures().values())},
                                timeout=15)

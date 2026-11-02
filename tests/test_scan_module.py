@@ -17,6 +17,7 @@ from modules.catalog import CatalogModule
 from modules.scan import ScanModule
 from core import ids
 from series_factory import insert_series, source
+from settle import wait_until
 
 
 class FakeBackend(BaseModule):
@@ -38,6 +39,7 @@ class FakeBackend(BaseModule):
         self.reprocess_calls = 0
         self.fail_adds = False
         self.hold_reprocess: asyncio.Event | None = None
+        self.reprocess_held = asyncio.Event()  # set when a reprocess waits for hold_reprocess
         super().__init__(bus)
 
     def register(self):
@@ -58,6 +60,7 @@ class FakeBackend(BaseModule):
     async def on_reprocess(self, env):
         self.reprocess_calls += 1
         if self.hold_reprocess:
+            self.reprocess_held.set()
             await self.hold_reprocess.wait()
         return {"ok": True}
 
@@ -327,7 +330,7 @@ async def test_concurrent_scan_rejected(system):
     fake.releases = []
     first = asyncio.create_task(
         probe.request("scan.series.run", {"series_id": 1}, timeout=10))
-    await asyncio.sleep(0.05)  # первый скан повис на переобработке
+    await asyncio.wait_for(fake.reprocess_held.wait(), 10)  # the first scan hangs on the reprocess
     with pytest.raises(BusRequestError, match="not_allowed"):
         await probe.request("scan.series.run", {"series_id": 1}, timeout=10)
     fake.hold_reprocess.set()
@@ -357,10 +360,12 @@ async def test_resume_continues_from_journal(db_path):
     await runner.start()
     bus.publish(Envelope(topic="system.started", kind="event"))
     try:
-        for _ in range(100):
-            if len(fake.registered) == 2:
-                break
-            await asyncio.sleep(0.02)
+        def resumed():  # the journal is cleared before the scan reports that it ended
+            with sqlite3.connect(db_path) as conn:
+                return len(fake.registered) == 2 and conn.execute(
+                    "SELECT COUNT(*) FROM scan_tasks").fetchone()[0] == 0
+
+        assert await wait_until(resumed, bus, scan, fake), fake.registered
         assert [r["qb_hash"] for r in fake.registered] == \
             ["done0", "hash-tid2"]
         assert len(fake.added) == 1  # первый пункт не добавлялся повторно

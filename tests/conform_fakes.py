@@ -22,6 +22,7 @@ class FakeClient:
         self.known = {}
         self.plots = {}  # (job id, name) -> the picture the daemon holds
         self.asked = []  # the plots that were asked for
+        self.drained = asyncio.Event()  # set when the bridge has taken in every event of a script and asks for more
 
     async def info(self):
         return {"version": "0.1.0", "device": "cuda", "gpu": True, "gpu_name": "RTX"}
@@ -35,6 +36,7 @@ class FakeClient:
                 raise item
             await asyncio.sleep(0)
             yield item
+        self.drained.set()  # the consumer comes back for the next event only after it has finished with the last one
         await asyncio.Event().wait()
 
     async def enqueue(self, body):

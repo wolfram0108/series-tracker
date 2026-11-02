@@ -20,6 +20,7 @@ from modules.renaming import RenamingModule
 from modules.scan.repository import ScanRepository
 from modules.slicing.repository import SlicingRepository
 from series_factory import insert_series, source
+from settle import settle
 
 
 @pytest.fixture
@@ -341,14 +342,7 @@ async def test_delete_cascade_by_owners(db_path, tmp_path):
                 f"SELECT * FROM {table} WHERE {where}")
             return not rows
 
-        for _ in range(100):  # каскад событийный — дожидаемся владельцев
-            done = (await _empty("series", "id=2")
-                    and await _empty("media_items")
-                    and await _empty("renaming_tasks")
-                    and await _empty("series_tmdb_mappings"))
-            if done:
-                break
-            await asyncio.sleep(0.02)
+        await settle(bus, *modules)  # the cascade is an event: it ends when every owner has handled it
         assert await _empty("series", "id=2")
         assert await _empty("media_items")
         assert await _empty("renaming_tasks")
@@ -371,10 +365,7 @@ async def test_update_without_path_change_asks_renaming_whatever_the_kind(system
     assert resp.status_code == 200
     row = await db.fetch_one("SELECT name FROM series WHERE id=?", (series_id,))
     assert row["name"] == "Переименован"
-    for _ in range(100):  # команда фоновая — дожидаемся
-        if ("reprocess", {"series_id": series_id}) in neighbours.calls:
-            break
-        await asyncio.sleep(0.02)
+    await settle(bus, neighbours)  # the command is background work of the gateway: done when the bus is quiet
     assert ("reprocess", {"series_id": series_id}) in neighbours.calls
     assert all(c[0] != "relocate" for c in neighbours.calls)
     # the layout of a video series is counted again on series.updated; the gateway starts no sync
@@ -443,11 +434,7 @@ async def test_state_route_drives_viewing_and_asks_each_owner_to_check_its_files
     assert env.payload["series_id"] == series_id
     assert "viewing" in env.payload["statuses"]
     # opening the window asks every owner of files to check its own with the disk; the gateway knows no kind
-    for _ in range(100):
-        if ("fs.verify", {"series_id": series_id}) in neighbours.calls and \
-                ("fs.sync", {"series_id": series_id}) in neighbours.calls:
-            break
-        await asyncio.sleep(0.02)
+    await settle(bus, neighbours)
     assert ("fs.verify", {"series_id": series_id}) in neighbours.calls
     assert ("fs.sync", {"series_id": series_id}) in neighbours.calls
     assert "catalog.series.get" not in topics(spy)

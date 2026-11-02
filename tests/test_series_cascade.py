@@ -18,6 +18,7 @@ from modules.catalog import CatalogModule
 from modules.catalog.repository import CatalogRepository
 from modules.scan import ScanModule
 from series_factory import create_series, source
+from settle import wait_until
 
 
 @pytest.fixture
@@ -154,10 +155,8 @@ async def test_delete_during_scan_leaves_no_rows(db_path):
         await asyncio.wait_for(source.entered.wait(), 10)
         await catalog.request("catalog.series.delete",
                               {"series_id": series_id})
-        for _ in range(100):  # ждём, пока владелец scan увидит удаление
-            if series_id in scan._aborted:
-                break
-            await asyncio.sleep(0.02)
+        # The source holds an envelope until released, so the bus never goes quiet: the state of scan is the signal.
+        assert await wait_until(lambda: series_id in scan._aborted, bus, scan)
         source.release.set()
         result = await asyncio.wait_for(task, 15)
         assert result.get("aborted") is True
