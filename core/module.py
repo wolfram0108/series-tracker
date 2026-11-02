@@ -73,12 +73,12 @@ class BaseModule:
         """Хук модуля: корректное завершение."""
 
     async def start(self) -> None:
-        reply_sub = self.bus.subscribe(self._reply_topic)
+        reply_sub = self.bus.subscribe(self._reply_topic, tracked=True)
         self._subs.append(reply_sub)
         self._tasks.append(asyncio.create_task(
             self._consume_replies(reply_sub), name=f"{self.name}:replies"))
         for pattern, handler, concurrent in self._handlers:
-            sub = self.bus.subscribe(pattern)
+            sub = self.bus.subscribe(pattern, tracked=True)
             self._subs.append(sub)
             self._tasks.append(asyncio.create_task(
                 self._consume(sub, handler, concurrent),
@@ -125,6 +125,10 @@ class BaseModule:
         finally:
             self._pending.pop(env.correlation_id, None)
 
+    def background(self) -> set[asyncio.Task]:
+        """Задачи, в которых модуль работает вне обработчиков шины; тот, кто ждёт тишины, ждёт и их."""
+        return set(self._bg)
+
     # --- потребители -------------------------------------------------------
 
     async def _consume(self, sub: Subscription, handler: Handler,
@@ -135,8 +139,12 @@ class BaseModule:
                 task = asyncio.create_task(self._handle_one(env, handler))
                 self._bg.add(task)
                 task.add_done_callback(self._bg.discard)
+                task.add_done_callback(lambda _task, sub=sub: self.bus.processed(sub))
             else:
-                await self._handle_one(env, handler)
+                try:
+                    await self._handle_one(env, handler)
+                finally:
+                    self.bus.processed(sub)
 
     async def _handle_one(self, env: Envelope, handler: Handler) -> None:
         try:
@@ -161,10 +169,13 @@ class BaseModule:
     async def _consume_replies(self, sub: Subscription) -> None:
         while True:
             env: Envelope = await sub.queue.get()
-            fut = self._pending.get(env.correlation_id)
-            if fut is None or fut.done():
-                continue  # запоздавший ответ после таймаута — игнорируем
-            if isinstance(env.payload, dict) and ERROR_KEY in env.payload:
-                fut.set_exception(BusRequestError(env.payload[ERROR_KEY]))
-            else:
-                fut.set_result(env.payload)
+            try:
+                fut = self._pending.get(env.correlation_id)
+                if fut is None or fut.done():
+                    continue  # запоздавший ответ после таймаута — игнорируем
+                if isinstance(env.payload, dict) and ERROR_KEY in env.payload:
+                    fut.set_exception(BusRequestError(env.payload[ERROR_KEY]))
+                else:
+                    fut.set_result(env.payload)
+            finally:
+                self.bus.processed(sub)

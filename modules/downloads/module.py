@@ -635,6 +635,11 @@ class DownloadsModule(BaseModule):
             if wanted(job_key, owner):
                 runner.cancel()
 
+    def background(self) -> set[asyncio.Task]:
+        """The workers of the downloads and of the fetches belong to what a waiter for quiet waits for."""
+        workers = {each for each in self._active.values() if isinstance(each, asyncio.Task)}
+        return super().background() | workers | {runner for runner, _ in self._fetch_active.values()}
+
     def _fetch_pump(self) -> None:
         while self._fetch_queue and len(self._fetch_active) < self._fetch_limit:
             job = self._fetch_queue.pop(0)

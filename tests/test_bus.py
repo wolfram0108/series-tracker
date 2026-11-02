@@ -137,3 +137,108 @@ async def test_parallel_requests_do_not_mix_replies():
     finally:
         await client.stop()
         await echo.stop()
+
+
+# --- тишина шины: сигнал, а не пауза -------------------------------------------
+
+class Chain(BaseModule):
+    """`chain.first` порождает `chain.second`; второй обработчик медленный и записывает конец своей работы."""
+    name = "chain"
+
+    def __init__(self, bus):
+        super().__init__(bus)
+        self.done: list[str] = []
+        self.release = asyncio.Event()
+
+    def register(self):
+        self.handle("chain.first", self.on_first)
+        self.handle("chain.second", self.on_second)
+        self.handle("chain.parallel", self.on_parallel, concurrent=True)
+
+    async def on_first(self, env):
+        self.publish_event("chain.second", env.payload)
+
+    async def on_second(self, env):
+        await self.release.wait()
+        self.done.append("second")
+
+    async def on_parallel(self, env):
+        await self.release.wait()
+        self.done.append("parallel")
+
+
+@pytest.mark.asyncio
+async def test_a_bus_with_nothing_in_flight_is_settled_at_once():
+    bus = Bus()
+    await asyncio.wait_for(bus.settled(), 1)
+
+
+@pytest.mark.asyncio
+async def test_settled_waits_for_what_the_handlers_published_on_the_way():
+    bus = Bus()
+    chain = Chain(bus)
+    await chain.start()
+    try:
+        bus.publish(Envelope(topic="chain.first", kind="event", payload=1))
+        waiting = asyncio.create_task(bus.settled())
+        await asyncio.sleep(0)  # the first handler has run, the second is held
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert not waiting.done() and chain.done == []
+        chain.release.set()
+        await asyncio.wait_for(waiting, 2)
+        assert chain.done == ["second"]
+    finally:
+        await chain.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_concurrent_handler_counts_until_its_task_ends():
+    bus = Bus()
+    chain = Chain(bus)
+    await chain.start()
+    try:
+        bus.publish(Envelope(topic="chain.parallel", kind="event"))
+        for _ in range(5):
+            await asyncio.sleep(0)
+        waiting = asyncio.create_task(bus.settled())
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert not waiting.done()
+        chain.release.set()
+        await asyncio.wait_for(waiting, 2)
+        assert chain.done == ["parallel"]
+    finally:
+        await chain.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_subscription_that_does_not_report_is_not_waited_for():
+    bus = Bus()
+    raw = bus.subscribe("chain.first")  # a test or a stream of events: nobody reports its envelopes
+    bus.publish(Envelope(topic="chain.first", kind="event"))
+    await asyncio.wait_for(bus.settled(), 1)
+    assert raw.queue.qsize() == 1
+
+
+@pytest.mark.asyncio
+async def test_a_module_that_stops_with_work_in_hand_does_not_hold_the_bus_for_ever():
+    bus = Bus()
+    chain = Chain(bus)
+    await chain.start()
+    bus.publish(Envelope(topic="chain.first", kind="event"))
+    bus.publish(Envelope(topic="chain.parallel", kind="event"))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    await chain.stop()
+    await asyncio.wait_for(bus.settled(), 1)
+
+
+@pytest.mark.asyncio
+async def test_a_waiter_that_took_the_step_signal_loses_no_step_between_the_look_and_the_wait():
+    bus = Bus()
+    step = bus.next_step()
+    bus.publish(Envelope(topic="a.b", kind="event"))
+    await asyncio.wait_for(step.wait(), 1)  # the step happened after the signal was taken, so it is not missed
+    assert bus.next_step() is not step
+
