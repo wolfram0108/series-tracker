@@ -530,7 +530,7 @@ async def test_cancel_active_download(system):
                        == "downloading")
     task = _tasks(db_path)[0]
     save_path = task["save_path"]
-    # имитируем недокачанные артефакты yt-dlp на диске: задача пишет под своим именем рядом с именем видео
+    # half-written files of the download on disk: a task writes under a name of its own beside the name of the video
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     work = os.path.join(os.path.dirname(save_path), f".uid1.{os.path.basename(save_path)}")
     open(work, "wb").close()
@@ -547,7 +547,7 @@ async def test_cancel_active_download(system):
     assert item["status"] == "pending"
     assert item["plan_status"] == "in_plan_single"
     assert item["is_ignored_by_user"] == 0
-    # файл задачи и его части удалены
+    # the file of the task and its pieces are gone
     assert not os.path.exists(work)
     assert not os.path.exists(work + ".part")
     assert not os.path.exists(save_path + ".part")

@@ -582,9 +582,10 @@ class ScanModule(BaseModule):
         """The work goes to those who do it, and the command of the user is kept until each of them has written the work
         down: a receiver answers after its record, so a stop at any point of the hand-over finds the command again and
         the next run gives the work again (a receiver takes the same work twice as once)."""
-        topics = ("downloads.dispatch", "voices.dispatch")
-        answers = await asyncio.gather(*(self.request(topic, {"series_id": series_id}, timeout=HANDOVER_TIMEOUT_S)
-                                         for topic in topics), return_exceptions=True)
+        answers = await asyncio.gather(
+            self.request("downloads.dispatch", {"series_id": series_id}, timeout=HANDOVER_TIMEOUT_S),
+            self.request("voices.dispatch", {"series_id": series_id}, timeout=HANDOVER_TIMEOUT_S),
+            return_exceptions=True)
         for answer in answers:
             if isinstance(answer, BusRequestError) and _NO_HANDLER in str(answer):
                 continue  # nobody does that kind of work in this process

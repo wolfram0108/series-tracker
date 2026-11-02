@@ -451,7 +451,7 @@ class DownloadsModule(BaseModule):
         # ytdlp.download в finally убивает процесс
         await self._cancel_runner(task_id)
 
-        # 2) удалить недокачанный файл и временные артефакты yt-dlp (под именем задачи, не под именем видео)
+        # 2) remove the half-written file and the yt-dlp pieces: those under the name of the task, never the name of the video
         await self._clear_task_files(task)
 
         # 3) снять задачу, вернуть элемент в pending (был downloading)
