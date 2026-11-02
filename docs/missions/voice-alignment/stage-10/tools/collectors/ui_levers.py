@@ -26,8 +26,9 @@ import httpx
 from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from live_three import (CUT, EXCLUDE, FIRST, LAST, NUMBER_FIRST, OUT_NUMBER_FIRST, PROFILES as LIVE_PROFILES, REAL_DB, SERIES,
-                        SERIES_EN, SOURCES, _extract, _rule)  # noqa: E402
+from live_sync import LIVE_STATES, Live, conform_address  # noqa: E402
+from live_three import (CUT, EXCLUDE, FIRST, KEEP, LAST, LIBRARY, LOCAL, NUMBER_FIRST, OUT_NUMBER_FIRST, PROFILES as LIVE_PROFILES,
+                        REAL_DB, REMOTE, SERIES, SERIES_EN, SOURCES, _extract, _rule, two_phase)  # noqa: E402
 from stand import RAW, Stand  # noqa: E402
 from ui_journey import ADMIN, PASSWORD, option_named, text_of  # noqa: E402
 
@@ -35,6 +36,8 @@ DUNHUA = SOURCES[1][0]
 CHANNEL = "https://vkvideo.ru/@donghuaworld"
 QUERY = "Расколотая битвой синева небес"
 PROFILE_SITE, PROFILE_VK = "dunhuatv 5", "vk 5, без озвучки"
+# The profiles `ui_profiles.py` makes by hand in the constructor; `--profiles hand` takes these instead of the ones made through the API.
+HAND_SITE, HAND_VK = "dunhuatv (вручную)", "vk (вручную)"
 VK_RULES = [_rule("Исключить до 207", [OUT_NUMBER_FIRST], EXCLUDE), _rule("N серия", [NUMBER_FIRST], [_extract(NUMBER_FIRST)])]
 SEASON = 5
 
@@ -48,6 +51,9 @@ class Campaign:
         self.shots.mkdir(parents=True, exist_ok=True)
         self.http = httpx.Client(base_url=stand.base, timeout=60)
         self.series_id = 0
+        self.library = work / "library" / SERIES_EN
+        self.hand = False
+        self.pending: list[str] | None = None
 
     # --- the clock and the record ---------------------------------------------------------------------------------
 
@@ -90,6 +96,10 @@ class Campaign:
 
     def profile_ids(self) -> dict[str, int]:
         existing = {each["name"]: each["id"] for each in self.api("/api/parser-profiles")}
+        if self.hand:
+            missing = {HAND_SITE, HAND_VK} - set(existing)
+            assert not missing, f"profiles made by hand are not in the database (run ui_profiles.py first): {sorted(missing)}"
+            return existing
         for name, rules in ((PROFILE_SITE, LIVE_PROFILES["dunhuatv"]), (PROFILE_VK, VK_RULES)):
             if name in existing:
                 continue
@@ -147,7 +157,7 @@ def setup(c: Campaign, page: Page) -> None:
     c.scenario("источник dunhuatv.ru добавлен по адресу; плееры и озвучки видны, у озвучек «нет группы»", page, make)
 
     def profile_site() -> dict:
-        pick_profile(page, 0, PROFILE_SITE)
+        pick_profile(page, 0, HAND_SITE if c.hand else PROFILE_SITE)
         return {"state": page.locator(".source-card").nth(0).locator(".source-state").inner_text()}
 
     c.scenario("профиль назначен источнику dunhuatv.ru", page, profile_site)
@@ -165,15 +175,15 @@ def setup(c: Campaign, page: Page) -> None:
     c.scenario("второй источник — канал VK: адрес и поисковый запрос набраны в карточке", page, channel)
 
     def profile_vk() -> dict:
-        pick_profile(page, 1, PROFILE_VK)
+        pick_profile(page, 1, HAND_VK if c.hand else PROFILE_VK)
         return {"state": page.locator(".source-card").nth(1).locator(".source-state").inner_text()}
 
-    c.scenario("профиль без озвучки назначен каналу VK", page, profile_vk)
+    c.scenario("профиль назначен каналу VK" + ("" if c.hand else " (без озвучки)"), page, profile_vk)
 
     def series() -> dict:
         page.get_by_label("Название (RU)").fill(SERIES)
         page.get_by_label("Название (EN)").fill(SERIES_EN)
-        page.get_by_label("Путь сохранения").fill(str(c.work / "library" / SERIES_EN))
+        page.get_by_label("Путь сохранения").fill(str(c.library))
         page.get_by_label("Сезон (формат s01)").fill(f"s0{SEASON}")
         page.locator(".modern-footer").get_by_role("button", name="Добавить", exact=True).click(timeout=15000)
         page.wait_for_selector(".modal-title", state="detached", timeout=60000)
@@ -271,6 +281,30 @@ def clean(c: Campaign) -> None:
         c.http.post(f"/api/series/{c.series_id}/output/settings/reset", json={"season": SEASON, "episode": episode}).raise_for_status()
 
 
+def make_groups(c: Campaign, page: Page) -> dict:
+    """The groups of the voice-overs, made the way a user makes them: in the column of a voice-over of the output, by its button."""
+    made = {}
+    for raw, group in MAKE:
+        label = next(r["voice_label"] for r in layout_rows(c) if r["voice_name"] == raw)
+        root = grid(page, "series")
+        box = column(page, root, label)
+        if not box.locator(".group-maker-name").count():
+            made[raw] = group  # the voice-over is in a group already (the name of the group covers it)
+            continue
+        box.locator(".group-maker-name").fill(group)
+        box.locator(".group-maker-make").click()
+        # The column of the new group is there, and the column the voice-over left is gone.
+        page.wait_for_function(
+            "(a) => { const r = document.querySelector('section.output-level[data-scope=series] > .output-levers');"
+            " const has = (g) => r.querySelector('.voice-column[data-group=\"' + g + '\"]');"
+            " return has(a.group) && (a.label === a.group || !has(a.label)) }",
+            arg={"group": group, "label": label}, timeout=c.left_ms())
+        made[raw] = group
+    columns = sorted(each.get_attribute("data-group") for each in grid(page, "series").locator(".voice-column").all())
+    assert columns == sorted(GROUPS), f"columns {columns}"
+    return {"columns": columns}
+
+
 def levers(c: Campaign, page: Page, context) -> None:
     c.series_id = next(each["id"] for each in c.api("/api/series") if each["name"] == SERIES)
     ids = source_ids(c)
@@ -298,29 +332,7 @@ def levers(c: Campaign, page: Page, context) -> None:
 
     c.scenario("озвучка канала VK названа в карточке источника «AniStar» и слилась с озвучкой AniStar плеера CVH", page, name_the_channel)
 
-    def make_groups() -> dict:
-        made = {}
-        for raw, group in MAKE:
-            label = next(r["voice_label"] for r in layout_rows(c) if r["voice_name"] == raw)
-            root = grid(page, "series")
-            box = column(page, root, label)
-            if not box.locator(".group-maker-name").count():
-                made[raw] = group  # the voice-over is in a group already (the name of the group covers it)
-                continue
-            box.locator(".group-maker-name").fill(group)
-            box.locator(".group-maker-make").click()
-            # The column of the new group is there, and the column the voice-over left is gone.
-            page.wait_for_function(
-                "(a) => { const r = document.querySelector('section.output-level[data-scope=series] > .output-levers');"
-                " const has = (g) => r.querySelector('.voice-column[data-group=\"' + g + '\"]');"
-                " return has(a.group) && (a.label === a.group || !has(a.label)) }",
-                arg={"group": group, "label": label}, timeout=c.left_ms())
-            made[raw] = group
-        columns = sorted(each.get_attribute("data-group") for each in grid(page, "series").locator(".voice-column").all())
-        assert columns == sorted(GROUPS), f"columns {columns}"
-        return {"columns": columns}
-
-    c.scenario("пять групп озвучек заведены кнопкой «Завести группу» в колонках «Выхода», без настроек", page, make_groups)
+    c.scenario("пять групп озвучек заведены кнопкой «Завести группу» в колонках «Выхода», без настроек", page, lambda: make_groups(c, page))
 
     def variants_of_groups() -> dict:
         root = grid(page, "series")
@@ -544,10 +556,171 @@ def levers(c: Campaign, page: Page, context) -> None:
     c.scenario("при ширине 360 px окно «Выход» с открытыми рычагами не выходит за экран", page, narrow)
 
 
+DUBS_OF_EPISODE = f"article.output-episode[data-season='{SEASON}'][data-episode='{KEEP}'] .episode-dubs li"
+ALIGNED_STATES = ("align_queued", "running", "done")
+ENDED_STATES = ("done", "error")
+
+
+def dub_states(page: Page) -> list[str]:
+    """The state of every voice-over of the episode as the window shows it (the class `dub-<state>` of its line)."""
+    return page.eval_on_selector_all(DUBS_OF_EPISODE, "els => els.map(e => [...e.classList].find(c => c.startsWith('dub-')).slice(4))")
+
+
+def sync(c: Campaign, page: Page) -> None:
+    """Ж-1 and Ж-9 through the window: the channel is named by the rule of the profile made by hand; the groups, the reference and the
+    one episode are set by the buttons; the alignment server is typed in the settings; the button starts the pass."""
+    assert c.hand, "sync needs the profiles made by hand (--profiles hand): the channel is named by their rule"
+    c.series_id = next(each["id"] for each in c.api("/api/series") if each["name"] == SERIES)
+    channel = source_ids(c)["channel"]
+    page.goto(c.stand.base + "/", wait_until="domcontentloaded")
+    first_run(page)
+
+    def named_by_the_rule() -> dict:
+        open_output(page, c.stand.base)
+        page.locator(".st-tab[title='Свойства']").click()
+        card = page.locator(".source-card").filter(has=page.locator(".vk-mode-group"))
+        typed = card.locator(".source-voice-name input").input_value()
+        page.locator(".st-tab[title='Выход']").click()
+        page.wait_for_selector(".output-episode .episode-marks li", timeout=60000)
+        rows = [r for r in layout_rows(c) if r["source_id"] == channel and not r["excluded"]]
+        assert rows and {r["voice_name"] for r in rows} == {"AniStar"} and {r["player"] for r in rows} == {"vk"}, rows[:2]
+        assert typed == "", f"the name was typed in the card, not given by the rule: {typed!r}"
+        return {"rows": len(rows), "name_in_card": typed, "voice": "AniStar", "player": "vk"}
+
+    c.scenario("Ж-1: озвучка канала VK названа правилом профиля, собранного руками; в карточке источника имя не набрано", page, named_by_the_rule)
+    c.scenario("Ж-6: пять групп озвучек заведены кнопкой в колонках «Выхода»", page, lambda: make_groups(c, page))
+
+    def reference() -> dict:
+        variant(page, grid(page, "series"), "AniStar", "vk", channel).locator(".variant-reference").click()
+        now = eventually(c, lambda: (lambda r: r if r[KEEP]["source_id"] == channel and r[KEEP]["voice_group"] == "AniStar" else None)(refs(c)),
+                         "the reference of the channel")
+        return {"episode": KEEP, "player": now[KEEP]["player"], "height": now[KEEP]["height"], "mark": now[KEEP]["mark"]}
+
+    c.scenario("референс сериала: AniStar из канала VK", page, reference)
+
+    def one_episode() -> dict:
+        for episode in sorted(refs(c)):
+            if episode == KEEP or refs(c)[episode]["mark"] == "off":
+                continue
+            card = page.locator(f"article.output-episode[data-episode='{episode}']")
+            card.locator(".episode-switch").click()
+            card.locator(".episode-marks li", has_text=text_of("output.mark.off")).wait_for(timeout=20000)
+        on = sorted(e for e, each in refs(c).items() if each["mark"] != "off")
+        assert on == [KEEP], f"episodes on: {on}"
+        return {"on": on}
+
+    c.scenario(f"все серии кроме {KEEP} отключены кнопкой серии", page, one_episode)
+
+    def conform_server() -> dict:
+        before = c.api("/api/auth")["vk"]["has_password"]
+        page.goto(c.stand.base + "/", wait_until="domcontentloaded")
+        page.wait_for_selector(".series-card", timeout=30000)
+        page.get_by_role("button", name="Настройки").click(timeout=30000)
+        page.get_by_label(text_of("conform.settings.url")).fill(conform_address())
+        page.get_by_label(text_of("conform.settings.local")).fill(LOCAL)
+        page.get_by_label(text_of("conform.settings.daemon")).fill(REMOTE)
+        page.get_by_role("button", name="Сохранить").click()
+        page.locator(".conform-status .pill-success").wait_for(timeout=60000)
+        saved = c.api("/api/conform/settings")
+        assert saved["work_dir"] == LOCAL and saved["work_dir_remote"] == REMOTE and saved["url"], saved
+        after = c.api("/api/auth")["vk"]["has_password"]
+        assert before and after, f"the saving of the tab lost the password of VK: {before} -> {after}"
+        page.get_by_role("button", name="Закрыть").click()
+        return {"daemon": "up", "work_dir": saved["work_dir"], "vk_password_kept": after}
+
+    c.scenario("сервер выравнивания набран в настройках, сохранён кнопкой; демон отвечает; пароль VK цел", page, conform_server)
+
+    def press() -> dict:
+        open_output(page, c.stand.base)
+        page.get_by_role("button", name=text_of("output.sync")).click(timeout=20000)
+        page.wait_for_function(f"() => document.querySelector(\"{DUBS_OF_EPISODE}\")", timeout=c.left_ms())
+        return {"dubs": dub_states(page)}
+
+    c.scenario("кнопка «Синхронизировать»: озвучки серии появились в окне", page, press)
+
+    def aligned() -> dict:
+        page.wait_for_function(
+            "(s) => [...document.querySelectorAll(s.dubs)].some(e => s.states.some(n => e.classList.contains('dub-' + n)))",
+            arg={"dubs": DUBS_OF_EPISODE, "states": list(ALIGNED_STATES)}, timeout=c.left_ms())
+        return {"dubs": dub_states(page)}
+
+    c.scenario("загрузка дошла до выравнивания: в окне озвучка в очереди, в работе или выполнена", page, aligned)
+
+
+def again(c: Campaign, page: Page) -> None:
+    """The voice-overs of the episode that ended in error are taken again as a user takes them: «брать озвучку» is switched off for
+    the episode and on, then the button of the pass is pressed. Whatever else was placed stays as it is."""
+    c.series_id = next(each["id"] for each in c.api("/api/series") if each["name"] == SERIES)
+    page.goto(c.stand.base + "/", wait_until="domcontentloaded")
+    first_run(page)
+    labels = [row["voice_label"] for row in c.db(
+        "SELECT voice_label FROM voice_dubs WHERE series_id=? AND season=? AND episode=? AND status IN ('rejected', 'failed')",
+        (c.series_id, SEASON, KEEP))]
+    assert labels, "no voice-over of the episode ended in error"
+
+    def off_and_on() -> dict:
+        open_output(page, c.stand.base)
+        root = grid(page, "episode", KEEP)
+        for label in labels:
+            box = column(page, root, label).locator(".voice-head input[type=checkbox]")
+            line = page.locator(DUBS_OF_EPISODE, has=page.locator("span", has_text=label))
+            box.uncheck()
+            page.wait_for_function("(s) => ![...document.querySelectorAll(s.dubs)].some(e => e.innerText.includes(s.label))",
+                                   arg={"dubs": DUBS_OF_EPISODE, "label": label}, timeout=c.left_ms())
+            box.check()
+            line.first.wait_for(timeout=c.left_ms())
+        return {"taken_again": labels}
+
+    c.scenario("озвучки с ошибкой выключены у серии и включены снова: строки ушли из плана и вернулись", page, off_and_on)
+
+    def press() -> dict:
+        page.get_by_role("button", name=text_of("output.sync")).click(timeout=20000)
+        page.wait_for_function(
+            "(s) => [...document.querySelectorAll(s.dubs)].some(e => s.labels.some(l => e.innerText.includes(l)) && !e.classList.contains('dub-planned') && !e.classList.contains('dub-error'))",
+            arg={"dubs": DUBS_OF_EPISODE, "labels": labels}, timeout=c.left_ms())
+        return {"dubs": dub_states(page)}
+
+    c.scenario("кнопка «Синхронизировать»: взятые заново озвучки пошли в работу", page, press)
+
+
+def finish(c: Campaign, page: Page, live: Live) -> None:
+    """The end of Ж-9: a new stand on the same database picks the work up; the window shows every voice-over ended; the files
+    lie beside the reference and the pairs of the service are judged. Not ended in the time of the run: the run says so and is repeated."""
+    c.series_id = next(each["id"] for each in c.api("/api/series") if each["name"] == SERIES)
+    page.goto(c.stand.base + "/", wait_until="domcontentloaded")
+    first_run(page)
+    open_output(page)
+
+    def ended() -> dict:
+        try:
+            page.wait_for_function(
+                "(s) => { const l = [...document.querySelectorAll(s.dubs)];"
+                " return l.length > 0 && l.every(e => s.states.some(n => e.classList.contains('dub-' + n))) }",
+                arg={"dubs": DUBS_OF_EPISODE, "states": list(ENDED_STATES)}, timeout=c.left_ms())
+        except Exception:  # noqa: BLE001 - time out is the answer "still going", anything else is the result of the scenario
+            c.pending = dub_states(page)
+            raise
+        states = dub_states(page)
+        assert all(state == "done" for state in states), states
+        return {"dubs": states}
+
+    if not c.scenario("все озвучки серии закончили в окне: выполнены", page, ended):
+        return
+    c.scenario("файлы рядом с референсом, пары сервиса выравнивания приняты", page, lambda: {"verdict": _passed(two_phase(live))})
+
+
+def _passed(verdict: str) -> str:
+    assert verdict.startswith("PASS"), verdict
+    return verdict
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("phase", choices=("reset", "setup", "levers"))
+    parser.add_argument("phase", choices=("reset", "setup", "levers", "sync", "again", "finish"))
     parser.add_argument("--work", required=True)
+    parser.add_argument("--profiles", choices=("api", "hand"), default="api",
+                        help="hand: the profiles made in the constructor by ui_profiles.py (the channel is named by their rule)")
+    parser.add_argument("--on-nas", action="store_true", help="the library of the series is the folder the alignment service sees")
     parser.add_argument("--safeguard", type=float, default=170)
     args = parser.parse_args()
     verdict = "FAIL прибор"
@@ -558,6 +731,9 @@ def main() -> int:
             context = browser.new_context(viewport={"width": 1280, "height": 1000})
             page = context.new_page()
             campaign = Campaign(stand, Path(args.work), args.safeguard - 15)
+            campaign.hand = args.profiles == "hand"
+            if args.on_nas:
+                campaign.library = Path(LIBRARY)
             try:
                 if args.phase == "reset":
                     for each in campaign.api("/api/series"):
@@ -568,6 +744,14 @@ def main() -> int:
                     campaign.results.append({"scenario": "сериал и группы озвучек сняты", "ok": True, "detail": {}, "shot": None, "seconds": 0})
                 elif args.phase == "setup":
                     setup(campaign, page)
+                elif args.phase == "sync":
+                    sync(campaign, page)
+                elif args.phase == "again":
+                    again(campaign, page)
+                elif args.phase == "finish":
+                    live = Live(stand, campaign.deadline)
+                    live.series_name, live.work = SERIES, args.work
+                    finish(campaign, page, live)
                 else:
                     levers(campaign, page, context)  # noqa: F821
             finally:
@@ -576,6 +760,8 @@ def main() -> int:
         failed = [each["scenario"] for each in results if not each["ok"]]
         verdict = (f"PASS сценариев {len(results)}" if results and not failed
                    else f"FAIL сценариев {len(results)}, не прошло {len(failed)}: {failed[:4]}")
+        if failed and campaign.pending:
+            verdict = f"ЕЩЁ ИДЁТ озвучки {campaign.pending}: прогон повторяется на той же базе"
     except Exception as exc:  # noqa: BLE001 - the last line must come out in any outcome
         verdict = f"FAIL прибор: {type(exc).__name__}: {exc}"
         traceback.print_exc()
@@ -583,7 +769,7 @@ def main() -> int:
     with open(RAW / f"M-33__{datetime.now(timezone.utc):%Y%m%d}.jsonl", "a", encoding="utf-8") as out:
         out.write(json.dumps({"phase": args.phase, "verdict": verdict, "results": results}, ensure_ascii=False) + "\n")
     print(f"ИЗМЕРЕНИЕ M-33: {verdict}")
-    return 0 if verdict.startswith("PASS") else 1
+    return 0 if verdict.startswith("PASS") else 2 if verdict.startswith("ЕЩЁ") else 1
 
 
 if __name__ == "__main__":

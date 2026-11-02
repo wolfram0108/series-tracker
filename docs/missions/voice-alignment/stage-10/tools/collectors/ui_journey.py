@@ -1,8 +1,8 @@
 """M-27 and M-28: the life of a series in a browser, and two windows of one series.
 
-    ui_journey.py [--url <address>] [--safeguard 170]
+    ui_journey.py [--site ruchime|dunhuatv] [--url <address>] [--safeguard 170]
 
-A new database with one general profile (the number of the episode after the word "Серия") is migrated and served by
+A new database with one general profile (the number of the episode next to the word for it) is migrated and served by
 the stand (`stand.py`), so that no series of a real database is read at the first run; a headless browser adds a series from one
 site address, picks the profile, opens the section "Output", and goes the steps of `SPEC.md`, section 6, that a small
 release can show: reading with its progress (Ж-2), the profile (Ж-7), the references and voice-overs of each episode
@@ -34,13 +34,26 @@ CATALOG = ROOT / "web" / "src" / "i18n" / "ru.ts"
 SERIES_NAME = "Тест этапа 10"
 PROFILE = "общий"
 QUIET_S = 12
-GROUP = "Ruchime"
 UNKNOWN_VOICE = "Неизвестная озвучка"  # the core words a voice-over of no group so
-# The line of the constructor ends with the word for the episode and its number; the season comes from the series.
-PROFILES = [{"name": PROFILE, "rules": [{
-    "name": "серия", "conditions": [[{"type": "text", "value": "Серия"}]],
-    "actions": [{"action_type": "extract_single", "action_pattern": json.dumps(
-        [{"type": "text", "value": "Серия"}, {"type": "whitespace"}, {"type": "number"}])}]}]}]
+# What differs between the sites: where the word for the episode stands against its number, and the group the journey makes (None:
+# the voice-over of the reference of the first episode is read from the layout, as its raw name is not known beforehand).
+WORD_FIRST = [{"type": "text", "value": "Серия"}, {"type": "whitespace"}, {"type": "number"}]
+NUMBER_FIRST = [{"type": "number"}, {"type": "whitespace"}, {"type": "text", "value": "серия"}]
+SITES = {
+    "ruchime": {"url": "https://1.ruchime.org/release/asura-bezumnyi-korol-2", "condition": [{"type": "text", "value": "Серия"}],
+                "line": WORD_FIRST, "group": "Ruchime"},
+    "dunhuatv": {"url": "https://dunhuatv.ru/24-raskolotaja-bitvoj-sineva-nebes-5-smotret-onlajn.html", "condition": NUMBER_FIRST,
+                 "line": NUMBER_FIRST, "group": None},
+}
+
+
+def profiles_of(site: dict) -> list[dict]:
+    """The line of the constructor holds the word for the episode and its number; the season comes from the series."""
+    return [{"name": PROFILE, "rules": [{
+        "name": "серия", "conditions": [site["condition"]],
+        "actions": [{"action_type": "extract_single", "action_pattern": json.dumps(site["line"])}]}]}]
+
+
 ADMIN, PASSWORD = "stage10", "stage10-throwaway"  # of the database of the stand, which is deleted with it
 
 
@@ -57,8 +70,8 @@ def option_named(page: Page, text: str):
 
 
 class Journey:
-    def __init__(self, stand: Stand, url: str, profile: str, safeguard: float) -> None:
-        self.stand, self.url, self.profile = stand, url, profile
+    def __init__(self, stand: Stand, url: str, profile: str, group: str | None, safeguard: float) -> None:
+        self.stand, self.url, self.profile, self.group = stand, url, profile, group
         self.deadline = time.monotonic() + safeguard
         self.steps: list[dict] = []
         self.requests_of_second_window: list[str] = []
@@ -127,31 +140,39 @@ class Journey:
 
         heading = page.locator(".output-episode").first.locator("header").inner_text()
         assert UNKNOWN_VOICE in heading, f"before the group: {heading!r}"
+        group = self.group or self.raw_voice_of_first_reference()
         third = page.context.new_page()
         third.goto(base + "/", wait_until="domcontentloaded")
         third.get_by_role("button", name="Настройки").click(timeout=30000)
         third.locator(f".st-tab[title='{text_of('settings.tab.voices')}']").click()
-        third.get_by_label(text_of("voices.settings.group.new")).fill(GROUP)
+        third.get_by_label(text_of("voices.settings.group.new")).fill(group)
         third.get_by_role("button", name=text_of("voices.settings.group.create")).click()
-        page.locator(".output-episode").first.locator("header", has_text=f"{GROUP} —").wait_for(timeout=30000)
+        page.locator(".output-episode").first.locator("header", has_text=f"{group} —").wait_for(timeout=30000)
         third.close()
-        self.step("Ж-3 группа озвучки заведена в настройках; окно сериала показало её событием, без перезагрузки", group=GROUP)
+        self.step("Ж-3 группа озвучки заведена в настройках; окно сериала показало её событием, без перезагрузки", group=group)
 
-        first = page.locator(".output-episode").first
-        buttons = first.locator("button").all_inner_texts()
-        assert text_of("output.levers.show") in buttons[0], f"buttons of the first episode: {buttons}"
-        first.locator("button").first.click()
         # The levers are a grid: a column per voice-over group, in it the variants (source and player) with the reference mark.
-        variants = first.locator(".voice-column .variant-reference:not(:disabled)")
+        # The episode is the first that has two variants to choose from: how many a site gives an episode is its data, not the run's.
+        cards = page.locator(".output-episode")
+        chosen = None
+        for index in range(cards.count()):
+            buttons = cards.nth(index).locator("button").all_inner_texts()
+            assert text_of("output.levers.show") in buttons[0], f"buttons of the episode {index}: {buttons}"
+            cards.nth(index).locator("button").first.click()
+            variants = cards.nth(index).locator(".voice-column .variant-reference:not(:disabled)")
+            if variants.count() >= 2:
+                chosen = index
+                break
+            cards.nth(index).locator("button").first.click()
+        assert chosen is not None, "no episode has two variants that can be the reference"
         options = variants.count()
-        assert options >= 2, f"variants that can be the reference {options}"
         self.open_output(second, SERIES_NAME, base)
         second.wait_for_selector(".output-episode .episode-marks li", timeout=30000)
         second.on("request", lambda request: self.requests_of_second_window.append(f"{request.method} {request.url}"))
         variants.nth(1).click()
-        second.locator(".output-episode").first.locator(".episode-marks li", has_text=text_of("output.mark.own")).wait_for(timeout=20000)
-        page.locator(".output-episode").first.locator(".episode-marks li", has_text=text_of("output.mark.own")).wait_for(timeout=20000)
-        self.step("Ж-8 ручной выбор референса серии; второе окно увидело его событием", options=options)
+        second.locator(".output-episode").nth(chosen).locator(".episode-marks li", has_text=text_of("output.mark.own")).wait_for(timeout=20000)
+        page.locator(".output-episode").nth(chosen).locator(".episode-marks li", has_text=text_of("output.mark.own")).wait_for(timeout=20000)
+        self.step("Ж-8 ручной выбор референса серии; второе окно увидело его событием", episode_card=chosen, options=options)
 
         deviations = page.locator(".output-deviations input")
         deviations.check()
@@ -160,13 +181,15 @@ class Journey:
         deviations.uncheck()
         self.step("фильтр «только отклонения»", shown=shown, of=episodes)
 
-        target = page.locator(".output-episode").nth(1)
+        # An episode other than the one with a manual reference: its mark comes back to «by level» when it is switched on again.
+        other = 0 if chosen else 1
+        target = page.locator(".output-episode").nth(other)
         target.locator(".episode-switch", has_text=text_of("output.episode.disable")).click()
-        second.locator(".output-episode").nth(1).locator(".episode-marks li", has_text=text_of("output.mark.off")).wait_for(timeout=20000)
-        assert "is-off" in (second.locator(".output-episode").nth(1).get_attribute("class") or "")
+        second.locator(".output-episode").nth(other).locator(".episode-marks li", has_text=text_of("output.mark.off")).wait_for(timeout=20000)
+        assert "is-off" in (second.locator(".output-episode").nth(other).get_attribute("class") or "")
         self.step("серия отключена; второе окно увидело отключение событием")
-        page.locator(".output-episode").nth(1).locator(".episode-switch", has_text=text_of("output.episode.enable")).click()
-        second.locator(".output-episode").nth(1).locator(".episode-marks li", has_text=text_of("output.mark.by_level")).wait_for(timeout=20000)
+        page.locator(".output-episode").nth(other).locator(".episode-switch", has_text=text_of("output.episode.enable")).click()
+        second.locator(".output-episode").nth(other).locator(".episode-marks li", has_text=text_of("output.mark.by_level")).wait_for(timeout=20000)
         self.step("серия включена обратно; референс вернулся")
 
         def asked() -> int:
@@ -179,6 +202,15 @@ class Journey:
         second.wait_for_timeout(QUIET_S * 1000)
         assert asked() == before, f"the second window asked the API {asked() - before} times with nothing happening"
         self.step("M-28 второе окно читает только по событиям и молчит без них", reads_after_events=before, quiet_s=QUIET_S)
+
+    def raw_voice_of_first_reference(self) -> str:
+        """The name the site gives to the voice-over that is the reference of the first episode: a group of that name takes it in."""
+        base = self.stand.base
+        series_id = next(each["id"] for each in httpx.get(base + "/api/series", timeout=30).json() if each["name"] == SERIES_NAME)
+        output = httpx.get(f"{base}/api/series/{series_id}/output", timeout=30).json()
+        first = min(output, key=lambda each: (each["season"], each["episode"]))
+        rows = httpx.get(f"{base}/api/series/{series_id}/composition", timeout=30).json()["rows"]
+        return next(row["voice_name"] for row in rows if row["voice_label"] == first["voice_group"] and row.get("voice_name"))
 
     def first_run(self, page: Page) -> None:
         """A new database asks for an administrator at the first start; the stand's is a throw-away one."""
@@ -199,17 +231,19 @@ class Journey:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="https://1.ruchime.org/release/asura-bezumnyi-korol-2")
+    parser.add_argument("--site", choices=sorted(SITES), default="ruchime")
+    parser.add_argument("--url", default=None, help="the address of the release; the default is that of the site")
     parser.add_argument("--safeguard", type=float, default=170)
     args = parser.parse_args()
     verdict, detail, steps = "FAIL", "", []
     journey = None
+    site = SITES[args.site]
     try:
-        with Stand(profiles=PROFILES) as stand, sync_playwright() as pw:
+        with Stand(profiles=profiles_of(site)) as stand, sync_playwright() as pw:
             browser = pw.firefox.launch(headless=True)
             context = browser.new_context(viewport={"width": 1280, "height": 900})
             page, second = context.new_page(), context.new_page()
-            journey = Journey(stand, args.url, PROFILE, args.safeguard)
+            journey = Journey(stand, args.url or site["url"], PROFILE, site["group"], args.safeguard)
             try:
                 journey.run(page, second)
                 verdict = "PASS"
