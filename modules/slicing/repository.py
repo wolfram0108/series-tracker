@@ -17,16 +17,12 @@ class SlicingRepository:
     # --- задачи -------------------------------------------------------------------
 
     async def create_task(self, unique_id: str, series_id: int) -> int:
-        await self._db.execute(
+        return await self._db.insert(
             "INSERT INTO slicing_tasks (media_item_unique_id, series_id, "
             "status, progress_chapters, created_at) VALUES "
             "(?, ?, 'pending', '{}', ?)",
             (unique_id, series_id,
              datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")))
-        row = await self._db.fetch_one(
-            "SELECT id FROM slicing_tasks WHERE media_item_unique_id=? "
-            "ORDER BY id DESC LIMIT 1", (unique_id,))
-        return row["id"]
 
     async def delete_task_by_uid(self, unique_id: str) -> None:
         await self._db.execute(

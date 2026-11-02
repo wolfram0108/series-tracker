@@ -91,7 +91,7 @@ class Harness:
         self.armed = False  # the failures of a scenario happen after its step is reached, not on the way to it
 
     async def up(self) -> None:
-        db = Database(self.db_path)
+        db = self.db = Database(self.db_path)
         if not self.series_id:
             created = await create_series(db, name="Т", name_en="T", site="x", save_path=str(self.media), sources=[
                 source(url=URL, source_type="web_video", parser_profile_id=1)])
@@ -111,6 +111,7 @@ class Harness:
 
     async def down(self) -> None:
         await self.runner.stop()
+        await self.db.drained()  # a write a stopped worker began lands before the next instance looks at the rows
 
     async def restart(self) -> None:
         await self.down()

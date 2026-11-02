@@ -25,15 +25,11 @@ class ScanRepository:
     # --- scan_tasks -----------------------------------------------------------
 
     async def create_task(self, series_id: int, task_data: list[dict], results: dict | None = None) -> int:
-        await self._db.execute(
+        return await self._db.insert(
             "INSERT INTO scan_tasks (series_id, created_at, status, "
             "task_data, results_data) VALUES (?, ?, 'processing', ?, ?)",
             (series_id, datetime.now(timezone.utc).isoformat(),
              json.dumps(task_data, ensure_ascii=False), json.dumps(results or {}, ensure_ascii=False)))
-        row = await self._db.fetch_one(
-            "SELECT id FROM scan_tasks WHERE series_id=? "
-            "ORDER BY id DESC LIMIT 1", (series_id,))
-        return row["id"]
 
     async def update_results(self, task_id: int, results: dict) -> None:
         await self._db.execute(

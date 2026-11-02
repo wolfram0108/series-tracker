@@ -83,3 +83,31 @@ async def test_a_failed_statement_takes_back_the_whole_transaction(tmp_path):
     with pytest.raises(sqlite3.IntegrityError):
         await db.transaction(write)
     assert await db.fetch_all("SELECT id FROM parent") == []
+
+
+@pytest.mark.asyncio
+async def test_a_call_that_outlives_its_cancelled_caller_is_waited_for_by_drained(tmp_path):
+    import threading
+    import time
+    path = tmp_path / "late.db"
+    setup = sqlite3.connect(path)
+    setup.execute("CREATE TABLE t (id INTEGER)")
+    setup.commit()
+    setup.close()
+    db = Database(str(path))
+    began, go = threading.Event(), threading.Event()
+
+    def slow_write(conn: sqlite3.Connection) -> None:
+        began.set()
+        go.wait(5)
+        conn.execute("INSERT INTO t VALUES (1)")
+
+    caller = asyncio.create_task(db.transaction(slow_write))
+    await asyncio.to_thread(began.wait, 5)
+    caller.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await caller
+    assert await db.fetch_all("SELECT * FROM t") == []  # the thread has not written yet
+    go.set()
+    await asyncio.wait_for(db.drained(), 5)
+    assert await db.fetch_all("SELECT id FROM t") == [{"id": 1}]  # what a cancelled caller began has landed

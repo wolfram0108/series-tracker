@@ -17,15 +17,11 @@ class LibraryRepository:
             "status IN ('pending', 'in_progress')", (series_id,))
         if existing:
             return None
-        await self._db.execute(
+        return await self._db.insert(
             "INSERT INTO relocation_tasks (series_id, new_path, status, "
             "created_at) VALUES (?, ?, 'pending', ?)",
             (series_id, new_path,
              datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")))
-        row = await self._db.fetch_one(
-            "SELECT id FROM relocation_tasks WHERE series_id=? "
-            "ORDER BY id DESC LIMIT 1", (series_id,))
-        return row["id"]
 
     async def unfinished(self) -> list[dict]:
         return await self._db.fetch_all(

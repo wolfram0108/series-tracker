@@ -17,15 +17,11 @@ class RenamingRepository:
         self._db = db
 
     async def create(self, series_id: int, task_type: str) -> int:
-        await self._db.execute(
+        return await self._db.insert(
             "INSERT INTO renaming_tasks (series_id, status, task_type, "
             "created_at) VALUES (?, 'in_progress', ?, ?)",
             (series_id, task_type,
              datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")))
-        row = await self._db.fetch_one(
-            "SELECT id FROM renaming_tasks WHERE series_id=? "
-            "ORDER BY id DESC LIMIT 1", (series_id,))
-        return row["id"]
 
     async def delete(self, task_id: int) -> None:
         await self._db.execute(
