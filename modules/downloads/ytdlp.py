@@ -25,7 +25,7 @@ import time
 from typing import Awaitable, Callable
 
 from core import storage
-from core.ffprobe import duration_of
+from core.ffprobe import duration_of, video_gaps
 from core.proc import run_capture, spawn
 from core.retry import UNTIMED, Budget, retrying
 
@@ -42,6 +42,9 @@ RECONNECT_ARGS = ["-reconnect", "1", "-reconnect_streamed", "1",
 # ffmpeg exits 0 on a broken-off HLS stream, so a download counts only above this share of the
 # duration the stream announces.
 MIN_COMPLETE_FRACTION = 0.85
+# A pause between two frames longer than this is a piece of the video the download lost (ffmpeg skips a segment it cannot
+# open and still exits 0; the audio and the length of the file stay whole), not the pace of the picture.
+HOLE_S = 1.0
 STALL_TIMEOUT_S = 180.0
 DOWNLOAD_TIMEOUT_S = 3600.0
 PROBE_ATTEMPTS = 3
@@ -363,9 +366,24 @@ async def download(video_url: str, full_output_path: str,
         return False, "путь сохранения должен быть абсолютным"
     try:
         with storage.hold(full_output_path):
-            return await _download_owned(video_url, full_output_path, on_progress, headers, threads, progressive)
+            done = await _download_owned(video_url, full_output_path, on_progress, headers, threads, progressive)
+            return await _whole_or_discarded(done, full_output_path)
     except storage.StorageBusy:  # an operation on this name has not ended: a file written now could be lost
         return False, "путь занят незавершённой файловой операцией (timeout)"
+
+
+async def _whole_or_discarded(done: tuple[bool, str], path: str) -> tuple[bool, str]:
+    """A download that says it is done is checked for pieces it lost; a file with a hole is not kept, and the failure is
+    one the queue tries again."""
+    if not done[0]:
+        return done
+    holes = await video_gaps(path, longer_than=HOLE_S)
+    if not holes:
+        return done
+    await storage.discard(path)
+    lost = sum(length for _, length in holes)
+    return False, (f"обрыв: в видео нет кадров {lost:.0f} с (кусков {len(holes)}, первый на {holes[0][0]:.0f}-й секунде) — "
+                   "неполная загрузка")
 
 
 async def _download_ranged_file(video_url: str, headers: dict, full_output_path: str, on_progress: ProgressCb,

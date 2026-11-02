@@ -23,3 +23,30 @@ async def duration_of(target: str, *, input_args: list[str] | None = None,
         return float(out.decode().strip()) if code == 0 and out else 0.0
     except (OSError, ValueError):
         return 0.0
+
+
+async def video_gaps(path: str, *, longer_than: float, timeout: float = 120.0) -> list[tuple[float, float]]:
+    """(second where it begins, seconds it lasts) of every pause between two frames of the first video stream that is
+    longer than `longer_than`: a piece the download lost leaves such a pause, while the audio and the length of the file
+    stay whole. Empty when there is none, when the file has no video, or when ffprobe cannot read it."""
+    executable = shutil.which("ffprobe")
+    if not executable:
+        return []
+    cmd = [executable, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time", "-of", "csv=p=0", path]
+    try:
+        code, out, _ = await run_capture(cmd, timeout=timeout)
+    except (OSError, TimeoutError):
+        return []
+    if code != 0:
+        return []
+    times = sorted(float(word) for word in out.decode().split() if _is_number(word))
+    return [(before, after - before) for before, after in zip(times, times[1:]) if after - before > longer_than]
+
+
+def _is_number(word: str) -> bool:
+    try:
+        float(word)
+    except ValueError:
+        return False
+    return True
+
