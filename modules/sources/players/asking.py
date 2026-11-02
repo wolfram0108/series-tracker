@@ -28,6 +28,7 @@ class Outcome:
     state: RowState
     heights: list[int] = field(default_factory=list)
     reason: str | None = None
+    duration_s: float | None = None
 
 
 def outcome_of(answer: Verdict | Exception, ref: PlayerRef, label: str) -> Outcome:
@@ -36,7 +37,7 @@ def outcome_of(answer: Verdict | Exception, ref: PlayerRef, label: str) -> Outco
         return Outcome(RowState.NOT_OBTAINED, reason=reason("player_failed", player=label, cause=str(answer)))
     probe = probe_from(answer, ref, label)
     if probe.available:
-        return Outcome(RowState.PLAYABLE, sorted(answer.reading.resolutions))
+        return Outcome(RowState.PLAYABLE, sorted(answer.reading.resolutions), duration_s=answer.reading.duration_s)
     return Outcome(RowState.NOT_OBTAINED if probe.transient else RowState.ABSENT, reason=probe.reason)
 
 
@@ -96,5 +97,5 @@ async def catalog_rows(player, entries: Sequence[Entry], http: httpx.AsyncClient
         rows.append(TableRow(
             key=f"{player.name}:{entry.key}", player=player.name, player_label=player.label, group=entry.group,
             text=entry.text, voice=entry.voice, heights=outcome.heights, state=outcome.state, reason=outcome.reason,
-            link=entry.ref.url, site_fields=entry.site_fields))
+            duration_s=outcome.duration_s, link=entry.ref.url, site_fields=entry.site_fields))
     return rows

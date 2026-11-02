@@ -16,6 +16,7 @@ from ..players.catalog import CatalogError, Entry, catalog_id, read_catalog
 from ..players.contract import PlayerRef
 from ..players.registry import PlayerRegistry
 from . import PHASE_CATALOG, PHASE_PLAYERS, ReadContext, SiteError
+from .compilations import label_compilations
 
 
 @dataclass(frozen=True)
@@ -64,4 +65,4 @@ async def rows_of_catalogs(catalogs: list[Catalog], ctx: ReadContext, pacer, ask
     rows: list[TableRow] = []
     for catalog in catalogs:
         rows += await catalog_rows(catalog.player, catalog.entries, ctx.http, catalog.page_url, pacer, on_asked=asked)
-    return rows
+    return label_compilations(rows)  # a video of several episodes that the player names by the last of them

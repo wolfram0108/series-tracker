@@ -290,3 +290,19 @@ def test_a_playlist_error_is_told_apart_by_whether_asking_again_may_help():
         cdnvideohub.read_playlist(cdnvideohub.Answer(403))
 
     assert down.value.transient and not gone.value.transient
+
+
+@pytest.mark.parametrize("text,expected", [
+    ('{"duration": 855, "sources": {}}', 855.0),
+    ('{"duration": 439.5}', 439.5),
+    ('{"duration": 0}', None),
+    ('{"duration": -3}', None),
+    ('{"duration": "855"}', None),
+    ('{"duration": true}', None),
+    ('{"sources": {}}', None),
+    ('null', None),
+])
+def test_the_length_of_a_cvh_video_is_what_its_answer_says_and_nothing_else(text, expected):
+    from modules.sources.players import cdnvideohub
+
+    assert cdnvideohub.read_duration(text) == expected
