@@ -73,7 +73,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from core import BaseModule, BusRequestError, ids, torrent_source
-from core.contracts import CompositionReply, OutputSwitch, Reference, ReferenceChanged, SeriesSource, VoiceSettingsView
+from core.contracts import (CompositionReply, OutputSwitch, Reference, ReferenceChanged, SeriesSource, SourceStatus,
+                            VoiceSettingsView)
 from core.db import Database
 from core.envelope import Envelope
 from core.voice_names import Groups
@@ -629,6 +630,9 @@ class ScanModule(BaseModule):
             deletes = self._leftovers(existing, set(winners.values()), queued)
             rows = candidates.rows_after(existing, inserts, updates, deletes)
             statuses, superseded = planner.plan_with_supersession(rows, winners, seasons)
+            for unique_id in self._removed_by_configuration(series, layout, rows, set(winners.values())):
+                statuses[unique_id] = "removed"
+                superseded.pop(unique_id, None)
             records = [{**each.reference.model_dump(mode="json"), "unique_id": winners.get(each.slot)}
                        for each in chosen]
             shown_before = output.shown(stored, by_id, memory, seasons)
@@ -653,6 +657,18 @@ class ScanModule(BaseModule):
         for each in output.changes(shown_before, shown_after):
             self._announce(series_id, each)
         return Refreshed(sum(1 for each in statuses.values() if each == "in_plan_single"), shown_after, plan_changed)
+
+    @staticmethod
+    def _removed_by_configuration(series: dict, layout: CompositionReply, rows: list[dict], winners: set[str]) -> list[str]:
+        """The rows of a source the user took away, or whose profile they took away: nothing in the plan wants them.
+        With no source known they are not told from a layout that has not been counted yet, so nothing is named."""
+        mine = {each.id for each in _sources_of(series)}
+        if not mine:
+            return []
+        without_profile = {each.source_id for each in layout.sources if each.status == SourceStatus.NO_PROFILE}
+        return [item["unique_id"] for item in rows
+                if item["unique_id"] not in winners and item.get("source_id") is not None
+                and (item["source_id"] not in mine or item["source_id"] in without_profile)]
 
     async def _queued(self, series_id: int) -> set[str] | None:
         """The rows of the series that have a task in the queue of downloads; None when the queue cannot be told."""

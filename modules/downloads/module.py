@@ -239,9 +239,9 @@ class DownloadsModule(BaseModule):
                                     {"series_id": series_id})
         adopted = await self._adopt_existing_files(series)
         dropped = await self._drop_tasks_without_plan_row(series_id)
-        retired = await self._retire_superseded(series)
+        retired = await self._retire_superseded(series) + await self._remove_unwanted_files(series)
         self.log.info("план %d: усыновлено %d, вычищено вне плана %d, "
-                      "вытесненных файлов снесено %d",
+                      "вытесненных и ненужных файлов снесено %d",
                       series_id, adopted, dropped, retired)
         if adopted:
             await self._contribute(series_id)
@@ -427,14 +427,47 @@ class DownloadsModule(BaseModule):
         await self._cancel_runner(task["id"])
         await self._clear_task_files(task)
 
+    async def _remove_unwanted_files(self, series: dict) -> int:
+        """What lies on the disk is what the panel configures: the file of an episode the user switched off, or of a
+        source or profile taken away, goes, and its row is not fetched any more. A video series only; a file another row
+        of the plan holds under the same name is that row's and stays."""
+        if series.get("kind") != SeriesKind.VIDEO:
+            return 0
+        base, removed = series["save_path"], 0
+        for row in await self.repo.unwanted_files(series["id"]):
+            path = os.path.join(base, row["final_filename"])
+            if not _inside(base, path):
+                self.log.warning("файл вне каталога серии не тронут: %s", path)
+                continue
+            if not await self.repo.wanted_holder(series["id"], row["final_filename"], except_uid=row["unique_id"]):
+                if await storage.call(os.path.isfile, path):
+                    try:
+                        await storage.call(os.remove, path, owns=path)
+                    except FileNotFoundError:
+                        pass
+                    except OSError as exc:
+                        self.log.warning("ненужный файл %s не удалён: %s", path, exc)
+                        continue
+                removed += 1
+            await self.repo.reset_download_state(row["unique_id"])
+        return removed
+
     async def _drop_tasks_without_plan_row(self, series_id: int) -> int:
-        """A task lives while its row does: one without a row is stopped whatever its state (its file would
-        land on disk with nobody to register it); a waiting or failed one whose row left the plan just goes."""
+        """A task lives while the plan wants its video: one whose row is gone, or whose row left the plan (the user
+        switched the episode off, another video took its place), is stopped whatever its state, what it wrote goes, and
+        a row that was being fetched is not fetched any more. A waiting or failed one just goes. A file that is whole
+        stays: it is a file of the library, not a piece of work."""
         gone = await self.repo.tasks_without_row(series_id)
         for task in gone:
             await self._stop_task(task)
             await self.repo.delete_task(task["id"])
-        return len(gone) + await self.repo.drop_pending_outside_plan(series_id)
+        unwanted = await self.repo.active_tasks_outside_plan(series_id)
+        for task in unwanted:
+            await self._stop_task(task)
+            await self.repo.delete_task(task["id"])
+            await self.repo.set_item_status(task["task_key"], "pending")
+            self.log.info("серия %d: загрузка %s остановлена, видео больше не в плане", series_id, task["task_key"])
+        return len(gone) + len(unwanted) + await self.repo.drop_pending_outside_plan(series_id)
 
     async def on_cancel(self, env: Envelope) -> dict:
         """Точечная отмена загрузки (приказ пользователя): убить активный

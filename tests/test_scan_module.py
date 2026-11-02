@@ -403,3 +403,16 @@ async def test_prepare_refuses_a_series_of_video_sources(db_path):
             await probe.request("scan.series.prepare", {"series_id": 3}, timeout=10)
     finally:
         await runner.stop()
+
+
+def test_the_rows_of_a_source_or_a_profile_the_user_took_away_are_named_and_nothing_else():
+    from core.contracts import SourceStatus
+    from modules.scan.module import ScanModule
+    series = {"id": 1, "sources": [{"id": 10, "series_id": 1, "url": "https://a", "source_type": "web_video", "parser_profile_id": 1},
+                                   {"id": 11, "series_id": 1, "url": "https://b", "source_type": "web_video", "parser_profile_id": None}]}
+    rows = [{"unique_id": "gone", "source_id": 99}, {"unique_id": "noprofile", "source_id": 11}, {"unique_id": "kept", "source_id": 10},
+            {"unique_id": "won", "source_id": 99}, {"unique_id": "legacy", "source_id": None}]
+    layout = type("Layout", (), {"sources": [type("S", (), {"source_id": 10, "status": SourceStatus.READY})(),
+                                              type("S", (), {"source_id": 11, "status": SourceStatus.NO_PROFILE})()]})()
+    assert ScanModule._removed_by_configuration(series, layout, rows, {"won"}) == ["gone", "noprofile"]
+    assert ScanModule._removed_by_configuration({"id": 1, "sources": []}, layout, rows, set()) == []

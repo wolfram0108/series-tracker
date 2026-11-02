@@ -72,6 +72,30 @@ class DownloadsRepository:
             "(SELECT 1 FROM media_items mi WHERE mi.unique_id = download_tasks.task_key "
             f"AND mi.plan_status IN {_IN_PLAN})", (series_id,))
 
+    async def unwanted_files(self, series_id: int) -> list[dict]:
+        """Whole files of single episodes that the configuration took out of the plan: the user switched the episode off,
+        or the source (or its profile) the row came from is gone. A compilation and a sliced file are the business of the
+        slicing and are not named here."""
+        return await self._db.fetch_all(
+            "SELECT unique_id, final_filename FROM media_items WHERE series_id=? AND final_filename IS NOT NULL "
+            "AND slicing_status='none' AND (episode_end IS NULL OR episode_end <= episode_start) "
+            "AND (is_ignored_by_user=1 OR plan_status='removed')", (series_id,))
+
+    async def wanted_holder(self, series_id: int, filename: str, *, except_uid: str) -> bool:
+        """Whether a row the plan wants holds a file of this name: then the file is not an unwanted one."""
+        row = await self._db.fetch_one(
+            "SELECT 1 FROM media_items WHERE series_id=? AND final_filename=? AND unique_id != ? "
+            f"AND is_ignored_by_user=0 AND plan_status IN {_IN_PLAN}", (series_id, filename, except_uid))
+        return row is not None
+
+    async def active_tasks_outside_plan(self, series_id: int) -> list[dict]:
+        """Downloads under way whose row is no longer in the plan: the plan does not want that video any more."""
+        return await self._db.fetch_all(
+            "SELECT dt.id, dt.task_key, dt.save_path, dt.status FROM download_tasks dt "
+            "JOIN media_items mi ON mi.unique_id = dt.task_key "
+            "WHERE dt.series_id=? AND dt.task_type='vk_video' AND dt.status IN ('downloading', 'processing') "
+            f"AND mi.plan_status NOT IN {_IN_PLAN}", (series_id,))
+
     async def tasks_without_row(self, series_id: int) -> list[dict]:
         """Tasks of any state whose media_items row is gone (scan deletes the rows of a slot that lost)."""
         return await self._db.fetch_all(

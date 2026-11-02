@@ -1093,25 +1093,43 @@ async def test_a_finished_file_of_a_task_without_a_row_stays(system):
 
 
 @pytest.mark.asyncio
-async def test_an_active_task_whose_row_only_left_the_plan_is_left_to_finish(system):
-    """The row exists, so the file will be registered; only a task that has not begun goes with the plan."""
+async def test_an_active_task_whose_row_left_the_plan_is_stopped_with_what_it_wrote_and_its_row_is_not_fetched(system):
+    """The plan does not want the video any more (the episode is switched off): the download stops by itself, the pieces it
+    wrote go, and the row goes back to not fetched; the task of a video the plan still wants goes on."""
     _, _, dl, probe, db_path, _ = system
     dl.gate = asyncio.Event()
     _add_item(db_path, "uid1", 1)
+    _add_item(db_path, "uid2", 2)
     probe.publish_event("downloads.dispatch", {"series_id": 2})
-    assert await _wait(lambda: dl.concurrent == 1)
-    _add_item(db_path, "uid2", 2, plan="redundant")
-    _add_task(db_path, "uid2", "pending", "/tmp/x")  # the sentinel: it goes when the update is handled
+    assert await _wait(lambda: dl.concurrent >= 1)
+    task = next(each for each in _tasks(db_path) if each["task_key"] == "uid1" and each["status"] == "downloading")
+    work = os.path.join(os.path.dirname(task["save_path"]), f".uid1.{os.path.basename(task['save_path'])}")
+    os.makedirs(os.path.dirname(work), exist_ok=True)
+    open(work, "wb").close()
     with sqlite3.connect(db_path) as conn:
         conn.execute("UPDATE media_items SET plan_status='redundant' WHERE unique_id='uid1'")
         conn.commit()
 
     probe.publish_event("scan.plan.updated", {"series_id": 2})
 
-    assert await _wait(lambda: [t["task_key"] for t in _tasks(db_path)] == ["uid1"])
-    assert dl.concurrent == 1
+    assert await _wait(lambda: "uid1" not in [t["task_key"] for t in _tasks(db_path)])
+    assert await _wait(lambda: not os.path.exists(work))
+    assert _items(db_path)["uid1"]["status"] == "pending" and not _items(db_path)["uid1"]["final_filename"]
     dl.gate.set()
-    assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "completed")
+    assert await _wait(lambda: _items(db_path)["uid2"]["status"] == "completed")
+    assert _items(db_path)["uid1"]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_a_file_that_is_whole_stays_when_its_row_leaves_the_plan(system):
+    """Switching an episode off stops the work, not the library: a downloaded file is left where it lies."""
+    _, _, dl, probe, db_path, media_dir = system
+    done = os.path.join(media_dir, "done.mp4")
+    open(done, "wb").close()
+    _add_item(db_path, "uid1", 1, status="completed", plan="redundant", filename="done.mp4")
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await asyncio.sleep(0.2)
+    assert os.path.exists(done) and _items(db_path)["uid1"]["status"] == "completed"
 
 
 
@@ -1285,3 +1303,35 @@ async def test_a_fetch_is_announced_when_it_leaves_the_queue_and_starts(system, 
     await asyncio.wait_for(finished.queue.get(), 3)
     second = (await asyncio.wait_for(started.queue.get(), 3)).payload
     assert second["key"] == "dub:2"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("how", [{"ignored": 1}, {"plan": "removed"}])
+async def test_the_file_of_a_row_the_configuration_took_out_of_the_plan_goes_and_the_row_is_not_fetched(system, how):
+    _, _, dl, probe, db_path, media_dir = system
+    path = os.path.join(media_dir, "e1.mp4")
+    open(path, "wb").close()
+    _add_item(db_path, "uid1", 1, status="completed", filename="e1.mp4", **({"plan": "candidate"} | how))
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    assert await _wait(lambda: not os.path.exists(path))
+    assert _items(db_path)["uid1"]["status"] == "pending" and not _items(db_path)["uid1"]["final_filename"]
+
+
+@pytest.mark.asyncio
+async def test_a_file_of_a_compilation_a_sliced_file_and_a_file_the_plan_holds_under_the_same_name_are_not_unwanted(system):
+    _, _, dl, probe, db_path, media_dir = system
+    for name in ("compilation.mp4", "sliced.mp4", "shared.mp4"):
+        open(os.path.join(media_dir, name), "wb").close()
+    _add_item(db_path, "c", 1, status="completed", filename="compilation.mp4", plan="candidate", ignored=1)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE media_items SET episode_end=3 WHERE unique_id='c'")
+        conn.commit()
+    _add_item(db_path, "s", 4, status="completed", filename="sliced.mp4", plan="candidate", ignored=1)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE media_items SET slicing_status='completed' WHERE unique_id='s'")
+        conn.commit()
+    _add_item(db_path, "off", 5, status="completed", filename="shared.mp4", plan="candidate", ignored=1)
+    _add_item(db_path, "on", 6, status="completed", filename="shared.mp4")
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await asyncio.sleep(0.3)
+    assert all(os.path.exists(os.path.join(media_dir, name)) for name in ("compilation.mp4", "sliced.mp4", "shared.mp4"))
