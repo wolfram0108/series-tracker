@@ -357,8 +357,12 @@ async def download(video_url: str, full_output_path: str,
                    on_progress: ProgressCb, *,
                    headers: dict | None = None,
                    threads: int = 6,
-                   progressive: bool = False) -> tuple[bool, str]:
+                   progressive: bool = False,
+                   whole_video: bool = False) -> tuple[bool, str]:
     """Two-phase video download. Supports parts of a ready file, direct ffmpeg copy and yt-dlp.
+
+    `whole_video` asks for a video with no hole: the file is a file of the library, which stays as it was fetched. A voice-over
+    is not asked: the service puts a cut of it right as silence, and the method of track-muxer takes it by the length of the stream.
 
     `progressive` marks one ready file address: it is asked for in parts at once, and by one stream when the server
     cannot serve parts. The name is owned from the first step to the last: the programs, their leftovers and the publication."""
@@ -367,7 +371,7 @@ async def download(video_url: str, full_output_path: str,
     try:
         with storage.hold(full_output_path):
             done = await _download_owned(video_url, full_output_path, on_progress, headers, threads, progressive)
-            return await _whole_or_discarded(done, full_output_path)
+            return await _whole_or_discarded(done, full_output_path) if whole_video else done
     except storage.StorageBusy:  # an operation on this name has not ended: a file written now could be lost
         return False, "путь занят незавершённой файловой операцией (timeout)"
 

@@ -58,12 +58,17 @@ async def test_a_download_with_a_hole_is_discarded_and_is_a_failure_the_queue_tr
         return fake
 
     monkeypatch.setattr(ytdlp, "_download_owned", await writes(holed))
-    ok, error = await ytdlp.download("https://cdn.test/v.m3u8", target, lambda _data: None)
+    ok, error = await ytdlp.download("https://cdn.test/v.m3u8", target, lambda _data: None, whole_video=True)
     assert not ok and "обрыв" in error and "неполная" in error and _transient_download_error(error)
     assert not os.path.exists(target)
 
-    monkeypatch.setattr(ytdlp, "_download_owned", await writes(whole))
+    # A voice-over is not asked to be whole: the service puts a cut of it right as silence.
     ok, error = await ytdlp.download("https://cdn.test/v.m3u8", target, lambda _data: None)
+    assert ok and os.path.exists(target)
+    os.remove(target)
+
+    monkeypatch.setattr(ytdlp, "_download_owned", await writes(whole))
+    ok, error = await ytdlp.download("https://cdn.test/v.m3u8", target, lambda _data: None, whole_video=True)
     assert ok and error == "" and os.path.exists(target)
 
 
@@ -77,4 +82,5 @@ async def test_a_failed_download_is_not_looked_at_for_holes(tmp_path, monkeypatc
 
     monkeypatch.setattr(ytdlp, "_download_owned", failed)
     monkeypatch.setattr(ytdlp, "video_gaps", never)
-    assert await ytdlp.download("https://cdn.test/v.m3u8", str(tmp_path / "e.mp4"), lambda _data: None) == (False, "видео недоступно")
+    assert await ytdlp.download("https://cdn.test/v.m3u8", str(tmp_path / "e.mp4"), lambda _data: None,
+                                whole_video=True) == (False, "видео недоступно")

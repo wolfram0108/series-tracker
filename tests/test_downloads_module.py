@@ -320,7 +320,7 @@ async def test_dispatch_creates_downloads_and_completes(system):
     assert items["uid1"]["final_filename"] == "Серия 01.mp4"
     assert os.path.exists(os.path.join(media_dir, "Серия 01.mp4"))
     assert items["uid2"]["status"] == "pending"  # не трогали
-    assert _tasks(db_path) == []  # задача удалена после успеха
+    assert await _wait(lambda: _tasks(db_path) == [])  # the task goes one write after the status
     # свёртка дошла до ready (финальная публикуется после завершения
     # воркера — дожидаемся именно её)
     expected = {"downloading": False, "error": False,
@@ -744,7 +744,7 @@ async def test_a_progressive_file_is_handed_to_the_downloader_as_such(system):
 
     assert await _wait(lambda: _items(db_path)["web1"]["status"] == "completed")
     assert dl.started == ["https://cdn.test/f?sig=1"]
-    assert dl.kwargs["https://cdn.test/f?sig=1"] == {"progressive": True}
+    assert dl.kwargs["https://cdn.test/f?sig=1"] == {"progressive": True, "whole_video": True}
 
 
 @pytest.mark.asyncio
@@ -756,7 +756,7 @@ async def test_a_stream_that_is_not_marked_progressive_is_handed_over_without_th
     probe.publish_event("downloads.dispatch", {"series_id": 3})
 
     assert await _wait(lambda: _items(db_path)["web1"]["status"] == "completed")
-    assert dl.kwargs["https://cdn.test/g.mp4"] == {"headers": {"Referer": "https://r/"}}
+    assert dl.kwargs["https://cdn.test/g.mp4"] == {"headers": {"Referer": "https://r/"}, "whole_video": True}
 
 
 @pytest.mark.asyncio
@@ -1352,3 +1352,18 @@ async def test_a_download_is_cancelled_only_in_the_states_the_table_allows(syste
         with pytest.raises(BusRequestError, match="not_allowed"):
             await probe.request("downloads.cancel", {"task_id": task["id"]}, timeout=10)
         assert len(_tasks(db_path)) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_download_of_a_reference_asks_for_a_whole_video_and_the_fetch_of_a_voice_over_does_not(system, tmp_path):
+    _, fake, dl, probe, db_path, _ = system
+    fake.stream_replies[PAGE_URL] = {"handled": True, "stream_url": "https://cdn.test/ref.m3u8", "headers": {}}
+    fake.stream_replies["https://site/#cvh=9"] = {"handled": True, "stream_url": "https://cdn.test/dub.m3u8", "headers": {}}
+    _add_item(db_path, "web1", 1, series_id=3, source_url=PAGE_URL)
+    probe.publish_event("downloads.dispatch", {"series_id": 3})
+    assert await _wait(lambda: _items(db_path)["web1"]["status"] == "completed")
+    probe.send_command("downloads.fetch", {"key": "dub:1", "url": "https://site/#cvh=9",
+                                           "path": str(tmp_path / "d.mp4"), "series_id": 3})
+    assert await _wait(lambda: "https://cdn.test/dub.m3u8" in dl.kwargs)
+    assert dl.kwargs["https://cdn.test/ref.m3u8"].get("whole_video") is True
+    assert "whole_video" not in dl.kwargs["https://cdn.test/dub.m3u8"]

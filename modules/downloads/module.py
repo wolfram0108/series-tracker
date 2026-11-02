@@ -616,7 +616,7 @@ class DownloadsModule(BaseModule):
             if stream_error is not None:
                 ok, (error, transient) = False, stream_error
             else:
-                kw = {"threads": self._threads}
+                kw = {"threads": self._threads, "whole_video": True}  # a reference with a hole would skew every voice-over aligned to it
                 if stream_headers:
                     kw["headers"] = stream_headers
                 if progressive:
