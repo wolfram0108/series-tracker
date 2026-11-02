@@ -29,7 +29,7 @@ async def test_parallel_connect_switches_to_wal(tmp_path):
     db = Database(str(path))
 
     async def release() -> None:
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.3)  # time is the subject: the lock is held while the connects wait on their busy timeout
         blocker.rollback()
         blocker.close()
 

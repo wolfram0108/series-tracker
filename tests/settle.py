@@ -24,6 +24,14 @@ async def settle(bus, *modules, seconds: float = SAFEGUARD_S) -> None:
     await asyncio.wait_for(quiet(), seconds)
 
 
+async def path_free(path: str, seconds: float = SAFEGUARD_S) -> None:
+    """Returns when the storage says that no operation owns the path any more: a call that outlived its wait has ended."""
+    from core import storage
+    freed = asyncio.Event()
+    storage.when_free(path, freed.set)
+    await asyncio.wait_for(freed.wait(), seconds)
+
+
 async def _holds(predicate) -> bool:
     """The condition may be a plain function or one that has to be awaited (a read of the database)."""
     result = predicate()

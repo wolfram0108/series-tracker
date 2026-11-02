@@ -11,6 +11,7 @@ import pytest
 from core import proc
 from core.ffprobe import duration_of
 from proc_helpers import Spy, alive, stalled_downloader
+from settle import path_free
 
 SLEEP = [sys.executable, "-c", "import time; time.sleep(60)"]
 
@@ -35,7 +36,7 @@ async def test_a_cancelled_wait_stops_the_program_too():
     spy = Spy()
     with patch("core.proc.asyncio.create_subprocess_exec", spy):
         task = asyncio.create_task(proc.run_capture(SLEEP, timeout=60))
-        await asyncio.sleep(0.3)
+        await asyncio.wait_for(spy.spawned.wait(), 5)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -94,7 +95,7 @@ async def test_a_program_started_inside_a_hold_keeps_the_hold_until_it_has_ended
     finally:
         process.kill()
         await process.wait()
-    await asyncio.sleep(0.1)
+    await path_free(path)
     assert not storage.busy(path)
 
 

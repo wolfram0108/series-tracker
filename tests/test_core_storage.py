@@ -6,6 +6,7 @@ import time
 import pytest
 
 from core import storage
+from settle import path_free
 
 
 @pytest.mark.asyncio
@@ -53,7 +54,7 @@ async def test_what_a_call_owns_stays_owned_after_the_wait_ends_until_the_call_r
     assert storage.busy(path) and storage.busy(path + ".part") and storage.busy(str(tmp_path / "track.flac" / "x"))
     assert storage.busy(str(tmp_path)) and not storage.busy(str(tmp_path / "other.flac"))
     release.set()
-    await asyncio.sleep(0.1)
+    await path_free(path)
     assert not storage.busy(path)
 
 
@@ -68,7 +69,7 @@ async def test_a_change_on_an_owned_path_is_refused_not_queued(tmp_path):
         await storage.call(lambda: None, owns=path)
     assert await storage.call(lambda: "reading is not a change") == "reading is not a change"
     release.set()
-    await asyncio.sleep(0.1)
+    await path_free(path)
     await storage.call(lambda: None, owns=path)
 
 
@@ -83,7 +84,7 @@ async def test_whoever_needs_the_path_is_told_when_it_is_free(tmp_path):
     storage.when_free(path, lambda: told.append("free"))
     assert told == []
     release.set()
-    await asyncio.sleep(0.1)
+    await path_free(path)
     assert told == ["free"]
     storage.when_free(path, lambda: told.append("at once"))
     assert told == ["free", "at once"]
@@ -95,13 +96,14 @@ async def test_a_cancelled_wait_does_not_free_what_the_call_owns(tmp_path):
     release = threading.Event()
     path = str(tmp_path / "track.flac")
     task = asyncio.create_task(storage.call(stalled, release, timeout=5, owns=path))
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0)  # the call takes its hold in its first step
+    assert storage.busy(path)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
     assert storage.busy(path)
     release.set()
-    await asyncio.sleep(0.1)
+    await path_free(path)
     assert not storage.busy(path)
 
 
@@ -141,7 +143,7 @@ async def test_a_hold_lasts_until_what_was_attached_to_it_has_ended(tmp_path):
     storage.when_free(path, lambda: told.append("free"))
     assert told == []
     ending.set_result(None)
-    await asyncio.sleep(0.05)
+    await path_free(path)
     assert not storage.busy(path) and told == ["free"]
 
 

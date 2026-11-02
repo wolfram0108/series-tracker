@@ -16,11 +16,13 @@ class Spy:
 
     def __init__(self):
         self.started = []
+        self.spawned = asyncio.Event()  # a program is running: the test that waits for it does not guess a pause
         self._real = asyncio.create_subprocess_exec
 
     async def __call__(self, *args, **kwargs):
         process = await self._real(*args, **kwargs)
         self.started.append(process)
+        self.spawned.set()
         return process
 
 
