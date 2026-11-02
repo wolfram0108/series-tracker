@@ -51,8 +51,6 @@ class Reading:
     message: str = ""
     # Signed addresses of the files by height; out of repr and comparison so that they reach neither a log nor a test.
     files: tuple[tuple[int, str], ...] = field(default=(), repr=False, compare=False)
-    # The length of the video in seconds when the answer that gave the files gives it too.
-    duration_s: float | None = None
 
 
 class Player(Protocol):

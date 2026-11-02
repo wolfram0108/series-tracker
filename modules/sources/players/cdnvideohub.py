@@ -149,12 +149,6 @@ def read_playlist(answer: Answer) -> list[VoiceVideo]:
     return items
 
 
-def read_duration(text: str) -> float | None:
-    """The length of the video in seconds, as the answer that lists its files gives it."""
-    value = (json.loads(text) or {}).get("duration")
-    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else None
-
-
 def read_rungs(text: str) -> list[Rung]:
     """Direct mp4 links of a VK video; rungs above 1080p carry height 0 until measured."""
     sources = (json.loads(text) or {}).get("sources") or {}
@@ -283,8 +277,7 @@ class CdnVideoHubPlayer:
         files = await self._files(rungs, vk_id, cap)
         if not files:
             return Answer(200, reading=Reading(Kind.NO_FILE, 200, message="no known resolution"))
-        return Answer(200, reading=Reading(Kind.PLAYABLE, 200, tuple(sorted({height for height, _ in files})), files=files,
-                                           duration_s=read_duration(answer.text)))
+        return Answer(200, reading=Reading(Kind.PLAYABLE, 200, tuple(sorted({height for height, _ in files})), files=files))
 
     async def _files(self, rungs: list[Rung], vk_id: str, cap: int | None) -> tuple[tuple[int, str], ...]:
         measure = self._cached_measure(vk_id)

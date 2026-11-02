@@ -92,8 +92,7 @@ def test_a_compilation_stays_one_row_with_the_range_the_constructor_gave():
 
 
 def test_a_single_row_named_by_a_compilation_text_stays_a_single_episode():
-    # The constructor alone names the numbers: a row it names by one number is one episode, whatever the file holds. A file
-    # of several episodes reaches it worded by its range (`sources/sites/compilations.py`).
+    # CVH writes "110 episode" on a file of episodes 109-110: the text is all the constructor can read.
     only = one(item(source(), table(row("x", "110 серия", player="cvh")), {"x": {"season": 1, "episode": 110}}))[0]
     assert (only.episode_start, only.episode_end, only.is_compilation) == (110, 110, False)
 
