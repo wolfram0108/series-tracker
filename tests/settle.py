@@ -41,5 +41,5 @@ async def wait_until(predicate, bus, *modules, seconds: float = SAFEGUARD_S) -> 
     try:
         await asyncio.wait_for(holds(), seconds)
     except asyncio.TimeoutError:
-        return False  # TEMPORARY strict check
+        return predicate()  # a change that no step announced is still a change
     return True

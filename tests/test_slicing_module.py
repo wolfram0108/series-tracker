@@ -321,7 +321,7 @@ async def test_sim_C5_slicing_aborts_removes_partial(system):
 
     await probe.request("slicing.task.create", {"unique_id": "comp1"},
                         timeout=10)
-    assert await _wait(lambda: ffmpeg.started.is_set())  # режет первую главу
+    await asyncio.wait_for(ffmpeg.started.wait(), 5)  # режет первую главу; the fake says when it was called
     partial = os.path.join(media, "Show s01e11.mp4")
     assert os.path.exists(partial)  # частичный выход на диске
 
