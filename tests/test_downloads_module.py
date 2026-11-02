@@ -8,17 +8,19 @@ import sqlite3
 import subprocess
 import sys
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core import BaseModule, Bus, BusRequestError, Runner
+from core import BaseModule, Bus, BusRequestError, Envelope, Runner
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.downloads import DownloadsModule
 from modules.downloads import ytdlp
 from modules.downloads.module import source_of_candidate
 from series_factory import insert_series, source
+from settle import settle, wait_until
 
 
 # --- чистые функции разбора yt-dlp ----------------------------------------------
@@ -125,6 +127,10 @@ class FakeNeighbours(BaseModule):
 class FakeDownloader:
     """Управляемый «yt-dlp»: пишет файл или возвращает ошибку."""
 
+    # When set, entering the downloader is a step of the bus: a general fetch reports no progress, so without it nothing
+    # tells a waiter that the downloader was called.
+    bus: Bus | None = None
+
     def __init__(self):
         self.fail_urls: set[str] = set()
         self.timeouts: dict[str, int] = {}   # url -> how many more attempts end in a network timeout
@@ -140,6 +146,8 @@ class FakeDownloader:
         self.kwargs[url] = kw
         self.concurrent += 1
         self.max_concurrent = max(self.max_concurrent, self.concurrent)
+        if self.bus is not None:
+            self.bus.publish(Envelope(topic="test.downloader.entered", kind="event"))
         try:
             await on_progress({"progress": 50, "dlspeed": 1024, "eta": 5,
                                "total_size_mb": 10.0})
@@ -223,21 +231,37 @@ async def system(env_paths):
     db = Database(db_path)
     fake = FakeNeighbours(bus)
     dl = FakeDownloader()
+    dl.bus = bus
     catalog = CatalogModule(bus, db)
     downloads = DownloadsModule(bus, db, downloader=dl)
     probe = Probe(bus)
     runner = Runner(bus, [fake, catalog, downloads, probe])
     await runner.start()
+    _watch(runner, downloads)
     yield bus, fake, dl, probe, db_path, media_dir
     await runner.stop()
+    _watch(None, None)
+
+
+# The system a test started, for the waiters below: the fixtures (and tests) that start one say which it is.
+_running = SimpleNamespace(bus=None, modules=(), downloads=None)
+
+
+def _watch(runner, downloads):
+    _running.bus, _running.modules, _running.downloads = (
+        (runner.bus, tuple(runner.modules), downloads) if runner else (None, (), None))
 
 
 async def _wait(predicate, timeout=3.0):
-    for _ in range(int(timeout / 0.02)):
-        if predicate():
-            return True
-        await asyncio.sleep(0.02)
-    return False
+    """True when the condition holds; it is looked at again after each step of the bus and each end of a task of the modules.
+
+    `timeout` only ends a test that is stuck."""
+    return await wait_until(predicate, _running.bus, *_running.modules, seconds=timeout)
+
+
+async def _quiet():
+    """Returns when the bus took apart every envelope and the modules run nothing: what did not happen by now never will."""
+    await settle(_running.bus, *_running.modules)
 
 
 @pytest.mark.asyncio
@@ -326,12 +350,14 @@ async def test_dispatch_creates_downloads_and_completes(system):
     expected = {"downloading": False, "error": False,
                 "ready": True, "waiting": False}
     flags = None
-    for _ in range(100):
+
+    def reached_ready():
+        nonlocal flags
         while not sub.queue.empty():
             flags = sub.queue.get_nowait().payload["flags"]
-        if flags == expected:
-            break
-        await asyncio.sleep(0.02)
+        return flags == expected
+
+    await _wait(reached_ready)
     assert flags == expected
 
 
@@ -356,7 +382,7 @@ async def test_plan_updated_adopts_only_no_downloads(system):
     _, _, dl, probe, db_path, _ = system
     _add_item(db_path, "uid1", 1)  # файла на диске НЕТ
     probe.publish_event("scan.plan.updated", {"series_id": 2})
-    await asyncio.sleep(0.2)
+    await _quiet()
     assert dl.started == []                                  # не качали
     assert _tasks(db_path) == []                             # задач не создано
     assert _items(db_path)["uid1"]["status"] == "pending"    # остался pending
@@ -413,15 +439,16 @@ async def test_parallel_limit_respected(system):
     fake.settings["max_parallel_downloads"] = "1"
     probe.publish_event("settings.changed",
                         {"key": "max_parallel_downloads", "value": "1"})
-    await asyncio.sleep(0.05)
+    await _quiet()  # the module took the new limit
 
     dl.gate = asyncio.Event()
     for ep in (1, 2, 3):
         _add_item(db_path, f"uid{ep}", ep)
     probe.publish_event("downloads.dispatch", {"series_id": 2})
     assert await _wait(lambda: len(dl.started) >= 1)
-    await asyncio.sleep(0.1)
-    assert dl.max_concurrent == 1
+    # A held worker never ends, so quiet is the bus alone: nothing is left in it that could start a second worker.
+    await _running.bus.settled()
+    assert dl.max_concurrent == 1 and len(_running.downloads.background()) == 1
     dl.gate.set()
     assert await _wait(lambda: all(
         i["status"] == "completed" for i in _items(db_path).values()))
@@ -476,12 +503,14 @@ async def test_fs_sync_always_contributes(system):
                                 timeout=10)
     assert reply == {"adopted": 0, "lost": 0}  # ничего не изменилось
     flags = None
-    for _ in range(50):
+
+    def contributed():
+        nonlocal flags
         while not sub.queue.empty():
             flags = sub.queue.get_nowait().payload["flags"]
-        if flags is not None:
-            break
-        await asyncio.sleep(0.02)
+        return flags is not None
+
+    await _wait(contributed)
     assert flags is not None and flags["ready"] is True
 
 
@@ -501,11 +530,12 @@ async def test_interrupted_requeued_on_start_but_error_kept(env_paths):
     bus = Bus()
     db = Database(db_path)
     dl = FakeDownloader()
+    dl.bus = bus
     dl.gate = asyncio.Event()
-    runner = Runner(bus, [FakeNeighbours(bus), CatalogModule(bus, db),
-                          DownloadsModule(bus, db, downloader=dl),
-                          Probe(bus)])
+    downloads = DownloadsModule(bus, db, downloader=dl)
+    runner = Runner(bus, [FakeNeighbours(bus), CatalogModule(bus, db), downloads, Probe(bus)])
     await runner.start()
+    _watch(runner, downloads)
     try:
         # оборванная — снова запущена; error-задача не тронута (Р-13)
         assert await _wait(lambda: "https://vk.com/video-1_1" in dl.started)
@@ -514,6 +544,7 @@ async def test_interrupted_requeued_on_start_but_error_kept(env_paths):
         dl.gate.set()
     finally:
         await runner.stop()
+        _watch(None, None)
 
 
 @pytest.mark.asyncio
@@ -909,7 +940,7 @@ async def test_superseded_file_stays_while_winner_is_not_downloaded(system):
               filename="e01 360p.mp4", superseded_by="win")
 
     probe.publish_event("scan.plan.updated", {"series_id": 2})
-    await asyncio.sleep(0.2)
+    await _quiet()
 
     assert os.path.exists(loser)
     assert _items(db_path)["lose"]["final_filename"] == "e01 360p.mp4"
@@ -924,7 +955,7 @@ async def test_superseded_file_stays_when_winner_file_is_missing(system):
               filename="e01 360p.mp4", superseded_by="win")
 
     probe.publish_event("scan.plan.updated", {"series_id": 2})
-    await asyncio.sleep(0.2)
+    await _quiet()
 
     assert os.path.exists(loser)
 
@@ -957,7 +988,7 @@ async def test_retirement_is_idempotent_and_survives_fs_sync(system):
     await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=10)
     await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=10)
     probe.publish_event("scan.plan.updated", {"series_id": 2})
-    await asyncio.sleep(0.2)
+    await _quiet()
 
     items = _items(db_path)
     assert items["lose"]["status"] == "pending"         # holds no file; not in the plan, so no task is made for it
@@ -975,7 +1006,7 @@ async def test_superseded_row_sharing_the_winner_file_is_not_deleted(system):
               filename="e01.mp4", superseded_by="win")
 
     probe.publish_event("scan.plan.updated", {"series_id": 2})
-    await asyncio.sleep(0.2)
+    await _quiet()
 
     assert os.path.exists(shared)
     assert _items(db_path)["lose"]["final_filename"] == "e01.mp4"
@@ -992,7 +1023,7 @@ async def test_superseded_path_outside_series_dir_is_never_touched(system, tmp_p
               filename="../outside.mp4", superseded_by="win")
 
     probe.publish_event("scan.plan.updated", {"series_id": 2})
-    await asyncio.sleep(0.2)
+    await _quiet()
 
     assert outside.exists()
 
@@ -1010,12 +1041,14 @@ async def test_retired_file_leaves_downloaded_counter(system):
     probe.publish_event("scan.plan.updated", {"series_id": 2})
 
     count = None
-    for _ in range(100):
+
+    def counted():
+        nonlocal count
         while not sub.queue.empty():
             count = sub.queue.get_nowait().payload["count"]
-        if count == 1:
-            break
-        await asyncio.sleep(0.02)
+        return count == 1
+
+    await _wait(counted)
     assert count == 1
 
 
@@ -1128,7 +1161,7 @@ async def test_a_file_that_is_whole_stays_when_its_row_leaves_the_plan(system):
     open(done, "wb").close()
     _add_item(db_path, "uid1", 1, status="completed", plan="redundant", filename="done.mp4")
     probe.publish_event("scan.plan.updated", {"series_id": 2})
-    await asyncio.sleep(0.2)
+    await _quiet()
     assert os.path.exists(done) and _items(db_path)["uid1"]["status"] == "completed"
 
 
@@ -1219,12 +1252,12 @@ async def test_fetch_has_its_own_limit_and_ignores_repeated_keys(system, tmp_pat
     for job in jobs:
         probe.send_command("downloads.fetch", job)
     assert await _wait(lambda: dl.concurrent == 2)
-    await asyncio.sleep(0.1)
-    assert dl.max_concurrent == 2 and dl.concurrent == 2
+    await _running.bus.settled()  # every job is taken apart: two run, the rest wait (held workers never end)
+    assert dl.max_concurrent == 2 and dl.concurrent == 2 and len(dl.started) == 2
     dl.gate.set()
     got = [(await asyncio.wait_for(sub.queue.get(), 5)).payload["key"] for _ in range(4)]
     assert sorted(got) == [f"dub:{i}" for i in range(4)]
-    await asyncio.sleep(0.1)
+    await _quiet()
     assert sub.queue.empty() and len(dl.started) == 4
 
 
@@ -1282,7 +1315,7 @@ async def test_a_new_file_name_is_announced_to_the_modules_that_keep_files_next_
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT final_filename FROM media_items WHERE unique_id='uid-r'").fetchone() == ("new.mp4",)
     probe.send_command("downloads.item.set_filename", {"unique_id": "nobody", "filename": "x.mp4"})
-    await asyncio.sleep(0.1)
+    await _quiet()
     assert sub.queue.empty()
 
 
@@ -1333,7 +1366,7 @@ async def test_a_file_of_a_compilation_a_sliced_file_and_a_file_the_plan_holds_u
     _add_item(db_path, "off", 5, status="completed", filename="shared.mp4", plan="candidate", ignored=1)
     _add_item(db_path, "on", 6, status="completed", filename="shared.mp4")
     probe.publish_event("scan.plan.updated", {"series_id": 2})
-    await asyncio.sleep(0.3)
+    await _quiet()
     assert all(os.path.exists(os.path.join(media_dir, name)) for name in ("compilation.mp4", "sliced.mp4", "shared.mp4"))
 
 

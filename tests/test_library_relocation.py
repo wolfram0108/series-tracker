@@ -14,6 +14,7 @@ from core.envelope import Envelope
 from modules.catalog import CatalogModule
 from modules.library import LibraryModule
 from series_factory import insert_series
+from settle import settle, wait_until
 
 
 class FakeNeighbours(BaseModule):
@@ -59,7 +60,7 @@ class Probe(BaseModule):
 
 
 @pytest.fixture
-async def system(tmp_path):
+async def started(tmp_path):
     db_path = tmp_path / "test.db"
     subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
                    env={"ST_DB_URL": f"sqlite:///{db_path}",
@@ -81,16 +82,14 @@ async def system(tmp_path):
     probe = Probe(bus)
     runner = Runner(bus, [fake, catalog, library, probe])
     await runner.start()
-    yield bus, fake, probe, str(db_path), str(old_dir), str(new_dir)
+    yield runner, fake, probe, str(db_path), str(old_dir), str(new_dir)
     await runner.stop()
 
 
-async def _wait(predicate, timeout=3.0):
-    for _ in range(int(timeout / 0.02)):
-        if predicate():
-            return True
-        await asyncio.sleep(0.02)
-    return False
+@pytest.fixture
+def system(started):
+    runner, fake, probe, db_path, old_dir, new_dir = started
+    return runner.bus, fake, probe, db_path, old_dir, new_dir
 
 
 def _save_path(db_path):
@@ -107,8 +106,9 @@ def _tasks(db_path):
 
 
 @pytest.mark.asyncio
-async def test_vk_relocation_moves_files_and_chains_renaming(system):
-    bus, fake, probe, db_path, old_dir, new_dir = system
+async def test_vk_relocation_moves_files_and_chains_renaming(started):
+    runner, fake, probe, db_path, old_dir, new_dir = started
+    bus = runner.bus
     fake.media_items = [{"unique_id": "u1",
                          "final_filename": "Show s01e01.mp4"}]
     fake.sliced = [{"id": 1, "file_path": "Show s01e02.mp4"}]
@@ -132,12 +132,13 @@ async def test_vk_relocation_moves_files_and_chains_renaming(system):
     # busy: true на время работы, false по завершении (false приходит
     # после finished — дожидаемся)
     busy_seq = []
-    for _ in range(100):
+
+    def busy_ended():
         while not sub_busy.queue.empty():
             busy_seq.append(sub_busy.queue.get_nowait().payload["is_busy"])
-        if busy_seq == [True, False]:
-            break
-        await asyncio.sleep(0.02)
+        return busy_seq == [True, False]
+
+    await wait_until(busy_ended, bus, *runner.modules)
     assert busy_seq == [True, False]
 
 
@@ -211,8 +212,9 @@ async def test_relocate_sanitizes_target_path(system, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_relocation_a_restart_interrupted_is_taken_up_when_the_system_has_started_and_not_before(system):
-    bus, fake, _, db_path, old_dir, new_dir = system
+async def test_a_relocation_a_restart_interrupted_is_taken_up_when_the_system_has_started_and_not_before(started):
+    runner, fake, _, db_path, old_dir, new_dir = started
+    bus = runner.bus
     fake.media_items = [{"unique_id": "u1", "final_filename": "Show s01e01.mp4"}]
     fake.sliced = []
     open(os.path.join(old_dir, "Show s01e01.mp4"), "wb").close()
@@ -221,7 +223,7 @@ async def test_a_relocation_a_restart_interrupted_is_taken_up_when_the_system_ha
                      "VALUES (2, ?, 'in_progress', '2026-11-02 10:00:00')", (new_dir,))
         conn.commit()
     sub_fin = bus.subscribe("library.relocation.finished")
-    await asyncio.sleep(0.2)  # nothing in the module looks for such a task by itself
+    await settle(bus, *runner.modules)  # nothing in the module looks for such a task by itself
     assert os.path.exists(os.path.join(old_dir, "Show s01e01.mp4")) and sub_fin.queue.empty()
     bus.publish(Envelope(topic="system.started", kind="event"))
     env = await asyncio.wait_for(sub_fin.queue.get(), 5)

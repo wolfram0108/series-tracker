@@ -12,6 +12,7 @@ from core.db import Database
 from core.envelope import Envelope
 from modules.renaming import RenamingModule
 from series_factory import insert_series
+from settle import settle
 
 
 class FakeNeighbours(BaseModule):
@@ -35,6 +36,7 @@ class FakeNeighbours(BaseModule):
         self.collide_name: str | None = None  # одно имя на все файлы
         self.files_block: "asyncio.Event | None" = None  # C9: блок files.get
         self.files_calls = 0
+        self.files_entered = asyncio.Event()  # set when files.get is entered
         super().__init__(bus)
 
     def register(self):
@@ -91,6 +93,7 @@ class FakeNeighbours(BaseModule):
 
     async def on_qbt_files(self, env):
         self.files_calls += 1
+        self.files_entered.set()
         if self.files_block is not None and self.files_calls == 1:
             await self.files_block.wait()  # C9: держим конвейерный rename
         return self.qbt_files.get(env.payload["hash"], [])
@@ -122,7 +125,7 @@ def _torrent(series, profile_id=1):
 
 
 @pytest.fixture
-async def system(tmp_path):
+async def started(tmp_path):
     db_path = tmp_path / "test.db"
     subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
                    env={"ST_DB_URL": f"sqlite:///{db_path}",
@@ -142,8 +145,27 @@ async def system(tmp_path):
     probe = Probe(bus)
     runner = Runner(bus, [fake, renaming, probe])
     await runner.start()
-    yield bus, fake, probe, str(db_path), str(media)
+    yield bus, fake, renaming, probe, str(db_path), str(media)
     await runner.stop()
+
+
+@pytest.fixture
+def system(started):
+    bus, fake, _, probe, db_path, media = started
+    return bus, fake, probe, db_path, media
+
+
+class WatchedLock(asyncio.Lock):
+    """A lock that says when someone has to wait for it: a request that waits makes no step the bus could show."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.contended = asyncio.Event()
+
+    async def acquire(self) -> bool:
+        if self.locked():
+            self.contended.set()
+        return await super().acquire()
 
 
 def _item(uid, ep, filename):
@@ -268,11 +290,12 @@ async def test_process_torrent_uses_original_path_from_db(system):
 
 
 @pytest.mark.asyncio
-async def test_sim_C9_pipeline_rename_serializes_with_reprocess(system):
+async def test_sim_C9_pipeline_rename_serializes_with_reprocess(started):
     """C9: переименование конвейера (process_torrent) и reprocess (от save)
     делят per-series лок — НЕ переименовывают одни файлы параллельно
     (иначе кривые имена, как у «Путешествия»)."""
-    _, fake, probe, _, media = system
+    _, fake, renaming, probe, _, media = started
+    lock = renaming._locks[2] = WatchedLock()  # the lock of the series, seen
     fake.series = _torrent(fake.series)
     fake.active_torrents = [{"qb_hash": "h", "torrent_id": "t"}]
     fake.qbt_files["h"] = [{"name": "a.mkv"}]
@@ -280,20 +303,13 @@ async def test_sim_C9_pipeline_rename_serializes_with_reprocess(system):
                            "status": "downloaded"}]
     fake.files_block = asyncio.Event()  # конвейерный rename виснет в files.get
 
-    async def _poll(pred, t=2.0):
-        for _ in range(int(t / 0.02)):
-            if pred():
-                return True
-            await asyncio.sleep(0.02)
-        return False
-
     t1 = asyncio.create_task(probe.request(
         "renaming.process_torrent", {"series_id": 2, "qb_hash": "h"},
         timeout=10))
-    assert await _poll(lambda: fake.files_calls == 1)  # вошёл, держит лок
+    await asyncio.wait_for(fake.files_entered.wait(), 5)  # вошёл, держит лок
     t2 = asyncio.create_task(probe.request(
         "renaming.reprocess", {"series_id": 2}, timeout=10))
-    await asyncio.sleep(0.2)
+    await asyncio.wait_for(lock.contended.wait(), 5)  # reprocess стал в очередь на лок
     assert fake.files_calls == 1  # reprocess ЖДЁТ лок, в files.get не вошёл
 
     fake.files_block.set()  # отпускаем конвейерный rename
@@ -463,8 +479,8 @@ async def test_preview_gives_every_row_the_numbers_of_its_slot(system):
 
 
 @pytest.mark.asyncio
-async def test_a_reprocess_a_restart_interrupted_is_run_again_when_the_system_has_started_and_not_before(system):
-    bus, fake, probe, db_path, media = system
+async def test_a_reprocess_a_restart_interrupted_is_run_again_when_the_system_has_started_and_not_before(started):
+    bus, fake, renaming, probe, db_path, media = started
     fake.media_items = [_item("u1", 1, "старое имя 1.mp4")]
     open(os.path.join(media, "старое имя 1.mp4"), "wb").close()
     with sqlite3.connect(db_path) as conn:
@@ -472,7 +488,7 @@ async def test_a_reprocess_a_restart_interrupted_is_run_again_when_the_system_ha
                      "VALUES (2, 'in_progress', 0, '2026-11-02 10:00:00', 'reprocess', '{}')")
         conn.commit()
     sub = bus.subscribe("renaming.finished")
-    await asyncio.sleep(0.2)  # nothing in the module looks for such a task by itself
+    await settle(bus, renaming)  # nothing in the module looks for such a task by itself
     assert os.path.exists(os.path.join(media, "старое имя 1.mp4")) and sub.queue.empty()
     bus.publish(Envelope(topic="system.started", kind="event"))
     env = await asyncio.wait_for(sub.queue.get(), 5)

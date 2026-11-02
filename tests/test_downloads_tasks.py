@@ -14,7 +14,7 @@ from core.db import Database
 from modules.catalog import CatalogModule
 from modules.downloads import DownloadsModule
 from modules.downloads import publication
-from test_downloads_module import (FakeDownloader, FakeNeighbours, Probe, _add_item, _items, _tasks, _wait,  # noqa: F401
+from test_downloads_module import (FakeDownloader, FakeNeighbours, Probe, _add_item, _items, _tasks, _wait, _watch,  # noqa: F401
                                    env_paths, system)
 
 PLAN_IN = "in_plan_single"
@@ -46,14 +46,18 @@ class Boot:
     async def up(self):
         bus = Bus()
         self.fake, self.dl, db = FakeNeighbours(bus), FakeDownloader(), Database(self.db_path)
+        self.dl.bus = bus
         self.probe = Probe(bus)
-        self.runner = Runner(bus, [self.fake, CatalogModule(bus, db), DownloadsModule(bus, db, downloader=self.dl), self.probe])
+        downloads = DownloadsModule(bus, db, downloader=self.dl)
+        self.runner = Runner(bus, [self.fake, CatalogModule(bus, db), downloads, self.probe])
         await self.runner.start()
+        _watch(self.runner, downloads)
         bus.publish(Envelope(topic="system.started", kind="event"))  # what run.py says when every module is up
         return self
 
     async def down(self):
         await self.runner.stop()
+        _watch(None, None)
 
 
 @pytest.fixture

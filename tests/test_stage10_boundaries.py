@@ -19,6 +19,7 @@ from modules.downloads import DownloadsModule
 from modules.scan import ScanModule
 from scan_support import STUCK_S, World, migrated_db, row
 from series_factory import create_series, source
+from settle import wait_until
 from test_downloads_module import FakeDownloader
 
 URL = "https://fake.test/p/1"
@@ -98,11 +99,9 @@ class Rig:
         return await self.probe.request("scan.series.run", {"series_id": self.series_id, **payload}, timeout=STUCK_S * 2)
 
     async def until(self, condition, what: str) -> None:
-        for _ in range(400):
-            if condition():
-                return
-            await asyncio.sleep(0.02)
-        raise AssertionError((what, self.tasks(), self.query("SELECT unique_id, status, plan_status FROM media_items")))
+        # The condition is looked at again after each step of the bus and each end of a task of the modules.
+        if not await wait_until(condition, self.runner.bus, *self.runner.modules, seconds=8.0):
+            raise AssertionError((what, self.tasks(), self.query("SELECT unique_id, status, plan_status FROM media_items")))
 
 
 @pytest.fixture
@@ -115,6 +114,7 @@ async def rig(tmp_path):
     world = Neighbours(bus)
     world.settings_values["max_parallel_downloads"] = "1"
     downloader = UrlDownloader()
+    downloader.bus = bus
     probe = Probe(bus)
     runner = Runner(bus, [world, CatalogModule(bus, db), ScanModule(bus, db, scheduler_tick=None, table_wait_s=STUCK_S),
                           DownloadsModule(bus, db, downloader=downloader), probe])

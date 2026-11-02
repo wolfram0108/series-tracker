@@ -226,24 +226,38 @@ async def test_a_download_does_not_start_a_program_where_an_operation_has_not_en
         release.set()
 
 
+class StartedSpy(Spy):
+    """A Spy that says when the writer has been started: ffprobe runs before it, and is not the one to be waited for."""
+
+    def __init__(self):
+        super().__init__()
+        self.spawned = asyncio.Event()
+
+    async def __call__(self, *args, **kwargs):
+        process = await super().__call__(*args, **kwargs)
+        if os.path.basename(args[0]) == "ffmpeg":
+            self.spawned.set()
+        return process
+
+
 @pytest.mark.asyncio
 async def test_a_cancelled_download_keeps_its_name_until_the_program_is_dead(fake, tmp_path):
     from core import storage
     state, _ = fake
     (state / "stall").write_text("1")
-    spy = Spy()
+    spy = StartedSpy()
     target = str(tmp_path / "out" / "episode.mp4")
     with patch("modules.downloads.ytdlp.asyncio.create_subprocess_exec", spy):
         download = asyncio.create_task(ytdlp.download("https://cdn.test/e.mp4", target, noop))
-        end = asyncio.get_running_loop().time() + 5
-        while not (state / "ffmpeg_args").exists():
-            assert asyncio.get_running_loop().time() < end, "the writer did not start"
-            await asyncio.sleep(0.02)
+        await asyncio.wait_for(spy.spawned.wait(), 5)
         writer = spy.started[-1]
         assert alive(writer.pid) and storage.busy(target)
         download.cancel()
         with pytest.raises(asyncio.CancelledError):
             await download
     assert not alive(writer.pid)
-    await asyncio.sleep(0.05)
+    # The hold ends after the program has ended, not with the cancelled wait: the storage says when the name is free.
+    free = asyncio.Event()
+    storage.when_free(target, free.set)
+    await asyncio.wait_for(free.wait(), 5)
     assert not storage.busy(target)

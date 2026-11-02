@@ -27,6 +27,14 @@ class Server:
         self.payload, self.ranges, self.fails, self.short, self.status = payload, ranges, dict(fails or {}), short, dict(status or {})
         self.seen: list[str | None] = []
         self.gate: asyncio.Event | None = None
+        self.held = 0  # requests waiting at the gate
+        self._held_changed = asyncio.Event()
+
+    async def until_held(self, count: int) -> None:
+        """Returns when `count` requests wait at the gate; the CDN says so itself, nothing is waited for by time."""
+        while self.held < count:
+            self._held_changed.clear()
+            await asyncio.wait_for(self._held_changed.wait(), 5)
 
     async def __call__(self, request: httpx.Request) -> httpx.Response:
         header = request.headers.get("range")
@@ -35,6 +43,8 @@ class Server:
             return httpx.Response(200, content=self.payload)
         first, last = (int(number) for number in re.fullmatch(r"bytes=(\d+)-(\d+)", header).groups())
         if self.gate is not None and first > 0:
+            self.held += 1
+            self._held_changed.set()
             await self.gate.wait()
         if first in self.status:
             return httpx.Response(self.status[first])
@@ -137,10 +147,8 @@ async def test_a_cancelled_download_leaves_no_file(tmp_path):
     server.gate = asyncio.Event()
     out = str(tmp_path / "part.mp4")
     task = asyncio.ensure_future(ranged.download_ranged(URL, {}, out, AsyncMock(), threads=3, client=server.client()))
-    for _ in range(50):
-        if os.path.exists(out) and len(server.seen) > 2:
-            break
-        await asyncio.sleep(0.01)
+    await server.until_held(2)  # the parts after the first are in flight
+    assert os.path.exists(out)
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
