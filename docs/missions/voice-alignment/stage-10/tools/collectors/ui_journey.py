@@ -141,7 +141,7 @@ class Journey:
         buttons = first.locator("button").all_inner_texts()
         assert text_of("output.levers.show") in buttons[0], f"buttons of the first episode: {buttons}"
         first.locator("button").first.click()
-        # The levers are a grid: a column per voice-over group, in it the variants (source and player) with the mark "реф".
+        # The levers are a grid: a column per voice-over group, in it the variants (source and player) with the reference mark.
         variants = first.locator(".voice-column .variant-reference:not(:disabled)")
         options = variants.count()
         assert options >= 2, f"variants that can be the reference {options}"
