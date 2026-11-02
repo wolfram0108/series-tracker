@@ -525,8 +525,8 @@ class VoicesModule(BaseModule):
         for dub in plan.dubs:
             key = (dub.season, dub.episode, dub.part, keys[(dub.season, dub.episode, dub.part, dub.voice_key)])
             planned.add(key)
-            if dub.left_out and key in recorded:
-                await self._follow_variants(series_id, recorded[key], dub.left_out)
+            if (dub.left_out or dub.left_out_links) and key in recorded:
+                await self._follow_variants(series_id, recorded[key], dub)
             if await self.repo.relabel(series_id, *key, dub.voice_label):
                 relabeled.add(key)
             if await self.repo.upsert(series_id, *key, dub.voice_label, [each.as_json() for each in dub.chain],
@@ -557,15 +557,22 @@ class VoicesModule(BaseModule):
         await self._release_files()
         await self._admit()
 
-    async def _follow_variants(self, series_id: int, row: dict, left_out: frozenset[str]) -> None:
+    async def _follow_variants(self, series_id: int, row: dict, dub: planning.PlannedDub) -> None:
         """The user left variants out. Work that runs from one of them, or a track made from it, is not wanted at any
         step: it stops, what it made goes to the journal, and the voice-over is planned again from the others. Work
         that runs from another candidate goes on, without the variants left out among its next ones."""
         if row["status"] in (S.PENDING, S.FAILED) or not row["chain"]:  # nothing was begun: the plan offers it again
             return
+
+        def left_out(candidate: dict) -> bool:
+            # A candidate is its source and player; the link is only where the variant showed its video when it was recorded.
+            if candidate.get("source_id") is not None:
+                return (candidate["source_id"], candidate["player"]) in dub.left_out
+            return candidate["url"] in dub.left_out_links
+
         chain = row["chain"]
         active = chain[row["attempt"]] if row["attempt"] < len(chain) else None
-        if active is not None and active["url"] in left_out:
+        if active is not None and left_out(active):
             self.log.info("сериал %d, s%02de%02d: озвучка %s шла из варианта, который исключили, — снята", series_id,
                           row["season"], row["episode"], row["voice_label"])
             if row["status"] == S.DOWNLOADING and row["file_id"] is None:
@@ -574,7 +581,7 @@ class VoicesModule(BaseModule):
             await self.repo.retire(row["id"])
             await self._announce(row, E.REMOVED)
             return
-        kept = [each for each in chain if each["url"] not in left_out]
+        kept = [each for each in chain if not left_out(each)]
         if len(kept) != len(chain):
             await self.repo.set_chain(row["id"], kept, kept.index(active) if active is not None else 0)
 

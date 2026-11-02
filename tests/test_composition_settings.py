@@ -457,13 +457,13 @@ def canonical_of(records):
                                               -1 if each.episode is None else each.episode, each.lever, each.target or ""))
 
 
-def test_a_record_the_new_name_already_has_at_the_same_level_stands_and_the_moved_one_gives_way():
+def test_a_record_the_new_name_already_has_at_the_same_level_meets_the_moved_one_and_the_switch_off_stands():
     records = [rec(TAKE, False, season=1, target=group_target("Неизвестная озвучка 1")),
                rec(TAKE, True, season=1, target=group_target("Стар")),
                rec(TAKE, False, season=2, target=group_target("Неизвестная озвучка 1"))]
     after = retarget(records, {"Неизвестная озвучка 1": "Стар"})
     assert [(each.season, each.target, each.value) for each in after] == [
-        (1, group_target("Стар"), True), (2, group_target("Стар"), False)]
+        (1, group_target("Стар"), False), (2, group_target("Стар"), False)]
 
 
 def test_no_renames_leave_the_records_as_they_are():
@@ -504,10 +504,35 @@ def test_the_variants_of_groups_that_became_one_meet_only_where_the_source_and_t
         (variant_target("C", 1, "vk"), False), (variant_target("C", 2, "kodik"), False)])
 
 
-def test_a_record_the_new_name_has_stands_over_two_that_came_to_it():
+def test_a_record_the_new_name_has_meets_the_ones_that_came_to_it_and_a_switch_off_stands_over_a_switch_on():
+    """A group that takes the name of a group that exists is one group made of both: the same rule as for a new name."""
     records = [rec(TAKE, True, target=group_target("C")), rec(TAKE, False, target=group_target("A")),
                rec(TAKE, False, target=group_target("B"))]
-    assert [(each.target, each.value) for each in retarget(records, {"A": "C", "B": "C"})] == [(group_target("C"), True)]
+    assert [(each.target, each.value) for each in retarget(records, {"A": "C", "B": "C"})] == [(group_target("C"), False)]
+
+
+@pytest.mark.parametrize("old, name", [("A", "B"), ("B", "A")])
+def test_a_group_that_takes_the_name_of_an_existing_group_keeps_what_was_switched_off_whichever_of_them_it_was(old, name):
+    records = [rec(TAKE, False, target=group_target("A")), rec(TAKE, True, target=group_target("B"))]
+    assert [(each.target, each.value) for each in retarget(records, {old: name})] == [(group_target(name), False)]
+
+
+def test_a_pick_of_a_group_that_takes_the_name_of_an_existing_group_goes_back_to_the_level_above_when_the_picks_differ():
+    told = []
+    different = [rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("A")),
+                 rec(PLAYER, {"source_id": 2, "player": "kodik"}, target=group_target("B"))]
+    assert retarget(different, {"A": "B"}, told.append) == [] and len(told) == 1
+    equal = [rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("A")),
+             rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("B"))]
+    assert [(each.target, each.value) for each in retarget(equal, {"A": "B"})] == [
+        (group_target("B"), {"source_id": 1, "player": "vk"})]
+
+
+def test_the_records_of_the_name_that_do_not_meet_any_that_came_stay_as_they_are():
+    records = [rec(TAKE, False, target=group_target("A")), rec(TAKE, True, target=group_target("B"), season=1)]
+    after = retarget(records, {"A": "C"})
+    assert sorted((each.target, each.season, each.value) for each in after) == sorted([
+        (group_target("C"), None, False), (group_target("B"), 1, True)])
 
 
 def test_a_conflict_that_cannot_be_settled_is_told_to_whoever_asks():

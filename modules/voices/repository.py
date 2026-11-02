@@ -61,18 +61,25 @@ def _hand_over(where: str, args: tuple, *, files: bool = True) -> list[tuple[str
                           f"FROM voice_dubs WHERE ({where}) AND {column} IS NOT NULL {_UPSERT}",
                           (kind, HANDED_OVER, now, *args)))
     found.extend(_jobs(where, args))
-    found.append(("INSERT INTO voice_cleanup (path, kind, error, scope, updated_at) SELECT submit_key, ?, ?, out_dir, ? "
-                  f"FROM voice_dubs WHERE ({where}) AND status=? AND job_id IS NULL AND submit_key IS NOT NULL {_UPSERT}",
-                  ("submission", HANDED_OVER, now, *args, S.ALIGNING.value)))
+    found.append(("INSERT INTO voice_cleanup (path, kind, error, scope, updated_at) SELECT d.submit_key, ?, ?, d.out_dir, ? "
+                  f"FROM voice_dubs d WHERE ({where}) AND d.status=? AND d.job_id IS NULL AND d.submit_key IS NOT NULL "
+                  f"{_SHARED.format(column='submit_key', where=where)} {_UPSERT}",
+                  ("submission", HANDED_OVER, now, *args, S.ALIGNING.value, *args)))
     return found
+
+
+# A job (or a submission) is the work of a batch of rows, not of one: it is handed over with the last row that holds it. The
+# outer `d` is a row that goes; the inner rows are the others, and `where` binds to whichever table is nearest.
+_SHARED = ("AND NOT EXISTS (SELECT 1 FROM voice_dubs o WHERE o.{column} = d.{column} AND NOT ({where}))")
 
 
 def _jobs(where: str, args: tuple) -> list[tuple[str, tuple]]:
     """Journal entries for the jobs of the rows matching `where`, whatever their step: a job that ended still has a
-    record in the service's history and a folder it wrote in, and both are the owner's to let go."""
-    return [("INSERT INTO voice_cleanup (path, kind, error, scope, updated_at) SELECT job_id, ?, ?, out_dir, ? "
-             f"FROM voice_dubs WHERE ({where}) AND job_id IS NOT NULL {_UPSERT}",
-             ("job", HANDED_OVER, _now(), *args))]
+    record in the service's history and a folder it wrote in, and both are the owner's to let go. A job another row
+    that stays still holds is not handed over: it is that row's work too."""
+    return [("INSERT INTO voice_cleanup (path, kind, error, scope, updated_at) SELECT d.job_id, ?, ?, d.out_dir, ? "
+             f"FROM voice_dubs d WHERE ({where}) AND d.job_id IS NOT NULL {_SHARED.format(column='job_id', where=where)} {_UPSERT}",
+             ("job", HANDED_OVER, _now(), *args, *args))]
 
 
 def _folders(folders: Iterable[str]) -> list[tuple[str, tuple]]:

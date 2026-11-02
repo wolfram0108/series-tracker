@@ -138,3 +138,101 @@ async def test_two_voice_overs_the_user_makes_one_leave_one_track_under_the_name
     [kept] = await voices.repo.for_series(7)
     assert kept["voice_key"] in before and kept["id"] in {each["id"] for each in before.values()}
     assert kept["status"] == "placed" and os.path.isfile(kept["output_path"]) and "BlackCat" in kept["output_path"]
+
+
+async def merged_into_blackcat(dubs):
+    """BlackCat has no track (the service refused it), RedHeadSound has one; then the source of RedHeadSound is named BlackCat."""
+    from test_voices import job_done, statuses_until, two_voices_ready
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={"ok": False}))
+
+    async def one_placed_one_refused():
+        return {r["voice_key"]: r["status"] for r in await voices.repo.for_series(7)} == {
+            "BlackCat": "rejected", "RedHeadSound": "placed"}
+
+    await until_true(one_placed_one_refused, ("the track was not placed", await voices.repo.for_series(7)))
+    await quiet(voices)
+    # A new player for the source keeps the rows of the layout apart; the link of the row is the one the row has had.
+    neighbours.sources[-1]["studio"], neighbours.sources[-1]["player"] = "BlackCat", "alloha"
+    asks = neighbours.layout_asks + 1
+    layout_changed(probe)
+    await pass_over(voices, neighbours, asks)
+    return probe, neighbours, voices, ref
+
+
+@pytest.mark.asyncio
+async def test_two_voice_overs_that_became_one_keep_the_track_that_was_placed_though_the_other_row_has_the_name(dubs):
+    probe, neighbours, voices, ref = await merged_into_blackcat(dubs)
+
+    assert [(r["voice_key"], r["voice_label"], r["status"]) for r in await voices.repo.for_series(7)] == [
+        ("RedHeadSound", "BlackCat", "placed")]
+
+    async def track_follows_the_name():
+        names = library_files(neighbours)
+        return any(name.endswith(".BlackCat.ru.flac") for name in names) and not any("RedHeadSound" in name for name in names)
+
+    await until_true(track_follows_the_name, ("the track did not follow the name", library_files(neighbours)))
+
+
+@pytest.mark.asyncio
+async def test_a_variant_the_user_leaves_out_stops_the_download_that_runs_from_it_after_the_link_of_its_row_changed(dubs):
+    probe, neighbours, voices, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    await quiet(voices)
+    before = {r["episode"]: r for r in await voices.repo.for_series(7)}
+    assert players_of(before[1]) == ["cvh", "kodik"] and before[1]["status"] == "downloading"
+    neighbours.sources[2]["links"]["1"] = "https://site/moved#cvh-BlackCat-1"  # the page gave the row another address
+    leave_out(neighbours, "BlackCat", "cvh")
+    asks = neighbours.layout_asks + 1
+    layout_changed(probe)
+    await pass_over(voices, neighbours, asks)
+
+    after = {r["episode"]: r for r in await voices.repo.for_series(7)}
+    assert neighbours.cancelled_keys == [f"dub:{before[1]['id']}"]
+    assert after[1]["id"] != before[1]["id"] and after[1]["status"] == "pending" and players_of(after[1]) == ["kodik"]
+
+
+def leave_voices(neighbours, *voices):
+    neighbours.levers[(1, 1)] = [EffectiveLever(lever="voice.take", target=group_target(voice), value=False, level=Level.EPISODE)
+                                 for voice in voices]
+
+
+@pytest.mark.asyncio
+async def test_a_job_two_voice_overs_share_goes_on_for_the_one_that_is_left_and_is_cancelled_when_the_last_goes(dubs):
+    from test_voices import job_done, statuses_until, two_voices_ready
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+
+    leave_voices(neighbours, "RedHeadSound")
+    asks = neighbours.layout_asks + 1
+    layout_changed(probe)
+    await pass_over(voices, neighbours, asks)
+    [left] = await voices.repo.for_series(7)
+    assert left["voice_key"] == "BlackCat" and left["status"] == "aligning" and neighbours.conform_cancels == []
+
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+
+    async def placed():
+        return [r["status"] for r in await voices.repo.for_series(7)] == ["placed"]
+
+    await until_true(placed, ("the voice that stayed was not placed", await voices.repo.for_series(7)))
+    assert neighbours.conform_cancels == [] and not any("RedHeadSound" in name for name in library_files(neighbours))
+
+
+@pytest.mark.asyncio
+async def test_the_job_is_cancelled_when_every_voice_over_that_shared_it_has_gone(dubs):
+    from test_voices import statuses_until, two_voices_ready
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+
+    leave_voices(neighbours, "RedHeadSound", "BlackCat")
+    asks = neighbours.layout_asks + 1
+    layout_changed(probe)
+    await pass_over(voices, neighbours, asks)
+
+    async def cancelled():
+        return neighbours.conform_cancels == ["job-1"]
+
+    await until_true(cancelled, ("the job was not cancelled", neighbours.conform_cancels))

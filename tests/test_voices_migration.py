@@ -185,3 +185,23 @@ def test_the_way_back_keeps_the_row_of_the_whole_episode_whatever_the_order_the_
     assert {("/lib/p1.flac", "artifact"), ("/w/p1.mp4", "path"), ("job-p1", "job"),
             ("/lib/p2.flac", "artifact"), ("/w/p2.mp4", "path"), ("send-p2", "submission")} <= journal
     assert not any(path in ("/lib/whole.flac", "/w/whole.mp4", "job-whole") for path, _ in journal)
+
+
+def test_the_way_back_hands_over_a_job_only_when_no_row_that_stays_holds_it(at_0031):
+    """A job at the service is the work of a batch: the part that goes does not take with it a job another voice-over keeps."""
+    alembic(at_0031, "upgrade", "0032")
+    add = ("INSERT INTO voice_dubs (series_id, season, episode, part, voice_key, voice_label, chain, updated_at, status, "
+           "job_id, out_dir, submit_key) VALUES (7, 1, 1, ?, ?, ?, '[]', 'now', ?, ?, ?, ?)")
+    with sqlite3.connect(at_0031) as conn:
+        conn.execute(add, (0, "cat", "Cat", "aligning", "job-whole", "/w/out/whole", None))
+        conn.execute(add, (1, "cat", "Cat", "aligning", "job-shared", "/w/out/shared", None))
+        conn.execute(add, (0, "dog", "Dog", "aligning", "job-shared", "/w/out/shared", None))
+        conn.execute(add, (2, "cat", "Cat", "aligning", None, "/w/out/send", "send-shared"))
+        conn.execute(add, (0, "emu", "Emu", "aligning", None, "/w/out/send", "send-shared"))
+        conn.execute(add, (3, "cat", "Cat", "aligning", "job-own", "/w/out/own", None))
+        conn.commit()
+    alembic(at_0031, "downgrade", "0031")
+    with sqlite3.connect(at_0031) as conn:
+        journal = {(path, kind) for path, kind in conn.execute("SELECT path, kind FROM voice_cleanup")}
+    assert ("job-own", "job") in journal  # nobody who stays holds it
+    assert not any(path in ("job-shared", "send-shared", "job-whole") for path, _ in journal)

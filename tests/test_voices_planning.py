@@ -267,7 +267,7 @@ def test_two_voice_overs_with_different_links_stay_different_whatever_their_name
 
 
 def test_a_row_is_adopted_by_one_voice_over_and_not_by_one_that_has_a_row_of_its_own_key():
-    rows = [recorded(1, 1, "Old", "https://site/x"), recorded(2, 1, "New", "https://site/y")]
+    rows = [recorded(1, 1, "Old", "https://site/x"), recorded(2, 1, "New", "https://site/x")]
     keys = adopt([dub_of(1, "New", "https://site/x"), dub_of(1, "Other", "https://site/x")], rows)
     assert keys == {(1, 1, 0, "New"): "New", (1, 1, 0, "Other"): "Old"}
     twice = adopt([dub_of(1, "A", "https://site/x"), dub_of(1, "B", "https://site/x")], [recorded(1, 1, "Old", "https://site/x")])
@@ -295,3 +295,43 @@ def test_the_row_that_works_from_a_later_source_of_its_chain_is_ranked_by_the_so
     rows = [recorded(1, 1, "A", "https://site/z", "https://site/a", status="placed", attempt=1),
             recorded(2, 1, "B", "https://site/b", status="placed")]
     assert adopt([dub_of(1, "C", "https://site/b", "https://site/a")], rows) == {(1, 1, 0, "C"): "B"}
+
+
+def test_a_row_of_the_name_whose_source_the_voice_over_no_longer_offers_gives_way_to_a_row_whose_source_it_does():
+    rows = [recorded(1, 1, "Old", "https://site/x"), recorded(2, 1, "New", "https://site/y")]
+    assert adopt([dub_of(1, "New", "https://site/x")], rows) == {(1, 1, 0, "New"): "Old"}
+
+
+def test_a_row_that_has_its_track_stays_over_the_row_that_already_has_the_name_the_voice_over_now_carries():
+    """A group made of two voice-overs takes the name of one of them: the rows are judged the same whichever name it is."""
+    rows = [recorded(1, 1, "A", "https://site/a", status="placed"), recorded(2, 1, "B", "https://site/b", status="downloading")]
+    assert adopt([dub_of(1, "B", "https://site/b", "https://site/a")], rows) == {(1, 1, 0, "B"): "A"}
+    assert adopt([dub_of(1, "A", "https://site/b", "https://site/a")], rows) == {(1, 1, 0, "A"): "A"}
+
+
+def test_the_row_with_the_name_stays_when_it_has_its_track_and_the_other_has_not():
+    rows = [recorded(1, 1, "A", "https://site/a", status="downloading"), recorded(2, 1, "B", "https://site/b", status="placed")]
+    assert adopt([dub_of(1, "B", "https://site/a", "https://site/b")], rows) == {(1, 1, 0, "B"): "B"}
+
+
+def test_two_rows_with_tracks_stay_by_the_order_of_the_chain_whichever_of_them_has_the_name():
+    rows = [recorded(1, 1, "A", "https://site/a", status="placed"), recorded(2, 1, "B", "https://site/b", status="placed")]
+    assert adopt([dub_of(1, "B", "https://site/a", "https://site/b")], rows) == {(1, 1, 0, "B"): "A"}
+    assert adopt([dub_of(1, "B", "https://site/b", "https://site/a")], rows) == {(1, 1, 0, "B"): "B"}
+    assert adopt([dub_of(1, "A", "https://site/b", "https://site/a")], rows) == {(1, 1, 0, "A"): "B"}
+    assert adopt([dub_of(1, "A", "https://site/a", "https://site/b")], rows) == {(1, 1, 0, "A"): "A"}
+
+
+def test_the_row_with_the_name_is_judged_with_the_others_even_when_its_own_link_left_the_chain():
+    rows = [recorded(1, 1, "A", "https://site/a", status="placed"), recorded(2, 1, "B", "https://site/other", status="downloading")]
+    assert adopt([dub_of(1, "B", "https://site/b", "https://site/a")], rows) == {(1, 1, 0, "B"): "A"}
+
+
+def test_a_variant_the_user_left_out_is_named_by_its_source_and_player_not_by_the_link_it_has_now():
+    """The link of a row may change after the work began; the work that runs from the variant is found by what the variant is."""
+    rows = [row(1, "cvh", "Ref", 1), row(1, "cvh", "A", 1, link="https://site/new-link"), row(1, "kodik", "A", 1)]
+    leave_out = EffectiveLever(lever="variant.allow", target=variant_target("A", 1, "cvh"), value=False, level=Level.EPISODE)
+    found = planned(rows, [reference_of(rows, "Ref", 1)], settings=[EpisodeSettings(season=1, episode=1, levers=[leave_out])])
+    [dub] = [each for each in found.dubs if each.voice_key == "A"]
+    assert dub.left_out == frozenset({(1, "cvh")}) and [each.player for each in dub.chain] == ["kodik"]
+    assert [each.source_id for each in dub.chain] == [1]  # a link of the chain says which source it was found in

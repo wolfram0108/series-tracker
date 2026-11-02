@@ -88,10 +88,14 @@ def downgrade() -> None:
             "INSERT OR IGNORE INTO voice_cleanup (path, kind, error, updated_at) "
             f"SELECT {column}, '{kind}', 'handed over', {_NOW} FROM voice_dubs WHERE {goes} AND {column} IS NOT NULL")
     # A job at the service, whatever its step, and a submission that was sent and not answered, with the folder each wrote in.
+    # One that a row that stays still holds is the work of that row too: it is not handed over.
+    held = f"SELECT {{column}} FROM voice_dubs WHERE id IN ({_STAYS}) AND {{column}} IS NOT NULL"
     op.execute("INSERT OR IGNORE INTO voice_cleanup (path, kind, error, scope, updated_at) "
-               f"SELECT job_id, 'job', 'handed over', out_dir, {_NOW} FROM voice_dubs WHERE {goes} AND job_id IS NOT NULL")
+               f"SELECT job_id, 'job', 'handed over', out_dir, {_NOW} FROM voice_dubs WHERE {goes} AND job_id IS NOT NULL "
+               f"AND job_id NOT IN ({held.format(column='job_id')})")
     op.execute("INSERT OR IGNORE INTO voice_cleanup (path, kind, error, scope, updated_at) "
                f"SELECT submit_key, 'submission', 'handed over', out_dir, {_NOW} FROM voice_dubs "
-               f"WHERE {goes} AND status = 'aligning' AND job_id IS NULL AND submit_key IS NOT NULL")
+               f"WHERE {goes} AND status = 'aligning' AND job_id IS NULL AND submit_key IS NOT NULL "
+               f"AND submit_key NOT IN ({held.format(column='submit_key')})")
     op.execute(_table(part=False))
     _swap(f"INSERT INTO voice_dubs_next ({_COLUMNS}) SELECT {_COLUMNS} FROM voice_dubs WHERE id IN ({_STAYS})")

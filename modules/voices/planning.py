@@ -27,17 +27,21 @@ Slot = tuple[int, int, int]  # (season, episode, part); part 0 is an episode wit
 class Candidate(NamedTuple):
     """One place a voice-over of an episode can be downloaded from: the form of a link of `voice_dubs.chain`.
 
-    `file` is (source id, row key) of a row that covers several episodes: its video is downloaded once for all of them."""
+    `file` is (source id, row key) of a row that covers several episodes: its video is downloaded once for all of them.
+    `source_id` and `player` are what the variant is: the link is only where it shows its video now, and it may change."""
 
     player: str
     studio: str
     url: str
     file: tuple[int, str] | None = None
+    source_id: int | None = None
 
     def as_json(self) -> dict[str, Any]:
         found: dict[str, Any] = {"player": self.player, "studio": self.studio, "url": self.url}
         if self.file is not None:
             found["file"] = {"source_id": self.file[0], "row_key": self.file[1]}
+        if self.source_id is not None:
+            found["source_id"] = self.source_id
         return found
 
 
@@ -51,7 +55,10 @@ class PlannedDub:
     voice_key: str
     voice_label: str
     chain: tuple[Candidate, ...]
-    left_out: frozenset[str] = frozenset()  # links of the variants the user left out: no work may run from them
+    # The variants the user left out, as (source id, player): no work may run from them. A chain recorded before its
+    # candidates said which source they came from is told by the links the variants showed.
+    left_out: frozenset[tuple[int, str]] = frozenset()
+    left_out_links: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -98,9 +105,10 @@ def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settin
             covering = [row for row in fitting if (label, row.source_id, row.player) not in denied]
             chain = _chain(covering, picks.get(group_target(label)), priority, players)
             kept = {each.url for each in chain}
-            left_out = frozenset(row.link for row in fitting
-                                 if (label, row.source_id, row.player) in denied and row.link and row.link not in kept)
-            dubs.append(PlannedDub(ref.season, ref.episode, slot[2], label, label, chain, left_out))
+            left = [row for row in fitting if (label, row.source_id, row.player) in denied and row.link not in kept]
+            dubs.append(PlannedDub(ref.season, ref.episode, slot[2], label, label, chain,
+                                   frozenset((row.source_id, row.player) for row in left),
+                                   frozenset(row.link for row in left if row.link)))
     return Plan(tuple(dubs), frozenset(with_reference), frozenset(undecided))
 
 
@@ -139,23 +147,26 @@ def _chain(rows: Sequence[CompositionRow], pick: tuple[int, str] | None, priorit
     chain: dict[str, Candidate] = {}
     for _, row in ordered:
         chain.setdefault(row.link, Candidate(row.player, row.voice_label, row.link,
-                                             (row.source_id, row.row_key) if row.is_compilation else None))
+                                             (row.source_id, row.row_key) if row.is_compilation else None, row.source_id))
     return tuple(chain.values())
 
 
-def _standing(row: dict[str, Any], order: dict[str, int]) -> tuple[int, int, int]:
+def _standing(row: dict[str, Any], order: dict[str, int], key: str) -> tuple[int, int, int, int]:
     """Which of the rows of one voice-over stays when several became it: the one that has its track first, then the one
-    whose source stands first in the chain of the voice-over, then the older one."""
+    whose source stands first in the chain of the voice-over, then the one that has the name of the voice-over already (so
+    that nothing is renamed for nothing), then the older one."""
     chain = row["chain"]
     used = chain[row.get("attempt", 0)]["url"] if row.get("attempt", 0) < len(chain) else None
     has_track = row.get("status") in (S.PLACED, S.ALIGNED)
-    return (0 if has_track else 1, order.get(used, len(order)), row["id"])
+    return (0 if has_track else 1, order.get(used, len(order)), 0 if row["voice_key"] == key else 1, row["id"])
 
 
 def adopt(dubs: Iterable[PlannedDub], rows: Iterable[dict[str, Any]]) -> dict[tuple[int, int, int, str], str]:
-    """The key each planned voice-over is recorded under: its own, unless a row of the same episode under another key
-    holds a link of its chain. That is the same voice-over called by another name (a group was made or renamed), so the
-    row keeps its key and what it has downloaded. A row whose key another planned voice-over has is that voice-over."""
+    """The key each planned voice-over is recorded under. The rows of the episode that are that voice-over are the row of
+    its own key and every row under another key that holds a link of its chain: the same voice-over called by another name
+    (a group was made or renamed, or took the name of a group that was there). One of them stays, whichever name it has —
+    by `_standing` — and keeps what it has downloaded; the others are not planned and leave with what they own. A row whose
+    key another planned voice-over has is that voice-over."""
     dubs = list(dubs)
     planned = {(each.season, each.episode, each.part, each.voice_key) for each in dubs}
     by_episode: dict[Slot, list[dict[str, Any]]] = {}
@@ -166,15 +177,14 @@ def adopt(dubs: Iterable[PlannedDub], rows: Iterable[dict[str, Any]]) -> dict[tu
     for dub in dubs:
         slot = (dub.season, dub.episode, dub.part)
         recorded = by_episode.get(slot, ())
-        key = dub.voice_key
-        if not any(row["voice_key"] == key for row in recorded):
-            order = {each.url: place for place, each in enumerate(dub.chain)}
-            same = min((row for row in recorded
-                        if (*slot, row["voice_key"]) not in planned | taken
-                        and order.keys() & {each["url"] for each in row["chain"]}),
-                       key=lambda row: _standing(row, order), default=None)
-            if same is not None:
-                key = same["voice_key"]
-                taken.add((*slot, key))
+        order = {each.url: place for place, each in enumerate(dub.chain)}
+        same = min((row for row in recorded
+                    if row["voice_key"] == dub.voice_key
+                    or ((*slot, row["voice_key"]) not in planned | taken
+                        and order.keys() & {each["url"] for each in row["chain"]})),
+                   key=lambda row: _standing(row, order, dub.voice_key), default=None)
+        key = same["voice_key"] if same is not None else dub.voice_key
+        if key != dub.voice_key:
+            taken.add((*slot, key))
         keys[(*slot, dub.voice_key)] = key
     return keys

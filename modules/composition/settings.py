@@ -88,7 +88,7 @@ def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
              on_conflict: Callable[[list[SettingRecord]], None] | None = None) -> list[SettingRecord]:
     """The records after voice-over groups changed their names: what was set for a group (or for a variant of it, or as
     the group of the reference) is set for the group it became. A record that would meet one the new name has already
-    set at the same level gives way to it. Records of several groups that became one meet each other: a flag that is off
+    set at the same level meets it with the rest. Records of several groups that became one meet each other: a flag that is off
     stands over one that is on (what the user switched off is not switched on by a merge); picks that are the same are
     one, and picks that differ go back to the level above, which `on_conflict` is told."""
     if not renames:
@@ -107,24 +107,29 @@ def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
         return record if (target, value) == (record.target, record.value) else record.model_copy(
             update={"target": target, "value": value})
 
-    own = {_slot(each) for each in records}
     kept: list[SettingRecord] = []
     arrived: dict[tuple, list[SettingRecord]] = {}
     for record in records:
         shifted = moved(record)
         if shifted is record:
             kept.append(shifted)
-        elif _slot(shifted) in own and shifted.target != record.target:
-            continue  # the new name has this record already: its own stands
         else:
             arrived.setdefault(_slot(shifted), []).append(shifted)
+    # A record the new name has already is one of the records that meet at its place, as a group that was there is one of
+    # the groups that became the new one: the same rule for a name that is new and a name that is taken.
+    settled = []
+    for record in kept:
+        if _slot(record) in arrived:
+            arrived[_slot(record)].append(record)
+        else:
+            settled.append(record)
     for group in arrived.values():
         merged = _merged(group)
         if merged is not None:
-            kept.append(merged)
+            settled.append(merged)
         elif on_conflict is not None:
             on_conflict(group)
-    return canonical(kept)
+    return canonical(settled)
 
 
 def _merged(group: list[SettingRecord]) -> SettingRecord | None:
