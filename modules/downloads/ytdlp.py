@@ -377,17 +377,19 @@ async def download(video_url: str, full_output_path: str,
 
 
 async def _whole_or_discarded(done: tuple[bool, str], path: str) -> tuple[bool, str]:
-    """A download that says it is done is checked for pieces it lost; a file with a hole is not kept, and the failure is
-    one the queue tries again."""
+    """A download that says it is done is checked for pieces it lost. A file with a hole is not kept; a look that could not
+    be made proves nothing, so the file is kept and the download is not finished. Both are failures the queue tries again."""
     if not done[0]:
         return done
-    holes = await video_gaps(path, longer_than=HOLE_S)
-    if not holes:
+    seen = await video_gaps(path, longer_than=HOLE_S)
+    if not seen.checked:
+        return False, f"обрыв: проверка целостности видео не выполнена ({seen.reason}) — загрузка повторится"
+    if not seen.holes:
         return done
     await storage.discard(path)
-    lost = sum(length for _, length in holes)
-    return False, (f"обрыв: в видео нет кадров {lost:.0f} с (кусков {len(holes)}, первый на {holes[0][0]:.0f}-й секунде) — "
-                   "неполная загрузка")
+    lost = sum(length for _, length in seen.holes)
+    return False, (f"обрыв: в видео нет кадров {lost:.0f} с (кусков {len(seen.holes)}, первый на {seen.holes[0][0]:.0f}-й "
+                   "секунде) — неполная загрузка")
 
 
 async def _download_ranged_file(video_url: str, headers: dict, full_output_path: str, on_progress: ProgressCb,

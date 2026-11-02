@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import shutil
+import statistics
+from dataclasses import dataclass
 
 from .proc import run_capture
 
 DEFAULT_TIMEOUT_S = 30.0
+# A pause is a hole only when it is also long against the pace of the video: a video of a frame in two seconds has no hole.
+PACE_FACTOR = 8
 
 
 async def duration_of(target: str, *, input_args: list[str] | None = None,
@@ -25,22 +29,37 @@ async def duration_of(target: str, *, input_args: list[str] | None = None,
         return 0.0
 
 
-async def video_gaps(path: str, *, longer_than: float, timeout: float = 120.0) -> list[tuple[float, float]]:
-    """(second where it begins, seconds it lasts) of every pause between two frames of the first video stream that is
-    longer than `longer_than`: a piece the download lost leaves such a pause, while the audio and the length of the file
-    stay whole. Empty when there is none, when the file has no video, or when ffprobe cannot read it."""
+@dataclass(frozen=True)
+class Gaps:
+    """What the look at the video of a file found. `checked` is False when the look could not be made (ffprobe is missing,
+    failed or did not answer, the file does not read or has no video): that says nothing about the file, and is told so."""
+
+    checked: bool
+    holes: tuple[tuple[float, float], ...] = ()  # (second where it begins, seconds it lasts)
+    reason: str = ""
+
+
+async def video_gaps(path: str, *, longer_than: float, timeout: float = 120.0) -> Gaps:
+    """The pauses between two frames of the first video stream that are longer than `longer_than` seconds and longer than
+    `PACE_FACTOR` times the usual interval between its frames: a piece the download lost leaves such a pause, while the
+    audio and the length of the file stay whole. A loss at the very end of the video leaves no pause to see: that is the
+    check of the length of the stream the download makes."""
     executable = shutil.which("ffprobe")
     if not executable:
-        return []
+        return Gaps(False, reason="ffprobe не найден")
     cmd = [executable, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time", "-of", "csv=p=0", path]
     try:
         code, out, _ = await run_capture(cmd, timeout=timeout)
-    except (OSError, TimeoutError):
-        return []
+    except (OSError, TimeoutError) as exc:
+        return Gaps(False, reason=f"ffprobe не ответил: {exc}")
     if code != 0:
-        return []
+        return Gaps(False, reason="файл не читается")
     times = sorted(float(word) for word in out.decode().split() if _is_number(word))
-    return [(before, after - before) for before, after in zip(times, times[1:]) if after - before > longer_than]
+    if not times:
+        return Gaps(False, reason="в файле нет видео")
+    intervals = [after - before for before, after in zip(times, times[1:])]
+    limit = max(longer_than, PACE_FACTOR * (statistics.median(intervals) if intervals else 0.0))
+    return Gaps(True, tuple((before, after - before) for before, after in zip(times, times[1:]) if after - before > limit))
 
 
 def _is_number(word: str) -> bool:
@@ -49,4 +68,3 @@ def _is_number(word: str) -> bool:
     except ValueError:
         return False
     return True
-
