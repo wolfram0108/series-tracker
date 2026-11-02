@@ -95,7 +95,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                              timeout=30)
         except BusRequestError as exc:
             msg = str(exc)
-            code = 404 if "LookupError" in msg else 500
+            code = 404 if "LookupError" in msg else 409 if msg.startswith("NotAllowed") else 500
             return JSONResponse(
                 {"success": False, "error": msg.split(": ", 1)[-1]},
                 status_code=code)

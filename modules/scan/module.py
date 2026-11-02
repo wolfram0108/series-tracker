@@ -73,7 +73,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from core import BaseModule, BusRequestError, ids, torrent_source
-from core.contracts import (CompositionReply, OutputSwitch, Reference, ReferenceChanged, SeriesSource, SourceStatus,
+from core.contracts import (availability, CompositionReply, OutputSwitch, Reference, ReferenceChanged, SeriesSource, SourceStatus,
                             VoiceSettingsView)
 from core.db import Database
 from core.envelope import Envelope
@@ -428,8 +428,7 @@ class ScanModule(BaseModule):
                           download: bool = True, resume: int | None = None) -> dict:
         """A scan of one series. The command is written down before anything is waited for, so that a restart finds
         it: a video synchronization is a task of `scan_tasks` until it ends (`resume` is the task a restart found)."""
-        if series_id in self._running:
-            raise ScanError(f"скан сериала {series_id} уже запущен")
+        self._require_idle(series_id)
         self._running.add(series_id)
         self._contribute(series_id, scanning=True, error=False)
         intent = resume
@@ -492,8 +491,7 @@ class ScanModule(BaseModule):
 
         Отдельный путь, а не флаг скана: здесь нет ни переобработки имён,
         ни диспетчеризации — только «добудь раздачу и покажи, что в ней»."""
-        if series_id in self._running:
-            raise ScanError(f"скан сериала {series_id} уже запущен")
+        self._require_idle(series_id)
         self._running.add(series_id)
         self._contribute(series_id, scanning=True, error=False)
         try:
@@ -592,6 +590,12 @@ class ScanModule(BaseModule):
                 continue  # nobody does that kind of work in this process
             if isinstance(answer, BaseException):
                 raise answer
+
+    def _require_idle(self, series_id: int) -> None:
+        """A scan of a series that is being scanned is refused by the table of what is allowed, as every module refuses."""
+        state = availability.SERIES_SCANNING if series_id in self._running else availability.SERIES_IDLE
+        if not availability.allowed(availability.Action.SYNC, state):
+            raise ScanError(f"скан сериала {series_id} уже запущен")
 
     async def _fingerprint(self, series_id: int) -> tuple:
         """The references and the rows of the plan as stored: two equal fingerprints mean the run changed nothing."""

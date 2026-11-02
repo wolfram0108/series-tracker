@@ -75,7 +75,7 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from core import BaseModule
-from core.contracts import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
+from core.contracts import (REFERENCE_CHOICE, VOICE_PLAYER, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RulesApplyReply,
                             RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
@@ -202,7 +202,7 @@ class CompositionModule(BaseModule):
             settings=[EpisodeSettings(season=season, episode=episode,
                                       levers=settings.effective(records, season, episode))
                       for season, episode in sorted(episodes)],
-            levers=levers.specs())
+            levers=levers.specs(), availability=availability.table())
         return reply.model_dump(mode="json")
 
     async def on_preview(self, env: Envelope) -> dict:
@@ -277,7 +277,20 @@ class CompositionModule(BaseModule):
         problem = settings.validate(record)
         if problem is not None:
             raise ValueError(problem)
+        await self._require_pickable(record)
         return await self._edit(record.series_id, lambda records: settings.apply_set(records, record))
+
+    async def _require_pickable(self, record: SettingsSet) -> None:
+        """A variant is picked as the reference, or as the first one of its group, only where the table of what is allowed
+        lets it: the same rule the window draws its marks by."""
+        if not isinstance(record.value, dict) or record.lever not in (REFERENCE_CHOICE, VOICE_PLAYER):
+            return
+        group = record.value.get("group") if record.lever == REFERENCE_CHOICE else parse_group_target(record.target or "")
+        action = availability.Action.CHOOSE_REFERENCE if record.lever == REFERENCE_CHOICE else availability.Action.PREFER_VARIANT
+        stored = await self.repo.stored(record.series_id)
+        found = [row for row in stored.rows if not row.excluded and row.voice_label == group
+                 and row.source_id == record.value.get("source_id") and row.player == record.value.get("player")]
+        availability.require(action, availability.variant_state(found))
 
     async def on_settings_reset(self, env: Envelope) -> dict:
         scope = SettingsReset.model_validate(env.payload)

@@ -490,7 +490,14 @@ async def test_a_series_whose_names_are_all_empty_asks_the_groups_nothing(system
 # --- M-33: levers on the bus, C-13 to C-17 -------------------------------------------------------------------------
 
 def choice(source_id: int, player: str = "vk") -> dict:
-    return {"group": "Рутина", "source_id": source_id, "player": player}
+    """A variant the layouts of these tests have: the voice-over `Ruchime` of the standard page, at a player of the source."""
+    return {"group": "Неизвестная озвучка 1", "source_id": source_id, "player": player}
+
+
+def rich_standard(url: str = PAGE) -> ReleaseTable:
+    """The standard page, with the same voice-over also at the players kodik and allvideo, for the levers that pick them."""
+    return page(*season_rows(1, range(1, 6)), *season_rows(2, range(1, 3)), *season_rows(1, range(1, 6), player="kodik"),
+                *season_rows(1, range(1, 6), player="allvideo"), url=url)
 
 
 def levers_by_episode(reply: CompositionReply) -> dict:
@@ -501,7 +508,7 @@ def levers_by_episode(reply: CompositionReply) -> dict:
 async def test_a_season_value_reaches_the_episodes_that_follow_it_and_not_the_one_with_a_value_of_its_own(system):
     """C-13."""
     s = system
-    series_id = await laid_out(s)
+    series_id = await laid_out(s, rich_standard())
     source_id = only_source(s, series_id)
     assert await s.set(series_id, "reference.choice", choice(source_id), season=1) == {"ok": True}
     assert s.taken(s.changed)[0]["episodes"] == season_one(1, 2, 3, 4, 5)
@@ -524,7 +531,7 @@ async def test_a_season_value_reaches_the_episodes_that_follow_it_and_not_the_on
 async def test_resetting_an_episode_back_to_its_season_touches_that_episode_alone(system):
     """C-14."""
     s = system
-    series_id = await laid_out(s)
+    series_id = await laid_out(s, rich_standard())
     source_id = only_source(s, series_id)
     await s.set(series_id, "reference.choice", choice(source_id), season=1)
     await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=3)
@@ -591,13 +598,15 @@ async def test_a_source_that_is_removed_takes_the_settings_that_point_at_it_and_
 async def test_an_episode_that_leaves_the_layout_takes_its_own_settings_and_the_numbers_keep_the_rest(system):
     """C-17."""
     s = system
-    series_id = await laid_out(s)
+    series_id = await laid_out(s, rich_standard())
     source_id = only_source(s, series_id)
     await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=5)
     await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=2)
     await s.set(series_id, "voice.take", False, season=1, target=group_target("Рутина"))
     s.taken(s.changed)
-    await s.counted(lambda: s.sources.finish(PAGE, page(*season_rows(1, range(1, 4)), *season_rows(2, [1]))))
+    await s.counted(lambda: s.sources.finish(PAGE, page(*season_rows(1, range(1, 4)), *season_rows(2, [1]),
+                                                        *season_rows(1, range(1, 4), player="kodik"),
+                                                        *season_rows(1, range(1, 4), player="allvideo"))))
     assert s.sql("SELECT season, episode, lever FROM output_settings WHERE series_id = ?"
                  " ORDER BY season, episode, lever", series_id) == [(1, None, "voice.take"),
                                                                    (1, 2, "reference.choice")]
@@ -608,7 +617,7 @@ async def test_an_episode_that_leaves_the_layout_takes_its_own_settings_and_the_
 async def test_the_settings_of_a_series_without_an_answered_source_are_not_taken_away_with_its_layout(system):
     """C-12: a profile taken off for a while must not wipe what the user set per episode."""
     s = system
-    series_id = await laid_out(s)
+    series_id = await laid_out(s, rich_standard())
     source_id = only_source(s, series_id)
     await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=2)
     await s.counted(lambda: s.catalog.update_source(source_id, parser_profile_id=None))
@@ -616,7 +625,7 @@ async def test_the_settings_of_a_series_without_an_answered_source_are_not_taken
     assert reply.rows == [] and reply.sources[0].status == SourceStatus.NO_PROFILE
     assert s.sql("SELECT COUNT(*) FROM output_settings") == [(1,)]
     await s.counted(lambda: s.catalog.update_source(source_id, parser_profile_id=7))
-    assert len((await s.get(series_id)).rows) == 7
+    assert len((await s.get(series_id)).rows) == 17
 
 
 @pytest.mark.asyncio
@@ -1072,7 +1081,7 @@ async def test_the_series_and_each_season_show_their_own_levers_and_what_they_in
 @pytest.mark.asyncio
 async def test_an_episode_with_a_value_of_its_own_leaves_the_headers_as_they_are(system):
     s = system
-    series_id = await laid_out(s)
+    series_id = await laid_out(s, rich_standard())
     await s.set(series_id, "reference.choice", choice(only_source(s, series_id)), season=1)
     before = (await s.get(series_id)).levels
     await s.set(series_id, "reference.choice", choice(only_source(s, series_id), "kodik"), season=1, episode=3)
@@ -1388,3 +1397,39 @@ async def test_the_preview_gives_the_names_of_the_release_as_the_table_has_them(
     reply = await preview(s, profile_id=None, refresh=False)
     assert reply.names == list(standard().names) and reply.names
 
+
+
+# --- what may be picked: the table of what is allowed in each state of a variant ---------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_variant_without_a_line_that_plays_is_refused_as_the_reference_and_as_the_preferred_one(system):
+    s = system
+    series_id = await laid_out(s, page(row("a", "Серия 1"), row("b", "Серия 2", player="kodik", state=RowState.ABSENT)))
+    source_id = only_source(s, series_id)
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1)
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await s.set(series_id, "voice.player", {"source_id": source_id, "player": "kodik"}, target=group_target(choice(1)["group"]))
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await s.set(series_id, "reference.choice", choice(source_id, "allvideo"), season=1)  # no line of it at all
+    assert s.sql("SELECT lever FROM output_settings WHERE series_id = ?", series_id) == []
+    assert await s.set(series_id, "reference.choice", choice(source_id), season=1) == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_a_variant_of_compilations_only_may_be_preferred_and_not_made_the_reference(system):
+    s = system
+    series_id = await laid_out(s, page(row("a", "Серия 1"), row("c", "2-4 серия", player="kodik")))
+    source_id = only_source(s, series_id)
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1)
+    assert await s.set(series_id, "voice.player", {"source_id": source_id, "player": "kodik"},
+                       target=group_target(choice(source_id)["group"])) == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_the_layout_carries_the_table_of_what_is_allowed(system):
+    s = system
+    series_id = await laid_out(s)
+    from core.contracts import availability
+    assert (await s.get(series_id)).availability == availability.table()

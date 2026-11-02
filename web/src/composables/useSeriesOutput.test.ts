@@ -11,7 +11,7 @@ import { useSSE } from "./useSSE"
 import { useCompositionStore, type ReferencePacket } from "../stores/composition"
 import { useVoicesStore, type VoiceDubEvent } from "../stores/voices"
 import { groupTarget, resetBody, setBody, type Reference, type Row } from "../lib/output"
-import { SPECS } from "../lib/output.fixtures"
+import { SPECS, AVAILABILITY } from "../lib/output.fixtures"
 import type { SourceSummary } from "../lib/sources"
 
 vi.mock("./outputCalls")
@@ -41,6 +41,7 @@ const composition = (over: Partial<Composition> = {}): Composition => ({
   levels: [{ season: 1, levers: [{ lever: "voice.take", target: groupTarget("Ruchime"), value: false, level: "season" }] }],
   settings: [{ season: 1, episode: 2, levers: [{ lever: "voice.take", target: groupTarget("Ruchime"), value: true, level: "episode" }] }],
   levers: SPECS,
+  availability: AVAILABILITY,
   ...over,
 })
 const dubEvent = (over: Partial<VoiceDubEvent> = {}): VoiceDubEvent => ({
@@ -84,6 +85,7 @@ describe("useSeriesOutput", () => {
       season: 1, episode: 2, references: [reference()], rows: [row()],
       levers: [{ lever: "voice.take", target: groupTarget("Ruchime"), value: true, level: "episode" }],
       dubs: [expect.objectContaining({ voice_label: "Ruchime", state: "align_queued" })],
+      availability: composition().availability,
     }])
     expect(output.levels.value).toEqual(composition().levels)
     expect(output.sources.value).toEqual([summary])

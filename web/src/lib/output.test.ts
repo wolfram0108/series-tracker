@@ -55,7 +55,7 @@ describe("joinEpisodes", () => {
 
   it("keeps an episode that only the settings name, with its levers and no rows", () => {
     const levers = [lever("voice.take", groupTarget("AniStar"), false, "episode")]
-    expect(joinEpisodes([], [], [settings(1, 5, levers)], [])).toEqual([episodeOf({ episode: 5, levers })])
+    expect(joinEpisodes([], [], [settings(1, 5, levers)], [])).toEqual([episodeOf({ episode: 5, levers, availability: {} })])
   })
 
   it("takes every reference of an episode in the order of its parts, the whole episode first", () => {
@@ -133,17 +133,17 @@ describe("the choices of an episode", () => {
     const columns = voiceColumns(view)
     const found = (group: string, sourceId: number, player: string) =>
       columns.find((column) => column.group === group)?.variants.find((each) => each.sourceId === sourceId && each.player === player)
-    expect(found("AniStar", 7, "vibix")).toMatchObject({ height: 480, playable: true, referable: true, playerLabel: "Vibix" })
-    expect(found("AniStar", 8, "kodik")).toMatchObject({ height: 1080, playable: true, referable: true, playerLabel: "Kodik" })
+    expect(found("AniStar", 7, "vibix")).toMatchObject({ height: 480, state: "referable", playerLabel: "Vibix" })
+    expect(found("AniStar", 8, "kodik")).toMatchObject({ height: 1080, state: "referable", playerLabel: "Kodik" })
     // A compilation is no file of one episode: its step counts for the variant, but the variant is no reference by it alone.
-    expect(found("Ruchime", 7, "vibix")).toMatchObject({ height: 2160, playable: true, referable: true })
-    expect(found("Ruchime", 7, "vk")).toMatchObject({ height: null, playable: false, referable: false })
-    expect(found("Ruchime", 9, "astar")).toMatchObject({ height: null, playable: true, referable: true })
+    expect(found("Ruchime", 7, "vibix")).toMatchObject({ height: 2160, state: "referable" })
+    expect(found("Ruchime", 7, "vk")).toMatchObject({ height: null, state: "absent" })
+    expect(found("Ruchime", 9, "astar")).toMatchObject({ height: null, state: "referable" })
   })
 
   it("offers a variant that plays only as a compilation for the preference but not for the reference", () => {
     const only = episodeOf({ rows: [row({ episode_end: 2 })] })
-    expect(voiceColumns(only)[0].variants[0]).toMatchObject({ playable: true, referable: false })
+    expect(voiceColumns(only)[0].variants[0]).toMatchObject({ state: "playable" })
   })
 
   it("says whether a voice-over is in no group of the user and which names its lines carry", () => {

@@ -52,6 +52,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     references.value,
     composition.value?.settings ?? [],
     voices.forSeries(seriesId),
+    composition.value?.availability ?? {},
   ))
   const levels = computed(() => composition.value?.levels ?? [])
   const sources = computed(() => composition.value?.sources ?? [])

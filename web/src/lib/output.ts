@@ -67,6 +67,8 @@ export interface EpisodeView {
   rows: Row[]
   levers: Lever[]
   dubs: VoiceDub[]
+  /** What may be done with an object in each of its states, as the core gives it with the layout. */
+  availability?: Record<string, string[]>
 }
 
 type Slot = { season: number; episode: number }
@@ -116,6 +118,7 @@ export function joinEpisodes(
   references: Reference[],
   settings: Schemas["EpisodeSettings"][],
   dubs: VoiceDub[],
+  availability: Record<string, string[]> = {},
 ): EpisodeView[] {
   const slots = new Map<string, Slot>()
   const note = (slot: Slot): void => {
@@ -160,6 +163,7 @@ export function joinEpisodes(
       rows: rowsBy.get(key) ?? [],
       levers: settingsBy.get(key)?.levers ?? [],
       dubs: dubsBy.get(key) ?? [],
+      availability,
     }
   })
 }
@@ -185,10 +189,14 @@ export interface PlayerOption {
 export interface Variant extends PlayerOption {
   group: string
   height: number | null
-  /** A line of it plays. */
-  playable: boolean
-  /** A line of it is one episode that plays: it may be the reference (a compilation is no file of one episode). */
-  referable: boolean
+  /** What the lines of it allow (the states of core/contracts/availability.py): `referable` when a line of it is one
+   *  episode that plays (a compilation is no file of one episode), `playable` when only compilations play, else `absent`. */
+  state: "referable" | "playable" | "absent"
+}
+
+/** Whether the table of the core allows the action in the state: a control is drawn enabled only where it does. */
+export function canDo(view: EpisodeView, action: string, state: string): boolean {
+  return (view.availability?.[action] ?? []).includes(state)
 }
 
 /** One voice-over group and its variants: a column of the output. */
@@ -225,15 +233,15 @@ export function sourcePlayers(view: EpisodeView): PlayerOption[] {
 /** The voice-over groups of the view with the variants of each: one column per group, alphabetically, the variants
  *  by source and player. */
 export function voiceColumns(view: EpisodeView): VoiceColumn[] {
-  const found = new Map<string, { group: string; sourceId: number; player: string; heights: number[]; playable: boolean; referable: boolean }>()
+  const found = new Map<string, { group: string; sourceId: number; player: string; heights: number[]; state: Variant["state"] }>()
   for (const row of view.rows) {
     const key = keyOf(row.voice_label, row.source_id, row.player)
     const variant = found.get(key)
-      ?? { group: row.voice_label, sourceId: row.source_id, player: row.player, heights: [], playable: false, referable: false }
+      ?? { group: row.voice_label, sourceId: row.source_id, player: row.player, heights: [], state: "absent" as Variant["state"] }
     if (row.state === "playable") {
-      variant.playable = true
       variant.heights.push(...(row.heights ?? []))
-      if (isSingle(row)) variant.referable = true
+      if (isSingle(row)) variant.state = "referable"
+      else if (variant.state === "absent") variant.state = "playable"
     }
     found.set(key, variant)
   }
@@ -370,5 +378,5 @@ export function scopeView(views: EpisodeView[]): EpisodeView {
       rows.push(row)
     }
   }
-  return { season: 0, episode: 0, references: [], rows, levers: [], dubs: [] }
+  return { season: 0, episode: 0, references: [], rows, levers: [], dubs: [], availability: views[0]?.availability ?? {} }
 }

@@ -4,7 +4,7 @@ import { mount, type DOMWrapper } from "@vue/test-utils"
 import OutputLevers from "./OutputLevers.vue"
 import { t } from "../../i18n"
 import { groupTarget, isDrawn, variantTarget, type EpisodeView, type Lever, type LeverSpec, type Row } from "../../lib/output"
-import { SPECS } from "../../lib/output.fixtures"
+import { AVAILABILITY, SPECS } from "../../lib/output.fixtures"
 
 // A playable single-episode line; each test changes only the fields it is about.
 const rowOf = (over: Partial<Row>): Row => ({
@@ -22,7 +22,7 @@ const ROWS: Row[] = [
   rowOf({ row_key: "e", source_id: 9, player: "cvh", player_label: "CVH", voice_label: "Студия", episode_start: 4, episode_end: 6, heights: [1080] }),
 ]
 
-const viewOf = (rows: Row[] = ROWS): EpisodeView => ({ season: 1, episode: 5, references: [], rows, levers: [], dubs: [] })
+const viewOf = (rows: Row[] = ROWS): EpisodeView => ({ season: 1, episode: 5, references: [], rows, levers: [], dubs: [], availability: AVAILABILITY })
 
 const leverOf = (over: Partial<Lever>): Lever => ({ lever: "voice.take", target: null, value: null, level: "default", ...over })
 
@@ -178,6 +178,21 @@ describe("OutputLevers", () => {
     for (const control of [...w.findAll("input"), ...w.findAll(".variant-mark")]) {
       expect(control.attributes("disabled")).toBeDefined()
     }
+  })
+
+  it("enables the marks of a variant only where the table of the core allows the action in the state of the variant", () => {
+    const rows = [rowOf({ row_key: "a", voice_label: "Ruchime", player: "vk" }),
+      rowOf({ row_key: "c", voice_label: "Ruchime", player: "kodik", player_label: "Kodik", episode_start: 4, episode_end: 6 }),
+      rowOf({ row_key: "d", voice_label: "Ruchime", player: "cvh", player_label: "CVH", state: "absent", heights: [] })]
+    const w = mountLevers({ view: viewOf(rows) })
+    const byPlayer = (label: string) => columnOf(w, "Ruchime").findAll(".variant").find((item) => item.find(".variant-name").text().includes(label))!
+    expect(mark(byPlayer("VK"), "reference").attributes("disabled")).toBeUndefined()
+    expect(mark(byPlayer("Kodik"), "reference").attributes("disabled")).toBeDefined()
+    expect(mark(byPlayer("Kodik"), "prefer").attributes("disabled")).toBeUndefined()
+    expect(mark(byPlayer("CVH"), "reference").attributes("disabled")).toBeDefined()
+    expect(mark(byPlayer("CVH"), "prefer").attributes("disabled")).toBeDefined()
+    const none = mountLevers({ view: { ...viewOf(rows), availability: {} } })
+    expect(none.findAll(".variant-reference, .variant-prefer").every((button) => button.attributes("disabled") !== undefined)).toBe(true)
   })
 
   it("says so when it cannot draw a lever of a form, and draws nothing for a view without lines", () => {

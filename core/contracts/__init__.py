@@ -18,12 +18,13 @@ from .release_table import (LINE_SEPARATOR, ReleaseTable, RowState, RowVoice, Si
 from .rules import RuleLine, RuleResult, RulesApplyReply, RulesApplyRequest, RulesProfileChanged
 from .series_sources import SeriesKind, SeriesSource, SourceChanged, SourceEvent, SourceType
 from .voice_groups import GroupsResolveReply, GroupsResolveRequest
+from .availability import Action, NotAllowed, allowed, refusal, require, variant_state
 from .work import WORK_WITHDRAWN, WorkWithdrawn
 from .voices import (DubEvent, DubEventStatus, DubHint, DubItem, DubRecord, DubsSnapshot, DubState, DubStatus,
                      Reason, SettingProblem, SnapshotItem,
                      VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView)
 
-__all__ = ["LEVER_FORMS", "WORK_WITHDRAWN", "WorkWithdrawn", "AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitReply", "DubEvent",
+__all__ = ["Action", "NotAllowed", "allowed", "refusal", "require", "variant_state", "LEVER_FORMS", "WORK_WITHDRAWN", "WorkWithdrawn", "AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitReply", "DubEvent",
            "DubEventStatus", "DubHint", "DubItem", "DubRecord", "DubsSnapshot", "DubState", "DubStatus", "Reason", "SnapshotItem", "SettingProblem", "VoiceSettingsDraft",
            "VoiceSettingsSaved", "VoiceSettingsView", "ConformSettingsDraft", "ConformSettingsSaved",
            "ConformSettingsView",

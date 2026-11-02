@@ -1335,3 +1335,20 @@ async def test_a_file_of_a_compilation_a_sliced_file_and_a_file_the_plan_holds_u
     probe.publish_event("scan.plan.updated", {"series_id": 2})
     await asyncio.sleep(0.3)
     assert all(os.path.exists(os.path.join(media_dir, name)) for name in ("compilation.mp4", "sliced.mp4", "shared.mp4"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state, allowed", [("pending", True), ("error", False)])
+async def test_a_download_is_cancelled_only_in_the_states_the_table_allows(system, state, allowed):
+    """A task that waits or runs is cancelled; a task that failed has no process to cancel, and is refused with the code."""
+    _, _, dl, probe, db_path, media_dir = system
+    _add_item(db_path, "uid1", 1)
+    _add_task(db_path, "uid1", state, os.path.join(media_dir, "e1.mp4"))
+    task = _tasks(db_path)[0]
+    if allowed:
+        assert (await probe.request("downloads.cancel", {"task_id": task["id"]}, timeout=10))["cancelled"] is True
+        assert _tasks(db_path) == []
+    else:
+        with pytest.raises(BusRequestError, match="not_allowed"):
+            await probe.request("downloads.cancel", {"task_id": task["id"]}, timeout=10)
+        assert len(_tasks(db_path)) == 1

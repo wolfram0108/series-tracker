@@ -74,7 +74,7 @@ import os
 import time
 
 from core import BaseModule, BusRequestError, storage
-from core.contracts import WORK_WITHDRAWN, SeriesKind, SourceType, WorkWithdrawn
+from core.contracts import WORK_WITHDRAWN, SeriesKind, SourceType, WorkWithdrawn, availability
 from core.db import Database
 from core.envelope import Envelope
 from core.retry import UNTIMED, Budget, retrying
@@ -478,6 +478,7 @@ class DownloadsModule(BaseModule):
         task = await self.repo.get_task(task_id)
         if task is None:
             raise LookupError(f"задача загрузки {task_id} не найдена")
+        availability.require(availability.Action.CANCEL_DOWNLOAD, task["status"])
         uid, series_id = task["task_key"], task["series_id"]
 
         # 1) остановить активную загрузку — cancel прерывает _run_download,

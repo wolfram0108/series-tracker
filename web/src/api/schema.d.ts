@@ -1639,6 +1639,10 @@ export interface components {
             settings?: components["schemas"]["EpisodeSettings"][];
             /** Levers */
             levers?: components["schemas"]["LeverSpec"][];
+            /** Availability */
+            availability?: {
+                [key: string]: string[];
+            };
         };
         /**
          * CompositionRow

@@ -316,6 +316,7 @@ export const ru = {
   "reason.trigger_in_two_groups": "«{trigger}» записано в двух группах: «{first}» и «{second}»",
   "reason.mixed_kinds": "Торрент и источники видео в одном сериале не сочетаются",
   "reason.last_source": "Единственный источник сериала удалить нельзя",
+  "reason.not_allowed": "Действие «{action}» недоступно: объект в состоянии «{state}»",
   "reason.source_exists": "Этот источник уже есть у сериала",
   "reason.profile_not_found": "Профиль правил не найден",
   "reason.not_a_torrent_page": "Страницу этого адреса читает сайт, а не трекер: добавьте её источником сериала",

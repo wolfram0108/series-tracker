@@ -194,3 +194,5 @@
 | `alembic/versions/0032_voices_part.py::downgrade` | уходящие строки определялись по части | перепроектирована | Р-68 (7) | — |
 | `core/contracts/output_settings.py::LEVER_FORMS`, `modules/composition/levers.py::register`, `web/src/components/status/OutputLevers.vue` | окно рисовало четыре формы из девяти | перепроектирована | Р-68 (8) | регистрация рычагов |
 | `tools/collectors/{live_three,live_sync,migrate_copy}.py`, `verdicts.py` | PASS без пар и без путей дорожек | перепроектирована | Р-68 (9) | — |
+| `downloads/module.py::_drop_tasks_without_plan_row`, `_remove_unwanted_files`, `downloads/repository.py::unwanted_files`, `scan/module.py::_removed_by_configuration` | идущая загрузка отключённой серии доходила до конца, файлы серий, снятых настройкой, оставались | перепроектирована | Р-68 (10): на диске то, что настроено | `on_plan_updated` |
+| `core/contracts/availability.py`, `scan._require_idle`, `downloads.on_cancel`, `composition._require_pickable`, `web/src/lib/output.ts::canDo` | допустимое по статусам решали тексты исключений у владельцев и окно само | перепроектирована | Р-68 (11): одна таблица в ядре | `OutputLevers.vue` |

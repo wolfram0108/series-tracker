@@ -3,7 +3,7 @@ import { computed } from "vue"
 import { hasMessage, t, type MessageKey } from "../../i18n"
 import VoiceGroupMaker from "../VoiceGroupMaker.vue"
 import {
-  groupTarget, isDrawn, isOwn, leverState, variantTarget, voiceColumns,
+  canDo, groupTarget, isDrawn, isOwn, leverState, variantTarget, voiceColumns,
   type EpisodeView, type Lever, type LeverSpec, type LeverState, type Variant,
 } from "../../lib/output"
 
@@ -185,12 +185,12 @@ const preferVariant = (spec: LeverSpec, variant: Variant): void =>
             <div class="cluster lever-row">
               <button
                 v-for="spec in referencePicks" :key="`ref-${spec.name}`" type="button" class="variant-mark variant-reference"
-                :aria-pressed="isReference(spec, variant)" :disabled="busy || !variant.referable"
+                :aria-pressed="isReference(spec, variant)" :disabled="busy || !canDo(view, 'choose_reference', variant.state)"
                 @click="pickReference(spec, variant)"
               >{{ t("output.variant.reference") }}</button>
               <button
                 v-for="spec in groupPicks" :key="`prefer-${spec.name}`" type="button" class="variant-mark variant-prefer"
-                :aria-pressed="isPreferred(spec, variant)" :disabled="busy || !variant.playable"
+                :aria-pressed="isPreferred(spec, variant)" :disabled="busy || !canDo(view, 'prefer_variant', variant.state)"
                 @click="preferVariant(spec, variant)"
               >{{ t("output.variant.prefer") }}</button>
             </div>
