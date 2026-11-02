@@ -15,6 +15,11 @@ echo "$@" > "$FAKE_DIR/ffmpeg_args"
 out="${@: -1}"
 # The stalled writer must be one process, as the real ffmpeg is: a child left by a killed shell keeps the pipe open.
 if [ -f "$FAKE_DIR/stall" ]; then exec sleep 30; fi
+# The line ffmpeg prints for an HLS segment it skips, followed by more warnings than the tail of its output keeps.
+if [ -f "$FAKE_DIR/skip" ]; then
+  echo "[hls @ 0x55] Failed to open segment 2 of playlist 0" >&2
+  for i in $(seq 1 80); do echo "[h264 @ 0x56] Packet corrupt ($i)" >&2; done
+fi
 echo "progress=end"
 echo data > "$out"
 exit $(cat "$FAKE_DIR/ffmpeg_rc" 2>/dev/null || echo 0)
@@ -69,15 +74,24 @@ async def test_a_network_stream_is_read_with_reconnects_and_the_headers(fake, tm
     assert args.index("-reconnect") < args.index("-i")
     for flag in ("-reconnect_streamed", "-reconnect_on_network_error", "-reconnect_delay_max"):
         assert args.index(flag) < args.index("-i")
+    assert args[args.index("-seg_max_retry") + 1] == str(ytdlp.SEGMENT_RETRIES) and args.index("-seg_max_retry") < args.index("-i")
     assert "Referer: https://kodikplayer.com/" in (state / "ffmpeg_args").read_text()
 
 
 @pytest.mark.asyncio
-async def test_a_local_manifest_gets_no_network_options(fake, tmp_path):
+async def test_a_local_manifest_gets_no_network_options_but_asks_for_its_segments_again(fake, tmp_path):
     state, _ = fake
     target = str(tmp_path / "e.mp4")
     ok, _ = await ytdlp._download_direct_ffmpeg("file:/tmp/m.m3u8", {}, target, noop)
-    assert ok and "-reconnect" not in (state / "ffmpeg_args").read_text()
+    args = (state / "ffmpeg_args").read_text()
+    assert ok and "-reconnect" not in args and "-seg_max_retry" in args
+
+
+@pytest.mark.asyncio
+async def test_a_progressive_file_gets_no_option_of_the_hls_demuxer(fake, tmp_path):
+    state, _ = fake
+    ok, _ = await ytdlp._download_direct_ffmpeg("https://cdn.test/v/720.mp4?sign=1", {"Referer": "x"}, str(tmp_path / "e.mp4"), noop)
+    assert ok and "-seg_max_retry" not in (state / "ffmpeg_args").read_text()
 
 
 @pytest.mark.asyncio
@@ -87,6 +101,17 @@ async def test_a_broken_off_stream_is_not_taken_for_a_finished_episode(fake, tmp
     target = str(tmp_path / "e.mp4")
     ok, error = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"}, target, noop)
     assert not ok and "обрыв" in error and "300" in error and "1200" in error
+    assert not os.path.exists(target) and not os.path.exists(target + ".download.mp4")
+    assert _transient_download_error(error)
+
+
+@pytest.mark.asyncio
+async def test_a_skipped_segment_fails_a_download_whose_length_is_whole(fake, tmp_path):
+    state, _ = fake
+    (state / "skip").write_text("1")  # the length of the file is the announced one, yet ffmpeg said it skipped segment 2
+    target = str(tmp_path / "e.mp4")
+    ok, error = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"}, target, noop)
+    assert not ok and "пропустил сегменты" in error and "№2" in error
     assert not os.path.exists(target) and not os.path.exists(target + ".download.mp4")
     assert _transient_download_error(error)
 
