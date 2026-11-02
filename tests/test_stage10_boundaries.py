@@ -6,6 +6,7 @@ queue and the download to the real module. What a test waits for is a row of the
 never time; the one number (STUCK_S) only ends a test that is stuck.
 """
 import asyncio
+import json
 import sqlite3
 
 import pytest
@@ -39,7 +40,14 @@ class Neighbours(World):
         h("rules.format_filename", self.on_format)
         h("sources.video.stream", self.on_stream)
 
+    format_gate: asyncio.Event | None = None  # while it is closed, nobody gets the name of a file
+    format_asked: asyncio.Event | None = None
+
     async def on_format(self, env) -> dict:
+        if self.format_asked is not None:
+            self.format_asked.set()
+        if self.format_gate is not None:
+            await self.format_gate.wait()
         item = env.payload["media_item"]
         return {"filename": f"Серия {item['episode_start']:02d}.mp4"}
 
@@ -232,3 +240,28 @@ async def test_a_replacement_that_is_fetched_takes_the_place_of_the_old_file_and
     assert (rig.media / old["final_filename"]).read_bytes() == b"https://v/new"
     assert rig.query("SELECT final_filename FROM media_items WHERE unique_id=?", (old["unique_id"],))[0]["final_filename"] is None
     assert sorted(each.name for each in rig.media.iterdir()) == [old["final_filename"]]
+
+
+async def test_the_command_to_synchronize_is_kept_until_downloads_has_written_the_work_down(rig):
+    rig.world.format_gate, rig.world.format_asked = asyncio.Event(), asyncio.Event()
+    rig.world.rows = [rig.row("a", 1, link="https://v/1")]
+    run = asyncio.create_task(rig.run())
+    await asyncio.wait_for(rig.world.format_asked.wait(), STUCK_S)
+
+    # Downloads has the work and has not recorded it: the synchronization has not ended, and its command is on the database.
+    assert not run.done()
+    assert [json.loads(each["results_data"]).get("video_sync") for each in rig.query("SELECT results_data FROM scan_tasks")] == [True]
+    assert rig.tasks() == {}
+
+    rig.world.format_gate.set()
+    await asyncio.wait_for(run, STUCK_S * 2)
+    assert list(rig.tasks()) and rig.query("SELECT id FROM scan_tasks") == []
+
+
+async def test_a_synchronization_whose_work_downloads_cannot_take_ends_as_a_failure_with_its_command_kept(rig):
+    rig.execute("UPDATE series SET save_path='relative/path' WHERE id=?", (rig.series_id,))
+    rig.world.rows = [rig.row("a", 1, link="https://v/1")]
+    with pytest.raises(Exception):
+        await rig.run()
+    assert [each["status"] for each in rig.query("SELECT status FROM scan_tasks")] == ["error"]
+    assert rig.tasks() == {}

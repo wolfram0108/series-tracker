@@ -260,7 +260,7 @@ class DownloadsModule(BaseModule):
         if not os.path.isabs(base_path):
             self.log.error("серия %d: путь сохранения не абсолютный (%r) — "
                            "загрузка не запущена", series_id, base_path)
-            return
+            raise ValueError(f"путь сохранения не абсолютный: {base_path!r}")
         adopted = await self._adopt_existing_files(series)
         await self._retire_superseded(series)
         created = 0

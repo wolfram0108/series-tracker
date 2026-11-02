@@ -440,6 +440,7 @@ class VoicesModule(BaseModule):
                 await self._dispatch(series_id)
             except (BusRequestError, LookupError, ValueError, OSError, asyncio.TimeoutError) as exc:
                 self.log.warning("сериал %d: озвучки не подготовлены: %s", series_id, exc)
+                raise  # the sender keeps its command: the reply is the word that the work is written down
 
     async def _dispatch(self, series_id: int) -> None:
         """The explicit sync: the series may download from now on, and what failed is offered again."""

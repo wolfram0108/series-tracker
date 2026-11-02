@@ -94,6 +94,8 @@ DEFAULT_REPLACE_MODE = "rolling"
 STEP_TIMEOUT_S = 30.0
 # Counting a layout asks the constructor once per source, up to 300 s each.
 RECOMPUTE_TIMEOUT_S = 900.0
+# A receiver answers once it has written the work down; the number only ends a wait on a receiver that is stuck.
+HANDOVER_TIMEOUT_S = 900.0
 
 _NO_HANDLER = "нет обработчика"
 
@@ -572,10 +574,22 @@ class ScanModule(BaseModule):
         # An explicit scan is the only way to a download: after the plan, downloads is told to fetch what is missing and
         # voices to take the voice-overs of the same episodes; a plain save (download=False) and a recount on an event do not.
         if download:
-            self.send_command("downloads.dispatch", {"series_id": series_id})
-            self.send_command("voices.dispatch", {"series_id": series_id})
+            await self._hand_over(series_id)
         return {"kind": "video", "changed": changed, "sources": [each.as_dict() for each in tables],
                 "references": output.marks(refreshed.references), "in_plan": refreshed.in_plan}
+
+    async def _hand_over(self, series_id: int) -> None:
+        """The work goes to those who do it, and the command of the user is kept until each of them has written the work
+        down: a receiver answers after its record, so a stop at any point of the hand-over finds the command again and
+        the next run gives the work again (a receiver takes the same work twice as once)."""
+        topics = ("downloads.dispatch", "voices.dispatch")
+        answers = await asyncio.gather(*(self.request(topic, {"series_id": series_id}, timeout=HANDOVER_TIMEOUT_S)
+                                         for topic in topics), return_exceptions=True)
+        for answer in answers:
+            if isinstance(answer, BusRequestError) and _NO_HANDLER in str(answer):
+                continue  # nobody does that kind of work in this process
+            if isinstance(answer, BaseException):
+                raise answer
 
     async def _fingerprint(self, series_id: int) -> tuple:
         """The references and the rows of the plan as stored: two equal fingerprints mean the run changed nothing."""
