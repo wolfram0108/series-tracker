@@ -172,7 +172,7 @@ class BaseModule:
             try:
                 fut = self._pending.get(env.correlation_id)
                 if fut is None or fut.done():
-                    continue  # запоздавший ответ после таймаута — игнорируем
+                    continue  # a reply that came after the fuse is ignored
                 if isinstance(env.payload, dict) and ERROR_KEY in env.payload:
                     fut.set_exception(BusRequestError(env.payload[ERROR_KEY]))
                 else:

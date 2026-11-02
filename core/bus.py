@@ -35,17 +35,17 @@ class Subscription:
     sub_id: int
     pattern: str
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
-    tracked: bool = False  # потребитель сообщает `Bus.processed` о каждом конверте
+    tracked: bool = False  # the consumer reports each envelope it is done with (`Bus.processed`)
 
 
 class Bus:
     def __init__(self) -> None:
         self._subs: dict[int, Subscription] = {}
         self._ids = itertools.count(1)
-        self._unfinished = 0  # конверты учитываемых подписок: в очереди или в обработке
+        self._unfinished = 0  # envelopes of tracked subscriptions that are queued or being handled
         self._quiet = asyncio.Event()
         self._quiet.set()
-        self._step = asyncio.Event()  # поднимается с каждым опубликованным и с каждым обработанным конвертом
+        self._step = asyncio.Event()  # set with every envelope published and every envelope taken apart
 
     def subscribe(self, pattern: str, *, tracked: bool = False) -> Subscription:
         sub = Subscription(sub_id=next(self._ids), pattern=pattern, tracked=tracked)
@@ -54,7 +54,7 @@ class Bus:
 
     def unsubscribe(self, sub: Subscription) -> None:
         if self._subs.pop(sub.sub_id, None) is not None and sub.tracked:
-            for _ in range(sub.queue.qsize()):  # конверты, которые уже никто не разберёт
+            for _ in range(sub.queue.qsize()):  # envelopes that nobody will take apart any more
                 self.processed(sub)
 
     def _tick(self) -> None:

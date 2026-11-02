@@ -321,7 +321,7 @@ async def test_sim_C5_slicing_aborts_removes_partial(system):
 
     await probe.request("slicing.task.create", {"unique_id": "comp1"},
                         timeout=10)
-    await asyncio.wait_for(ffmpeg.started.wait(), 5)  # режет первую главу; the fake says when it was called
+    await asyncio.wait_for(ffmpeg.started.wait(), 5)  # it slices the first chapter; the fake says when it was called
     partial = os.path.join(media, "Show s01e11.mp4")
     assert os.path.exists(partial)  # частичный выход на диске
 
@@ -356,7 +356,7 @@ async def test_full_slice_flow(system):
     # асинхронная — дожидаемся
     assert await _wait(lambda: fake.ignored_calls == [
         {"unique_id": "comp1", "is_ignored": True}])
-    # задача удалена: последний шаг воркера, после команды ignore
+    # the task is deleted: the last step of the worker, after the ignore command
     assert await _wait(lambda: _task_count(db_path) == 0)
 
 

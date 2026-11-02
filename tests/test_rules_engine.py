@@ -715,7 +715,7 @@ def test_extension_follows_the_kind_of_the_series_not_a_source_type():
     assert formatter.format_name(torrent, formatter.build_metadata(torrent, item)).endswith(".mkv")
 
 
-# --- «Назначить диапазон серий»: диапазон называет конструктор, а не таблица -------------------------------------
+# --- the action that assigns a range of episodes: the constructor names it, the table does not ------------------
 
 def _assign_range(value, conditions=()):
     return _rule(1, "склейка", [{"action_type": "assign_range", "action_pattern": value}], conditions=conditions)

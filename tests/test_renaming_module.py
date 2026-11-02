@@ -306,10 +306,10 @@ async def test_sim_C9_pipeline_rename_serializes_with_reprocess(started):
     t1 = asyncio.create_task(probe.request(
         "renaming.process_torrent", {"series_id": 2, "qb_hash": "h"},
         timeout=10))
-    await asyncio.wait_for(fake.files_entered.wait(), 5)  # вошёл, держит лок
+    await asyncio.wait_for(fake.files_entered.wait(), 5)  # it has entered and holds the lock
     t2 = asyncio.create_task(probe.request(
         "renaming.reprocess", {"series_id": 2}, timeout=10))
-    await asyncio.wait_for(lock.contended.wait(), 5)  # reprocess стал в очередь на лок
+    await asyncio.wait_for(lock.contended.wait(), 5)  # reprocess is queued for the lock
     assert fake.files_calls == 1  # reprocess ЖДЁТ лок, в files.get не вошёл
 
     fake.files_block.set()  # отпускаем конвейерный rename

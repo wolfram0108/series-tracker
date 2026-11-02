@@ -139,7 +139,7 @@ async def test_parallel_requests_do_not_mix_replies():
         await echo.stop()
 
 
-# --- тишина шины: сигнал, а не пауза -------------------------------------------
+# --- quiet of the bus: a signal, not a pause ------------------------------------
 
 class Chain(BaseModule):
     """`chain.first` порождает `chain.second`; второй обработчик медленный и записывает конец своей работы."""
