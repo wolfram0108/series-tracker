@@ -21,8 +21,10 @@ from pathlib import Path
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from live_sync import Live, LIVE_STATES, conform_address, states  # noqa: E402
+from live_sync import (Live, LIVE_STATES, conform_address, outputs_of, pairs_of_jobs, reference_beside,  # noqa: E402
+                       states)
 from stand import RAW, Stand  # noqa: E402
+from verdicts import judge_alignment  # noqa: E402
 
 REAL_DB = "/home/user/series-tracker/app.db"
 SERIES = "Расколотая битвой синева небес 5"
@@ -225,22 +227,6 @@ def build_phase(live: Live) -> str:
     return aim(live)
 
 
-def pairs_of_jobs(work: str) -> list[dict]:
-    """What the service says of each pair of the jobs of this series: read-only asks, the ids from the database of the stand."""
-    import sqlite3
-    ids = sorted({row[0] for row in sqlite3.connect(f"file:{work}/app.db?mode=ro", uri=True).execute(
-        "SELECT job_id FROM voice_dubs WHERE episode=? AND status != 'removed' AND job_id IS NOT NULL", (KEEP,))})
-    address = conform_address()
-    pairs = []
-    for job_id in ids:
-        job = httpx.get(f"{address}/conform/jobs/{job_id}", timeout=30).json()
-        for result in job.get("results", []):
-            pairs.append({"job": job_id, "elapsed_s": round(job.get("elapsed_s") or 0), **{
-                key: result.get(key) for key in ("dub", "ok", "suspect", "critical", "error", "audio_resid_ms",
-                                                 "assigned_pct", "dropped_intro_s") if key in result}})
-    return pairs
-
-
 def mine(live: Live) -> list[dict]:
     """The voice-overs of the episode in work: the rows of episodes switched off and the removed ones are history."""
     return [dub for dub in live.dubs() if dub.get("status") != "removed" and dub["episode"] == KEEP]
@@ -276,17 +262,16 @@ def two_phase(live: Live) -> str:
         time.sleep(0.5)
         temp = temporary_files()
     live.step("файлы рядом с референсом", files=files[:12], aligned=len(aligned), temporary_left=temp[:5])
-    pairs = pairs_of_jobs(live.work)
-    live.step("пары сервиса выравнивания", pairs=pairs)
+    outputs = outputs_of(live.work, KEEP)
+    pairs = pairs_of_jobs(live.work, KEEP)
+    live.step("пары сервиса выравнивания", pairs=pairs, outputs=outputs)
     suspect = [pair["dub"] for pair in pairs if pair.get("suspect")]
     critical = [pair["dub"] for pair in pairs if pair.get("critical")]
-    failed = [pair["dub"] for pair in pairs if not pair.get("ok")]
-    done = count.get("done", 0)
     # The verdict of a pair is the service's `ok`; `suspect` and `critical` tell what it found and put right.
-    ok = done == len(dubs) and len(aligned) == len(dubs) and not temp and not failed
-    detail = (f"озвучек {done}, дорожек рядом с референсом {len(aligned)}, во временной папке {len(temp)}, пары: не ok {len(failed)}; "
+    problems = judge_alignment(dubs, outputs, reference_beside(library, outputs), pairs, temp)
+    detail = (f"озвучек {len(dubs)}, результатов сервиса {len(pairs)}, дорожки по путям базы рядом с референсом, во временной папке {len(temp)}; "
               f"сообщения сервиса: suspect {len(suspect)}, critical {len(critical)}")
-    return f"PASS {detail}" if ok else f"FAIL {detail}"
+    return f"PASS {detail}" if not problems else f"FAIL {'; '.join(problems)}"
 
 
 def run_live(phase, work: str, safeguard: float) -> str:

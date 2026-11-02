@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 import time
 import traceback
@@ -28,6 +29,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from stand import RAW, ROOT, Stand  # noqa: E402
+from verdicts import judge_alignment  # noqa: E402
 
 URL = "https://dunhuatv.ru/500-stat-pobeditelem.html"
 NAME, NAME_EN = "Стать победителем", "Stat Pobeditelem"
@@ -49,6 +51,36 @@ def conform_address() -> str:
         if name.strip() == "ST_CONFORM_URL":
             return value.strip().strip('"').strip("'")
     raise RuntimeError("ST_CONFORM_URL is not in the .env of the project")
+
+
+def pairs_of_jobs(work: str, episode: int) -> list[dict]:
+    """What the service says of each pair of the jobs of the episode: read-only asks, the jobs named by the database of the stand."""
+    with sqlite3.connect(f"file:{work}/app.db?mode=ro", uri=True) as conn:
+        ids = sorted({row[0] for row in conn.execute(
+            "SELECT job_id FROM voice_dubs WHERE episode=? AND job_id IS NOT NULL", (episode,))})
+    address = conform_address()
+    pairs = []
+    for job_id in ids:
+        job = httpx.get(f"{address}/conform/jobs/{job_id}", timeout=30).json()
+        for result in job.get("results", []):
+            pairs.append({"job": job_id, "elapsed_s": round(job.get("elapsed_s") or 0), **{
+                key: result.get(key) for key in ("dub", "ok", "suspect", "critical", "error", "audio_resid_ms",
+                                                 "assigned_pct", "dropped_intro_s") if key in result}})
+    return pairs
+
+
+def outputs_of(work: str, episode: int) -> dict[str, str]:
+    """{label of the voice-over: the path of its track} for the voice-overs of the episode that are placed, as the database holds them."""
+    with sqlite3.connect(f"file:{work}/app.db?mode=ro", uri=True) as conn:
+        return dict(conn.execute("SELECT voice_label, output_path FROM voice_dubs WHERE episode=? AND status='placed' "
+                                 "AND output_path IS NOT NULL", (episode,)).fetchall())
+
+
+def reference_beside(library: Path, outputs: dict[str, str]) -> Path | None:
+    """The video the tracks lie beside: the one file of the library whose name begins the name of every track."""
+    names = [Path(path).name for path in outputs.values()]
+    found = [path for path in library.rglob("*.mp4") if names and all(name.startswith(path.stem) for name in names)] if library.exists() else []
+    return found[0] if len(found) == 1 else None
 
 
 class Live:
@@ -165,18 +197,14 @@ def phase_two(live: Live) -> str:
         return f"FAIL ещё идёт: {count}"
     library = Path(LIBRARY)
     files = sorted(str(path.relative_to(library)) for path in library.rglob("*") if path.is_file()) if library.exists() else []
-    aligned = [name for name in files if "_aligned" in name or name.endswith((".flac", ".mka", ".ac3", ".aac"))]
     temp = sorted(str(path.relative_to(LOCAL)) for path in Path(LOCAL).glob("downloads/**/*") if path.is_file())
-    live.step("файлы рядом с референсом", files=files[:12], aligned=aligned[:8], temporary_left=temp[:5])
-    queue = live.events.get("conform_queue_update") or {}
-    task = next((each for each in queue.get("tasks", []) if each.get("status") == "done"), None) or {}
-    pairs = [{key: result.get(key) for key in ("dub", "ok", "suspect", "critical", "error") if key in result}
-             for result in task.get("results", [])]
-    live.step("пары сервиса выравнивания", job=task.get("id"), status=task.get("status"), pairs=pairs)
-    done = count.get("done", 0)
-    ok = done == len(dubs) and bool(aligned) and not temp
-    return (f"PASS озвучек {done}, дорожки рядом с референсом: {len(aligned)}, временная папка пуста" if ok
-            else f"FAIL озвучки {count}, дорожек рядом: {len(aligned)}, во временной папке осталось: {len(temp)}")
+    outputs = outputs_of(live.work, KEEP)
+    pairs = pairs_of_jobs(live.work, KEEP)
+    live.step("файлы рядом с референсом", files=files[:12], outputs=outputs, temporary_left=temp[:5])
+    live.step("пары сервиса выравнивания", pairs=pairs)
+    problems = judge_alignment(dubs, outputs, reference_beside(library, outputs), pairs, temp)
+    return (f"PASS озвучек {len(dubs)}, результатов сервиса {len(pairs)}, дорожки по путям базы рядом с референсом, временная папка пуста"
+            if not problems else f"FAIL {'; '.join(problems)}")
 
 
 def main() -> int:
@@ -190,6 +218,7 @@ def main() -> int:
     try:
         with Stand(profiles=PROFILES, work=args.work) as stand:
             live = Live(stand, time.monotonic() + args.safeguard - 15)
+            live.work = args.work
             try:
                 verdict = (phase_one if args.phase == "one" else phase_two)(live)
             except Exception as exc:  # noqa: BLE001 - the last line must come out in any outcome

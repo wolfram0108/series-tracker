@@ -106,6 +106,16 @@ def main() -> int:
             for table in ("series", "media_items", "parser_profiles", "parser_rules", "parser_rule_conditions"):
                 if was[table] != back[table]:
                     problems.append(f"{table}: {was[table]} rows before, {back[table]} after the way back")
+            # The way back is judged by the same checks as the way up.
+            conn = sqlite3.connect(copy)
+            integrity_back = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            conn.execute("PRAGMA foreign_keys=ON")
+            broken_back = conn.execute("PRAGMA foreign_key_check").fetchall()
+            conn.close()
+            if integrity_back != "ok":
+                problems.append(f"integrity_check after the way back: {integrity_back}")
+            if broken_back:
+                problems.append(f"foreign_key_check after the way back: {len(broken_back)} rows")
         verdict = "FAIL " + "; ".join(problems) if problems else "PASS"
         print(f"revisions {start_rev} -> {head} -> {args.before}; series {series}; sources {sources} {types}; "
               f"rows before {was}; after upgrade {up_counts}; back {back}")
