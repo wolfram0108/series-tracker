@@ -3,6 +3,7 @@ import { computed } from "vue"
 import ToggleSwitch from "primevue/toggleswitch"
 import StGroup from "../StGroup.vue"
 import StSelect from "../StSelect.vue"
+import { t } from "../../i18n"
 import ParserPatternEditor, { type PatternBlock } from "./ParserPatternEditor.vue"
 
 // Карточка одного правила профиля парсера. Шапка (имя + управление) и
@@ -61,9 +62,10 @@ const ACTION_TYPES = [
   { value: "assign_part", label: "Назначить часть серии" },
   { value: "assign_quality", label: "Назначить качество" },
   { value: "assign_resolution", label: "Назначить разрешение" },
+  { value: "assign_range", label: t("rules.action.assign_range") },
 ]
 const EXTRACT_TYPES = ["extract_single", "extract_range", "extract_season"]
-const ASSIGN_TYPES = ["assign_voiceover", "assign_episode", "assign_season", "assign_part", "assign_quality", "assign_resolution"]
+const ASSIGN_TYPES = ["assign_voiceover", "assign_episode", "assign_season", "assign_part", "assign_quality", "assign_resolution", "assign_range"]
 
 const ASSIGN_LABELS: Record<string, string> = {
   assign_voiceover: "Назначить озвучку/тег",
@@ -72,6 +74,7 @@ const ASSIGN_LABELS: Record<string, string> = {
   assign_part: "Назначить часть серии",
   assign_quality: "Назначить качество",
   assign_resolution: "Назначить разрешение",
+  assign_range: t("rules.action.assign_range"),
 }
 
 const toggleIcon = computed(() => (props.isOpen ? "pi-chevron-down" : "pi-chevron-right"))
@@ -236,7 +239,7 @@ function getAssignActionLabel(actionType: string): string {
                 v-model="action.action_pattern"
                 :type="['assign_episode', 'assign_season', 'assign_part'].includes(action.action_type) ? 'number' : 'text'"
                 class="constructor-item item-input"
-                placeholder="Введите значение..."
+                :placeholder="action.action_type === 'assign_range' ? t('rules.action.assign_range.hint') : 'Введите значение...'"
               />
               <div v-if="a_index === rule.actions.length - 1" class="constructor-item item-button-group">
                 <button class="btn-icon btn-add" title="Добавить действие" @click="addAction">

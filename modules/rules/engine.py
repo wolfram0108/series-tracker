@@ -28,7 +28,8 @@ CONDITION_TYPES = ("contains", "not_contains")
 EXTRACT_TYPES = ("extract_single", "extract_range", "extract_season",
                  "extract_part")
 ASSIGN_TYPES = ("assign_voiceover", "assign_episode", "assign_season",
-                "assign_part", "assign_quality", "assign_resolution")
+                "assign_part", "assign_quality", "assign_resolution",
+                "assign_range")
 ACTION_TYPES = ("exclude",) + EXTRACT_TYPES + ASSIGN_TYPES
 BLOCK_TYPES = ("text", "number", "range", "add", "subtract", "whitespace",
                "any_text", "start_of_line", "end_of_line")
@@ -54,6 +55,18 @@ _RANGE_SINGLE_PAT = re.compile(r"^(\d+)$")
 def _has_quality_suffix(tail: str) -> bool:
     """Return True if string immediately starts with a resolution or quality marker."""
     return bool(_RES_SUFFIX_PAT.match(tail))
+
+
+def parse_assigned_range(raw: str | None) -> tuple[int, int]:
+    """The range a rule gives to a row: one interval «A-B» with A below B, not a list and not a single number (that is an
+    episode, and «Назначить номер серии» gives it). The numbers are the constructor's alone: the table is not read for them."""
+    found = _RANGE_DASH_PAT.match((raw or "").strip())
+    if not found:
+        raise ValueError(f"диапазон должен быть вида «109-110»: {raw!r}")
+    start, end = int(found.group(1)), int(found.group(2))
+    if start >= end:
+        raise ValueError(f"начало диапазона должно быть меньше конца: {raw!r}")
+    return start, end
 
 
 def parse_range_spec(raw: str | None) -> list[tuple[int, int]]:
@@ -258,6 +271,8 @@ def _compile_rule(rule: dict) -> CompiledRule:
         if a_type == "exclude":
             actions.append(CompiledAction(action_type="exclude"))
         elif a_type in ASSIGN_TYPES:
+            if a_type == "assign_range":
+                parse_assigned_range(raw_pattern)  # a wrong range is refused on saving, not found in a title
             actions.append(CompiledAction(action_type=a_type,
                                           raw_value=raw_pattern))
         else:  # extract_*
@@ -405,6 +420,9 @@ def _run_actions(title: str, rule: CompiledRule,
             produced = True
         elif a_type == "assign_resolution":
             extracted["resolution"] = action.raw_value
+            produced = True
+        elif a_type == "assign_range":
+            extracted["start"], extracted["end"] = parse_assigned_range(action.raw_value)
             produced = True
         elif a_type in ("assign_episode", "assign_season", "assign_part"):
             key = "episode" if a_type == "assign_episode" else (

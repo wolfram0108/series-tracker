@@ -723,3 +723,22 @@ def test_the_unused_profile_column_goes_and_comes_back_without_touching_rules(tm
     assert "preferred_voiceovers" not in columns() and kept() == before
     alembic(path, "downgrade", "0029")
     assert "preferred_voiceovers" in columns() and kept() == before
+
+
+@pytest.mark.asyncio
+async def test_an_assigned_range_is_answered_as_start_and_end_for_the_lines_the_rule_names(system):
+    probe = system.probe
+    profile = await new_profile(probe)
+    await new_rule(probe, profile, "склейка 109-110", [assign("assign_range", "109-110")], [contains("110 серия")])
+    await new_rule(probe, profile, "серия", [extract("extract_single", "N", " серия")])
+    results = (await apply(probe, profile, {"c": "AniMy | 110 серия", "s": "AniMy | 111 серия"}))["results"]
+    assert (results["c"]["start"], results["c"]["end"]) == (109, 110)
+    assert (results["s"]["start"], results["s"]["end"], results["s"]["episode"]) == (None, None, 111)
+
+
+@pytest.mark.asyncio
+async def test_a_rule_with_a_wrong_assigned_range_is_not_saved(system):
+    probe = system.probe
+    profile = await new_profile(probe)
+    with pytest.raises(BusRequestError, match="диапазон"):
+        await new_rule(probe, profile, "склейка", [assign("assign_range", "110-109")])

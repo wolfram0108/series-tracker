@@ -193,6 +193,8 @@ export const ru = {
   "output.episode.enable": "Включить серию",
   "output.season.disable": "Отключить сезон",
   "output.season.enable": "Включить сезон",
+  "rules.action.assign_range": "Назначить диапазон серий",
+  "rules.action.assign_range.hint": "Например: 109-110",
   "rulesTest.error.refused": "Не удалось выполнить тест",
   "rulesTest.error.network": "Нет связи с сервером",
   "rulesTest.notSite": "Этот адрес не читает ни один сайт",

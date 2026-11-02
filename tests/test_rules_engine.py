@@ -713,3 +713,36 @@ def test_extension_follows_the_kind_of_the_series_not_a_source_type():
     assert formatter.format_name(legacy, formatter.build_metadata(legacy, item),
                                  original_filename="x.avi").endswith(".avi")
     assert formatter.format_name(torrent, formatter.build_metadata(torrent, item)).endswith(".mkv")
+
+
+# --- «Назначить диапазон серий»: диапазон называет конструктор, а не таблица -------------------------------------
+
+def _assign_range(value, conditions=()):
+    return _rule(1, "склейка", [{"action_type": "assign_range", "action_pattern": value}], conditions=conditions)
+
+
+def test_assign_range_gives_the_numbers_of_a_compilation_the_title_does_not_say():
+    profile = compile_profile(1, [_assign_range("109-110", [_cond(_blocks("110 серия"))])])
+    res = process_title(profile, "Название | cvh | AniMy | 1 сезон | 1080p | 110 серия")
+    assert res["extracted"] == {"start": 109, "end": 110} and not res["errors"]
+    assert process_title(profile, "Название | cvh | AniMy | 1 сезон | 1080p | 111 серия")["extracted"] == {}
+
+
+def test_assign_range_takes_the_dashes_and_the_spaces_a_person_types():
+    for text in ("109-110", "109 – 110", "109—110", " 109 - 110 "):
+        res = process_title(compile_profile(1, [_assign_range(text)]), "любое")
+        assert res["extracted"] == {"start": 109, "end": 110}, text
+
+
+@pytest.mark.parametrize("value", ["110", "110-109", "110-110", "109-110, 112", "109-", "-110", "abc", ""])
+def test_assign_range_with_anything_but_one_ascending_interval_is_refused_on_saving(value):
+    with pytest.raises(ValueError):
+        validate_rule({"name": "склейка", "conditions": [],
+                       "action_pattern": json.dumps([{"action_type": "assign_range", "action_pattern": value}])})
+
+
+def test_assign_range_next_to_a_voice_over_gives_both():
+    profile = compile_profile(1, [_rule(1, "склейка", [
+        {"action_type": "assign_range", "action_pattern": "3-4"},
+        {"action_type": "assign_voiceover", "action_pattern": "Студия"}])])
+    assert process_title(profile, "x")["extracted"] == {"start": 3, "end": 4, "voiceover": "Студия"}
