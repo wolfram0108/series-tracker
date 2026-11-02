@@ -1750,7 +1750,7 @@ async def test_a_failed_removal_hands_the_file_to_the_cleanup_journal_and_is_tri
     assert {entry["path"] for entry in await voices.repo.cleanup_list()} == set(paths)  # ...and not forgotten
     assert all(row["output_path"] is None for row in await voices.repo.for_series(7))
     async def swept():  # a name another attempt still owns is answered "not now": the sweep is made again
-        await voices._sweep_cleanup()
+        await voices._cleanup.sweep()
         return not any(os.path.exists(path) for path in paths) and await voices.repo.cleanup_list() == []
 
     await until_true(swept, "the journal was not carried out")
@@ -1769,7 +1769,7 @@ async def test_a_journaled_path_that_a_voice_over_holds_again_is_not_removed(dub
         for row in group:  # the new reference got its tracks under the same names, before any removal can succeed
             await voices.repo.set_output(row["id"], row["output_path"], ref)
         await quiet(voices)
-    await voices._sweep_cleanup()
+    await voices._cleanup.sweep()
     assert all(os.path.exists(path) for path in paths) and await voices.repo.cleanup_list() == []
 
 
@@ -1789,15 +1789,15 @@ async def test_a_failed_removal_of_the_temporary_folder_is_journaled_and_the_epi
     assert len(journal) == 2 and {entry["kind"] for entry in journal} == {"tree"}  # the voice-overs' folder and the copy of the reference
     assert all(os.path.isdir(entry["path"]) for entry in journal)
     await quiet(voices)  # a pass of the module that runs its own sweep owns the path while it removes it
-    await voices._sweep_cleanup()
+    await voices._cleanup.sweep()
     assert not any(os.path.exists(entry["path"]) for entry in journal) and await voices.repo.cleanup_list() == []
 
 
 @pytest.mark.asyncio
 async def test_a_file_that_is_already_gone_is_a_success_not_a_journal_entry(dubs):
     voices = dubs[2]
-    assert await voices._discard(os.path.join(os.sep, "tmp", "nobody-has-this")) is True
-    assert await voices._discard(os.path.join(os.sep, "tmp", "nobody-has-this-dir"), kind="tree") is True
+    assert await voices._cleanup.discard(os.path.join(os.sep, "tmp", "nobody-has-this")) is True
+    assert await voices._cleanup.discard(os.path.join(os.sep, "tmp", "nobody-has-this-dir"), kind="tree") is True
     assert await voices.repo.cleanup_list() == []
 
 
@@ -1821,10 +1821,10 @@ async def test_a_removal_that_the_storage_does_not_answer_is_journaled_not_await
     import time
 
     voices = dubs[2]
-    monkeypatch.setattr("modules.voices.module.REMOVE_TIMEOUT_S", 0.1)
-    monkeypatch.setattr(type(voices), "_unlink", staticmethod(lambda path, kind: time.sleep(0.6)))
+    monkeypatch.setattr("modules.voices.cleanup.REMOVE_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(voices._cleanup, "unlink", lambda path, kind: time.sleep(0.6))
     started = time.monotonic()
-    assert await voices._discard("/some/slow/file") is False
+    assert await voices._cleanup.discard("/some/slow/file") is False
     assert time.monotonic() - started < 0.5
     assert [entry["path"] for entry in await voices.repo.cleanup_list()] == ["/some/slow/file"]
 
@@ -1868,11 +1868,11 @@ async def test_the_cleanup_sweep_leaves_an_entry_alone_while_its_removal_still_r
     release = threading.Event()
     await stalled_removal(path, release)
     await voices.repo.journal_cleanup(path, "path", "timed out")
-    await voices._sweep_cleanup()
+    await voices._cleanup.sweep()
     assert [entry["path"] for entry in await voices.repo.cleanup_list()] == [path] and os.path.exists(path)
     release.set()
     await idle()
-    await voices._sweep_cleanup()
+    await voices._cleanup.sweep()
     assert await voices.repo.cleanup_list() == [] and not os.path.exists(path)
 
 
@@ -1904,15 +1904,15 @@ async def test_a_removal_ends_with_the_file_gone_or_on_the_journal_and_never_nei
     try:
         if fault == "refused":
             with patch("modules.voices.module.os.remove", side_effect=PermissionError("read-only")):
-                gone = await voices._discard(path)
+                gone = await voices._cleanup.discard(path)
         elif fault == "stays":  # the call returns without error and the name is still taken
             with patch("modules.voices.module.os.remove"):
-                gone = await voices._discard(path)
+                gone = await voices._cleanup.discard(path)
         elif fault == "owned":
             await stalled_removal(path, release)
-            gone = await voices._discard(path)
+            gone = await voices._cleanup.discard(path)
         else:
-            gone = await voices._discard(path)
+            gone = await voices._cleanup.discard(path)
         journaled = path in {entry["path"] for entry in await voices.repo.cleanup_list()}
         assert gone is not journaled and gone is (not os.path.exists(path))
         assert gone is (fault == "none")
@@ -1928,7 +1928,7 @@ async def test_a_journaled_name_inside_the_folder_a_running_job_writes_to_is_lef
     stale = os.path.join(out_dir, "left-over.flac")
     touch(stale, b"flac")
     await voices.repo.journal_cleanup(stale, "path", "was busy")
-    assert await voices._clear(stale) is False
+    assert await voices._cleanup.clear(stale) is False
     assert os.path.exists(stale) and [e["path"] for e in await voices.repo.cleanup_list()] == [stale]
 
 
@@ -2515,14 +2515,14 @@ async def test_cleanup_does_not_forget_a_file_while_its_row_is_being_reset(dubs,
     voices = dubs[2]
     group = await voices.repo.for_series(7)
     old = group[0]["output_path"]
-    real_unlink = voices._unlink
+    real_unlink = voices._cleanup.unlink
 
     def refuse_old(path, kind):
         if path == old:
             raise PermissionError("the share refuses for a while")
         return real_unlink(path, kind)
 
-    monkeypatch.setattr(voices, "_unlink", refuse_old)
+    monkeypatch.setattr(voices._cleanup, "unlink", refuse_old)
     monkeypatch.setattr("modules.voices.module.SUBMIT_RETRY_S", 0.005)
     real_reset = voices.repo.reset
 
@@ -2552,7 +2552,7 @@ async def test_an_episode_that_left_the_plan_hands_its_tracks_to_the_journal_wit
         await quiet(voices)  # every pass of the module ends while the removal is still refused
         assert {e["path"] for e in await voices.repo.cleanup_list()} >= set(tracks)
     assert all(os.path.exists(track) for track in tracks)
-    await voices._sweep_cleanup()
+    await voices._cleanup.sweep()
     assert not any(os.path.exists(track) for track in tracks) and await voices.repo.cleanup_list() == []
 
 
@@ -2651,7 +2651,7 @@ async def test_a_pass_that_removed_the_old_file_does_not_end_the_entry_of_its_ne
         return await real(name, version)
 
     monkeypatch.setattr(voices.repo, "cleanup_done", when_a_new_owner_arrives)
-    assert await voices._clear(path) is False
+    assert await voices._cleanup.clear(path) is False
     assert [e["path"] for e in await voices.repo.cleanup_list()] == [path]
 
 
@@ -2747,7 +2747,7 @@ async def test_a_name_is_owned_before_the_removal_looks_at_who_holds_it(dubs, tm
         return found
 
     monkeypatch.setattr(voices.repo, "all_rows", looking)
-    assert await voices._clear(path) is True
+    assert await voices._cleanup.clear(path) is True
     await other
     assert outcome == ["had to wait"] and not os.path.exists(path)
 
