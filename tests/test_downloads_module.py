@@ -532,7 +532,7 @@ async def test_cancel_active_download(system):
     save_path = task["save_path"]
     # half-written files of the download on disk: a task writes under a name of its own beside the name of the video
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    work = os.path.join(os.path.dirname(save_path), f".uid1.{os.path.basename(save_path)}")
+    work = task["work_path"]
     open(work, "wb").close()
     open(work + ".part", "wb").close()
     open(save_path + ".part", "wb").close()  # a piece an earlier version left beside the name of the video
@@ -895,7 +895,7 @@ async def test_superseded_file_is_removed_once_winner_is_on_disk(system):
     assert os.path.exists(winner)
     items = _items(db_path)
     assert items["lose"]["final_filename"] is None
-    assert items["lose"]["status"] == "completed"   # remembers the fetched resolution
+    assert items["lose"]["status"] == "pending"     # holds no file, so it is not ready; the plan does not want it, so it is not fetched
     assert items["win"]["final_filename"] == "e01 1080p.mp4"
     assert dl.started == []
 
@@ -960,7 +960,7 @@ async def test_retirement_is_idempotent_and_survives_fs_sync(system):
     await asyncio.sleep(0.2)
 
     items = _items(db_path)
-    assert items["lose"]["status"] == "completed"       # not sent back to pending
+    assert items["lose"]["status"] == "pending"         # holds no file; not in the plan, so no task is made for it
     assert items["lose"]["final_filename"] is None
     assert dl.started == []
     assert _tasks(db_path) == []

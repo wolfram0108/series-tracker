@@ -8,11 +8,12 @@ import sqlite3
 import pytest
 
 from core import Bus, Runner
+from core.envelope import Envelope
 from core.retry import Budget
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.downloads import DownloadsModule
-from modules.downloads import module as downloads_module
+from modules.downloads import publication
 from test_downloads_module import (FakeDownloader, FakeNeighbours, Probe, _add_item, _items, _tasks, _wait,  # noqa: F401
                                    env_paths, system)
 
@@ -48,6 +49,7 @@ class Boot:
         self.probe = Probe(bus)
         self.runner = Runner(bus, [self.fake, CatalogModule(bus, db), DownloadsModule(bus, db, downloader=self.dl), self.probe])
         await self.runner.start()
+        bus.publish(Envelope(topic="system.started", kind="event"))  # what run.py says when every module is up
         return self
 
     async def down(self):
@@ -97,7 +99,7 @@ def _two_videos_for_one_name(db_path, media_dir):
 @pytest.mark.asyncio
 async def test_a_failure_of_the_database_after_the_file_took_its_name_leaves_a_task_that_is_finished_not_an_error(system, monkeypatch):
     _, _, dl, probe, db_path, media_dir = system
-    monkeypatch.setattr(downloads_module, "PUBLISH_BUDGET", Budget(attempts=2, pauses=(0.0,), limit_s=5.0))
+    monkeypatch.setattr(publication, "PUBLISH_BUDGET", Budget(attempts=2, pauses=(0.0,), limit_s=5.0))
     final = _two_videos_for_one_name(db_path, media_dir)
     broken = {"on": True}
     real = Database.execute_many

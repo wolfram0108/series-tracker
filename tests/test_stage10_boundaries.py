@@ -300,10 +300,11 @@ async def test_an_episode_the_user_switches_off_loses_its_whole_file_and_the_oth
 
     await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": 1, "off": True},
                             timeout=STUCK_S)
-    await rig.until(lambda: not (rig.media / "Серия 01.mp4").exists(), "the file of the switched off episode is gone")
+    # The file goes first and the row lets it go after: a stop between the two leaves a name without a file, which the next look mends.
+    await rig.until(lambda: not (rig.media / "Серия 01.mp4").exists() and rig.query(
+        "SELECT status, final_filename FROM media_items WHERE episode_start=1") == [{"status": "pending", "final_filename": None}],
+        "the file of the switched off episode is gone and its row lets it go")
     assert sorted(each.name for each in rig.media.iterdir()) == ["Серия 02.mp4"]
-    assert rig.query("SELECT status, final_filename FROM media_items WHERE episode_start=1") == [
-        {"status": "pending", "final_filename": None}]
     assert rig.query("SELECT status FROM media_items WHERE episode_start=2") == [{"status": "completed"}]
 
 
