@@ -164,8 +164,11 @@ class ScanRepository:
                  row["voiceover_tag"], row.get("resolution"), row["source_id"], row["row_key"])))
         for unique_id, fields in updates:
             columns = sorted(fields)
+            # A video that began to be fetched while the plan was counted keeps its address: the file is of that video.
+            guard = (" AND status != 'downloading' AND final_filename IS NULL AND status != 'completed'"
+                     if "source_url" in fields else "")
             statements.append((
-                f"UPDATE media_items SET {', '.join(f'{name}=?' for name in columns)} WHERE unique_id=?",
+                f"UPDATE media_items SET {', '.join(f'{name}=?' for name in columns)} WHERE unique_id=?{guard}",
                 (*(fields[name] for name in columns), unique_id)))
         statements.append(("UPDATE media_items SET plan_status='candidate', superseded_by=NULL WHERE series_id=?",
                            (series_id,)))

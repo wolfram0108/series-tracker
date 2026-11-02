@@ -540,7 +540,7 @@ async def test_a_better_version_of_a_downloaded_candidate_gets_a_row_of_its_own(
     await rig.run()
     await rig.run()
     rows = {each["unique_id"]: each for each in rig.query("SELECT * FROM media_items")}
-    better = ids.upgrade_row_unique_id(rig.series_id, rig.source_ids[0], "k", 1080)
+    better = ids.upgrade_row_unique_id(rig.series_id, rig.source_ids[0], "k", 1080, rig.world.rows[0].link)
     assert set(rows) == {old, better}
     assert rows[old]["resolution"] == 480 and rows[old]["status"] == "completed"
     assert rows[better]["resolution"] == 1080 and rows[better]["plan_status"] == "in_plan_single"

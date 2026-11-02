@@ -530,10 +530,12 @@ async def test_cancel_active_download(system):
                        == "downloading")
     task = _tasks(db_path)[0]
     save_path = task["save_path"]
-    # имитируем недокачанные артефакты yt-dlp на диске
+    # имитируем недокачанные артефакты yt-dlp на диске: задача пишет под своим именем рядом с именем видео
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    open(save_path, "wb").close()
-    open(save_path + ".part", "wb").close()
+    work = os.path.join(os.path.dirname(save_path), f".uid1.{os.path.basename(save_path)}")
+    open(work, "wb").close()
+    open(work + ".part", "wb").close()
+    open(save_path + ".part", "wb").close()  # a piece an earlier version left beside the name of the video
 
     reply = await probe.request("downloads.cancel",
                                 {"task_id": task["id"]}, timeout=10)
@@ -545,9 +547,27 @@ async def test_cancel_active_download(system):
     assert item["status"] == "pending"
     assert item["plan_status"] == "in_plan_single"
     assert item["is_ignored_by_user"] == 0
-    # файл и .part удалены
-    assert not os.path.exists(save_path)
+    # файл задачи и его части удалены
+    assert not os.path.exists(work)
+    assert not os.path.exists(work + ".part")
     assert not os.path.exists(save_path + ".part")
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_leaves_the_file_under_the_name_of_the_video(system):
+    """The name of the video holds a whole file (of the video this one displaces, or of a row): a cancel never touches it."""
+    bus, _, dl, probe, db_path, media_dir = system
+    dl.gate = asyncio.Event()
+    _add_item(db_path, "uid1", 1)
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
+    assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "downloading")
+    task = _tasks(db_path)[0]
+    os.makedirs(os.path.dirname(task["save_path"]), exist_ok=True)
+    open(task["save_path"], "wb").close()
+
+    await probe.request("downloads.cancel", {"task_id": task["id"]}, timeout=10)
+
+    assert os.path.exists(task["save_path"])
 
 
 @pytest.mark.asyncio

@@ -293,11 +293,14 @@ class DownloadsModule(BaseModule):
         """pending-элемент плана, чей файл уже лежит с ожидаемым именем,
         регистрируется скачанным без загрузки."""
         adopted = 0
+        writing = await self.repo.task_paths(series["id"])
         for item in await self.repo.planned_pending_items(series["id"]):
             filename = await self._format_filename(series, item)
             path = os.path.join(series["save_path"], filename)
             if await self.repo.holders_of_file(series["id"], filename, except_uid=item["unique_id"]):
                 continue  # the file is another row's (the video this one displaces): this one is fetched, not adopted
+            if writing.get(path, item["unique_id"]) != item["unique_id"]:
+                continue  # the task of another row is about to leave that file there: it is that row's
             if await storage.call(os.path.exists, path):
                 await self.repo.register_downloaded(item["unique_id"],
                                                     filename)
@@ -421,11 +424,7 @@ class DownloadsModule(BaseModule):
     async def _stop_task(self, task: dict) -> None:
         """Stops a task and removes what its download left half-written; a finished file stays."""
         await self._cancel_runner(task["id"])
-        path = task.get("save_path")
-        # No final file means the download did not finish: remove the half-written files;
-        # a final file in place is a finished one and stays.
-        if path and not await storage.call(os.path.exists, path):
-            await storage.call(self._remove_partial, path, timeout=storage.REMOVE_TIMEOUT_S, owns=path)
+        await self._clear_task_files(task)
 
     async def _drop_tasks_without_plan_row(self, series_id: int) -> int:
         """A task lives while its row does: one without a row is stopped whatever its state (its file would
@@ -451,10 +450,8 @@ class DownloadsModule(BaseModule):
         # ytdlp.download в finally убивает процесс
         await self._cancel_runner(task_id)
 
-        # 2) удалить недокачанный файл и временные артефакты yt-dlp
-        if task.get("save_path"):
-            await storage.call(self._remove_partial, task["save_path"], timeout=storage.REMOVE_TIMEOUT_S,
-                               owns=task["save_path"])
+        # 2) удалить недокачанный файл и временные артефакты yt-dlp (под именем задачи, не под именем видео)
+        await self._clear_task_files(task)
 
         # 3) снять задачу, вернуть элемент в pending (был downloading)
         await self.repo.delete_task(task_id)
@@ -464,6 +461,23 @@ class DownloadsModule(BaseModule):
         await self._contribute(series_id)
         await self._broadcast_queue()
         return {"cancelled": True}
+
+    async def _clear_task_files(self, task: dict) -> None:
+        """What a task wrote goes with it: its file under its own name and the pieces of the download. The file under
+        the name of the video is never touched: it is whole, and it belongs to a row (or to the video this one displaces)."""
+        if not task.get("save_path"):
+            return
+        work = self._work_path(task)
+        await storage.call(self._remove_partial, work, timeout=storage.REMOVE_TIMEOUT_S, owns=work)
+        # The pieces an earlier version of the download left beside the name of the video.
+        await storage.call(self._remove_pieces, task["save_path"], timeout=storage.REMOVE_TIMEOUT_S,
+                           owns=task["save_path"])
+
+    @staticmethod
+    def _remove_pieces(save_path: str) -> None:
+        for path in ytdlp.download_artifacts(save_path):
+            if os.path.isfile(path):
+                storage.remove_file(path)
 
     @staticmethod
     def _remove_partial(save_path: str) -> None:
@@ -526,23 +540,22 @@ class DownloadsModule(BaseModule):
                           task["id"], task["task_key"])
         await self._broadcast_queue()
 
-    async def _release_displaced_file(self, series_id: int, uid: str, path: str) -> None:
-        """Another video behind the same row is named as the one it displaces: the file under that name is the old
-        video's, and a download does not write over a file. It goes, and its row no longer holds it."""
-        holders = await self.repo.holders_of_file(series_id, os.path.basename(path), except_uid=uid, displaced_by=uid)
-        if not holders:
-            return
-        if await storage.call(os.path.isfile, path):
-            try:
-                await storage.call(os.remove, path, owns=path)
-            except FileNotFoundError:
-                pass
-            except OSError as exc:
-                self.log.warning("файл вытесненного видео %s не удалён: %s", path, exc)
-                return
-        for holder in holders:
-            await self.repo.clear_item_filename(holder["unique_id"])
-        self.log.info("видео серии заменено другим под тем же именем: прежний файл убран: %s", os.path.basename(path))
+    @staticmethod
+    def _work_path(task: dict) -> str:
+        """Where a task writes: beside the final file, under a name of its own. The name of the video only ever holds a
+        whole file, so a video that is not whole yet, or never will be, cannot be taken for one, and the file of the
+        video this one displaces stays where it is until this one is whole."""
+        directory, name = os.path.split(task["save_path"])
+        return os.path.join(directory, f".{task['task_key']}.{name}")
+
+    async def _take_over(self, series_id: int, uid: str, work: str, final: str, relative: str) -> None:
+        """The file is whole: it takes the name of the video. A file that lay under that name is the video this one
+        displaces; it is replaced in one step, and the rows that held it let it go with the row that has the new one."""
+        holders = await self.repo.holders_of_file(series_id, os.path.basename(final), except_uid=uid, displaced_by=uid)
+        await storage.call(os.replace, work, final, owns=final)
+        await self.repo.register_downloaded(uid, relative, released=[each["unique_id"] for each in holders])
+        if holders:
+            self.log.info("видео серии заменено другим под тем же именем: %s", os.path.basename(final))
 
     async def _run_download(self, task: dict) -> None:
         task_id, uid = task["id"], task["task_key"]
@@ -560,7 +573,7 @@ class DownloadsModule(BaseModule):
                     self._last_event = now
                     await self._broadcast_queue()
 
-            await self._release_displaced_file(series_id, uid, task["save_path"])
+            work = self._work_path(task)
 
             stream_url, stream_headers, stream_error, progressive = await self._resolve_stream(
                 task["video_url"], ytdlp_fallback=lambda: self._candidate_may_use_ytdlp(series_id, uid))
@@ -573,16 +586,14 @@ class DownloadsModule(BaseModule):
                     kw["headers"] = stream_headers
                 if progressive:
                     kw["progressive"] = True
-                ok, error = await self._download(stream_url,
-                                                 task["save_path"], on_progress,
-                                                 **kw)
+                ok, error = await self._download(stream_url, work, on_progress, **kw)
                 transient = not ok and _transient_download_error(error)
             if ok:
                 series = await self.request("catalog.series.get",
                                             {"series_id": series_id})
                 rel = os.path.relpath(task["save_path"],
                                       series["save_path"]).replace("\\", "/")
-                await self.repo.register_downloaded(uid, rel)
+                await self._take_over(series_id, uid, work, task["save_path"], rel)
                 await self.repo.delete_task(task_id)
                 await self._retire_superseded(series)
                 self.send_command("catalog.series.touch_scan_time",

@@ -598,7 +598,10 @@ class ScanModule(BaseModule):
                                       previous=[output.reference_of(each) for each in stored],
                                       player_groups=Groups.of(voices.player_groups))
             memory, seasons = self._ignored_episodes(series), self._ignored_seasons(series)
-            placements = candidates.place(series_id, chosen, existing)
+            queued = await self._queued(series_id)
+            # When the queue cannot be told, every row that is not fetched is held: none is turned to another video.
+            placements = candidates.place(series_id, chosen, existing, queued if queued is not None else {
+                each["unique_id"] for each in existing if not candidates.is_downloaded(each)})
             winners = {each.slot: each.unique_id for each in placements}
             by_id = {each["unique_id"]: each for each in existing}
             inserts = [candidates.new_row(series_id, each, memory) for each in placements if each.is_new]
@@ -608,7 +611,7 @@ class ScanModule(BaseModule):
                     changed = {name: value for name, value in each.fields.items() if by_id[each.unique_id].get(name) != value}
                     if changed:
                         updates.append((each.unique_id, changed))
-            deletes = await self._leftovers(series_id, existing, set(winners.values()))
+            deletes = self._leftovers(existing, set(winners.values()), queued)
             rows = candidates.rows_after(existing, inserts, updates, deletes)
             statuses, superseded = planner.plan_with_supersession(rows, winners, seasons)
             records = [{**each.reference.model_dump(mode="json"), "unique_id": winners.get(each.slot)}
@@ -636,23 +639,25 @@ class ScanModule(BaseModule):
             self._announce(series_id, each)
         return Refreshed(sum(1 for each in statuses.values() if each == "in_plan_single"), shown_after, plan_changed)
 
-    async def _leftovers(self, series_id: int, existing: list[dict], kept: set[str]) -> list[str]:
-        """The rows to delete: those that stand for nothing and have no task in the queue of downloads. When the
-        queue cannot be told, nothing is deleted this time, so that no task is left without its row."""
-        if not candidates.obsolete(existing, kept, ()):
-            return []
+    async def _queued(self, series_id: int) -> set[str] | None:
+        """The rows of the series that have a task in the queue of downloads; None when the queue cannot be told."""
         try:
             queue = await self.request("downloads.queue.get", {}, timeout=STEP_TIMEOUT_S)
         except BusRequestError as exc:
             if _NO_HANDLER not in str(exc):
-                self.log.warning("сериал %d: очередь загрузок недоступна, лишние строки оставлены: %s", series_id, exc)
-                return []
-            queue = {"tasks": []}
+                self.log.warning("сериал %d: очередь загрузок недоступна: %s", series_id, exc)
+                return None
+            return set()
         except asyncio.TimeoutError:
-            self.log.warning("сериал %d: очередь загрузок не ответила, лишние строки оставлены", series_id)
-            return []
-        busy = {task["task_key"] for task in queue.get("tasks", []) if task.get("series_id") == series_id}
-        return candidates.obsolete(existing, kept, busy)
+            self.log.warning("сериал %d: очередь загрузок не ответила", series_id)
+            return None
+        return {task["task_key"] for task in queue.get("tasks", []) if task.get("series_id") == series_id}
+
+    @staticmethod
+    def _leftovers(existing: list[dict], kept: set[str], queued: set[str] | None) -> list[str]:
+        """The rows to delete: those that stand for nothing and have no task in the queue of downloads. When the
+        queue cannot be told, nothing is deleted this time, so that no task is left without its row."""
+        return [] if queued is None else candidates.obsolete(existing, kept, queued)
 
     @staticmethod
     def _ignored_episodes(series: dict) -> dict[int, set[int]]:

@@ -63,8 +63,12 @@ class Placement:
         return self.chosen.slot
 
 
-def place(series_id: int, chosen: Iterable[Chosen], existing: list[dict[str, Any]]) -> list[Placement]:
-    """A placement for every chosen slot that has a row; slots with the marks `none` and `unfit` have none."""
+def place(series_id: int, chosen: Iterable[Chosen], existing: list[dict[str, Any]],
+          busy: Collection[str] = ()) -> list[Placement]:
+    """A placement for every chosen slot that has a row; slots with the marks `none` and `unfit` have none.
+
+    `busy` are the rows with a task in the queue of downloads: a task is bound to the video it was made for, so a row
+    that has one is held like a row that is being fetched, and another video behind it is a row of its own."""
     by_id = {item["unique_id"]: item for item in existing}
     placements = []
     for each in chosen:
@@ -79,9 +83,10 @@ def place(series_id: int, chosen: Iterable[Chosen], existing: list[dict[str, Any
         known = [item for item in here if item.get("source_url") == row.link]
         moved = by_id.get(fresh)
         # The same row of the layout, numbered otherwise now, is kept in place. So is one that shows another video
-        # while nothing was fetched from the row: there is no file to mix up. A row with a fetched video that now
-        # shows another is the earlier video, which the new one displaces.
-        if moved is not None and moved not in known and (moved.get("source_url") == row.link or not is_settled(moved)):
+        # while nothing was fetched from the row and no task waits for it: there is no file to mix up. A row with a
+        # fetched video, or a task for one, that now shows another is the earlier video, which the new one displaces.
+        if moved is not None and moved not in known and (
+                moved.get("source_url") == row.link or not (is_settled(moved) or moved["unique_id"] in busy)):
             known.append(moved)
         fields = {
             "season": each.reference.season, "episode_start": each.reference.episode, "episode_end": None,
@@ -98,7 +103,7 @@ def place(series_id: int, chosen: Iterable[Chosen], existing: list[dict[str, Any
             placements.append(Placement(each, target["unique_id"], {**fields, "resolution": resolution}, False))
             continue
         if known:
-            unique_id = ids.upgrade_row_unique_id(series_id, row.source_id, row.row_key, resolution)
+            unique_id = ids.upgrade_row_unique_id(series_id, row.source_id, row.row_key, resolution, row.link)
         elif fresh in by_id:  # the id of the row holds the video fetched before: this video is a row of its own
             unique_id = ids.version_row_unique_id(series_id, row.source_id, row.row_key, row.link)
         else:

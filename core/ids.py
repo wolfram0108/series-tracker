@@ -63,7 +63,8 @@ def version_row_unique_id(series_id: int, source_id: int, row_key: str, address:
     return media_unique_id(f"{_row_address(source_id, row_key)}@{address}", _ROW_ID_DATE, series_id)
 
 
-def upgrade_row_unique_id(series_id: int, source_id: int, row_key: str, resolution: int) -> str:
+def upgrade_row_unique_id(series_id: int, source_id: int, row_key: str, resolution: int, address: str) -> str:
     """Id of the row of a better version of a candidate whose earlier version is already fetched (see
-    `upgrade_unique_id`), for a row of the layout."""
-    return upgrade_unique_id(_row_address(source_id, row_key), _ROW_ID_DATE, series_id, resolution)
+    `upgrade_unique_id`), for a row of the layout. The address of the video is a part of it: two videos behind one row
+    at one resolution are two rows, never one that holds the file of the other."""
+    return upgrade_unique_id(f"{_row_address(source_id, row_key)}@{address}", _ROW_ID_DATE, series_id, resolution)

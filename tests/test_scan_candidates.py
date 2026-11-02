@@ -61,14 +61,19 @@ def test_the_formulas_of_the_ids_of_rows_of_the_layout_leave_the_old_ones_alone(
         b"u2026-01-01 00:00:001@1080p").hexdigest()[:16]
     key = ids.row_unique_id(1, 2, "k")
     assert key == ids.media_unique_id("row:2/k", "1970-01-01 00:00:00", 1) and len(key) == 16
-    assert ids.upgrade_row_unique_id(1, 2, "k", 1080) == ids.upgrade_unique_id("row:2/k", "1970-01-01 00:00:00", 1, 1080)
+    assert ids.upgrade_row_unique_id(1, 2, "k", 1080, "https://a") == ids.upgrade_unique_id(
+        "row:2/k@https://a", "1970-01-01 00:00:00", 1, 1080)
 
 
 def test_the_id_of_a_row_follows_the_series_the_source_the_key_and_the_resolution_of_a_better_version():
     base = ids.row_unique_id(1, 2, "k")
     assert len({base, ids.row_unique_id(2, 2, "k"), ids.row_unique_id(1, 3, "k"), ids.row_unique_id(1, 2, "j")}) == 4
-    better = {ids.upgrade_row_unique_id(1, 2, "k", 720), ids.upgrade_row_unique_id(1, 2, "k", 1080)}
+    better = {ids.upgrade_row_unique_id(1, 2, "k", 720, "https://a"), ids.upgrade_row_unique_id(1, 2, "k", 1080, "https://a")}
     assert len(better) == 2 and base not in better
+
+
+def test_the_id_of_a_better_version_follows_the_video_behind_the_row_as_well():
+    assert ids.upgrade_row_unique_id(1, 2, "k", 1080, "https://a") != ids.upgrade_row_unique_id(1, 2, "k", 1080, "https://b")
 
 
 def test_the_columns_written_for_a_candidate_come_from_its_row():
@@ -111,13 +116,13 @@ def test_a_downloaded_row_of_a_higher_resolution_stays_the_candidate_of_its_addr
 def test_a_better_version_of_a_downloaded_candidate_gets_a_row_of_its_own():
     old = item("old", "https://a", resolution=480, status="completed", filename="e01.mp4")
     placed = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://a", height=1080)), [old])[0]
-    assert placed.is_new and placed.unique_id == ids.upgrade_row_unique_id(S, SRC, "k", 1080) != "old"
+    assert placed.is_new and placed.unique_id == ids.upgrade_row_unique_id(S, SRC, "k", 1080, "https://a") != "old"
     assert placed.fields["resolution"] == 1080
 
 
 def test_the_row_of_a_better_version_is_found_again_at_the_next_count():
     old = item("old", "https://a", resolution=480, status="completed", filename="e01.mp4")
-    up = item(ids.upgrade_row_unique_id(S, SRC, "k", 1080), "https://a", resolution=1080)
+    up = item(ids.upgrade_row_unique_id(S, SRC, "k", 1080, "https://a"), "https://a", resolution=1080)
     placed = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://a", height=1080)), [old, up])[0]
     assert (placed.unique_id, placed.is_new) == (up["unique_id"], False)
 
@@ -131,7 +136,7 @@ def test_a_row_not_yet_fetched_takes_the_better_resolution_in_place():
 def test_a_row_being_fetched_is_not_rewritten_under_the_download():
     busy = item("busy", "https://a", resolution=480, status="downloading")
     placed = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://a", height=1080)), [busy])[0]
-    assert placed.is_new and placed.unique_id == ids.upgrade_row_unique_id(S, SRC, "k", 1080)
+    assert placed.is_new and placed.unique_id == ids.upgrade_row_unique_id(S, SRC, "k", 1080, "https://a")
 
 
 def test_an_address_in_another_slot_is_another_candidate():
@@ -217,3 +222,24 @@ def test_rows_after_follow_the_writes():
     after = candidates.rows_after(rows, [{"unique_id": "n", "season": 1, "episode_start": 9}],
                                   [("a", {"episode_start": 4})], ["c"])
     assert [(each["unique_id"], each["episode_start"]) for each in after] == [("a", 4), ("b", 1), ("n", 9)]
+
+
+def test_a_row_with_a_task_in_the_queue_is_not_turned_to_another_video():
+    mine = ids.row_unique_id(S, SRC, "k")
+    waiting = item(mine, "https://a", resolution=720)
+    placed = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://b", height=720)), [waiting], busy={mine})[0]
+    assert placed.is_new and placed.unique_id == ids.version_row_unique_id(S, SRC, "k", "https://b") != mine
+
+
+def test_a_row_with_no_task_is_still_turned_to_the_other_video_in_place():
+    mine = ids.row_unique_id(S, SRC, "k")
+    waiting = item(mine, "https://a", resolution=720)
+    placed = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://b", height=720)), [waiting], busy=set())[0]
+    assert (placed.unique_id, placed.is_new, placed.fields["source_url"]) == (mine, False, "https://b")
+
+
+def test_the_same_video_behind_a_row_with_a_task_stays_that_row():
+    mine = ids.row_unique_id(S, SRC, "k")
+    waiting = item(mine, "https://a", resolution=480)
+    placed = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://a", height=1080)), [waiting], busy={mine})[0]
+    assert (placed.unique_id, placed.is_new) == (mine, False)

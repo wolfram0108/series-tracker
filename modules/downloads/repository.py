@@ -5,6 +5,7 @@ plan_status и строки — у scan, slicing_* — у slicing: только 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Iterable
 
 from core.db import Database
 
@@ -74,7 +75,7 @@ class DownloadsRepository:
     async def tasks_without_row(self, series_id: int) -> list[dict]:
         """Tasks of any state whose media_items row is gone (scan deletes the rows of a slot that lost)."""
         return await self._db.fetch_all(
-            "SELECT id, save_path, status FROM download_tasks WHERE series_id=? AND task_type='vk_video' "
+            "SELECT id, task_key, save_path, status FROM download_tasks WHERE series_id=? AND task_type='vk_video' "
             "AND NOT EXISTS (SELECT 1 FROM media_items mi WHERE mi.unique_id = download_tasks.task_key)",
             (series_id,))
 
@@ -119,10 +120,10 @@ class DownloadsRepository:
             (task_id,))
 
     async def tasks_for_series(self, series_id: int) -> list[dict]:
-        """Задачи загрузки серии (id, save_path, status) — для отмены
+        """Задачи загрузки серии (id, task_key, save_path, status) — для отмены
         in-flight при удалении серии (Д2)."""
         return await self._db.fetch_all(
-            "SELECT id, save_path, status FROM download_tasks WHERE "
+            "SELECT id, task_key, save_path, status FROM download_tasks WHERE "
             "series_id=? AND task_type='vk_video'", (series_id,))
 
     async def clear_queue(self) -> int:
@@ -163,11 +164,18 @@ class DownloadsRepository:
             "UPDATE media_items SET status=? WHERE unique_id=?",
             (status, unique_id))
 
-    async def register_downloaded(self, unique_id: str,
-                                  filename: str) -> None:
-        await self._db.execute(
-            "UPDATE media_items SET status='completed', final_filename=? "
-            "WHERE unique_id=?", (filename, unique_id))
+    async def register_downloaded(self, unique_id: str, filename: str, released: Iterable[str] = ()) -> None:
+        """The row holds the file; `released` are the rows it displaced, which no longer do, in the same step."""
+        await self._db.execute_many([
+            ("UPDATE media_items SET final_filename=NULL WHERE unique_id=?", (each,)) for each in released] + [
+            ("UPDATE media_items SET status='completed', final_filename=? WHERE unique_id=?", (filename, unique_id))])
+
+    async def task_paths(self, series_id: int) -> dict[str, str]:
+        """{final path: key of the row} of the tasks that are to write a file of the series."""
+        rows = await self._db.fetch_all(
+            "SELECT save_path, task_key FROM download_tasks WHERE series_id=? AND task_type='vk_video' "
+            "AND status IN ('pending', 'downloading', 'processing')", (series_id,))
+        return {each["save_path"]: each["task_key"] for each in rows}
 
     async def reset_download_state(self, unique_id: str) -> None:
         await self._db.execute(
