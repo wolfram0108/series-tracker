@@ -30,6 +30,9 @@ import httpx
 ROOT = Path(__file__).resolve().parents[6]
 RAW = Path(__file__).resolve().parents[2] / "raw" / "measurements"
 PY = sys.executable
+# The stand holds the logins of the systems it reads and no others: a copied login of the download client or of a tracker would be
+# tried against the real service by the modules of the stand, and failed attempts get the address of this machine banned.
+LOGINS = ("vk",)
 
 
 class Stand:
@@ -136,8 +139,11 @@ class Stand:
 
     def _silence_the_schedule(self) -> None:
         """The copy must not scan, fetch or download anything of its own: the schedule of the scanner is switched off
-        and no series is left on the automatic scan, before the instance comes up."""
+        and no series is left on the automatic scan, before the instance comes up; the logins other than `LOGINS` are dropped."""
         conn = sqlite3.connect(self.db)
+        marks = ", ".join("?" * len(LOGINS))
+        conn.execute(f"DELETE FROM auth WHERE auth_type NOT IN ({marks})", LOGINS)
+        conn.execute(f"DELETE FROM tracker_sessions WHERE service NOT IN ({marks})", LOGINS)
         conn.execute("UPDATE series SET auto_scan_enabled=0")
         conn.execute("UPDATE settings SET value='false' WHERE key='scanner_agent_enabled'")
         conn.commit()
@@ -161,12 +167,13 @@ class Stand:
         target.close()
 
     def _copy_credentials(self) -> None:
-        """The token of VK lives in the table `auth` (module trackerauth); the stand takes a copy of the rows."""
+        """The token of VK lives in the table `auth` (module trackerauth); the stand takes a copy of the rows of `LOGINS` only."""
         source = sqlite3.connect(f"file:{self.credentials_from}?mode=ro", uri=True)
         target = sqlite3.connect(self.db)
-        for table in ("auth", "tracker_sessions"):
+        for table, key in (("auth", "auth_type"), ("tracker_sessions", "service")):
             columns = [row[1] for row in target.execute(f"PRAGMA table_info({table})")]
-            rows = source.execute(f"SELECT {', '.join(columns)} FROM {table}").fetchall()
+            rows = source.execute(f"SELECT {', '.join(columns)} FROM {table} WHERE {key} IN ({', '.join('?' * len(LOGINS))})",
+                                  LOGINS).fetchall()
             target.executemany(f"INSERT OR REPLACE INTO {table} ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
                                rows)
         target.commit()
