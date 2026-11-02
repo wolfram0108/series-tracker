@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from live_three import (CUT, EXCLUDE, FIRST, LAST, NUMBER_FIRST, OUT_NUMBER_FIRST, PROFILES as LIVE_PROFILES, REAL_DB, SERIES,
                         SERIES_EN, SOURCES, _extract, _rule)  # noqa: E402
 from stand import RAW, Stand  # noqa: E402
-from ui_journey import ADMIN, PASSWORD, text_of  # noqa: E402
+from ui_journey import ADMIN, PASSWORD, option_named, text_of  # noqa: E402
 
 DUNHUA = SOURCES[1][0]
 CHANNEL = "https://vkvideo.ru/@donghuaworld"
@@ -115,7 +115,7 @@ def reading_done(page: Page, c: Campaign) -> None:
 
 def pick_profile(page: Page, card: int, name: str) -> None:
     page.locator(".source-card").nth(card).locator(".item-select").first.click()
-    page.locator(".options-list .option", has_text=name).click()
+    option_named(page, name).click()
     page.wait_for_function("(n) => document.querySelectorAll('.source-card')[n].querySelector('.source-state.is-ready, .source-state.is-failed')",
                            arg=card, timeout=60000)
 

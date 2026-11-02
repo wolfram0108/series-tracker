@@ -51,6 +51,11 @@ def text_of(key: str) -> str:
     return found.group(1).replace("\\n", "\n")
 
 
+def option_named(page: Page, text: str):
+    """The item of an opened list whose whole text is `text`: «vk 5» must not take «vk 5, без озвучки» too."""
+    return page.locator(".options-list .option").filter(has_text=re.compile(rf"^\s*{re.escape(text)}\s*$"))
+
+
 class Journey:
     def __init__(self, stand: Stand, url: str, profile: str, safeguard: float) -> None:
         self.stand, self.url, self.profile = stand, url, profile
@@ -92,7 +97,7 @@ class Journey:
         self.step("Ж-2 таблица готова: плееры, озвучки без группы", players=players, voices=voices)
 
         page.locator(".source-card .item-select").first.click()
-        page.locator(".options-list .option", has_text=self.profile).click()
+        option_named(page, self.profile).click()
         page.wait_for_selector(".source-card .source-state.is-ready", timeout=60000)
         self.step("Ж-7 профиль назначен, строки получили номера")
 

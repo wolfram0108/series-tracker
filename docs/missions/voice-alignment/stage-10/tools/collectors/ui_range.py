@@ -20,6 +20,7 @@ from playwright.sync_api import Page, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from live_three import REAL_DB, SOURCES  # noqa: E402
 from stand import Stand  # noqa: E402
+from ui_journey import option_named  # noqa: E402
 
 CATALOG = Path(__file__).resolve().parents[6] / "web" / "src" / "i18n" / "ru.ts"
 
@@ -41,10 +42,11 @@ def first_run(page: Page) -> None:
 
 
 def try_profile(page: Page, profile: str, address: str, query: str) -> dict:
-    if not page.locator(".accordion-item .item-select").first.is_visible():
+    # The select of the profiles is the one of Step 1; a card of a rule has selects of its own.
+    if not page.locator(".field-group .item-select").first.is_visible():
         page.locator("button.accordion-button").first.click()
-    page.locator(".accordion-item .item-select").first.click()
-    page.locator(".options-list .option", has_text=profile).click()
+    page.locator(".field-group .item-select").first.click()
+    option_named(page, profile).click()
     page.locator("button.accordion-button", has_text="Шаг 3").click()
     page.get_by_label(text_of("rulesTest.field.address")).fill(address)
     page.get_by_label(text_of("rulesTest.field.query")).fill(query)
