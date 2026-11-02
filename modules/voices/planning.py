@@ -51,6 +51,7 @@ class PlannedDub:
     voice_key: str
     voice_label: str
     chain: tuple[Candidate, ...]
+    left_out: frozenset[str] = frozenset()  # links of the variants the user left out: no work may run from them
 
 
 @dataclass(frozen=True)
@@ -93,10 +94,13 @@ def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settin
         for label in voices:
             if label == ref_row.voice_label or group_target(label) in take_off:
                 continue
-            covering = [row for row in by_voice.get((ref.season, label), ())
-                        if _covers(row, ref.episode, ref_row.part) and (label, row.source_id, row.player) not in denied]
-            dubs.append(PlannedDub(ref.season, ref.episode, slot[2], label, label,
-                                   _chain(covering, picks.get(group_target(label)), priority, players)))
+            fitting = [row for row in by_voice.get((ref.season, label), ()) if _covers(row, ref.episode, ref_row.part)]
+            covering = [row for row in fitting if (label, row.source_id, row.player) not in denied]
+            chain = _chain(covering, picks.get(group_target(label)), priority, players)
+            kept = {each.url for each in chain}
+            left_out = frozenset(row.link for row in fitting
+                                 if (label, row.source_id, row.player) in denied and row.link and row.link not in kept)
+            dubs.append(PlannedDub(ref.season, ref.episode, slot[2], label, label, chain, left_out))
     return Plan(tuple(dubs), frozenset(with_reference), frozenset(undecided))
 
 

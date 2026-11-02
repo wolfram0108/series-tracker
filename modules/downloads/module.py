@@ -54,7 +54,8 @@ A general "stream to file" download (voice-over mission):
       the link to an absolute path without a record in media_items or download_tasks
       (the voice-overs of a series go to a temporary directory). The executor keeps no state:
       the owner of the queue (voices) sends the command again after a restart.
-  downloads.fetch.cancel {series_id?, key?} — drop the queue and the running downloads of a series, or one job by its key
+  work.withdrawn {series_id, keys?} (event) — the owner does not need the work: the queue and the running downloads of a
+      series, or the jobs of these keys, stop and what they wrote goes
 events downloads.fetch.started {key, series_id, path} (the download left the queue and began) and
 downloads.fetch.finished {key, ok, error, transient, path, series_id}.
 It has a limit of its own, the setting max_parallel_dub_downloads (2 by default),
@@ -73,7 +74,7 @@ import os
 import time
 
 from core import BaseModule, BusRequestError, storage
-from core.contracts import SeriesKind, SourceType
+from core.contracts import WORK_WITHDRAWN, SeriesKind, SourceType, WorkWithdrawn
 from core.db import Database
 from core.envelope import Envelope
 from core.retry import UNTIMED, Budget, retrying
@@ -148,7 +149,7 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.cancel", self.on_cancel)
         self.handle("downloads.episodes.get", self.on_episodes_get)
         self.handle("downloads.fetch", self.on_fetch)
-        self.handle("downloads.fetch.cancel", self.on_fetch_cancel)
+        self.handle(WORK_WITHDRAWN, self.on_work_withdrawn)
         self.handle("downloads.fs.sync", self.on_fs_sync)
         self.handle("downloads.item.set_filename", self.on_set_filename)
         self.handle("downloads.item.set_status", self.on_set_status)
@@ -658,14 +659,13 @@ class DownloadsModule(BaseModule):
         self._fetch_queue.append(job)
         self._fetch_pump()
 
-    async def on_fetch_cancel(self, env: Envelope) -> None:
-        """payload: {series_id?, key?}: the jobs of a series, one job by its key, or the job of that key in that series."""
-        series_id, key = env.payload.get("series_id"), env.payload.get("key")
-        if series_id is None and key is None:
-            raise ValueError("отмена загрузки: нужен series_id или key")
+    async def on_work_withdrawn(self, env: Envelope) -> None:
+        """The owner of the work does not need it: the jobs of the series, or of the keys it names, stop. This module
+        stops them itself and removes what they wrote; nobody tells it how."""
+        notice = WorkWithdrawn.model_validate(env.payload)
 
         def wanted(job_key: str, owner: int) -> bool:
-            return (key is None or job_key == key) and (series_id is None or owner == series_id)
+            return owner == notice.series_id and (notice.keys is None or job_key in notice.keys)
 
         self._fetch_queue = [job for job in self._fetch_queue if not wanted(job["key"], job["series_id"])]
         for job_key, (runner, owner) in list(self._fetch_active.items()):

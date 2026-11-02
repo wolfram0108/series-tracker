@@ -18,11 +18,12 @@ from .release_table import (LINE_SEPARATOR, ReleaseTable, RowState, RowVoice, Si
 from .rules import RuleLine, RuleResult, RulesApplyReply, RulesApplyRequest, RulesProfileChanged
 from .series_sources import SeriesKind, SeriesSource, SourceChanged, SourceEvent, SourceType
 from .voice_groups import GroupsResolveReply, GroupsResolveRequest
+from .work import WORK_WITHDRAWN, WorkWithdrawn
 from .voices import (DubEvent, DubEventStatus, DubHint, DubItem, DubRecord, DubsSnapshot, DubState, DubStatus,
                      Reason, SettingProblem, SnapshotItem,
                      VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView)
 
-__all__ = ["AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitReply", "DubEvent",
+__all__ = ["WORK_WITHDRAWN", "WorkWithdrawn", "AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitReply", "DubEvent",
            "DubEventStatus", "DubHint", "DubItem", "DubRecord", "DubsSnapshot", "DubState", "DubStatus", "Reason", "SnapshotItem", "SettingProblem", "VoiceSettingsDraft",
            "VoiceSettingsSaved", "VoiceSettingsView", "ConformSettingsDraft", "ConformSettingsSaved",
            "ConformSettingsView",

@@ -175,7 +175,7 @@ class Neighbours(BaseModule):
         self.handle("settings.value.get", self.on_setting)
         self.handle("settings.values.by_prefix", self.on_settings_by_prefix)
         self.handle("downloads.fetch", self.on_fetch)
-        self.handle("downloads.fetch.cancel", self.on_cancel)
+        self.handle("work.withdrawn", self.on_cancel)
         if self.serves_conform:
             self.handle("conform.submit", self.on_submit)
             self.handle("conform.cancel", self.on_conform_cancel)
@@ -253,8 +253,9 @@ class Neighbours(BaseModule):
         self.fetches.append(dict(env.payload))
 
     async def on_cancel(self, env):
-        if env.payload.get("key"):  # one job by its key
-            self.cancelled_keys.append(env.payload["key"])
+        """The notice that work is not needed (the executor, downloads, hears it and stops by itself)."""
+        if env.payload.get("keys"):  # the jobs of these keys
+            self.cancelled_keys.extend(env.payload["keys"])
         else:
             self.cancels.append(env.payload["series_id"])
 

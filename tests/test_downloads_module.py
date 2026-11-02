@@ -1219,7 +1219,7 @@ async def test_fetch_cancel_drops_the_queue_and_active_jobs_of_a_series(system, 
             "key": f"dub:{i}", "url": f"https://site/#cvh={i}",
             "path": str(tmp_path / f"{i}.mp4"), "series_id": 3 if i < 3 else 4})
     assert await _wait(lambda: dl.started == ["https://site/#cvh=0", "https://site/#cvh=1"])
-    probe.send_command("downloads.fetch.cancel", {"series_id": 3})
+    probe.publish_event("work.withdrawn", {"series_id": 3})
     # The slots of the cancelled jobs go to the next series' job; the queued job of series 3 never runs.
     assert await _wait(lambda: "https://site/#cvh=3" in dl.started)
     dl.gate.set()
@@ -1237,7 +1237,7 @@ async def test_fetch_cancel_by_key_drops_only_that_job(system, tmp_path):
             "key": f"file:{i}", "url": f"https://site/#cvh={i}",
             "path": str(tmp_path / f"{i}.mp4"), "series_id": 3})
     assert await _wait(lambda: dl.started == ["https://site/#cvh=0", "https://site/#cvh=1"])
-    probe.send_command("downloads.fetch.cancel", {"key": "file:0"})
+    probe.publish_event("work.withdrawn", {"series_id": 3, "keys": ["file:0"]})
     # The slot of the cancelled job goes to the queued one; the other running job is untouched.
     assert await _wait(lambda: "https://site/#cvh=2" in dl.started)
     dl.gate.set()

@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from core.contracts import EffectiveLever, Level, group_target
+from core.contracts import EffectiveLever, Level, group_target, variant_target
 from test_voices import (db_path, dubs, layout_changed, library_files, pass_over, placed_set, quiet, rows,  # noqa: F401
                          settled, until_true)
 
@@ -48,3 +48,71 @@ async def test_a_track_already_placed_is_removed_when_its_voice_over_leaves_the_
     await until_true(gone, ("the track stayed", library_files(neighbours)))
     assert [r["voice_key"] for r in await voices.repo.for_series(7)] == ["BlackCat"]
     assert any("BlackCat" in name for name in library_files(neighbours)) and os.path.isfile(ref)
+
+
+def leave_out(neighbours, voice, player, season=1, episode=1):
+    """The user leaves the variant (voice-over, source 1, player) out of the episode."""
+    neighbours.levers.setdefault((season, episode), []).append(
+        EffectiveLever(lever="variant.allow", target=variant_target(voice, 1, player), value=False, level=Level.EPISODE))
+
+
+def players_of(row):
+    return [each["player"] for each in row["chain"]]
+
+
+@pytest.mark.asyncio
+async def test_a_variant_the_user_leaves_out_stops_the_download_that_runs_from_it_and_the_voice_goes_on_from_the_others(dubs):
+    probe, neighbours, voices, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    await quiet(voices)
+    before = {r["episode"]: r for r in await voices.repo.for_series(7)}
+    assert players_of(before[1]) == ["cvh", "kodik"] and before[1]["status"] == "downloading"
+    leave_out(neighbours, "BlackCat", "cvh")
+    asks = neighbours.layout_asks + 1
+    layout_changed(probe)
+    await pass_over(voices, neighbours, asks)
+
+    after = {r["episode"]: r for r in await voices.repo.for_series(7)}
+    assert neighbours.cancelled_keys == [f"dub:{before[1]['id']}"]
+    assert after[1]["id"] != before[1]["id"] and after[1]["status"] == "pending" and players_of(after[1]) == ["kodik"]
+    assert {n: after[n]["id"] for n in (2, 3)} == {n: before[n]["id"] for n in (2, 3)}  # the other episodes are left alone
+
+
+@pytest.mark.asyncio
+async def test_a_variant_left_out_is_taken_out_of_the_chain_of_work_that_runs_from_another(dubs):
+    probe, neighbours, voices, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    await quiet(voices)
+    before = {r["episode"]: r for r in await voices.repo.for_series(7)}
+    leave_out(neighbours, "BlackCat", "kodik")  # the next candidate: the download under way is from cvh
+    asks = neighbours.layout_asks + 1
+    layout_changed(probe)
+    await pass_over(voices, neighbours, asks)
+
+    after = {r["episode"]: r for r in await voices.repo.for_series(7)}
+    assert after[1]["id"] == before[1]["id"] and after[1]["status"] == "downloading"
+    assert players_of(after[1]) == ["cvh"] and after[1]["attempt"] == 0
+    assert neighbours.cancelled_keys == [] and neighbours.cancels == []
+
+
+@pytest.mark.asyncio
+async def test_a_track_made_from_a_variant_the_user_leaves_out_is_removed_and_the_voice_is_planned_again(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    voices = dubs[2]
+    assert any("BlackCat" in name for name in library_files(neighbours))
+    black = next(r for r in await voices.repo.for_series(7) if r["voice_key"] == "BlackCat")
+    used = black["chain"][black["attempt"]]["player"]
+    leave_out(neighbours, "BlackCat", used)
+    asks = neighbours.layout_asks + 1
+    layout_changed(probe)
+    await pass_over(voices, neighbours, asks)
+
+    async def gone():
+        return not any("BlackCat" in name for name in library_files(neighbours))
+
+    await until_true(gone, ("the track stayed", library_files(neighbours)))
+    black = next(r for r in await voices.repo.for_series(7) if r["voice_key"] == "BlackCat")
+    assert black["status"] == "pending" and used not in players_of(black) and players_of(black)
+    assert any("RedHeadSound" in name for name in library_files(neighbours))  # the other voice-over is not touched

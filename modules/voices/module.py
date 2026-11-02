@@ -31,7 +31,7 @@ Command:
       begin when conform.settings.changed says it was named). Before a job is sent the reference video is copied into
       the service's folder of the episode, so that the service reads and writes only inside the work folder; the copy
       goes with the other temporary files of the episode. Only a series of kind `video` is planned (catalog.series.get).
-Commands out: downloads.fetch, downloads.fetch.cancel. Queries to conform: workspace (the folders of the service
+Commands out: downloads.fetch. Event out: work.withdrawn (the downloads of dropped voice-overs and files stop). Queries to conform: workspace (the folders of the service
             for a place, asked of the bridge: this module does not know its layout), submit (with a key that
             finds the job again; the reply is a SubmitReply: accepted, rejected, unavailable (not sent) or
             uncertain, anything that is not a clear reply counts as uncertain, and only "unavailable" releases the
@@ -88,7 +88,7 @@ is one file, a row of voice_files, downloaded once (downloads.fetch with the key
 of every episode it covers that has a reference: each goes to the service with the reference of its own episode. The
 file belongs to its row in voice_files; it goes to the cleanup journal, with its row deleted in the same transaction,
 when no voice-over reads it (all placed, rejected, failed or gone from the plan); a transfer under way is cancelled
-(downloads.fetch.cancel with the key of the file), and an ending that comes anyway puts the folder on the journal again. A
+(work.withdrawn with the key of the file), and an ending that comes anyway puts the folder on the journal again. A
 file that cannot be downloaded sends every voice-over that waited on it to its next candidate; the new row of a changed
 compilation is a new file, and the old one stays while a voice-over still reads it. A series that is deleted loses its
 downloads, its files and its rows.
@@ -175,7 +175,7 @@ from collections import OrderedDict, defaultdict
 from core import BaseModule, BusRequestError
 from pydantic import ValidationError
 
-from core.contracts import (AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
+from core.contracts import (WORK_WITHDRAWN, WorkWithdrawn, AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
                             DubRecord, DubsSnapshot, DubStatus as S, GroupsResolveReply, GroupsResolveRequest,
                             JobStatus, Reference, ReferenceChanged, SnapshotItem, SubmitOutcome, SubmitReply,
                             VoiceSettingsDraft, VoiceSettingsSaved)
@@ -520,9 +520,12 @@ class VoicesModule(BaseModule):
         planned: set[tuple[int, int, int, str]] = set()
         touched: set[tuple[int, int, int, str]] = set()
         relabeled: set[tuple[int, int, int, str]] = set()
+        recorded = {(row["season"], row["episode"], row["part"], row["voice_key"]): row for row in before}
         for dub in plan.dubs:
             key = (dub.season, dub.episode, dub.part, keys[(dub.season, dub.episode, dub.part, dub.voice_key)])
             planned.add(key)
+            if dub.left_out and key in recorded:
+                await self._follow_variants(series_id, recorded[key], dub.left_out)
             if await self.repo.relabel(series_id, *key, dub.voice_label):
                 relabeled.add(key)
             if await self.repo.upsert(series_id, *key, dub.voice_label, [each.as_json() for each in dub.chain],
@@ -534,7 +537,7 @@ class VoicesModule(BaseModule):
             self.log.info("сериал %d: озвучка %s серии %d вышла из плана", series_id, gone["voice_label"], gone["episode"])
             if gone["status"] == S.DOWNLOADING and gone["file_id"] is None:  # its own download goes with it
                 self._fetching.discard(gone["id"])
-                self.send_command("downloads.fetch.cancel", {"key": f"{DUB_KEY}{gone['id']}", "series_id": series_id})
+                self._withdraw(series_id, [f"{DUB_KEY}{gone['id']}"])
             await self._announce(gone, E.REMOVED)
         await self._drop_without_reference(series_id, plan, before)
         await self._work_off()
@@ -552,6 +555,27 @@ class VoicesModule(BaseModule):
         await self._recheck_ready(series_id)
         await self._release_files()
         await self._admit()
+
+    async def _follow_variants(self, series_id: int, row: dict, left_out: frozenset[str]) -> None:
+        """The user left variants out. Work that runs from one of them, or a track made from it, is not wanted at any
+        step: it stops, what it made goes to the journal, and the voice-over is planned again from the others. Work
+        that runs from another candidate goes on, without the variants left out among its next ones."""
+        if row["status"] in (S.PENDING, S.FAILED) or not row["chain"]:  # nothing was begun: the plan offers it again
+            return
+        chain = row["chain"]
+        active = chain[row["attempt"]] if row["attempt"] < len(chain) else None
+        if active is not None and active["url"] in left_out:
+            self.log.info("сериал %d, s%02de%02d: озвучка %s шла из варианта, который исключили, — снята", series_id,
+                          row["season"], row["episode"], row["voice_label"])
+            if row["status"] == S.DOWNLOADING and row["file_id"] is None:
+                self._fetching.discard(row["id"])
+                self._withdraw(series_id, [f"{DUB_KEY}{row['id']}"])
+            await self.repo.retire(row["id"])
+            await self._announce(row, E.REMOVED)
+            return
+        kept = [each for each in chain if each["url"] not in left_out]
+        if len(kept) != len(chain):
+            await self.repo.set_chain(row["id"], kept, kept.index(active) if active is not None else 0)
 
     async def _drop_without_reference(self, series_id: int, plan: planning.Plan, rows: list[dict]) -> None:
         """An episode that has no reference loses the voice-overs it had begun, as an episode that left the plan does."""
@@ -733,13 +757,17 @@ class VoicesModule(BaseModule):
         await self._release_files()
         self._replan_deferred(file["series_id"])
 
+    def _withdraw(self, series_id: int, keys: list[str] | None) -> None:
+        """The work given out under these keys (all of the series without keys) is not needed: whoever does it hears."""
+        self.publish_event(WORK_WITHDRAWN, WorkWithdrawn(series_id=series_id, keys=keys).model_dump(mode="json"))
+
     def _cancel_transfer(self, file: dict) -> None:
         """No voice-over reads the file whose transfer is under way: the transfer is cancelled, the file is free at once
         and its folder is on the journal. A transfer that ends before the cancel arrives is met in `_on_file_finished`."""
         self._file_fetching.discard(file["id"])
         self.log.info("сериал %d: загрузка файла склейки %d отменена, он больше не нужен озвучкам", file["series_id"],
                       file["id"])
-        self.send_command("downloads.fetch.cancel", {"key": f"{FILE_KEY}{file['id']}", "series_id": file["series_id"]})
+        self._withdraw(file["series_id"], [f"{FILE_KEY}{file['id']}"])
 
     async def _release_files(self) -> None:
         """Files that no voice-over reads any more go to the cleanup journal, and are carried out."""
@@ -1499,7 +1527,7 @@ class VoicesModule(BaseModule):
         series_id = env.payload["series_id"]
         self._deleted.add(series_id)
         self._file_fetching -= {file["id"] for file in await self.repo.files_of(series_id)}
-        self.send_command("downloads.fetch.cancel", {"series_id": series_id})
+        self._withdraw(series_id, None)
         rows = await self.repo.for_series(series_id)
         folders = {os.path.dirname(folder) for folder in self._folders_of(rows, "")} - {""}
         # The rows go with their jobs and the folders to remove written to the journal in one transaction.

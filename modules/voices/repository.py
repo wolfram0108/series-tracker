@@ -270,9 +270,17 @@ class VoicesRepository:
                      or row["status"] in lifecycle.OFFER.sources
                      or (row["status"] == S.DOWNLOADING and row["file_id"] is not None))]
         for row in gone:
-            await self._atomically([*_hand_over("id=?", (row["id"],)),
-                                    ("DELETE FROM voice_dubs WHERE id=?", (row["id"],))])
+            await self.retire(row["id"])
         return gone
+
+    async def retire(self, dub_id: int) -> None:
+        """The row is not wanted: whatever it owns goes to the journal with it, in one step."""
+        await self._atomically([*_hand_over("id=?", (dub_id,)), ("DELETE FROM voice_dubs WHERE id=?", (dub_id,))])
+
+    async def set_chain(self, dub_id: int, chain: list[dict[str, Any]], attempt: int) -> None:
+        """The candidates of a row that has begun: the same work goes on from the candidate it began with."""
+        await self._db.execute("UPDATE voice_dubs SET chain=?, attempt=? WHERE id=?",
+                               (json.dumps(chain, ensure_ascii=False), attempt, dub_id))
 
     async def mark_pending(self, dub_id: int, error: str) -> bool:
         return await self._move(lifecycle.FILE_LOST, "attempt=0, error=?", (error,), "id=?", (dub_id,))
