@@ -175,7 +175,7 @@ class DownloadsModule(BaseModule):
         requeued = await self.repo.requeue_interrupted()
         if requeued:
             self.log.info("оборванных загрузок возвращено в очередь: %d", requeued)
-        try:  # the fold of statuses at the start (the duty of a supplier, Р-11)
+        try:  # a supplier of the catalog's fold of statuses states its contribution at the start
             for series in await self.request("catalog.series.list", {}, timeout=30):
                 if series.get("kind") == SeriesKind.VIDEO:
                     await self._contribute(series["id"])

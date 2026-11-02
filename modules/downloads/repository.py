@@ -373,7 +373,7 @@ class DownloadsRepository:
             (series_id,))
         return row["n"] if row else 0
 
-    # --- the fold of statuses (Р-11) -----------------------------------------------
+    # --- the contribution to the catalog's fold of statuses ------------------------
 
     async def series_flags(self, series_id: int) -> dict:
         planned = await self._db.fetch_all(
