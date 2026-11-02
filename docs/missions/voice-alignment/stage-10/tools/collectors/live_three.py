@@ -29,8 +29,8 @@ from verdicts import judge_alignment  # noqa: E402
 REAL_DB = "/home/user/series-tracker/app.db"
 SERIES = "Расколотая битвой синева небес 5"
 SERIES_EN = "Raskolotaia Bitva Sineva Nebes 5"
-LOCAL = "/nas/torrents/track-muxer/stage10-live5"
-REMOTE = "/mnt/meganas/media/torrents/track-muxer/stage10-live5"
+LOCAL = "/nas/torrents/track-muxer/stage10-live6"
+REMOTE = "/mnt/meganas/media/torrents/track-muxer/stage10-live6"
 LIBRARY = f"{LOCAL}/library/{SERIES_EN}"
 CUT = "1-207"  # the range filter: the episodes up to 207 are out, 208-217 stay
 FIRST, LAST = 208, 217

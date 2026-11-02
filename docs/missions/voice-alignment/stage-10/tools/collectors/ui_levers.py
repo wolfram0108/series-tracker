@@ -28,9 +28,9 @@ from playwright.sync_api import Page, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from live_sync import LIVE_STATES, Live, conform_address  # noqa: E402
 from live_three import (CUT, EXCLUDE, FIRST, KEEP, LAST, LIBRARY, LOCAL, NUMBER_FIRST, OUT_NUMBER_FIRST, PROFILES as LIVE_PROFILES,
-                        REAL_DB, REMOTE, SERIES, SERIES_EN, SOURCES, _extract, _rule, two_phase)  # noqa: E402
+                        REAL_DB, REMOTE, SERIES, SERIES_EN, SOURCES, TEXT_FIRST, _extract, _rule, two_phase)  # noqa: E402
 from stand import RAW, Stand  # noqa: E402
-from ui_journey import ADMIN, PASSWORD, option_named, text_of  # noqa: E402
+from ui_journey import ADMIN, PASSWORD, UNKNOWN_VOICE, option_named, text_of  # noqa: E402
 
 DUNHUA = SOURCES[1][0]
 CHANNEL = "https://vkvideo.ru/@donghuaworld"
@@ -38,6 +38,8 @@ QUERY = "Расколотая битвой синева небес"
 PROFILE_SITE, PROFILE_VK = "dunhuatv 5", "vk 5, без озвучки"
 # The profiles `ui_profiles.py` makes by hand in the constructor; `--profiles hand` takes these instead of the ones made through the API.
 HAND_SITE, HAND_VK = "dunhuatv (вручную)", "vk (вручную)"
+# `--three`: the release of ruchime is the third source of the series; its profile is the one the live runs use.
+PROFILE_RUCHIME_5, RUCHIME_RELEASE = "ruchime 5", SOURCES[0][0]
 VK_RULES = [_rule("Исключить до 207", [OUT_NUMBER_FIRST], EXCLUDE), _rule("N серия", [NUMBER_FIRST], [_extract(NUMBER_FIRST)])]
 SEASON = 5
 
@@ -53,6 +55,7 @@ class Campaign:
         self.series_id = 0
         self.library = work / "library" / SERIES_EN
         self.hand = False
+        self.three = False
         self.pending: list[str] | None = None
 
     # --- the clock and the record ---------------------------------------------------------------------------------
@@ -99,8 +102,10 @@ class Campaign:
         if self.hand:
             missing = {HAND_SITE, HAND_VK} - set(existing)
             assert not missing, f"profiles made by hand are not in the database (run ui_profiles.py first): {sorted(missing)}"
-            return existing
-        for name, rules in ((PROFILE_SITE, LIVE_PROFILES["dunhuatv"]), (PROFILE_VK, VK_RULES)):
+        wanted = [(PROFILE_RUCHIME_5, LIVE_PROFILES["ruchime"])] if self.three else []
+        if not self.hand:
+            wanted += [(PROFILE_SITE, LIVE_PROFILES["dunhuatv"]), (PROFILE_VK, VK_RULES)]
+        for name, rules in wanted:
             if name in existing:
                 continue
             made = self.http.post("/api/parser-profiles", json={"name": name}).json()
@@ -180,6 +185,24 @@ def setup(c: Campaign, page: Page) -> None:
 
     c.scenario("профиль назначен каналу VK" + ("" if c.hand else " (без озвучки)"), page, profile_vk)
 
+    if c.three:
+        def ruchime_source() -> dict:
+            page.get_by_label(text_of("sources.add.label")).fill(RUCHIME_RELEASE)
+            page.locator("button.source-action", has_text=text_of("sources.add.button")).click(timeout=20000)
+            page.wait_for_function("() => document.querySelectorAll('.source-card').length === 3", timeout=20000)
+            reading_done(page, c)
+            players = [each.strip() for each in page.locator(".source-card").nth(2).locator("li.player b").all_inner_texts()]
+            assert "Vibix" in players and len(players) >= 3, players
+            return {"players": players}
+
+        c.scenario("третий источник — ruchime: адрес набран, таблица прочитана, плееры страницы и каталог Vibix", page, ruchime_source)
+
+        def profile_ruchime() -> dict:
+            pick_profile(page, 2, PROFILE_RUCHIME_5)
+            return {"state": page.locator(".source-card").nth(2).locator(".source-state").inner_text()}
+
+        c.scenario("профиль назначен источнику ruchime", page, profile_ruchime)
+
     def series() -> dict:
         page.get_by_label("Название (RU)").fill(SERIES)
         page.get_by_label("Название (EN)").fill(SERIES_EN)
@@ -200,7 +223,7 @@ GROUPS = ["AniStar", "Anton Shanteau", "Animy", "Студия Константи
 # raw name of a voice-over -> the group the user makes of it and whether it is the group's own name
 MAKE = [("AniStar", "AniStar"), ("Anton Shanteau", "Anton Shanteau"), ("AniMy / RuChiMe", "Animy"),
         ("Студия Константина Исаева", "Студия Константина Исаева"), ("AnimeVost", "AnimeVost"),
-        ("AniStar Многоголосый", "AniStar")]
+        ("AniStar Многоголосый", "AniStar"), ("Ruchime", "Animy")]
 
 
 def open_output(page: Page, base: str | None = None) -> None:
@@ -281,11 +304,13 @@ def clean(c: Campaign) -> None:
         c.http.post(f"/api/series/{c.series_id}/output/settings/reset", json={"season": SEASON, "episode": episode}).raise_for_status()
 
 
-def make_groups(c: Campaign, page: Page) -> dict:
+def make_groups(c: Campaign, page: Page, unnamed_ok: bool = False) -> dict:
     """The groups of the voice-overs, made the way a user makes them: in the column of a voice-over of the output, by its button."""
     made = {}
     for raw, group in MAKE:
-        label = next(r["voice_label"] for r in layout_rows(c) if r["voice_name"] == raw)
+        label = next((r["voice_label"] for r in layout_rows(c) if r["voice_name"] == raw), None)
+        if label is None:
+            continue  # no source of the series has this voice-over
         root = grid(page, "series")
         box = column(page, root, label)
         if not box.locator(".group-maker-name").count():
@@ -301,8 +326,10 @@ def make_groups(c: Campaign, page: Page) -> dict:
             arg={"group": group, "label": label}, timeout=c.left_ms())
         made[raw] = group
     columns = sorted(each.get_attribute("data-group") for each in grid(page, "series").locator(".voice-column").all())
-    assert columns == sorted(GROUPS), f"columns {columns}"
-    return {"columns": columns}
+    extra = [each for each in columns if each not in GROUPS]
+    assert set(GROUPS) <= set(columns) and (unnamed_ok or not extra), f"columns {columns}"
+    assert all(each.startswith(UNKNOWN_VOICE) for each in extra), f"columns that are neither a group nor an unknown voice-over: {extra}"
+    return {"columns": columns, "unnamed": extra}
 
 
 def levers(c: Campaign, page: Page, context) -> None:
@@ -588,7 +615,19 @@ def sync(c: Campaign, page: Page) -> None:
         return {"rows": len(rows), "name_in_card": typed, "voice": "AniStar", "player": "vk"}
 
     c.scenario("Ж-1: озвучка канала VK названа правилом профиля, собранного руками; в карточке источника имя не набрано", page, named_by_the_rule)
-    c.scenario("Ж-6: пять групп озвучек заведены кнопкой в колонках «Выхода»", page, lambda: make_groups(c, page))
+    c.scenario("Ж-6: пять групп озвучек заведены кнопкой в колонках «Выхода»", page, lambda: make_groups(c, page, unnamed_ok=c.three))
+
+    if c.three:
+        def drop_unnamed() -> dict:
+            """The voice-overs no group names (the nameless ones of a player) are not taken: «брать озвучку» is off for the series."""
+            root = grid(page, "series")
+            labels = [each.get_attribute("data-group") for each in root.locator(".voice-column").all() if each.get_attribute("data-group") not in GROUPS]
+            for label in labels:
+                column(page, root, label).locator(".voice-head input[type=checkbox]").uncheck()
+                eventually(c, lambda label=label: chain_of(c, KEEP, label) is None, f"{label} is not planned")
+            return {"not_taken": labels}
+
+        c.scenario("безымянные озвучки не берутся: «брать озвучку» выключено на сериал", page, drop_unnamed)
 
     def reference() -> dict:
         variant(page, grid(page, "series"), "AniStar", "vk", channel).locator(".variant-reference").click()
@@ -645,6 +684,95 @@ def sync(c: Campaign, page: Page) -> None:
         return {"dubs": dub_states(page)}
 
     c.scenario("загрузка дошла до выравнивания: в окне озвучка в очереди, в работе или выполнена", page, aligned)
+
+
+RUCHIME = "https://1.ruchime.org/release/asura-bezumnyi-korol-2"  # its catalog of Vibix keeps two seasons, so the source may name one
+RUCHIME_SERIES, RUCHIME_SERIES_EN, PROFILE_RUCHIME = "Асура: Безумный король 2", "Asura Bezumnyi Korol 2", "ruchime общий"
+
+
+def ruchime(c: Campaign, page: Page) -> None:
+    """Ж-2 and Ж-4 through the window: the site is added by its address and its reading shows its progress, the players and the
+    catalog of Vibix appear with the voice-over of the site in no group; the season of the catalog is picked in the card of the source,
+    the layout is counted again, and the choice stays with the source."""
+    if PROFILE_RUCHIME not in {each["name"] for each in c.api("/api/parser-profiles")}:
+        made = c.http.post("/api/parser-profiles", json={"name": PROFILE_RUCHIME}).json()
+        c.http.post(f"/api/parser-profiles/{made['id']}/rules", json=_rule("Серия N", [TEXT_FIRST], [_extract(TEXT_FIRST)])).raise_for_status()
+    page.goto(c.stand.base + "/", wait_until="domcontentloaded")
+    first_run(page)
+
+    def add_source() -> dict:
+        page.get_by_role("button", name="Добавить сериал").click(timeout=30000)
+        page.get_by_label("URL для парсинга").fill(RUCHIME)
+        page.locator("button.source-action", has_text=text_of("sources.add.button")).click(timeout=20000)
+        page.wait_for_selector(".source-card", timeout=20000)
+        page.wait_for_selector(".source-card .source-state.is-reading", timeout=20000)
+        progress = page.locator(".source-card .source-state").first.inner_text()
+        reading_done(page, c)
+        card = page.locator(".source-card").first
+        titles = [each.strip() for each in card.locator("li.player b").all_inner_texts()]
+        voices = [each.strip() for each in card.locator("li.voice .voice-name").all_inner_texts()]
+        outside = card.locator("li.voice .voice-group.is-none").count()
+        assert "Vibix" in titles and len(titles) >= 3, titles
+        assert voices and outside == len(voices), f"voice-overs {voices}, without a group {outside}"
+        assert card.locator("li.player", has=page.locator("b", has_text="Vibix")).locator(".item-select").count() == 1, "no season choice at the catalog"
+        return {"progress_seen": progress, "players": titles, "voices": sorted(set(voices)), "without_group": outside}
+
+    c.scenario("Ж-2: источник ruchime добавлен по адресу; ход чтения виден; плееры страницы и каталог Vibix; озвучки сайта «нет группы»", page, add_source)
+
+    def profile_and_series() -> dict:
+        pick_profile(page, 0, PROFILE_RUCHIME)
+        page.get_by_label("Название (RU)").fill(RUCHIME_SERIES)
+        page.get_by_label("Название (EN)").fill(RUCHIME_SERIES_EN)
+        page.get_by_label("Путь сохранения").fill(str(c.work / "library" / RUCHIME_SERIES_EN))
+        page.get_by_label("Сезон (формат s01)").fill("s01")
+        page.locator(".modern-footer").get_by_role("button", name="Добавить", exact=True).click(timeout=15000)
+        page.wait_for_selector(".modal-title", state="detached", timeout=60000)
+        page.locator(".series-card", has_text=RUCHIME_SERIES).first.wait_for(timeout=30000)
+        c.series_id = next(each["id"] for each in c.api("/api/series") if each["name"] == RUCHIME_SERIES)
+        return {"series_id": c.series_id}
+
+    c.scenario("профиль назначен источнику, сериал создан в окне добавления", page, profile_and_series)
+
+    def vibix_rows() -> int:
+        return len([r for r in layout_rows(c) if r["player"] == "vibix" and not r["excluded"]])
+
+    def source_view() -> dict:
+        return c.api(f"/api/series/{c.series_id}/sources")[0]
+
+    def pick_season(position: int) -> dict:
+        before_rev = c.api(f"/api/series/{c.series_id}/composition")["rev"]
+        card = page.locator(".source-card").first
+        card.locator("li.player", has=page.locator("b", has_text="Vibix")).locator(".item-select").click()
+        option_named(page, text_of("sources.vibix.option").replace("{position}", str(position))).click()
+        eventually(c, lambda: source_view()["vibix_season"] == position, "the season is saved at the source")
+        eventually(c, lambda: c.api(f"/api/series/{c.series_id}/composition")["rev"] > before_rev, "the layout is counted again")
+        return {"season": position, "vibix_rows": vibix_rows()}
+
+    def open_properties() -> None:
+        page.locator(".series-card", has_text=RUCHIME_SERIES).first.locator("[title='Статус']").click()
+        page.locator(".st-tab[title='Свойства']").click()
+        page.wait_for_selector(".source-card li.player", timeout=30000)
+
+    def season_choice() -> dict:
+        open_properties()
+        assert source_view()["vibix_season"] is None
+        none_rows = vibix_rows()
+        reason = page.locator(".source-card .source-reason").inner_text() if page.locator(".source-card .source-reason").count() else ""
+        first = pick_season(1)
+        second = pick_season(2)
+        assert first["vibix_rows"] != second["vibix_rows"] or first["vibix_rows"] == 0, (first, second)
+        return {"before": {"vibix_rows": none_rows, "reason": reason}, "season_1": first, "season_2": second}
+
+    c.scenario("Ж-4: сезон каталога Vibix выбран в карточке источника; выбор записан у источника, раскладка пересчитана", page, season_choice)
+
+    def kept() -> dict:
+        page.reload(wait_until="domcontentloaded")
+        open_properties()
+        shown = page.locator(".source-card li.player", has=page.locator("b", has_text="Vibix")).locator(".selected-value").inner_text()
+        assert text_of("sources.vibix.option").replace("{position}", "2") in shown, shown
+        return {"shown_after_reload": shown, "saved": source_view()["vibix_season"]}
+
+    c.scenario("выбор сезона каталога пережил перезагрузку окна", page, kept)
 
 
 def again(c: Campaign, page: Page) -> None:
@@ -716,11 +844,12 @@ def _passed(verdict: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("phase", choices=("reset", "setup", "levers", "sync", "again", "finish"))
+    parser.add_argument("phase", choices=("reset", "setup", "levers", "sync", "again", "finish", "ruchime"))
     parser.add_argument("--work", required=True)
     parser.add_argument("--profiles", choices=("api", "hand"), default="api",
                         help="hand: the profiles made in the constructor by ui_profiles.py (the channel is named by their rule)")
     parser.add_argument("--on-nas", action="store_true", help="the library of the series is the folder the alignment service sees")
+    parser.add_argument("--three", action="store_true", help="the release of ruchime is the third source of the series")
     parser.add_argument("--safeguard", type=float, default=170)
     args = parser.parse_args()
     verdict = "FAIL прибор"
@@ -732,6 +861,7 @@ def main() -> int:
             page = context.new_page()
             campaign = Campaign(stand, Path(args.work), args.safeguard - 15)
             campaign.hand = args.profiles == "hand"
+            campaign.three = args.three
             if args.on_nas:
                 campaign.library = Path(LIBRARY)
             try:
@@ -746,6 +876,8 @@ def main() -> int:
                     setup(campaign, page)
                 elif args.phase == "sync":
                     sync(campaign, page)
+                elif args.phase == "ruchime":
+                    ruchime(campaign, page)
                 elif args.phase == "again":
                     again(campaign, page)
                 elif args.phase == "finish":
