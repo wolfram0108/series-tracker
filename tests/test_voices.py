@@ -475,16 +475,16 @@ async def test_a_ready_dub_is_not_downloaded_again_while_its_file_exists(dubs):
 
 
 @pytest.mark.asyncio
-async def test_episodes_that_left_the_plan_lose_their_pending_rows(dubs):
-    probe, neighbours, _, _ = dubs
+async def test_episodes_that_left_the_plan_lose_their_rows_and_a_download_under_way_is_withdrawn(dubs):
+    probe, neighbours, voices, _ = dubs
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
     finish(probe, neighbours.fetches[2]["key"], ok=False, error="x")
-    await asyncio.sleep(0.1)
     neighbours.plan[:] = [(1, 1)]
     probe.send_command("voices.dispatch", {"series_id": 7})
-    await asyncio.sleep(0.2)
-    assert [r["episode"] for r in await rows(probe)] == [1, 2]
+    await pass_over(voices, neighbours, 2)
+    assert [r["episode"] for r in await rows(probe)] == [1]
+    assert neighbours.fetches[1]["key"] in neighbours.cancelled_keys  # nobody needs the file any more
 
 
 @pytest.mark.asyncio
@@ -1755,8 +1755,9 @@ async def test_a_journaled_path_that_a_voice_over_holds_again_is_not_removed(dub
     paths = [row["output_path"] for row in group]
     with patch("modules.voices.module.os.remove", side_effect=PermissionError("read-only")):
         assert await voices._follow(7, 1, 1, 0, group, ref, "another-reference")
-    for row in group:  # the new reference got its tracks under the same names
-        await voices.repo.set_output(row["id"], row["output_path"], ref)
+        for row in group:  # the new reference got its tracks under the same names, before any removal can succeed
+            await voices.repo.set_output(row["id"], row["output_path"], ref)
+        await quiet(voices)
     await voices._sweep_cleanup()
     assert all(os.path.exists(path) for path in paths) and await voices.repo.cleanup_list() == []
 
@@ -3104,17 +3105,12 @@ async def test_the_levers_choose_which_voice_overs_an_episode_gets_and_where_fro
 
 
 @pytest.mark.asyncio
-async def test_a_reference_that_turns_none_while_a_voice_over_downloads_takes_its_episode_when_the_download_ends(dubs):
+async def test_a_reference_that_turns_none_while_a_voice_over_downloads_takes_its_episode_and_withdraws_the_download(dubs):
     probe, neighbours, voices, bus = dubs
-    sub = bus.subscribe("voices.dub.changed")
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
     neighbours.marks[(1, 3)] = ReferenceMark.NONE
     reference_changed(probe, 1, 3, "none")
     await pass_over(voices, neighbours, 2)
-    assert [r["episode"] for r in await rows(probe)] == [1, 2, 3]  # a download under way is not cut short
     victim = next(f for f in neighbours.fetches if f["url"].endswith("kodik-BlackCat-3"))
-    touch(victim["path"], b"video")
-    finish(probe, victim["key"])
-    await statuses_until(sub, ["ready", "removed"])
-    assert [r["episode"] for r in await rows(probe)] == [1, 2] and not os.path.exists(victim["path"])
+    assert [r["episode"] for r in await rows(probe)] == [1, 2] and victim["key"] in neighbours.cancelled_keys
