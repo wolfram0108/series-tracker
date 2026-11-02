@@ -5,6 +5,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,6 +23,7 @@ from modules.voices.module import dub_file, temp_path
 from modules.voices.settings import DEFAULT_PRIORITY
 from modules.voices.states import public_state
 from series_factory import insert_series
+from settle import settle, wait_until
 
 
 def code_of(stored):
@@ -48,6 +50,25 @@ def db_path(tmp_path):
 
 class Probe(BaseModule):
     name = "probe"
+
+
+# The system the test started, for the waiters below: `build_system` says which it is.
+_running = SimpleNamespace(bus=None, voices=None)
+
+
+async def next_step():
+    """The scripted neighbours act on what the module sent: they look again at the next step of the bus."""
+    step = _running.bus.next_step()
+    try:
+        await asyncio.wait_for(step.wait(), 1.0)  # the one second only ends a wait for a step that never comes
+    except asyncio.TimeoutError:
+        pass
+
+
+async def idle():
+    """Returns when the bus took apart every envelope and the module runs nothing in the background: what did not happen
+    by now will not happen."""
+    await settle(_running.bus, _running.voices)
 
 
 @pytest.fixture
@@ -323,6 +344,7 @@ async def build_system(db_path, tmp_path, daemon=None):
         modules.append(ConformModule(bus, daemon, backoff_start=0.05))
     runner = Runner(bus, modules)
     await runner.start()
+    _running.bus, _running.voices = bus, voices
     return (probe, neighbours, voices, bus), runner
 
 
@@ -351,10 +373,8 @@ async def dubs_with_conform(db_path, tmp_path):
 
 
 async def settled(neighbours, count, seconds=3.0):
-    end = asyncio.get_running_loop().time() + seconds
-    while len(neighbours.fetches) < count:
-        assert asyncio.get_running_loop().time() < end, neighbours.fetches
-        await asyncio.sleep(0.01)
+    assert await wait_until(lambda: len(neighbours.fetches) >= count, _running.bus, _running.voices,
+                            seconds=seconds), neighbours.fetches
 
 
 def finish(probe, key, ok=True, error=None):
@@ -466,7 +486,7 @@ async def test_a_ready_dub_is_not_downloaded_again_while_its_file_exists(dubs):
     finish(probe, done["key"])
     await change(sub, "ready")
     probe.send_command("voices.dispatch", {"series_id": 7})
-    await asyncio.sleep(0.2)
+    await idle()
     assert len(neighbours.fetches) == 3
     os.remove(done["path"])
     probe.send_command("voices.dispatch", {"series_id": 7})
@@ -603,12 +623,9 @@ async def change_state(sub, voice_key, state, seconds=3.0):
 
 
 async def quiet(voices, seconds=20.0):
-    """Wait until the module has nothing running in the background, so a test may change its data."""
-    end = asyncio.get_running_loop().time() + seconds
-    while voices._bg:
-        left = end - asyncio.get_running_loop().time()
-        assert left > 0, [task.get_name() for task in voices._bg]
-        await asyncio.wait(list(voices._bg), timeout=left)
+    """Wait until the bus took apart every envelope and the module has nothing running in the background, so a test may
+    change its data: what a handler was still doing when the last command went out is done."""
+    await settle(_running.bus, voices, seconds=seconds)
 
 
 async def change(sub, status, seconds=3.0):
@@ -705,7 +722,7 @@ async def test_an_episode_goes_to_alignment_and_its_tracks_land_next_to_the_vide
 async def test_the_episode_waits_for_its_reference_video(dubs):
     probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, reference=False)
     await statuses_until(sub, ["ready", "ready"])
-    await asyncio.sleep(0.2)
+    await idle()
     assert neighbours.submits == []
     reference_on_disk(neighbours)
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
@@ -720,7 +737,7 @@ async def test_the_episode_waits_for_every_voice_still_being_downloaded(dubs):
     touch(first["path"], b"video")
     finish(probe, first["key"])
     await statuses_until(sub, ["ready"])
-    await asyncio.sleep(0.2)
+    await idle()
     assert neighbours.submits == []
     touch(second["path"], b"video")
     finish(probe, second["key"])
@@ -839,7 +856,7 @@ async def test_an_unreachable_service_leaves_the_voices_waiting_until_it_is_back
         touch(fetch["path"], b"video")
         finish(probe, fetch["key"])
     await statuses_until(sub, ["ready", "ready"])
-    await asyncio.sleep(0.2)
+    await idle()
     assert {r["status"] for r in await rows(probe)} == {"ready"}
     neighbours.submit_reply = None
     probe.publish_event("conform.daemon.up", {})
@@ -921,10 +938,7 @@ async def test_a_transient_failure_with_the_service_up_is_retried_without_a_new_
         touch(fetch["path"], b"video")
         finish(probe, fetch["key"])
     await statuses_until(sub, ["ready", "ready"])
-    end = asyncio.get_running_loop().time() + 3
-    while not neighbours.submits:
-        assert asyncio.get_running_loop().time() < end
-        await asyncio.sleep(0.01)
+    await until_true(lambda: bool(neighbours.submits), "the service was not asked")
     neighbours.submit_reply = None  # the service recovers; nothing else announces it
     await statuses_until(sub, ["aligning", "aligning"])
     assert len(neighbours.submits) >= 2
@@ -943,16 +957,13 @@ async def test_an_obligation_that_keeps_failing_is_reported_and_still_carried(du
         touch(fetch["path"], b"video")
         finish(probe, fetch["key"])
     await statuses_until(sub, ["ready", "ready"])
-    await asyncio.sleep(0.4)
-    assert len(neighbours.submits) >= 6, "the account of attempts goes on without any outside event"
+    await until_true(lambda: len(neighbours.submits) >= 6, "the account of attempts goes on without any outside event",
+                     every=RETRY_TICK_S)
     assert len(told) == 1 and "series:7" in told[0], "the owner is told once"
     assert list(voices._recovery.failures()) == ["series:7"]
     neighbours.submit_reply = None
     await statuses_until(sub, ["aligning", "aligning"])
-    deadline = asyncio.get_running_loop().time() + 3
-    while voices._recovery.failures():
-        assert asyncio.get_running_loop().time() < deadline, voices._recovery.failures()
-        await asyncio.sleep(0.01)
+    await until_true(lambda: not voices._recovery.failures(), "the account of failures was not closed", every=RETRY_TICK_S)
 
 
 @pytest.mark.asyncio
@@ -974,14 +985,14 @@ async def test_the_folders_of_the_series_go_when_every_episode_of_the_series_is_
     neighbours.submits[:] = [first]
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
     await asyncio.wait_for(settled_sub.queue.get(), 5)
-    await asyncio.sleep(0.2)
+    await idle()
     folders = [os.path.join(base, "7") for base in (downloads(neighbours), conform_dir(neighbours))]
     assert all(os.path.isdir(folder) for folder in folders)  # the second episode's files are still in them
     assert not os.path.exists(os.path.join(conform_dir(neighbours), "7", "s01e01"))
     neighbours.submits[:] = [second]
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-2"))
     await asyncio.wait_for(settled_sub.queue.get(), 5)
-    await asyncio.sleep(0.2)
+    await idle()
     assert not any(os.path.exists(folder) for folder in folders)  # nothing of the series is left in the work folder
 
 
@@ -1040,7 +1051,7 @@ async def test_an_unchanged_reference_leaves_the_tracks_alone(dubs):
     before = library_files(neighbours)
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
     probe.publish_event("conform.daemon.up", {})
-    await asyncio.sleep(0.3)
+    await idle()
     assert sub.queue.empty() and library_files(neighbours) == before
     assert len(neighbours.submits) == 1
 
@@ -1055,7 +1066,7 @@ async def test_a_track_the_user_deleted_is_not_made_again(dubs):
     assert by_voice["BlackCat"]["status"] == "rejected" and code_of(by_voice["BlackCat"]["outcome"]) == "track_removed"
     assert by_voice["RedHeadSound"]["status"] == "placed"
     probe.send_command("voices.dispatch", {"series_id": 7})
-    await asyncio.sleep(0.3)
+    await idle()
     assert len(neighbours.fetches) == 2 and len(neighbours.submits) == 1
 
 
@@ -1101,7 +1112,7 @@ async def test_the_result_of_a_job_for_a_replaced_reference_is_ignored(dubs):
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
     await statuses_until(sub, ["stale", "stale"])
     probe.publish_event("conform.job.finished", old_job)
-    await asyncio.sleep(0.3)
+    await idle()
     assert not any(name.endswith(".flac") for name in library_files(neighbours))
     assert {r["status"] for r in await rows(probe)} <= {"pending", "downloading"}
 
@@ -1122,7 +1133,7 @@ async def test_an_episode_that_left_the_plan_keeps_its_tracks_while_the_video_is
     probe, neighbours, bus, sub, ref = await placed_set(dubs)
     neighbours.plan[:] = []
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
-    await asyncio.sleep(0.3)
+    await idle()
     assert sub.queue.empty() and len(library_files(neighbours)) == 3 and len(await rows(probe)) == 2
 
 
@@ -1140,7 +1151,7 @@ async def test_a_failed_relocation_is_not_a_reason_to_look_at_the_tracks(dubs):
     probe, neighbours, bus, sub, ref = await placed_set(dubs)
     os.rename(ref, ref + ".moved")
     probe.publish_event("library.relocation.finished", {"series_id": 7, "success": False, "message": "boom"})
-    await asyncio.sleep(0.3)
+    await idle()
     assert sub.queue.empty() and len(await rows(probe)) == 2
 
 
@@ -1222,7 +1233,7 @@ async def test_a_voice_over_goes_from_queued_to_running_when_the_service_starts_
     assert set((await states_of(probe)).values()) == {"running"}
     # A picture that changes nothing is not an event.
     probe.publish_event("conform.queue.changed", {"daemon": {"up": True}, "tasks": [{"id": "job-1", "status": "running"}]})
-    await asyncio.sleep(0.2)
+    await idle()
     assert sub.queue.empty()
     probe.publish_event("conform.queue.changed", {"daemon": {"up": False}, "tasks": []})
     await statuses_until(sub, ["aligning", "aligning"])
@@ -1277,7 +1288,7 @@ async def test_a_sent_download_is_announced_at_once_as_queued(dubs):
 @pytest.mark.asyncio
 async def test_the_next_source_of_a_voice_is_queued_again_until_its_own_start(dubs):
     probe, neighbours, _, bus, sub, _ = await two_voices_ready(dubs, finished=False)
-    await asyncio.sleep(0.2)
+    await idle()
     changes = bus.subscribe("voices.dub.changed")
     black = next(f for f in neighbours.fetches if "BlackCat" in f["url"])
     start(probe, black)
@@ -1294,11 +1305,11 @@ async def test_the_next_source_of_a_voice_is_queued_again_until_its_own_start(du
 @pytest.mark.asyncio
 async def test_a_start_of_a_foreign_download_is_none_of_our_business(dubs):
     probe, neighbours, _, bus, sub, _ = await two_voices_ready(dubs, finished=False)
-    await asyncio.sleep(0.2)
+    await idle()
     changes = bus.subscribe("voices.dub.changed")
     probe.publish_event("downloads.fetch.started", {"key": "other:1", "series_id": 7, "path": "/x"})
     probe.publish_event("downloads.fetch.started", {"key": "dub:99999", "series_id": 7, "path": "/x"})
-    await asyncio.sleep(0.2)
+    await idle()
     assert changes.queue.empty()
 
 
@@ -1312,7 +1323,7 @@ async def capped_two_episodes(dubs, cap="1"):
     sub = bus.subscribe("voices.dub.changed")
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 2)
-    await asyncio.sleep(0.3)
+    await idle()
     return probe, neighbours, bus, sub
 
 
@@ -1364,7 +1375,7 @@ async def test_a_waiting_voice_over_is_taken_for_download_only_once(dubs):
     row = (await voices.repo.for_series(7))[0]
     sent = len(neighbours.fetches)
     await voices._start(await voices.repo.get(row["id"]))  # taken already: nothing is sent again
-    await asyncio.sleep(0.1)
+    await idle()
     assert len(neighbours.fetches) == sent
 
 
@@ -1378,7 +1389,7 @@ async def test_the_job_of_a_replaced_reference_is_cancelled_in_the_service(dubs)
     neighbours.references[1] = "Series s01e01 2160p.mp4"
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
     await statuses_until(sub, ["stale", "stale"])
-    await asyncio.sleep(0.1)
+    await idle()
     assert set(neighbours.conform_cancels) == {"job-1"}  # one job for the two voice-overs; a late answer may cancel it twice
 
 
@@ -1389,7 +1400,7 @@ async def test_deleting_a_series_cancels_its_running_job_in_the_service(dubs):
     report = bus.subscribe("series.purged")
     probe.publish_event("series.deleted", {"series_id": 7})
     await asyncio.wait_for(report.queue.get(), 5)
-    await asyncio.sleep(0.1)
+    await idle()
     assert set(neighbours.conform_cancels) == {"job-1"}  # the journal and a late answer may both cancel the same job
 
 
@@ -1494,7 +1505,7 @@ async def test_a_track_never_overwrites_the_track_of_another_voice(dubs):
     placed = {r["output_path"] for r in await rows(probe)}
     assert len(placed) == 3 and all(os.path.isfile(p) for p in placed)
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
-    await asyncio.sleep(0.3)
+    await idle()
     assert {r["output_path"] for r in await rows(probe)} == placed  # a later look moves nothing
 
 
@@ -1522,7 +1533,7 @@ async def serve(probe, neighbours, holder, finished, progress, seconds=60.0):
             probe.publish_event("conform.job.finished", view)
         progress["submits"] = len(neighbours.submits)
         peak = max(peak, len(await holder[0].repo.active_episodes()))
-        await asyncio.sleep(0.005)
+        await next_step()
     return peak
 
 
@@ -1555,7 +1566,7 @@ async def test_twelve_episodes_of_four_voices_flow_through_under_a_limit_of_thre
     assert len(keys) == 48 == len(set(keys))  # every voice-over of every episode was fetched once
     assert len(neighbours.submits) == 12 and all(len(s["dubs"]) == 4 for s in neighbours.submits)
     assert len(neighbours.submits) == len({s["ref"] for s in neighbours.submits})
-    await asyncio.sleep(0.3)
+    await idle()
     flacs = [name for name in library_files(neighbours) if name.endswith(".flac")]
     assert len(flacs) == 48 and neighbours.conform_cancels == []
     assert not os.path.exists(downloads(neighbours)) or os.listdir(downloads(neighbours)) == []
@@ -1592,7 +1603,7 @@ async def test_the_whole_series_still_arrives_when_the_module_restarts_midway(du
 
     try:
         await serve(probe, neighbours, holder, all_placed, progress)
-        await asyncio.sleep(0.3)
+        await idle()
         assert len([n for n in library_files(neighbours) if n.endswith(".flac")]) == 24
         assert {r["status"] for r in await rows(probe)} == {"placed"}
         assert not any("нет на месте" in record.getMessage() for record in caplog.records)
@@ -1627,7 +1638,7 @@ async def test_a_late_ending_of_a_download_does_not_turn_a_waiting_voice_into_a_
     stale = (await voices.repo.for_series(7))[0]
     await voices.repo.advance(stale["id"], "x")  # waits for its next source: not downloading now
     finish(probe, f"dub:{stale['id']}")
-    await asyncio.sleep(0.2)
+    await idle()
     after = await voices.repo.get(stale["id"])
     assert after["status"] == "pending" and row["voice_key"] == after["voice_key"]
 
@@ -1716,10 +1727,10 @@ async def test_a_move_begun_for_a_placed_track_is_finished_by_the_next_start(db_
     again = VoicesModule(bus, Database(db_path))
     await restarted(again)
     try:
-        deadline = asyncio.get_running_loop().time() + 5
-        while (await again.repo.get(row["id"]))["move_from"] is not None:
-            assert asyncio.get_running_loop().time() < deadline, "the begun move was not taken up at the start"
-            await asyncio.sleep(0.02)
+        async def taken_up():
+            return (await again.repo.get(row["id"]))["move_from"] is None
+
+        assert await wait_until(taken_up, bus, again, seconds=5.0), "the begun move was not taken up at the start"
         assert os.path.isfile(expected) and not os.path.exists(row["output_path"])
     finally:
         await again.stop()
@@ -1860,7 +1871,7 @@ async def test_the_cleanup_sweep_leaves_an_entry_alone_while_its_removal_still_r
     await voices._sweep_cleanup()
     assert [entry["path"] for entry in await voices.repo.cleanup_list()] == [path] and os.path.exists(path)
     release.set()
-    await asyncio.sleep(0.2)
+    await idle()
     await voices._sweep_cleanup()
     assert await voices.repo.cleanup_list() == [] and not os.path.exists(path)
 
@@ -1929,10 +1940,10 @@ async def ready_to_send(dubs, monkeypatch):
 
 async def job_numbers_known(probe, expected, seconds=5.0):
     """Wait until every voice-over has its job number: the interface is told of a lost answer before it is found."""
-    end = asyncio.get_running_loop().time() + seconds
-    while {r["job_id"] for r in await rows(probe)} != expected:
-        assert asyncio.get_running_loop().time() < end, await rows(probe)
-        await asyncio.sleep(0.02)
+    async def known():
+        return {r["job_id"] for r in await rows(probe)} == expected
+
+    await until_true(known, "the voice-overs do not all have their job numbers", seconds, every=RETRY_TICK_S)
 
 
 def finish_all(probe, neighbours):
@@ -1961,10 +1972,10 @@ async def test_an_http_answer_that_never_came_back_is_asked_for_by_the_key_not_s
     daemon.lose_answers = 1  # the daemon takes the job, the read times out
     probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs_with_conform, finished=False)
     finish_all(probe, neighbours)
-    deadline = asyncio.get_running_loop().time() + 8
-    while not all(r["status"] == "aligning" and r["job_id"] for r in await rows(probe)):
-        assert asyncio.get_running_loop().time() < deadline, (await rows(probe), daemon.enqueued)
-        await asyncio.sleep(0.05)
+    async def aligning():
+        return all(r["status"] == "aligning" and r["job_id"] for r in await rows(probe))
+
+    await until_true(aligning, "the voice-overs are not aligning", 8.0)
     assert len(daemon.enqueued) == 1
     assert {r["job_id"] for r in await rows(probe)} == {"j-1"}
 
@@ -1974,10 +1985,7 @@ async def test_the_service_is_given_and_asked_to_write_only_inside_the_work_fold
     daemon = dubs_with_conform[1].daemon
     probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs_with_conform, finished=False)
     finish_all(probe, neighbours)
-    deadline = asyncio.get_running_loop().time() + 8
-    while not daemon.enqueued:
-        assert asyncio.get_running_loop().time() < deadline, await rows(probe)
-        await asyncio.sleep(0.05)
+    await until_true(lambda: bool(daemon.enqueued), "the daemon was not given the job", 8.0)
     body = daemon.enqueued[0]
     paths = [body["ref"], *body["dubs"], body["out_dir"], body["cache_dir"]]
     assert all(path.startswith("/share/work/") for path in paths), paths  # not one path of the library
@@ -2020,7 +2028,7 @@ async def test_while_the_service_cannot_say_whether_it_has_the_job_nothing_is_se
     neighbours.service_reachable = False
     finish_all(probe, neighbours)
     await statuses_until(sub, ["ready", "ready"])
-    await asyncio.sleep(0.5)
+    await idle()
     assert len(neighbours.submits) == 1
     assert {(r["status"], r["job_id"]) for r in await rows(probe)} == {("aligning", None)}
     neighbours.service_reachable = True
@@ -2044,10 +2052,10 @@ async def test_a_cancel_that_could_not_be_made_is_kept_and_made_when_the_service
     assert [e["path"] for e in await voices.repo.cleanup_list()] == ["job-1"]
     neighbours.cancel_done = True
     probe.publish_event("conform.daemon.up", {})
-    end = asyncio.get_running_loop().time() + 3
-    while await voices.repo.cleanup_list():
-        assert asyncio.get_running_loop().time() < end
-        await asyncio.sleep(0.01)
+    async def journal_empty():
+        return not await voices.repo.cleanup_list()
+
+    await until_true(journal_empty, "the journal of cleanup was not emptied")
     assert neighbours.conform_cancels.count("job-1") >= 2
 
 
@@ -2090,7 +2098,7 @@ async def test_planned_rows_are_announced_when_created_and_when_they_leave_the_p
     assert picture(events) == await held(probe)
     neighbours.plan[:] = [(1, 1)]
     probe.send_command("voices.dispatch", {"series_id": 7})
-    await asyncio.sleep(0.6)
+    await idle()
     later = drained(sub)
     assert {(e["episode"], e["status"]) for e in later} == {(2, "removed")} and len(later) == 2
     assert picture(events + later) == await held(probe)
@@ -2102,7 +2110,7 @@ async def test_deleting_the_series_tells_the_interface_every_row_is_gone(dubs):
     sub = bus.subscribe("voices.dub.changed")
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
-    await asyncio.sleep(0.3)
+    await idle()
     before = drained(sub)
     assert picture(before) and picture(before) == await held(probe)
     purged = bus.subscribe("series.purged")
@@ -2182,7 +2190,7 @@ async def test_a_wrong_setting_is_logged_once_and_the_default_is_used(dubs, capl
         probe.send_command("voices.dispatch", {"series_id": 7})
         await settled(neighbours, 3)
         probe.send_command("voices.dispatch", {"series_id": 7})
-        await asyncio.sleep(0.5)
+        await idle()
     named = [r for r in caplog.records if "max_temp_episodes" in r.getMessage()]
     assert len(named) == 1
 
@@ -2264,13 +2272,13 @@ async def test_a_job_and_its_ending_that_meet_in_the_middle_of_each_others_check
 
     async def slow_after_reading(job_id):
         found = await real(job_id)
-        await asyncio.sleep(0.15)
+        await idle()
         return found
 
     voices.repo.by_job = slow_after_reading
     try:
         ended = asyncio.create_task(voices.on_job_finished(ending))
-        await asyncio.sleep(0.05)
+        await idle()
         await voices._attach("k9", "job-9")
         await ended
     finally:
@@ -2291,13 +2299,11 @@ async def test_an_unknown_submission_is_asked_for_again_with_no_outside_event(du
     assert len(neighbours.submits) == 1 and all(r["job_id"] is None for r in await rows(probe))
     assert voices._recovery.failures().keys() == {"submission:" + next(iter(neighbours.sent_keys))}
     neighbours.service_reachable = True
-    deadline = asyncio.get_running_loop().time() + 5
-    while not all(r["job_id"] for r in await rows(probe)):
-        assert asyncio.get_running_loop().time() < deadline, (await rows(probe), voices._recovery.failures())
-        await asyncio.sleep(0.02)
-    while voices._recovery.failures():
-        assert asyncio.get_running_loop().time() < deadline, voices._recovery.failures()
-        await asyncio.sleep(0.02)
+    async def numbered():
+        return all(r["job_id"] for r in await rows(probe))
+
+    await until_true(numbered, "the voice-overs did not get their job numbers")
+    await until_true(lambda: not voices._recovery.failures(), "the account of failures was not closed")
     assert len(neighbours.submits) == 1
 
 
@@ -2311,10 +2317,10 @@ async def test_a_reply_that_is_not_a_clear_answer_is_no_answer_and_the_interface
     waiting = await change(sub, "aligning")
     assert waiting["hint"] == "awaiting_answer" and waiting["state"] == "align_queued"
     neighbours.submit_reply = None
-    deadline = asyncio.get_running_loop().time() + 5
-    while not all(r["job_id"] == "job-1" for r in await rows(probe)):
-        assert asyncio.get_running_loop().time() < deadline, await rows(probe)
-        await asyncio.sleep(0.02)
+    async def found():
+        return all(r["job_id"] == "job-1" for r in await rows(probe))
+
+    await until_true(found, "the job was not found by its number")
     assert len(neighbours.submits) == 1
 
 
@@ -2344,10 +2350,10 @@ async def test_a_job_that_could_not_be_cancelled_is_cancelled_when_the_service_c
     await voices._cancel_job("job-9")
     assert [(e["path"], e["kind"]) for e in await voices.repo.cleanup_list()] == [("job-9", "job")]
     neighbours.cancel_done = True
-    deadline = asyncio.get_running_loop().time() + 5
-    while await voices.repo.cleanup_list():
-        assert asyncio.get_running_loop().time() < deadline, voices._recovery.failures()
-        await asyncio.sleep(0.02)
+    async def journal_empty():
+        return not await voices.repo.cleanup_list()
+
+    await until_true(journal_empty, "the journal of cleanup was not emptied", every=RETRY_TICK_S)
     assert neighbours.conform_cancels.count("job-9") >= 2
 
 
@@ -2377,11 +2383,14 @@ async def reference_replaced(neighbours, probe):
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
 
 
-async def until_true(condition, what, seconds=5.0):
-    end = asyncio.get_running_loop().time() + seconds
-    while not await condition():
-        assert asyncio.get_running_loop().time() < end, what
-        await asyncio.sleep(0.02)
+# The module carries an obligation again every SUBMIT_RETRY_S, and the tests that watch it do that set it to this.
+RETRY_TICK_S = 0.05
+
+
+async def until_true(condition, what, seconds=5.0, every=None):
+    """Returns when the condition holds: it is looked at again after every step of the bus and every end of a task, and,
+    for a test whose subject is the timer of a carried obligation, after every `every` seconds."""
+    assert await wait_until(condition, _running.bus, _running.voices, seconds=seconds, every=every), what
 
 
 @pytest.mark.asyncio
@@ -2429,14 +2438,14 @@ async def test_the_folder_of_a_job_goes_when_its_stop_is_confirmed_and_not_befor
     await reference_replaced(neighbours, probe)
     await statuses_until(sub, ["stale", "stale"])
     touch(os.path.join(folder, "written-by-the-old-job.flac"), b"late")
-    await asyncio.sleep(0.3)
+    await idle()
     assert os.path.isdir(folder), "while the job may still write, its folder stays"
     neighbours.cancel_done = True
 
     async def journal_empty():
         return await voices.repo.cleanup_list() == []
 
-    await until_true(journal_empty, await voices.repo.cleanup_list())
+    await until_true(journal_empty, await voices.repo.cleanup_list(), every=RETRY_TICK_S)
     assert not os.path.exists(folder)
 
 
@@ -2461,7 +2470,7 @@ async def test_a_submission_without_an_answer_whose_voices_are_reset_is_cancelle
     async def cancelled_and_cleared():
         return set(neighbours.conform_cancels) == {"job-1"} and await voices.repo.cleanup_list() == []
 
-    await until_true(cancelled_and_cleared, (neighbours.conform_cancels, await voices.repo.cleanup_list()))
+    await until_true(cancelled_and_cleared, (neighbours.conform_cancels, await voices.repo.cleanup_list()), every=RETRY_TICK_S)
 
 
 @pytest.mark.asyncio
@@ -2518,12 +2527,12 @@ async def test_cleanup_does_not_forget_a_file_while_its_row_is_being_reset(dubs,
     real_reset = voices.repo.reset
 
     async def slow_reset(*args, **kwargs):
-        await asyncio.sleep(0.1)  # the recovery gets its turns before the row lets go
+        await idle()  # the recovery gets its turns before the row lets go
         return await real_reset(*args, **kwargs)
 
     monkeypatch.setattr(voices.repo, "reset", slow_reset)
     await voices._follow(7, 1, 1, 0, group, ref, "new-reference")
-    await asyncio.sleep(0.2)
+    await idle()
     assert os.path.exists(old) and old in {e["path"] for e in await voices.repo.cleanup_list()}
 
 
@@ -2604,7 +2613,7 @@ async def test_the_folder_above_an_unconfirmed_job_stays_while_the_job_may_write
     purged = bus.subscribe("series.purged")
     probe.publish_event("series.deleted", {"series_id": 7})
     await asyncio.wait_for(purged.queue.get(), 5)
-    await asyncio.sleep(0.3)
+    await idle()
     entries = {e["path"]: e for e in await voices.repo.cleanup_list()}
     assert entries["job-1"]["scope"] == folder and series_folder in entries, "the folder above waits on the journal"
     assert os.path.exists(track) and os.path.isdir(series_folder)
@@ -2613,7 +2622,7 @@ async def test_the_folder_above_an_unconfirmed_job_stays_while_the_job_may_write
     async def everything_gone():
         return await voices.repo.cleanup_list() == [] and not os.path.exists(series_folder)
 
-    await until_true(everything_gone, (await voices.repo.cleanup_list(), os.path.exists(series_folder)))
+    await until_true(everything_gone, (await voices.repo.cleanup_list(), os.path.exists(series_folder)), every=RETRY_TICK_S)
 
 
 @pytest.mark.asyncio
@@ -2673,7 +2682,7 @@ async def test_a_submission_accepted_after_its_series_was_deleted_is_cancelled(d
     key = next(r["submit_key"] for r in await voices.repo.for_series(7))
     try:
         await voices.on_series_deleted(Envelope("series.deleted", "event", {"series_id": 7}))
-        await asyncio.sleep(0.3)
+        await bus.settled()  # the send is held back on purpose, so the module is not quiet, only the bus
         assert (key, "submission") in {(e["path"], e["kind"]) for e in await voices.repo.cleanup_list()}, \
             "while the request is on its way no look at the service ends the entry"
     finally:
@@ -2682,7 +2691,8 @@ async def test_a_submission_accepted_after_its_series_was_deleted_is_cancelled(d
     async def cancelled_and_cleared():
         return set(neighbours.conform_cancels) == {"job-1"} and await voices.repo.cleanup_list() == []
 
-    await until_true(cancelled_and_cleared, (neighbours.conform_cancels, await voices.repo.cleanup_list()))
+    await until_true(cancelled_and_cleared, (neighbours.conform_cancels, await voices.repo.cleanup_list()),
+                     every=RETRY_TICK_S)
     assert len(neighbours.submits) == 1
 
 
@@ -2703,7 +2713,7 @@ async def test_a_submission_on_its_way_is_not_sent_again_when_the_service_comes_
         finish(probe, fetch["key"])
     await asyncio.wait_for(entered.wait(), 3)
     probe.publish_event("conform.daemon.up", {})
-    await asyncio.sleep(0.4)
+    await bus.settled()  # the send is held back on purpose, so the module is not quiet, only the bus
     release.set()
     await job_numbers_known(probe, {"job-1"})
     await quiet(voices)
@@ -2733,7 +2743,7 @@ async def test_a_name_is_owned_before_the_removal_looks_at_who_holds_it(dubs, tm
     async def looking(*args):
         found = await real(*args)
         go.set()
-        await asyncio.sleep(0.05)  # the pass has looked and not yet removed
+        await idle()  # the pass has looked and not yet removed
         return found
 
     monkeypatch.setattr(voices.repo, "all_rows", looking)
@@ -3047,7 +3057,7 @@ async def test_a_series_that_was_never_synced_stays_planned_after_a_restart(db_p
     again = VoicesModule(bus, Database(db_path))
     await restarted(again)
     try:
-        await asyncio.sleep(0.1)
+        await idle()
         assert neighbours.fetches == [] and {r["status"] for r in await rows(probe)} == {"pending"}
         probe.send_command("voices.dispatch", {"series_id": 7})
         await settled(neighbours, 3)
@@ -3068,7 +3078,7 @@ async def test_a_neighbour_that_does_not_answer_the_plan_is_asked_again_by_itsel
     async def carried():
         return not voices._recovery.failures()
 
-    await until_true(carried, voices._recovery.failures())
+    await until_true(carried, voices._recovery.failures(), every=RETRY_TICK_S)
 
 
 @pytest.mark.asyncio

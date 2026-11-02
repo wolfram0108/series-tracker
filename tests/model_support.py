@@ -27,6 +27,7 @@ from modules.downloads import DownloadsModule
 from modules.scan import ScanModule
 from scan_support import STUCK_S, row
 from series_factory import create_series, source
+from settle import settle, wait_until
 from test_downloads_module import FakeDownloader
 from test_stage10_boundaries import URL, Neighbours, Probe
 
@@ -161,12 +162,10 @@ class Harness:
         return found
 
     async def until(self, condition, what: str) -> None:
-        end = asyncio.get_running_loop().time() + STUCK_S * 2
-        while not condition():
-            if asyncio.get_running_loop().time() > end:
-                raise AssertionError((what, self.tasks(), [(i["unique_id"], i["status"], i["final_filename"]) for i in self.items()],
-                                      sorted(self.files())))
-            await asyncio.sleep(0.02)
+        # The condition is looked at again after each step of the bus and each end of a task of the modules.
+        if not await wait_until(condition, self.bus, *self.runner.modules, seconds=STUCK_S * 2):
+            raise AssertionError((what, self.tasks(), [(i["unique_id"], i["status"], i["final_filename"]) for i in self.items()],
+                                  sorted(self.files())))
 
     def waits_for_name(self, task: dict, items: list[dict]) -> bool:
         """A whole file that waits for the name a row the plan wants holds until renaming gives that file its new name."""
@@ -177,16 +176,15 @@ class Harness:
                    and not item["is_ignored_by_user"] for item in items)
 
     async def quiesce(self) -> None:
-        """Nothing is under way: no task is alive but those that wait for a name, and none has changed for a while."""
-        end = asyncio.get_running_loop().time() + STUCK_S * 2
-        calm = 0
-        while calm < 6:
-            if asyncio.get_running_loop().time() > end:
-                return
+        """Nothing is under way: no task is alive but those that wait for a name, the bus has taken apart every envelope
+        and the modules run nothing in the background."""
+        def calm() -> bool:
             items = self.items()
-            alive = [task for task in self.tasks() if task["status"] in LIVE and not self.waits_for_name(task, items)]
-            calm = calm + 1 if not alive and not self.downloader.concurrent else 0
-            await asyncio.sleep(0.04)
+            return not [task for task in self.tasks() if task["status"] in LIVE and not self.waits_for_name(task, items)] \
+                and not self.downloader.concurrent
+
+        await wait_until(calm, self.bus, *self.runner.modules, seconds=STUCK_S * 2)
+        await settle(self.bus, *self.runner.modules, seconds=STUCK_S * 2)
 
 
 def video_of(item: dict) -> bytes:

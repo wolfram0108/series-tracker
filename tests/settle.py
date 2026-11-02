@@ -7,6 +7,7 @@ or taken apart) and after every end of a task of the modules, because in a syste
 changes it. A condition that does not come true is a stuck test, and the one number here only ends it.
 """
 import asyncio
+import inspect
 
 SAFEGUARD_S = 20.0
 
@@ -23,12 +24,23 @@ async def settle(bus, *modules, seconds: float = SAFEGUARD_S) -> None:
     await asyncio.wait_for(quiet(), seconds)
 
 
-async def wait_until(predicate, bus, *modules, seconds: float = SAFEGUARD_S) -> bool:
-    """True when `predicate()` holds; False when it did not within the safeguard."""
+async def _holds(predicate) -> bool:
+    """The condition may be a plain function or one that has to be awaited (a read of the database)."""
+    result = predicate()
+    return bool(await result if inspect.isawaitable(result) else result)
+
+
+async def wait_until(predicate, bus, *modules, seconds: float = SAFEGUARD_S, every: float | None = None) -> bool:
+    """True when `predicate()` holds; False when it did not within the safeguard.
+
+    `every` is for a system whose own timer is the subject of the test (an obligation it carries again every so many
+    seconds, with nothing sent on the bus in between): the condition is looked at after each of those periods too."""
     async def holds() -> None:
-        while not predicate():
+        while not await _holds(predicate):
             step = bus.next_step()  # taken at the moment the condition was looked at
             waiting = [asyncio.ensure_future(step.wait())]
+            if every is not None:
+                waiting.append(asyncio.ensure_future(asyncio.sleep(every)))
             running = {task for each in modules for task in each.background() if not task.done()}
             if running:
                 waiting.append(asyncio.ensure_future(asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)))
@@ -41,5 +53,5 @@ async def wait_until(predicate, bus, *modules, seconds: float = SAFEGUARD_S) -> 
     try:
         await asyncio.wait_for(holds(), seconds)
     except asyncio.TimeoutError:
-        return predicate()  # a change that no step announced is still a change
+        return await _holds(predicate)  # a change that no step announced is still a change
     return True

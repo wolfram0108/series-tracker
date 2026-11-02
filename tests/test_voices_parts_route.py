@@ -20,6 +20,7 @@ from modules.downloads import DownloadsModule
 from modules.settings import SettingsModule
 from modules.voices import VoicesModule
 from series_factory import insert_series
+from settle import wait_until
 from test_downloads_module import FakeDownloader
 from test_voices import Neighbours, db_path, restarted, touch  # noqa: F401
 
@@ -129,10 +130,9 @@ class Route:
         return sorted(await self.voices.repo.for_series(7), key=lambda row: row["part"])
 
     async def until(self, condition, what):
-        end = asyncio.get_running_loop().time() + 10
-        while not await condition():
-            assert asyncio.get_running_loop().time() < end, (what, await self.rows(), self.service.enqueued)
-            await asyncio.sleep(0.02)
+        # The condition is looked at again after each step of the bus and each end of a task of the modules.
+        assert await wait_until(condition, self.bus, *self.runner.modules, seconds=10.0), \
+            (what, await self.rows(), self.service.enqueued)
 
     async def aligning(self):
         rows = await self.rows()
