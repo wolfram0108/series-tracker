@@ -564,11 +564,17 @@ class VoicesModule(BaseModule):
         if row["status"] in (S.PENDING, S.FAILED) or not row["chain"]:  # nothing was begun: the plan offers it again
             return
 
+        offered = {each.url for each in dub.chain}
+        players = {player for _, player in dub.left_out}
+
         def left_out(candidate: dict) -> bool:
             # A candidate is its source and player; the link is only where the variant showed its video when it was recorded.
             if candidate.get("source_id") is not None:
                 return (candidate["source_id"], candidate["player"]) in dub.left_out
-            return candidate["url"] in dub.left_out_links
+            # A chain recorded before candidates said their source: its link left out is left out; a link no variant offers
+            # any more is of the variant that was left out when that player is one of them (a work that goes on from a
+            # variant left out is worse than one that begins again).
+            return candidate["url"] in dub.left_out_links or (candidate["url"] not in offered and candidate["player"] in players)
 
         chain = row["chain"]
         active = chain[row["attempt"]] if row["attempt"] < len(chain) else None
@@ -594,8 +600,8 @@ class VoicesModule(BaseModule):
             return
         for season, episode, part in sorted(episodes):
             group = await self.repo.for_episode(series_id, season, episode, part)
-            if group and not await self._drop_orphans(series_id, season, episode, part, group, root):
-                self._deferred.add(series_id)
+            if group:
+                await self._drop_orphans(series_id, season, episode, part, group, root)
 
     async def _forget(self, series_id: int) -> None:
         """Remove every row of a series that is gone, announcing each."""
@@ -1038,14 +1044,16 @@ class VoicesModule(BaseModule):
         await self._announce(row, E.MOVED)
 
     async def _drop_orphans(self, series_id: int, season: int, episode: int, part: int, group: list[dict],
-                            root: str) -> bool:
-        """An episode left the plan: with its video gone, its set of tracks goes too. False when a download is under
-        way: the episode is looked at again when it ends."""
-        if any(row["status"] == S.DOWNLOADING for row in group):
-            return False
+                            root: str) -> None:
+        """An episode left the plan: with its video gone, its set of tracks goes too, and a download of one of its
+        voice-overs stops: nobody needs it any more."""
         for row in group:
             if row["ref_path"] and await self._io(os.path.isfile, row["ref_path"]):
-                return True
+                return
+        for row in group:
+            if row["status"] == S.DOWNLOADING and row["file_id"] is None:
+                self._fetching.discard(row["id"])
+                self._withdraw(series_id, [f"{DUB_KEY}{row['id']}"])
         folders = await self._episode_folders(group, root, series_id, season, episode, part)
         await self.repo.drop_episode(series_id, season, episode, part, folders)
         await self._work_off()
@@ -1053,7 +1061,6 @@ class VoicesModule(BaseModule):
             await self._announce(row, E.REMOVED)
         self.log.info("сериал %d, s%02de%02d: серии нет в плане и видео нет — дорожки удалены",
                       series_id, season, episode)
-        return True
 
     def _unlink(self, path: str, kind: str) -> None:
         """Remove what the kind says and confirm it: success is the name being free, not the absence of an error."""

@@ -236,3 +236,27 @@ async def test_the_job_is_cancelled_when_every_voice_over_that_shared_it_has_gon
         return neighbours.conform_cancels == ["job-1"]
 
     await until_true(cancelled, ("the job was not cancelled", neighbours.conform_cancels))
+
+
+@pytest.mark.asyncio
+async def test_a_chain_recorded_before_candidates_said_their_source_is_judged_safely_after_the_link_of_its_row_changed(dubs):
+    """The row of the stored chain has no source: a variant the user left out is found by its player, so that no work from a
+    variant that is left out goes on because its link changed."""
+    import json
+    probe, neighbours, voices, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    await quiet(voices)
+    before = {r["episode"]: r for r in await voices.repo.for_series(7)}
+    assert players_of(before[1]) == ["cvh", "kodik"] and before[1]["status"] == "downloading"
+    legacy = json.dumps([{key: value for key, value in each.items() if key != "source_id"} for each in before[1]["chain"]])
+    await voices.repo._db.execute("UPDATE voice_dubs SET chain=? WHERE id=?", (legacy, before[1]["id"]))
+    neighbours.sources[2]["links"]["1"] = "https://site/moved#cvh-BlackCat-1"
+    leave_out(neighbours, "BlackCat", "cvh")
+    asks = neighbours.layout_asks + 1
+    layout_changed(probe)
+    await pass_over(voices, neighbours, asks)
+
+    after = {r["episode"]: r for r in await voices.repo.for_series(7)}
+    assert neighbours.cancelled_keys == [f"dub:{before[1]['id']}"]
+    assert after[1]["id"] != before[1]["id"] and players_of(after[1]) == ["kodik"]
