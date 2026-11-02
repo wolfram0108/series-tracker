@@ -71,6 +71,7 @@ PROFILES = {
            _rule("N серия, озвучка AniStar", [NUMBER_FIRST], [_extract(NUMBER_FIRST),
                                                               {"action_type": "assign_voiceover", "action_pattern": "AniStar"}])],
 }
+NAMES = ["ruchime", "dunhuatv", "vk"]
 SOURCES = [
     ("https://1.ruchime.org/release/raskolotaia-bitvoi-sineva-nebes-5", {}),
     ("https://dunhuatv.ru/24-raskolotaja-bitvoj-sineva-nebes-5-smotret-onlajn.html", {}),
@@ -110,7 +111,7 @@ def read_phase(work: str, safeguard: float) -> str:
                                         "voices": [v["name"] for v in p.get("voices", [])]} for p in players]})
             print("  ", json.dumps(report[-1], ensure_ascii=False)[:900], flush=True)
         ready = all(item["state"] == "ready" and item["lines"] for item in report)
-        verdict = (f"PASS таблицы трёх источников прочитаны за {elapsed} с: {[item['lines'] for item in report]} строк"
+        verdict = (f"PASS таблицы источников прочитаны за {elapsed} с: {[item['lines'] for item in report]} строк"
                    if ready else f"FAIL чтение за {elapsed} с: {[(i['state'], i['lines']) for i in report]}")
     return verdict
 
@@ -139,7 +140,7 @@ def create_series(live: Live) -> None:
             live.call("POST", f"/api/parser-profiles/{ids[name]}/rules", json=rule)
     live.step("профили созданы, правила записаны", profiles=ids)
 
-    for (url, options), name in zip(SOURCES, ("ruchime", "dunhuatv", "vk")):
+    for (url, options), name in zip(SOURCES, NAMES):
         tested = live.call("POST", "/api/parser-profiles/test", json={
             "url": url, "options": options, "profile_id": ids[name], "refresh": False})
         lines = tested["lines"]
@@ -158,7 +159,7 @@ def create_series(live: Live) -> None:
         "name": SERIES, "name_en": SERIES_EN, "site": "1.ruchime.org", "save_path": LIBRARY, "season": "s05",
         "sources": [{"url": url, "source_type": "web_video", "parser_profile_id": ids[name],
                      "vk_search_mode": options.get("vk_search_mode", "search"), "vibix_season": None, "players_off": []}
-                    for (url, options), name in zip(SOURCES, ("ruchime", "dunhuatv", "vk"))]})
+                    for (url, options), name in zip(SOURCES, NAMES)]})
     watching[1].wait(100)
     live.step("сериал создан из трёх источников; референсы пришли событиями", episodes=sorted(seen))
     assert min(seen) >= FIRST and max(seen) <= LAST, f"episodes {sorted(seen)}"
@@ -292,7 +293,11 @@ def main() -> int:
     parser.add_argument("phase", choices=("read", "build", "two"))
     parser.add_argument("--work", required=True)
     parser.add_argument("--safeguard", type=float, default=170)
+    parser.add_argument("--skip", default="", help="names of the sources left out (ruchime, dunhuatv, vk), comma separated")
     args = parser.parse_args()
+    skipped = {name for name in args.skip.split(",") if name}
+    SOURCES[:] = [source for source, name in zip(SOURCES, NAMES) if name not in skipped]
+    NAMES[:] = [name for name in NAMES if name not in skipped]
     verdict = "FAIL прибор"
     try:
         if args.phase == "read":
@@ -305,7 +310,7 @@ def main() -> int:
     RAW.mkdir(parents=True, exist_ok=True)
     ident = "M-25" if args.phase == "two" else "M-24"
     with open(RAW / f"{ident}__{datetime.now(timezone.utc):%Y%m%d}.jsonl", "a", encoding="utf-8") as out:
-        out.write(json.dumps({"scenario": "three-sources", "phase": args.phase, "verdict": verdict}, ensure_ascii=False) + "\n")
+        out.write(json.dumps({"scenario": f"{len(SOURCES)}-sources", "phase": args.phase, "verdict": verdict}, ensure_ascii=False) + "\n")
     print(f"ИЗМЕРЕНИЕ {ident}: {verdict}")
     return 0 if verdict.startswith("PASS") else 1
 

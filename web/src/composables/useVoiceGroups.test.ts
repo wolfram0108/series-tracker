@@ -31,6 +31,13 @@ describe("useVoiceGroups", () => {
     expect(client.PUT.mock.calls[0][1].body.voice_groups).toEqual({ AniStar: ["anistar", "Anistar 2"] })
   })
 
+  it("leaves out of the triggers the names the name of the group covers by itself", async () => {
+    client.GET.mockResolvedValueOnce({ data: view({}) })
+    client.PUT.mockResolvedValueOnce({ data: { saved: true, problems: [], settings: view({}) } })
+    await useVoiceGroups().makeGroup("AniStar", ["AniStar", "anistar ", "Ani-Star", "AniStar Многоголосый"])
+    expect(client.PUT.mock.calls[0][1].body.voice_groups).toEqual({ AniStar: ["AniStar Многоголосый"] })
+  })
+
   it("says in words why the core did not take the group", async () => {
     client.GET.mockResolvedValueOnce({ data: view({}) })
     client.PUT.mockResolvedValueOnce({ data: {

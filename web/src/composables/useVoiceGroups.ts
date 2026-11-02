@@ -6,6 +6,9 @@ import { reasonText } from "../lib/reason"
 
 type View = components["schemas"]["VoiceSettingsView"]
 
+/** The form names are compared in, as the core does it: no case, no spaces, no signs. */
+const fold = (name: string): string => name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "")
+
 /**
  * Making a group of voice-overs from a window that shows a voice-over without one. The settings are read right before
  * the save, so that a group made elsewhere a moment ago is kept; the group takes the names it is made from as its
@@ -24,7 +27,9 @@ export function useVoiceGroups() {
       if (!current.data) return t("voices.settings.loadFailed")
       const view: View = current.data
       const kept = view.voice_groups[wanted] ?? []
-      const voiceGroups = { ...view.voice_groups, [wanted]: [...new Set([...kept, ...triggers])] }
+      // The name of a group stands for itself: a name the group's own name covers is no trigger (the core refuses it).
+      const wantedTriggers = triggers.filter((trigger) => fold(trigger) !== "" && fold(trigger) !== fold(wanted))
+      const voiceGroups = { ...view.voice_groups, [wanted]: [...new Set([...kept, ...wantedTriggers])] }
       const saved = await api.PUT("/api/voices/settings", { body: { priority: view.priority, voice_groups: voiceGroups } })
       if (!saved.data) return t("voices.settings.saveFailed")
       if (saved.data.saved) return null
