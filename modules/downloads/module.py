@@ -24,7 +24,7 @@ Queries / commands:
   downloads.episodes.get {series_id} → {items: [{unique_id, season, episode_start,
       source_url, status, final_filename, superseded_by}]} — the reference episodes of the plan (read
       by voices); superseded_by of a displaced row names the winner of the slot
-  downloads.queue.clear {} → {deleted} — всё, кроме идущих загрузок
+  downloads.queue.clear {} → {deleted} — ждущие и упавшие задачи с их рабочими файлами; идущие остаются
   downloads.fs.sync {series_id} → {adopted, lost} — синхронизация с
       диском (вызывается сканом и при открытии модалки статуса). A series
       of kind `torrent` answers {0, 0} at once: nothing is read, published
@@ -44,6 +44,14 @@ scan вместе с планом) теряет файл, как только ф
 на диске. Строка остаётся (final_filename=NULL) — память о скачанном
 разрешении; без победителя на диске не удаляется ничего. Сносит
 _retire_superseded: после загрузки, усыновления, диспетчеризации и сверки.
+
+Задача — запись процесса, и всё, что процесс оставил на диске, принадлежит её записи:
+  - задача берёт адрес видео у строки в момент старта (claim: одной записью со статусом строки), а не хранит копию;
+  - файл получает имя в шаге, который можно закончить после остановки: статус `publishing` пишется до os.replace,
+    запись файла за строкой и снятие задачи — одна транзакция; недоделанную публикацию заканчивают старт процесса и
+    downloads.dispatch (по рабочему файлу или по файлу под именем видео);
+  - задача уходит одним путём (_discard_tasks): воркер останавливается, рабочий файл и куски удаляются, строка
+    возвращается к ожиданию; рабочий файл без задачи при старте и сверке диска убирается как ничей.
 
 Диспетчер живёт по событиям (создание задачи, завершение загрузки,
 смена лимита) — никаких тиков. Параллелизм — счётчик активных задач
@@ -86,6 +94,8 @@ PROGRESS_DB_THROTTLE = 2.0   # секунд между записями прог
 PROGRESS_EVENT_THROTTLE = 1.0  # секунд между событиями очереди при прогрессе
 MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
+# The record of a finished file is written again this many times before the task is left `publishing` for the next dispatch.
+PUBLISH_BUDGET = Budget(attempts=4, pauses=(0.5, 2.0, 5.0), limit_s=30.0)
 STREAM_RESOLVE_TIMEOUT_S = 120  # a Vibix playlist may need a browser capture first
 FETCH_LIMIT_KEY = "max_parallel_dub_downloads"
 _TRANSIENT_MARKERS = ("timed out", "timeout", "connection", "network", "обрыв", "input/output error",
@@ -97,6 +107,10 @@ _TRANSIENT_MARKERS = ("timed out", "timeout", "connection", "network", "обры
 def _inside(base: str, path: str) -> bool:
     root = os.path.realpath(base)
     return os.path.commonpath([root, os.path.realpath(path)]) == root
+
+
+class PublicationUnfinished(RuntimeError):
+    """The file took its name but the record of it could not be written: the task stays `publishing` and is finished later."""
 
 
 async def _never() -> bool:
@@ -167,8 +181,10 @@ class DownloadsModule(BaseModule):
         try:
             all_series = await self.request("catalog.series.list", {},
                                             timeout=30)
+            await self._finish_publications()
             for s in all_series:
                 if s.get("kind") == SeriesKind.VIDEO:
+                    await self._sweep_work_files(s)
                     await self._contribute(s["id"])
         except BusRequestError as exc:
             self.log.warning("каталог недоступен при старте: %s", exc)
@@ -261,12 +277,17 @@ class DownloadsModule(BaseModule):
             self.log.error("серия %d: путь сохранения не абсолютный (%r) — "
                            "загрузка не запущена", series_id, base_path)
             raise ValueError(f"путь сохранения не абсолютный: {base_path!r}")
+        finished = await self._finish_publications(series_id, series)
         adopted = await self._adopt_existing_files(series)
         await self._retire_superseded(series)
         created = 0
         for item in await self.repo.planned_pending_items(series_id):
             filename = await self._format_filename(series, item)
             save_path = os.path.join(series["save_path"], filename)
+            if not await self.repo.task_exists_active(item["unique_id"]):
+                failed = await self.repo.failed_task_of(item["unique_id"])
+                if failed is not None:  # what the failed run left is not the start of the next one
+                    await self._discard_tasks([failed])
             if await self.repo.replace_or_create_task(
                     item["unique_id"], series_id,
                     item.get("download_url") or item["source_url"],
@@ -277,9 +298,9 @@ class DownloadsModule(BaseModule):
                                                     "pending")
         self.log.info("диспетч %d: усыновлено %d, задач создано %d",
                       series_id, adopted, created)
-        if adopted or created:
+        if adopted or created or finished:
             await self._contribute(series_id)
-        if created:
+        if created or finished:
             await self._broadcast_queue()
         await self._pump()
 
@@ -427,6 +448,43 @@ class DownloadsModule(BaseModule):
         await self._cancel_runner(task["id"])
         await self._clear_task_files(task)
 
+    async def _discard_tasks(self, tasks: list[dict]) -> None:
+        """The one way a task that is not wanted goes, whatever its state: the worker stops, what it wrote goes, the
+        record goes, and a row that was being fetched waits for a task again. A task that leaves its file behind leaves
+        a file no record names."""
+        for task in tasks:
+            await self._stop_task(task)
+            await self.repo.remove_task(task["id"], task["task_key"])
+
+    async def _sweep_work_files(self, series: dict) -> int:
+        """A work file (`.<key of a row>.<name>`) of a row that has no task has no owner: a stop left it, or an earlier
+        version wrote it so. Only files of that shape named by a row of this series are taken; nothing else is touched."""
+        if series.get("kind") != SeriesKind.VIDEO or not series.get("save_path"):
+            return 0
+        rows, owned = await self.repo.work_owners(series["id"])
+        free = rows - owned
+        if not free:
+            return 0
+        try:
+            found = await storage.call(self._work_files_of, series["save_path"], free)
+        except (OSError, storage.StorageTimeout) as exc:
+            self.log.warning("серия %d: каталог не прочитан, рабочие файлы не проверены: %s", series["id"], exc)
+            return 0
+        removed = 0
+        for path in found:
+            if await storage.discard(path):
+                removed += 1
+                self.log.info("убран рабочий файл без задачи: %s", path)
+        return removed
+
+    @staticmethod
+    def _work_files_of(base: str, keys: set[str]) -> list[str]:
+        found: list[str] = []
+        for directory, _, names in os.walk(base):
+            found.extend(os.path.join(directory, name) for name in names
+                         if name.startswith(".") and name[1:].partition(".")[0] in keys)
+        return found
+
     async def _remove_unwanted_files(self, series: dict) -> int:
         """What lies on the disk is what the panel configures: the file of an episode the user switched off, or of a
         source or profile taken away, goes, and its row is not fetched any more. A video series only; a file another row
@@ -458,16 +516,14 @@ class DownloadsModule(BaseModule):
         a row that was being fetched is not fetched any more. A waiting or failed one just goes. A file that is whole
         stays: it is a file of the library, not a piece of work."""
         gone = await self.repo.tasks_without_row(series_id)
-        for task in gone:
-            await self._stop_task(task)
-            await self.repo.delete_task(task["id"])
+        await self._discard_tasks(gone)
         unwanted = await self.repo.active_tasks_outside_plan(series_id)
+        await self._discard_tasks(unwanted)
         for task in unwanted:
-            await self._stop_task(task)
-            await self.repo.delete_task(task["id"])
-            await self.repo.set_item_status(task["task_key"], "pending")
             self.log.info("серия %d: загрузка %s остановлена, видео больше не в плане", series_id, task["task_key"])
-        return len(gone) + len(unwanted) + await self.repo.drop_pending_outside_plan(series_id)
+        waiting = await self.repo.waiting_outside_plan(series_id)
+        await self._discard_tasks(waiting)
+        return len(gone) + len(unwanted) + len(waiting)
 
     async def on_cancel(self, env: Envelope) -> dict:
         """Точечная отмена загрузки (приказ пользователя): убить активный
@@ -542,9 +598,10 @@ class DownloadsModule(BaseModule):
         return {"items": await self.repo.reference_items(env.payload["series_id"])}
 
     async def on_queue_clear(self, env: Envelope) -> dict:
-        deleted = await self.repo.clear_queue()
+        tasks = await self.repo.clearable_tasks()
+        await self._discard_tasks(tasks)
         await self._broadcast_queue()
-        return {"deleted": deleted}
+        return {"deleted": len(tasks)}
 
     async def _broadcast_queue(self) -> None:
         tasks = await self.repo.active_tasks()
@@ -565,9 +622,12 @@ class DownloadsModule(BaseModule):
             placeholder: asyncio.Future = asyncio.get_running_loop(
                 ).create_future()
             self._active[task["id"]] = placeholder
-            await self.repo.mark_downloading(task["id"])
-            await self.repo.set_item_status(task["task_key"], "downloading")
-            runner = asyncio.create_task(self._run_download(task))
+            claimed = await self.repo.claim(task["id"])
+            if claimed is None:  # the task went while the slot was being taken
+                self._active.pop(task["id"], None)
+                placeholder.cancel()
+                continue
+            runner = asyncio.create_task(self._run_download(claimed))
             self._active[task["id"]] = runner
             placeholder.cancel()
             self._tasks.append(runner)
@@ -583,14 +643,52 @@ class DownloadsModule(BaseModule):
         directory, name = os.path.split(task["save_path"])
         return os.path.join(directory, f".{task['task_key']}.{name}")
 
-    async def _take_over(self, series_id: int, uid: str, work: str, final: str, relative: str) -> None:
-        """The file is whole: it takes the name of the video. A file that lay under that name is the video this one
-        displaces; it is replaced in one step, and the rows that held it let it go with the row that has the new one."""
-        holders = await self.repo.holders_of_file(series_id, os.path.basename(final), except_uid=uid, displaced_by=uid)
-        await storage.call(os.replace, work, final, owns=final)
-        await self.repo.register_downloaded(uid, relative, released=[each["unique_id"] for each in holders])
-        if holders:
-            self.log.info("видео серии заменено другим под тем же именем: %s", os.path.basename(final))
+    async def _publish(self, task: dict, relative: str) -> None:
+        """The file is whole: it takes the name of the video. The task says `publishing` before anything is changed, so a
+        stop at any point leaves a record from which the step is finished (see `_finish_publication`)."""
+        await self.repo.begin_publish(task["id"])
+        await self._finish_publication(task, relative)
+
+    async def _finish_publication(self, task: dict, relative: str) -> bool:
+        """The file takes the name of the video, the row holds it and the task ends, doing only what is not done yet: the
+        work file is replaced over the name if it is still there; with it gone and the name taken, the replacement was
+        done; with neither the task is fetched again. A file that lay under the name was another video: it is replaced
+        in one step, and every row that held the name lets it go with the row that now has the file."""
+        work, final = self._work_path(task), task["save_path"]
+        if await storage.call(os.path.exists, work):
+            await storage.call(os.replace, work, final, owns=final)
+        elif not await storage.call(os.path.exists, final):
+            await self.repo.requeue_task(task["id"])
+            return False
+
+        async def record() -> Exception | None:
+            try:
+                await self.repo.finish_publish(task["id"], task["task_key"], relative)
+            except Exception as exc:  # noqa: BLE001 - the file is in place, so the record is asked for again
+                return exc
+            return None
+
+        failure, _, unsure = await retrying(record, final=lambda result: result is None, budget=PUBLISH_BUDGET)
+        if unsure:
+            raise PublicationUnfinished(f"запись файла {relative} не сохранена: {failure}") from failure
+        return True
+
+    async def _finish_publications(self, series_id: int | None = None, series: dict | None = None) -> int:
+        """Finish the publications a stop or a failed write left: the tasks that are `publishing` and have no worker."""
+        done = 0
+        for task in await self.repo.publishing_tasks(series_id):
+            if task["id"] in self._active:
+                continue  # its own worker is at it
+            try:
+                owner = series if series is not None and series["id"] == task["series_id"] else await self.request(
+                    "catalog.series.get", {"series_id": task["series_id"]})
+                relative = os.path.relpath(task["save_path"], owner["save_path"]).replace("\\", "/")
+                if await self._finish_publication(task, relative):
+                    self.log.info("публикация файла закончена: %s", relative)
+                    done += 1
+            except (PublicationUnfinished, BusRequestError, LookupError) as exc:
+                self.log.warning("публикация файла задачи %d не закончена: %s", task["id"], exc)
+        return done
 
     async def _run_download(self, task: dict) -> None:
         task_id, uid = task["id"], task["task_key"]
@@ -628,14 +726,13 @@ class DownloadsModule(BaseModule):
                                             {"series_id": series_id})
                 rel = os.path.relpath(task["save_path"],
                                       series["save_path"]).replace("\\", "/")
-                await self._take_over(series_id, uid, work, task["save_path"], rel)
-                await self.repo.delete_task(task_id)
+                await self._publish(task, rel)
                 await self._retire_superseded(series)
                 self.send_command("catalog.series.touch_scan_time",
                                   {"series_id": series_id})
                 self.log.info("загрузка завершена: %s", rel)
             else:
-                attempt = int(task.get("attempts") or 0) + 1
+                attempt = int(task.get("attempts") or 0)  # the claim has counted this run already
                 budget = _download_budget()
                 if budget.allows(attempt) and transient:
                     pause = budget.pause(attempt)
@@ -648,6 +745,8 @@ class DownloadsModule(BaseModule):
                     await self.repo.mark_error(task_id, error)
                     await self.repo.set_item_status(uid, "error")
                     self.log.error("загрузка %s не удалась: %s", uid, error)
+        except PublicationUnfinished as exc:
+            self.log.error("загрузка %s: %s — задача закончит публикацию при следующей отправке или старте", uid, exc)
         except Exception as exc:  # noqa: BLE001 — ошибка не валит модуль
             self.log.exception("сбой воркера загрузки %d", task_id)
             await self.repo.mark_error(task_id, f"внутренняя ошибка: {exc}")

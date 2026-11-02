@@ -13,6 +13,7 @@ import pytest
 
 from core import BaseModule, Bus, Runner
 from core.db import Database
+from core.envelope import Envelope
 from modules.catalog import CatalogModule
 from modules.downloads import DownloadsModule
 from modules.scan import ScanModule
@@ -304,3 +305,36 @@ async def test_an_episode_the_user_switches_off_loses_its_whole_file_and_the_oth
     assert rig.query("SELECT status, final_filename FROM media_items WHERE episode_start=1") == [
         {"status": "pending", "final_filename": None}]
     assert rig.query("SELECT status FROM media_items WHERE episode_start=2") == [{"status": "completed"}]
+
+
+async def test_a_task_made_after_the_queue_was_read_fetches_the_address_the_scan_then_writes(rig, monkeypatch):
+    """The scan reads the queue first and writes the plan after: a task made between the two waits with the old address
+    while its row gets the new one. What the task fetches is the video its row has when the task begins."""
+    rig.downloader.gate = asyncio.Event()
+    rig.world.rows = [rig.row("a", 1, link="https://v/a"), rig.row("b", 2, link="https://v/old")]
+    await rig.run()
+    await rig.until(lambda: sorted(rig.tasks().values()) == ["downloading", "pending"], "one download under way, one waiting")
+    waiting = next(key for key, status in rig.tasks().items() if status == "pending")
+    [task] = rig.query("SELECT id FROM download_tasks WHERE task_key=?", (waiting,))
+    await rig.probe.request("downloads.cancel", {"task_id": task["id"]}, timeout=STUCK_S)
+    assert waiting not in rig.tasks()  # the row waits and has no task: the queue the scan reads next does not name it
+
+    scan = next(each for each in rig.runner.modules if isinstance(each, ScanModule))
+    downloads = next(each for each in rig.runner.modules if isinstance(each, DownloadsModule))
+    real = scan._queued
+
+    async def read_then_dispatch(series_id):
+        queue = await real(series_id)
+        monkeypatch.setattr(scan, "_queued", real)
+        await downloads.on_dispatch(Envelope(topic="downloads.dispatch", kind="event", payload={"series_id": series_id}))
+        return queue
+
+    monkeypatch.setattr(scan, "_queued", read_then_dispatch)
+    rig.world.rows = [rig.row("a", 1, link="https://v/a"), rig.row("b", 2, link="https://v/new")]
+    await rig.run()
+    assert rig.tasks()[waiting] == "pending"  # made after the queue was read
+    rig.downloader.gate.set()
+    await rig.until(lambda: (rig.media / "Серия 01.mp4").exists() and (rig.media / "Серия 02.mp4").exists(), "both fetched")
+
+    assert "https://v/old" not in rig.downloader.started
+    assert (rig.media / "Серия 02.mp4").read_bytes() == b"https://v/new"

@@ -11,6 +11,18 @@ from core.db import Database
 
 _IN_PLAN = "('in_plan_single', 'in_plan_compilation')"
 
+# A task holds its place in every one of these states; in the first two a worker is at it, in the last one the file is
+# taking its name. Every query that means "a task that is alive" says it with these, not with a list of its own.
+RUNNING_STATES = ("downloading", "processing")
+LIVE_STATES = ("pending", *RUNNING_STATES, "publishing")
+
+
+def _marks(states: Iterable[str]) -> str:
+    return "(" + ", ".join(f"'{each}'" for each in states) + ")"
+
+
+_LIVE, _RUNNING = _marks(LIVE_STATES), _marks(RUNNING_STATES)
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -23,11 +35,10 @@ class DownloadsRepository:
     # --- задачи -------------------------------------------------------------------
 
     async def active_tasks(self) -> list[dict]:
-        """pending+downloading+processing (remux) — активная очередь UI."""
+        """Живые задачи (pending, downloading, processing, publishing) — активная очередь UI и снимок очереди для scan."""
         return await self._db.fetch_all(
             "SELECT * FROM download_tasks WHERE task_type='vk_video' AND "
-            "status IN ('pending', 'downloading', 'processing') "
-            "ORDER BY created_at")
+            f"status IN {_LIVE} ORDER BY created_at")
 
     async def next_pending(self, limit: int) -> list[dict]:
         """Добор: только задачи, чей элемент в плане (семантика
@@ -42,7 +53,7 @@ class DownloadsRepository:
     async def task_exists_active(self, unique_id: str) -> bool:
         row = await self._db.fetch_one(
             "SELECT id FROM download_tasks WHERE task_key=? AND "
-            "task_type='vk_video' AND status IN ('pending', 'downloading')",
+            f"task_type='vk_video' AND status IN {_LIVE}",
             (unique_id,))
         return row is not None
 
@@ -63,11 +74,11 @@ class DownloadsRepository:
             (unique_id, series_id, video_url, save_path, _now(), _now()))
         return True
 
-    async def drop_pending_outside_plan(self, series_id: int) -> int:
-        """Чистка pending- и error-задач без строки плана (находка 32): строка либо вышла из плана, либо
-        удалена scan; ошибка элемента вне плана никем не повторяется и только мусорит."""
-        return await self._db.execute(
-            "DELETE FROM download_tasks WHERE series_id=? AND "
+    async def waiting_outside_plan(self, series_id: int) -> list[dict]:
+        """Pending- и error-задачи без строки плана (находка 32): строка либо вышла из плана, либо удалена scan;
+        ошибка элемента вне плана никем не повторяется и только мусорит."""
+        return await self._db.fetch_all(
+            "SELECT id, task_key, save_path, status FROM download_tasks WHERE series_id=? AND "
             "task_type='vk_video' AND status IN ('pending', 'error') AND NOT EXISTS "
             "(SELECT 1 FROM media_items mi WHERE mi.unique_id = download_tasks.task_key "
             f"AND mi.plan_status IN {_IN_PLAN})", (series_id,))
@@ -93,7 +104,7 @@ class DownloadsRepository:
         return await self._db.fetch_all(
             "SELECT dt.id, dt.task_key, dt.save_path, dt.status FROM download_tasks dt "
             "JOIN media_items mi ON mi.unique_id = dt.task_key "
-            "WHERE dt.series_id=? AND dt.task_type='vk_video' AND dt.status IN ('downloading', 'processing') "
+            f"WHERE dt.series_id=? AND dt.task_type='vk_video' AND dt.status IN {_RUNNING} "
             f"AND mi.plan_status NOT IN {_IN_PLAN}", (series_id,))
 
     async def tasks_without_row(self, series_id: int) -> list[dict]:
@@ -103,11 +114,62 @@ class DownloadsRepository:
             "AND NOT EXISTS (SELECT 1 FROM media_items mi WHERE mi.unique_id = download_tasks.task_key)",
             (series_id,))
 
-    async def mark_downloading(self, task_id: int) -> None:
-        await self._db.execute(
-            "UPDATE download_tasks SET status='downloading', "
-            "attempts=attempts+1, updated_at=? WHERE id=?",
-            (_now(), task_id))
+    async def claim(self, task_id: int) -> dict | None:
+        """The task begins. It takes the address its row has now, and the row is marked as being fetched in the same step:
+        the scan, which leaves the address of such a row alone, either wrote its address before this step or does not
+        write it. None when the task is not waiting any more."""
+        def work(conn) -> dict | None:
+            began = conn.execute(
+                "UPDATE download_tasks SET status='downloading', attempts=attempts+1, updated_at=?, video_url=COALESCE("
+                "(SELECT COALESCE(NULLIF(mi.download_url, ''), mi.source_url) FROM media_items mi "
+                "WHERE mi.unique_id = download_tasks.task_key), video_url) WHERE id=? AND status='pending'",
+                (_now(), task_id)).rowcount
+            if not began:
+                return None
+            conn.execute("UPDATE media_items SET status='downloading' WHERE unique_id="
+                         "(SELECT task_key FROM download_tasks WHERE id=?)", (task_id,))
+            return dict(conn.execute("SELECT * FROM download_tasks WHERE id=?", (task_id,)).fetchone())
+        return await self._db.transaction(work)
+
+    async def begin_publish(self, task_id: int) -> None:
+        """The file is whole and is about to take its name: the task says so before anything is changed, so that a stop at
+        any point leaves a record that tells what was to be done."""
+        await self._db.execute("UPDATE download_tasks SET status='publishing', progress=100, dlspeed=0, eta=0, updated_at=? "
+                               "WHERE id=?", (_now(), task_id))
+
+    async def finish_publish(self, task_id: int, unique_id: str, filename: str) -> None:
+        """The file has its name: the row holds it, every other row of the series that held that name lets it go (the
+        file is another video now), and the task is done, in one step."""
+        await self._db.execute_many([
+            ("UPDATE media_items SET final_filename=NULL WHERE final_filename=? AND unique_id != ? AND series_id="
+             "(SELECT series_id FROM media_items WHERE unique_id=?)", (filename, unique_id, unique_id)),
+            ("UPDATE media_items SET status='completed', final_filename=? WHERE unique_id=?", (filename, unique_id)),
+            ("DELETE FROM download_tasks WHERE id=?", (task_id,))])
+
+    async def publishing_tasks(self, series_id: int | None = None) -> list[dict]:
+        """Tasks whose file was taking its name when the process stopped or the record could not be written."""
+        where, args = ("AND series_id=? ", (series_id,)) if series_id is not None else ("", ())
+        return await self._db.fetch_all(
+            f"SELECT * FROM download_tasks WHERE task_type='vk_video' AND status='publishing' {where}ORDER BY id", args)
+
+    async def failed_task_of(self, unique_id: str) -> dict | None:
+        return await self._db.fetch_one(
+            "SELECT id, task_key, save_path, status FROM download_tasks WHERE task_key=? AND task_type='vk_video' "
+            "AND status='error'", (unique_id,))
+
+    async def remove_task(self, task_id: int, unique_id: str) -> None:
+        """The task goes, and a row that was being fetched waits for a task again, in one step: nobody sees a row that is
+        fetched by no task."""
+        await self._db.execute_many([
+            ("DELETE FROM download_tasks WHERE id=?", (task_id,)),
+            ("UPDATE media_items SET status='pending' WHERE unique_id=? AND status='downloading'", (unique_id,))])
+
+    async def work_owners(self, series_id: int) -> tuple[set[str], set[str]]:
+        """(keys of the rows of the series, keys of its tasks): a work file of a row that has no task has no owner."""
+        rows = await self._db.fetch_all("SELECT unique_id FROM media_items WHERE series_id=?", (series_id,))
+        tasks = await self._db.fetch_all("SELECT task_key FROM download_tasks WHERE series_id=? AND task_type='vk_video'",
+                                         (series_id,))
+        return {each["unique_id"] for each in rows}, {each["task_key"] for each in tasks}
 
     async def mark_error(self, task_id: int, message: str) -> None:
         await self._db.execute(
@@ -150,19 +212,19 @@ class DownloadsRepository:
             "SELECT id, task_key, save_path, status FROM download_tasks WHERE "
             "series_id=? AND task_type='vk_video'", (series_id,))
 
-    async def clear_queue(self) -> int:
-        """Удаляет все задачи, кроме идущих загрузок (контракт
-        /downloads/queue/clear)."""
-        return await self._db.execute(
-            "DELETE FROM download_tasks WHERE task_type='vk_video' AND "
-            "status != 'downloading'")
+    async def clearable_tasks(self) -> list[dict]:
+        """Задачи, которые очистка очереди снимает (контракт /downloads/queue/clear): ждущие и упавшие; идущая загрузка
+        и файл, который получает имя, остаются."""
+        return await self._db.fetch_all(
+            "SELECT id, task_key, save_path, status FROM download_tasks WHERE task_type='vk_video' AND "
+            "status IN ('pending', 'error')")
 
     async def requeue_interrupted(self) -> int:
         """Reconcile при старте: оборванные загрузки — снова в очередь.
         error НЕ трогаем (Р-13: ошибка не лечится рестартом)."""
         return await self._db.execute(
             "UPDATE download_tasks SET status='pending' WHERE "
-            "task_type='vk_video' AND status IN ('downloading', 'processing')")
+            f"task_type='vk_video' AND status IN {_RUNNING}")
 
     # --- media_items: наши колонки (status, final_filename) ------------------------
 
@@ -198,7 +260,7 @@ class DownloadsRepository:
         """{final path: key of the row} of the tasks that are to write a file of the series."""
         rows = await self._db.fetch_all(
             "SELECT save_path, task_key FROM download_tasks WHERE series_id=? AND task_type='vk_video' "
-            "AND status IN ('pending', 'downloading', 'processing')", (series_id,))
+            f"AND status IN {_LIVE}", (series_id,))
         return {each["save_path"]: each["task_key"] for each in rows}
 
     async def reset_download_state(self, unique_id: str) -> None:
