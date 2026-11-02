@@ -73,7 +73,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from core import BaseModule, BusRequestError, ids, torrent_source
+from core import BaseModule, BusRequestError, torrent_source
 from core.deadlines import TABLE_WAIT_S
 from core.contracts import (availability, CompositionReply, OutputSwitch, Reference, ReferenceChanged, SeriesSource, SourceStatus,
                             VoiceSettingsView)
@@ -83,29 +83,12 @@ from core.voice_names import Groups
 from core.ignored import parse_memory
 from core.reasons import reason
 from . import candidates, output, planner, reference, sync
+from .errors import ScanAborted, ScanError, SyncFailed
 from .repository import ScanRepository
+from .torrent import TorrentScan
 from .sync import TableSignals
 
-# Режим замены раздач по трекерам (ревизия находки 28 — вместо
-# подстроки в оркестраторе). fixed: новая раздача заменяет активную с
-# теми же episodes; rolling: при единственной активной заменяется она,
-# при нескольких — осознанно не заменяем (неоднозначно, что устарело).
-REPLACE_MODE = {"astar": "fixed"}
-DEFAULT_REPLACE_MODE = "rolling"
-
 _NO_HANDLER = "нет обработчика"
-
-
-class ScanError(RuntimeError):
-    pass
-
-
-class SyncFailed(ScanError):
-    """A step of a synchronization failed; the message is a reason (core/reasons), not a sentence."""
-
-
-class ScanAborted(RuntimeError):
-    """Серию удалили во время скана — работа прекращается (Д2)."""
 
 
 @dataclass(frozen=True)
@@ -145,6 +128,7 @@ class ScanModule(BaseModule):
         self._scan_all_running = False
         self._awaiting_pipeline = False
         super().__init__(bus)
+        self._torrents = TorrentScan(self.repo, self.request, self.log, self._aborted)
 
     def register(self) -> None:
         # concurrent: долгий скан одного сериала не должен блокировать
@@ -451,7 +435,7 @@ class ScanModule(BaseModule):
                 result = await self._sync_video(series, download)
                 await self.repo.delete_task(intent)
             else:
-                result = await self._scan_torrents(series, _torrent_source(series), force)
+                result = await self._torrents.scan(series, _torrent_source(series), force)
             self._contribute(series_id, scanning=False, error=False)
             # Многосезонный агрегат TMDB: реальные сезоны могли измениться
             # (новый сезон/файлы) — пересчитать число серий по сезонам.
@@ -495,7 +479,7 @@ class ScanModule(BaseModule):
             if series.get("kind") == "video":
                 raise ScanError("подготовка состава — только для торрентов")
             await self.repo.delete_error_tasks(series_id)
-            result = await self._scan_torrents(series, _torrent_source(series), False, prepare=True)
+            result = await self._torrents.scan(series, _torrent_source(series), False, prepare=True)
             self._contribute(series_id, scanning=False, error=False)
             return result
         except ScanAborted as exc:
@@ -713,147 +697,6 @@ class ScanModule(BaseModule):
 
     # --- торрент-ветка -------------------------------------------------------------
 
-    async def _scan_torrents(self, series: dict, source: SeriesSource, force: bool,
-                             prepare: bool = False) -> dict:
-        series_id = series["id"]
-        # Сверка файлов на диске (R1, ситуации F1/F2): пропавший renamed-файл
-        # → recheck-задача (восстановление средствами qB). Легаси делал это
-        # на КАЖДОМ скане; в новом fs.verify висела только на открытии
-        # модалки — пропажа файла сканом не лечилась.
-        try:
-            await self.request("torrents.fs.verify",
-                               {"series_id": series_id})
-            # реконсиляция застрявших раздач (P10): активная, но не докачана
-            # и без задачи → загнать в конвейер заново. В режиме подготовки
-            # пропускается: она бы сняла паузу до выбора серий.
-            if not prepare:
-                await self.request("torrents.drive_incomplete",
-                                   {"series_id": series_id})
-        except BusRequestError as exc:
-            self.log.warning("сверка файлов перед сканом пропущена: %s", exc)
-        if force:
-            self.log.warning("force_replace: все активные торренты "
-                             "сериала %d будут заменены", series_id)
-            await self.request("torrents.db.deactivate_all",
-                               {"series_id": series_id})
-        active = await self.request("torrents.db.active",
-                                    {"series_id": series_id})
-
-        parsed = await self.request("sources.parse", {"url": source.url})
-        if series_id in self._aborted:
-            raise ScanAborted(f"сериал {series_id} удалён во время скана")
-        plan_items = self._replace_plan(series, parsed, active)
-        if not plan_items:
-            self.log.info("сериал %d: новых раздач нет", series_id)
-            return {"source_type": "torrent", "tasks_created": 0,
-                    "changed": False}
-
-        task_id = await self.repo.create_task(series_id, plan_items)
-        return await self._execute_torrent_task(
-            task_id, series, plan_items, {}, prepare=prepare)
-
-    def _replace_plan(self, series: dict, parsed: dict,
-                      active: list[dict]) -> list[dict]:
-        """Факты парсера + активные раздачи -> план замен."""
-        releases = []
-        for r in parsed.get("releases", []):
-            link_for_id = r.get("link") or r.get("magnet")
-            if not link_for_id:
-                continue
-            releases.append({**r, "torrent_id": ids.torrent_id(
-                link_for_id, r.get("date_marker"))})
-
-        if series.get("quality"):
-            wanted = {q.strip() for q in series["quality"].split(";")
-                      if q.strip()}
-            releases = [r for r in releases if r.get("quality") in wanted]
-
-        mode = REPLACE_MODE.get(parsed.get("service", ""),
-                                DEFAULT_REPLACE_MODE)
-        active_ids = {t["torrent_id"] for t in active}
-        plan = []
-        for rel in releases:
-            if rel["torrent_id"] in active_ids:
-                continue  # дата не менялась — раздача уже у нас
-            old = None
-            if mode == "fixed":
-                old = next((t for t in active
-                            if t.get("episodes") == rel.get("episodes")), None)
-            elif mode == "rolling" and len(active) == 1:
-                old = active[0]
-            plan.append({
-                "site_torrent": {
-                    "torrent_id": rel["torrent_id"],
-                    "link": rel.get("link"),
-                    "magnet": rel.get("magnet"),
-                    "date_time": rel.get("date_marker"),
-                    "quality": rel.get("quality"),
-                    "episodes": rel.get("episodes"),
-                },
-                "old": ({"torrent_id": old["torrent_id"],
-                         "qb_hash": old.get("qb_hash"),
-                         "db_id": old.get("id")} if old else None),
-            })
-        return plan
-
-    async def _execute_torrent_task(self, task_id: int, series: dict,
-                                    plan_items: list[dict],
-                                    results: dict,
-                                    prepare: bool = False) -> dict:
-        """Выполнение журнала: каждый шаг идемпотентен, результаты
-        фиксируются по мере — после падения продолжаем отсюда же.
-
-        prepare — раздача добавляется и разбирается на состав, но в
-        конвейер не идёт: закачку запускает следующий скан."""
-        series_id = series["id"]
-        try:
-            for idx, item in enumerate(plan_items):
-                if series_id in self._aborted:
-                    raise ScanAborted(f"сериал {series_id} удалён во время скана")
-                if str(idx) in results:
-                    continue  # сделано до падения
-                st = item["site_torrent"]
-                add_payload: dict = {"save_path": series["save_path"],
-                                     "paused": True}
-                if st.get("link"):
-                    file_reply = await self.request(
-                        "sources.torrent_file.get",
-                        {"url": st["link"], "torrent_id": st["torrent_id"]})
-                    add_payload["content_b64"] = file_reply["content_b64"]
-                else:
-                    add_payload["magnet"] = st["magnet"]
-                added = await self.request("torrents.add", add_payload)
-                results[str(idx)] = {"hash": added["hash"],
-                                     "link_type": added["link_type"]}
-                await self.repo.update_results(task_id, results)
-
-            if not results:
-                raise ScanError("не удалось добавить ни одной раздачи")
-
-            created = 0
-            for idx_str, res in results.items():
-                item = plan_items[int(idx_str)]
-                reg = await self.request("torrents.register", {
-                    "series_id": series_id,
-                    "torrent": item["site_torrent"],
-                    "qb_hash": res["hash"],
-                    "link_type": res["link_type"],
-                    "replaces": item["old"],
-                    "start_pipeline": not prepare})
-                # existed=True — тот же infohash (перевыкладка, ПУНКТ 3):
-                # ничего не создано, в «изменения» не идёт.
-                if not (reg or {}).get("existed"):
-                    created += 1
-
-            await self.repo.delete_task(task_id)
-            return {"source_type": "torrent", "tasks_created": created,
-                    "changed": created > 0}
-        except ScanAborted:
-            raise
-        except Exception as exc:
-            await self.repo.set_error(task_id, str(exc))
-            raise
-
     async def _resume(self, task: dict) -> None:
         """A task a restart found: a video synchronization is run again from its written command, a torrent scan
         goes on from its journal."""
@@ -881,7 +724,7 @@ class ScanModule(BaseModule):
         try:
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
-            await self._execute_torrent_task(
+            await self._torrents.execute(
                 task["id"], series, task["task_data"],
                 dict(task["results_data"]))
             self._contribute(series_id, scanning=False, error=False)
