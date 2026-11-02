@@ -19,7 +19,7 @@ Queries:
       counted from these tables), composition.get with voices.settings.get, the choice and the plan, and with
       download (the default) downloads.dispatch and voices.dispatch. A failed step is the one signal of failure:
       the error carrier (scan_tasks.status='error') holds its reason. The wait for a table has a safeguard
-      (TABLE_WAIT_SAFEGUARD_S): when it runs out the source counts as failed, reason `table_wait_timeout`.
+      (`TABLE_WAIT_S`): when it runs out the source counts as failed, reason `table_wait_timeout`.
   scan.series.prepare {series_id} → the summary of a torrent scan without a download: the torrent is added to
       qBittorrent, split into its files (torrent_files) and left paused — the user picks the episodes in the
       composition, the next scan starts the download.
@@ -74,6 +74,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from core import BaseModule, BusRequestError, ids, torrent_source
+from core.deadlines import TABLE_WAIT_S
 from core.contracts import (availability, CompositionReply, OutputSwitch, Reference, ReferenceChanged, SeriesSource, SourceStatus,
                             VoiceSettingsView)
 from core.db import Database
@@ -83,7 +84,7 @@ from core.ignored import parse_memory
 from core.reasons import reason
 from . import candidates, output, planner, reference, sync
 from .repository import ScanRepository
-from .sync import TABLE_WAIT_SAFEGUARD_S, TableSignals
+from .sync import TableSignals
 
 # Режим замены раздач по трекерам (ревизия находки 28 — вместо
 # подстроки в оркестраторе). fixed: новая раздача заменяет активную с
@@ -91,13 +92,6 @@ from .sync import TABLE_WAIT_SAFEGUARD_S, TableSignals
 # при нескольких — осознанно не заменяем (неоднозначно, что устарело).
 REPLACE_MODE = {"astar": "fixed"}
 DEFAULT_REPLACE_MODE = "rolling"
-
-# Safeguards of requests, not syncs: an answer that is not there by then fails the step.
-STEP_TIMEOUT_S = 30.0
-# Counting a layout asks the constructor once per source, up to 300 s each.
-RECOMPUTE_TIMEOUT_S = 900.0
-# A receiver answers once it has written the work down; the number only ends a wait on a receiver that is stuck.
-HANDOVER_TIMEOUT_S = 900.0
 
 _NO_HANDLER = "нет обработчика"
 
@@ -139,7 +133,7 @@ class ScanModule(BaseModule):
     name = "scan"
 
     def __init__(self, bus, db: Database, *, scheduler_tick: float | None = 10.0,
-                 table_wait_s: float = TABLE_WAIT_SAFEGUARD_S) -> None:
+                 table_wait_s: float = TABLE_WAIT_S) -> None:
         self.repo = ScanRepository(db)
         self._tick = scheduler_tick  # None — без планировщика (тесты)
         self._table_wait_s = table_wait_s
@@ -238,7 +232,7 @@ class ScanModule(BaseModule):
         series_id = request.series_id
 
         async def apply() -> None:
-            series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=STEP_TIMEOUT_S)
+            series = await self.request("catalog.series.get", {"series_id": series_id})
             seasons, memory = self._ignored_seasons(series), self._ignored_episodes(series)
             if request.episode is None:
                 seasons = seasons | {request.season} if request.off else seasons - {request.season}
@@ -253,7 +247,7 @@ class ScanModule(BaseModule):
             await self.request("catalog.series.update", {"series_id": series_id, "fields": {
                 "ignored_seasons": json.dumps(sorted(seasons)),
                 "ignored_episodes": json.dumps({str(season): sorted(numbers) for season, numbers in memory.items() if numbers}),
-            }}, timeout=STEP_TIMEOUT_S)
+            }})
             await self._recount(series_id)
 
         await self._announcing(series_id, apply())
@@ -263,7 +257,7 @@ class ScanModule(BaseModule):
     async def on_output_get(self, env: Envelope) -> list[dict]:
         """The references of the series that are wanted, in the order of season, episode, part."""
         series_id = int(env.payload["series_id"])
-        series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=STEP_TIMEOUT_S)
+        series = await self.request("catalog.series.get", {"series_id": series_id})
         shown = await self._output_of(series)
         return [output.reference_of(each).model_dump(mode="json") for each in shown]
 
@@ -277,7 +271,7 @@ class ScanModule(BaseModule):
         that left the plan lose their place in it and downloads drops the tasks that wait for them, and the rows that
         came back have theirs. A torrent series has no plan of references."""
         try:
-            series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=STEP_TIMEOUT_S)
+            series = await self.request("catalog.series.get", {"series_id": series_id})
         except BusRequestError as exc:
             if "LookupError" in str(exc):
                 return
@@ -289,14 +283,14 @@ class ScanModule(BaseModule):
         """Awaits `action` (a change of the rows that may switch a reference off) and announces what changed in the
         output of the series. A series the catalog does not have, or a torrent one, has no output to announce."""
         try:
-            series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=STEP_TIMEOUT_S)
+            series = await self.request("catalog.series.get", {"series_id": series_id})
             before = await self._output_of(series)
         except (BusRequestError, asyncio.TimeoutError):
             return await action
         result = await action
         # The action may have changed the memory of the series: the output after it is read with the series as it is now.
         try:
-            series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=STEP_TIMEOUT_S)
+            series = await self.request("catalog.series.get", {"series_id": series_id})
             after = await self._output_of(series)
         except (BusRequestError, asyncio.TimeoutError):
             return result
@@ -386,7 +380,7 @@ class ScanModule(BaseModule):
     async def on_voice_settings_changed(self, env: Envelope) -> None:
         """The order of players decides ties of the choice, so a new order may change references."""
         try:
-            listing = await self.request("catalog.series.list", {}, timeout=STEP_TIMEOUT_S)
+            listing = await self.request("catalog.series.list", {})
         except (BusRequestError, asyncio.TimeoutError) as exc:
             self.log.warning("порядок плееров изменён, список сериалов недоступен: %s", exc)
             return
@@ -398,7 +392,7 @@ class ScanModule(BaseModule):
         """Counts the references of a video series again after an event; a failure is logged, the next event or the
         next scan counts again."""
         try:
-            series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=STEP_TIMEOUT_S)
+            series = await self.request("catalog.series.get", {"series_id": series_id})
             if series.get("kind") == "video":
                 await self._refresh(series)
         except ScanAborted as exc:
@@ -415,10 +409,10 @@ class ScanModule(BaseModule):
         if series_id in self._aborted:
             raise ScanAborted(f"сериал {series_id} удалён во время скана")
 
-    async def _step(self, topic: str, payload: dict, *, timeout: float = STEP_TIMEOUT_S):
+    async def _step(self, topic: str, payload: dict, *, units: int = 1):
         """A request of a synchronization: any failure of it is the one signal that the step failed."""
         try:
-            return await self.request(topic, payload, timeout=timeout)
+            return await self.request(topic, payload, units=units)
         except (BusRequestError, asyncio.TimeoutError) as exc:
             if "LookupError" in str(exc):
                 raise ScanAborted(f"сериал {payload.get('series_id')} удалён во время скана") from exc
@@ -528,7 +522,7 @@ class ScanModule(BaseModule):
         существующей серии — иначе внешний ключ не даст записать."""
         try:
             await self.request("catalog.series.get",
-                                {"series_id": series_id}, timeout=10)
+                                {"series_id": series_id})
             return True
         except BusRequestError:
             return False
@@ -537,8 +531,7 @@ class ScanModule(BaseModule):
         """Переобработка имён до скана — request/reply вместо
         create+sleep-поллинга до 600 с (находка 16)."""
         try:
-            await self.request("renaming.reprocess", {"series_id": series_id},
-                               timeout=600)
+            await self.request("renaming.reprocess", {"series_id": series_id})
         except BusRequestError as exc:
             if _NO_HANDLER in str(exc):
                 self.log.warning("модуль renaming ещё не подключён — "
@@ -556,7 +549,7 @@ class ScanModule(BaseModule):
         # Disk check before the scan: a downloaded file that is gone is reset from completed to pending so that dispatch
         # fetches it again; an unreachable path is absorbed inside downloads.on_fs_sync.
         try:
-            await self.request("downloads.fs.sync", {"series_id": series_id}, timeout=120)
+            await self.request("downloads.fs.sync", {"series_id": series_id})
         except BusRequestError as exc:
             self.log.warning("сверка диска перед видео-сканом пропущена: %s", exc)
         before = await self._fingerprint(series_id)
@@ -567,7 +560,7 @@ class ScanModule(BaseModule):
                 self.log.warning("сериал %d, источник %d: страница %s — %s, причина %s", series_id, each.source_id,
                                  each.url, each.state, each.reason)
         self._alive(series_id)
-        await self._step("composition.recompute", {"series_id": series_id}, timeout=RECOMPUTE_TIMEOUT_S)
+        await self._step("composition.recompute", {"series_id": series_id}, units=len(_sources_of(series)))
         self._alive(series_id)
         refreshed = await self._refresh(series, announce=True)
         changed = before != await self._fingerprint(series_id)
@@ -583,8 +576,8 @@ class ScanModule(BaseModule):
         down: a receiver answers after its record, so a stop at any point of the hand-over finds the command again and
         the next run gives the work again (a receiver takes the same work twice as once)."""
         answers = await asyncio.gather(
-            self.request("downloads.dispatch", {"series_id": series_id}, timeout=HANDOVER_TIMEOUT_S),
-            self.request("voices.dispatch", {"series_id": series_id}, timeout=HANDOVER_TIMEOUT_S),
+            self.request("downloads.dispatch", {"series_id": series_id}),
+            self.request("voices.dispatch", {"series_id": series_id}),
             return_exceptions=True)
         for answer in answers:
             if isinstance(answer, BusRequestError) and _NO_HANDLER in str(answer):
@@ -682,7 +675,7 @@ class ScanModule(BaseModule):
     async def _queued(self, series_id: int) -> set[str] | None:
         """The rows of the series that have a task in the queue of downloads; None when the queue cannot be told."""
         try:
-            queue = await self.request("downloads.queue.get", {}, timeout=STEP_TIMEOUT_S)
+            queue = await self.request("downloads.queue.get", {})
         except BusRequestError as exc:
             if _NO_HANDLER not in str(exc):
                 self.log.warning("сериал %d: очередь загрузок недоступна: %s", series_id, exc)
@@ -729,25 +722,24 @@ class ScanModule(BaseModule):
         # модалки — пропажа файла сканом не лечилась.
         try:
             await self.request("torrents.fs.verify",
-                               {"series_id": series_id}, timeout=120)
+                               {"series_id": series_id})
             # реконсиляция застрявших раздач (P10): активная, но не докачана
             # и без задачи → загнать в конвейер заново. В режиме подготовки
             # пропускается: она бы сняла паузу до выбора серий.
             if not prepare:
                 await self.request("torrents.drive_incomplete",
-                                   {"series_id": series_id}, timeout=120)
+                                   {"series_id": series_id})
         except BusRequestError as exc:
             self.log.warning("сверка файлов перед сканом пропущена: %s", exc)
         if force:
             self.log.warning("force_replace: все активные торренты "
                              "сериала %d будут заменены", series_id)
             await self.request("torrents.db.deactivate_all",
-                               {"series_id": series_id}, timeout=120)
+                               {"series_id": series_id})
         active = await self.request("torrents.db.active",
-                                    {"series_id": series_id}, timeout=60)
+                                    {"series_id": series_id})
 
-        parsed = await self.request("sources.parse", {"url": source.url},
-                                    timeout=300)
+        parsed = await self.request("sources.parse", {"url": source.url})
         if series_id in self._aborted:
             raise ScanAborted(f"сериал {series_id} удалён во время скана")
         plan_items = self._replace_plan(series, parsed, active)
@@ -826,13 +818,11 @@ class ScanModule(BaseModule):
                 if st.get("link"):
                     file_reply = await self.request(
                         "sources.torrent_file.get",
-                        {"url": st["link"], "torrent_id": st["torrent_id"]},
-                        timeout=180)
+                        {"url": st["link"], "torrent_id": st["torrent_id"]})
                     add_payload["content_b64"] = file_reply["content_b64"]
                 else:
                     add_payload["magnet"] = st["magnet"]
-                added = await self.request("torrents.add", add_payload,
-                                           timeout=120)
+                added = await self.request("torrents.add", add_payload)
                 results[str(idx)] = {"hash": added["hash"],
                                      "link_type": added["link_type"]}
                 await self.repo.update_results(task_id, results)
@@ -849,7 +839,7 @@ class ScanModule(BaseModule):
                     "qb_hash": res["hash"],
                     "link_type": res["link_type"],
                     "replaces": item["old"],
-                    "start_pipeline": not prepare}, timeout=600)
+                    "start_pipeline": not prepare})
                 # existed=True — тот же infohash (перевыкладка, ПУНКТ 3):
                 # ничего не создано, в «изменения» не идёт.
                 if not (reg or {}).get("existed"):
@@ -939,9 +929,9 @@ class ScanModule(BaseModule):
     async def _scan_all(self, force: bool = False) -> None:
         self._scan_all_running = True
         await self._broadcast_status()
+        stopped = False
         try:
-            all_series = await self.request("catalog.series.list", {},
-                                            timeout=30)
+            all_series = await self.request("catalog.series.list", {})
             for s in all_series:
                 if not s.get("auto_scan_enabled"):
                     continue
@@ -953,18 +943,22 @@ class ScanModule(BaseModule):
                     await self._run_series(s["id"], force)
                 except Exception as exc:  # noqa: BLE001 — проход не прерываем
                     self.log.error("автоскан сериала %d: %s", s["id"], exc)
+        except asyncio.CancelledError:
+            stopped = True  # the module is going away: its neighbours are not asked anything on the way out
+            raise
         finally:
             self._scan_all_running = False
-            self._awaiting_pipeline = True
-            await self._broadcast_status()
-            await self._check_pipeline_empty()
+            if not stopped:
+                self._awaiting_pipeline = True
+                await self._broadcast_status()
+                await self._check_pipeline_empty()
 
     async def _pipeline_busy(self, series_id: int) -> bool:
         """Поведение старого автоскана: сериал с активными задачами
         конвейера не сканируется (ручной скан — без этой проверки)."""
         try:
             queue = await self.request("torrents.queue.get",
-                                       {"series_id": series_id}, timeout=10)
+                                       {"series_id": series_id})
             return queue.get("count", 0) > 0
         except BusRequestError as exc:
             if _NO_HANDLER in str(exc):
@@ -975,7 +969,7 @@ class ScanModule(BaseModule):
         """После прохода: если конвейер уже пуст — назначить следующий
         скан сразу, не дожидаясь события."""
         try:
-            queue = await self.request("torrents.queue.get", {}, timeout=10)
+            queue = await self.request("torrents.queue.get", {})
             count = queue.get("count", 0) if isinstance(queue, dict) \
                 else len(queue)
         except BusRequestError as exc:
@@ -997,14 +991,12 @@ class ScanModule(BaseModule):
         interval = int(await self._setting("scan_interval_minutes", "60"))
         next_time = datetime.now(timezone.utc) + timedelta(minutes=interval)
         await self.request("settings.value.set", {
-            "key": "next_scan_timestamp", "value": next_time.isoformat()},
-            timeout=10)
+            "key": "next_scan_timestamp", "value": next_time.isoformat()})
         self.log.info("следующее сканирование: %s", next_time.isoformat())
         await self._broadcast_status()
 
     async def _setting(self, key: str, default: str | None) -> str | None:
-        reply = await self.request("settings.value.get", {"key": key},
-                                   timeout=10)
+        reply = await self.request("settings.value.get", {"key": key})
         value = reply.get("value")
         return value if value is not None else default
 

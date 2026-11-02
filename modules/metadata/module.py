@@ -55,7 +55,7 @@ class MetadataModule(BaseModule):
 
     async def _headers(self) -> dict:
         reply = await self.request("settings.value.get",
-                                   {"key": "tmdb_token"}, timeout=5)
+                                   {"key": "tmdb_token"})
         token = reply["value"]
         if not token:
             raise TmdbError("токен TMDB не настроен")
@@ -154,7 +154,7 @@ class MetadataModule(BaseModule):
         if not mapping or not mapping.get("tmdb_id"):
             return {"skipped": "no_tmdb"}
         series = await self.request("catalog.series.get",
-                                    {"series_id": series_id}, timeout=10)
+                                    {"series_id": series_id})
         if (series.get("season") or "").strip():
             return {"skipped": "single_season"}
         real = await self._real_seasons(series)
@@ -176,8 +176,7 @@ class MetadataModule(BaseModule):
         topic = ("scan.seasons" if series.get("kind") == SeriesKind.VIDEO
                  else "torrents.seasons")
         try:
-            reply = await self.request(topic, {"series_id": series["id"]},
-                                       timeout=30)
+            reply = await self.request(topic, {"series_id": series["id"]})
         except BusRequestError as exc:
             self.log.warning("сезоны серии %d недоступны (%s): %s",
                              series["id"], topic, exc)

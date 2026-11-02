@@ -53,7 +53,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """Счётчики скачанного; модуль может быть не запущен (torrents
         без qBit) — тогда счётчик пустой, карточки живут дальше."""
         try:
-            return (await gw.request(topic, {}, timeout=10))["counts"]
+            return (await gw.request(topic, {}))["counts"]
         except BusRequestError:
             return {}
 
@@ -66,8 +66,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.get("/api/series", response_model=list[SeriesObject])
     async def list_series():
-        series = await gw.request("catalog.series.list", {}, timeout=15)
-        reply = await gw.request("metadata.map.list", {}, timeout=10)
+        series = await gw.request("catalog.series.list", {})
+        reply = await gw.request("metadata.map.list", {})
         mappings = {m["series_id"]: m for m in reply["mappings"]}
         # Each owner counts its own rows and a series has rows with one of them only, so the sum needs no kind.
         counts = [await _counts("scan.media.downloaded_counts"),
@@ -82,19 +82,17 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def add_series(body: SeriesCreate):
         data = body.model_dump(mode="json", exclude={"tmdb_data", "torrents"}, exclude_unset=True)
         try:
-            series = await gw.request("catalog.series.create", {"data": data},
-                                      timeout=15)
+            series = await gw.request("catalog.series.create", {"data": data})
         except BusRequestError as exc:
             return _error_response(exc)
         series_id = series["id"]
         if body.tmdb_data:
             await gw.request("metadata.map.set", {
-                "series_id": series_id, "tmdb_data": body.tmdb_data}, timeout=10)
+                "series_id": series_id, "tmdb_data": body.tmdb_data})
         if body.torrents:
             try:
                 await gw.request("torrents.db.add", {
-                    "series_id": series_id, "torrents": body.torrents},
-                    timeout=10)
+                    "series_id": series_id, "torrents": body.torrents})
             except BusRequestError as exc:
                 gw.log.warning("торренты формы добавления не записаны "
                                "(модуль torrents недоступен?): %s", exc)
@@ -107,8 +105,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         «Мониторинг» вкладки агентов; Р-23 — исправление маппинга
         блока 2: источник — torrent_progress модуля torrents, не очередь конвейера)."""
         try:
-            reply = await gw.request("torrents.db.progress.list", {},
-                                     timeout=10)
+            reply = await gw.request("torrents.db.progress.list", {})
         except BusRequestError:
             return []
         return reply["tasks"]
@@ -119,7 +116,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         voice_dub_update event."""
         try:
             reply = await gw.request("voices.dubs.get",
-                                     {"series_id": series_id}, timeout=10)
+                                     {"series_id": series_id})
         except BusRequestError:
             return {"items": []}
         return {"items": [DubItem.model_validate(item).model_dump(mode="json")
@@ -130,19 +127,19 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def series_details(series_id: int):
         try:
             s = await gw.request("catalog.series.get",
-                                 {"series_id": series_id}, timeout=10)
+                                 {"series_id": series_id})
         except BusRequestError as exc:
             return _error_response(exc, with_success=False)
         s["last_scan_time"] = _iso(s.get("last_scan_time"))
         # `sources` decides which address is a tracker's; a series with no such address has no tracker_info.
         for source in s["sources"]:
             reply = await gw.request("sources.tracker.resolve",
-                                     {"url": source["url"]}, timeout=10)
+                                     {"url": source["url"]})
             if reply["tracker"]:
                 s["tracker_info"] = reply["tracker"]
                 break
         reply = await gw.request("metadata.map.get",
-                                 {"series_id": series_id}, timeout=10)
+                                 {"series_id": series_id})
         _attach_tmdb(s, reply["mapping"])
         return s
 
@@ -155,22 +152,21 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         sent = body.model_dump(mode="json", exclude_unset=True)
         try:
             series = await gw.request("catalog.series.get",
-                                      {"series_id": series_id}, timeout=10)
+                                      {"series_id": series_id})
             fields = {k: v for k, v in sent.items()
                       if k not in ("save_path", "tmdb_data")}
             await gw.request("catalog.series.update", {
-                "series_id": series_id, "fields": fields}, timeout=10)
+                "series_id": series_id, "fields": fields})
         except BusRequestError as exc:
             return _error_response(exc)
         if tmdb_data := sent.get("tmdb_data"):
             await gw.request("metadata.map.set", {
-                "series_id": series_id, "tmdb_data": tmdb_data}, timeout=10)
+                "series_id": series_id, "tmdb_data": tmdb_data})
         new_path = sent.get("save_path")
         if new_path and new_path != series.get("save_path"):
             try:
                 await gw.request("library.relocate", {
-                    "series_id": series_id, "new_path": new_path},
-                    timeout=15)
+                    "series_id": series_id, "new_path": new_path})
             except BusRequestError as exc:
                 return _error_response(exc)
         else:
@@ -184,8 +180,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def delete_series(series_id: int, delete_from_qb: bool = False):
         try:
             await gw.request("catalog.series.delete", {
-                "series_id": series_id, "delete_from_qb": delete_from_qb},
-                timeout=15)
+                "series_id": series_id, "delete_from_qb": delete_from_qb})
         except BusRequestError as exc:
             return _error_response(exc)
         return {"success": True}
@@ -223,7 +218,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         try:
             await gw.request("catalog.series.update", {
                 "series_id": series_id,
-                "fields": {"auto_scan_enabled": bool(enabled)}}, timeout=10)
+                "fields": {"auto_scan_enabled": bool(enabled)}})
         except BusRequestError as exc:
             return _error_response(exc)
         return {"success": True}
@@ -241,8 +236,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         try:
             await gw.request("catalog.series.update", {
                 "series_id": series_id,
-                "fields": {"ignored_seasons": json.dumps(seasons)}},
-                timeout=10)
+                "fields": {"ignored_seasons": json.dumps(seasons)}})
         except BusRequestError as exc:
             return _error_response(exc)
         return {"success": True}
@@ -264,8 +258,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         try:
             await gw.request("catalog.series.update", {
                 "series_id": series_id,
-                "fields": {"ignored_episodes": json.dumps(episodes)}},
-                timeout=10)
+                "fields": {"ignored_episodes": json.dumps(episodes)}})
         except BusRequestError as exc:
             return _error_response(exc)
         return {"success": True}
@@ -275,7 +268,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def torrents_history(series_id: int):
         try:
             return await gw.request("torrents.db.history",
-                                    {"series_id": series_id}, timeout=10)
+                                    {"series_id": series_id})
         except BusRequestError:
             return []
 
@@ -288,7 +281,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         результата; force_replace scan берёт из настройки отладки."""
         try:
             result = await gw.request("scan.series.run",
-                                      {"series_id": series_id}, timeout=900)
+                                      {"series_id": series_id})
         except BusRequestError as exc:
             msg = str(exc).split(": ", 1)[-1]
             code = 409 if "not_allowed" in msg else 500

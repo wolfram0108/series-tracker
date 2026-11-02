@@ -195,9 +195,6 @@ from .settings import PREFIX, VoiceSettings, parse
 from .states import public_hint, public_state
 
 DUB_MAX_HEIGHT = 720
-# Fuse of a question to a neighbour that makes the plan: an answer that is not there fails the pass, not the module.
-PLAN_TIMEOUT_S = 30
-SUBMIT_TIMEOUT_S = 60
 # A reference video is some gigabytes: this is only the fuse of its copy.
 COPY_TIMEOUT_S = 1800.0
 # The keys of downloads.fetch: a voice-over of its own, a file read by several voice-overs.
@@ -374,7 +371,7 @@ class VoicesModule(BaseModule):
 
     async def _workspace(self, *, dub_folder: str) -> dict:
         """The folders the service writes to for an episode's folder: only the service's bridge knows its layout."""
-        return await self.request("conform.workspace", {"dub_folder": dub_folder}, timeout=10)
+        return await self.request("conform.workspace", {"dub_folder": dub_folder})
 
     def _when_free(self, path: str, series_id: int) -> None:
         """A step that needs a path an unfinished storage call still owns waits for that call to end."""
@@ -389,7 +386,7 @@ class VoicesModule(BaseModule):
 
     async def _settings(self) -> VoiceSettings:
         """Every setting of the module in one read; a problem with a value is logged once, then the default is used."""
-        reply = await self.request("settings.values.by_prefix", {"prefix": PREFIX}, timeout=10)
+        reply = await self.request("settings.values.by_prefix", {"prefix": PREFIX})
         settings = parse(reply.get("values") or {})
         for problem in sorted(set(settings.problems) - self._reported):
             self.log.warning("озвучки: настройка: %s", problem)
@@ -398,7 +395,7 @@ class VoicesModule(BaseModule):
 
     async def _folders(self) -> dict:
         """The two folders inside the work folder, asked of the bridge: both empty while the owner has not named it."""
-        return await self.request("conform.workspace", {}, timeout=10)
+        return await self.request("conform.workspace", {})
 
     async def _downloads_root(self) -> str:
         return (await self._folders())["downloads"]
@@ -425,7 +422,7 @@ class VoicesModule(BaseModule):
         draft = VoiceSettingsDraft.model_validate(env.payload)
         problems = editor.check(draft, (await self._settings()).player_groups)
         if not problems:
-            await self.request("settings.values.set_many", {"values": editor.stored(editor.clean(draft))}, timeout=10)
+            await self.request("settings.values.set_many", {"values": editor.stored(editor.clean(draft))})
         view = editor.view(await self._settings())
         if not problems:
             self.log.info("озвучки: настройки сохранены")
@@ -499,7 +496,7 @@ class VoicesModule(BaseModule):
     async def _is_video(self, series_id: int) -> bool:
         """Voice-overs are planned for a series of kind `video`; a series the catalog no longer has is no one's."""
         try:
-            series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=PLAN_TIMEOUT_S)
+            series = await self.request("catalog.series.get", {"series_id": series_id})
         except BusRequestError as exc:
             if "LookupError" in str(exc):
                 return False
@@ -509,9 +506,9 @@ class VoicesModule(BaseModule):
     async def _plan_series(self, series_id: int, *, offer: bool) -> None:
         """Read the layout and the references, plan the voice-overs, bring the rows in line, and begin what is allowed."""
         layout = CompositionReply.model_validate(
-            await self.request("composition.get", {"series_id": series_id}, timeout=PLAN_TIMEOUT_S))
+            await self.request("composition.get", {"series_id": series_id}))
         references = [Reference.model_validate(item) for item in
-                      await self.request("scan.output.get", {"series_id": series_id}, timeout=PLAN_TIMEOUT_S)]
+                      await self.request("scan.output.get", {"series_id": series_id})]
         settings = await self._settings()
         plan = planning.plan(layout.rows, references, layout.settings, settings.priority, settings.players)
         self.log.info("сериал %d: озвучки — раскладка %d, серий с референсом %d, озвучек к плану %d", series_id,
@@ -984,7 +981,7 @@ class VoicesModule(BaseModule):
         """The planned episodes, and (file, media item) of the reference that is on disk, by episode and part.
 
         When a slot holds a superseded file and its winner, the winner is the reference."""
-        reply = await self.request("downloads.episodes.get", {"series_id": series["id"]}, timeout=30)
+        reply = await self.request("downloads.episodes.get", {"series_id": series["id"]})
         in_plan, found = set(), {}
         for item in reply["items"]:
             slot = (item["season"], item["episode_start"], item["part"] or 0)
@@ -1167,7 +1164,7 @@ class VoicesModule(BaseModule):
             if entry["path"] in self._sending:
                 return False  # the request is on its way: the service may take the job after any look at it
             try:
-                found = await self.request("conform.job.find", {"key": entry["path"]}, timeout=30)
+                found = await self.request("conform.job.find", {"key": entry["path"]})
             except (BusRequestError, asyncio.TimeoutError):
                 return False
             if not found.get("reachable"):
@@ -1175,7 +1172,7 @@ class VoicesModule(BaseModule):
             job_id = found.get("job_id")
         if job_id:
             try:
-                reply = await self.request("conform.cancel", {"job_id": job_id}, timeout=30)
+                reply = await self.request("conform.cancel", {"job_id": job_id})
             except (BusRequestError, asyncio.TimeoutError):
                 return False
             if not reply.get("done"):
@@ -1212,7 +1209,7 @@ class VoicesModule(BaseModule):
     async def _clear_finished(self) -> bool:
         """The owner's choice: a job whose result is taken leaves the service's history at once."""
         try:
-            reply = await self.request("conform.settings.get", {}, timeout=10)
+            reply = await self.request("conform.settings.get", {})
         except (BusRequestError, asyncio.TimeoutError):
             return False
         return bool(reply.get("clear_finished"))
@@ -1243,7 +1240,7 @@ class VoicesModule(BaseModule):
             if not any([await self._io(os.path.isdir, row["out_dir"]) for row in group]):
                 continue
             try:
-                job = AlignmentJob.model_validate(await self.request("conform.job.get", {"job_id": job_id}, timeout=30))
+                job = AlignmentJob.model_validate(await self.request("conform.job.get", {"job_id": job_id}))
             except (BusRequestError, asyncio.TimeoutError, ValidationError):
                 return  # the service could not say: the next time it is reachable asks again
             if job.status is JobStatus.GONE:
@@ -1330,7 +1327,7 @@ class VoicesModule(BaseModule):
             reply = SubmitReply.model_validate(await self.request("conform.submit", {
                 "ref": reference, "dubs": [row["temp_path"] for row in ready],
                 "out_dir": out_dir, "cache_dir": cache_dir,
-                "label": label, "key": key}, timeout=SUBMIT_TIMEOUT_S))
+                "label": label, "key": key}))
         except (BusRequestError, asyncio.TimeoutError, ValidationError) as exc:
             self.log.warning("%s: ответа на постановку нет, спросим сервис, есть ли задача: %s", label, exc)
             await self._ask_service(key, ready)
@@ -1380,7 +1377,7 @@ class VoicesModule(BaseModule):
         if key in self._sending:
             return False
         try:
-            reply = await self.request("conform.job.find", {"key": key}, timeout=30)
+            reply = await self.request("conform.job.find", {"key": key})
         except (BusRequestError, asyncio.TimeoutError):
             return False
         if not reply.get("reachable"):
@@ -1440,7 +1437,7 @@ class VoicesModule(BaseModule):
         """A job sent before a restart: learn how it ended, or send its voice-overs again. False when the
         service could not say."""
         try:
-            job = AlignmentJob.model_validate(await self.request("conform.job.get", {"job_id": job_id}, timeout=30))
+            job = AlignmentJob.model_validate(await self.request("conform.job.get", {"job_id": job_id}))
         except (BusRequestError, asyncio.TimeoutError, ValidationError) as exc:
             self.log.info("задача выравнивания %s: итог пока неизвестен (%s)", job_id, exc)
             return False

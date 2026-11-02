@@ -61,8 +61,7 @@ def build_router(gw):
         password = data.get("password") or ""
         try:
             reply = await gw.request(
-                "auth.login", {"username": username, "password": password},
-                timeout=10)
+                "auth.login", {"username": username, "password": password})
         except BusRequestError:
             return JSONResponse(
                 {"success": False, "error": "Сервис аутентификации недоступен."},
@@ -84,7 +83,7 @@ def build_router(gw):
         ввода логина (приложение однопользовательское)."""
         admin = ""
         try:
-            reply = await gw.request("auth.exists", {}, timeout=10)
+            reply = await gw.request("auth.exists", {})
             configured = bool(reply.get("exists"))
             admin = reply.get("username") or ""
         except BusRequestError:
@@ -101,7 +100,7 @@ def build_router(gw):
         нет; после создания — 403 (пересоздать в обход входа нельзя).
         Успех сразу логинит (сессия)."""
         try:
-            exists = (await gw.request("auth.exists", {}, timeout=10)).get("exists")
+            exists = (await gw.request("auth.exists", {})).get("exists")
         except BusRequestError:
             return JSONResponse(
                 {"success": False, "error": "Сервис аутентификации недоступен."},
@@ -119,8 +118,7 @@ def build_router(gw):
                  "error": "Укажите имя и пароль не короче 8 символов."},
                 status_code=400)
         reply = await gw.request(
-            "auth.password.set", {"username": username, "password": password},
-            timeout=10)
+            "auth.password.set", {"username": username, "password": password})
         if not reply.get("ok"):
             return JSONResponse(
                 {"success": False, "error": "Не удалось создать администратора."},
@@ -150,8 +148,7 @@ def build_router(gw):
                  "error": "Новый пароль не короче 8 символов."},
                 status_code=400)
         reply = await gw.request(
-            "auth.password.set", {"username": user, "password": new},
-            timeout=10)
+            "auth.password.set", {"username": user, "password": new})
         if not reply.get("ok"):
             return JSONResponse(
                 {"success": False, "error": "Не удалось сменить пароль."},

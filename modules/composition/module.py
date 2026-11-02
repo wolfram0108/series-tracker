@@ -90,10 +90,6 @@ from .repository import CompositionRepository, StoredSource
 
 OWNER = "composition"
 
-# Safeguards, not syncs: an answer that is not there by then fails the recount, it does not count as an answer.
-REQUEST_TIMEOUT_S = 30.0
-RULES_TIMEOUT_S = 300.0
-
 
 class _Unavailable(Exception):
     """A neighbour did not answer a request, or answered what the contract does not allow."""
@@ -247,7 +243,7 @@ class CompositionModule(BaseModule):
             try:
                 answer = await self._ask("rules.apply", RulesApplyRequest(
                     profile_id=request.profile_id, lines=lines, series_season=request.series_season,
-                ).model_dump(mode="json"), model=RulesApplyReply, timeout=RULES_TIMEOUT_S)
+                ).model_dump(mode="json"), model=RulesApplyReply)
             except _Unavailable as exc:
                 raise ValueError(exc.reason) from exc
             results = answer.results
@@ -303,7 +299,7 @@ class CompositionModule(BaseModule):
 
     async def _edit(self, series_id: int, change) -> dict:
         # A command about a series the catalog does not have is refused with the catalog's own answer.
-        await self.request("catalog.series.get", {"series_id": series_id}, timeout=REQUEST_TIMEOUT_S)
+        await self.request("catalog.series.get", {"series_id": series_id})
         async with self._lock(series_id):
             if series_id in self._deleted:
                 raise LookupError(f"сериал {series_id} не найден")
@@ -481,8 +477,7 @@ class CompositionModule(BaseModule):
         if not lines:
             return RulesApplyReply(results={})
         request = RulesApplyRequest(profile_id=source.parser_profile_id, lines=lines, series_season=season)
-        return await self._ask("rules.apply", request.model_dump(mode="json"), model=RulesApplyReply,
-                               timeout=RULES_TIMEOUT_S)
+        return await self._ask("rules.apply", request.model_dump(mode="json"), model=RulesApplyReply)
 
     async def _groups(self, names: list[str]) -> dict[str, str | None]:
         reply = await self._ask("voices.groups.resolve", GroupsResolveRequest(names=names).model_dump(),
@@ -578,9 +573,9 @@ class CompositionModule(BaseModule):
         if url is not None:
             self._pages.get(url, {}).pop(source_id, None)
 
-    async def _ask(self, topic: str, payload, *, model=None, timeout: float = REQUEST_TIMEOUT_S):
+    async def _ask(self, topic: str, payload, *, model=None):
         try:
-            answer = await self.request(topic, payload, timeout=timeout)
+            answer = await self.request(topic, payload)
             return model.model_validate(answer) if model is not None else answer
         except Exception as exc:  # noqa: BLE001 — any failure of a neighbour is one signal: the recount did not happen
             self.log.error("запрос %s не выполнен: %s: %s", topic, type(exc).__name__, exc)

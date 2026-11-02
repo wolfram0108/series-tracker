@@ -195,8 +195,7 @@ class TorrentsModule(BaseModule):
             return cfg
         try:
             reply = await self.request("trackerauth.credentials.get",
-                                       {"service": "qbittorrent"},
-                                       timeout=10)
+                                       {"service": "qbittorrent"})
         except BusRequestError as exc:
             self.log.warning("креды qBittorrent не получены: %s", exc)
             return cfg
@@ -346,7 +345,7 @@ class TorrentsModule(BaseModule):
         try:
             reply = await self.request(
                 "sources.torrent_file.get",
-                {"url": link, "torrent_id": tid}, timeout=60)
+                {"url": link, "torrent_id": tid})
         except (BusRequestError, asyncio.TimeoutError) as exc:
             self._emit_preview_failed(
                 tid, None, "не удалось скачать .torrent: "
@@ -598,8 +597,7 @@ class TorrentsModule(BaseModule):
                              "построен", qb_hash[:8])
             return
         await self.request("renaming.process_torrent", {
-            "series_id": series_id, "qb_hash": qb_hash, "dry_run": True},
-            timeout=300)
+            "series_id": series_id, "qb_hash": qb_hash, "dry_run": True})
         await self._project_and_apply(series_id, allow_resume=False)
 
     async def _await_metadata(self, qb_hash: str,
@@ -850,7 +848,7 @@ class TorrentsModule(BaseModule):
             reply = await self.request("rules.format_torrent_file", {
                 "series": series, "profile_id": profile_id,
                 "file_basename": os.path.basename(f["original_path"]),
-                "original_path": f["original_path"]}, timeout=60)
+                "original_path": f["original_path"]})
             preview = reply["filename"] or current
             plan.append({
                 "id": f["id"], "original_path": f["original_path"],
@@ -1082,8 +1080,7 @@ class TorrentsModule(BaseModule):
                 await self.qbt.pause([qb_hash])
             elif action == "rename":
                 await self.request("renaming.process_torrent", {
-                    "series_id": task["series_id"], "qb_hash": qb_hash},
-                    timeout=300)
+                    "series_id": task["series_id"], "qb_hash": qb_hash})
             elif action == "recheck":
                 await self.qbt.recheck([qb_hash])
                 task["recheck_initiated"] = True
@@ -1198,8 +1195,7 @@ class TorrentsModule(BaseModule):
         if series_id not in self._names_cache:
             try:
                 series = await self.request("catalog.series.get",
-                                            {"series_id": series_id},
-                                            timeout=10)
+                                            {"series_id": series_id})
                 self._names_cache[series_id] = series.get("name") or ""
             except BusRequestError:
                 return ""

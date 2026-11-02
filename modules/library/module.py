@@ -206,7 +206,7 @@ class LibraryModule(BaseModule):
         """Цепочка оригинала: после перемещения — переименование."""
         try:
             await self.request("renaming.reprocess",
-                               {"series_id": series_id}, timeout=600)
+                               {"series_id": series_id})
         except BusRequestError as exc:
             if _NO_HANDLER in str(exc):
                 self.log.warning("модуль renaming недоступен — "

@@ -22,7 +22,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.get("/api/scanner/status", response_model=ScannerStatus)
     async def scanner_status():
-        return await gw.request("scan.status.get", {}, timeout=10)
+        return await gw.request("scan.status.get", {})
 
     @r.post("/api/scanner/settings", response_model=OkResponse,
             response_model_exclude_none=True)
@@ -31,11 +31,11 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         if "enabled" in data:
             await gw.request("settings.value.set", {
                 "key": "scanner_agent_enabled",
-                "value": str(data["enabled"]).lower()}, timeout=10)
+                "value": str(data["enabled"]).lower()})
         if "interval" in data:
             await gw.request("settings.value.set", {
                 "key": "scan_interval_minutes",
-                "value": str(data["interval"])}, timeout=10)
+                "value": str(data["interval"])})
         # Пересчёт расписания делает scan по settings.changed (Р-20);
         # немедленный полный скан старой системы не воспроизводится.
         return {"success": True}
@@ -46,8 +46,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def scan_all(request: Request):
         data = await request.json() if await request.body() else {}
         reply = await gw.request("scan.all.start", {
-            "force_replace": data.get("debug_force_replace", False)},
-            timeout=15)
+            "force_replace": data.get("debug_force_replace", False)})
         if not reply["started"]:
             return JSONResponse(
                 {"success": False, "error": "Сканирование уже запущено."},
@@ -58,7 +57,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.get("/api/agent/queue", response_model=list[QueueTask])
     async def agent_queue():
         try:
-            reply = await gw.request("torrents.queue.get", {}, timeout=10)
+            reply = await gw.request("torrents.queue.get", {})
         except BusRequestError:
             return []  # модуль не поднят — как старый «нет агента»
         return [{"hash": t.get("torrent_hash"), **t} for t in reply["tasks"]]
@@ -66,7 +65,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.get("/api/downloads/queue", response_model=list[QueueTask])
     async def downloads_queue():
         try:
-            reply = await gw.request("downloads.queue.get", {}, timeout=10)
+            reply = await gw.request("downloads.queue.get", {})
         except BusRequestError:
             return []
         return reply["tasks"]
@@ -76,7 +75,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             responses={500: {"model": ErrorResponse}})
     async def downloads_queue_clear():
         try:
-            reply = await gw.request("downloads.queue.clear", {}, timeout=15)
+            reply = await gw.request("downloads.queue.clear", {})
         except BusRequestError as exc:
             return JSONResponse({"success": False, "error": str(exc)},
                                 status_code=500)
@@ -91,8 +90,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """Точечная отмена загрузки: убить процесс + удалить файл +
         снять задачу (находка 45)."""
         try:
-            await gw.request("downloads.cancel", {"task_id": task_id},
-                             timeout=30)
+            await gw.request("downloads.cancel", {"task_id": task_id})
         except BusRequestError as exc:
             msg = str(exc)
             code = 404 if "LookupError" in msg else 409 if msg.startswith("NotAllowed") else 500
@@ -105,7 +103,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def conform_job_delete(job_id: str):
         """Stops a job that waits or runs; deletes the record of a job that ended."""
         try:
-            reply = await gw.request("conform.cancel", {"job_id": job_id}, timeout=30)
+            reply = await gw.request("conform.cancel", {"job_id": job_id})
         except BusRequestError:
             reply = {"done": False}
         if not reply["done"]:
@@ -117,7 +115,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def conform_plot(job_id: str, name: str):
         """The picture of an alignment plot, as the daemon made it."""
         try:
-            reply = await gw.request("conform.plot", {"job_id": job_id, "name": name}, timeout=30)
+            reply = await gw.request("conform.plot", {"job_id": job_id, "name": name})
         except BusRequestError as exc:
             return JSONResponse({"error": str(exc).split(": ", 1)[-1]}, status_code=502)
         if not reply["found"]:

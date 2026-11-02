@@ -11,17 +11,13 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Sequence
 
 from core import BusRequestError
+from core.deadlines import TABLE_WAIT_S
 from core.contracts import SeriesSource, TableGetReply, TableGetRequest, TableState
 from core.logging import get_logger
 from core.reasons import reason
 
 log = get_logger("scan")
 
-# Safeguard of the wait for a table: twice the safeguard of a read in `sources` (1800 s), which itself is twice the price
-# of the largest release known (VERIFICATION M-2).
-TABLE_WAIT_SAFEGUARD_S = 3600.0
-# Safeguard of the request itself: it only starts a read or answers from the store.
-TABLE_REQUEST_TIMEOUT_S = 60.0
 
 Ask = Callable[..., Awaitable[Any]]
 
@@ -91,7 +87,7 @@ class SourceSync:
 
 
 async def sync_tables(sources: Sequence[SeriesSource], ask: Ask, signals: TableSignals,
-                      safeguard_s: float = TABLE_WAIT_SAFEGUARD_S) -> list[SourceSync]:
+                      safeguard_s: float = TABLE_WAIT_S) -> list[SourceSync]:
     """Every source at once; the answer is in the order of `sources`. A failure of one source never stops the others."""
     return list(await asyncio.gather(*(_sync_source(source, ask, signals, safeguard_s) for source in sources)))
 
@@ -101,7 +97,7 @@ async def _sync_source(source: SeriesSource, ask: Ask, signals: TableSignals, sa
     request = TableGetRequest(url=source.url, options=source.read_options(), refresh=True)
     try:
         reply = TableGetReply.model_validate(
-            await ask("sources.table.get", request.model_dump(mode="json"), timeout=TABLE_REQUEST_TIMEOUT_S))
+            await ask("sources.table.get", request.model_dump(mode="json")))
     except (BusRequestError, asyncio.TimeoutError) as exc:
         log.error("источник %d: запрос таблицы %s не выполнен: %s", source.id, source.url, exc)
         return SourceSync(source.id, source.url, "skipped", reason("scan_step_failed", step="sources.table.get"))

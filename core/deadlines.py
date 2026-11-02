@@ -1,0 +1,95 @@
+"""The fuse of a request over the bus.
+
+The price of an answer is known by the module that gives it, not by the module that asks, so the owner of a topic states
+its fuse here, once, and `BaseModule.request` takes it from this table. A fuse is a safeguard, not a way to wait: the
+expiry of one is a failed step, and the answer that comes after it is not looked for. Callers do not choose a number; a
+guard (`bus_deadlines`) refuses a number or a constant in the `timeout` of a request in `modules/`.
+
+Fuses nest. A request that is made of steps lives longer than each of them, so its fuse is derived from theirs here, and
+a request whose length is the sum of an unbounded number of steps (a scan of a torrent series: one step for every
+torrent) has no fuse of its own: each of its steps has one, and a number that fires in the middle of a working scan
+would report a failure of something that goes on.
+
+None of the numbers below was measured as a price: they are the longest fuse any caller gave the topic before the table
+existed, kept so that no step is cut shorter than it was. The measured prices of the queries go to `PARAMETERS.md`.
+"""
+from __future__ import annotations
+
+# A read or a write of one record in the store of the module that answers.
+QUICK_S = 10.0
+# The rest of the queries: the answer asks a neighbour or looks at the disk; also the fuse of a topic not listed.
+STANDARD_S = 30.0
+# The answer writes a file, registers something or asks an external service.
+SERVICE_S = 60.0
+# The answer walks the files of a series, drives the torrent client or captures a stream with a browser.
+HEAVY_S = 120.0
+# The answer fetches a file from a tracker.
+FETCH_S = 180.0
+# The answer applies a profile of rules to a table or reads a page of a site; a table of a thousand rows is minutes.
+RULES_S = 300.0
+# The answer renames or registers the files of a whole series.
+BATCH_S = 600.0
+# A receiver of work answers once it has written the work down (a stuck receiver is all this number ends).
+HANDOVER_S = 900.0
+
+# A read of one page of a site, measured on small releases (M-7, M-8: 0.42 s a row at ruchime, 0.14 s at dunhuatv); the
+# largest release known, about 1200 rows, is about 8 minutes, so twice that is under this value.
+TABLE_READ_S = 1800.0
+# The wait of a scan for the tables of its sources: twice a read, as the read itself may start late.
+TABLE_WAIT_S = 2 * TABLE_READ_S
+
+_QUICK = (
+    "auth.exists", "auth.login", "auth.password.set",
+    "catalog.sources.add", "catalog.sources.list", "catalog.sources.remove", "catalog.sources.update",
+    "conform.settings.get", "conform.settings.set", "conform.workspace",
+    "metadata.map.get", "metadata.map.list", "metadata.map.set",
+    "renaming.tasks.active",
+    "rules.profiles.create", "rules.profiles.delete", "rules.profiles.list", "rules.profiles.update",
+    "rules.rules.add", "rules.rules.delete", "rules.rules.list", "rules.rules.reorder", "rules.rules.update",
+    "scan.status.get",
+    "settings.paths.add", "settings.paths.list", "settings.paths.remove",
+    "settings.value.set", "settings.values.by_prefix", "settings.values.set_many",
+    "sources.site.resolve", "sources.tracker.resolve", "sources.tracker.set_mirrors", "sources.trackers.list",
+    "torrents.db.add", "torrents.db.files.for_series", "torrents.db.history", "torrents.db.progress.list",
+    "torrents.queue.get",
+    "trackerauth.credentials.get", "trackerauth.credentials.set",
+    "voices.dubs.get", "voices.settings.set",
+)
+
+_FUSES: dict[str, float] = {
+    **dict.fromkeys(_QUICK, QUICK_S),
+    **dict.fromkeys(("conform.submit", "rules.format_torrent_file", "slicing.chapters.mark", "slicing.source.delete",
+                     "slicing.task.create", "torrents.db.active", "sources.table.get"), SERVICE_S),
+    **dict.fromkeys(("downloads.fs.sync", "slicing.verify", "sources.video.stream", "torrents.add",
+                     "torrents.db.deactivate_all", "torrents.drive_incomplete", "torrents.fs.verify"), HEAVY_S),
+    "sources.torrent_file.get": FETCH_S,
+    **dict.fromkeys(("renaming.preview", "renaming.process_torrent", "rules.apply", "slicing.chapters.filtered",
+                     "slicing.chapters.get", "sources.parse"), RULES_S),
+    **dict.fromkeys(("renaming.reprocess", "torrents.register"), BATCH_S),
+    "torrents.composition": 900.0,
+    # The fetch of a page of a service with credentials; it covers an anti-bot challenge solved by a browser (up to 45 s).
+    "trackerauth.fetch": 150.0,
+    **dict.fromkeys(("downloads.dispatch", "voices.dispatch"), HANDOVER_S),
+    # A recount asks the rules once for each source of the series: the fuse of the table is for one source.
+    "composition.recompute": RULES_S,
+    # A preview reads the table, applies the profile to its lines and asks for the groups of the names, one after another.
+    "composition.preview": SERVICE_S + RULES_S + STANDARD_S,
+}
+
+# The topics whose request has no fuse of its own (see the top).
+_UNBOUNDED = frozenset({"scan.series.run", "scan.series.prepare"})
+
+UNBOUNDED = None
+
+
+def deadline_of(topic: str, units: int = 1) -> float | None:
+    """The fuse of a request for `topic`: the table's number times `units` for a topic whose work is one step for each
+    unit (a source of a series), `None` for a topic that has none of its own, the standard fuse for one not listed."""
+    if topic in _UNBOUNDED:
+        return UNBOUNDED
+    return _FUSES.get(topic, STANDARD_S) * max(1, units)
+
+
+def topics() -> frozenset[str]:
+    """The topics that the table names, for the check that none of them is a topic nobody answers."""
+    return frozenset(_FUSES) | _UNBOUNDED

@@ -19,6 +19,7 @@ import inspect
 from typing import Any, Awaitable, Callable
 
 from .bus import Bus, Subscription
+from .deadlines import deadline_of
 from .envelope import Envelope
 from .logging import get_logger
 
@@ -26,6 +27,9 @@ Handler = Callable[[Envelope], Awaitable[Any]]
 
 REPLY_PREFIX = "_reply"
 ERROR_KEY = "_bus_error"
+
+# `request` takes the fuse from the table of `core.deadlines` unless the caller names one (a test, a one-off wrapper).
+_FROM_TABLE: Any = object()
 
 
 class BusRequestError(RuntimeError):
@@ -103,8 +107,12 @@ class BaseModule:
     def send_command(self, topic: str, payload: Any = None) -> None:
         self.bus.publish(Envelope(topic=topic, kind="command", payload=payload))
 
-    async def request(self, topic: str, payload: Any = None,
-                      timeout: float = 30.0) -> Any:
+    async def request(self, topic: str, payload: Any = None, timeout: float | None = _FROM_TABLE, *,
+                      units: int = 1) -> Any:
+        """The answer of the owner of `topic`. The fuse is the owner's (`core.deadlines`), times `units` for a topic
+        whose work is one step for each unit; `None` waits without one."""
+        if timeout is _FROM_TABLE:
+            timeout = deadline_of(topic, units)
         env = Envelope(topic=topic, kind="query", payload=payload,
                        reply_to=self._reply_topic)
         fut: asyncio.Future = asyncio.get_running_loop().create_future()

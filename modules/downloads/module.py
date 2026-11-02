@@ -81,7 +81,6 @@ PROGRESS_DB_THROTTLE = 2.0     # seconds between writes of progress to the datab
 PROGRESS_EVENT_THROTTLE = 1.0  # seconds between queue events on progress
 MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
-STREAM_RESOLVE_TIMEOUT_S = 120  # a Vibix playlist may need a browser capture first
 FETCH_LIMIT_KEY = "max_parallel_dub_downloads"
 _TRANSIENT_MARKERS = ("timed out", "timeout", "connection", "network", "обрыв", "input/output error",
                       "temporarily", "server returned 5", "server returned 429",
@@ -176,7 +175,7 @@ class DownloadsModule(BaseModule):
         if requeued:
             self.log.info("оборванных загрузок возвращено в очередь: %d", requeued)
         try:  # a supplier of the catalog's fold of statuses states its contribution at the start
-            for series in await self.request("catalog.series.list", {}, timeout=30):
+            for series in await self.request("catalog.series.list", {}):
                 if series.get("kind") == SeriesKind.VIDEO:
                     await self._contribute(series["id"])
         except BusRequestError as exc:
@@ -189,7 +188,7 @@ class DownloadsModule(BaseModule):
     async def on_system_started(self, env: Envelope) -> None:
         """Every module is up: look at every video series, so that what a stop interrupted is carried on."""
         try:
-            all_series = await self.request("catalog.series.list", {}, timeout=30)
+            all_series = await self.request("catalog.series.list", {})
         except BusRequestError as exc:
             self.log.warning("каталог недоступен: серии не просмотрены: %s", exc)
             return
@@ -223,7 +222,7 @@ class DownloadsModule(BaseModule):
 
     async def _look_at_id(self, series_id: int) -> None:
         try:
-            series = await self.request("catalog.series.get", {"series_id": series_id}, timeout=30)
+            series = await self.request("catalog.series.get", {"series_id": series_id})
         except BusRequestError as exc:
             self.log.warning("серия %d: не просмотрена после освобождения пути: %s", series_id, exc)
             return
@@ -233,15 +232,14 @@ class DownloadsModule(BaseModule):
     async def _read_limit(self) -> int:
         try:
             reply = await self.request("settings.value.get",
-                                       {"key": "max_parallel_downloads"},
-                                       timeout=10)
+                                       {"key": "max_parallel_downloads"})
             return max(1, int(reply.get("value") or 2))
         except (BusRequestError, ValueError, TypeError):
             return 2
 
     async def _read_fetch_limit(self) -> int:
         try:
-            reply = await self.request("settings.value.get", {"key": FETCH_LIMIT_KEY}, timeout=10)
+            reply = await self.request("settings.value.get", {"key": FETCH_LIMIT_KEY})
             return max(1, int(reply.get("value") or 2))
         except (BusRequestError, ValueError, TypeError):
             return 2
@@ -250,14 +248,13 @@ class DownloadsModule(BaseModule):
         """The number of parallel fragments of yt-dlp (-N); the gain comes only with hls+-N (measured on the stand)."""
         try:
             reply = await self.request("settings.value.get",
-                                       {"key": "yt_dlp_concurrent_fragments"},
-                                       timeout=10)
+                                       {"key": "yt_dlp_concurrent_fragments"})
             return max(1, int(reply.get("value") or 6))
         except (BusRequestError, ValueError, TypeError):
             return 6
 
     async def _naming(self, series: dict, item: dict) -> str:
-        reply = await self.request("rules.format_filename", {"series": series, "media_item": item}, timeout=30)
+        reply = await self.request("rules.format_filename", {"series": series, "media_item": item})
         return reply["filename"]
 
     # --- events -------------------------------------------------------------------
@@ -601,8 +598,7 @@ class DownloadsModule(BaseModule):
         player is no stream and yt-dlp would scrape a foreign player."""
         payload = {"url": url, **({"max_height": max_height} if max_height else {})}
         try:
-            reply = await self.request("sources.video.stream", payload,
-                                       timeout=STREAM_RESOLVE_TIMEOUT_S)
+            reply = await self.request("sources.video.stream", payload)
             if reply.get("error"):
                 return url, None, (reply["error"], bool(reply.get("transient"))), False
             if reply.get("handled"):
@@ -696,7 +692,7 @@ class DownloadsModule(BaseModule):
         """Whether the downloader may take over a candidate whose stream request failed: only a VK one."""
         try:
             series = await self.request("catalog.series.get",
-                                        {"series_id": series_id}, timeout=10)
+                                        {"series_id": series_id})
         except BusRequestError:
             return False  # the source is unknown: an error that is retried, not a scrape of a foreign player
         source = source_of_candidate(series.get("sources") or [],

@@ -22,6 +22,7 @@ sys.dont_write_bytecode = True  # imported guards must not leave __pycache__ in 
 sys.path.insert(0, str(CHECKS))
 try:
     import bus_catalog
+    import bus_deadlines
     import comment_language
     import commit_attribution
     import guard_common
@@ -1085,3 +1086,66 @@ def test_the_wait_guard_script_prints_its_trigger_even_when_the_permits_are_stal
     done = subprocess.run([sys.executable, "-B", str(CHECKS / "no_wait_no_poll.py"), "--root", str(root)],
                           capture_output=True, text=True, encoding="utf-8")
     assert done.returncode == 1 and re.search(r"^ИЗМЕРЕНИЕ no_wait_no_poll: FAIL \d+$", done.stdout, re.M)
+
+
+# --- bus_deadlines ---------------------------------------------------------------------------------------------
+
+DEADLINES = """
+    _FUSES = {"settings.value.get": 10.0, "scan.status.get": 10.0}
+    _UNBOUNDED = frozenset()
+
+    def topics():
+        return frozenset(_FUSES) | _UNBOUNDED
+"""
+
+
+def test_a_fuse_named_by_the_caller_is_a_violation_whatever_form_it_takes(tmp_path):
+    root = write_tree(tmp_path, {"modules/a/module.py": """
+        STEP_TIMEOUT_S = 30.0
+
+        class A:
+            async def one(self):
+                await self.request("settings.value.get", {}, timeout=10)
+
+            async def two(self):
+                await self._step("scan.status.get", {}, timeout=STEP_TIMEOUT_S)
+
+            async def three(self, seconds):
+                await self.request("settings.value.get", {}, timeout=seconds)
+                await self.request("settings.value.get", {}, timeout=float(seconds))
+                await self.request("settings.value.get", {}, units=2)
+    """})
+    found = bus_deadlines.check_deadlines(root)
+    assert places(found) == {("modules/a/module.py", line_of(root, "modules/a/module.py", "timeout=10")),
+                             ("modules/a/module.py", line_of(root, "modules/a/module.py", "timeout=STEP_TIMEOUT_S")),
+                             ("modules/a/module.py", line_of(root, "modules/a/module.py", "timeout=seconds"))}
+
+
+def test_a_request_without_a_fuse_of_its_own_and_a_wait_of_something_else_pass(tmp_path):
+    root = write_tree(tmp_path, {"modules/a/module.py": """
+        class A:
+            async def one(self):
+                await self.request("settings.value.get", {})
+                await self.client.get("http://x", timeout=10)
+    """})
+    assert not bus_deadlines.check_deadlines(root).violations
+
+
+def test_a_topic_of_the_table_that_nobody_answers_is_a_violation(tmp_path):
+    root = write_tree(tmp_path, {
+        "core/deadlines.py": DEADLINES,
+        "modules/a/module.py": """
+            class A:
+                def register(self):
+                    self.handle("settings.value.get", self.on_get)
+        """})
+    found = bus_deadlines.check_deadlines(root)
+    assert [v.reason for v in found.violations if "scan.status.get" in v.reason]
+    assert not [v for v in found.violations if "settings.value.get" in v.reason]
+
+
+def test_a_tree_without_a_table_of_deadlines_is_a_note_not_a_failure(tmp_path):
+    root = write_tree(tmp_path, {"modules/a/module.py": "class A:\n    pass\n"})
+    found = bus_deadlines.check_deadlines(root)
+    assert not found.violations and found.notes
+

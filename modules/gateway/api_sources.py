@@ -19,9 +19,6 @@ from .schemas import (ChangedSource, CreatedSource, ErrorOnly, ErrorResponse, Ok
 _ERR = {code: {"model": ErrorResponse} for code in (400, 404, 500, 503)}
 _ERR1 = {code: {"model": ErrorOnly} for code in (400, 500, 503)}
 
-# A safeguard, not a sync: the constructor answers every line of a page, up to 300 s in `composition`.
-_PREVIEW_TIMEOUT_S = 330.0
-
 
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
     r = APIRouter()
@@ -31,7 +28,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.get("/api/series/{series_id}/sources", response_model=list[SeriesSource], responses=_ERR)
     async def sources_of(series_id: int):
         try:
-            return await gw.request("catalog.sources.list", {"series_id": series_id}, timeout=10)
+            return await gw.request("catalog.sources.list", {"series_id": series_id})
         except BusRequestError as exc:
             return refusal(exc)
 
@@ -39,7 +36,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def add_source(series_id: int, body: SourceAdd):
         try:
             return await gw.request("catalog.sources.add", {
-                "series_id": series_id, "source": body.model_dump(mode="json", exclude_unset=True)}, timeout=10)
+                "series_id": series_id, "source": body.model_dump(mode="json", exclude_unset=True)})
         except BusRequestError as exc:
             return refusal(exc)
 
@@ -49,7 +46,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         try:
             reply = await gw.request("catalog.sources.update", {
                 "series_id": series_id, "source_id": source_id,
-                "fields": body.model_dump(mode="json", exclude_unset=True)}, timeout=10)
+                "fields": body.model_dump(mode="json", exclude_unset=True)})
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True, "applied": reply["applied"]}
@@ -58,7 +55,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
               response_model_exclude_none=True, responses=_ERR)
     async def remove_source(series_id: int, source_id: int):
         try:
-            await gw.request("catalog.sources.remove", {"series_id": series_id, "source_id": source_id}, timeout=10)
+            await gw.request("catalog.sources.remove", {"series_id": series_id, "source_id": source_id})
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -67,8 +64,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     async def _preview(request: CompositionPreviewRequest):
         try:
-            return await gw.request("composition.preview", request.model_dump(mode="json"),
-                                    timeout=_PREVIEW_TIMEOUT_S)
+            return await gw.request("composition.preview", request.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 
@@ -81,7 +77,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def resolve_source(body: SiteResolveRequest):
         """Which site reads an address, and the address in its canonical form; no network."""
         try:
-            return await gw.request("sources.site.resolve", body.model_dump(mode="json"), timeout=10)
+            return await gw.request("sources.site.resolve", body.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 

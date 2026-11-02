@@ -29,8 +29,6 @@ from .parsers import SourceParseError, SourceRefusedError
 
 TORRENT_TIMEOUT = 30       # секунд на запрос .torrent у трекера
 PAGE_TIMEOUT = 20          # секунд на запрос страницы
-# Bus budget covers an anti-bot challenge solved by a browser (up to 45 s).
-BUS_TIMEOUT = 150
 
 
 @dataclass(frozen=True)
@@ -82,13 +80,12 @@ class Delivery:
                     mirrors: Iterable[str] = (), transport: str = "auth",
                     accept: Callable[[Any, str], Any] | None = None,
                     timeout: int = PAGE_TIMEOUT,
-                    bus_timeout: int = BUS_TIMEOUT,
                     params: dict | None = None) -> Delivered:
         attempts: list[str] = []
         for attempt_url in hosts.candidates(url, mirrors):
             try:
                 raw = await self._deliver(service, attempt_url, transport,
-                                          timeout, bus_timeout, params)
+                                          timeout, params)
                 value = _ACCEPTORS[expect](raw)
                 if accept is not None:
                     value = accept(value, attempt_url)
@@ -108,7 +105,7 @@ class Delivery:
             f"{service}: не сработал ни один хост ({'; '.join(attempts)})")
 
     async def _deliver(self, service: str, url: str, transport: str,
-                       timeout: int, bus_timeout: int,
+                       timeout: int,
                        params: dict | None) -> str | bytes:
         if transport == "browser":
             return await self._browser_html(service, url)
@@ -117,8 +114,7 @@ class Delivery:
                                        "timeout": timeout}
             if params is not None:
                 payload["params"] = params
-            reply = await self._request("trackerauth.fetch", payload,
-                                        timeout=bus_timeout)
+            reply = await self._request("trackerauth.fetch", payload)
             if reply["status"] != 200:
                 raise SourceParseError(f"HTTP {reply['status']}")
             if "text" in reply:

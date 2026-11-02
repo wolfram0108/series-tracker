@@ -418,6 +418,20 @@ async def test_the_scheduled_pass_over_all_series_asks_for_voice_overs_too(rig):
     assert await next_event(voices) == {"series_id": rig.series_id}
 
 
+async def test_a_pass_over_all_series_that_the_stop_of_the_module_cancels_asks_nobody_on_its_way_out(rig):
+    rig.sql("UPDATE series SET auto_scan_enabled=1 WHERE id=?", (rig.series_id,))
+    rig.world.rows = [rig.row("a", 1, 1)]
+    voices = rig.bus.subscribe("voices.dispatch")  # nobody answers it: the pass waits for the receiver of the work
+    await rig.probe.request("scan.all.start", {}, timeout=STUCK_S)
+    await next_event(voices)
+    spy = rig.bus.subscribe("#")
+    await asyncio.wait_for(rig.scan.stop(), STUCK_S)  # a stop that asks a neighbour waits for the fuse of the answer
+    left = []
+    while not spy.queue.empty():
+        left.append(spy.queue.get_nowait())
+    assert [each.topic for each in left if each.kind == "query"] == []
+
+
 # --- the references and the plan -----------------------------------------------------------------------------------
 
 async def test_a_synchronization_chooses_the_reference_of_every_episode_and_makes_the_plan(rig):

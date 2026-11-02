@@ -264,8 +264,7 @@ class GatewayModule(BaseModule):
         from core import logging as core_logging
         try:
             reply = await self.request("settings.values.by_prefix",
-                                       {"prefix": "debug_enabled_"},
-                                       timeout=5)
+                                       {"prefix": "debug_enabled_"})
         except (BusRequestError, asyncio.TimeoutError):
             self.log.warning("debug-группы логирования не загружены — "
                              "settings не ответил")

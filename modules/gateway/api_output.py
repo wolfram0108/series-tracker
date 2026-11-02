@@ -48,19 +48,18 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         a torrent series (`torrents`; `refresh` fetches
         the release first)."""
         try:
-            series = await gw.request("catalog.series.get", {"series_id": series_id}, timeout=10)
+            series = await gw.request("catalog.series.get", {"series_id": series_id})
         except BusRequestError:
             return JSONResponse({"error": "Сериал не найден"}, status_code=404)
         try:
             if series["kind"] == SeriesKind.VIDEO:
                 return await gw.request("composition.get", CompositionGetRequest(
                     series_id=series_id, include_excluded=include_excluded,
-                    sources_only=sources_only).model_dump(mode="json"), timeout=30)
+                    sources_only=sources_only).model_dump(mode="json"))
             if refresh:
                 # Fetch the release and split it into files without starting the download.
-                await gw.request("scan.series.prepare", {"series_id": series_id}, timeout=900)
-            plan = await gw.request("torrents.composition", {"series_id": series_id, "refresh": refresh},
-                                    timeout=900)
+                await gw.request("scan.series.prepare", {"series_id": series_id})
+            plan = await gw.request("torrents.composition", {"series_id": series_id, "refresh": refresh})
         except BusRequestError as exc:
             return JSONResponse({"error": str(exc)}, status_code=500)
         for item in plan:
@@ -73,7 +72,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def output(series_id: int):
         """The reference of every episode of the series and why it is that one (the mark)."""
         try:
-            return await gw.request("scan.output.get", {"series_id": series_id}, timeout=30)
+            return await gw.request("scan.output.get", {"series_id": series_id})
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 
@@ -84,7 +83,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         as references: the episode gets the mark `off`, or its reference back."""
         command = _contract(OutputSwitch, series_id=series_id, **body.model_dump())
         try:
-            await gw.request("scan.output.switch", command.model_dump(mode="json"), timeout=30)
+            await gw.request("scan.output.switch", command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -96,7 +95,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         that the registry does not know is refused with its code (`unknown_lever`, `bad_target`, `bad_value`)."""
         command = _contract(SettingsSet, series_id=series_id, **body.model_dump())
         try:
-            await gw.request("composition.settings.set", command.model_dump(mode="json"), timeout=30)
+            await gw.request("composition.settings.set", command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -107,7 +106,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """Takes the levers of a level (or the one named) back to the level above."""
         command = _contract(SettingsReset, series_id=series_id, **body.model_dump())
         try:
-            await gw.request("composition.settings.reset", command.model_dump(mode="json"), timeout=30)
+            await gw.request("composition.settings.reset", command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}

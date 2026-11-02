@@ -63,6 +63,7 @@ import httpx
 from core import BaseModule, ids
 from core import storage
 from core.contracts import SiteResolveRequest, TableGetRequest
+from core.deadlines import TABLE_READ_S
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
@@ -76,7 +77,7 @@ from .players.registry import PlayerRegistry
 from .players.streams import resolve_stream
 from .sites import Site, SiteError, SiteRegistry
 from .sites.builtin import builtin_sites
-from .table import READ_SAFEGUARD_S, TableReader, utc_now
+from .table import TableReader, utc_now
 
 REQUEST_MIN_INTERVAL = 3.0  # секунд между запросами к одному трекеру
 VK_API_BASE = "https://api.vk.com/method/"
@@ -95,7 +96,7 @@ class SourcesModule(BaseModule):
                  torrent_cache_dir: str = "torrent_cache",
                  sites: Iterable[Site] | None = None,
                  table_clock: Callable[[], datetime] = utc_now,
-                 table_safeguard_s: float = READ_SAFEGUARD_S) -> None:
+                 table_safeguard_s: float = TABLE_READ_S) -> None:
         self.repo = SourcesRepository(db)
         self._cache_dir = torrent_cache_dir
         self._locks: dict[str, asyncio.Lock] = {}
@@ -298,7 +299,7 @@ class SourcesModule(BaseModule):
         try:
             delivered = await self._delivery.fetch(
                 "vk", f"{VK_API_BASE}{method}", expect="json",
-                transport="auth", params=params, bus_timeout=60)
+                transport="auth", params=params)
         except SourceParseError as exc:
             raise SiteError(reason("vk_call_failed", method=method, cause=str(exc))) from exc
         data = delivered.value

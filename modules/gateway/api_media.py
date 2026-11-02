@@ -51,7 +51,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
            response_model=list[DynamicObject])
     async def media_items(series_id: int):
         items = await gw.request("scan.media.list",
-                                 {"series_id": series_id}, timeout=15)
+                                 {"series_id": series_id})
         for item in items:
             item["publication_date"] = _iso(item.get("publication_date"))
         return items
@@ -63,7 +63,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def chapters(unique_id: str):
         try:
             return await gw.request("slicing.chapters.get",
-                                    {"unique_id": unique_id}, timeout=300)
+                                    {"unique_id": unique_id})
         except BusRequestError as exc:
             if "LookupError" in str(exc):
                 return JSONResponse({"error": "Медиа-элемент не найден"},
@@ -76,7 +76,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def chapters_filtered(unique_id: str):
         try:
             reply = await gw.request("slicing.chapters.filtered",
-                                     {"unique_id": unique_id}, timeout=300)
+                                     {"unique_id": unique_id})
         except BusRequestError as exc:
             if "LookupError" in str(exc):
                 return JSONResponse({"error": "Медиа-элемент не найден"},
@@ -97,8 +97,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 status_code=400)
         try:
             reply = await gw.request("slicing.chapters.mark", {
-                "unique_id": unique_id, "garbage_indices": indices},
-                timeout=60)
+                "unique_id": unique_id, "garbage_indices": indices})
         except BusRequestError as exc:
             return _media_error(exc)
         return _with_status_message(reply)
@@ -127,7 +126,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def slice_task(unique_id: str):
         try:
             reply = await gw.request("slicing.task.create",
-                                     {"unique_id": unique_id}, timeout=60)
+                                     {"unique_id": unique_id})
         except BusRequestError as exc:
             return _media_error(exc)
         if reply.get("source_missing"):
@@ -144,8 +143,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         try:
             reply = await gw.request("slicing.task.create", {
                 "unique_id": unique_id,
-                "garbage_indices": data.get("garbage_indices", [])},
-                timeout=60)
+                "garbage_indices": data.get("garbage_indices", [])})
         except BusRequestError as exc:
             return _media_error(exc)
         if reply.get("source_missing"):
@@ -162,7 +160,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def delete_source(unique_id: str):
         try:
             reply = await gw.request("slicing.source.delete",
-                                     {"unique_id": unique_id}, timeout=60)
+                                     {"unique_id": unique_id})
         except BusRequestError as exc:
             return _media_error(exc)
         if reply.get("deleted"):
@@ -176,7 +174,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def verify_sliced(unique_id: str):
         try:
             reply = await gw.request("slicing.verify",
-                                     {"unique_id": unique_id}, timeout=120)
+                                     {"unique_id": unique_id})
         except BusRequestError as exc:
             if "LookupError" in str(exc):
                 return JSONResponse(
@@ -203,7 +201,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def rename_preview(series_id: int):
         try:
             return await gw.request("renaming.preview",
-                                    {"series_id": series_id}, timeout=300)
+                                    {"series_id": series_id})
         except BusRequestError as exc:
             return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -213,7 +211,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             response_model_exclude_none=True, responses=_ERR)
     async def reprocess(series_id: int):
         active = await gw.request("renaming.tasks.active",
-                                  {"series_id": series_id}, timeout=10)
+                                  {"series_id": series_id})
         if active:
             return JSONResponse(
                 {"success": False,
@@ -233,7 +231,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         for the test come from composition.preview."""
         try:
             files = await gw.request("torrents.db.files.for_series",
-                                     {"series_id": series_id}, timeout=10)
+                                     {"series_id": series_id})
         except BusRequestError:
             return []
         return [os.path.basename(f["original_path"]) for f in files]

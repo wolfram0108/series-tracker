@@ -177,7 +177,7 @@ class ConformModule(BaseModule):
 
     async def _stored(self, key: str) -> str | None:
         try:
-            reply = await self.request("settings.value.get", {"key": key}, timeout=10)
+            reply = await self.request("settings.value.get", {"key": key})
         except (BusRequestError, asyncio.TimeoutError):
             return None
         return reply.get("value")
@@ -193,7 +193,7 @@ class ConformModule(BaseModule):
         problems = conform_settings.check(draft)
         if not problems:
             draft = conform_settings.clean(draft)
-            await self.request("settings.values.set_many", {"values": conform_settings.stored(draft)}, timeout=10)
+            await self.request("settings.values.set_many", {"values": conform_settings.stored(draft)})
             await self._use_address(draft.url)
         view = await self._settings_view()
         if not problems:

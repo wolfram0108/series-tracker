@@ -15,6 +15,7 @@ import httpx
 
 from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGetReply, TableGetRequest, TableProgress,
                             TableReady, TableState)
+from core.deadlines import TABLE_READ_S
 from core.logging import get_logger
 from core.reasons import describe, reason
 
@@ -27,10 +28,6 @@ FAILED_TOPIC = "sources.table.failed"
 
 # The term of a table is a requirement (a page is not read again within the hour); it is the subject of the task.
 TABLE_TERM = timedelta(hours=1)
-# A safeguard, not a sync: a hung site must not hold its page for ever; its expiry is a failed read. Measured on small
-# releases (M-7, M-8): 0.42 s a row at ruchime, 0.14 s at dunhuatv; the largest release known, about 1200 rows, is
-# about 8 minutes, so twice that is under this value.
-READ_SAFEGUARD_S = 1800.0
 
 Publish = Callable[[str, dict], None]
 
@@ -44,7 +41,7 @@ class TableReader:
 
     def __init__(self, repo: SourcesRepository, sites: SiteRegistry, publish: Publish,
                  http: Callable[[], httpx.AsyncClient], *, clock: Callable[[], datetime] = utc_now,
-                 term: timedelta = TABLE_TERM, safeguard_s: float = READ_SAFEGUARD_S) -> None:
+                 term: timedelta = TABLE_TERM, safeguard_s: float = TABLE_READ_S) -> None:
         self._repo, self._sites, self._publish, self._http = repo, sites, publish, http
         self._clock, self._term, self._safeguard_s = clock, term, safeguard_s
         self._log = get_logger("sources")

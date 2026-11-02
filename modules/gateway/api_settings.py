@@ -73,10 +73,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         out = {}
         for service in AUTH_SERVICES:
             reply = await gw.request("trackerauth.credentials.get",
-                                     {"service": service}, timeout=10)
+                                     {"service": service})
             out[service] = reply["credentials"] or {}
         tmdb = await gw.request("settings.value.get",
-                                {"key": "tmdb_token"}, timeout=10)
+                                {"key": "tmdb_token"})
         out["tmdb"] = {"configured": bool(tmdb.get("value"))}
         return out
 
@@ -91,15 +91,15 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                     "service": service,
                     "username": creds.get("username"),
                     "password": creds.get("password") or None,
-                    "url": creds.get("url")}, timeout=10)
+                    "url": creds.get("url")})
         if vk := data.get("vk"):
             # как в оригинале: токен VK — в поле password
             await gw.request("trackerauth.credentials.set", {
                 "service": "vk", "username": "vk_token",
-                "password": vk.get("token") or None}, timeout=10)
+                "password": vk.get("token") or None})
         if (tmdb := data.get("tmdb")) and tmdb.get("token"):
             await gw.request("settings.value.set", {
-                "key": "tmdb_token", "value": tmdb["token"]}, timeout=10)
+                "key": "tmdb_token", "value": tmdb["token"]})
         return {"success": True}
 
     # --- разбор URL (форма добавления) ---------------------------------------------
@@ -109,10 +109,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """A torrent page for the add form. A page that a site reads is no torrent page: `composition.preview`
         shows it, and here it is refused with a code."""
         try:
-            site = await gw.request("sources.site.resolve", {"url": body.url}, timeout=10)
+            site = await gw.request("sources.site.resolve", {"url": body.url})
             if site["site"] is not None:
                 return JSONResponse({"error": reason("not_a_torrent_page")}, status_code=400)
-            result = await gw.request("sources.parse", {"url": body.url}, timeout=300)
+            result = await gw.request("sources.parse", {"url": body.url})
         except BusRequestError as exc:
             return refusal(exc, 400, with_success=False)
         torrents = [{**rel,
@@ -130,11 +130,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             data = await request.json()
             if response_key in data:
                 await gw.request("settings.value.set", {
-                    "key": key, "value": str(data[response_key]).lower()},
-                    timeout=10)
+                    "key": key, "value": str(data[response_key]).lower()})
             return {"success": True}
-        reply = await gw.request("settings.value.get", {"key": key},
-                                 timeout=10)
+        reply = await gw.request("settings.value.get", {"key": key})
         return {response_key: (reply.get("value") or "false") == "true"}
 
     @route_per_method(r, "/api/settings/force_replace", methods=["GET", "POST"],
@@ -165,11 +163,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             if "value" in data:
                 await gw.request("settings.value.set", {
                     "key": "max_parallel_downloads",
-                    "value": str(data["value"])}, timeout=10)
+                    "value": str(data["value"])})
             return {"success": True}
         reply = await gw.request("settings.value.get",
-                                 {"key": "max_parallel_downloads"},
-                                 timeout=10)
+                                 {"key": "max_parallel_downloads"})
         return {"value": int(reply.get("value") or 2)}
 
     @route_per_method(r, "/api/settings/concurrent_fragments",
@@ -182,11 +179,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             if "value" in data:
                 await gw.request("settings.value.set", {
                     "key": "yt_dlp_concurrent_fragments",
-                    "value": str(data["value"])}, timeout=10)
+                    "value": str(data["value"])})
             return {"success": True}
         reply = await gw.request("settings.value.get",
-                                 {"key": "yt_dlp_concurrent_fragments"},
-                                 timeout=10)
+                                 {"key": "yt_dlp_concurrent_fragments"})
         return {"value": int(reply.get("value") or 6)}
 
     @route_per_method(r, "/api/settings/saved_paths", methods=["GET", "POST", "DELETE"],
@@ -197,14 +193,14 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         if request.method == "POST":
             data = await request.json()
             reply = await gw.request("settings.paths.add",
-                                     {"path": data.get("path", "")}, timeout=10)
+                                     {"path": data.get("path", "")})
             return {"paths": reply["paths"]}
         if request.method == "DELETE":
             data = await request.json()
             reply = await gw.request("settings.paths.remove",
-                                     {"id": data.get("id")}, timeout=10)
+                                     {"id": data.get("id")})
             return {"paths": reply["paths"]}
-        reply = await gw.request("settings.paths.list", {}, timeout=10)
+        reply = await gw.request("settings.paths.list", {})
         return {"paths": reply["paths"]}
 
     # Checking and storing belong to the voices module; the gateway only forwards.
@@ -212,26 +208,26 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.get("/api/voices/settings", response_model=VoiceSettingsView)
     async def voices_settings():
         """What applies now; the screen shows exactly this."""
-        return await gw.request("voices.settings.get", {}, timeout=10)
+        return await gw.request("voices.settings.get", {})
 
     @r.put("/api/voices/settings", response_model=VoiceSettingsSaved)
     async def save_voices_settings(draft: VoiceSettingsDraft):
         """Written whole or refused with coded reasons (`saved: false`); a refusal writes nothing."""
-        return await gw.request("voices.settings.set", draft.model_dump(mode="json"), timeout=10)
+        return await gw.request("voices.settings.set", draft.model_dump(mode="json"))
 
     @r.get("/api/conform/settings", response_model=ConformSettingsView)
     async def conform_settings():
         """The address of the alignment server and the path map as they apply now."""
-        return await gw.request("conform.settings.get", {}, timeout=10)
+        return await gw.request("conform.settings.get", {})
 
     @r.put("/api/conform/settings", response_model=ConformSettingsSaved)
     async def save_conform_settings(draft: ConformSettingsDraft):
         """Written whole and taken at once, or refused with coded reasons (`saved: false`) and nothing written."""
-        return await gw.request("conform.settings.set", draft.model_dump(mode="json"), timeout=10)
+        return await gw.request("conform.settings.set", draft.model_dump(mode="json"))
 
     async def _refresh_debug_groups():
         reply = await gw.request("settings.values.by_prefix",
-                                 {"prefix": "debug_enabled_"}, timeout=10)
+                                 {"prefix": "debug_enabled_"})
         flags = reply["values"]
         groups = {key.removeprefix("debug_enabled_")
                   for key, value in flags.items() if value == "true"}
@@ -250,7 +246,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                      "error": "Module name not specified"}, status_code=400)
             await gw.request("settings.value.set", {
                 "key": f"debug_enabled_{module}",
-                "value": str(data.get("enabled")).lower()}, timeout=10)
+                "value": str(data.get("enabled")).lower()})
             await _refresh_debug_groups()
             return {"success": True}
         flags = await _refresh_debug_groups()
@@ -275,8 +271,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 {"success": False, "error": "Query is required"},
                 status_code=400)
         try:
-            reply = await gw.request("metadata.search", {"query": query},
-                                     timeout=30)
+            reply = await gw.request("metadata.search", {"query": query})
         except BusRequestError as exc:
             return JSONResponse(
                 {"success": False, "error": str(exc).split(": ", 1)[-1]},
@@ -288,7 +283,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def tmdb_details(tmdb_id: int):
         try:
             reply = await gw.request("metadata.details",
-                                     {"tmdb_id": tmdb_id}, timeout=30)
+                                     {"tmdb_id": tmdb_id})
         except BusRequestError as exc:
             return JSONResponse(
                 {"success": False, "error": str(exc).split(": ", 1)[-1]},
@@ -299,7 +294,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.get("/api/trackers", response_model=list[DynamicObject])
     async def trackers_list():
-        return await gw.request("sources.trackers.list", {}, timeout=10)
+        return await gw.request("sources.trackers.list", {})
 
     @r.put("/api/trackers/{tracker_id}", response_model=OkResponse,
            response_model_exclude_none=True, responses=_ERR1)
@@ -310,7 +305,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return JSONResponse({"error": "Список зеркал не предоставлен"},
                                 status_code=400)
         await gw.request("sources.tracker.set_mirrors", {
-            "tracker_id": tracker_id, "mirrors": mirrors}, timeout=10)
+            "tracker_id": tracker_id, "mirrors": mirrors})
         return {"success": True, "message": "Список зеркал обновлен."}
 
     # --- каталоги -------------------------------------------------------------------
@@ -319,7 +314,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def directories(path: str = "/"):
         try:
             return await gw.request("library.directories.list",
-                                    {"path": path}, timeout=30)
+                                    {"path": path})
         except BusRequestError as exc:
             msg = str(exc).split(": ", 1)[-1]
             code = 403 if ("запрещ" in msg or "нет доступа" in msg) else 400
@@ -329,7 +324,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.get("/api/parser-profiles", response_model=list[DynamicObject])
     async def profiles_list():
-        return await gw.request("rules.profiles.list", {}, timeout=10)
+        return await gw.request("rules.profiles.list", {})
 
     @r.post("/api/parser-profiles", response_model=OkResponse,
             response_model_exclude_none=True,
@@ -343,7 +338,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 status_code=400)
         try:
             reply = await gw.request("rules.profiles.create",
-                                     {"name": name}, timeout=10)
+                                     {"name": name})
         except BusRequestError as exc:
             return refusal(exc, 409)
         return JSONResponse({"success": True, "id": reply["id"]},
@@ -359,8 +354,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 status_code=400)
         try:
             await gw.request("rules.profiles.update", {
-                "profile_id": profile_id, "data": {"name": data["name"]}},
-                timeout=10)
+                "profile_id": profile_id, "data": {"name": data["name"]}})
         except BusRequestError as exc:
             return refusal(exc, 409)
         return {"success": True}
@@ -370,7 +364,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def profile_delete(profile_id: int):
         try:
             await gw.request("rules.profiles.delete",
-                             {"profile_id": profile_id}, timeout=10)
+                             {"profile_id": profile_id})
         except BusRequestError as exc:
             return refusal(exc, 400)
         return {"success": True}
@@ -379,7 +373,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
            response_model=list[DynamicObject])
     async def rules_list(profile_id: int):
         return await gw.request("rules.rules.list",
-                                {"profile_id": profile_id}, timeout=10)
+                                {"profile_id": profile_id})
 
     @r.post("/api/parser-profiles/{profile_id}/rules",
             response_model=OkResponse, response_model_exclude_none=True,
@@ -388,7 +382,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         data = await request.json()
         try:
             reply = await gw.request("rules.rules.add", {
-                "profile_id": profile_id, "data": data}, timeout=10)
+                "profile_id": profile_id, "data": data})
         except BusRequestError as exc:
             return refusal(exc, 400)
         return {"success": True, "id": reply["id"]}
@@ -399,7 +393,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         data = await request.json()
         try:
             await gw.request("rules.rules.update",
-                             {"rule_id": rule_id, "data": data}, timeout=10)
+                             {"rule_id": rule_id, "data": data})
         except BusRequestError as exc:
             return refusal(exc, 400)
         return {"success": True}
@@ -407,8 +401,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.delete("/api/parser-rules/{rule_id}", response_model=OkResponse,
               response_model_exclude_none=True)
     async def rule_delete(rule_id: int):
-        await gw.request("rules.rules.delete", {"rule_id": rule_id},
-                         timeout=10)
+        await gw.request("rules.rules.delete", {"rule_id": rule_id})
         return {"success": True}
 
     @r.post("/api/parser-rules/reorder", response_model=OkResponse,
@@ -416,7 +409,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def rules_reorder(request: Request):
         ordered_ids = await request.json()
         await gw.request("rules.rules.reorder",
-                         {"ordered_ids": ordered_ids}, timeout=10)
+                         {"ordered_ids": ordered_ids})
         return {"success": True}
 
     # --- логи -----------------------------------------------------------------------
