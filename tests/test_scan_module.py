@@ -405,14 +405,19 @@ async def test_prepare_refuses_a_series_of_video_sources(db_path):
         await runner.stop()
 
 
-def test_the_rows_of_a_source_or_a_profile_the_user_took_away_are_named_and_nothing_else():
+def test_the_rows_of_a_season_a_source_or_a_profile_the_user_took_away_are_named_and_nothing_else():
     from core.contracts import SourceStatus
     from modules.scan.module import ScanModule
     series = {"id": 1, "sources": [{"id": 10, "series_id": 1, "url": "https://a", "source_type": "web_video", "parser_profile_id": 1},
                                    {"id": 11, "series_id": 1, "url": "https://b", "source_type": "web_video", "parser_profile_id": None}]}
     rows = [{"unique_id": "gone", "source_id": 99}, {"unique_id": "noprofile", "source_id": 11}, {"unique_id": "kept", "source_id": 10},
-            {"unique_id": "won", "source_id": 99}, {"unique_id": "legacy", "source_id": None}]
+            {"unique_id": "won", "source_id": 99}, {"unique_id": "legacy", "source_id": None},
+            {"unique_id": "off", "source_id": 10, "season": 2}, {"unique_id": "off-and-gone", "source_id": 99, "season": 2}]
     layout = type("Layout", (), {"sources": [type("S", (), {"source_id": 10, "status": SourceStatus.READY})(),
                                               type("S", (), {"source_id": 11, "status": SourceStatus.NO_PROFILE})()]})()
-    assert ScanModule._removed_by_configuration(series, layout, rows, {"won"}) == ["gone", "noprofile"]
-    assert ScanModule._removed_by_configuration({"id": 1, "sources": []}, layout, rows, set()) == []
+    assert ScanModule._removed_by_configuration(series, layout, rows, {"won"}, set()) == ["gone", "noprofile", "off-and-gone"]
+    # A season that is switched off names its rows by itself, whichever source they came from and whether or not a source is known.
+    assert ScanModule._removed_by_configuration(series, layout, rows, {"won"}, {2}) == [
+        "off", "off-and-gone", "gone", "noprofile"]
+    assert ScanModule._removed_by_configuration({"id": 1, "sources": []}, layout, rows, set(), set()) == []
+    assert ScanModule._removed_by_configuration({"id": 1, "sources": []}, layout, rows, set(), {2}) == ["off", "off-and-gone"]

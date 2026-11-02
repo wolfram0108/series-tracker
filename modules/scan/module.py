@@ -634,7 +634,7 @@ class ScanModule(BaseModule):
             deletes = self._leftovers(existing, set(winners.values()), queued)
             rows = candidates.rows_after(existing, inserts, updates, deletes)
             statuses, superseded = planner.plan_with_supersession(rows, winners, seasons)
-            for unique_id in self._removed_by_configuration(series, layout, rows, set(winners.values())):
+            for unique_id in self._removed_by_configuration(series, layout, rows, set(winners.values()), seasons):
                 statuses[unique_id] = "removed"
                 superseded.pop(unique_id, None)
             records = [{**each.reference.model_dump(mode="json"), "unique_id": winners.get(each.slot)}
@@ -663,16 +663,21 @@ class ScanModule(BaseModule):
         return Refreshed(sum(1 for each in statuses.values() if each == "in_plan_single"), shown_after, plan_changed)
 
     @staticmethod
-    def _removed_by_configuration(series: dict, layout: CompositionReply, rows: list[dict], winners: set[str]) -> list[str]:
-        """The rows of a source the user took away, or whose profile they took away: nothing in the plan wants them.
-        With no source known they are not told from a layout that has not been counted yet, so nothing is named."""
+    def _removed_by_configuration(series: dict, layout: CompositionReply, rows: list[dict], winners: set[str],
+                                  seasons: set[int]) -> list[str]:
+        """The rows the configuration took out of the plan: those of a season the user switched off, of a source they took
+        away, or of a source whose profile they took away. This is the one place the reason is told; downloads removes
+        the files of the rows it names and no others, so that a site that fails is never taken for a choice of the user.
+        With no source known the rows of a source are not told from a layout that has not been counted yet."""
+        gone = [item["unique_id"] for item in rows if item.get("season") in seasons]
         mine = {each.id for each in _sources_of(series)}
         if not mine:
-            return []
+            return gone
         without_profile = {each.source_id for each in layout.sources if each.status == SourceStatus.NO_PROFILE}
-        return [item["unique_id"] for item in rows
-                if item["unique_id"] not in winners and item.get("source_id") is not None
-                and (item["source_id"] not in mine or item["source_id"] in without_profile)]
+        return gone + [item["unique_id"] for item in rows
+                       if item["unique_id"] not in winners and item.get("source_id") is not None
+                       and item["unique_id"] not in gone
+                       and (item["source_id"] not in mine or item["source_id"] in without_profile)]
 
     async def _queued(self, series_id: int) -> set[str] | None:
         """The rows of the series that have a task in the queue of downloads; None when the queue cannot be told."""

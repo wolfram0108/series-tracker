@@ -338,3 +338,32 @@ async def test_a_task_made_after_the_queue_was_read_fetches_the_address_the_scan
 
     assert "https://v/old" not in rig.downloader.started
     assert (rig.media / "Серия 02.mp4").read_bytes() == b"https://v/new"
+
+
+async def test_a_season_the_user_switches_off_loses_its_whole_files_and_the_other_seasons_stay(rig):
+    rig.world.rows = [rig.row("a", 1, link="https://v/1"), rig.row("b", 2, link="https://v/2"),
+                      row(rig.series_id, rig.source_id, "c", 2, 3, link="https://v/3")]
+    await rig.run()
+    await rig.until(lambda: [each["status"] for each in rig.query("SELECT status FROM media_items")] == ["completed"] * 3,
+                    "three episodes fetched")
+
+    await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "off": True}, timeout=STUCK_S)
+    await rig.until(lambda: sorted(each.name for each in rig.media.iterdir()) == ["Серия 03.mp4"],
+                    "the files of the switched off season are gone")
+    assert rig.query("SELECT episode_start, status, final_filename FROM media_items WHERE season=1 ORDER BY episode_start") == [
+        {"episode_start": 1, "status": "pending", "final_filename": None},
+        {"episode_start": 2, "status": "pending", "final_filename": None}]
+    assert rig.query("SELECT status FROM media_items WHERE season=2") == [{"status": "completed"}]
+
+
+async def test_a_season_the_user_switches_off_loses_the_downloads_under_way_and_waiting(rig):
+    rig.downloader.gate = asyncio.Event()
+    rig.world.rows = [rig.row("a", 1, link="https://v/1"), rig.row("b", 2, link="https://v/2")]
+    await rig.run()
+    await rig.until(lambda: sorted(rig.tasks().values()) == ["downloading", "pending"], "one download under way, one waiting")
+
+    await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "off": True}, timeout=STUCK_S)
+    await rig.until(lambda: rig.tasks() == {}, "both tasks dropped")
+    assert sorted(each["status"] for each in rig.query("SELECT status FROM media_items")) == ["pending", "pending"]
+    rig.downloader.gate.set()
+    assert not rig.media.exists() or list(rig.media.iterdir()) == []  # nothing took a name
