@@ -16,6 +16,7 @@ from ..players.catalog import CatalogError, Entry, catalog_id, read_catalog
 from ..players.contract import PlayerRef
 from ..players.registry import PlayerRegistry
 from . import PHASE_CATALOG, PHASE_PLAYERS, ReadContext, SiteError
+from .recent import last_of_each
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,9 @@ async def read_catalogs(players: PlayerRegistry, pages: Iterable[tuple[str, Mapp
     ctx.progress(PHASE_CATALOG, 0, len(chosen))
     for player, ref, page_url in chosen:
         try:
-            catalogs.append(Catalog(player, page_url, await read_catalog(player, ref, ctx.http, page_url)))
+            entries = await read_catalog(player, ref, ctx.http, page_url)
+            catalogs.append(Catalog(player, page_url,
+                                    last_of_each(entries, lambda each: (each.voice.name, each.voice.kind, each.group), ctx.recent)))
         except CatalogError as exc:
             raise SiteError(exc.reason) from exc
         ctx.progress(PHASE_CATALOG, len(catalogs), len(chosen))

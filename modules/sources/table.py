@@ -41,9 +41,9 @@ class TableReader:
 
     def __init__(self, repo: SourcesRepository, sites: SiteRegistry, publish: Publish,
                  http: Callable[[], httpx.AsyncClient], *, clock: Callable[[], datetime] = utc_now,
-                 term: timedelta = TABLE_TERM, safeguard_s: float = TABLE_READ_S) -> None:
+                 term: timedelta = TABLE_TERM, safeguard_s: float = TABLE_READ_S, recent: int | None = None) -> None:
         self._repo, self._sites, self._publish, self._http = repo, sites, publish, http
-        self._clock, self._term, self._safeguard_s = clock, term, safeguard_s
+        self._clock, self._term, self._safeguard_s, self._recent = clock, term, safeguard_s, recent
         self._log = get_logger("sources")
         self._reading: dict[str, asyncio.Task] = {}
         # Makes "look at the stored table, then decide to read" one step with respect to the end of a read.
@@ -160,7 +160,8 @@ class TableReader:
 
     async def _read(self, site: Site, key: str) -> ReleaseTable:
         context = ReadContext(http=self._http(), progress=lambda phase, current, total: self._publish(
-            PROGRESS_TOPIC, TableProgress(url=key, phase=phase, current=current, total=total).model_dump(mode="json")))
+            PROGRESS_TOPIC, TableProgress(url=key, phase=phase, current=current, total=total).model_dump(mode="json")),
+            recent=self._recent)
         limit = asyncio.timeout(self._safeguard_s)
         try:
             async with limit:

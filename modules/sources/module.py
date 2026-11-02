@@ -96,7 +96,7 @@ class SourcesModule(BaseModule):
                  torrent_cache_dir: str = "torrent_cache",
                  sites: Iterable[Site] | None = None,
                  table_clock: Callable[[], datetime] = utc_now,
-                 table_safeguard_s: float = TABLE_READ_S) -> None:
+                 table_safeguard_s: float = TABLE_READ_S, read_recent: int | None = None) -> None:
         self.repo = SourcesRepository(db)
         self._cache_dir = torrent_cache_dir
         self._locks: dict[str, asyncio.Lock] = {}
@@ -114,7 +114,7 @@ class SourcesModule(BaseModule):
         self.sites.configure(players=self.players, vk_call=self._vk_call)
         self.tables = TableReader(
             self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
-            clock=table_clock, safeguard_s=table_safeguard_s)
+            clock=table_clock, safeguard_s=table_safeguard_s, recent=read_recent)
         super().__init__(bus)
         # Late binding on purpose: tests replace the transport, not the bus.
         self._delivery = Delivery(

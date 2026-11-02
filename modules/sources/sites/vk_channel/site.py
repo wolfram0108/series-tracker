@@ -75,6 +75,9 @@ class VkChannelSite:
         else:
             videos = keep_by_terms(await self._pages("video.get", {"owner_id": owner}, ctx), address.terms)
         videos = [video for video in dedupe(videos) if not is_external(video)]
+        if ctx.recent is not None:  # the newest videos of the channel, in the order of their dates
+            videos = sorted(videos, key=lambda video: video.get("date") or 0)
+            videos = videos[max(0, len(videos) - ctx.recent):]
         return TableDraft(rows=await self._rows(videos, address.channel_url, ctx))
 
     async def _ask(self, method: str, params: dict) -> dict:

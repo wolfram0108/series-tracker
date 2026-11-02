@@ -8,6 +8,9 @@
   ST_CONFORM_URL
                address of the alignment daemon (track-muxer); empty — the conform module
                stays idle
+  ST_READ_RECENT
+               a stand only: a table is read for the last this many episodes of each voice-over, so that a check does
+               not load a site with hundreds of requests; the product leaves it unset and reads the whole page
   ST_QBIT_URL / ST_QBIT_USER / ST_QBIT_PASS
                qBittorrent; без ST_QBIT_URL модуль torrents не стартует
                (удобно для разработки без qBit)
@@ -46,6 +49,7 @@ log = get_logger("run")
 
 bus = Bus()
 db_path = os.environ.get("ST_DB_PATH", "app.db")
+read_recent = int(os.environ["ST_READ_RECENT"]) if os.environ.get("ST_READ_RECENT", "").strip() else None
 db = Database(db_path)
 
 # Ключ подписи сессионной куки входа: стабильный из .env, иначе сессии
@@ -79,7 +83,7 @@ modules = [
     AuthModule(bus, db),
     RulesModule(bus, db),
     TrackerauthModule(bus, db),
-    SourcesModule(bus, db),
+    SourcesModule(bus, db, read_recent=read_recent),
     MetadataModule(bus, db),
     LibraryModule(bus, db),
     # scan/downloads/renaming — после catalog/settings/sources/rules:

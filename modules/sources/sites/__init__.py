@@ -41,6 +41,9 @@ class ReadContext:
     """What the core gives a site for one read: the shared client, and the way to report how far the read is."""
     http: "httpx.AsyncClient"
     progress: Progress
+    # Only the last this many episodes of each voice-over are read (a stand does not load a site with hundreds of requests);
+    # None reads the whole page, as the product does.
+    recent: int | None = None
 
 
 class TableDraft(BaseModel):

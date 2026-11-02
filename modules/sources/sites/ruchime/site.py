@@ -21,6 +21,7 @@ from ...players.contract import Player, PlayerRef
 from ...players.registry import PlayerRegistry
 from .. import PHASE_EPISODES, PHASE_PLAYERS, PHASE_RELEASE, ReadContext, SiteError, TableDraft
 from ..catalogs import AskCount, read_catalogs, rows_of_catalogs
+from ..recent import last_of_each
 from .pages import (MAX_CONCURRENT_PAGES, EpisodePage, PageReader, episode_url, extract_slug, published_of,
                     release_episodes, release_names, release_voice)
 
@@ -55,7 +56,7 @@ class RuchimeSite:
             raise SiteError(reason("site_status", site="Ruchime", status=exc.response.status_code, url=url)) from exc
         except httpx.HTTPError as exc:
             raise SiteError(reason("site_unreachable", site="Ruchime", error=type(exc).__name__)) from exc
-        listed = release_episodes(release.text)
+        listed = last_of_each(release_episodes(release.text), lambda entry: None, ctx.recent)
         if not listed:
             raise SiteError(reason("title_no_videos", player="Ruchime"))
         ctx.progress(PHASE_RELEASE, 1, 1)
