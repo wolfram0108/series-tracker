@@ -97,13 +97,14 @@ class QbtClient:
                 got = await send()
             return got
 
-        result, _attempts, _exhausted = await retrying(
-            ask, final=lambda got: isinstance(got, httpx.Response),
+        result, attempts, _exhausted = await retrying(
+            # An address without a protocol is a mistake of the settings: asking again does not mend it.
+            ask, final=lambda got: isinstance(got, (httpx.Response, httpx.UnsupportedProtocol)),
             budget=Budget(attempts=self._retries, pauses=(self._retry_delay,), limit_s=UNTIMED),
             on_retry=lambda got, attempt, _pause: self.log.warning(
                 "ошибка %s %s (попытка %d/%d): %s", method, path, attempt, self._retries, got))
         if not isinstance(result, httpx.Response):
-            raise QbtError(f"{method} {path}: не удалось за {self._retries} "
+            raise QbtError(f"{method} {path}: не удалось за {attempts} "
                            f"попыток ({result})")
         if result.status_code == 404:
             return None

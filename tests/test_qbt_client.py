@@ -1,4 +1,6 @@
 """The qBittorrent client: what is asked again, what is final, and how a stale session is renewed."""
+import asyncio
+
 import httpx
 import pytest
 
@@ -92,3 +94,13 @@ async def test_the_infohash_qbittorrent_keys_the_torrent_by_is_found_after_it_ap
 
     qbt, seen = client_with(handler)
     assert await qbt.find_hash(["aaa", "bbb"], attempts=4, delay=0.0) == "bbb" and len(seen) == 2
+
+
+@pytest.mark.asyncio
+async def test_an_address_without_a_protocol_is_refused_at_once_not_asked_again():
+    qbt = QbtClient("qbit.example", "user", "secret", retries=4, retry_delay=30.0)  # a retry would wait half a minute
+    try:
+        with pytest.raises(QbtError, match="не удалось за 1 попыток"):
+            await asyncio.wait_for(qbt._request("GET", "/api/v2/torrents/info"), 5)
+    finally:
+        await qbt.close()
