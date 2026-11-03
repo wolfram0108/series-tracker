@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from core import BaseModule, Bus
+from core import deadlines
 from core import module as module_base
 from core.deadlines import (HANDOVER_S, QUICK_S, RULES_S, STANDARD_S, TABLE_READ_S, TABLE_WAIT_S, deadline_of,
                             topics)
@@ -31,6 +32,18 @@ def test_fuses_nest_the_outer_one_never_fires_before_an_inner_one():
     assert TABLE_WAIT_S >= 2 * TABLE_READ_S
     assert deadline_of("sources.table.get") < TABLE_READ_S  # the request only starts a read or answers from the store
     assert deadline_of("downloads.dispatch") == deadline_of("voices.dispatch") == HANDOVER_S
+
+
+def test_a_topic_that_asks_others_in_turn_lives_longer_than_all_of_them_together():
+    steps = 3 * deadline_of("settings.value.get") + deadline_of("settings.values.set_many")
+    assert deadline_of("conform.settings.set") == QUICK_S + steps
+    assert deadline_of("conform.settings.set", units=2) == 2 * (QUICK_S + steps)
+    assert all(deadline_of("conform.settings.set") > deadline_of(step) for step in ("settings.value.get", "settings.values.set_many"))
+
+
+def test_a_nested_topic_with_a_step_that_has_no_fuse_has_none(monkeypatch):
+    monkeypatch.setitem(deadlines._NESTED, "conform.workspace", (QUICK_S, ("scan.series.run",)))
+    assert deadline_of("conform.workspace") is None
 
 
 def test_a_quick_topic_is_quick_and_no_listed_topic_is_shorter_than_it():

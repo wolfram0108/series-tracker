@@ -5,8 +5,10 @@ its fuse here, once, and `BaseModule.request` takes it from this table. A fuse i
 expiry of one is a failed step, and the answer that comes after it is not looked for. Callers do not choose a number; a
 guard (`bus_deadlines`) refuses a number or a constant in the `timeout` of a request in `modules/`.
 
-Fuses nest. A request that is made of steps lives longer than each of them, so its fuse is derived from theirs here, and
-a request whose length is the sum of an unbounded number of steps (a scan of a torrent series: one step for every
+Fuses nest. A request that is made of steps lives longer than all of them together, so its fuse is derived from theirs
+here (`_NESTED`: its own work and the steps it waits for, one after another), and the guard (`bus_deadlines`) reads the
+handlers and refuses a fuse shorter than the sum of the fuses of the requests the handler awaits: an asker that gave up
+before its answer finished would report a timeout for an action the answerer went on to apply. A request whose length is the sum of an unbounded number of steps (a scan of a torrent series: one step for every
 torrent) has no fuse of its own: each of its steps has one, and a number that fires in the middle of a working scan
 would report a failure of something that goes on.
 
@@ -41,19 +43,17 @@ TABLE_WAIT_S = 2 * TABLE_READ_S
 _QUICK = (
     "auth.exists", "auth.login", "auth.password.set",
     "catalog.sources.add", "catalog.sources.list", "catalog.sources.remove", "catalog.sources.update",
-    "conform.settings.get", "conform.settings.set", "conform.workspace",
     "metadata.map.get", "metadata.map.list", "metadata.map.set",
     "renaming.tasks.active",
-    "rules.profiles.create", "rules.profiles.delete", "rules.profiles.list", "rules.profiles.update",
+    "rules.profiles.create", "rules.profiles.list", "rules.profiles.update",
     "rules.rules.add", "rules.rules.delete", "rules.rules.list", "rules.rules.reorder", "rules.rules.update",
-    "scan.status.get",
     "settings.paths.add", "settings.paths.list", "settings.paths.remove",
     "settings.value.set", "settings.values.by_prefix", "settings.values.set_many",
     "sources.site.resolve", "sources.tracker.resolve", "sources.tracker.set_mirrors", "sources.trackers.list",
-    "torrents.db.add", "torrents.db.files.for_series", "torrents.db.history", "torrents.db.progress.list",
+    "torrents.db.add", "torrents.db.files.for_series", "torrents.db.history",
     "torrents.queue.get",
     "trackerauth.credentials.get", "trackerauth.credentials.set",
-    "voices.dubs.get", "voices.settings.set",
+    "voices.dubs.get",
 )
 
 _FUSES: dict[str, float] = {
@@ -76,6 +76,21 @@ _FUSES: dict[str, float] = {
     "composition.preview": SERVICE_S + RULES_S + STANDARD_S,
 }
 
+# A handler that asks others in turn: its own work and the steps it awaits, as the guard reads them from the handler (a step
+# counts once for each place it is awaited; a step repeated for every unit of the request is scaled with `units`).
+_NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
+    "conform.job.get": (STANDARD_S, ("settings.value.get", "settings.value.get")),
+    "conform.settings.get": (QUICK_S, ("settings.value.get",) * 3),
+    "conform.settings.set": (QUICK_S, ("settings.value.get",) * 3 + ("settings.values.set_many",)),
+    "conform.workspace": (QUICK_S, ("settings.value.get",)),
+    "rules.profiles.delete": (QUICK_S, ("catalog.sources.by_profile",) * 2),
+    "scan.output.switch": (STANDARD_S, ("catalog.series.get",) * 4 + (
+        "catalog.series.update", "downloads.queue.get", "composition.get", "voices.settings.get")),
+    "scan.status.get": (QUICK_S, ("settings.value.get",) * 3),
+    "torrents.db.progress.list": (QUICK_S, ("catalog.series.get",)),
+    "voices.settings.set": (QUICK_S, ("settings.values.set_many", "settings.values.by_prefix", "settings.values.by_prefix")),
+}
+
 # The topics whose request has no fuse of its own (see the top).
 _UNBOUNDED = frozenset({"scan.series.run", "scan.series.prepare"})
 
@@ -87,9 +102,13 @@ def deadline_of(topic: str, units: int = 1) -> float | None:
     unit (a source of a series), `None` for a topic that has none of its own, the standard fuse for one not listed."""
     if topic in _UNBOUNDED:
         return UNBOUNDED
+    if topic in _NESTED:
+        own, steps = _NESTED[topic]
+        inner = [deadline_of(step) for step in steps]
+        return UNBOUNDED if any(each is None for each in inner) else (own + sum(inner)) * max(1, units)
     return _FUSES.get(topic, STANDARD_S) * max(1, units)
 
 
 def topics() -> frozenset[str]:
     """The topics that the table names, for the check that none of them is a topic nobody answers."""
-    return frozenset(_FUSES) | _UNBOUNDED
+    return frozenset(_FUSES) | frozenset(_NESTED) | _UNBOUNDED

@@ -1144,6 +1144,64 @@ def test_a_topic_of_the_table_that_nobody_answers_is_a_violation(tmp_path):
     assert not [v for v in found.violations if "settings.value.get" in v.reason]
 
 
+NESTED_TABLE = """
+    _FUSES = {"inner": 30.0, "outer": 10.0, "wide": 100.0, "forever": None}
+
+    def deadline_of(topic, units=1):
+        return _FUSES.get(topic, 30.0)
+
+    def topics():
+        return frozenset(_FUSES)
+"""
+
+NESTED_MODULE = """
+    class A:
+        def register(self):
+            self.handle("outer", self.on_outer)
+            self.handle("wide", self.on_wide)
+            self.handle("forever", self.on_forever)
+            self.handle("event", self.on_event)
+
+        async def on_outer(self, env):
+            return await self.look()
+
+        async def look(self):
+            await self.request("inner", {})
+
+        async def on_wide(self, env):
+            await self.request("inner", {})
+            await self.request("inner", {})
+            self.background(self.request("inner", {}))
+
+        async def on_forever(self, env):
+            await self.request("scan.series.run", {})
+
+        async def on_event(self, env):
+            await self.request("inner", {})
+            await self.request("inner", {})
+
+        async def asker(self):
+            await self.request("outer", {})
+            await self.request("wide", {})
+            await self.request("forever", {})
+"""
+
+
+def test_a_fuse_shorter_than_the_requests_the_handler_waits_for_is_a_violation(tmp_path):
+    root = write_tree(tmp_path, {"core/deadlines.py": NESTED_TABLE, "modules/a/module.py": NESTED_MODULE})
+    found = [v.reason for v in bus_deadlines.check_deadlines(root).violations]
+    assert any("«outer»" in reason and "короче суммы" in reason for reason in found), found  # 10 < 30, through an awaited method
+    assert not any("«wide»" in reason for reason in found)  # 100 >= 30 + 30: the task that is only started is no step
+    assert not any("«event»" in reason for reason in found)  # nobody asks for an event with a request
+
+
+def test_a_handler_that_waits_for_a_request_without_a_fuse_makes_its_topic_unbounded(tmp_path):
+    table = NESTED_TABLE.replace('"forever": None', '"forever": 50.0, "scan.series.run": None')
+    root = write_tree(tmp_path, {"core/deadlines.py": table, "modules/a/module.py": NESTED_MODULE})
+    found = [v.reason for v in bus_deadlines.check_deadlines(root).violations]
+    assert any("«forever»" in reason and "без срока" in reason for reason in found), found
+
+
 def test_a_tree_without_a_table_of_deadlines_is_a_note_not_a_failure(tmp_path):
     root = write_tree(tmp_path, {"modules/a/module.py": "class A:\n    pass\n"})
     found = bus_deadlines.check_deadlines(root)
