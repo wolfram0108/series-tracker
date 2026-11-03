@@ -73,7 +73,7 @@
 | `work.withdrawn {series_id, keys?}` — `WorkWithdrawn`: работа, выданная владельцем, не нужна (загрузки озвучек и файлов склейки; без `keys` — вся работа сериала) | voices | downloads | — |
 | `conform.queue.changed {daemon, tasks}` | conform | voices, gateway | `conform_queue_update` |
 | `conform.settings.changed` — `ConformSettingsView` | conform | voices, gateway | `conform_settings_update` |
-| `conform.job.finished {job_id, status, error, results}` / `conform.job.removed {job_id}` / `conform.daemon.up {}` | conform | voices | — |
+| `conform.job.finished {job_id, status, error, results}` (у пары `ok`, `refused`: отказ самой службы отличается от её сбоя) / `conform.job.removed {job_id}` / `conform.daemon.up {}` | conform | voices | — |
 
 ## SSE
 
