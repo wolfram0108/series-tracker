@@ -2,8 +2,8 @@
 import { computed, ref } from "vue"
 import { api } from "../../api/client"
 import { useApi } from "../../composables/useApi"
-import { t } from "../../i18n"
-import { dubRows, footText, isAccepted, isActive, resultMetrics, splitTitle, type DubRow, type DubState } from "../../lib/conform"
+import { t, type MessageKey } from "../../i18n"
+import { dubRows, footText, isActive, resultMetrics, splitTitle, verdictOf, type DubRow, type DubState, type Verdict } from "../../lib/conform"
 import { reasonText } from "../../lib/reason"
 import { useQueuesStore, type ConformTask } from "../../stores/queues"
 import { useVoicesStore } from "../../stores/voices"
@@ -20,6 +20,13 @@ const statusText = (status: string) =>
   (KNOWN as readonly string[]).includes(status) ? t(`agents.conform.status.${status as (typeof KNOWN)[number]}`) : status
 const statusClass = (status: string) =>
   ({ done: "pill-success", failed: "pill-danger", running: "pill-primary", cancelled: "pill-secondary", paused: "pill-secondary" })[status] ?? "pill-info"
+
+// The keys are written out, never built from a value, so every text stays findable in the catalog.
+const VERDICT: Record<Verdict, MessageKey> = {
+  accepted: "agents.conform.verdict.accepted",
+  rejected: "agents.conform.verdict.rejected",
+  failed: "agents.conform.verdict.failed",
+}
 
 const dubStateText = (state: DubState): string =>
   state === "running" ? t("agents.conform.dub.running")
@@ -98,8 +105,8 @@ function openPlot(task: ConformTask, episode: string, row: DubRow) {
               <template v-if="row.result">{{ resultMetrics(row.result) }}</template>
               <template v-else>{{ dubStateText(row.state) }}</template>
             </span>
-            <div v-if="row.result" class="pill" :class="isAccepted(row.result) ? 'pill-success' : 'pill-danger'">
-              {{ isAccepted(row.result) ? t("agents.conform.verdict.accepted") : t("agents.conform.verdict.rejected") }}
+            <div v-if="row.result" class="pill" :class="verdictOf(row.result) === 'accepted' ? 'pill-success' : 'pill-danger'">
+              {{ t(VERDICT[verdictOf(row.result)]) }}
             </div>
             <div v-else-if="row.state === 'running'" class="pill pill-primary">
               {{ t("agents.conform.dub.position", { index: card.task.dub_index, total: card.task.dub_total }) }}

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
 import type { ConformResult, ConformTask } from "../stores/queues"
-import { dubRows, footText, formatDuration, isAccepted, isActive, resultMetrics, splitTitle } from "./conform"
+import { dubRows, footText, formatDuration, isAccepted, isActive, resultMetrics, splitTitle, verdictOf } from "./conform"
 
 const result = (extra: Partial<ConformResult> = {}): ConformResult => ({
-  dub: "a.mp4", plot: null, ok: true, skipped: false, resid_ms: 5.7, coverage: 1, cuts: 0, suspect: false,
+  dub: "a.mp4", plot: null, ok: true, refused: false, skipped: false, resid_ms: 5.7, coverage: 1, cuts: 0, suspect: false,
   warnings: [], critical: [], error: null, ...extra,
 })
 
@@ -36,6 +36,14 @@ describe("isAccepted", () => {
     expect(isAccepted(result({ suspect: true }))).toBe(true)
     expect(isAccepted(result({ critical: ["no common sound"] }))).toBe(true)
     expect(isAccepted(result({ ok: false }))).toBe(false)
+  })
+})
+
+describe("verdictOf", () => {
+  it("tells a pair the service turned down from a pair it failed to process", () => {
+    expect(verdictOf(result())).toBe("accepted")
+    expect(verdictOf(result({ ok: false, refused: true }))).toBe("rejected")
+    expect(verdictOf(result({ ok: false, error: "CUDA out of memory" }))).toBe("failed")
   })
 })
 

@@ -13,8 +13,9 @@ Query:
       {outcome, job_id?, reason?, retry}
       One episode: a reference video and the voice-over files to align to it, local paths. `key`
       is written into the job's label so that the job can be found again when the answer is lost.
-      The outcome is what was proved. `accepted`: the daemon named the job. `rejected` is final: a path
-      outside the shared storage, found before anything is sent, or a refusal of the daemon. `unavailable`:
+      The outcome is what was proved. `accepted`: the daemon named the job. `rejected` is final for this request: a path
+      outside the shared storage, found before anything is sent, or a refusal of the daemon (it judged no voice-over:
+      the voices module offers them again at the next sync). `unavailable`:
       the request certainly did not take effect: with retry=false the daemon is not configured, has no path map or is down
       and the caller waits for conform.daemon.up; with retry=true the connection failed before the request was
       sent (or the daemon asked to come back later) and asking again soon may work. `uncertain`: the request
@@ -43,16 +44,18 @@ Query:
 Event:
   conform.queue.changed {daemon, tasks}   the whole picture on every change and whenever an
                                           interface connects (gateway.sse.clients)
-  conform.job.finished {job_id, status, error, results: [{dub, ok, skipped, out_path, suspect,
+  conform.job.finished {job_id, status, error, results: [{dub, ok, refused, skipped, out_path, suspect,
       critical, warnings, resid_ms, error}]}   once per job that ended (done, failed, cancelled);
-      out_path is a local path
+      out_path is a local path. A pair that is not `ok` is `refused` only when the service itself turned it down (its trace
+      holds a decision that went `abort`); otherwise it crashed in the service and no judgement of the voice-over was made.
+      The results of a failed or stopped job are those of the pairs it had finished.
   conform.daemon.up {}                    the daemon became reachable: waiting work may be sent
   conform.job.removed {job_id}            the daemon dropped the record of a job (deleted by the owner, by the service
                                           or by the cleanup of this project)
   conform.settings.changed ConformSettingsView   after every save, so that every open interface shows it
 A task is the compact view of one daemon job: id, label (the human part), key (the one the label carries,
 if any), status, progress, stage, stage_pct,
-detail, dub_index, dub_total, cur_dub, dubs (file names), elapsed_s, error and results[{dub, plot, ok, skipped, resid_ms,
+detail, dub_index, dub_total, cur_dub, dubs (file names), elapsed_s, error and results[{dub, plot, ok, refused, skipped, resid_ms,
 coverage, cuts, suspect, warnings, critical, error}]; `plot` names the picture of the voice-over's plot, if the daemon made one.
 """
 from __future__ import annotations
@@ -80,6 +83,8 @@ from .settings import CLEAR_KEY, REMOTE_DIR_KEY, URL_KEY, WORK_DIR_KEY, mapping_
 BACKOFF_START_S = 2.0
 BACKOFF_MAX_S = 30.0
 ENDED = ("done", "failed", "cancelled")
+# The word of the service's trace for a gate that turns a pair down (the one gate there is: a foreign video).
+ABORT = "abort"
 
 _JOB_FIELDS = ("id", "label", "status", "progress", "stage", "stage_pct", "detail", "dub_index",
                "dub_total", "cur_dub", "elapsed_s", "error", "created_at", "updated_at")
@@ -92,13 +97,21 @@ def compact_job(job: dict[str, Any]) -> dict[str, Any]:
     view["dubs"] = [os.path.basename(str(dub)) for dub in job.get("dubs") or []]
     view["results"] = [{
         "dub": result.get("dub"), "plot": plot_of(result),
-        "ok": bool(result.get("ok")), "skipped": bool(result.get("skipped")),
+        "ok": bool(result.get("ok")), "refused": refused_by_service(result), "skipped": bool(result.get("skipped")),
         "resid_ms": result.get("audio_resid_ms"), "coverage": result.get("audio_coverage"),
         "cuts": result.get("audio_cuts"), "suspect": bool(result.get("suspect")),
         "warnings": list(result.get("warnings") or []), "critical": list(result.get("critical") or []),
         "error": result.get("error"),
     } for result in job.get("results") or []]
     return view
+
+
+def refused_by_service(result: dict[str, Any]) -> bool:
+    """The service itself turned the pair down: its trace holds a decision that went the way of `abort`. A pair that is not `ok`
+    without such a decision crashed in the service (its trace may end in an `exception`, or hold nothing): no judgement of
+    the voice-over, only a failure to make one."""
+    return not result.get("ok") and any(
+        record.get("kind") == "decision" and record.get("verdict") == ABORT for record in result.get("trace") or [])
 
 
 def plot_of(result: dict[str, Any]) -> str | None:
@@ -136,7 +149,8 @@ def finished_view(job: dict[str, Any], to_local: dict[str, str]) -> dict[str, An
     return AlignmentJob(
         job_id=job.get("id"), status=job.get("status"), error=job.get("error"),
         results=[DubResult(
-            dub=result.get("dub"), ok=bool(result.get("ok")), skipped=bool(result.get("skipped")),
+            dub=result.get("dub"), ok=bool(result.get("ok")), refused=refused_by_service(result),
+            skipped=bool(result.get("skipped")),
             out_path=local(result.get("out_path")), suspect=bool(result.get("suspect")),
             critical=list(result.get("critical") or []), warnings=list(result.get("warnings") or []),
             resid_ms=result.get("audio_resid_ms"), error=result.get("error"),

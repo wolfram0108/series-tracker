@@ -152,6 +152,19 @@ def test_a_result_is_admitted_by_the_services_own_verdict_alone(result, code):
         assert parse(refusal)["code"] == code
 
 
+@pytest.mark.parametrize("result,turned_down", [
+    (None, False),
+    ({"ok": False}, False),
+    ({"ok": False, "error": "CUDA out of memory"}, False),
+    ({"ok": False, "refused": True, "error": "чужое видео"}, True),
+    ({"ok": True, "out_path": "/a.flac"}, False),
+    ({"ok": True}, False),
+])
+def test_only_the_judgement_of_the_service_writes_a_voice_over_off(result, turned_down):
+    from core.contracts import DubResult
+    assert alignment.turned_down(None if result is None else DubResult(**result)) is turned_down
+
+
 A_PAGE_OF = {"ruchime": "https://1.ruchime.org/release/x/episode-3?off=vk#top",
              "dunhuatv": "https://www.dunhuatv.ru/28-x-smotret-onlajn.html?a=1#cvh=2",
              "vk_channel": "https://vk.com/@chan/videos|запрос"}

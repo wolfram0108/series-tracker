@@ -7,7 +7,7 @@ export type QueueTask = Record<string, unknown>
 
 /** Alignment daemon picture pushed with every change (conform_queue_update). */
 export interface ConformResult {
-  dub: string; plot: string | null; ok: boolean; skipped: boolean; resid_ms: number | null; coverage: number | null
+  dub: string; plot: string | null; ok: boolean; refused: boolean; skipped: boolean; resid_ms: number | null; coverage: number | null
   cuts: number | null; suspect: boolean; warnings: string[]; critical: string[]; error: string | null
 }
 export interface ConformTask {

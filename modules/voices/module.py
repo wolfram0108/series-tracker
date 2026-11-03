@@ -106,8 +106,10 @@ is on disk and none of its voice-overs is still being downloaded or aligned: the
 sent (conform.submit). A voice-over that was not downloaded does not hold the episode back, and one
 that arrives later makes a job of its own. When a job ends, a voice-over that the service
 calls `ok` becomes `aligned` (what it adds, `suspect` or `warnings`, is what it found and put right: it goes to the
-journal); any other is `rejected` with the reason and a
-job that failed makes its voice-overs `failed` (the next scan offers them again). An `aligned`
+journal); a pair the service turned down itself (`refused`: its trace holds a decision that aborted) is `rejected` with the
+reason; any other that is not `ok` (a crash in the service, no result for the file, a success naming no file), a job
+that failed (for the pairs it did not reach: those it had finished keep their results) and a job the service refused to take
+make the voice-over `failed` with the reason (the next sync offers it again). An `aligned`
 track is moved next to the reference video as `<video name>.<voice title>.<lang>.<ext>` and the row
 becomes `placed` with the track's path; the series stays playable at every step. When every
 voice-over of the episode is placed, rejected or failed, the episode's temporary directory is
@@ -185,7 +187,7 @@ from core.envelope import Envelope
 from core.reasons import describe, parse as parse_reason, reason
 
 from . import editor, planning
-from .alignment import ENDED, job_failure, refusal, result_for, told, track_of
+from .alignment import ENDED, job_failure, refusal, result_for, told, track_of, turned_down
 from .cleanup import ARTIFACT, JOB, PATH, SUBMISSION, TREE, Cleanup, prune, remove_if_empty
 from .lifecycle import FINAL, WORKING
 from .outputs import Output, SidecarOutput
@@ -1190,8 +1192,9 @@ class VoicesModule(BaseModule):
             self.log.info("%s: озвучки ждут сервис выравнивания: %s", label, describe(reply.reason))
             return reply.retry
         if reply.outcome is SubmitOutcome.REJECTED:
+            # The service refused the request, not the voice-overs: nothing was judged, so they are offered again by the next sync.
             for row in ready:
-                await self.repo.mark_rejected(row["id"], reply.reason)
+                await self.repo.mark_failed(row["id"], reply.reason)
                 await self._announce(row)
             self.log.warning("%s: задача выравнивания отклонена: %s", label, describe(reply.reason))
             return False
@@ -1316,14 +1319,16 @@ class VoicesModule(BaseModule):
         return True
 
     async def _apply_to(self, job: AlignmentJob, row: dict) -> None:
-        if job.status is not JobStatus.DONE:
+        result = result_for(job, row["temp_path"])
+        if job.status is not JobStatus.DONE and result is None:
+            # The job ended before this pair was reached (the service lost its worker, the job was stopped): the end of the
+            # job is the reason. A pair the service had finished keeps its result, which is read like any other.
             error = job_failure(job)
             await self.repo.mark_failed(row["id"], error)
             self.log.warning("сериал %d, s%02de%02d: озвучка %s не выровнена: %s", row["series_id"],
                              row["season"], row["episode"], row["voice_label"], describe(error))
             await self._announce(row)
             return
-        result = result_for(job, row["temp_path"])
         verdict = refusal(result)
         conform_dir = await self._conform_episode(row["series_id"], row["season"], row["episode"], row["part"])
         out_dir = row["out_dir"] or (await self._workspace(dub_folder=conform_dir))["out_dir"]
@@ -1335,9 +1340,13 @@ class VoicesModule(BaseModule):
             if told(result):
                 self.log.info("сериал %d, s%02de%02d: озвучка %s выровнена, сервис сообщил: %s", row["series_id"],
                               row["season"], row["episode"], row["voice_label"], told(result))
-        else:
+        elif turned_down(result):
             await self.repo.mark_rejected(row["id"], verdict)
             self.log.warning("сериал %d, s%02de%02d: озвучка %s отклонена: %s", row["series_id"],
+                             row["season"], row["episode"], row["voice_label"], describe(verdict))
+        else:
+            await self.repo.mark_failed(row["id"], verdict)
+            self.log.warning("сериал %d, s%02de%02d: озвучка %s не выровнена: %s", row["series_id"],
                              row["season"], row["episode"], row["voice_label"], describe(verdict))
         await self._announce(row)
 

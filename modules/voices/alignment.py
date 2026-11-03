@@ -44,6 +44,13 @@ def refusal(result: DubResult | None) -> str | None:
     return None
 
 
+def turned_down(result: DubResult | None) -> bool:
+    """The refusal of a result is the service's judgement of the voice-over (it looked at the pair and turned it down). Every
+    other reason a result may not be placed (a crash in the service, no result for the file, a success with no file) is a
+    failure to align: it says nothing about the voice-over, so the voice-over is offered again, not written off."""
+    return result is not None and not result.ok and result.refused
+
+
 def told(result: DubResult | None) -> str:
     """What the service said besides its verdict, for the journal; empty when it said nothing."""
     if result is None:

@@ -760,36 +760,52 @@ async def test_a_voice_that_could_not_be_downloaded_does_not_hold_the_episode_ba
 
 
 @pytest.mark.asyncio
-async def test_a_result_the_service_did_not_call_ok_or_gave_no_track_for_is_rejected_and_never_placed(dubs, caplog):
+async def test_a_result_that_is_not_ok_without_the_judgement_of_the_service_fails_its_voice_and_is_never_placed(dubs, caplog):
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     settled_sub = bus.subscribe("voices.episode.settled")
     caplog.set_level("WARNING")
-    # Two videos that share no frame: the service says it did not bring them together, and gives no audio.
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={"ok": False},
+    # The service crashed on one pair (it gives no verdict) and said "ok" on the other without any audio: neither judged the voice-over.
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={"ok": False, "error": "CUDA out of memory"},
                                                          RedHeadSound={"out_path": None}))
-    await statuses_until(sub, ["rejected", "rejected"])
+    await statuses_until(sub, ["failed", "failed"])
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["BlackCat"]["status"] == "rejected" and code_of(by_voice["BlackCat"]["outcome"]) == "align_failed"
-    assert code_of(by_voice["RedHeadSound"]["outcome"]) == "output_missing"
+    assert by_voice["BlackCat"]["status"] == "failed" and by_voice["BlackCat"]["error"] == "CUDA out of memory"
+    assert by_voice["RedHeadSound"]["status"] == "failed" and code_of(by_voice["RedHeadSound"]["error"]) == "output_missing"
     stem = os.path.splitext(ref)[0]
     assert not any(name.startswith(os.path.basename(stem) + ".") and name.endswith(".flac")
                    for name in os.listdir(neighbours.library))
-    assert any("отклонена" in record.getMessage() for record in caplog.records)
+    assert any("не выровнена" in record.getMessage() for record in caplog.records)
+    assert not any("отклонена" in record.getMessage() for record in caplog.records)
     await asyncio.wait_for(settled_sub.queue.get(), 5)
     assert not os.path.exists(os.path.join(downloads(neighbours), "7", "s01e01"))
 
 
 @pytest.mark.asyncio
-async def test_a_success_without_a_file_refuses_that_voice_and_leaves_the_others_alone(dubs):
+async def test_a_pair_the_service_turned_down_itself_is_rejected_and_never_placed(dubs, caplog):
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    caplog.set_level("WARNING")
+    # Two videos that share no frame: the service looked at the pair and turned it down.
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={
+        "ok": False, "refused": True, "error": "чужое видео: сопоставлено 1% (< 60%) — выравнивание прервано"}))
+    await statuses_until(sub, ["aligned", "placed", "rejected"])
+    by_voice = {r["voice_key"]: r for r in await rows(probe)}
+    assert by_voice["BlackCat"]["status"] == "rejected" and by_voice["BlackCat"]["outcome"].startswith("чужое видео")
+    assert by_voice["RedHeadSound"]["status"] == "placed"
+    assert any("отклонена" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_a_success_without_a_file_fails_that_voice_and_leaves_the_others_alone(dubs):
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     view = job_done(neighbours, "job-1")
     next(r for r in view["results"] if "redheadsound" in r["dub"].lower())["out_path"] = None
     probe.publish_event("conform.job.finished", view)
-    await statuses_until(sub, ["aligned", "placed", "rejected"])
+    await statuses_until(sub, ["aligned", "placed", "failed"])
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["RedHeadSound"]["status"] == "rejected" and code_of(by_voice["RedHeadSound"]["outcome"]) == "output_missing"
+    assert by_voice["RedHeadSound"]["status"] == "failed" and code_of(by_voice["RedHeadSound"]["error"]) == "output_missing"
     assert by_voice["BlackCat"]["status"] == "placed"
 
 
@@ -830,10 +846,24 @@ async def test_a_missing_result_or_a_failed_job_never_places_anything(dubs):
     view = job_done(neighbours, "job-1")
     view["results"] = view["results"][:1]
     probe.publish_event("conform.job.finished", view)
-    await statuses_until(sub, ["aligned", "placed", "rejected"])
+    await statuses_until(sub, ["aligned", "placed", "failed"])
     outcomes = {r["voice_key"]: r for r in await rows(probe)}
-    missing = next(r for r in outcomes.values() if r["status"] == "rejected")
-    assert code_of(missing["outcome"]) == "no_result"
+    missing = next(r for r in outcomes.values() if r["status"] == "failed")
+    assert code_of(missing["error"]) == "no_result"
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_failed_midway_keeps_the_pair_it_had_finished_and_fails_the_rest(dubs):
+    probe, neighbours, _, _, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    view = job_done(neighbours, "job-1")
+    # The worker of the service died after the first pair: the job is failed, and the finished pair is still in its results.
+    view.update(status="failed", error="процесс conform завершился аварийно (-9)", results=view["results"][:1])
+    probe.publish_event("conform.job.finished", view)
+    await statuses_until(sub, ["aligned", "placed", "failed"])
+    by_status = {r["status"]: r for r in await rows(probe)}
+    assert by_status["failed"]["error"] == "процесс conform завершился аварийно (-9)"
+    assert os.path.isfile(by_status["placed"]["output_path"])
 
 
 @pytest.mark.asyncio
@@ -864,14 +894,14 @@ async def test_an_unreachable_service_leaves_the_voices_waiting_until_it_is_back
 
 
 @pytest.mark.asyncio
-async def test_a_final_refusal_of_the_service_rejects_the_voices(dubs):
+async def test_a_final_refusal_of_the_request_fails_the_voices_for_the_next_sync(dubs):
     probe, neighbours, _, _, sub, _ = await two_voices_ready(dubs, finished=False)
     neighbours.submit_reply = SubmitReply.rejected("путь вне общего хранилища").model_dump()
     for fetch in neighbours.fetches:
         touch(fetch["path"], b"video")
         finish(probe, fetch["key"])
-    await statuses_until(sub, ["ready", "ready", "rejected", "rejected"])
-    assert {r["outcome"] for r in await rows(probe)} == {"путь вне общего хранилища"}
+    await statuses_until(sub, ["ready", "ready", "failed", "failed"])
+    assert {(r["status"], r["error"]) for r in await rows(probe)} == {("failed", "путь вне общего хранилища")}
 
 
 @pytest.mark.asyncio
@@ -1178,7 +1208,7 @@ async def test_an_event_carries_the_voice_and_the_reason_so_the_interface_asks_n
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     changes = bus.subscribe("voices.dub.changed")
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={"ok": False}))
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={"ok": False, "refused": True}))
     await statuses_until(sub, ["aligned", "placed", "rejected"])
     seen = {}
     while not changes.queue.empty():
@@ -1245,7 +1275,7 @@ async def test_the_end_of_a_job_shows_done_and_error_without_any_other_word(dubs
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     changes = bus.subscribe("voices.dub.changed")
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", RedHeadSound={"ok": False}))
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", RedHeadSound={"ok": False, "refused": True}))
     await statuses_until(sub, ["aligned", "placed", "rejected"])
     states = {}
     while not changes.queue.empty():

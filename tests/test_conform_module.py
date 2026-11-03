@@ -9,7 +9,7 @@ import pytest
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.envelope import Envelope
 from modules.conform import ConformModule, DaemonClient, DaemonRefused, NotDelivered, Unconfirmed
-from modules.conform.module import compact_job, job_label, split_label
+from modules.conform.module import compact_job, finished_view, job_label, refused_by_service, split_label
 from modules.conform.paths import translate
 from conform_fakes import FakeClient
 from core.reasons import parse
@@ -81,10 +81,34 @@ def test_compact_job_keeps_what_the_interface_shows():
     view = compact_job(full)
     assert "trace" not in view and "ops" not in view
     assert view["results"] == [{
-        "dub": "kodik__rus__A__720p.mp4", "plot": None, "ok": True, "skipped": False, "resid_ms": 12.5,
+        "dub": "kodik__rus__A__720p.mp4", "plot": None, "ok": True, "refused": False, "skipped": False, "resid_ms": 12.5,
         "coverage": 0.97, "cuts": 2, "suspect": False, "warnings": ["drift"], "critical": [],
         "error": None}]
     assert view["stage"] == "" and view["dub_total"] == 2
+
+
+# The records of a trace as the service writes them: a gate that decided, and the exception of a pair that crashed.
+FOREIGN = {"kind": "decision", "name": "foreign_gate", "verdict": "abort", "inputs": {"assigned_pct": 0.58}}
+PROCEEDED = {"kind": "decision", "name": "foreign_gate", "verdict": "proceed", "inputs": {"assigned_pct": 99.0}}
+CRASHED = {"kind": "event", "name": "exception", "type": "OutOfMemoryError", "error": "CUDA out of memory. Tried to allocate 314.00 MiB"}
+
+
+@pytest.mark.parametrize("result,refused", [
+    ({"ok": False, "error": "чужое видео: сопоставлено 1% (< 60%)", "trace": [PROCEEDED, FOREIGN]}, True),
+    # A crash is no judgement: the gate had let the pair through, and the pair fell afterwards.
+    ({"ok": False, "error": "CUDA out of memory", "trace": [PROCEEDED, CRASHED]}, False),
+    # A crash outside the pair carries no trace at all.
+    ({"ok": False, "error": "boom"}, False),
+    ({"ok": False, "error": "boom", "trace": []}, False),
+    ({"ok": False, "trace": [CRASHED]}, False),
+    # A pair the service accepted has nothing to be refused for.
+    ({"ok": True, "trace": [PROCEEDED]}, False),
+])
+def test_a_pair_is_refused_only_when_the_service_decided_so_and_not_when_it_crashed(result, refused):
+    assert refused_by_service(result) is refused
+    view = finished_view(job("j1", status="done", results=[{"dub": "a.mp4", **result}]), {})
+    assert view["results"][0]["refused"] is refused
+    assert compact_job(job("j1", results=[{"dub": "a.mp4", **result}]))["results"][0]["refused"] is refused
 
 
 

@@ -16,6 +16,12 @@ export function splitTitle(label: string): { title: string; episode: string } {
 /** The service's own verdict, as the voices module reads it: `ok`. Its `suspect` and `critical` tell what it found and put right. */
 export const isAccepted = (result: ConformResult): boolean => result.ok
 
+export type Verdict = "accepted" | "rejected" | "failed"
+
+/** A pair that is not `ok` was turned down by the service (`refused`) or the service failed to process it: the second says
+ *  nothing about the voice-over. */
+export const verdictOf = (result: ConformResult): Verdict => (result.ok ? "accepted" : result.refused ? "rejected" : "failed")
+
 const number = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })
 
 export function resultMetrics(result: ConformResult): string {

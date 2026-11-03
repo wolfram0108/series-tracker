@@ -145,7 +145,7 @@ async def merged_into_blackcat(dubs):
     from test_voices import job_done, statuses_until, two_voices_ready
     probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={"ok": False}))
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={"ok": False, "refused": True}))
 
     async def one_placed_one_refused():
         return {r["voice_key"]: r["status"] for r in await voices.repo.for_series(7)} == {

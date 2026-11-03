@@ -19,10 +19,14 @@ class JobStatus(StrEnum):
 
 
 class DubResult(BaseModel):
-    """The result for one voice-over (a pair: the reference and the voice-over)."""
+    """The result for one voice-over (a pair: the reference and the voice-over).
+
+    A pair that is not `ok` is one of two things: the service looked at it and turned it down (`refused`), or it could not
+    process it (an error, a crash, no memory): the second says nothing about the voice-over itself."""
 
     dub: str | None = None
     ok: bool = False
+    refused: bool = False
     skipped: bool = False
     out_path: str | None = None
     suspect: bool = False

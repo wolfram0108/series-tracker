@@ -20,6 +20,7 @@ export const ru = {
   "agents.conform.dub.position": "{index} из {total}",
   "agents.conform.verdict.accepted": "принята",
   "agents.conform.verdict.rejected": "отклонена",
+  "agents.conform.verdict.failed": "сбой службы",
   "agents.conform.result.ok": "остаток {resid} мс, покрытие {coverage}%",
   "agents.conform.result.skipped": "уже выровнена",
   "agents.conform.elapsed": "время выполнения: {time}",
