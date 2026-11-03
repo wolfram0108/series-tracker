@@ -9,8 +9,9 @@
                address of the alignment daemon (track-muxer); empty — the conform module
                stays idle
   ST_READ_RECENT
-               a stand only: a table is read for the last this many episodes of each voice-over, so that a check does
-               not load a site with hundreds of requests; the product leaves it unset and reads the whole page
+               a stand only (it needs ST_STAND=1, or the process does not start): a table is read for the last this many
+               episodes of each voice-over, so that a check does not load a site with hundreds of requests, and an old
+               episode that is not in the table leaves the plan; the product leaves it unset and reads the whole page
   ST_QBIT_URL / ST_QBIT_USER / ST_QBIT_PASS
                qBittorrent; без ST_QBIT_URL модуль torrents не стартует
                (удобно для разработки без qBit)
@@ -50,6 +51,9 @@ log = get_logger("run")
 bus = Bus()
 db_path = os.environ.get("ST_DB_PATH", "app.db")
 read_recent = int(os.environ["ST_READ_RECENT"]) if os.environ.get("ST_READ_RECENT", "").strip() else None
+if read_recent is not None and os.environ.get("ST_STAND") != "1":
+    # A table cut to the newest episodes drops the older ones from the plan, and their files with them.
+    raise RuntimeError("ST_READ_RECENT limits what a site is read for and belongs to a stand only: it starts with ST_STAND=1")
 db = Database(db_path)
 
 # Ключ подписи сессионной куки входа: стабильный из .env, иначе сессии

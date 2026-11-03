@@ -60,7 +60,7 @@ class Stand:
                "ST_COOKIE_SECURE": "false", "ST_SECRET_KEY": "stage10", "ST_LOG_DIR": str(self.work),
                # A check reads the last ten episodes of each voice-over, not hundreds of pages of a site; a read of the
                # whole page is asked for by setting ST_READ_RECENT to an empty value in the environment of the run.
-               "ST_READ_RECENT": os.environ.get("ST_READ_RECENT", "10")}
+               "ST_READ_RECENT": os.environ.get("ST_READ_RECENT", "10"), "ST_STAND": "1"}
         for name in ("ST_QBIT_URL", "ST_CONFORM_URL"):
             env.pop(name, None)
         if self.credentials_from:
