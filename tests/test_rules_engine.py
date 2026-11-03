@@ -741,6 +741,33 @@ def test_assign_range_with_anything_but_one_ascending_interval_is_refused_on_sav
                        "action_pattern": json.dumps([{"action_type": "assign_range", "action_pattern": value}])})
 
 
+def _assign_episode(value):
+    return _rule(1, "серия", [{"action_type": "assign_episode", "action_pattern": value}], continue_after=True)
+
+
+def test_a_later_range_replaces_an_earlier_single_episode_and_the_result_holds_one_form():
+    rules = [_assign_episode("110"), _rule(2, "склейка", [{"action_type": "assign_range", "action_pattern": "109-110"}])]
+    assert process_title(compile_profile(1, rules), "x")["extracted"] == {"start": 109, "end": 110}
+
+
+def test_a_later_single_episode_replaces_an_earlier_range():
+    rules = [_rule(1, "склейка", [{"action_type": "assign_range", "action_pattern": "109-110"}], continue_after=True),
+             _rule(2, "серия", [{"action_type": "assign_episode", "action_pattern": "110"}])]
+    assert process_title(compile_profile(1, rules), "x")["extracted"] == {"episode": 110}
+
+
+def test_an_extracted_range_after_an_extracted_single_episode_leaves_the_range_alone():
+    single = _rule(1, "серия", [_extract("extract_single", "N", "_", "серия")], continue_after=True)
+    span = _rule(2, "склейка", [_extract("extract_range", "N", "-", "N")])
+    res = process_title(compile_profile(1, [single, span]), "110 серия 109-110")
+    assert res["extracted"] == {"start": 109, "end": 110}
+
+
+def test_within_one_rule_the_first_form_of_the_number_wins_over_a_later_alternative_of_the_other_form():
+    both = _rule(1, "серия или склейка", [_extract("extract_single", "N", "_", "серия"), _extract("extract_range", "N", "-", "N")])
+    assert process_title(compile_profile(1, [both]), "5 серия 7-8")["extracted"] == {"episode": 5}
+
+
 def test_assign_range_next_to_a_voice_over_gives_both():
     profile = compile_profile(1, [_rule(1, "склейка", [
         {"action_type": "assign_range", "action_pattern": "3-4"},

@@ -388,6 +388,15 @@ def _apply_modifier(value: int, modifier: int | None) -> int:
     return result if result >= 0 else value
 
 
+# The number of an episode is one value in one of two forms: a single episode, or a range (start, end). Consumers read a
+# single episode before a range, so a result never holds both: whatever sets one form takes the other away.
+_SINGLE_KEYS, _RANGE_KEYS = ("episode",), ("start", "end")
+
+
+def _other_form(key: str) -> tuple[str, ...]:
+    return _RANGE_KEYS if key in _SINGLE_KEYS else _SINGLE_KEYS
+
+
 def _run_actions(title: str, rule: CompiledRule,
                  extracted: dict, errors: list[str]) -> str:
     """Выполняет действия правила; возвращает 'exclude' | 'data' | 'nothing'.
@@ -404,6 +413,11 @@ def _run_actions(title: str, rule: CompiledRule,
     def put_extracted(key: str, value) -> bool:
         if key in set_by_this_rule:
             return False  # первый успешный вариант уже победил
+        if key in _SINGLE_KEYS + _RANGE_KEYS:
+            if any(other in set_by_this_rule for other in _other_form(key)):
+                return False  # the first variant of this rule keeps its form of the number
+            for other in _other_form(key):
+                extracted.pop(other, None)  # a later rule's form replaces the earlier rule's
         extracted[key] = value
         set_by_this_rule.add(key)
         return True
@@ -422,6 +436,7 @@ def _run_actions(title: str, rule: CompiledRule,
             extracted["resolution"] = action.raw_value
             produced = True
         elif a_type == "assign_range":
+            extracted.pop("episode", None)
             extracted["start"], extracted["end"] = parse_assigned_range(action.raw_value)
             produced = True
         elif a_type in ("assign_episode", "assign_season", "assign_part"):
@@ -429,6 +444,9 @@ def _run_actions(title: str, rule: CompiledRule,
                 "season" if a_type == "assign_season" else "part")
             try:
                 extracted[key] = int(action.raw_value)
+                if key == "episode":
+                    extracted.pop("start", None)
+                    extracted.pop("end", None)
                 produced = True
             except (ValueError, TypeError):
                 errors.append(f"правило «{rule.name}»: нечисловое значение "
