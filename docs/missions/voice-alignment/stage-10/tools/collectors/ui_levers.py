@@ -593,6 +593,49 @@ def dub_states(page: Page) -> list[str]:
     return page.eval_on_selector_all(DUBS_OF_EPISODE, "els => els.map(e => [...e.classList].find(c => c.startsWith('dub-')).slice(4))")
 
 
+def type_conform_server(c: Campaign, page: Page) -> dict:
+    """The settings window with the alignment server typed and saved by the button; it stays open. The password of VK, kept in the
+    same tab, must come out of the saving as it went in."""
+    before = c.api("/api/auth")["vk"]["has_password"]
+    page.goto(c.stand.base + "/", wait_until="domcontentloaded")
+    first_run(page)
+    page.get_by_role("button", name="Настройки").click(timeout=30000)
+    page.get_by_label(text_of("conform.settings.url")).fill(conform_address())
+    page.get_by_label(text_of("conform.settings.local")).fill(LOCAL)
+    page.get_by_label(text_of("conform.settings.daemon")).fill(REMOTE)
+    page.get_by_role("button", name="Сохранить").click()
+    page.locator(".conform-status .pill-success").wait_for(timeout=60000)
+    saved = c.api("/api/conform/settings")
+    assert saved["work_dir"] == LOCAL and saved["work_dir_remote"] == REMOTE and saved["url"], saved
+    after = c.api("/api/auth")["vk"]["has_password"]
+    assert before and after, f"the saving of the tab lost the password of VK: {before} -> {after}"
+    return {"daemon": "up", "work_dir": saved["work_dir"], "vk_password_kept": after}
+
+
+def queue(c: Campaign, page: Page) -> None:
+    """The queue of the alignment service in the settings, as the service holds it: every pair of every job carries the word for what
+    became of it. The expected words are counted from the answers of the service by two signs that do not depend on the product's
+    reading: the text of its gate and the exception of its trace."""
+    jobs = httpx.get(f"{conform_address()}/conform/jobs", timeout=30).json()
+    pairs = [result for job in jobs for result in job["results"]]
+    refused = len([r for r in pairs if not r["ok"] and (r.get("error") or "").startswith("чужое видео")])
+    crashed = len([r for r in pairs if not r["ok"] and any(each.get("name") == "exception" for each in r.get("trace") or [])])
+    assert refused and crashed, f"the service holds no pair of each kind to look at: refused {refused}, crashed {crashed}"
+
+    def words() -> dict:
+        type_conform_server(c, page)
+        page.locator(".st-tab[title='Агенты']").click()
+        page.wait_for_function("(w) => document.querySelectorAll('.pill').length > 0 && [...document.querySelectorAll('.pill')].some(e => e.innerText.trim() === w)",
+                               arg=text_of("agents.conform.verdict.accepted"), timeout=60000)
+        shown = page.eval_on_selector_all(".pill", "els => els.map(e => e.innerText.trim())")
+        seen = {key: shown.count(text_of(f"agents.conform.verdict.{key}")) for key in ("accepted", "rejected", "failed")}
+        assert seen["rejected"] == refused and seen["failed"] == crashed, (seen, refused, crashed)
+        assert seen["accepted"] == len([r for r in pairs if r["ok"]]), (seen, len([r for r in pairs if r["ok"]]))
+        return {"words": seen, "pairs_in_the_service": len(pairs)}
+
+    c.scenario("очередь выравнивания в настройках: у каждой пары слово «принята», «отклонена» или «сбой службы» по тому, что с ней стало", page, words)
+
+
 def sync(c: Campaign, page: Page) -> None:
     """Ж-1 and Ж-9 through the window: the channel is named by the rule of the profile made by hand; the groups, the reference and the
     one episode are set by the buttons; the alignment server is typed in the settings; the button starts the pass."""
@@ -651,21 +694,9 @@ def sync(c: Campaign, page: Page) -> None:
     c.scenario(f"все серии кроме {KEEP} отключены кнопкой серии", page, one_episode)
 
     def conform_server() -> dict:
-        before = c.api("/api/auth")["vk"]["has_password"]
-        page.goto(c.stand.base + "/", wait_until="domcontentloaded")
-        page.wait_for_selector(".series-card", timeout=30000)
-        page.get_by_role("button", name="Настройки").click(timeout=30000)
-        page.get_by_label(text_of("conform.settings.url")).fill(conform_address())
-        page.get_by_label(text_of("conform.settings.local")).fill(LOCAL)
-        page.get_by_label(text_of("conform.settings.daemon")).fill(REMOTE)
-        page.get_by_role("button", name="Сохранить").click()
-        page.locator(".conform-status .pill-success").wait_for(timeout=60000)
-        saved = c.api("/api/conform/settings")
-        assert saved["work_dir"] == LOCAL and saved["work_dir_remote"] == REMOTE and saved["url"], saved
-        after = c.api("/api/auth")["vk"]["has_password"]
-        assert before and after, f"the saving of the tab lost the password of VK: {before} -> {after}"
+        facts = type_conform_server(c, page)
         page.get_by_role("button", name="Закрыть").click()
-        return {"daemon": "up", "work_dir": saved["work_dir"], "vk_password_kept": after}
+        return facts
 
     c.scenario("сервер выравнивания набран в настройках, сохранён кнопкой; демон отвечает; пароль VK цел", page, conform_server)
 
@@ -844,7 +875,7 @@ def _passed(verdict: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("phase", choices=("reset", "setup", "levers", "sync", "again", "finish", "ruchime"))
+    parser.add_argument("phase", choices=("reset", "setup", "levers", "sync", "again", "finish", "ruchime", "queue"))
     parser.add_argument("--work", required=True)
     parser.add_argument("--profiles", choices=("api", "hand"), default="api",
                         help="hand: the profiles made in the constructor by ui_profiles.py (the channel is named by their rule)")
@@ -876,6 +907,8 @@ def main() -> int:
                     setup(campaign, page)
                 elif args.phase == "sync":
                     sync(campaign, page)
+                elif args.phase == "queue":
+                    queue(campaign, page)
                 elif args.phase == "ruchime":
                     ruchime(campaign, page)
                 elif args.phase == "again":
