@@ -15,8 +15,9 @@ echo "$@" > "$FAKE_DIR/ffmpeg_args"
 out="${@: -1}"
 # The stalled writer must be one process, as the real ffmpeg is: a child left by a killed shell keeps the pipe open.
 if [ -f "$FAKE_DIR/stall" ]; then exec sleep 30; fi
-# The line ffmpeg prints for an HLS segment it skips, followed by more warnings than the tail of its output keeps.
-if [ -f "$FAKE_DIR/skip" ]; then
+# The line ffmpeg prints at a refusal of an HLS segment (also of one the next look took), followed by more warnings than the
+# tail of its output keeps.
+if [ -f "$FAKE_DIR/refuse" ]; then
   echo "[hls @ 0x55] Failed to open segment 2 of playlist 0" >&2
   for i in $(seq 1 80); do echo "[h264 @ 0x56] Packet corrupt ($i)" >&2; done
 fi
@@ -106,23 +107,37 @@ async def test_a_broken_off_stream_is_not_taken_for_a_finished_episode(fake, tmp
 
 
 @pytest.mark.asyncio
-async def test_a_skipped_segment_fails_a_download_whose_length_is_whole(fake, tmp_path):
+async def test_a_refusal_of_a_segment_that_the_next_look_took_leaves_a_whole_download_whole(fake, tmp_path):
     state, _ = fake
-    (state / "skip").write_text("1")  # the length of the file is the announced one, yet ffmpeg said it skipped segment 2
+    (state / "refuse").write_text("1")  # ffmpeg said it failed to open segment 2, and the file holds the whole announced length
     target = str(tmp_path / "e.mp4")
     ok, error = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"}, target, noop)
-    assert not ok and "пропустил сегменты" in error and "№2" in error
+    assert (ok, error) == (True, "") and os.path.isfile(target)
+
+
+@pytest.mark.asyncio
+async def test_a_file_short_of_the_announced_length_by_a_segment_is_incomplete_and_names_the_refused_segment(fake, tmp_path):
+    state, set_durations = fake
+    (state / "refuse").write_text("1")
+    set_durations(1281.78, 1267.6)  # the length of a copy the service refused as a foreign video, against the whole one
+    target = str(tmp_path / "e.mp4")
+    ok, error = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"}, target, noop)
+    assert not ok and "обрыв" in error and "№2" in error and "1268" in error and "1282" in error
     assert not os.path.exists(target) and not os.path.exists(target + ".download.mp4")
     assert _transient_download_error(error)
 
 
 @pytest.mark.asyncio
-async def test_a_download_just_above_the_threshold_passes(fake, tmp_path):
+async def test_a_download_is_complete_up_to_the_pause_that_names_a_lost_piece(fake, tmp_path):
     _, set_durations = fake
-    set_durations(1200, 1200 * ytdlp.MIN_COMPLETE_FRACTION + 1)
-    ok, _ = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"},
-                                                str(tmp_path / "e.mp4"), noop)
+    set_durations(1200, 1200 - ytdlp.HOLE_S)
+    target = str(tmp_path / "e.mp4")
+    ok, _ = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"}, target, noop)
     assert ok
+    set_durations(1200, 1200 - ytdlp.HOLE_S - 0.5)
+    other = str(tmp_path / "f.mp4")
+    ok, error = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"}, other, noop)
+    assert not ok and "обрыв" in error and not os.path.exists(other)
 
 
 @pytest.mark.asyncio

@@ -40,18 +40,15 @@ PROTOCOL_WHITELIST = ["-protocol_whitelist", "file,http,https,tcp,tls"]
 # CDNs of the web players stall on open and drop a stream halfway: ffmpeg reconnects instead of failing.
 RECONNECT_ARGS = ["-reconnect", "1", "-reconnect_streamed", "1",
                   "-reconnect_on_network_error", "1", "-reconnect_delay_max", "30"]
-# A segment the CDN refuses once is asked for again by the HLS demuxer instead of being skipped (it skips by default); the same
-# count of looks as the CDN gets elsewhere in this module. What is still lost is caught by the line of a skipped segment.
+# A refused segment is asked for again by the HLS demuxer (by default it skips it); one still refused after these looks ends the
+# stream there and ffmpeg exits 0 with a file that stops short. The count is that of the looks the CDN gets elsewhere here.
 SEGMENT_RETRIES = 3
-# ffmpeg exits 0 on a broken-off HLS stream, so a download counts only above this share of the
-# duration the stream announces.
-MIN_COMPLETE_FRACTION = 0.85
-# A pause between two frames longer than this is a piece of the video the download lost (ffmpeg skips a segment it cannot
-# open and still exits 0; the audio and the length of the file stay whole), not the pace of the picture.
+# A pause between two frames longer than this is a piece of the video the download lost, not the pace of the picture; a file
+# shorter than the stream announces by more than this lacks a piece the same way (the service refuses a voice-over short of one).
 HOLE_S = 1.0
-# ffmpeg skips an HLS segment it cannot open and exits 0: the file is shorter by the segment, which a share of the duration does not
-# see, and the voice-over missing a piece is refused by the service as a foreign video. This line is the one sign of the loss.
-_SKIPPED_SEGMENT = re.compile(rb"Failed to open segment (\d+) of playlist \d+")
+# ffmpeg prints this line at every refusal of a segment, also of one the next look took: it explains an incomplete file and
+# does not make one, which is judged by what the file holds.
+_REFUSED_SEGMENT = re.compile(rb"Failed to open segment (\d+) of playlist \d+")
 STALL_TIMEOUT_S = 180.0
 DOWNLOAD_TIMEOUT_S = 3600.0
 PROBE_ATTEMPTS = 3
@@ -156,17 +153,17 @@ def ffmpeg_progress(fields: dict, duration: float,
             "speed": round(speed, 1)}
 
 
-async def _drain_stderr(stream, lost: list[int] | None = None) -> list[bytes]:
+async def _drain_stderr(stream, refused: list[int] | None = None) -> list[bytes]:
     """Read stderr in the background so a full pipe never blocks the process (a broken VK HLS floods ffmpeg with thousands of
-    'Packet corrupt' lines). Only the tail is kept for the error text; the numbers of skipped segments go to `lost` as the lines
+    'Packet corrupt' lines). Only the tail is kept for the error text; the numbers of refused segments go to `refused` as the lines
     arrive, before the tail pushes them out."""
     tail: list[bytes] = []
     while True:
         line = await stream.readline()
         if not line:
             break
-        if lost is not None and (skipped := _SKIPPED_SEGMENT.search(line)):
-            lost.append(int(skipped.group(1)))
+        if refused is not None and (match := _REFUSED_SEGMENT.search(line)):
+            refused.append(int(match.group(1)))
         tail.append(line)
         if len(tail) > 50:
             del tail[0]
@@ -307,8 +304,8 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
     cmd.extend(["-i", stream_url, "-c", "copy", "-progress", "pipe:1", "-nostats", tmp_out])
 
     proc = await spawn(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    skipped: list[int] = []
-    stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr, skipped))
+    refused: list[int] = []
+    stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr, refused))
     fields: dict[str, str] = {}
     last_size = 0
     last_at = time.monotonic()
@@ -350,14 +347,11 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
         await storage.discard(tmp_out)
         return False, stopped
     if proc.returncode == 0:
-        if skipped:
-            await storage.discard(tmp_out)
-            return False, (f"обрыв: ffmpeg пропустил сегменты потока ({len(skipped)}, первый №{skipped[0]}) — "
-                           "неполная загрузка")
         got = await _local_duration(tmp_out)
-        if got <= 0 or (duration > 0 and got < duration * MIN_COMPLETE_FRACTION):
+        if got <= 0 or (duration > 0 and got < duration - HOLE_S):
             await storage.discard(tmp_out)
-            return False, (f"обрыв: скачано {got:.0f} с из ожидаемых ~{duration:.0f} с — "
+            cause = f", отказов CDN на сегментах: {len(set(refused))}, первый №{refused[0]}" if refused else ""
+            return False, (f"обрыв: скачано {got:.0f} с из ожидаемых ~{duration:.0f} с{cause} — "
                            "неполная загрузка")
         await storage.call(os.replace, tmp_out, full_output_path, owns=(tmp_out, full_output_path))
         await on_progress({"phase": "download", "progress": 100, "eta": 0, "speed": 0.0})
@@ -381,8 +375,8 @@ async def download(video_url: str, full_output_path: str,
     """Two-phase video download. Supports parts of a ready file, direct ffmpeg copy and yt-dlp.
 
     `whole_video` asks for a video with no hole: the file is a file of the library, which stays as it was fetched. A voice-over
-    is not asked for the pause check (its picture only guides the service), but a segment ffmpeg skipped fails every stream
-    copy: the service refused each voice-over short of segments (1 % of frames matched) and took each whole one.
+    is not asked for the pause check (its picture only guides the service), but a stream copy short of the announced length
+    fails: the service refused each voice-over short of segments (1 % of frames matched) and took each whole one.
 
     `progressive` marks one ready file address: it is asked for in parts at once, and by one stream when the server
     cannot serve parts. The name is owned from the first step to the last: the programs, their leftovers and the publication."""
