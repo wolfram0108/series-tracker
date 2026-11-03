@@ -75,6 +75,7 @@ OWNERS: dict[str, tuple[str, str]] = {
 COLUMN_OWNERS: dict[str, dict[str, tuple[str, str]]] = {
     "media_items": {
         "status": ("downloads", "docstring of modules/downloads/repository.py: media_items.status / final_filename"),
+        "rename_to": ("downloads", "docstring of modules/downloads/repository.py: media_items.status / final_filename / rename_to"),
         "final_filename": ("downloads", "docstring of modules/downloads/repository.py: media_items.status / final_filename"),
         "slicing_status": ("slicing", "docstring of modules/slicing/repository.py: media_items.slicing_status / chapters / chapters_filtered"),
         "chapters": ("slicing", "docstring of modules/slicing/repository.py: media_items.slicing_status / chapters / chapters_filtered"),

@@ -20,11 +20,19 @@ from test_downloads_module import (FakeDownloader, FakeNeighbours, Probe, _add_i
 PLAN_IN = "in_plan_single"
 
 
-def _task(db_path, uid, status, save_path, *, url="u"):
+def _task(db_path, uid, status, save_path, *, url="u", work_path=None, identity=None):
+    """`identity` is (size, file number) of the whole work file, as the beginning of its publication records it."""
+    size, ino = identity if identity else (None, None)
     with sqlite3.connect(db_path) as conn:
-        conn.execute("INSERT INTO download_tasks (task_key, series_id, video_url, save_path, status, task_type) "
-                     "VALUES (?, 2, ?, ?, ?, 'vk_video')", (uid, url, save_path, status))
+        conn.execute("INSERT INTO download_tasks (task_key, series_id, video_url, save_path, status, task_type, work_path, "
+                     "work_size, work_ino) VALUES (?, 2, ?, ?, ?, 'vk_video', ?, ?, ?)",
+                     (uid, url, save_path, status, work_path, size, ino))
         conn.commit()
+
+
+def _identity(path):
+    info = os.stat(path)
+    return info.st_size, info.st_ino
 
 
 def _work(media_dir, uid, name="Серия 01.mp4"):
@@ -136,7 +144,7 @@ async def test_a_stop_after_the_file_took_its_name_is_finished_when_the_process_
     started, db_path, media_dir = boot
     final = _two_videos_for_one_name(db_path, media_dir)
     _write(final, b"new")  # the replacement was done, the database was not written
-    _task(db_path, "new", "publishing", final, url="https://vk.com/video-1_77")
+    _task(db_path, "new", "publishing", final, url="https://vk.com/video-1_77", identity=_identity(final))
 
     await started.up()
 
@@ -158,6 +166,24 @@ async def test_a_stop_before_the_file_took_its_name_is_finished_when_the_process
 
     assert await _wait(lambda: _items(db_path)["new"]["status"] == "completed")
     assert open(final, "rb").read() == b"new" and not os.path.exists(_work(media_dir, "new"))
+    assert _items(db_path)["old"]["final_filename"] is None and _tasks(db_path) == []
+
+
+@pytest.mark.asyncio
+async def test_a_file_under_the_name_that_is_not_the_one_of_the_task_does_not_end_its_publication(boot):
+    """The work file is not where the task says (its path was lost), and an older video lies under the name: that proves no
+    replacement, so the video is fetched again, and the older file stays until the new one replaces it."""
+    started, db_path, media_dir = boot
+    final = _two_videos_for_one_name(db_path, media_dir)
+    _write(os.path.join(media_dir, f".new.mp4"), b"the whole work file of the task, in a place it does not know")
+    _task(db_path, "new", "publishing", final, url="https://vk.com/video-1_77", work_path=_work(media_dir, "new"),
+          identity=(len(b"the whole work file of the task, in a place it does not know"), 123456789))
+
+    await started.up()
+
+    assert await _wait(lambda: started.dl.started == ["https://vk.com/video-1_77"])
+    assert await _wait(lambda: _items(db_path)["new"]["status"] == "completed")
+    assert open(final, "rb").read() != b"old"  # the new video replaced it
     assert _items(db_path)["old"]["final_filename"] is None and _tasks(db_path) == []
 
 

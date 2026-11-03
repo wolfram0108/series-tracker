@@ -6,10 +6,11 @@ renumbered, a video goes, an episode or a season is switched off, an address com
 operations. A scenario is a few of them in an order; after it the state must satisfy the invariants of `check`. The
 invariants say what the mechanism guarantees whatever the operations were; a violation names the invariant and the rows.
 
-L1 a name a row holds is a file with the video of that row; L2 a name is held by one row; L3 no whole file lies in the
-library that no row holds; L4 no work file lies without a task; L5 a row is ready exactly when it holds a name; L6 no
-task is left half-way; L7 the file of a row the configuration took out is gone; L8 (converged) every row the plan wants
-has its file, under the name its number gives, with its video.
+L1 a name a row holds is a file with the video of that row (while the file is on its way to another name it may lie aside
+or under the new one); L2 a name is held by one row; L3 no whole file lies in the library that no row holds; L4 no work file
+lies without a task; L5 a row is ready exactly when it holds a name; L6 no task is left half-way; L7 the file of a row the
+configuration took out is gone; L8 (converged) every row the plan wants has its file, under the name its number gives, with
+its video; L10 (converged) no row owes a move and no file lies aside.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ from core.db import Database
 from core.envelope import Envelope
 from modules.catalog import CatalogModule
 from modules.downloads import DownloadsModule
+from modules.renaming import RenamingModule
 from modules.scan import ScanModule
 from scan_support import STUCK_S, row
 from series_factory import create_series, source
@@ -61,18 +63,13 @@ class ScriptedDownloader(FakeDownloader):
         return done
 
 
-class Renaming(Neighbours):
-    """The renaming of the system as downloads sees it: before a pass dispatches, the ready files are given the names their
-    numbers give now, and the new names are written to the rows."""
+class ModelWorld(Neighbours):
+    """The neighbours of the model. The renaming is not among them: the model runs the real module, which counts the names of
+    the ready files from the rules and asks the owner of the files (downloads) to bring the files to them."""
 
-    def __init__(self, bus, harness: "Harness") -> None:
-        self.harness = harness
-        super().__init__(bus)
-
-    async def on_reprocess(self, env) -> dict:
-        for unique_id, name in self.harness.rename_ready_files():
-            self.send_command("downloads.item.set_filename", {"unique_id": unique_id, "filename": name})
-        return {"ok": True}
+    def register(self) -> None:
+        super().register()
+        self._handlers = [each for each in self._handlers if each[0] != "renaming.reprocess"]
 
 
 class Harness:
@@ -97,7 +94,7 @@ class Harness:
                 source(url=URL, source_type="web_video", parser_profile_id=1)])
             self.series_id, self.source_id = created.series_id, created.source_ids[0]
         self.bus = Bus()
-        self.world = Renaming(self.bus, self)
+        self.world = ModelWorld(self.bus)
         self.world.settings_values["max_parallel_downloads"] = "1"
         self.world.sources = [(self.source_id, URL)]
         self.push_rows()
@@ -105,7 +102,7 @@ class Harness:
         self.downloads = DownloadsModule(self.bus, db, downloader=self.downloader)
         self.runner = Runner(self.bus, [self.world, CatalogModule(self.bus, db),
                                         ScanModule(self.bus, db, scheduler_tick=None, table_wait_s=STUCK_S),
-                                        self.downloads, self.probe])
+                                        RenamingModule(self.bus, db), self.downloads, self.probe])
         await self.runner.start()
         self.bus.publish(Envelope(topic="system.started", kind="event"))  # what run.py says when every module is up
 
@@ -116,17 +113,6 @@ class Harness:
     async def restart(self) -> None:
         await self.down()
         await self.up()
-
-    def rename_ready_files(self) -> list[tuple[str, str]]:
-        """Two steps, so that two files may swap names; returns (row, new name) of the files moved."""
-        moves = [(item["unique_id"], item["final_filename"], name_of(item)) for item in self.items()
-                 if item["status"] == "completed" and item["final_filename"] and item["final_filename"] != name_of(item)
-                 and (self.media / item["final_filename"]).is_file() and item["plan_status"] in IN_PLAN]
-        for _, old, _ in moves:
-            os.replace(self.media / old, self.media / f"~{old}")
-        for _, old, new in moves:
-            os.replace(self.media / f"~{old}", self.media / new)
-        return [(uid, new) for uid, _, new in moves]
 
     def push_rows(self) -> None:
         self.world.rows = [row(self.series_id, self.source_id, key, season, episode, link=link)
@@ -215,18 +201,25 @@ def check(h: Harness, *, converged: bool) -> list[str]:
         if name in held:
             found.append(f"L2 {name!r} is held by {held[name]} and {label(item)}")
         held[name] = label(item)
-        if name not in files:
+        here = next((place for place in (name, f".renaming.{item['unique_id']}", item.get("rename_to")) if place in files), None)
+        if here is None:
             found.append(f"L1 {label(item)} holds {name!r}, which is not there")
-        elif files[name] != video_of(item):
-            found.append(f"L1 {label(item)} holds {name!r}, which has {files[name]!r}, not {video_of(item)!r}")
+        elif files[here] != video_of(item):
+            found.append(f"L1 {label(item)} holds {name!r}, which has {files[here]!r}, not {video_of(item)!r}")
+        if converged and item.get("rename_to"):
+            found.append(f"L10 {label(item)} still owes a move to {item['rename_to']!r}")
         if item["is_ignored_by_user"] or item["plan_status"] == "removed":
             found.append(f"L7 {label(item)} was taken out and still holds {name!r}")
     live_keys = {task["task_key"] for task in tasks if task["status"] in LIVE}
+    owed = {item.get("rename_to") for item in items if item.get("rename_to")}
     for name in files:
-        if name.startswith("."):
+        if name.startswith(".renaming."):
+            if converged or not any(name == f".renaming.{item['unique_id']}" for item in items):
+                found.append(f"L10 {name!r} lies aside and no row is moving a file")
+        elif name.startswith("."):
             if not any(name.startswith(f".{key}.") for key in live_keys):
                 found.append(f"L4 work file {name!r} has no task")
-        elif name not in held:
+        elif name not in held and name not in owed:
             found.append(f"L3 {name!r} lies in the library and no row holds it")
     for task in tasks:
         if task["status"] in LIVE and not h.waits_for_name(task, items):

@@ -1,6 +1,6 @@
 """Module downloads: the video of a series into its library (yt-dlp, ffmpeg). Decision Р-13.
 
-Owns: the table download_tasks (the video part) and the columns media_items.status and final_filename.
+Owns: the table download_tasks (the video part) and the columns media_items.status, final_filename and rename_to.
 
 The model. A row of the plan is READY exactly when it holds a file name; the plan says which rows are wanted and what they
 show; a task is the work order of one row. What lies in the library is what the plan wants: `Library` (library.py) keeps the
@@ -38,10 +38,16 @@ Queries / commands:
       record in media_items or download_tasks (the voice-overs of a series go to a temporary directory). The executor keeps no
       state: the owner of the queue (voices) sends the command again after a restart. It has a limit of its own, the setting
       max_parallel_dub_downloads (2 by default).
-  downloads.item.set_filename, downloads.item.set_status - renaming and slicing report what they did with a ready row.
+  downloads.items.rename {series_id, names: {key: name}} -> {renamed} - the names the plan gives the ready files of the series now
+      (all of them: a key whose name is the one it has owes nothing). The obligation is recorded first (`media_items.rename_to`),
+      then the files move to their names, a ring of files that swap names included, and each name is recorded when its file lies
+      under it; a name held by what does not give it up is not taken and the row keeps its own. A stop at any step is finished
+      from what the disk shows, at the next look at the series.
+  downloads.item.set_filename, downloads.item.set_status - slicing reports a name and a status of a file it made or took over.
 
 Events out:
-  downloads.item.renamed {series_id, unique_id, filename} - the file name of an episode changed (voices follow it).
+  downloads.item.renamed {series_id, unique_id, filename} - the file name of an episode changed, after the file lies under it
+      (voices follow it).
   downloads.queue.changed {tasks, count} - the queue changed (throttled on progress): SSE download_queue_update.
   downloads.fetch.started {key, series_id, path}, downloads.fetch.finished {key, ok, error, transient, path, series_id}.
   series.status.contribution {source: downloads, ...} - the fold of statuses (Р-11).
@@ -124,10 +130,12 @@ class Reconciled:
     retired: int = 0    # files another video displaced, removed
     removed: int = 0    # files of what the configuration took out, removed
     swept: int = 0      # work files that had no task, removed
+    renamed: int = 0    # files that reached the names their numbers give
 
     @property
     def changed(self) -> bool:
-        return any((self.finished, self.released, self.adopted, self.dropped, self.retired, self.removed, self.swept))
+        return any((self.finished, self.released, self.adopted, self.dropped, self.retired, self.removed, self.swept,
+                    self.renamed))
 
 
 class DownloadsModule(BaseModule):
@@ -147,7 +155,7 @@ class DownloadsModule(BaseModule):
         self._stopping = False        # a module that is stopping starts no work
         self._locks: dict[int, asyncio.Lock] = {}  # one look at a series at a time
         super().__init__(bus)
-        self.library = Library(self.repo, self._naming, self.log)
+        self.library = Library(self.repo, self._naming, self.log, self._neighbours)
         self._publication = Publication(self.repo, self.library, self.log, running=lambda task_id: task_id in self._active,
                                         resume=self._look_again, end_task=self._end_task)
 
@@ -162,6 +170,7 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.fetch", self.on_fetch)
         self.handle(WORK_WITHDRAWN, self.on_work_withdrawn)
         self.handle("downloads.fs.sync", self.on_fs_sync)
+        self.handle("downloads.items.rename", self.on_items_rename)
         self.handle("downloads.item.set_filename", self.on_set_filename)
         self.handle("downloads.item.set_status", self.on_set_status)
         self.handle("series.deleted", self.on_series_deleted)
@@ -195,6 +204,7 @@ class DownloadsModule(BaseModule):
         for series in all_series:
             if series.get("kind") == SeriesKind.VIDEO:
                 await self._look_at(series)
+        await self._end_orphans({each["id"] for each in all_series})
         await self._pump()
 
     def _lock(self, series_id: int) -> asyncio.Lock:
@@ -225,6 +235,7 @@ class DownloadsModule(BaseModule):
             series = await self.request("catalog.series.get", {"series_id": series_id})
         except BusRequestError as exc:
             self.log.warning("серия %d: не просмотрена после освобождения пути: %s", series_id, exc)
+            await self._end_orphans()  # the series may be gone: what its deletion could not remove is retried
             return
         await self._look_at(series)
         await self._pump()
@@ -256,6 +267,19 @@ class DownloadsModule(BaseModule):
     async def _naming(self, series: dict, item: dict) -> str:
         reply = await self.request("rules.format_filename", {"series": series, "media_item": item})
         return reply["filename"]
+
+    async def _neighbours(self, series: dict) -> list[dict]:
+        """The other video series whose folder is this one, holds it or lies inside it: a path of one is a path of the other."""
+        base = os.path.normpath(series["save_path"])
+        near = []
+        for each in await self.request("catalog.series.list", {}):
+            other = each.get("save_path") or ""
+            if each["id"] == series["id"] or each.get("kind") != SeriesKind.VIDEO or not os.path.isabs(other):
+                continue
+            other = os.path.normpath(other)
+            if os.path.commonpath([base, other]) in (base, other):
+                near.append(each)
+        return near
 
     # --- events -------------------------------------------------------------------
 
@@ -340,18 +364,29 @@ class DownloadsModule(BaseModule):
 
     async def _reconcile(self, series: dict) -> Reconciled:
         """Bring the files, the rows and the tasks of a series to what the plan says, reading the state as it is now. The
-        order matters: a stopped publication is finished first (it makes rows ready), ready rows adopt the files that lie,
-        the tasks that nobody needs end, then the files that are not wanted go."""
+        order matters: a stopped publication is finished first (it makes rows ready), the files on their way to other names
+        arrive (they free names), ready rows adopt the files that lie, the tasks that nobody needs end, then the files that
+        are not wanted go."""
         if series.get("kind") != SeriesKind.VIDEO or not os.path.isabs(series.get("save_path") or ""):
             return Reconciled()
         finished = await self._publication.finish_unfinished(series)
+        renamed = await self._settle(series)
         released = await self.library.release_unbacked(series)
         adopted = await self.library.adopt(series)
         dropped = await self._drop_tasks_without_need(series["id"])
         retired = await self.library.retire_superseded(series)
         removed = await self.library.remove_unwanted(series)
         swept = await self.library.sweep_work(series)
-        return Reconciled(finished, released, adopted, dropped, retired, removed, swept)
+        return Reconciled(finished, released, adopted, dropped, retired, removed, swept, renamed)
+
+    async def _settle(self, series: dict) -> int:
+        """The files on their way to other names go on; each name that is recorded is told to those who follow it."""
+        recorded = await self.library.settle_names(series)
+        for unique_id, filename in recorded:
+            self.publish_event("downloads.item.renamed", {"series_id": series["id"], "unique_id": unique_id, "filename": filename})
+        if recorded:
+            self._look_again(series["id"])  # a name that is free now may be the one a downloaded file waits for
+        return len(recorded)
 
     async def _drop_tasks_without_need(self, series_id: int) -> int:
         """A task lives while the plan wants its video and the row has no file: one whose row is gone, whose row left the plan
@@ -418,14 +453,34 @@ class DownloadsModule(BaseModule):
 
     async def on_series_deleted(self, env: Envelope) -> None:
         """Cascade Р-19 and Д2: the downloads of the series stop, what they wrote goes (a finished file stays: deleting a
-        series deletes no files), then its tasks go."""
+        series deletes no files), and each task goes with it. A task that could not remove what it wrote stays, failed, as the
+        record of what is left: it is tried again when the queue is cleared, when a path is free and at the start."""
         series_id = env.payload["series_id"]
         for task in await self.repo.tasks_for_series(series_id):
             await self._cancel_runner(task["id"])
-            await self.library.clear_task_files(task)
-        await self.repo.delete_for_series(series_id)
+            await self._end_task(task)
         await self._broadcast_queue()
         self.publish_event("series.purged", {"series_id": series_id, "owner": self.name})
+
+    async def _end_orphans(self, existing: set[int] | None = None) -> None:
+        """The tasks of series that are gone and could not clear after themselves are tried again."""
+        try:
+            ids = existing if existing is not None else {each["id"] for each in await self.request("catalog.series.list", {})}
+        except BusRequestError as exc:
+            self.log.warning("каталог недоступен: задачи удалённых сериалов не проверены: %s", exc)
+            return
+        await self._discard_tasks(await self.repo.tasks_without_series(ids))
+
+    async def on_items_rename(self, env: Envelope) -> dict:
+        """The names the plan gives the ready files of a series now: the obligation is written down, then the files move."""
+        series_id = env.payload["series_id"]
+        series = await self.request("catalog.series.get", {"series_id": series_id})
+        if series.get("kind") != SeriesKind.VIDEO or not os.path.isabs(series.get("save_path") or ""):
+            return {"renamed": 0}
+        async with self._lock(series_id):
+            await self.repo.record_renames(series_id, env.payload["names"])
+            renamed = await self._settle(series)
+        return {"renamed": renamed}
 
     # --- the disk check ------------------------------------------------------------
 

@@ -1,10 +1,14 @@
-"""The SQL of downloads: the table download_tasks and the columns media_items.status and final_filename (column ownership:
-the rows and plan_status are scan's, slicing_* are slicing's, read only here).
+"""The SQL of downloads: the table download_tasks and the columns media_items.status, final_filename and rename_to (column
+ownership: the rows and plan_status are scan's, slicing_* are slicing's, read only here).
 
 The state of a row of the plan that downloads owns is two columns that say one thing. A row is READY exactly when it holds
 a file name (status 'completed' and final_filename set); otherwise it is pending, downloading (a task has it) or in error.
 `register_file` and `release_file` are the only writes that move a row between the two; nothing in this module leaves a row
 ready without a name or with a name and not ready.
+
+A ready row whose file is on its way to another name carries that name in `rename_to` from before the file moves until the
+name is recorded: the row holds both names for the others (neither is free to take), and a stop at any step leaves the
+obligation, which the disk then tells how to finish.
 
 A task is a work order for one row. What it holds of the plan is a snapshot taken when it begins (`claim`: the address of
 the video) or a projection kept current (`retarget_task`: where the file will lie); the plan stays the truth, and where the
@@ -200,11 +204,12 @@ class DownloadsRepository:
             "UPDATE download_tasks SET status='pending' WHERE "
             f"task_type='vk_video' AND status IN {_RUNNING}")
 
-    async def delete_for_series(self, series_id: int) -> None:
-        """The series is deleted (Р-19): its tasks go."""
-        await self._db.execute(
-            "DELETE FROM download_tasks WHERE series_id=? AND "
-            "task_type='vk_video'", (series_id,))
+    async def tasks_without_series(self, series_ids: Iterable[int]) -> list[dict]:
+        """Tasks of a series that does not exist any more: the record of what its deletion could not remove."""
+        ids = list(series_ids)
+        marks = ", ".join("?" * len(ids)) or "NULL"
+        return await self._db.fetch_all(
+            f"SELECT {_TASK} FROM download_tasks WHERE task_type='vk_video' AND series_id NOT IN ({marks})", tuple(ids))
 
     async def work_owners(self, series_id: int) -> tuple[set[str], set[str]]:
         """(keys of the rows of the series, keys of its tasks): a work file of a row that has no task has no owner."""
@@ -222,12 +227,15 @@ class DownloadsRepository:
 
     # --- a file takes its name -----------------------------------------------------
 
-    async def begin_publish(self, task_id: int, target: str, relative: str) -> str:
+    async def begin_publish(self, task_id: int, target: str, relative: str, *, foreign: bool = False,
+                            identity: tuple[int, int] | None = None) -> str:
         """The file is whole and is about to take the name `relative` (the path `target`). The plan is read again in the
         same step the task says `publishing`, and the task goes on only if the file is still what the plan wants: the row is
         in the plan and not switched off ('gone' otherwise), it still shows the video the file was fetched from ('stale'),
-        and no other row the plan wants holds the name ('taken': the task waits for the name, `publishing`). The task is
-        recorded as `publishing` with the path, so that a stop at any point leaves a record from which the step is finished."""
+        and no other row the plan wants holds the name ('taken': the task waits for the name, `publishing`); a row of another
+        series that holds the same file (`foreign`) takes it the same. The task is recorded as `publishing` with the path and the
+        identity of its whole work file (size, file number), so that a stop at any point leaves a record from which the step is
+        finished and from which a file under the name is known to be this one."""
         def work(conn) -> str:
             task = conn.execute("SELECT * FROM download_tasks WHERE id=?", (task_id,)).fetchone()
             row = conn.execute("SELECT series_id, plan_status, is_ignored_by_user, download_url, source_url FROM media_items "
@@ -237,21 +245,27 @@ class DownloadsRepository:
             if (row["download_url"] or row["source_url"]) != task["video_url"]:
                 return PUBLISH_STALE
             taken = conn.execute(
-                "SELECT 1 FROM media_items WHERE series_id=? AND final_filename=? AND unique_id != ? "
-                f"AND is_ignored_by_user=0 AND plan_status IN {_IN_PLAN}", (row["series_id"], relative, task["task_key"])).fetchone()
-            conn.execute("UPDATE download_tasks SET status='publishing', save_path=?, progress=100, dlspeed=0, eta=0, updated_at=? "
-                         "WHERE id=?", (target, _now(), task_id))
-            return PUBLISH_TAKEN if taken is not None else PUBLISH_OK
+                "SELECT 1 FROM media_items WHERE series_id=? AND (final_filename=? OR rename_to=?) AND unique_id != ? "
+                f"AND is_ignored_by_user=0 AND plan_status IN {_IN_PLAN}", (row["series_id"], relative, relative, task["task_key"])).fetchone()
+            size, ino = identity if identity is not None else (None, None)
+            conn.execute("UPDATE download_tasks SET status='publishing', save_path=?, progress=100, dlspeed=0, eta=0, updated_at=?, "
+                         "work_size=COALESCE(?, work_size), work_ino=COALESCE(?, work_ino) WHERE id=?",
+                         (target, _now(), size, ino, task_id))
+            return PUBLISH_TAKEN if taken is not None or foreign else PUBLISH_OK
         return await self._db.transaction(work)
 
-    async def finish_publish(self, task_id: int, unique_id: str, relative: str) -> None:
+    async def finish_publish(self, task_id: int, unique_id: str, relative: str, *, leftovers: bool = False) -> None:
         """The file has its name: the row holds it, every other row of the series that held that name lets it go (the file
-        is another video now: they wait for a file again), and the task is done, in one step."""
+        is another video now: they wait for a file again), and the task is done, in one step. With `leftovers` (pieces of the
+        download that could not be removed) the task stays, failed, as the record of what is left, until they are gone."""
+        done = ("UPDATE download_tasks SET status='error', error_message=?, updated_at=? WHERE id=?",
+                ("рабочие файлы задачи не удалены", _now(), task_id)) if leftovers else (
+                "DELETE FROM download_tasks WHERE id=?", (task_id,))
         await self._db.execute_many([
-            ("UPDATE media_items SET status='pending', final_filename=NULL WHERE final_filename=? AND unique_id != ? AND series_id="
-             "(SELECT series_id FROM media_items WHERE unique_id=?)", (relative, unique_id, unique_id)),
-            ("UPDATE media_items SET status='completed', final_filename=? WHERE unique_id=?", (relative, unique_id)),
-            ("DELETE FROM download_tasks WHERE id=?", (task_id,))])
+            ("UPDATE media_items SET status='pending', final_filename=NULL, rename_to=NULL WHERE final_filename=? AND unique_id != ? "
+             "AND series_id=(SELECT series_id FROM media_items WHERE unique_id=?)", (relative, unique_id, unique_id)),
+            ("UPDATE media_items SET status='completed', final_filename=?, rename_to=NULL WHERE unique_id=?", (relative, unique_id)),
+            done])
 
     async def fail_publish(self, task_id: int, unique_id: str, message: str) -> None:
         """The file could not be put under its name and certainly was not: the task fails, its work file stays."""
@@ -283,12 +297,12 @@ class DownloadsRepository:
     async def register_file(self, unique_id: str, filename: str) -> None:
         """The row holds a file that lies in the library: it is ready."""
         await self._db.execute(
-            "UPDATE media_items SET status='completed', final_filename=? WHERE unique_id=?", (filename, unique_id))
+            "UPDATE media_items SET status='completed', final_filename=?, rename_to=NULL WHERE unique_id=?", (filename, unique_id))
 
     async def release_file(self, unique_id: str) -> None:
         """The row holds no file any more (gone, removed, displaced, overwritten): it is not ready, it waits for one."""
         await self._db.execute(
-            "UPDATE media_items SET status='pending', final_filename=NULL WHERE unique_id=?", (unique_id,))
+            "UPDATE media_items SET status='pending', final_filename=NULL, rename_to=NULL WHERE unique_id=?", (unique_id,))
 
     async def release_unbacked(self, series_id: int) -> int:
         """A whole single episode that is ready and holds no name is not ready (earlier versions let a displaced row stay
@@ -298,10 +312,45 @@ class DownloadsRepository:
             f"AND {_SINGLE}", (series_id,))
 
     async def set_item_filename(self, unique_id: str, filename: str) -> None:
-        """Renaming reports the new name of the file of a ready row."""
+        """Slicing reports the name of a file it made or took over."""
         await self._db.execute(
-            "UPDATE media_items SET final_filename=? WHERE unique_id=?",
+            "UPDATE media_items SET final_filename=?, rename_to=NULL WHERE unique_id=?",
             (filename, unique_id))
+
+    # --- a ready file on its way to another name ------------------------------------
+
+    async def record_renames(self, series_id: int, names: dict[str, str]) -> int:
+        """The names the plan gives the ready files of the series now: each ready row whose name differs carries the new one in
+        `rename_to`, each whose name is the same carries none (an earlier wish is cancelled). Written before any file moves.
+        Returns how many rows owe a move."""
+        def work(conn) -> int:
+            owed = 0
+            rows = conn.execute("SELECT unique_id, final_filename, rename_to FROM media_items WHERE series_id=? "
+                                "AND status='completed' AND final_filename IS NOT NULL", (series_id,)).fetchall()
+            for row in rows:
+                if row["unique_id"] not in names:
+                    continue
+                wanted = None if names[row["unique_id"]] == row["final_filename"] else names[row["unique_id"]]
+                if wanted != row["rename_to"]:
+                    conn.execute("UPDATE media_items SET rename_to=? WHERE unique_id=?", (wanted, row["unique_id"]))
+                owed += wanted is not None
+            return owed
+        return await self._db.transaction(work)
+
+    async def pending_renames(self, series_id: int) -> list[dict]:
+        return await self._db.fetch_all(
+            "SELECT unique_id, final_filename, rename_to FROM media_items WHERE series_id=? AND rename_to IS NOT NULL "
+            "AND status='completed' AND final_filename IS NOT NULL ORDER BY unique_id", (series_id,))
+
+    async def finish_rename(self, unique_id: str, filename: str) -> bool:
+        """The file lies under its new name: the row holds it and owes nothing."""
+        return bool(await self._db.execute(
+            "UPDATE media_items SET final_filename=?, rename_to=NULL WHERE unique_id=? AND rename_to=?",
+            (filename, unique_id, filename)))
+
+    async def drop_rename(self, unique_id: str) -> None:
+        """The file cannot go to the name (it is held by what is not this row's): the row keeps its name."""
+        await self._db.execute("UPDATE media_items SET rename_to=NULL WHERE unique_id=?", (unique_id,))
 
     async def set_item_status(self, unique_id: str, status: str) -> None:
         await self._db.execute(
@@ -338,8 +387,8 @@ class DownloadsRepository:
     async def wanted_holder(self, series_id: int, filename: str, *, except_uid: str) -> bool:
         """Whether a row the plan wants holds a file of this name: then the file is not an unwanted one."""
         row = await self._db.fetch_one(
-            "SELECT 1 FROM media_items WHERE series_id=? AND final_filename=? AND unique_id != ? "
-            f"AND is_ignored_by_user=0 AND plan_status IN {_IN_PLAN}", (series_id, filename, except_uid))
+            "SELECT 1 FROM media_items WHERE series_id=? AND (final_filename=? OR rename_to=?) AND unique_id != ? "
+            f"AND is_ignored_by_user=0 AND plan_status IN {_IN_PLAN}", (series_id, filename, filename, except_uid))
         return row is not None
 
     async def superseded_files(self, series_id: int) -> list[dict]:
@@ -358,11 +407,11 @@ class DownloadsRepository:
             "AND winner.final_filename IS NOT NULL", (series_id,))
 
     async def holders_of_file(self, series_id: int, filename: str, *, except_uid: str) -> list[dict]:
-        """The other rows of the series that hold a file of this name. A file one row holds is not an orphan that another
-        row may take."""
+        """The other rows of the series that hold a file of this name or are moving a file to it. A file one row holds is not
+        an orphan that another row may take."""
         return await self._db.fetch_all(
-            "SELECT unique_id, final_filename FROM media_items WHERE series_id=? AND final_filename=? AND unique_id != ?",
-            (series_id, filename, except_uid))
+            "SELECT unique_id, final_filename, rename_to FROM media_items WHERE series_id=? AND (final_filename=? OR rename_to=?) "
+            "AND unique_id != ?", (series_id, filename, filename, except_uid))
 
     async def downloaded_count(self, series_id: int) -> int:
         """The counter of what is downloaded for a VK series, as scan.media.downloaded_counts has it (a name held), for the

@@ -17,10 +17,14 @@ Queries:
 Событие renaming.finished {series_id} — контракт SSE renaming_complete.
 
 Имена вычисляет rules (rules.format_filename / format_torrent_file —
-Р-15, дифф 349/349 с реальными именами); физика (os.rename, rename в
-qBit) — здесь. Чужие колонки — командами владельцам:
-downloads.item.set_filename, slicing.file.set_path (slicing — фейк до
-своего разбора), torrents.db.files.upsert.
+Р-15, дифф 349/349 с реальными именами). Файлы видео-сериала принадлежат
+downloads: здесь считаются имена всех готовых файлов, а переносит их владелец
+(downloads.items.rename: обязательство записывается до переноса, кольцо
+из обмениваемых имён разрывается, чужой файл не затирается, новое имя
+объявляется после переноса). Физика нарезанных файлов (os.rename) и rename
+в qBit — здесь. Чужие колонки — командами владельцам: slicing.file.set_path
+(slicing — фейк до своего разбора; путь сообщается только после переноса или
+если файла нет), torrents.db.files.upsert.
 
 Ресьюмабельность: запись renaming_tasks живёт на время работы
 (и держит is_busy-семантику); незавершённые при старте перевыполняются
@@ -40,6 +44,8 @@ from core.envelope import Envelope
 from .repository import RenamingRepository
 
 _NO_HANDLER = "нет обработчика"
+# What became of a file the renaming was to move.
+MOVED, ABSENT, BLOCKED = "moved", "absent", "blocked"
 _VIDEO_EXT = (".mkv", ".avi", ".mp4", ".mov", ".wmv", ".webm", ".ts", ".m4v")
 _AUDIO_EXT = (".mka", ".ac3", ".dts", ".aac", ".flac", ".wav", ".ogg", ".eac3", ".m4a")
 _SUB_EXT = (".ass", ".srt", ".vtt", ".sub")
@@ -208,24 +214,20 @@ class RenamingModule(BaseModule):
         items = await self.request("scan.media.list",
                                    {"series_id": series_id})
         items_map = {i["unique_id"]: i for i in items}
-        renamed = 0
+        names: dict[str, str] = {}
 
         for item in items:
             if item.get("status") != "completed" \
                     or not item.get("final_filename"):
                 continue
-            old_rel = item["final_filename"]
             reply = await self.request("rules.format_filename", {
                 "series": series, "media_item": item,
-                "original_filename": old_rel})
-            new_rel = reply["filename"]
-            if new_rel == old_rel:
-                continue
-            if await self._rename_on_disk(base, old_rel, new_rel):
-                renamed += 1
-            # имя в БД обновляется в любом случае (поведение оригинала)
-            self.send_command("downloads.item.set_filename", {
-                "unique_id": item["unique_id"], "filename": new_rel})
+                "original_filename": item["final_filename"]})
+            names[item["unique_id"]] = reply["filename"]
+        renamed = 0
+        if names:  # all of them: a name that is the one a file has cancels an earlier wish
+            answer = await self.request("downloads.items.rename", {"series_id": series_id, "names": names})
+            renamed = int(answer.get("renamed") or 0)
 
         for child in await self._sliced_files(series_id):
             parent = items_map.get(child["source_media_item_unique_id"])
@@ -239,10 +241,12 @@ class RenamingModule(BaseModule):
             new_rel = reply["filename"]
             if new_rel == old_rel:
                 continue
-            if await self._rename_on_disk(base, old_rel, new_rel):
+            outcome = await self._rename_on_disk(base, old_rel, new_rel)
+            if outcome == MOVED:
                 renamed += 1
-            self.send_command("slicing.file.set_path", {
-                "id": child["id"], "path": new_rel})
+            if outcome != BLOCKED:  # the path is told when the file lies there, or when there is no file to move
+                self.send_command("slicing.file.set_path", {
+                    "id": child["id"], "path": new_rel})
         return renamed
 
     async def _sliced_files(self, series_id: int) -> list[dict]:
@@ -257,16 +261,18 @@ class RenamingModule(BaseModule):
             raise
 
     async def _rename_on_disk(self, base: str, old_rel: str,
-                              new_rel: str) -> bool:
+                              new_rel: str) -> str:
+        """MOVED: the file lies under the new name now; ABSENT: there is no file to move; BLOCKED: the new name is taken
+        by another file, which is left alone, and the file keeps its name."""
         old_abs = os.path.join(base, old_rel)
         new_abs = os.path.join(base, new_rel)
         if await storage.call(os.path.exists, new_abs):
             self.log.warning("файл с новым именем уже существует: %s",
                              new_abs)
-            return False
+            return BLOCKED
         if not await storage.call(os.path.exists, old_abs):
             self.log.error("исходный файл не найден: %s", old_abs)
-            return False
+            return ABSENT
 
         def _do() -> None:
             os.makedirs(os.path.dirname(new_abs), exist_ok=True)
@@ -274,7 +280,7 @@ class RenamingModule(BaseModule):
 
         await storage.call(_do, owns=(old_abs, new_abs))
         self.log.info("переименован: %s -> %s", old_rel, new_rel)
-        return True
+        return MOVED
 
     # --- торренты: файлы внутри qBittorrent ------------------------------------------------
 

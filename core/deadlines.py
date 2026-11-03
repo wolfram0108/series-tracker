@@ -60,7 +60,7 @@ _FUSES: dict[str, float] = {
     **dict.fromkeys(_QUICK, QUICK_S),
     **dict.fromkeys(("conform.submit", "rules.format_torrent_file", "slicing.chapters.mark", "slicing.source.delete",
                      "slicing.task.create", "torrents.db.active", "sources.table.get"), SERVICE_S),
-    **dict.fromkeys(("downloads.fs.sync", "slicing.verify", "sources.video.stream", "torrents.add",
+    **dict.fromkeys(("downloads.fs.sync", "downloads.items.rename", "slicing.verify", "sources.video.stream", "torrents.add",
                      "torrents.db.deactivate_all", "torrents.drive_incomplete", "torrents.fs.verify"), HEAVY_S),
     "sources.torrent_file.get": FETCH_S,
     **dict.fromkeys(("renaming.preview", "renaming.process_torrent", "rules.apply", "slicing.chapters.filtered",

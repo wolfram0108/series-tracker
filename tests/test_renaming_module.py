@@ -24,6 +24,7 @@ class FakeNeighbours(BaseModule):
         self.media_items: list[dict] = []
         self.sliced: list[dict] = []
         self.set_filename_calls: list[dict] = []
+        self.rename_calls: list[dict] = []
         self.set_path_calls: list[dict] = []
         self.qbt_files: dict[str, list] = {}
         self.db_files: dict[str, list] = {}
@@ -46,6 +47,7 @@ class FakeNeighbours(BaseModule):
         h("rules.format_torrent_file", self.on_format_torrent)
         h("scan.media.list", self.on_media)
         h("downloads.item.set_filename", self.on_set_filename)
+        h("downloads.items.rename", self.on_rename_items)
         h("slicing.files.list", self.on_sliced)
         h("slicing.file.set_path", self.on_set_path)
         h("torrents.db.active", self.on_active)
@@ -81,6 +83,12 @@ class FakeNeighbours(BaseModule):
 
     async def on_set_filename(self, env):
         self.set_filename_calls.append(env.payload)
+
+    async def on_rename_items(self, env):
+        """The owner of the files of a video series: it moves them and says how many names changed."""
+        self.rename_calls.append(env.payload)
+        current = {item["unique_id"]: item["final_filename"] for item in self.media_items}
+        return {"renamed": len([key for key, name in env.payload["names"].items() if current.get(key) != name])}
 
     async def on_sliced(self, env):
         return self.sliced
@@ -191,11 +199,11 @@ async def test_vk_reprocess_renames_on_disk(system):
     reply = await probe.request("renaming.reprocess", {"series_id": 2},
                                 timeout=10)
     assert reply == {"renamed": 1}
-    assert os.path.exists(os.path.join(media, "Show s01e01.mp4"))
-    assert not os.path.exists(os.path.join(media, "старое имя 1.mp4"))
-    # имя в БД обновляет владелец колонки (downloads)
-    assert fake.set_filename_calls == [
-        {"unique_id": "u1", "filename": "Show s01e01.mp4"}]
+    # the files of a video series are moved by their owner (downloads): here the names of all the ready files are counted and
+    # asked for, the unchanged ones too (a name a file has cancels an earlier wish), and the disk is not touched
+    assert fake.rename_calls == [{"series_id": 2, "names": {"u1": "Show s01e01.mp4", "u2": "Show s01e02.mp4"}}]
+    assert os.path.exists(os.path.join(media, "старое имя 1.mp4")) and not os.path.exists(os.path.join(media, "Show s01e01.mp4"))
+    assert fake.set_filename_calls == []
     env = await asyncio.wait_for(sub.queue.get(), 2)
     assert env.payload == {"series_id": 2}
     assert _renaming_tasks(db_path) == []  # запись подчищена
@@ -452,7 +460,7 @@ async def test_a_video_series_is_renamed_by_its_numbers_without_any_profile(syst
     reply = await probe.request("renaming.reprocess", {"series_id": 2}, timeout=10)
 
     assert reply == {"renamed": 1}
-    assert os.path.exists(os.path.join(media, "Show s01e01.mp4"))
+    assert fake.rename_calls[0]["names"] == {"u1": "Show s01e01.mp4"}
     assert fake.format_series[0]["kind"] == "video"
 
 
@@ -489,8 +497,23 @@ async def test_a_reprocess_a_restart_interrupted_is_run_again_when_the_system_ha
         conn.commit()
     sub = bus.subscribe("renaming.finished")
     await settle(bus, renaming)  # nothing in the module looks for such a task by itself
-    assert os.path.exists(os.path.join(media, "старое имя 1.mp4")) and sub.queue.empty()
+    assert os.path.exists(os.path.join(media, "старое имя 1.mp4")) and sub.queue.empty() and not fake.rename_calls
     bus.publish(Envelope(topic="system.started", kind="event"))
     env = await asyncio.wait_for(sub.queue.get(), 5)
     assert env.payload == {"series_id": 2}
-    assert os.path.exists(os.path.join(media, "Show s01e01.mp4")) and _renaming_tasks(db_path) == []
+    assert fake.rename_calls and _renaming_tasks(db_path) == []
+
+
+@pytest.mark.asyncio
+async def test_a_sliced_file_whose_new_name_is_taken_keeps_its_name_and_says_nothing_of_a_new_one(system):
+    _, fake, probe, _, media = system
+    fake.media_items = [_item("parent", 1, "Show s01e01.mp4")]
+    fake.media_items[0]["episode_end"] = 3
+    fake.sliced = [{"id": 5, "source_media_item_unique_id": "parent", "episode_number": 2, "file_path": "кусок 2.mp4"}]
+    open(os.path.join(media, "кусок 2.mp4"), "wb").close()
+    open(os.path.join(media, "Show s01e02.mp4"), "wb").close()  # somebody else's file lies under the name
+
+    reply = await probe.request("renaming.reprocess", {"series_id": 2}, timeout=10)
+
+    assert reply == {"renamed": 0}
+    assert os.path.exists(os.path.join(media, "кусок 2.mp4")) and fake.set_path_calls == []
