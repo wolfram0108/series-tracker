@@ -669,17 +669,12 @@ class ScanModule(BaseModule):
     def _removed_by_configuration(series: dict, layout: CompositionReply, rows: list[dict], winners: set[str],
                                   seasons: set[int], statuses: dict[str, str]) -> list[str]:
         """The rows the configuration took out of the plan: those of a season the user switched off, of a source they took
-        away, of a source whose profile they took away, and those whose row of the layout the configuration excluded (a
-        rule, a switched-off player) while nothing else holds their slot. This is the one place the reason is told;
-        downloads removes the files of the rows it names and no others, so that a site that fails is never taken for a
-        choice of the user. A displaced row whose slot has a winner waits for it: its file goes once the winner is on
-        disk, so the episode is never left without a video. With no source known the rows of a source are not told from
-        a layout that has not been counted yet."""
+        away, or of a source whose profile they took away. This is the one place the reason is told; downloads removes
+        the files of the rows it names and no others, so that a site that fails is never taken for a choice of the user.
+        A row a rule or the source's choice excluded is not named: the rules are edited through states in between, every
+        save counts the layout again, and a file removed on such a state is lost for good. With no source known the rows
+        of a source are not told from a layout that has not been counted yet."""
         gone = [item["unique_id"] for item in rows if item.get("season") in seasons]
-        left_out = {(row.source_id, row.row_key) for row in layout.rows if row.left_out}
-        gone += [item["unique_id"] for item in rows
-                 if item["unique_id"] not in gone and statuses.get(item["unique_id"]) == "redundant"
-                 and (item.get("source_id"), item.get("row_key")) in left_out]
         mine = {each.id for each in _sources_of(series)}
         if not mine:
             return gone

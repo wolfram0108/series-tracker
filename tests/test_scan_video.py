@@ -947,7 +947,7 @@ def _expected_plan(after: str, other: str, downloaded: bool) -> str:
         return "out"
     if after == "playable":
         return "replaced"
-    return "replaced" if other != "none" else "removed"
+    return "replaced" if other != "none" else "redundant"  # an exclusion removes no file
 
 
 @pytest.mark.parametrize("downloaded", [True, False])

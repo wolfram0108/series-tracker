@@ -431,7 +431,7 @@ def test_the_rows_of_a_season_a_source_or_a_profile_the_user_took_away_are_named
 
 @pytest.mark.parametrize("exclusion", ["rule", "source", "no_number", None])
 @pytest.mark.parametrize("status", ["redundant", "replaced", "in_plan_single"])
-def test_a_row_the_configuration_excluded_is_named_only_while_nothing_holds_its_slot(exclusion, status):
+def test_a_row_the_configuration_excluded_is_never_named_for_removal(exclusion, status):
     from core.contracts import Exclusion, SourceStatus
     from modules.scan.module import ScanModule
     from scan_support import row
@@ -444,4 +444,5 @@ def test_a_row_the_configuration_excluded_is_named_only_while_nothing_holds_its_
                                  "sources": [type("S", (), {"source_id": 10, "status": SourceStatus.READY})()]})()
     rows = [{"unique_id": "u", "source_id": 10, "row_key": "k"}]
     named = ScanModule._removed_by_configuration(series, layout, rows, set(), set(), {"u": status})
-    assert named == (["u"] if exclusion in ("rule", "source") and status == "redundant" else [])
+    # An exclusion never removes a file: a rule being edited passes through states that exclude what it keeps.
+    assert named == []
