@@ -56,6 +56,14 @@ async def test_refresh_does_not_start_a_scan_of_a_video_series(tmp_path):
     assert "scan.series.run" not in topics(spy)
 
 
+async def test_a_scan_of_a_series_downloads_unless_the_window_asks_for_the_status_alone(tmp_path):
+    answers = {"scan.series.run": {"changed": False}}
+    async with serving(tmp_path, answers) as (client, owners, _, _):
+        assert (await client.post("/api/series/1/scan")).status_code == 200
+        assert (await client.post("/api/series/1/scan?download=false")).status_code == 200
+    assert owners.asked("scan.series.run") == [{"series_id": 1}, {"series_id": 1, "download": False}]
+
+
 async def test_the_composition_of_a_torrent_series_is_the_torrent_plan_with_iso_dates(tmp_path):
     plan = [{"id": 1, "original_path": "Dir/T.S01E01.mkv", "source_data": {"publication_date": "2026-01-01 00:00:00"}}]
     answers = {"catalog.series.get": card_of, "torrents.composition": plan, "composition.get": LAYOUT}

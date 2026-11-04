@@ -21,7 +21,10 @@ export function fetchOutput(seriesId: number): Promise<Answer<Reference[]>> {
 
 /** A pass over the series now; the core answers when the pass is over, and what it changed comes as events. */
 export function syncSeries(seriesId: number): Promise<Answer<unknown>> {
-  return call(() => api.POST("/api/series/{series_id}/scan", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
+  // The status of the files and of the plan is brought up to date; a download is the scan of the series card.
+  return call(() => api.POST("/api/series/{series_id}/scan", {
+    params: { path: { series_id: seriesId }, query: { download: false } },
+  }), OUTPUT_WORDS)
 }
 
 /** The names the files of the series get by the rules as they are now, each with the slot it belongs to. */

@@ -1262,6 +1262,28 @@ async def test_fetch_has_its_own_limit_and_ignores_repeated_keys(system, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_the_fetches_of_voice_overs_are_in_the_queue_of_the_window_while_they_wait_and_run(system, tmp_path):
+    bus, fake, dl, probe, _, _ = system
+    dl.gate = asyncio.Event()
+    changed = bus.subscribe("downloads.queue.changed")
+    for i in range(3):
+        probe.send_command("downloads.fetch", {
+            "key": f"dub:{i}", "url": f"https://site/#cvh={i}", "path": str(tmp_path / f"{i}.mp4"), "series_id": 3})
+    assert await _wait(lambda: dl.concurrent == 2)
+    await _running.bus.settled()
+    queue = await probe.request("downloads.queue.get", {}, timeout=5)
+    assert queue["count"] == 3
+    assert sorted((each["task_key"], each["status"], each["task_type"]) for each in queue["tasks"]) == [
+        ("dub:0", "downloading", "fetch"), ("dub:1", "downloading", "fetch"), ("dub:2", "pending", "fetch")]
+    assert {each["save_path"] for each in queue["tasks"]} == {str(tmp_path / f"{i}.mp4") for i in range(3)}
+    assert not changed.queue.empty()  # the window is told, not asked
+    dl.gate.set()
+    assert await _wait(lambda: os.path.isfile(tmp_path / "2.mp4"))
+    await _quiet()
+    assert (await probe.request("downloads.queue.get", {}, timeout=5))["count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_fetch_cancel_drops_the_queue_and_active_jobs_of_a_series(system, tmp_path):
     bus, fake, dl, probe, _, _ = system
     dl.gate = asyncio.Event()

@@ -40,7 +40,7 @@ function str(v: unknown): string {
             <span class="queue-title">{{ str(t.save_path).split(/[\\/]/).pop() }}</span>
             <div class="pill pill-primary">{{ str(t.status) }}</div>
           </div>
-          <div v-if="['downloading', 'processing', 'completed'].includes(str(t.status))" class="queue-row">
+          <div v-if="['downloading', 'processing', 'completed'].includes(str(t.status)) && t.progress != null" class="queue-row">
             <div class="progress">
               <div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: str(t.progress) + '%' }">{{ str(t.progress) }}%</div>
             </div>

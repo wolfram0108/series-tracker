@@ -26,7 +26,8 @@ Queries / commands:
   downloads.dispatch {series_id} - the command of scan to fetch what is missing: reconcile, make the tasks of the rows the
       plan wants and that have no file, keep the paths of the live ones current, start the pool. The only place where a
       download starts.
-  downloads.queue.get {} -> {tasks, count} - the live tasks (the window; the snapshot of scan).
+  downloads.queue.get {} -> {tasks, count} - the live tasks (the window; the snapshot of scan): the tasks of the plan
+      and the fetches of the voice-overs (`task_type` fetch: waiting `pending`, under way `downloading`, no progress).
   downloads.queue.clear {} -> {deleted} - waiting and failed tasks with their work files; a download under way stays.
   downloads.cancel {task_id} - one task that waits or runs (the table of what is allowed); a task whose files could not be
       removed stays as a failed one, the record of what is left.
@@ -148,6 +149,7 @@ class DownloadsModule(BaseModule):
         self._fetch_limit = 2         # parallel general downloads (downloads.fetch)
         self._fetch_queue: list[dict] = []
         self._fetch_active: dict[str, tuple[asyncio.Task, int | None]] = {}
+        self._fetch_jobs: dict[str, dict] = {}  # the job of every fetch under way: the window names it by its path
         self._threads = 6             # fragments per file (yt-dlp -N)
         self._active: dict[int, asyncio.Task] = {}
         self._last_db_write: dict[int, float] = {}
@@ -524,16 +526,31 @@ class DownloadsModule(BaseModule):
         await self.repo.set_item_status(env.payload["unique_id"], env.payload["status"])
 
     async def on_queue_get(self, env: Envelope) -> dict:
-        tasks = await self.repo.active_tasks()
+        tasks = await self._queue()
         return {"tasks": tasks, "count": len(tasks)}
 
     async def on_episodes_get(self, env: Envelope) -> dict:
         """Reference episodes of the series with their download state (for voices)."""
         return {"items": await self.repo.reference_items(env.payload["series_id"])}
 
+    async def _queue(self) -> list[dict]:
+        """What the window sees of the downloads: the live tasks of the plan, and the fetches of the voice-overs, which
+        have no record in `download_tasks` (the executor keeps no state of them) and would never be seen otherwise."""
+        fetches = [(self._fetch_jobs[key], "downloading") for key in self._fetch_active if key in self._fetch_jobs]
+        fetches += [(job, "pending") for job in self._fetch_queue]
+        return [*await self.repo.active_tasks(), *({
+            "id": f"fetch:{job['key']}", "task_key": job["key"], "task_type": "fetch", "series_id": job["series_id"],
+            "save_path": job["path"], "status": status, "progress": None} for job, status in fetches)]
+
     async def _broadcast_queue(self) -> None:
-        tasks = await self.repo.active_tasks()
+        tasks = await self._queue()
         self.publish_event("downloads.queue.changed", {"tasks": tasks, "count": len(tasks)})
+
+    def _announce_queue(self) -> None:
+        """A fetch began, waits or ended: the window sees it, though no task of the plan changed."""
+        task = asyncio.create_task(self._broadcast_queue())
+        self._bg.add(task)
+        task.add_done_callback(self._bg.discard)
 
     # --- the dispatcher and the download -------------------------------------------
 
@@ -676,6 +693,7 @@ class DownloadsModule(BaseModule):
             return
         self._fetch_queue.append(job)
         self._fetch_pump()
+        self._announce_queue()
 
     async def on_work_withdrawn(self, env: Envelope) -> None:
         """The owner of the work does not need it: the jobs of the series, or of the keys it names, stop. This module
@@ -689,6 +707,7 @@ class DownloadsModule(BaseModule):
         for job_key, (runner, owner) in list(self._fetch_active.items()):
             if wanted(job_key, owner):
                 runner.cancel()
+        self._announce_queue()
 
     def background(self) -> set[asyncio.Task]:
         """The workers of the downloads and of the fetches belong to what a waiter for quiet waits for."""
@@ -700,6 +719,7 @@ class DownloadsModule(BaseModule):
             job = self._fetch_queue.pop(0)
             runner = asyncio.create_task(self._fetch_one(job))
             self._fetch_active[job["key"]] = (runner, job["series_id"])
+            self._fetch_jobs[job["key"]] = job
             self._tasks.append(runner)
             self.publish_event("downloads.fetch.started", {
                 "key": job["key"], "series_id": job["series_id"], "path": job["path"]})
@@ -735,7 +755,9 @@ class DownloadsModule(BaseModule):
         except asyncio.CancelledError:
             await storage.call(Library.remove_download, path, timeout=storage.REMOVE_TIMEOUT_S, owns=path)
             self._fetch_active.pop(key, None)
+            self._fetch_jobs.pop(key, None)
             self._fetch_pump()
+            self._announce_queue()
             raise
         except Exception as exc:  # noqa: BLE001 - one failed fetch must not take the module down
             self.log.exception("сбой общей загрузки %s", key)
@@ -743,10 +765,12 @@ class DownloadsModule(BaseModule):
         if not ok:
             await storage.call(Library.remove_download, path, timeout=storage.REMOVE_TIMEOUT_S, owns=path)
         self._fetch_active.pop(key, None)
+        self._fetch_jobs.pop(key, None)
         self.publish_event("downloads.fetch.finished", {
             "key": key, "ok": ok, "error": "" if ok else error, "transient": transient,
             "path": path, "series_id": job.get("series_id")})
         self._fetch_pump()
+        self._announce_queue()
 
     async def _candidate_may_use_ytdlp(self, series_id: int, unique_id: str) -> bool:
         """Whether the downloader may take over a candidate whose stream request failed: only a VK one."""

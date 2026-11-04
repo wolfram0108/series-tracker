@@ -62,7 +62,7 @@ describe("the calls to the output of the core", () => {
   it("asks for a pass over the series by its path", async () => {
     client.POST.mockResolvedValueOnce({ data: { success: true } })
     expect(await syncSeries(1)).toEqual({ ok: true, data: { success: true } })
-    expect(client.POST).toHaveBeenCalledWith("/api/series/{series_id}/scan", { params: { path: { series_id: 1 } } })
+    expect(client.POST).toHaveBeenCalledWith("/api/series/{series_id}/scan", { params: { path: { series_id: 1 }, query: { download: false } } })
   })
 
   it("says only that the action was refused when the refusal has no words", async () => {
