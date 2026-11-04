@@ -403,6 +403,58 @@ async def test_vk_keeps_default_user_agent(system, transport):
 
 
 @pytest.mark.asyncio
+async def test_vk_catalog_uses_player_token_and_refreshes_once(system, transport):
+    from urllib.parse import parse_qs, urlsplit
+
+    _, db, _, probe, _ = system
+    await db.execute("INSERT INTO auth (auth_type, password) VALUES (?, ?)",
+                     ("vk", "saved-user-token"))
+    issued = []
+    calls = []
+
+    def handler(req):
+        if urlsplit(req.url).path == "/video_ext.php":
+            token = f"web-token-{len(issued)}"
+            issued.append(token)
+            return _response(req.url, text='init = {webToken: ' + json.dumps({
+                "access_token": token, "expired_at": 9_000_000_000}) + '};')
+        body = parse_qs(req.body)
+        calls.append(body)
+        assert "access_token" not in req.url
+        assert "saved-user-token" not in req.body
+        assert body["v"] == ["5.289"]
+        if body["access_token"] == ["web-token-0"]:
+            data = {"error": {"error_code": 5, "error_msg": "expired"}}
+        else:
+            data = {"response": {"block": {"videos_ids": []}}}
+        return _response(req.url, text=json.dumps(data), content_type="application/json")
+
+    transport.handler = handler
+    for method, params in [
+        ("catalog.getOwnerVideosSearch", {"owner_id": -42, "q": "Тайтл"}),
+        ("catalog.getBlockItems", {"block_id": "block", "start_from": "cursor"}),
+    ]:
+        reply = await probe.request("trackerauth.fetch", {
+            "service": "vk", "url": f"https://api.vk.com/method/{method}",
+            "params": params}, timeout=5)
+        assert json.loads(reply["text"])["response"]
+        assert all(token not in json.dumps(reply) for token in issued)
+    assert len(issued) == 2
+    assert len(calls) == 3
+    assert calls[-1]["start_from"] == ["cursor"]
+
+
+@pytest.mark.asyncio
+async def test_vk_catalog_missing_token_is_an_error(system, transport):
+    _, _, _, probe, _ = system
+    transport.handler = lambda req: _response(req.url, text="<html>no token</html>")
+    with pytest.raises(BusRequestError, match="не выдал ключ"):
+        await probe.request("trackerauth.fetch", {
+            "service": "vk", "url": "https://api.vk.com/method/catalog.getOwnerVideosSearch",
+            "params": {"owner_id": -42, "q": "Тайтл"}}, timeout=5)
+
+
+@pytest.mark.asyncio
 async def test_cookies_survive_restart(system, transport):
     bus, db, module, probe, _ = system
     await probe.request("trackerauth.fetch", {

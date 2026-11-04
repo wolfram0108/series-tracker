@@ -382,7 +382,8 @@ class ScanModule(BaseModule):
         return await self._setting("debug_force_replace", "false") == "true"
 
     async def _run_series(self, series_id: int, force: bool = False,
-                          download: bool = True) -> dict:
+                          download: bool = True, *,
+                          vk_channels: dict[str, list[dict]] | None = None) -> dict:
         if series_id in self._running:
             raise ScanError(f"скан сериала {series_id} уже запущен")
         self._running.add(series_id)
@@ -411,7 +412,7 @@ class ScanModule(BaseModule):
                     self.log.warning("сверка диска перед видео-сканом "
                                      "пропущена: %s", exc)
                 if series["source_type"] == "vk_video":
-                    result = await self._scan_vk(series)
+                    result = await self._scan_vk(series, channels=vk_channels)
                 else:
                     result = await self._scan_web_video(series)
                 # VF2: проверка нарезанных детей на КАЖДОМ скане (а не только
@@ -519,7 +520,7 @@ class ScanModule(BaseModule):
     # --- VK-ветка ---------------------------------------------------------------
 
     async def _process_video_candidates(self, series: dict, videos: list[dict],
-                                        source_type: str) -> dict:
+                                        source_type: str, *, complete: bool = True) -> dict:
         series_id = series["id"]
         if series_id in self._aborted:
             raise ScanAborted(f"сериал {series_id} удалён во время скана")
@@ -531,7 +532,8 @@ class ScanModule(BaseModule):
                                          self._ignored_episodes(series))
         candidates = await self._skip_completed_downgrades(series_id, candidates)
         try:
-            stats = await self.repo.upsert_candidates(series_id, candidates)
+            stats = await self.repo.upsert_candidates(series_id, candidates,
+                                                       remove_missing=complete)
         except Exception as exc:
             if "FOREIGN KEY" in str(exc) or "not found" in str(exc).lower():
                 self.log.warning("Сериал %d удалён во время видео-сканирования: %s",
@@ -547,21 +549,57 @@ class ScanModule(BaseModule):
                       stats["deleted"])
 
         plan = await self._rebuild_plan(
-            series, offered={c["unique_id"] for c in candidates})
+            series, offered={c["unique_id"] for c in candidates} if complete else None)
         in_plan = sum(1 for s in plan.values() if s.startswith("in_plan"))
         self.publish_event("scan.plan.updated", {"series_id": series_id})
         changed = bool(stats["added"] or stats["deleted"])
         return {"source_type": source_type, "candidates": stats,
                 "in_plan": in_plan, "changed": changed}
 
-    async def _scan_vk(self, series: dict) -> dict:
+    async def _scan_vk(self, series: dict, *,
+                       channels: dict[str, list[dict]] | None = None) -> dict:
         channel_url, _, query = series["url"].partition("|")
-        reply = await self.request("sources.vk.scan", {
-            "channel_url": channel_url, "query": query,
-            "search_mode": series.get("vk_search_mode") or "search",
-            "series_id": series["id"]},
-            timeout=900)
-        return await self._process_video_candidates(series, reply["videos"], "vk_video")
+        mode = series.get("vk_search_mode") or "search"
+        inventory_verified = channels is not None or mode == "get_all"
+
+        async def fetch(search_mode: str, terms: str) -> dict:
+            return await self.request("sources.vk.scan", {
+                "channel_url": channel_url, "query": terms,
+                "search_mode": search_mode, "series_id": series["id"]}, timeout=900)
+
+        def require_complete(reply: dict) -> list[dict]:
+            if reply.get("complete") is not True or not isinstance(reply.get("videos"), list):
+                raise ScanError("VK: список канала получен не полностью; "
+                                "проверка новых серий не завершена, состав не изменён")
+            return reply["videos"]
+
+        if channels is not None:
+            # A successful search may silently omit new uploads. Scheduled
+            # scans therefore read the inventory once per channel per run.
+            if channel_url not in channels:
+                channels[channel_url] = require_complete(await fetch("get_all", ""))
+            terms = [t.strip().lower() for t in query.split("/") if t.strip()]
+            videos = [v for v in channels[channel_url]
+                      if not terms or any(t in v.get("title", "").lower() for t in terms)]
+        else:
+            try:
+                reply = await fetch(mode, query)
+            except BusRequestError:
+                if mode != "search":
+                    raise
+                self.log.warning("VK %d: быстрый поиск не ответил — проверяю весь канал", series["id"])
+                reply = await fetch("get_all", query)
+                inventory_verified = True
+            else:
+                if mode == "search" and (reply.get("complete") is not True or not reply.get("videos")):
+                    self.log.warning("VK %d: быстрый поиск неполный или пуст — проверяю весь канал", series["id"])
+                    reply = await fetch("get_all", query)
+                    inventory_verified = True
+            videos = require_complete(reply)
+        return await self._process_video_candidates(
+            # Even a paginated search can omit indexed-out videos. Only a
+            # verified inventory is evidence that an old candidate disappeared.
+            series, videos, "vk_video", complete=inventory_verified)
 
     async def _included_episodes(self, series: dict) -> list[int] | None:
         """Fast release list + rules: excluded episodes are never fetched."""
@@ -953,6 +991,7 @@ class ScanModule(BaseModule):
 
     async def _scan_all(self, force: bool = False) -> None:
         self._scan_all_running = True
+        vk_channels: dict[str, list[dict]] = {}
         await self._broadcast_status()
         try:
             all_series = await self.request("catalog.series.list", {},
@@ -965,7 +1004,7 @@ class ScanModule(BaseModule):
                                   "активные задачи конвейера", s["id"])
                     continue
                 try:
-                    await self._run_series(s["id"], force)
+                    await self._run_series(s["id"], force, vk_channels=vk_channels)
                 except Exception as exc:  # noqa: BLE001 — проход не прерываем
                     self.log.error("автоскан сериала %d: %s", s["id"], exc)
         finally:

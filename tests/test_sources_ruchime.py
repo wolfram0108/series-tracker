@@ -378,7 +378,8 @@ async def test_sources_module_bus_parse_and_scan():
 
 
 @pytest.mark.asyncio
-async def test_vk_paginate_reports_progress():
+async def test_vk_paginate_reports_progress(monkeypatch):
+    monkeypatch.setattr("modules.sources.vk.PAGE_SIZE", 2)
     bus = Bus()
     db = Database(":memory:")
     sources = SourcesModule(bus, db, vk_page_interval=0)

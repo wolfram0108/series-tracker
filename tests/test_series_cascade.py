@@ -110,7 +110,7 @@ class SlowSource(BaseModule):
     async def on_vk(self, env):
         self.entered.set()
         await self.release.wait()
-        return {"videos": self.videos}
+        return {"videos": self.videos, "complete": True}
 
     async def on_rules(self, env):
         return {"results": [{"extracted": {"episode": 1}}], "invalid_rules": []}

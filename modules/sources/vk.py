@@ -1,8 +1,9 @@
-"""VK как источник видео — официальный VK API (находка 15: никакого
-браузера, старая система уже ходила в API; здесь — то же, но с
-таймаутами, паузами пагинации и токеном, не покидающим trackerauth).
+"""VK video facts and channel-search responses, without browser automation.
 
-Чистые функции разбора — здесь; сетевая оркестрация — в module.py.
+Channel search uses VK Video's catalog API; listing the whole channel uses
+video.get. Both kinds of credentials remain inside trackerauth.
+
+Pure parsing lives here; network orchestration lives in module.py.
 """
 from __future__ import annotations
 
@@ -14,7 +15,9 @@ PAGE_SIZE = 200
 
 
 class VkScanError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, error_code: int | None = None) -> None:
+        super().__init__(message)
+        self.error_code = error_code
 
 
 def screen_name_from_url(channel_url: str) -> str:
@@ -73,7 +76,35 @@ def filter_by_terms(videos: list[dict], terms: list[str]) -> list[dict]:
 def dedupe_by_id(videos: list[dict]) -> list[dict]:
     seen, result = set(), []
     for v in videos:
-        if v.get("id") not in seen:
-            seen.add(v.get("id"))
+        key = (v.get("owner_id"), v.get("id"))
+        if key not in seen:
+            seen.add(key)
             result.append(v)
     return result
+
+
+def search_block(response: dict, owner_id: int) -> dict | None:
+    """Only the channel's video block; catalog_videos contains other creators."""
+    catalog = response.get("catalog")
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("sections"), list):
+        raise VkScanError("VK: неожиданный ответ поиска по каналу (нет каталога)")
+    for section in catalog["sections"]:
+        for block in section.get("blocks", []):
+            if (block.get("data_type") == "videos"
+                    and block.get("layout", {}).get("owner_id") == owner_id):
+                return block
+    if response.get("videos"):
+        raise VkScanError("VK: в ответе поиска нет блока видео выбранного канала")
+    return None
+
+
+def search_page(response: dict, block: dict) -> list[dict]:
+    """The response may contain recommendations too; membership is given by videos_ids."""
+    video_ids, videos = block.get("videos_ids"), response.get("videos", [])
+    if not isinstance(video_ids, list) or not isinstance(videos, list):
+        raise VkScanError("VK: неожиданный формат страницы поиска")
+    wanted = set(video_ids)
+    items = [v for v in videos if f"{v.get('owner_id')}_{v.get('id')}" in wanted]
+    if len({f"{v.get('owner_id')}_{v.get('id')}" for v in items}) != len(wanted):
+        raise VkScanError("VK: поиск вернул неполную страницу видео")
+    return items

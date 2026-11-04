@@ -25,6 +25,9 @@ class FakeBackend(BaseModule):
         self.service = "kinozal"
         self.releases: list[dict] = []
         self.vk_videos: list[dict] = []
+        self.vk_complete = True
+        self.vk_calls: list[dict] = []
+        self.vk_replies: list[dict | Exception] = []
         self.web_videos: list[dict] = []
         self.web_players: dict = {}
         self.web_scan_error: str | None = None
@@ -86,7 +89,13 @@ class FakeBackend(BaseModule):
                 "from_cache": False}
 
     async def on_vk(self, env):
-        return {"videos": self.vk_videos}
+        self.vk_calls.append(dict(env.payload))
+        if self.vk_replies:
+            reply = self.vk_replies.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+        return {"videos": self.vk_videos, "complete": self.vk_complete}
 
     async def on_web_scan(self, env):
         if self.web_scan_error:
@@ -546,6 +555,115 @@ async def test_sim_VU11_ignored_seasons_excluded_on_scan(system):
             "series_id=2")}
     assert rows["Сезон1 эп1"].startswith("in_plan")       # сезон 1 — в плане
     assert not rows["Сезон2 эп5"].startswith("in_plan")   # сезон 2 — исключён
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fallback_fails", [True, False])
+async def test_failed_vk_fallback_keeps_catalog_and_does_not_dispatch(system, fallback_fails):
+    bus, fake, probe, db_path = system
+    fake.vk_videos = [_vk_video(1, "Тайтл 1 серия")]
+    fake.rules_results = [{"excluded": False, "extracted": {"episode": 1}}]
+    await probe.request("scan.series.run", {"series_id": 2, "download": False}, timeout=10)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE series SET vk_search_mode='search' WHERE id=2")
+        before = conn.execute("SELECT * FROM media_items WHERE series_id=2").fetchall()
+    incomplete = {"videos": [_vk_video(99, "Тайтл 99 серия")], "complete": False}
+    fake.vk_replies = [incomplete, RuntimeError("Full inventory failed") if fallback_fails else incomplete]
+    dispatch = bus.subscribe("downloads.dispatch")
+    plans = bus.subscribe("scan.plan.updated")
+    with pytest.raises(BusRequestError):
+        await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
+    assert dispatch.queue.empty() and plans.queue.empty()
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT * FROM media_items WHERE series_id=2").fetchall() == before
+        assert conn.execute("SELECT count(*) FROM scan_tasks WHERE series_id=2 AND status='error'").fetchone()[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_successful_manual_search_cannot_delete_videos_it_silently_omitted(system):
+    _, fake, probe, db_path = system
+    fake.vk_videos = [_vk_video(1, "Тайтл 1 серия"), _vk_video(2, "Тайтл 2 серия")]
+    fake.rules_results = [{"excluded": False, "extracted": {"episode": n}} for n in [1, 2]]
+    await probe.request("scan.series.run", {"series_id": 2, "download": False}, timeout=10)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE series SET vk_search_mode='search' WHERE id=2")
+    fake.vk_videos = fake.vk_videos[:1]
+    fake.rules_results = fake.rules_results[:1]
+    reply = await probe.request("scan.series.run", {"series_id": 2, "download": False}, timeout=10)
+    assert fake.vk_calls[-1]["search_mode"] == "search"
+    assert reply["candidates"]["deleted"] == 0
+    assert reply["in_plan"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["partial", "empty", "error"])
+async def test_manual_vk_scan_verifies_unreliable_search_before_processing(system, failure):
+    _, fake, probe, db_path = system
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE series SET vk_search_mode='search' WHERE id=2")
+    videos = [_vk_video(1, "Тайтл 1 серия"), _vk_video(2, "Тайтл 2 серия")]
+    first = ({"videos": videos[:1], "complete": False} if failure == "partial" else
+             {"videos": [], "complete": True} if failure == "empty" else RuntimeError("VK unavailable"))
+    fake.vk_replies = [first, {"videos": videos, "complete": True}]
+    fake.rules_results = [{"excluded": False, "extracted": {"episode": n}} for n in [1, 2]]
+    reply = await probe.request("scan.series.run", {"series_id": 2, "download": False}, timeout=10)
+    assert [p["search_mode"] for p in fake.vk_calls] == ["search", "get_all"]
+    assert reply["candidates"]["added"] == 2
+
+
+@pytest.mark.asyncio
+async def test_scheduled_vk_scan_reads_channel_once_per_pass_and_refreshes_next_pass(db_path):
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE series SET source_type='vk_video', auto_scan_enabled=1, "
+                     "vk_search_mode='search', url='https://vkvideo.ru/@chan|Первый / First' WHERE id=1")
+        conn.execute("UPDATE series SET auto_scan_enabled=1, vk_search_mode='search', "
+                     "url='https://vkvideo.ru/@chan|Второй' WHERE id=2")
+    bus, fake, scan, probe, runner = _system_factory(db_path)
+    fake.vk_videos = [_vk_video(1, "Первый 1"), _vk_video(2, "Второй 1")]
+    fake.rules_by_title = {title: {"excluded": False, "extracted": {"episode": episode}}
+                           for title, episode in [("Первый 1", 1), ("Второй 1", 1), ("Первый 2", 2)]}
+    await runner.start()
+    try:
+        await scan._scan_all()
+        assert len(fake.vk_calls) == 1
+        assert fake.vk_calls[0]["search_mode"] == "get_all" and fake.vk_calls[0]["query"] == ""
+        with sqlite3.connect(db_path) as conn:
+            rows = conn.execute("SELECT series_id, source_title FROM media_items ORDER BY series_id").fetchall()
+        assert rows == [(1, "Первый 1"), (2, "Второй 1")]
+        fake.vk_videos.append(_vk_video(3, "Первый 2"))
+        await scan._scan_all()
+        assert len(fake.vk_calls) == 2
+        with sqlite3.connect(db_path) as conn:
+            assert conn.execute("SELECT count(*) FROM media_items WHERE series_id=1").fetchone()[0] == 2
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_incomplete_vk_search_preserves_previous_candidates_and_plan(system):
+    bus, fake, probe, db_path = system
+    fake.vk_videos = [_vk_video(1, "Тайтл 1 серия"), _vk_video(2, "Тайтл 2 серия")]
+    fake.rules_results = [
+        {"excluded": False, "extracted": {"episode": 1}},
+        {"excluded": False, "extracted": {"episode": 2}},
+    ]
+    await probe.request("scan.series.run", {"series_id": 2, "download": False}, timeout=10)
+    fake.vk_videos = fake.vk_videos[:1]
+    fake.rules_results = fake.rules_results[:1]
+    fake.vk_complete = False
+    dispatches = bus.subscribe("downloads.dispatch")
+    with pytest.raises(BusRequestError, match="проверка новых серий не завершена"):
+        await probe.request("scan.series.run", {"series_id": 2}, timeout=10)
+    assert dispatches.queue.empty()
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT episode_start, plan_status FROM media_items "
+                            "WHERE series_id=2 ORDER BY episode_start").fetchall()
+    assert [row[0] for row in rows] == [1, 2]
+    assert all(row[1].startswith("in_plan") for row in rows)
+    with sqlite3.connect(db_path) as conn:
+        errors = conn.execute("SELECT results_data FROM scan_tasks "
+                              "WHERE series_id=2 AND status='error'").fetchall()
+    assert len(errors) == 1 and "не завершена" in json.loads(errors[0][0])["error"]
 
 
 @pytest.mark.asyncio

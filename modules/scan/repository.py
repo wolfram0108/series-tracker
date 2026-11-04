@@ -82,7 +82,7 @@ class ScanRepository:
     # --- media_items: строки и план ---------------------------------------------
 
     async def upsert_candidates(self, series_id: int,
-                                items: list[dict]) -> dict:
+                                items: list[dict], *, remove_missing: bool = True) -> dict:
         """Апсерт кандидатов скана (семантика старого
         add_or_update_media_items): обновлённым принудительно
         переписываются распарсенные поля и plan_status='candidate';
@@ -103,7 +103,7 @@ class ScanRepository:
             pristine = (row["status"] == "pending"
                         and row["slicing_status"] == "none"
                         and not row["is_ignored_by_user"])
-            if pristine:
+            if pristine and remove_missing:
                 await self._db.execute(
                     "DELETE FROM media_items WHERE unique_id=?",
                     (row["unique_id"],))

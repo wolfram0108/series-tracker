@@ -302,30 +302,50 @@ class SourcesModule(BaseModule):
         if "error" in data:
             raise vk.VkScanError(
                 f"VK {method}: {data['error'].get('error_msg')} "
-                f"(код {data['error'].get('error_code')})")
+                f"(код {data['error'].get('error_code')})",
+                error_code=data["error"].get("error_code"))
         return data
 
     async def _vk_paginate(self, method: str, params: dict,
-                           *, max_pages: int = 50, progress=None) -> list[dict]:
+                           *, max_pages: int = 1000, progress=None) -> list[dict]:
         items, offset, total = [], 0, 0
+        seen_pages = set()
         for page in range(max_pages):
-            data = await self._vk_call(method, {
-                **params, "offset": offset, "count": vk.PAGE_SIZE})
-            response = data.get("response") or {}
-            page_items = response.get("items", [])
-            if page == 0:
-                total = int(response.get("count") or 0)
-            if not page_items:
-                break
+            for attempt in range(3):
+                try:
+                    data = await self._vk_call(method, {
+                        **params, "offset": offset, "count": vk.PAGE_SIZE})
+                    break
+                except vk.VkScanError as exc:
+                    if attempt == 2 or exc.error_code not in (None, 6, 10):
+                        raise
+                    self.log.warning("VK %s: ошибка страницы offset=%d, повтор %d/2: %s",
+                                     method, offset, attempt + 1, exc)
+                    await asyncio.sleep(max(self.vk_page_interval, 1.0) * (attempt + 1))
+            response = data.get("response")
+            if (not isinstance(response, dict)
+                    or not isinstance(response.get("items"), list)
+                    or type(response.get("count")) is not int
+                    or response["count"] < 0):
+                raise vk.VkScanError(f"VK {method}: неполный ответ списка канала")
+            page_items = response["items"]
+            total = max(total, response["count"])
+            if page_items:
+                signature = tuple((v.get("owner_id"), v.get("id")) for v in page_items)
+                if signature in seen_pages:
+                    raise vk.VkScanError(f"VK {method}: повторилась страница списка канала")
+                seen_pages.add(signature)
             items.extend(page_items)
             offset += vk.PAGE_SIZE
             if progress is not None:
                 progress(len(items), max(total, len(items)), "videos")
+            # VK may omit unavailable videos, even an entire page. Advance by
+            # API positions, not the number of accessible items returned.
+            if offset >= total:
+                return vk.dedupe_by_id(items)
             await asyncio.sleep(self.vk_page_interval)  # pause respects the API
-        else:
-            self.log.warning("VK %s: достигнут предел %d страниц", method,
-                             max_pages)
-        return items
+        raise vk.VkScanError(f"VK {method}: достигнут предел {max_pages} страниц; "
+                             "список канала получен не полностью")
 
     async def on_vk_scan(self, env: Envelope) -> dict:
         """payload: {channel_url, query, search_mode: 'search'|'get_all'}
@@ -334,6 +354,11 @@ class SourcesModule(BaseModule):
         series_id = p.get("series_id")
         started = time.monotonic()
         state = {"current": 0, "total": 0}
+        complete = True
+
+        def incomplete() -> None:
+            nonlocal complete
+            complete = False
 
         def report(current: int, total: int, phase: str) -> None:
             state["current"] = current
@@ -358,9 +383,8 @@ class SourcesModule(BaseModule):
             if p.get("search_mode", "search") == "search":
                 raw: list[dict] = []
                 for term in terms:
-                    raw.extend(await self._vk_paginate(
-                        "video.search", {**base, "q": term},
-                        progress=report))
+                    raw.extend(await self._vk_search(
+                        owner_id, term, progress=report, incomplete=incomplete))
                 raw = vk.dedupe_by_id(raw)
             else:  # get_all: весь канал + локальный фильтр
                 raw = vk.filter_by_terms(
@@ -375,7 +399,61 @@ class SourcesModule(BaseModule):
         report(state["current"], state["total"], "done")
         self.log.info("VK-скан %s: видео %d (сырых %d)", screen_name,
                       len(facts), len(raw))
-        return {"videos": facts}
+        return {"videos": facts, "complete": complete}
+
+    async def _vk_search(self, owner_id: int, query: str, *,
+                         max_pages: int = 100, progress=None, incomplete=None) -> list[dict]:
+        # video.search with owner_id returns empty results; use the channel
+        # search used by VK Video itself, including its opaque page cursors.
+        data = await self._vk_call("catalog.getOwnerVideosSearch", {
+            "owner_id": owner_id, "q": query})
+        response = data.get("response") or {}
+        block = vk.search_block(response, owner_id)
+        if block is None:
+            return []
+        block_id = block.get("id")
+        items, cursors = [], set()
+        for page in range(max_pages):
+            items.extend(vk.search_page(response, block))
+            if progress is not None:
+                progress(len(items), len(items), "videos")
+            cursor = block.get("next_from")
+            if not cursor:
+                return vk.dedupe_by_id(items)
+            if not block_id or (block_id, cursor) in cursors:
+                raise vk.VkScanError("VK: повторилась страница быстрого поиска")
+            cursors.add((block_id, cursor))
+            if page + 1 == max_pages:
+                break
+            # The catalog transport paces requests across searches sharing
+            # its token; adding a page pause here would count HTTP time twice.
+            params = {"block_id": block_id, "start_from": cursor}
+            try:
+                data = await self._vk_call("catalog.getBlockItems", params)
+            except vk.VkScanError as exc:
+                if exc.error_code != 104:
+                    raise
+                # VK also returns Not found for an exhausted/unavailable
+                # continuation, even after advertising next_from. Keep the
+                # matches already returned, marking the scan as incomplete.
+                await asyncio.sleep(max(self.vk_page_interval, 1.0))
+                try:
+                    data = await self._vk_call("catalog.getBlockItems", params)
+                except vk.VkScanError as retry_exc:
+                    if retry_exc.error_code != 104 or not items:
+                        raise
+                    self.log.warning(
+                        "VK поиск %s %r: продолжение выдачи недоступно (код 104); "
+                        "получено %d уникальных видео", owner_id, query,
+                        len(vk.dedupe_by_id(items)))
+                    if incomplete is not None:
+                        incomplete()
+                    return vk.dedupe_by_id(items)
+            response = data.get("response") or {}
+            block = response.get("block")
+            if not isinstance(block, dict) or block.get("data_type") != "videos":
+                raise vk.VkScanError("VK: неожиданный ответ следующей страницы поиска")
+        raise vk.VkScanError("VK: достигнут предел страниц быстрого поиска; результат неполон")
 
     async def on_video_scan(self, env: Envelope) -> dict:
         """payload: {url, series: dict}
