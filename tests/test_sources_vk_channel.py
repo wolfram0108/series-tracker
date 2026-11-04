@@ -15,25 +15,36 @@ from modules.sources.module import SourcesModule
 from modules.sources.players.registry import PlayerRegistry
 from modules.sources.sites import PHASE_PLAYERS, PHASE_VIDEOS, ReadContext, SiteError
 from modules.sources.sites.vk_channel import VkChannelSite
-from modules.sources.sites.vk_channel.api import PAGE_SIZE, dedupe, heights_of, is_external, keep_by_terms, parse_address
+from modules.sources.sites.vk_channel.api import (PAGE_SIZE, dedupe, error_code_of, heights_of, is_external,
+                                                   keep_by_terms, parse_address, search_block, search_page)
 from sources_support import READ_LIMIT_S, Web, json_of, migrate, text_of, within
 
 OWNER = -170515668
 CHANNEL = "https://vkvideo.ru/@ruchime"
-SEARCH_BY_OWNER = "run1/vk__52__video.search.json"
-SEARCH = "run2_vk/vk__52__video.search_noowner.json"
+SEARCH = "run2_vk/vk__52__video.search_noowner.json"  # the videos of the global search; those of the channel are the ones found
 LISTING = "run2_vk/vk__52__video.get.json"
 EMBED_CLOSED = "run1/ruchime__episode-390__vk_embed.html"
 OPEN_EMBED = '<script>{"mp4_720":"a","mp4_1080":"b"}</script>'
 
 
 class Api:
-    """The VK API as the snapshots show it: `video.search` with an owner finds nothing, without one it finds the videos of
-    every channel with their files, `video.get` lists one channel and gives no files. Only the first page is the snapshot."""
+    """The VK API as VK answers it: `video.get` lists one channel (the snapshot, which gives no files), and the catalog search of
+    VK Video gives the first page of the videos of the channel and, by the cursor of its block, the next ones. The videos the
+    search finds are those of the channel in the snapshot of the global search, `page` of them to a page; a recommendation
+    of another creator comes in every answer. `video.search` is not answered: the site does not ask it."""
 
-    def __init__(self, error: SiteError | None = None) -> None:
+    def __init__(self, error: SiteError | None = None, page: int = 5) -> None:
         self.calls: list[tuple[str, dict]] = []
-        self.error = error
+        self.error, self.page = error, page
+        self.ours = [video for video in json_of(SEARCH)["response"]["items"] if video["owner_id"] == OWNER]
+
+    def block(self, number: int) -> dict:
+        part = self.ours[number * self.page:(number + 1) * self.page]
+        block = {"id": "channel-search", "data_type": "videos", "layout": {"owner_id": OWNER},
+                 "videos_ids": [f"{video['owner_id']}_{video['id']}" for video in part]}
+        if (number + 1) * self.page < len(self.ours):
+            block["next_from"] = f"page-{number + 1}"
+        return block
 
     async def __call__(self, method: str, params: dict) -> dict:
         self.calls.append((method, dict(params)))
@@ -41,16 +52,25 @@ class Api:
             raise self.error
         if method == "utils.resolveScreenName":
             return json_of("run1/vk__52__resolve.json")
-        if method == "video.search" and "owner_id" in params:
-            return json_of(SEARCH_BY_OWNER)
-        name = SEARCH if method == "video.search" else LISTING
-        first = json_of(name)
+        if method == "catalog.getOwnerVideosSearch":
+            foreign = {"owner_id": 1, "id": 9, "title": "Рекомендация", "files": {"mp4_720": "u"}}
+            return {"response": {"catalog": {"sections": [{"blocks": [
+                self.block(0), {"id": "rec", "data_type": "catalog_videos", "videos_ids": ["1_9"]}]}]},
+                "videos": self.ours[:self.page] + [foreign]}}
+        if method == "catalog.getBlockItems":
+            number = int(params["start_from"].split("-")[1])
+            return {"response": {"block": self.block(number), "videos": self.ours[number * self.page:(number + 1) * self.page]}}
+        assert method == "video.get", f"the site asked {method}"
+        first = json_of(LISTING)
         if params["offset"] == 0:
             return first
         return {"response": {"count": first["response"]["count"], "items": []}}
 
     def pages(self, method: str) -> list[int]:
         return [params["offset"] for called, params in self.calls if called == method]
+
+    def asked(self, method: str) -> list[dict]:
+        return [params for called, params in self.calls if called == method]
 
 
 class Run:
@@ -104,20 +124,44 @@ def test_the_pure_reading_of_a_video_of_the_api():
     assert keep_by_terms(dedupe(videos), ()) == dedupe(videos)
 
 
-# --- the mode "search" (the snapshot of the search without an owner) -----------------------------------------------------
+# --- the mode "search" (the catalog search of VK Video: the videos of the channel in pages with the cursor of a block) ---------
 
-async def test_the_search_asks_vk_without_the_owner_and_keeps_the_videos_of_the_channel_with_their_files():
-    api, listed = Api(), json_of(SEARCH)["response"]["items"]
-    ours = [video for video in listed if video["owner_id"] == OWNER]
+def scripted(answers: dict[str, list]) -> Api:
+    """An API whose catalog calls answer as scripted: a dict is the answer, an exception is raised. The rest is as `Api`."""
+
+    class Scripted(Api):
+        async def __call__(self, method, params):
+            if method not in answers:
+                return await super().__call__(method, params)
+            self.calls.append((method, dict(params)))
+            answer = answers[method].pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+    return Scripted()
+
+
+def refusal(code: int) -> SiteError:
+    return SiteError(reason("vk_api_error", method="catalog.getBlockItems", message="Not found", error_code=code))
+
+
+def first_page(api: Api, cursor: str | None = "page-1") -> dict:
+    block = {**api.block(0), "next_from": cursor} if cursor else {k: v for k, v in api.block(0).items() if k != "next_from"}
+    return {"response": {"catalog": {"sections": [{"blocks": [block]}]}, "videos": api.ours[:api.page]}}
+
+
+async def test_the_search_is_the_catalog_search_of_the_channel_and_follows_the_cursor_of_its_block():
+    api = Api()
 
     draft = await Run(api).read(f"{CHANNEL}|Непревзойденный на пути алхимии|search")
 
-    assert len(ours) == 9 and 0 < len(ours) < len(listed)
-    assert [row.key for row in draft.rows] == [f"{OWNER}_{video['id']}" for video in ours]
-    # No call carries `owner_id` to the search, and the pages go on to the count VK reports.
-    searches = [params for called, params in api.calls if called == "video.search"]
-    assert all("owner_id" not in params and params["q"] == "Непревзойденный на пути алхимии" for params in searches)
-    assert api.pages("video.search") == [PAGE_SIZE * page for page in range(math.ceil(27720 / PAGE_SIZE))]
+    assert len(api.ours) == 9
+    assert [row.key for row in draft.rows] == [f"{OWNER}_{video['id']}" for video in api.ours]  # the recommendation is no row
+    assert [called for called, _params in api.calls] == [
+        "utils.resolveScreenName", "catalog.getOwnerVideosSearch", "catalog.getBlockItems"]
+    assert api.asked("catalog.getOwnerVideosSearch") == [{"owner_id": OWNER, "q": "Непревзойденный на пути алхимии"}]
+    assert api.asked("catalog.getBlockItems") == [{"block_id": "channel-search", "start_from": "page-1"}]
 
 
 async def test_a_row_of_the_search_is_the_title_the_steps_of_the_files_and_the_date_of_the_video():
@@ -148,24 +192,181 @@ async def test_each_term_of_the_query_is_searched_and_a_video_found_twice_is_one
     draft = await Run(api).read(f"{CHANNEL}|Непревзойденный на пути алхимии/алхимии|search")
 
     assert len(draft.rows) == len({row.key for row in draft.rows}) == 9
-    assert {params["q"] for called, params in api.calls if called == "video.search"} == {
+    assert {params["q"] for params in api.asked("catalog.getOwnerVideosSearch")} == {
         "Непревзойденный на пути алхимии", "алхимии"}
 
 
-async def test_the_read_reports_the_pages_of_the_listing_to_the_count():
+async def test_the_read_reports_the_videos_found_as_the_pages_of_the_search_come():
     run = Run(Api())
 
     await run.read(f"{CHANNEL}|Непревзойденный на пути алхимии|search")
 
-    assert run.progress[0] == (PHASE_VIDEOS, 0, 0) and run.progress[-1] == (PHASE_VIDEOS, 27720, 27720)
+    assert run.progress[0] == (PHASE_VIDEOS, 0, 0) and run.progress[-1] == (PHASE_VIDEOS, 9, 9)
 
 
-async def test_a_search_without_terms_finds_nothing_and_asks_nothing():
+async def test_a_search_without_terms_reads_the_channel_whole():
     api = Api()
+    web = Web().route("video_ext.php", text_of(EMBED_CLOSED))
 
-    draft = await Run(api).read(f"{CHANNEL}||search")
+    draft = await Run(api, web).read(f"{CHANNEL}||search")
 
-    assert draft.rows == [] and [called for called, _params in api.calls] == ["utils.resolveScreenName"]
+    assert len(draft.rows) == len(json_of(LISTING)["response"]["items"])
+    assert not api.asked("catalog.getOwnerVideosSearch") and api.pages("video.get")
+
+
+# --- a search that cannot be trusted: the channel is listed whole instead ---------------------------------------------------------
+
+def kept_by_the_term() -> list[str]:
+    return [f"{OWNER}_{video['id']}" for video in json_of(LISTING)["response"]["items"] if "противостояние" in video["title"].lower()]
+
+
+async def read_listed(api: Api) -> list[str]:
+    web = Web().route("video_ext.php", text_of(EMBED_CLOSED))
+    draft = await Run(api, web).read(f"{CHANNEL}|противостояние|search")
+    assert api.asked("video.get"), "the channel was not listed"
+    return [row.key for row in draft.rows]
+
+
+async def test_a_search_that_finds_nothing_is_not_believed_and_the_channel_is_listed():
+    nothing = {"response": {"catalog": {"sections": [{"blocks": [{"data_type": "catalog_videos"}]}]}, "catalog_videos": [{}]}}
+    api = scripted({"catalog.getOwnerVideosSearch": [nothing]})
+
+    assert await read_listed(api) == kept_by_the_term() != []
+
+
+@pytest.mark.parametrize("code", [5, 9, 104])
+async def test_a_search_the_api_refuses_is_not_an_empty_result_and_the_channel_is_listed(code):
+    api = scripted({"catalog.getOwnerVideosSearch": [SiteError(reason("vk_api_error", method="m", message="x", error_code=code))]})
+
+    assert await read_listed(api) == kept_by_the_term()
+
+
+async def test_a_continuation_that_stays_missing_leaves_a_part_and_the_channel_is_listed():
+    api = scripted({"catalog.getOwnerVideosSearch": [first_page(Api())], "catalog.getBlockItems": [refusal(104), refusal(104)]})
+
+    assert await read_listed(api) == kept_by_the_term()
+    calls = api.asked("catalog.getBlockItems")
+    assert len(calls) == 2 and calls[0] == calls[1]  # asked once more, with the same cursor, before the part is given up
+
+
+async def test_a_continuation_that_is_missing_once_is_asked_again_and_the_search_goes_on():
+    full = Api()
+    api = scripted({"catalog.getOwnerVideosSearch": [first_page(full)], "catalog.getBlockItems": [
+        refusal(104), {"response": {"block": full.block(1), "videos": full.ours[full.page:]}}]})
+
+    draft = await Run(api).read(f"{CHANNEL}|алхимии|search")
+
+    assert [row.key for row in draft.rows] == [f"{OWNER}_{video['id']}" for video in full.ours]
+    assert not api.asked("video.get")
+
+
+async def test_a_cursor_that_comes_again_is_not_followed_and_the_channel_is_listed():
+    full = Api()
+    again = {"response": {"block": {**full.block(0), "next_from": "page-1"}, "videos": full.ours[:full.page]}}
+    api = scripted({"catalog.getOwnerVideosSearch": [first_page(full)], "catalog.getBlockItems": [again]})
+
+    assert await read_listed(api) == kept_by_the_term()
+    assert len(api.asked("catalog.getBlockItems")) == 1
+
+
+def test_an_answer_that_is_not_a_catalog_is_not_an_empty_success():
+    for bad in ({}, {"catalog": {"sections": "x"}}, {"catalog": {"sections": []}, "videos": [{"owner_id": 1, "id": 1}]}):
+        with pytest.raises(SiteError) as refused:
+            search_block(bad, OWNER)
+        assert parse(refused.value.reason)["code"] == "vk_reply_unexpected"
+    block = {"id": "b", "data_type": "videos", "layout": {"owner_id": OWNER}, "videos_ids": [f"{OWNER}_1"]}
+    with pytest.raises(SiteError) as refused:
+        search_page({"videos": []}, block)
+    assert parse(refused.value.reason)["code"] == "vk_reply_unexpected"
+    none = {"catalog": {"sections": [{"blocks": [{"data_type": "catalog_videos"}]}]}, "catalog_videos": [{}]}
+    assert search_block(none, OWNER) is None
+
+
+def test_the_code_of_an_error_of_the_api_is_read_from_the_reason_of_the_call():
+    assert error_code_of(SiteError(reason("vk_api_error", method="m", message="Not found", error_code=104))) == 104
+    assert error_code_of(SiteError(reason("vk_call_failed", method="m", cause="timeout"))) is None
+
+
+# --- the listing of a channel never gives a part as the whole ----------------------------------------------------------------------
+
+@pytest.fixture
+def small_pages(monkeypatch):
+    monkeypatch.setattr("modules.sources.sites.vk_channel.site.PAGE_SIZE", 2)
+    monkeypatch.setattr("modules.sources.sites.vk_channel.site.VK_PAGE_INTERVAL_S", 0)
+
+
+class Listing(Api):
+    """`video.get` as scripted by a function of the call; the rest is as `Api`."""
+
+    def __init__(self, answer) -> None:
+        super().__init__()
+        self.answer = answer
+
+    async def __call__(self, method, params):
+        if method != "video.get":
+            return await super().__call__(method, params)
+        self.calls.append((method, dict(params)))
+        return self.answer(params, len(self.asked("video.get")))
+
+
+def listed_video(number: int) -> dict:
+    return {"owner_id": OWNER, "id": number, "title": "Тайтл", "date": 1, "files": {"mp4_720": "u"}}
+
+
+async def test_the_listing_goes_on_through_an_empty_page_and_past_fifty_pages(small_pages):
+    # More than the 50 pages of the former limit, and a page with no video that is available.
+    api = Listing(lambda params, _n: {"response": {"count": 51 * 2 + 1, "items": [] if params["offset"] == 2 else [listed_video(params["offset"] + 1)]}})
+
+    draft = await Run(api).read(f"{CHANNEL}||get_all")
+
+    assert api.pages("video.get") == list(range(0, 52 * 2, 2)) and len(draft.rows) == 51
+
+
+@pytest.mark.parametrize("failure", ["limit", "repeat", "malformed"])
+async def test_a_listing_that_is_cut_short_ends_in_a_reason_and_not_in_a_part(small_pages, monkeypatch, failure):
+    monkeypatch.setattr("modules.sources.sites.vk_channel.site.LISTING_PAGES", 2)
+
+    def answer(params, _n):
+        if failure == "malformed":
+            return {"response": {"count": 600}}
+        return {"response": {"count": 600, "items": [listed_video(1 if failure == "repeat" else params["offset"] + 1)]}}
+
+    with pytest.raises(SiteError) as refused:
+        await Run(Listing(answer)).read(f"{CHANNEL}||get_all")
+
+    assert parse(refused.value.reason)["code"] == ("vk_listing_limit" if failure == "limit" else "vk_reply_unexpected")
+
+
+@pytest.mark.parametrize("recovers", [True, False])
+async def test_a_page_the_api_fails_is_asked_again_up_to_three_asks(small_pages, recovers):
+    failure = SiteError(reason("vk_api_error", method="video.get", message="Internal server error", error_code=10))
+
+    def answer(params, asked):
+        if asked == 1 or not recovers:
+            raise failure
+        return {"response": {"count": 1, "items": [listed_video(1)]}}
+
+    api = Listing(answer)
+    if recovers:
+        assert len((await Run(api).read(f"{CHANNEL}||get_all")).rows) == 1
+        assert api.pages("video.get") == [0, 0]
+    else:
+        with pytest.raises(SiteError) as refused:
+            await Run(api).read(f"{CHANNEL}||get_all")
+        assert refused.value is failure and api.pages("video.get") == [0, 0, 0]
+
+
+async def test_a_page_the_api_refuses_for_a_reason_that_a_repeat_does_not_mend_is_asked_once(small_pages):
+    refused = SiteError(reason("vk_api_error", method="video.get", message="Access denied", error_code=15))
+
+    def answer(params, _n):
+        raise refused
+
+    api = Listing(answer)
+    with pytest.raises(SiteError):
+        await Run(api).read(f"{CHANNEL}||get_all")
+
+    assert api.pages("video.get") == [0]
 
 
 # --- the mode "get_all" (the snapshot of the listing of the channel, which gives no files) ---------------------------------
@@ -226,10 +427,11 @@ async def test_a_video_without_files_and_without_a_key_is_not_obtained_not_absen
 async def test_a_video_that_vk_only_links_to_has_no_row():
     class Linked(Api):
         async def __call__(self, method, params):
-            if method == "video.search" and params["offset"] == 0:
-                return {"response": {"count": 2, "items": [
-                    {"owner_id": OWNER, "id": 1, "title": "tube", "platform": "YouTube", "files": {"external": "u"}},
-                    {"owner_id": OWNER, "id": 2, "title": "own", "files": {"mp4_720": "u"}}]}}
+            if method == "catalog.getOwnerVideosSearch":
+                videos = [{"owner_id": OWNER, "id": 1, "title": "tube", "platform": "YouTube", "files": {"external": "u"}},
+                          {"owner_id": OWNER, "id": 2, "title": "own", "files": {"mp4_720": "u"}}]
+                block = {"id": "b", "data_type": "videos", "layout": {"owner_id": OWNER}, "videos_ids": [f"{OWNER}_1", f"{OWNER}_2"]}
+                return {"response": {"catalog": {"sections": [{"blocks": [block]}]}, "videos": videos}}
             return await super().__call__(method, params)
 
     draft = await Run(Linked()).read(f"{CHANNEL}|x|search")
@@ -251,7 +453,7 @@ async def test_a_channel_vk_does_not_know_is_refused_with_a_reason():
 
 
 async def test_an_error_of_the_api_ends_the_read_with_its_reason():
-    failure = SiteError(reason("vk_api_error", method="video.search", message="User authorization failed", error_code=5))
+    failure = SiteError(reason("vk_api_error", method="utils.resolveScreenName", message="User authorization failed", error_code=5))
 
     with pytest.raises(SiteError) as refused:
         await Run(Api(error=failure)).read(f"{CHANNEL}|x|search")

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
-from core.reasons import reason
+from core.reasons import parse, reason
 
 from .. import SiteError
 
@@ -101,6 +101,39 @@ def keep_by_terms(videos: list[dict], terms: tuple[str, ...]) -> list[dict]:
         return videos
     lowered = [term.lower() for term in terms]
     return [video for video in videos if any(term in str(video.get("title", "")).lower() for term in lowered)]
+
+
+def error_code_of(failure: SiteError) -> int | None:
+    """The code VK gave in an error of the API, taken from the reason the call put in the `SiteError`."""
+    code = ((parse(failure.reason) or {}).get("params") or {}).get("error_code")
+    return code if isinstance(code, int) else None
+
+
+def search_block(response: Mapping[str, Any], owner_id: int) -> dict | None:
+    """The block of the videos of the channel in an answer of the catalog search; the recommendations hold other creators.
+    None when the channel has none that match. An answer that is not a catalog is not an empty result."""
+    catalog = response.get("catalog")
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("sections"), list):
+        raise SiteError(reason("vk_reply_unexpected", method="catalog.getOwnerVideosSearch"))
+    for section in catalog["sections"]:
+        for block in section.get("blocks", []):
+            if block.get("data_type") == "videos" and block.get("layout", {}).get("owner_id") == owner_id:
+                return block
+    if response.get("videos"):
+        raise SiteError(reason("vk_reply_unexpected", method="catalog.getOwnerVideosSearch"))
+    return None
+
+
+def search_page(response: Mapping[str, Any], block: Mapping[str, Any]) -> list[dict]:
+    """The videos of one page of the block: the answer may carry recommendations too, the membership is `videos_ids`."""
+    video_ids, videos = block.get("videos_ids"), response.get("videos", [])
+    if not isinstance(video_ids, list) or not isinstance(videos, list):
+        raise SiteError(reason("vk_reply_unexpected", method="catalog.getBlockItems"))
+    wanted = set(video_ids)
+    items = [video for video in videos if key_of(video) in wanted]
+    if len({key_of(video) for video in items}) != len(wanted):
+        raise SiteError(reason("vk_reply_unexpected", method="catalog.getBlockItems"))
+    return items
 
 
 def dedupe(videos: list[dict]) -> list[dict]:

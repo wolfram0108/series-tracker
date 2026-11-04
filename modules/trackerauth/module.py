@@ -43,6 +43,7 @@ import asyncio
 import base64
 import time
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 
@@ -53,6 +54,7 @@ from core.envelope import Envelope
 from . import cf_challenge
 from .providers import PROVIDERS, TrackerLoginError
 from .repository import TrackerAuthRepository, account_fingerprint
+from .vk_catalog import METHODS as VK_CATALOG_METHODS, VkCatalogClient
 
 LOGIN_MIN_INTERVAL = 300.0      # секунд между логинами на один трекер
 CHALLENGE_MIN_INTERVAL = 60.0   # секунд между прохождениями челленджа
@@ -70,6 +72,7 @@ class TrackerauthModule(BaseModule):
         self._last_login: dict[str, float] = {}
         self._last_challenge: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._vk_catalog = VkCatalogClient()
         super().__init__(bus)
 
     def register(self) -> None:
@@ -274,6 +277,11 @@ class TrackerauthModule(BaseModule):
 
     async def _do_request(self, session: requests.Session, provider,
                           p: dict) -> requests.Response:
+        method = urlsplit(p["url"]).path.removeprefix("/method/")
+        if provider.service == "vk" and method in VK_CATALOG_METHODS:
+            return await asyncio.to_thread(
+                self._vk_catalog.fetch, session, method,
+                dict(p.get("params") or {}), float(p.get("timeout", 25)))
         headers = provider.request_headers(p["url"])
         headers.update(p.get("headers") or {})
         params = dict(p.get("params") or {})

@@ -87,14 +87,16 @@ class SourceSync:
 
 
 async def sync_tables(sources: Sequence[SeriesSource], ask: Ask, signals: TableSignals,
-                      safeguard_s: float = TABLE_WAIT_S) -> list[SourceSync]:
-    """Every source at once; the answer is in the order of `sources`. A failure of one source never stops the others."""
-    return list(await asyncio.gather(*(_sync_source(source, ask, signals, safeguard_s) for source in sources)))
+                      safeguard_s: float = TABLE_WAIT_S, *, inventory: bool = False) -> list[SourceSync]:
+    """Every source at once; the answer is in the order of `sources`. A failure of one source never stops the others.
+    `inventory` asks the sources of a VK channel for the whole channel (a scan of the schedule)."""
+    return list(await asyncio.gather(*(_sync_source(source, ask, signals, safeguard_s, inventory) for source in sources)))
 
 
-async def _sync_source(source: SeriesSource, ask: Ask, signals: TableSignals, safeguard_s: float) -> SourceSync:
+async def _sync_source(source: SeriesSource, ask: Ask, signals: TableSignals, safeguard_s: float,
+                       inventory: bool = False) -> SourceSync:
     since = signals.mark()
-    request = TableGetRequest(url=source.url, options=source.read_options(), refresh=True)
+    request = TableGetRequest(url=source.url, options=source.read_options(inventory=inventory), refresh=True)
     try:
         reply = TableGetReply.model_validate(
             await ask("sources.table.get", request.model_dump(mode="json")))

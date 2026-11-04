@@ -133,6 +133,8 @@ export const ru = {
   "reason.vk_bad_address": "в адресе нет имени канала VK (@…)",
   "reason.vk_call_failed": "VK не ответил на {method}",
   "reason.vk_api_error": "VK {method}: {message} (код {error_code})",
+  "reason.vk_reply_unexpected": "VK {method}: ответ неполный, повторный или неожиданного вида",
+  "reason.vk_listing_limit": "Список VK не уместился в {pages} страниц, результат был бы неполным",
   "reason.vk_channel_unknown": "VK не знает канала {name}",
   "sources.phase.release": "Страница релиза",
   "sources.phase.episodes": "Страницы серий",

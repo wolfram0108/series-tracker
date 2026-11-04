@@ -34,9 +34,12 @@ class SeriesSource(BaseModel):
     # The voice-over of the rows that have no name of their own and none from the constructor (a VK channel gives none).
     voice_name: str = ""
 
-    def read_options(self) -> dict[str, str]:
-        """The choices that change what the site is asked for; the others are applied to the table afterwards."""
-        return {"vk_search_mode": self.vk_search_mode}
+    def read_options(self, *, inventory: bool = False) -> dict[str, str]:
+        """The choices that change what the site is asked for; the others are applied to the table afterwards.
+
+        `inventory` is a scan of the schedule: the quick search of a VK channel may leave out a new upload without a sign,
+        so such a scan reads the channel whole (the table is shared by the series of one channel for the term of a table)."""
+        return {"vk_search_mode": "get_all" if inventory else self.vk_search_mode}
 
 
 class SourceEvent(BaseModel):

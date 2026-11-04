@@ -404,16 +404,18 @@ class ScanModule(BaseModule):
             raise SyncFailed(reason("scan_step_failed", step=topic)) from exc
 
     async def _run_series(self, series_id: int, force: bool = False,
-                          download: bool = True, resume: int | None = None) -> dict:
+                          download: bool = True, resume: int | None = None, inventory: bool = False) -> dict:
         """A scan of one series. The command is written down before anything is waited for, so that a restart finds
-        it: a video synchronization is a task of `scan_tasks` until it ends (`resume` is the task a restart found)."""
+        it: a video synchronization is a task of `scan_tasks` until it ends (`resume` is the task a restart found).
+        `inventory` is a scan of the schedule: the channels of VK are read whole, the quick search may miss a new upload."""
         self._require_idle(series_id)
         self._running.add(series_id)
         self._contribute(series_id, scanning=True, error=False)
         intent = resume
         try:
             if intent is None:
-                intent = await self.repo.create_task(series_id, [], {"video_sync": True, "download": download})
+                intent = await self.repo.create_task(series_id, [], {"video_sync": True, "download": download,
+                                                                     "inventory": inventory})
             self._owned.add(intent)
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
@@ -432,7 +434,7 @@ class ScanModule(BaseModule):
             await self.repo.delete_error_tasks(series_id)
             await self._reprocess_names(series_id)
             if video:
-                result = await self._sync_video(series, download)
+                result = await self._sync_video(series, download, inventory)
                 await self.repo.delete_task(intent)
             else:
                 result = await self._torrents.scan(series, _torrent_source(series), force)
@@ -525,7 +527,7 @@ class ScanModule(BaseModule):
 
     # --- video branch: synchronisation and the plan of references ----------------------------------
 
-    async def _sync_video(self, series: dict, download: bool) -> dict:
+    async def _sync_video(self, series: dict, download: bool, inventory: bool = False) -> dict:
         """Tables of all sources -> layout -> references and plan -> (with download) the download and the voice-overs.
 
         Each step starts on the signal that the one before it ended, and any step that fails fails the scan."""
@@ -538,7 +540,8 @@ class ScanModule(BaseModule):
             self.log.warning("сверка диска перед видео-сканом пропущена: %s", exc)
         before = await self._fingerprint(series_id)
         self._alive(series_id)
-        tables = await sync.sync_tables(_sources_of(series), self.request, self._signals, self._table_wait_s)
+        tables = await sync.sync_tables(_sources_of(series), self.request, self._signals, self._table_wait_s,
+                                        inventory=inventory)
         for each in tables:
             if each.reason:
                 self.log.warning("сериал %d, источник %d: страница %s — %s, причина %s", series_id, each.source_id,
@@ -711,7 +714,7 @@ class ScanModule(BaseModule):
             return
         try:
             await self._run_series(series_id, download=bool(task["results_data"].get("download", True)),
-                                   resume=task["id"])
+                                   resume=task["id"], inventory=bool(task["results_data"].get("inventory", False)))
         except Exception:  # noqa: BLE001 - the failure is kept as the error task of the series
             self.log.exception("возобновление синхронизации сериала %d не удалось", series_id)
 
@@ -783,7 +786,7 @@ class ScanModule(BaseModule):
                                   "активные задачи конвейера", s["id"])
                     continue
                 try:
-                    await self._run_series(s["id"], force)
+                    await self._run_series(s["id"], force, inventory=True)
                 except Exception as exc:  # noqa: BLE001 — проход не прерываем
                     self.log.error("автоскан сериала %d: %s", s["id"], exc)
         except asyncio.CancelledError:

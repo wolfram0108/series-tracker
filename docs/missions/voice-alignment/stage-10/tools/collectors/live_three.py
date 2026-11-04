@@ -32,12 +32,12 @@ from verdicts import judge_alignment  # noqa: E402
 REAL_DB = "/home/user/series-tracker/app.db"
 SERIES = "Расколотая битвой синева небес 5"
 SERIES_EN = "Raskolotaia Bitva Sineva Nebes 5"
-LOCAL = "/nas/torrents/track-muxer/stage10-live8"
-REMOTE = "/mnt/meganas/media/torrents/track-muxer/stage10-live8"
+LOCAL = "/nas/torrents/track-muxer/stage10-live9"
+REMOTE = "/mnt/meganas/media/torrents/track-muxer/stage10-live9"
 LIBRARY = f"{LOCAL}/library/{SERIES_EN}"
 CUT = "1-207"  # the range filter: the episodes up to 207 are out, 208-217 stay
 FIRST, LAST = 208, 217
-KEEP = 212  # the channel has this episode in 2160p, and all five voice-overs have a row for it
+KEEP = 213  # the channel has this episode in 2160p (the newest videos of the channel are 213-217), and all voice-overs have a row for it
 TEXT_FIRST = [{"type": "text", "value": "Серия"}, {"type": "whitespace"}, {"type": "number"}]
 NUMBER_FIRST = [{"type": "number"}, {"type": "whitespace"}, {"type": "text", "value": "серия"}]
 OUT_TEXT_FIRST = [*TEXT_FIRST, {"type": "range", "value": CUT}]
