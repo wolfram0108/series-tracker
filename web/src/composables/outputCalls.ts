@@ -87,6 +87,12 @@ export function setLever(seriesId: number, body: Schemas["OutputSettingsSet"]): 
   }), OUTPUT_WORDS)
 }
 
+export function setVoiceOrder(seriesId: number, body: Schemas["VoiceOrderBody"]): Promise<Answer<unknown>> {
+  return call(() => api.PUT("/api/series/{series_id}/output/voice-order", {
+    params: { path: { series_id: seriesId } }, body,
+  }), OUTPUT_WORDS)
+}
+
 export function resetLever(seriesId: number, body: Schemas["OutputSettingsReset"]): Promise<Answer<unknown>> {
   return call(() => api.POST("/api/series/{series_id}/output/settings/reset", {
     params: { path: { series_id: seriesId } }, body,

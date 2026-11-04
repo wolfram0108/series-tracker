@@ -95,6 +95,8 @@ const switchSeason = (season: number, off: boolean) => changed(output.switchTo(s
         v-for="season in shownSeasons" :key="season.season" scope="season" :season="season.season"
         :title="t('output.season', { n: season.season })" :views="season.episodes" :levers="levelLevers(season.season)"
         :specs="output.specs.value" :busy="output.busy.value || seriesBusy" @set="setLever" @reset="resetLever" @switch="switchSeason"
+        :voices="output.voiceOrders.value.find((each) => each.season === season.season)?.voices ?? []"
+        @order="(number: number, labels: string[]) => changed(output.order(number, labels))"
       >
         <OutputEpisode
           v-for="view in season.shown" :key="view.episode" :view="view" :specs="output.specs.value" :busy="output.busy.value || seriesBusy"

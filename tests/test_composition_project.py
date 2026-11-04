@@ -658,3 +658,61 @@ def test_a_player_switched_off_or_on_renames_no_group():
     named = labelled(("a", "AniStar", "Стар"))
     left = [row.model_copy(update={"excluded": True, "exclusion": Exclusion.SOURCE, "voice_label": ""}) for row in named]
     assert group_renames(named, left) == {} and group_renames(left, named) == {}
+
+
+
+# ---- the order of the voice-overs of a season (ЭТАП_11) ------------------------------------------------------------
+
+
+def voiced(*pairs, season=1) -> list[CompositionRow]:
+    """Rows of one season: (voice label, episode) in the order of the layout."""
+    return [CompositionRow(series_id=5, source_id=1, row_key=f"r{i}", season=season, episode_start=episode,
+                           episode_end=episode, voice_label=label, voice_name=label, player="vk", state=RowState.PLAYABLE)
+            for i, (label, episode) in enumerate(pairs)]
+
+
+def test_a_new_voice_takes_the_end_and_the_voices_there_keep_their_places_whatever_the_layout_brings():
+    import itertools
+    from modules.composition.project import season_orders
+    for previous in itertools.permutations(["A", "B", "C"]):
+        for present in itertools.permutations(["A", "B", "C", "D"], 3):
+            order = season_orders({1: list(previous)}, voiced(*[(label, n) for n, label in enumerate(present, 1)]), {})[1]
+            assert order[:3] == list(previous)  # nothing that was there moved
+            assert order[3:] == [label for label in present if label not in previous]  # what is new takes the end
+
+
+def test_the_default_order_is_the_order_of_the_layout_and_a_group_absent_now_keeps_its_place():
+    from modules.composition.project import season_orders, season_voices
+    rows = voiced(("Ruchime", 1), ("ПВА", 1), ("Ruchime", 2), ("Anistar", 3))
+    assert season_orders({}, rows, {}) == {1: ["Ruchime", "ПВА", "Anistar"]}
+    kept = season_orders({1: ["X", "ПВА", "Ruchime"]}, rows, {})
+    assert kept == {1: ["X", "ПВА", "Ruchime", "Anistar"]}
+    shown = season_voices(kept, rows)[0]
+    assert [(voice.label, voice.episodes) for voice in shown.voices] == [("ПВА", "1"), ("Ruchime", "1–2"), ("Anistar", "3")]
+
+
+def test_a_renamed_group_keeps_its_place_and_two_groups_made_one_keep_the_higher_place():
+    from modules.composition.project import season_orders
+    rows = voiced(("Стар", 1), ("B", 1), ("C", 1))
+    assert season_orders({1: ["A", "B", "C"]}, rows, {"A": "Стар"}) == {1: ["Стар", "B", "C"]}
+    merged = voiced(("G", 1), ("C", 1))
+    assert season_orders({1: ["C", "A", "B"]}, merged, {"A": "G", "B": "G"}) == {1: ["C", "G"]}
+
+
+def test_the_seasons_have_orders_of_their_own():
+    from modules.composition.project import season_orders
+    rows = voiced(("A", 1), ("B", 1)) + voiced(("B", 1), ("C", 1), season=2)
+    assert season_orders({}, rows, {}) == {1: ["A", "B"], 2: ["B", "C"]}
+
+
+@pytest.mark.parametrize("numbers, text", [([1], "1"), ([1, 2, 3], "1–3"), ([5, 1, 2, 9, 10], "1–2, 5, 9–10"), ([], "")])
+def test_the_episodes_of_a_voice_are_worded_as_runs(numbers, text):
+    from modules.composition.project import spans
+    assert spans(numbers) == text
+
+
+def test_the_user_orders_the_voices_shown_and_the_hidden_keep_their_places():
+    from modules.composition.project import reorder
+    assert reorder(["A", "X", "B", "C"], ["A", "B", "C"], ["C", "A", "B"]) == ["C", "X", "A", "B"]
+    assert reorder(["A", "B"], ["A", "B"], ["A"]) is None
+    assert reorder(["A", "B"], ["A", "B"], ["A", "A"]) is None

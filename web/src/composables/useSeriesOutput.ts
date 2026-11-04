@@ -7,7 +7,8 @@ import { useQueuesStore } from "../stores/queues"
 import { useSeriesStore } from "../stores/series"
 import { useVoicesStore } from "../stores/voices"
 import {
-  adoptSeries, fetchComposition, fetchMedia, fetchOutput, fetchRenames, reprocessSeries, resetLever, setLever, switchOutput, syncSeries,
+  adoptSeries, fetchComposition, fetchMedia, fetchOutput, fetchRenames, reprocessSeries, resetLever, setLever, setVoiceOrder, switchOutput,
+  syncSeries,
   type Composition, type MediaFile, type RenameRow,
 } from "./outputCalls"
 import type { Answer } from "./sourceCalls"
@@ -160,6 +161,11 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
 
   const sync = (): Promise<string | null> => act(() => syncSeries(seriesId), syncing)
 
+  // The order of the voice-overs of a season (the tracks of its containers); the new order comes back as an event.
+  const voiceOrders = computed(() => composition.value?.voice_orders ?? [])
+  const order = (season: number, labels: string[]): Promise<string | null> =>
+    act(() => setVoiceOrder(seriesId, { season, labels }), busy)
+
   if (kind === "video") {
     onMounted(() => void load())
     // The layout moved to a newer revision: the output is read again. The same or an older revision changes nothing.
@@ -182,5 +188,5 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   }
 
   return { composition, references, loading, failure, busy, syncing, reprocessing, adopting, names, namesWanted, naming, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
-    sync, reprocess, adopt, showNames }
+    sync, reprocess, adopt, showNames, voiceOrders, order }
 }

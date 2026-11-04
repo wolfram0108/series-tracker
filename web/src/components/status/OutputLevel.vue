@@ -3,6 +3,8 @@ import { computed, ref } from "vue"
 import { t } from "../../i18n"
 import { allOff, scopeView, type EpisodeView, type Lever, type LeverSpec, type Scope } from "../../lib/output"
 import OutputLevers from "./OutputLevers.vue"
+import VoiceOrder from "./VoiceOrder.vue"
+import type { components } from "../../api/schema"
 
 // A header of one level, with its episodes in the slot; the levers and the folding are local, since they change no data.
 const props = withDefaults(defineProps<{
@@ -14,12 +16,15 @@ const props = withDefaults(defineProps<{
   specs: LeverSpec[]
   season?: number
   busy?: boolean
-}>(), { busy: false })
+  /** The voice-overs of the season in the order of the tracks of its containers (a season only). */
+  voices?: components["schemas"]["VoiceSpan"][]
+}>(), { busy: false, voices: () => [] })
 
 const emit = defineEmits<{
   (e: "set", scope: Scope, lever: string, target: string | null, value: unknown): void
   (e: "reset", scope: Scope, lever: string, target: string | null): void
   (e: "switch", season: number, off: boolean): void
+  (e: "order", season: number, labels: string[]): void
 }>()
 
 // Named apart from the levers prop, which a ref of the same name would shadow.
@@ -65,6 +70,11 @@ function forwardReset(lever: string, target: string | null): void {
     <OutputLevers
       v-if="leversOpen" :scope="scope" :view="pooled" :levers="levers" :specs="specs" :busy="busy"
       @set="forwardSet" @reset="forwardReset"
+    />
+
+    <VoiceOrder
+      v-if="scope === 'season' && season !== undefined && voices.length > 1" :voices="voices" :busy="busy"
+      @order="(labels) => emit('order', season!, labels)"
     />
 
     <div v-if="!folded" class="level-episodes stack">

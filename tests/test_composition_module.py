@@ -31,7 +31,8 @@ from modules.composition.levers import Lever
 
 ROOT = Path(__file__).resolve().parent.parent
 MIGRATIONS = [ROOT / "alembic" / "versions" / name
-              for name in ("0027_composition_tables.py", "0035_composition_source_exclusion.py")]
+              for name in ("0027_composition_tables.py", "0035_composition_source_exclusion.py",
+                           "0036_composition_voice_orders.py")]
 # A test that waits longer than this for an event is stuck: the event is the signal, the number only ends a broken test.
 STUCK_S = 5.0
 
@@ -1492,3 +1493,33 @@ async def test_a_series_whose_sync_is_under_way_keeps_its_layout_and_refuses_its
     await s.counted(lambda: s.probe.publish_event(RUN_CHANGED, {"series_id": series_id, "active": False}))
     await s.bus.settled()
     assert {r.season for r in (await s.get(series_id)).rows} == {2}  # what was owed is counted once the run is over
+
+
+
+# --- the order of the voice-overs of a season (ЭТАП_11) ----------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_the_order_of_the_voices_of_a_season_is_shown_kept_and_set_by_the_user_only(system):
+    from core.contracts import RUN_CHANGED
+    s = system
+    series_id = await laid_out(s, page(*season_rows(1, range(1, 4)),
+                                       *season_rows(1, range(1, 3), player="kodik", voice="AniStar")))
+    [order] = (await s.get(series_id)).voice_orders
+    labels = [voice.label for voice in order.voices]
+    assert order.season == 1 and len(labels) == 2 and all(voice.episodes for voice in order.voices)
+
+    wanted = list(reversed(labels))
+    changed = s.bus.subscribe("composition.changed")
+    await s.probe.request("composition.voice_order.set", {"series_id": series_id, "season": 1, "labels": wanted},
+                          timeout=STUCK_S)
+    assert [voice.label for voice in (await s.get(series_id)).voice_orders[0].voices] == wanted
+    assert s.taken(changed)  # the containers follow the order at the next sync: consumers hear of it
+
+    with pytest.raises(BusRequestError, match="voice_order_mismatch"):
+        await s.probe.request("composition.voice_order.set", {"series_id": series_id, "season": 1, "labels": ["nobody"]},
+                              timeout=STUCK_S)
+    s.probe.publish_event(RUN_CHANGED, {"series_id": series_id, "active": True})
+    await s.bus.settled()
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await s.probe.request("composition.voice_order.set", {"series_id": series_id, "season": 1, "labels": labels},
+                              timeout=STUCK_S)

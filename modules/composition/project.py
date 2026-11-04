@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Iterator, Mapping, Sequence
 
-from core.contracts import (CompositionRow, Exclusion, PlayerSummary, ReleaseTable, RowState, RuleLine, RuleResult,
+from core.contracts import (CompositionRow, Exclusion, PlayerSummary, SeasonVoiceOrder, VoiceSpan, ReleaseTable, RowState, RuleLine, RuleResult,
                             RulesApplyReply, SeriesSource, SourceStatus, SourceSummary, TableRow, line_of)
 from core.voice_names import fold_name
 
@@ -244,3 +244,65 @@ def _players_of(table: ReleaseTable) -> list[PlayerSummary]:
         rows=len(rows), groups=len({row.group for row in rows if row.group}),
         group_names=list(dict.fromkeys(row.group for row in rows if row.group)))
         for player, rows in by_player.items()]
+
+
+# --- the order of the voice-overs of a season (ЭТАП_11) --------------------------------------------------------------
+
+def season_orders(previous: Mapping[int, Sequence[str]], rows: Sequence[CompositionRow],
+                  renames: Mapping[str, str]) -> dict[int, list[str]]:
+    """season -> the voice-over groups in the order of the tracks of the container.
+
+    What is there keeps its place: a group renamed keeps the place of its old name, two groups that became one keep the
+    higher of their places, a group that has no row now keeps its place for when it comes back. A group new to the season
+    takes the end, in the order the layout gives it (the sources in their order, then the rows as they come); only the
+    user moves the others."""
+    present: dict[int, list[str]] = {}
+    for row in rows:
+        if row.excluded or row.season is None or not row.voice_label:
+            continue
+        labels = present.setdefault(row.season, [])
+        if row.voice_label not in labels:
+            labels.append(row.voice_label)
+    orders: dict[int, list[str]] = {}
+    for season in sorted(set(previous) | set(present)):
+        kept: list[str] = []
+        for label in previous.get(season, ()):
+            label = renames.get(label, label)
+            if label not in kept:
+                kept.append(label)
+        kept += [label for label in present.get(season, []) if label not in kept]
+        orders[season] = kept
+    return orders
+
+
+def season_voices(orders: Mapping[int, Sequence[str]], rows: Sequence[CompositionRow]) -> list[SeasonVoiceOrder]:
+    """What the window shows of the orders: the groups each season has now, in their order, with their episodes."""
+    episodes: dict[tuple[int, str], set[int]] = {}
+    for row in rows:
+        if row.excluded or row.season is None or not row.voice_label:
+            continue
+        episodes.setdefault((row.season, row.voice_label), set()).update(number for _, number in _covered(row))
+    seasons = sorted({season for season, _ in episodes})
+    return [SeasonVoiceOrder(season=season, voices=[
+        VoiceSpan(label=label, episodes=spans(episodes[(season, label)]))
+        for label in orders.get(season, ()) if (season, label) in episodes]) for season in seasons]
+
+
+def spans(numbers: Iterable[int]) -> str:
+    """`1–50, 52` of a set of episode numbers."""
+    runs: list[list[int]] = []
+    for number in sorted(set(numbers)):
+        if runs and number == runs[-1][1] + 1:
+            runs[-1][1] = number
+        else:
+            runs.append([number, number])
+    return ", ".join(str(first) if first == last else f"{first}–{last}" for first, last in runs)
+
+
+def reorder(stored: Sequence[str], shown: Sequence[str], wanted: Sequence[str]) -> list[str] | None:
+    """The stored order with the groups the window shows put in the user's order, the hidden ones in their places;
+    None when `wanted` is not the groups shown."""
+    if sorted(wanted) != sorted(shown) or len(set(wanted)) != len(wanted):
+        return None
+    queue = list(wanted)
+    return [queue.pop(0) if label in shown else label for label in stored]

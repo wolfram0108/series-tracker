@@ -216,9 +216,9 @@ export interface paths {
         put?: never;
         /**
          * Update Series
-         * @description Saving the properties: catalog, then metadata, then library or renaming.
+         * @description Saving the properties: catalog, then metadata, then library when the folder moves.
          *     The sources are not changed here; the layout of a video series is counted again on
-         *     series.updated, and what renaming does for each kind of series is renaming's own.
+         *     series.updated. The files take the names of the new properties at the next sync (И-59).
          */
         post: operations["update_series_api_series__series_id__post"];
         /** Delete Series */
@@ -542,6 +542,27 @@ export interface paths {
          *     that the registry does not know is refused with its code (`unknown_lever`, `bad_target`, `bad_value`).
          */
         put: operations["set_output_setting_api_series__series_id__output_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/series/{series_id}/output/voice-order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Voice Order
+         * @description The user's order of the voice-overs of a season: the order of the tracks in its containers. A plan: the
+         *     containers follow it at the next sync; refused while a sync of the series is under way.
+         */
+        put: operations["set_voice_order_api_series__series_id__output_voice_order_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1655,6 +1676,8 @@ export interface components {
             availability?: {
                 [key: string]: string[];
             };
+            /** Voice Orders */
+            voice_orders?: components["schemas"]["SeasonVoiceOrder"][];
         };
         /**
          * CompositionRow
@@ -2214,6 +2237,16 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * SeasonVoiceOrder
+         * @description The order of the voice-overs of a season in the container of every episode: the first is the default track.
+         */
+        SeasonVoiceOrder: {
+            /** Season */
+            season: number;
+            /** Voices */
+            voices?: components["schemas"]["VoiceSpan"][];
+        };
+        /**
          * SeriesCreate
          * @description A new series: its own fields and at least one source. The address, kind and profile of the series are the
          *     fields of a source, so the series model does not know `url`, `source_type`, `parser_profile_id`,
@@ -2259,41 +2292,6 @@ export interface components {
          * @enum {string}
          */
         SeriesKind: "torrent" | "video";
-        /**
-         * SeriesReadProgress
-         * @description The event `scan.series.progress`: how far the read of a page is that the scan of a series waits for. `active`
-         *     false says the wait for that source is over (read, failed or given up); the other fields are then those it last had.
-         */
-        SeriesReadProgress: {
-            /** Series Id */
-            series_id: number;
-            /** Source Id */
-            source_id: number;
-            /** Url */
-            url: string;
-            /**
-             * Phase
-             * @default
-             */
-            phase?: string;
-            /**
-             * Current
-             * @default 0
-             */
-            current?: number;
-            /**
-             * Total
-             * @default 0
-             */
-            total?: number;
-            /** Rate */
-            rate?: number | null;
-            /**
-             * Active
-             * @default true
-             */
-            active?: boolean;
-        };
         /**
          * SeriesObject
          * @description A series (list and card). The fields that are always there are declared; the conditional ones
@@ -2598,6 +2596,16 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * VoiceOrderBody
+         * @description The body of the command `composition.voice_order.set` without the series: a season and its voice-overs in order.
+         */
+        VoiceOrderBody: {
+            /** Season */
+            season: number;
+            /** Labels */
+            labels: string[];
+        };
+        /**
          * VoiceSettingsDraft
          * @description What the settings screen of the voices sends: the order of the sources and the groups of voice-overs.
          *     A group is a name with the list of names that put a voice-over into it; a save replaces both values.
@@ -2641,6 +2649,16 @@ export interface components {
             player_groups?: {
                 [key: string]: string[];
             };
+        };
+        /**
+         * VoiceSpan
+         * @description A voice-over group of a season and the episodes it has, as the window words them (`1–50, 52`).
+         */
+        VoiceSpan: {
+            /** Label */
+            label: string;
+            /** Episodes */
+            episodes: string;
         };
         /**
          * DubEventStatus
@@ -2762,8 +2780,11 @@ export interface components {
             current: number;
             /** Total */
             total: number;
-            /** Rate */
-            rate?: number | null;
+            /**
+             * Rate
+             * @default null
+             */
+            rate: number | null;
         };
         /** TableReady */
         TableReady: {
@@ -2873,6 +2894,44 @@ export interface components {
             source_id: number;
             /** What */
             what: string;
+        };
+        /**
+         * SeriesReadProgress
+         * @description The event `scan.series.progress`: how far the read of a page is that the scan of a series waits for. `active`
+         *     false says the wait for that source is over (read, failed or given up); the other fields are then those it last had.
+         */
+        SeriesReadProgress: {
+            /** Series Id */
+            series_id: number;
+            /** Source Id */
+            source_id: number;
+            /** Url */
+            url: string;
+            /**
+             * Phase
+             * @default
+             */
+            phase: string;
+            /**
+             * Current
+             * @default 0
+             */
+            current: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Rate
+             * @default null
+             */
+            rate: number | null;
+            /**
+             * Active
+             * @default true
+             */
+            active: boolean;
         };
     };
     responses: never;
@@ -4387,6 +4446,77 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["OutputSettingsSet"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_voice_order_api_series__series_id__output_voice_order_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoiceOrderBody"];
             };
         };
         responses: {

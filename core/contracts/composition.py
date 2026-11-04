@@ -116,6 +116,28 @@ class CompositionGetRequest(BaseModel):
     sources_only: bool = False
 
 
+class VoiceSpan(BaseModel):
+    """A voice-over group of a season and the episodes it has, as the window words them (`1–50, 52`)."""
+
+    label: str
+    episodes: str
+
+
+class SeasonVoiceOrder(BaseModel):
+    """The order of the voice-overs of a season in the container of every episode: the first is the default track."""
+
+    season: int
+    voices: list[VoiceSpan] = Field(default_factory=list)
+
+
+class VoiceOrderSet(BaseModel):
+    """The command `composition.voice_order.set`: the user's order of the voice-overs a season has now."""
+
+    series_id: int
+    season: int
+    labels: list[str]
+
+
 class CompositionReply(BaseModel):
     series_id: int
     rev: int
@@ -128,6 +150,8 @@ class CompositionReply(BaseModel):
     # What may be done with an object in each of its states (core/contracts/availability.py): a window draws a control only
     # where this allows it.
     availability: dict[str, list[str]] = Field(default_factory=dict)
+    # The order of the voice-overs of each season (ЭТАП_11): the order of the tracks in the container.
+    voice_orders: list[SeasonVoiceOrder] = Field(default_factory=list)
 
 
 class EpisodeRef(BaseModel):

@@ -36,7 +36,7 @@ export const useSourceTablesStore = defineStore("sourceTables", () => {
     }
   }
 
-  function applyProgress(packet: Schemas["TableProgress"]): void {
+  function applyProgress(packet: Omit<Schemas["TableProgress"], "rate"> & { rate?: number | null }): void {
     put(packet.url, {
       state: "reading",
       progress: { phase: packet.phase, current: packet.current, total: packet.total, rate: packet.rate ?? null },

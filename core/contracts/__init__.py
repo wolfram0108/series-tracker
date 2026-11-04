@@ -5,7 +5,7 @@ so the two cannot drift apart unnoticed. Modules import their contracts from her
 """
 from .alignment import AlignmentJob, DubResult, JobStatus, SubmitOutcome, SubmitReply
 from .composition import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
-                          CompositionPreviewRequest, CompositionReply, PreviewLine,
+                          CompositionPreviewRequest, CompositionReply, PreviewLine, SeasonVoiceOrder, VoiceOrderSet, VoiceSpan,
                           CompositionRow, EpisodeRef, Exclusion, PlayerSummary, SourceStatus, SourceSummary)
 from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
 from .output_settings import (LEVER_FORMS, REFERENCE_CHOICE, VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, EffectiveLever, EpisodeSettings, LeverSpec,
@@ -33,7 +33,7 @@ __all__ = ["Action", "NotAllowed", "allowed", "refusal", "require", "variant_sta
            "RuleLine", "RuleResult", "RulesApplyReply", "RulesApplyRequest", "RulesProfileChanged",
            "SeriesKind", "SeriesSource", "SourceChanged", "SourceEvent", "SourceType",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
-           "CompositionReply", "CompositionRow", "PreviewLine",
+           "CompositionReply", "CompositionRow", "PreviewLine", "SeasonVoiceOrder", "VoiceOrderSet", "VoiceSpan",
            "EpisodeRef", "Exclusion", "PlayerSummary", "SourceStatus", "SourceSummary",
            "REFERENCE_CHOICE", "VARIANT_ALLOW", "VOICE_PLAYER", "VOICE_TAKE", "EffectiveLever", "EpisodeSettings", "LeverSpec", "Level", "LevelSettings", "PlayerPick", "ReferenceChoice", "SettingRecord", "SettingsReset", "SettingsSet",
            "TargetKind", "ValueShape",

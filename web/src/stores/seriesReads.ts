@@ -16,7 +16,10 @@ export interface SeriesRead extends PageProgress {
 export const useSeriesReadsStore = defineStore("seriesReads", () => {
   const reads = ref<Record<number, Record<number, SeriesRead>>>({})
 
-  function apply(packet: Schemas["SeriesReadProgress"]): void {
+  // The core sends every field; a packet without the ones that have defaults is read with them.
+  type Packet = Pick<Schemas["SeriesReadProgress"], "series_id" | "source_id" | "url"> & Partial<Schemas["SeriesReadProgress"]>
+
+  function apply(packet: Packet): void {
     const mine = { ...(reads.value[packet.series_id] ?? {}) }
     if (packet.active === false) delete mine[packet.source_id]
     else

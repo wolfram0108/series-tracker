@@ -245,6 +245,12 @@ class OutputSettingsReset(RequestModel):
     target: str | None = None
 
 
+class VoiceOrderBody(RequestModel):
+    """The body of the command `composition.voice_order.set` without the series: a season and its voice-overs in order."""
+    season: int
+    labels: list[str]
+
+
 class OutputSwitchBody(RequestModel):
     """The body of the command `scan.output.switch` without the series: an episode, or a whole season, off or on."""
     season: int

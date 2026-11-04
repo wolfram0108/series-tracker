@@ -82,7 +82,7 @@ from core.contracts import (REFERENCE_CHOICE, RUN_CHANGED, VOICE_PLAYER, RunChan
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
                             RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
-                            SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState)
+                            SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState, VoiceOrderSet)
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
@@ -160,6 +160,7 @@ class CompositionModule(BaseModule):
         self.handle("rules.profile.changed", self.on_profile_changed)
         self.handle("voices.settings.changed", self.on_groups_changed)
         self.handle(RUN_CHANGED, self.on_run_changed)
+        self.handle("composition.voice_order.set", self.on_voice_order_set)
 
     # --- start ------------------------------------------------------------------------------
 
@@ -206,8 +207,34 @@ class CompositionModule(BaseModule):
             settings=[EpisodeSettings(season=season, episode=episode,
                                       levers=settings.effective(records, season, episode))
                       for season, episode in sorted(episodes)],
-            levers=levers.specs(), availability=availability.table())
+            levers=levers.specs(), availability=availability.table(),
+            # A series counted before the orders were kept shows its default order until its next count writes it.
+            voice_orders=project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows))
         return reply.model_dump(mode="json")
+
+    async def on_voice_order_set(self, env: Envelope) -> dict:
+        """The user's order of the voice-overs of a season: the order of the tracks in its containers (ЭТАП_11). It is a
+        plan: the containers follow it at the next sync."""
+        command = VoiceOrderSet.model_validate(env.payload)
+        self._require_editable(command.series_id)
+        await self.request("catalog.series.get", {"series_id": command.series_id})
+        async with self._lock(command.series_id):
+            stored = await self.repo.stored(command.series_id)
+            orders = project.season_orders(stored.orders, stored.rows, {})
+            shown = next((each for each in project.season_voices(orders, stored.rows) if each.season == command.season), None)
+            current = orders.get(command.season, [])
+            wanted = project.reorder(current, [voice.label for voice in shown.voices] if shown else [], command.labels)
+            if wanted is None:
+                raise ValueError(reason("voice_order_mismatch", season=command.season))
+            if wanted == current and orders == stored.orders:
+                return {"ok": True}
+            orders[command.season] = wanted
+            rev = stored.rev + 1
+            await self.repo.write(command.series_id, orders=orders, rev=rev)
+            episodes = sorted(number for season, number in project.layout_episodes(stored.rows) if season == command.season)
+            self._publish_changed(command.series_id, rev, {(command.season, number) for number in episodes},
+                                  summary_only=False)
+        return {"ok": True}
 
     async def on_preview(self, env: Envelope) -> dict:
         """An address that is no source of a series yet, as the add window and the test of rules show it. It reads
@@ -535,9 +562,11 @@ class CompositionModule(BaseModule):
             result = project.project(inputs, groups, stored.numbering)
             gone = [each.source_id for each in stored.sources if each.source_id not in {i.source.id for i in inputs}]
             before = settings.canonical(stored.records)
+            renames = project.group_renames(stored.rows, result.rows)
+            orders = project.season_orders(stored.orders, result.rows, renames)
             # What was set for a voice-over group follows the voice-over when the user names it, renames it or dissolves its group.
             records = settings.retarget(
-                before, project.group_renames(stored.rows, result.rows),
+                before, renames,
                 lambda group: self.log.info("сериал %d: у слитых групп расходящиеся настройки %s — выбор возвращён уровню выше",
                                             series_id, group[0].lever))
             for source_id in gone:
@@ -567,7 +596,8 @@ class CompositionModule(BaseModule):
                 rows=result.rows if rows_changed else None,
                 sources=sources if sources != stored.sources else None,
                 numbering=result.unknown_voices if result.unknown_voices != stored.numbering else None,
-                records=records if records_changed else None, rev=rev)
+                records=records if records_changed else None, rev=rev,
+                orders=orders if orders != stored.orders else None)
             if any(value is not None for value in parts.values()):
                 await self.repo.write(series_id, **parts)
             if not publish:

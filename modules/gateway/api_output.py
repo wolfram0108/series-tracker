@@ -13,10 +13,12 @@ from pydantic import ValidationError
 
 from core import BusRequestError
 from core.contracts import (CompositionGetRequest, CompositionReply, OutputSwitch, Reference, SeriesKind, SettingsReset,
+                            VoiceOrderSet,
                             SettingsSet)
 
 from .routing import refusal
 from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, OkResponse, OutputSettingsReset, OutputSettingsSet,
+                      VoiceOrderBody,
                       OutputSwitchBody)
 
 _ERR = {code: {"model": ErrorResponse} for code in (400, 404, 500, 503)}
@@ -96,6 +98,18 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         command = _contract(SettingsSet, series_id=series_id, **body.model_dump())
         try:
             await gw.request("composition.settings.set", command.model_dump(mode="json"))
+        except BusRequestError as exc:
+            return refusal(exc)
+        return {"success": True}
+
+    @r.put("/api/series/{series_id}/output/voice-order", response_model=OkResponse, response_model_exclude_none=True,
+           responses=_ERR)
+    async def set_voice_order(series_id: int, body: VoiceOrderBody):
+        """The user's order of the voice-overs of a season: the order of the tracks in its containers. A plan: the
+        containers follow it at the next sync; refused while a sync of the series is under way."""
+        command = _contract(VoiceOrderSet, series_id=series_id, **body.model_dump())
+        try:
+            await gw.request("composition.voice_order.set", command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
