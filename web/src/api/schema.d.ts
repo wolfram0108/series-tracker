@@ -1816,6 +1816,10 @@ export interface components {
             state: components["schemas"]["DubState"];
             hint: components["schemas"]["DubHint"] | null;
             detail: components["schemas"]["Reason"] | null;
+            /** Source Id */
+            source_id?: number | null;
+            /** Player */
+            player?: string | null;
         };
         /**
          * DubState
@@ -2646,6 +2650,16 @@ export interface components {
              * @default null
              */
             file: string | null;
+            /**
+             * Source Id
+             * @default null
+             */
+            source_id: number | null;
+            /**
+             * Player
+             * @default null
+             */
+            player: string | null;
         };
         /** SnapshotItem */
         SnapshotItem: {
@@ -2666,6 +2680,16 @@ export interface components {
             state: components["schemas"]["DubState"];
             hint: components["schemas"]["DubHint"] | null;
             detail: components["schemas"]["Reason"] | null;
+            /**
+             * Source Id
+             * @default null
+             */
+            source_id: number | null;
+            /**
+             * Player
+             * @default null
+             */
+            player: string | null;
             /** Series Id */
             series_id: number;
             /**

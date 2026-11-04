@@ -237,6 +237,13 @@ def file_path(root: str, series_id: int, file_id: int, studio: str) -> str:
     return os.path.join(root, str(series_id), f"f{file_id}", f"{series_id}_f{file_id}_{_safe(studio)}.mp4")
 
 
+def candidate_of(row: dict) -> dict:
+    """The candidate of the chain the work of a row is on: the one it began with, the first for a row that has not begun
+    (the last one tried for a row that went through them all); empty for a row with no candidate."""
+    chain = row.get("chain") or []
+    return chain[min(row.get("attempt") or 0, len(chain) - 1)] if chain else {}
+
+
 def sent_as(row: dict) -> str:
     """The name a voice-over is sent to the service under: the name of the file it reads."""
     if row.get("file_id") is not None and row.get("temp_path"):
@@ -841,8 +848,8 @@ class VoicesModule(BaseModule):
             series_id=row["series_id"], season=row["season"], episode=row["episode"], part=row["part"] or None,
             voice_key=row["voice_key"], voice_label=row["voice_label"], status=status, state=state,
             hint=public_hint(status, state, row.get("job_id")), detail=parse_reason(detail), epoch=epoch,
-            rev=rev, job_id=row.get("job_id"),
-            file=sent_as(row)).model_dump(mode="json"))
+            rev=rev, job_id=row.get("job_id"), file=sent_as(row),
+            source_id=candidate_of(row).get("source_id"), player=candidate_of(row).get("player")).model_dump(mode="json"))
 
     async def _announce_difference(self, before: list[dict], after: list[dict]) -> None:
         """Rows that the planner created or took over are news for the interface like any other change."""
@@ -858,7 +865,8 @@ class VoicesModule(BaseModule):
         return DubRecord(**{field: row[field] for field in DubRecord.model_fields
                             if field in row and field not in ("state", "hint", "detail", "part")},
                          part=row["part"] or None, state=state, hint=public_hint(row["status"], state, row["job_id"]),
-                         detail=parse_reason(row["outcome"] or row["error"]))
+                         detail=parse_reason(row["outcome"] or row["error"]),
+                         source_id=candidate_of(row).get("source_id"), player=candidate_of(row).get("player"))
 
     async def on_clients(self, env: Envelope) -> None:
         """A new interface has no history: it gets every voice-over at once, stamped before the read."""

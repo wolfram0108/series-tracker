@@ -70,24 +70,40 @@ describe("OutputEpisode switch", () => {
 })
 
 describe("OutputEpisode", () => {
-  it("names the episode and its reference by group, player and height, and carries its season and number", () => {
+  it("names the episode in its header and carries its season and number", () => {
     const w = mountEpisode({ references: [refOf({})] })
     expect(w.attributes("data-season")).toBe("1")
     expect(w.attributes("data-episode")).toBe("5")
-    expect(w.find("header").text()).toContain(t("output.episode", { n: 5 }))
-    expect(w.find("header").text()).toContain("Ruchime — VK 1080p")
+    expect(w.find("header").text()).toBe(t("output.episode", { n: 5 }))
+  })
+
+  it("lists the voice-overs on the output: the reference first with its group, player, height and the status of its file", () => {
+    const files = [{ unique_id: "u", source_id: 7, row_key: "a", status: "completed" }]
+    const w = mountEpisode({ references: [refOf({})], files })
+    expect(w.find("h4").text()).toBe(t("output.voices"))
+    expect(w.findAll(".episode-dubs li").map((li) => li.text())).toEqual(["реф - Ruchime - VK 1080p (загружен)"])
+    expect(mountEpisode({ references: [refOf({})] }).find(".episode-dubs li").text()).toBe("реф - Ruchime - VK 1080p (нет файла)")
   })
 
   it("names a reference with no group by the catalog and one with no height without the height", () => {
     const w = mountEpisode({ references: [refOf({ voice_group: "", height: null })] })
-    expect(w.find("header").text()).toContain(
-      t("output.lever.referenceLabel", { group: t("output.lever.noGroup"), player: "VK" }),
-    )
+    expect(w.find(".episode-dubs li").text()).toBe(`реф - ${t("output.lever.noGroup")} - VK (нет файла)`)
   })
 
   it("names a reference by the part of the episode it is", () => {
     const w = mountEpisode({ references: [refOf({ part: 2 })] })
-    expect(w.find("header").text()).toContain(t("output.part", { n: 2 }))
+    expect(w.find(".episode-dubs li").text()).toContain(t("output.part", { n: 2 }))
+  })
+
+  it("lists a voice-over as its group, the player and the height it comes from and its state, after the reference", () => {
+    const rows = [rowOf({}), rowOf({ row_key: "k", source_id: 9, player: "kodik", player_label: "Kodik", voice_label: "AniStar", heights: [720] })]
+    const w = mountEpisode({
+      rows, references: [refOf({})],
+      dubs: [dubOf({ voice_label: "AniStar", voice_key: "anistar", source_id: 9, player: "kodik", state: "downloading", status: "downloading" })],
+    })
+    expect(w.findAll(".episode-dubs li").map((li) => li.text())).toEqual([
+      "реф - Ruchime - VK 1080p (нет файла)", `AniStar - Kodik 720p (${t("voices.state.downloading")})`,
+    ])
   })
 
   it("keeps the mark of a reference with no source and names no player for it", () => {

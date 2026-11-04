@@ -335,3 +335,14 @@ def test_a_variant_the_user_left_out_is_named_by_its_source_and_player_not_by_th
     [dub] = [each for each in found.dubs if each.voice_key == "A"]
     assert dub.left_out == frozenset({(1, "cvh")}) and [each.player for each in dub.chain] == ["kodik"]
     assert [each.source_id for each in dub.chain] == [1]  # a link of the chain says which source it was found in
+
+
+def test_a_voice_over_names_the_source_and_the_player_its_work_is_on_the_first_one_before_it_begins_and_the_last_after_all():
+    from modules.voices.module import candidate_of
+
+    chain = [{"player": "kodik", "source_id": 29, "url": "u1"}, {"player": "cvh", "source_id": 29, "url": "u2"}]
+    assert candidate_of({"chain": chain, "attempt": 0})["player"] == "kodik"
+    assert candidate_of({"chain": chain, "attempt": 1})["player"] == "cvh"
+    assert candidate_of({"chain": chain, "attempt": 5})["player"] == "cvh"
+    assert candidate_of({"chain": [], "attempt": 0}) == {} and candidate_of({}) == {}
+

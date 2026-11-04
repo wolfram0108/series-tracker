@@ -6,11 +6,11 @@ const dub = (over: Partial<VoiceDub> = {}): VoiceDub & { part: number | null } =
   season: 1, episode: 2, voice_key: "blackcat", voice_label: "BlackCat", status: "ready", state: "align_queued", hint: "ready", detail: null, ...over,
   part: over.part ?? null,
 })
-const event = (rev: number, over: Partial<VoiceDubEvent> = {}): VoiceDubEvent => ({ series_id: 7, job_id: null, file: null, ...dub(), epoch: 1, rev, ...over })
+const event = (rev: number, over: Partial<VoiceDubEvent> = {}): VoiceDubEvent => ({ series_id: 7, job_id: null, file: null, source_id: null, player: null, ...dub(), epoch: 1, rev, ...over })
 const snapshot = (rev: number, items: (VoiceDub & { part: number | null; series_id?: number })[], epoch = 1): VoiceDubsSnapshot => ({
   epoch,
   rev,
-  items: items.map((item) => ({ series_id: 7, job_id: null, file: null, ...item })),
+  items: items.map((item) => ({ series_id: 7, job_id: null, file: null, source_id: null, player: null, ...item })),
 })
 
 describe("voices store", () => {

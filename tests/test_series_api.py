@@ -511,6 +511,7 @@ async def test_voices_of_a_series_show_state_and_reason_only(system):
     assert resp.status_code == 200
     assert resp.json() == {"items": [
         {"season": 1, "episode": 2, "part": None, "voice_key": "blackcat", "voice_label": "BlackCat",
-         "status": "rejected", "state": "error", "hint": None, "detail": {"code": "suspect_residual", "params": {}}},
+         "status": "rejected", "state": "error", "hint": None, "detail": {"code": "suspect_residual", "params": {}},
+         "source_id": None, "player": None},
         {"season": 1, "episode": 2, "part": None, "voice_key": "red", "voice_label": "RedHeadSound",
-         "status": "placed", "state": "done", "hint": "done", "detail": None}]}
+         "status": "placed", "state": "done", "hint": "done", "detail": None, "source_id": None, "player": None}]}

@@ -79,6 +79,10 @@ class DubItem(BaseModel):
     state: DubState
     hint: DubHint | None
     detail: Reason | None
+    # The source and the player the work is on: the candidate of the chain it began with, the first one for a row that
+    # has not begun; None for a voice-over with no candidate. A window names the variant the voice-over comes from by them.
+    source_id: int | None = None
+    player: str | None = None
 
 
 class SnapshotItem(DubItem):
@@ -119,6 +123,8 @@ class DubEvent(BaseModel):
     rev: int
     job_id: str | None = None
     file: str | None = None
+    source_id: int | None = None
+    player: str | None = None
 
 
 class DubsSnapshot(BaseModel):

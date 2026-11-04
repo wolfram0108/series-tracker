@@ -3,6 +3,7 @@
 import { compareNames } from "./collate"
 import type { components } from "../api/schema"
 import type { VoiceDub } from "../stores/voices"
+import type { MediaFile } from "../composables/outputCalls"
 
 type Schemas = components["schemas"]
 
@@ -67,6 +68,8 @@ export interface EpisodeView {
   rows: Row[]
   levers: Lever[]
   dubs: VoiceDub[]
+  /** The files of the plan of the series: the status of the video of a reference is read from them. */
+  files?: MediaFile[]
   /** What may be done with an object in each of its states, as the core gives it with the layout. */
   availability?: Record<string, string[]>
 }
@@ -119,6 +122,7 @@ export function joinEpisodes(
   settings: Schemas["EpisodeSettings"][],
   dubs: VoiceDub[],
   availability: Record<string, string[]> = {},
+  files: MediaFile[] = [],
 ): EpisodeView[] {
   const slots = new Map<string, Slot>()
   const note = (slot: Slot): void => {
@@ -163,6 +167,7 @@ export function joinEpisodes(
       rows: rowsBy.get(key) ?? [],
       levers: settingsBy.get(key)?.levers ?? [],
       dubs: dubsBy.get(key) ?? [],
+      files,
       availability,
     }
   })
@@ -368,4 +373,52 @@ export function scopeView(views: EpisodeView[]): EpisodeView {
     }
   }
   return { season: 0, episode: 0, references: [], rows, levers: [], dubs: [], availability: views[0]?.availability ?? {} }
+}
+
+// --- the lines of the output of an episode ---------------------------------------------------------------------------
+
+/** One line of "the voice-overs on the output": the reference or a voice-over, the variant it comes from and its status.
+ *  The status of a reference is the status of its file (null: no file of the plan), that of a voice-over its own state. */
+export interface OutputLine {
+  key: string
+  kind: "reference" | "dub"
+  group: string
+  part: number | null
+  /** The code and the label of the player, and the best height of the variant; null where the core names none. */
+  player: string | null
+  playerLabel: string | null
+  height: number | null
+  file: string | null
+  dub: VoiceDub | null
+}
+
+/** The reference of each part of the episode first, then its voice-overs: each with the player it comes from and the best
+ *  height of that variant, as the layout has it for this episode. A reference with no source names no variant, so it has
+ *  no line: its mark says why. */
+export function outputLines(view: EpisodeView): OutputLine[] {
+  const variants = voiceColumns(view).flatMap((column) => column.variants)
+  const labelOf = (sourceId: number | null, player: string | null): string | null =>
+    player === null ? null : (variants.find((each) => each.sourceId === sourceId && each.player === player)?.playerLabel
+      ?? sourcePlayers(view).find((each) => each.sourceId === sourceId && each.player === player)?.playerLabel ?? player)
+  const lines: OutputLine[] = []
+  for (const reference of view.references) {
+    if ((reference.source_id ?? null) === null) continue
+    const player = reference.player ?? null
+    const file = (view.files ?? []).find((each) => each.source_id === reference.source_id && each.row_key === (reference.row_key ?? null))
+    lines.push({
+      key: `reference:${reference.part ?? 0}`, kind: "reference", group: reference.voice_group ?? "", part: reference.part ?? null,
+      player, playerLabel: labelOf(reference.source_id ?? null, player), height: reference.height ?? null,
+      file: file?.status ?? null, dub: null,
+    })
+  }
+  for (const dub of view.dubs) {
+    const sourceId = dub.source_id ?? null
+    const player = dub.player ?? null
+    const variant = variants.find((each) => each.group === dub.voice_label && each.sourceId === sourceId && each.player === player)
+    lines.push({
+      key: `dub:${dub.part ?? 0}:${dub.voice_key}`, kind: "dub", group: dub.voice_label, part: dub.part ?? null,
+      player, playerLabel: labelOf(sourceId, player), height: variant?.height ?? null, file: null, dub,
+    })
+  }
+  return lines
 }

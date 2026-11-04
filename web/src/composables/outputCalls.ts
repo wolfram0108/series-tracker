@@ -14,6 +14,30 @@ export function fetchComposition(seriesId: number): Promise<Answer<Composition>>
   return call(() => api.GET("/api/series/{series_id}/composition", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
 }
 
+/** The file of a row of the plan as the downloads keep it: the status of the video of a reference is read from it. */
+export interface MediaFile {
+  unique_id: string
+  source_id: number | null
+  row_key: string | null
+  status: string
+}
+
+/** The files of the plan of the series (the rows of its plan with their status). */
+export async function fetchMedia(seriesId: number): Promise<Answer<MediaFile[]>> {
+  const answer = await call<unknown>(
+    () => api.GET("/api/series/{series_id}/media-items", { params: { path: { series_id: seriesId } } } as never),
+    OUTPUT_WORDS,
+  )
+  if (!answer.ok) return answer
+  const items = Array.isArray(answer.data) ? (answer.data as Partial<MediaFile>[]) : []
+  return {
+    ok: true,
+    data: items.map((item) => ({
+      unique_id: String(item.unique_id ?? ""), source_id: item.source_id ?? null, row_key: item.row_key ?? null, status: String(item.status ?? ""),
+    })),
+  }
+}
+
 /** The reference of every episode of the series, each with the mark that says why it is that one. */
 export function fetchOutput(seriesId: number): Promise<Answer<Reference[]>> {
   return call(() => api.GET("/api/series/{series_id}/output", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import type { components } from "../../api/schema"
-import { t, type MessageKey } from "../../i18n"
+import { hasMessage, t, type MessageKey } from "../../i18n"
 import { reasonText } from "../../lib/reason"
-import { isDeviation, isOff, sourcePlayers, type EpisodeView, type LeverSpec, type Reference, type Scope } from "../../lib/output"
+import { isDeviation, isOff, outputLines, type EpisodeView, type LeverSpec, type OutputLine, type Scope } from "../../lib/output"
 import OutputLevers from "./OutputLevers.vue"
 
 type Schemas = components["schemas"]
@@ -57,39 +57,29 @@ const HINT: Record<Schemas["DubHint"], MessageKey> = {
 }
 
 const open = ref(false)
-const players = computed(() => sourcePlayers(props.view))
+const lines = computed(() => outputLines(props.view))
 const deviation = computed(() => isDeviation(props.view))
 const off = computed(() => isOff(props.view))
 
 const episodeScope = (): Scope => ({ season: props.view.season, episode: props.view.episode })
 
-// A player the episode no longer lists is named by its code, as the levers name it.
-function playerOf(reference: Reference): string {
-  const sourceId = reference.source_id ?? null
-  const player = reference.player ?? ""
-  return players.value.find((option) => option.sourceId === sourceId && option.player === player)?.playerLabel ?? player
+// The status of the video of a reference is the status of its file; a status the catalog has no words for is shown as the core gave it.
+function fileStatusText(status: string | null): string {
+  if (status === null) return t("output.file.status.none")
+  const key = `output.file.status.${status}`
+  return hasMessage(key) ? t(key) : status
 }
 
-function partText(reference: Reference): string | null {
-  const part = reference.part ?? null
-  return part === null ? null : t("output.part", { n: part })
+// One line: the reference (marked) or the voice-over, the variant it comes from and its status.
+function lineText(line: OutputLine): string {
+  const group = line.group || t("output.lever.noGroup")
+  const player = line.playerLabel ?? line.player
+  const where = player === null
+    ? t("output.line.unknownSource")
+    : line.height === null ? t("output.line.where", { player }) : t("output.line.whereHeight", { player, height: line.height })
+  const status = line.dub === null ? fileStatusText(line.file) : t(STATE[line.dub.state])
+  return t(line.kind === "reference" ? "output.line.reference" : "output.line.dub", { group, where, status })
 }
-
-// A reference with no source names no player, so it has no description; its mark still stands.
-function sourceText(reference: Reference): string | null {
-  if ((reference.source_id ?? null) === null) return null
-  const group = reference.voice_group || t("output.lever.noGroup")
-  const player = playerOf(reference)
-  const height = reference.height ?? null
-  return height === null
-    ? t("output.lever.referenceLabel", { group, player })
-    : t("output.lever.referenceLabelHeight", { group, player, height })
-}
-
-// The header names each reference by its part and its description; a reference with neither adds nothing.
-const headings = computed(() => props.view.references
-  .map((reference, index) => ({ key: index, part: partText(reference), source: sourceText(reference) }))
-  .filter((heading) => heading.part !== null || heading.source !== null))
 
 function forwardSet(lever: string, target: string | null, value: unknown): void {
   emit("set", episodeScope(), lever, target, value)
@@ -107,15 +97,11 @@ function forwardReset(lever: string, target: string | null): void {
   >
     <header class="cluster">
       <h3 class="episode-title">{{ t("output.episode", { n: view.episode }) }}</h3>
-      <span v-for="heading in headings" :key="heading.key" class="cluster episode-reference">
-        <span v-if="heading.part !== null">{{ heading.part }}</span>
-        <span v-if="heading.source !== null">{{ heading.source }}</span>
-      </span>
     </header>
 
     <ul v-if="view.references.length > 0 || view.rows.length > 0" class="episode-marks stack">
       <li v-for="(reference, index) in view.references" :key="index" class="cluster">
-        <span v-if="partText(reference) !== null">{{ partText(reference) }}</span>
+        <span v-if="reference.part != null">{{ t("output.part", { n: reference.part }) }}</span>
         <span>{{ t(MARK[reference.mark]) }}</span>
         <span v-if="reference.reason" class="episode-reason">{{ reasonText(reference.reason) }}</span>
       </li>
@@ -128,15 +114,14 @@ function forwardReset(lever: string, target: string | null): void {
       <li v-for="name in fileNames" :key="name" class="episode-file">{{ t("output.file", { name }) }}</li>
     </ul>
 
-    <section v-if="view.dubs.length > 0" class="episode-voices stack">
+    <section v-if="lines.length > 0" class="episode-voices stack">
       <h4 class="episode-subtitle">{{ t("output.voices") }}</h4>
       <ul class="episode-dubs stack">
-        <li v-for="dub in view.dubs" :key="`${dub.part ?? 0}:${dub.voice_key}`" class="cluster" :class="`dub-${dub.state}`">
-          <span>{{ dub.voice_label }}</span>
-          <span v-if="dub.part" class="episode-part">{{ t("output.part", { n: dub.part }) }}</span>
-          <span class="episode-state">{{ t(STATE[dub.state]) }}</span>
-          <span v-if="dub.hint" class="episode-hint">{{ t(HINT[dub.hint]) }}</span>
-          <span v-if="dub.detail" class="episode-reason">{{ reasonText(dub.detail) }}</span>
+        <li v-for="line in lines" :key="line.key" class="cluster" :class="line.dub ? `dub-${line.dub.state}` : 'is-reference'">
+          <span class="episode-line">{{ lineText(line) }}</span>
+          <span v-if="line.part !== null" class="episode-part">{{ t("output.part", { n: line.part }) }}</span>
+          <span v-if="line.dub?.hint" class="episode-hint">{{ t(HINT[line.dub.hint]) }}</span>
+          <span v-if="line.dub?.detail" class="episode-reason">{{ reasonText(line.dub.detail) }}</span>
         </li>
       </ul>
     </section>
@@ -165,7 +150,7 @@ function forwardReset(lever: string, target: string | null): void {
 .episode-title, .episode-subtitle { margin: 0; font-size: 1em; }
 .episode-marks, .episode-dubs, .episode-files { list-style: none; margin: 0; padding: 0; }
 .episode-file { overflow-wrap: anywhere; color: var(--text-muted); font-size: smaller; }
-.episode-reference, .episode-reason { overflow-wrap: anywhere; }
+.episode-line, .episode-reason { overflow-wrap: anywhere; }
 .episode-state, .episode-hint, .episode-reason { color: var(--text-muted); font-size: smaller; }
 .episode-toggle {
   padding: 0; border: none; background: none; cursor: pointer;

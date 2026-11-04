@@ -60,6 +60,8 @@ export const useVoicesStore = defineStore("voices", () => {
         state: event.state,
         hint: event.hint,
         detail: event.detail,
+        source_id: event.source_id ?? null,
+        player: event.player ?? null,
       })
       list.sort(byLabel)
     }
@@ -90,6 +92,8 @@ export const useVoicesStore = defineStore("voices", () => {
         state: item.state,
         hint: item.hint,
         detail: item.detail,
+        source_id: item.source_id ?? null,
+        player: item.player ?? null,
       })
     }
     for (const [key, list] of Object.entries(bySlot.value)) {

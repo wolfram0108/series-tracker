@@ -45,7 +45,7 @@ const composition = (over: Partial<Composition> = {}): Composition => ({
   ...over,
 })
 const dubEvent = (over: Partial<VoiceDubEvent> = {}): VoiceDubEvent => ({
-  series_id: 1, job_id: null, file: null, season: 1, episode: 2, part: null, voice_key: "ruchime", voice_label: "Ruchime",
+  series_id: 1, job_id: null, file: null, source_id: null, player: null, season: 1, episode: 2, part: null, voice_key: "ruchime", voice_label: "Ruchime",
   status: "ready", state: "align_queued", hint: "ready", detail: null, epoch: 1, rev: 1, ...over,
 })
 
@@ -62,6 +62,7 @@ beforeEach(() => {
   useSSE().connected.value = false
   vi.mocked(calls.fetchComposition).mockReset().mockResolvedValue(ok(composition()))
   vi.mocked(calls.fetchOutput).mockReset().mockResolvedValue(ok([reference()]))
+  vi.mocked(calls.fetchMedia).mockReset().mockResolvedValue(ok([]))
   vi.mocked(calls.setLever).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.resetLever).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.syncSeries).mockReset().mockResolvedValue(ok({ success: true }))
@@ -85,6 +86,7 @@ describe("useSeriesOutput", () => {
       season: 1, episode: 2, references: [reference()], rows: [row()],
       levers: [{ lever: "voice.take", target: groupTarget("Ruchime"), value: true, level: "episode" }],
       dubs: [expect.objectContaining({ voice_label: "Ruchime", state: "align_queued" })],
+      files: [],
       availability: composition().availability,
     }])
     expect(output.levels.value).toEqual(composition().levels)

@@ -48,6 +48,7 @@ beforeEach(() => {
   vi.mocked(calls.fetchComposition).mockReset().mockResolvedValue(ok(composition()))
   vi.mocked(calls.fetchOutput).mockReset().mockResolvedValue(ok([
     reference(1, 1), reference(1, 2, { mark: "own" }), reference(2, 1)]))
+  vi.mocked(calls.fetchMedia).mockReset().mockResolvedValue(ok([]))
   vi.mocked(calls.switchOutput).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.syncSeries).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.reprocessSeries).mockReset().mockResolvedValue(ok({ success: true }))

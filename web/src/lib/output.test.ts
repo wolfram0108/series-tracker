@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { components } from "../api/schema"
 import type { VoiceDub } from "../stores/voices"
 import {
-  allOff, bySeason, fileNamesOf, groupTarget, isDeviation, isOff, isOwn, joinEpisodes, leverState, parseGroupTarget,
+  allOff, bySeason, fileNamesOf, groupTarget, isDeviation, isOff, isOwn, joinEpisodes, leverState, outputLines, parseGroupTarget,
   parseVariantTarget, referenceOf, resetBody, scopeView, setBody, sourcePlayers, variantTarget, voiceColumns,
   type EpisodeView, type Lever, type LeverState, type Reference, type Row,
 } from "./output"
@@ -26,7 +26,7 @@ const dub = (season: number, episode: number, state: VoiceDub["state"] = "done")
   season, episode, part: null, voice_key: "ruchime", voice_label: "Ruchime", status: "placed", state, hint: null, detail: null,
 })
 const episodeOf = (over: Partial<EpisodeView> = {}): EpisodeView => ({
-  season: 1, episode: 1, references: [], rows: [], levers: [], dubs: [], ...over,
+  season: 1, episode: 1, references: [], rows: [], levers: [], dubs: [], files: [], ...over,
 })
 
 describe("joinEpisodes", () => {
@@ -334,5 +334,35 @@ describe("scopeView", () => {
     expect(sourcePlayers(merged).map((each) => each.player).sort()).toEqual(["kodik", row().player].sort())
     expect(merged.references).toEqual([])
     expect(merged.levers).toEqual([])
+  })
+})
+
+describe("outputLines", () => {
+  const ref1 = (over: Partial<Reference> = {}): Reference => ref(1, 1, { source_id: 7, row_key: "a", player: "vk", voice_group: "ПВА ШОУ", height: 2160, ...over })
+  const dubOn = (label: string, over: Partial<VoiceDub> = {}): VoiceDub => ({ ...dub(1, 1), voice_key: label, voice_label: label, source_id: 9, player: "kodik", ...over })
+
+  it("puts the reference first and then each voice-over, each with the player it comes from and the best height of that variant", () => {
+    const rows = [
+      row({ source_id: 7, player: "vk", player_label: "VK", voice_label: "ПВА ШОУ", heights: [1080, 2160] }),
+      row({ row_key: "k", source_id: 9, player: "kodik", player_label: "Kodik", voice_label: "AniStar", heights: [360, 720] }),
+    ]
+    const lines = outputLines(episodeOf({ rows, references: [ref1()], dubs: [dubOn("AniStar", { state: "downloading" })] }))
+    expect(lines.map((line) => [line.kind, line.group, line.playerLabel, line.height])).toEqual([
+      ["reference", "ПВА ШОУ", "VK", 2160], ["dub", "AniStar", "Kodik", 720],
+    ])
+  })
+
+  it("reads the status of a reference from the file of its row, and of a voice-over from its own state", () => {
+    const files = [{ unique_id: "u", source_id: 7, row_key: "a", status: "completed" }, { unique_id: "v", source_id: 7, row_key: "b", status: "pending" }]
+    const lines = outputLines(episodeOf({ references: [ref1()], files, dubs: [dubOn("AniStar", { state: "align_queued" })] }))
+    expect([lines[0].file, lines[0].dub, lines[1].file, lines[1].dub?.state]).toEqual(["completed", null, null, "align_queued"])
+    expect(outputLines(episodeOf({ references: [ref1()], files: [] }))[0].file).toBeNull()
+  })
+
+  it("makes no line for a reference with no source, and names no player for a voice-over the core names none for", () => {
+    const none = ref1({ mark: "none", source_id: null, row_key: null, player: null, voice_group: null, height: null })
+    expect(outputLines(episodeOf({ references: [none] }))).toEqual([])
+    const [line] = outputLines(episodeOf({ dubs: [dubOn("AniStar", { source_id: null, player: null })] }))
+    expect([line.player, line.playerLabel, line.height]).toEqual([null, null, null])
   })
 })

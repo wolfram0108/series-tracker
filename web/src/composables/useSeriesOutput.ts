@@ -3,10 +3,12 @@ import { t } from "../i18n"
 import { bySeason, joinEpisodes, resetBody, setBody, type Reference, type Scope } from "../lib/output"
 import { reasonText } from "../lib/reason"
 import { useCompositionStore, type ReferencePacket } from "../stores/composition"
+import { useQueuesStore } from "../stores/queues"
+import { useSeriesStore } from "../stores/series"
 import { useVoicesStore } from "../stores/voices"
 import {
-  adoptSeries, fetchComposition, fetchOutput, fetchRenames, reprocessSeries, resetLever, setLever, switchOutput, syncSeries,
-  type Composition, type RenameRow,
+  adoptSeries, fetchComposition, fetchMedia, fetchOutput, fetchRenames, reprocessSeries, resetLever, setLever, switchOutput, syncSeries,
+  type Composition, type MediaFile, type RenameRow,
 } from "./outputCalls"
 import type { Answer } from "./sourceCalls"
 import { useSSE } from "./useSSE"
@@ -32,8 +34,12 @@ function mergePackets(current: Reference[], packets: ReferencePacket[]): Referen
 export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const store = useCompositionStore()
   const voices = useVoicesStore()
+  const queues = useQueuesStore()
+  const seriesStore = useSeriesStore()
   const composition = ref<Composition | null>(null)
   const references = ref<Reference[]>([])
+  // The files of the plan: the status of the video of a reference is read from them.
+  const files = ref<MediaFile[]>([])
   // A video series has not been read yet when it is shown first: the window must not say "nothing here" for that moment.
   const loading = ref(kind === "video")
   const failure = ref<string | null>(null)
@@ -53,6 +59,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     composition.value?.settings ?? [],
     voices.forSeries(seriesId),
     composition.value?.availability ?? {},
+    files.value,
   ))
   const levels = computed(() => composition.value?.levels ?? [])
   const sources = computed(() => composition.value?.sources ?? [])
@@ -79,11 +86,20 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     loading.value = false
     if (layout.ok) composition.value = layout.data
     if (output.ok) references.value = output.data
+    void loadFiles()
     Object.values(store.references[seriesId] ?? {}).forEach((packet) => merged.add(packet))
     const broken = [layout, output].find((answer) => !answer.ok)
     failure.value = broken && !broken.ok ? broken.text : null
     if (packetDuringRead) void load()
     if (namesWanted.value) void loadNames()
+  }
+
+  // The files change with the downloads, not with the layout: they are read on their own, the newest ask writing.
+  let filesAsked = 0
+  async function loadFiles(): Promise<void> {
+    const ask = ++filesAsked
+    const answer = await fetchMedia(seriesId)
+    if (ask === filesAsked && answer.ok) files.value = answer.data
   }
 
   let namesAsked = 0
@@ -149,6 +165,9 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
       fresh.forEach((packet) => merged.add(packet))
       references.value = mergePackets(references.value, fresh)
     }, { deep: true })
+    // A download began or ended, or the number of downloaded episodes changed: the status of the videos is read again.
+    // The progress of a download does not change the length of the queue, so it does not ask.
+    watch(() => [queues.downloads.length, seriesStore.byId(seriesId)?.downloaded_episodes_count], () => void loadFiles())
     // A connection that came back may have missed events: the output is read again.
     watch(useSSE().connected, (up) => {
       if (up) void load()
