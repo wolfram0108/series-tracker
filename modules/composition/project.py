@@ -98,6 +98,7 @@ def project(inputs: Sequence[SourceInput], groups: Mapping[str, str | None],
         for row, result in _answered_rows(item):
             rows.append(_row_of(item.source, row, result, voice_name_of(row, result, item.source.voice_name), groups,
                                 numbering))
+        rows.extend(_left_by_source(item))
     return Projection(rows, summaries, numbering)
 
 
@@ -110,7 +111,9 @@ def group_renames(before: Sequence[CompositionRow], after: Sequence[CompositionR
     became: dict[str, set[str]] = {}
     for row in after:
         old = was.get((row.source_id, row.row_key))
-        if old is None or old.voice_label == row.voice_label or old.voice_name != row.voice_name:
+        if row.exclusion == Exclusion.SOURCE or old is None or old.exclusion == Exclusion.SOURCE:
+            continue  # a row the source leaves out names no group: a player switched off renames nothing
+        if old.voice_label == row.voice_label or old.voice_name != row.voice_name:
             continue
         became.setdefault(old.voice_label, set()).add(row.voice_label)
     return {old: next(iter(new)) for old, new in became.items() if len(new) == 1 and old not in standing}
@@ -160,6 +163,21 @@ def _answered_rows(item: SourceInput) -> Iterator[tuple[TableRow, RuleResult]]:
     for row in selected_rows(item.source, item.table):
         result = item.reply.results.get(row.key)
         yield row, result if result is not None else RuleResult()
+
+
+def _left_by_source(item: SourceInput) -> Iterator[CompositionRow]:
+    """The rows the source's own choice leaves out, as excluded rows: the layout says the video is there and is not
+    wanted, which a row a read did not bring cannot say. They are asked nothing and name no voice-over group."""
+    if item.table is None or item.reply is None or item.source.parser_profile_id is None:
+        return
+    kept = {row.key for row in selected_rows(item.source, item.table)}
+    for row in item.table.rows:
+        if row.key not in kept:
+            yield CompositionRow(
+                series_id=item.source.series_id, source_id=item.source.id, row_key=row.key, excluded=True,
+                exclusion=Exclusion.SOURCE, voice_name=row.voice.name, player=row.player, player_label=row.player_label,
+                group=row.group, text=row.text, heights=list(row.heights), state=row.state, published=row.published,
+                link=row.link)
 
 
 def _row_of(source: SeriesSource, row: TableRow, result: RuleResult, name: str, groups: Mapping[str, str | None],

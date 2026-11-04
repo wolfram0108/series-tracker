@@ -590,14 +590,17 @@ class ScanModule(BaseModule):
         series_id = series["id"]
         async with self._lock(series_id):
             self._alive(series_id)
-            layout = CompositionReply.model_validate(await self._step("composition.get", {"series_id": series_id}))
+            # The excluded rows too: they tell a video taken out by the configuration from one a read did not bring.
+            layout = CompositionReply.model_validate(await self._step(
+                "composition.get", {"series_id": series_id, "include_excluded": True}))
             voices = VoiceSettingsView.model_validate(await self._step("voices.settings.get", {}))
             existing = await self.repo.items_for_series(series_id)
             stored = await self.repo.references(series_id)
             chosen = reference.choose(layout.rows, layout.settings, voices.priority,
-                                      [each.source_id for each in layout.sources],
+                                      self._standing_sources(series, layout),
                                       previous=[output.reference_of(each) for each in stored],
-                                      player_groups=Groups.of(voices.player_groups))
+                                      player_groups=Groups.of(voices.player_groups),
+                                      on_disk=candidates.on_disk(existing))
             memory, seasons = self._ignored_episodes(series), self._ignored_seasons(series)
             queued = await self._queued(series_id)
             # When the queue cannot be told, every row that is not fetched is held: none is turned to another video.
@@ -615,7 +618,8 @@ class ScanModule(BaseModule):
             deletes = self._leftovers(existing, set(winners.values()), queued)
             rows = candidates.rows_after(existing, inserts, updates, deletes)
             statuses, superseded = planner.plan_with_supersession(rows, winners, seasons)
-            for unique_id in self._removed_by_configuration(series, layout, rows, set(winners.values()), seasons):
+            for unique_id in self._removed_by_configuration(series, layout, rows, set(winners.values()), seasons,
+                                                            statuses):
                 statuses[unique_id] = "removed"
                 superseded.pop(unique_id, None)
             records = [{**each.reference.model_dump(mode="json"), "unique_id": winners.get(each.slot)}
@@ -644,13 +648,28 @@ class ScanModule(BaseModule):
         return Refreshed(sum(1 for each in statuses.values() if each == "in_plan_single"), shown_after, plan_changed)
 
     @staticmethod
+    def _standing_sources(series: dict, layout: CompositionReply) -> list[int]:
+        """The sources of the series in their order that can bring rows: one taken away, or one without a profile, holds
+        no reference of its own (its rows are gone by the user's choice, not by a read)."""
+        mine = {each.id for each in _sources_of(series)}
+        return [each.source_id for each in layout.sources
+                if each.status != SourceStatus.NO_PROFILE and (not mine or each.source_id in mine)]
+
+    @staticmethod
     def _removed_by_configuration(series: dict, layout: CompositionReply, rows: list[dict], winners: set[str],
-                                  seasons: set[int]) -> list[str]:
+                                  seasons: set[int], statuses: dict[str, str]) -> list[str]:
         """The rows the configuration took out of the plan: those of a season the user switched off, of a source they took
-        away, or of a source whose profile they took away. This is the one place the reason is told; downloads removes
-        the files of the rows it names and no others, so that a site that fails is never taken for a choice of the user.
-        With no source known the rows of a source are not told from a layout that has not been counted yet."""
+        away, of a source whose profile they took away, and those whose row of the layout the configuration excluded (a
+        rule, a switched-off player) while nothing else holds their slot. This is the one place the reason is told;
+        downloads removes the files of the rows it names and no others, so that a site that fails is never taken for a
+        choice of the user. A displaced row whose slot has a winner waits for it: its file goes once the winner is on
+        disk, so the episode is never left without a video. With no source known the rows of a source are not told from
+        a layout that has not been counted yet."""
         gone = [item["unique_id"] for item in rows if item.get("season") in seasons]
+        left_out = {(row.source_id, row.row_key) for row in layout.rows if row.left_out}
+        gone += [item["unique_id"] for item in rows
+                 if item["unique_id"] not in gone and statuses.get(item["unique_id"]) == "redundant"
+                 and (item.get("source_id"), item.get("row_key")) in left_out]
         mine = {each.id for each in _sources_of(series)}
         if not mine:
             return gone

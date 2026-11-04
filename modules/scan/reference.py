@@ -6,6 +6,10 @@ only tells why an episode has no reference (`unfit`).
 
 A reference whose row has an unsure answer (`not_obtained`, which is not `absent`) is held, so that a probe that failed
 once does not swap the reference and the file for a worse one and back; a pick of the user is stronger than the hold.
+So is a reference whose file is on disk and whose row the layout does not have at all: a read that did not bring a row
+proves nothing (a page read short, a video a quick search did not find), and the file is not swapped on it; nor does a
+row with no number. A row the layout numbers otherwise, or one the configuration took out (`CompositionRow.left_out`),
+is its word: the reference follows it.
 
 A slot is (season, episode, part): the pieces of one episode that are different videos. Of the playable single rows
 of a slot, whose player takes part in the choice, the best by `RANKING` is the reference. A voice-over picked by the
@@ -14,7 +18,7 @@ user narrows the candidates to that voice-over and is never replaced by the best
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Collection, Iterable, Sequence
 
 from pydantic import ValidationError
 
@@ -71,7 +75,8 @@ RANKING: tuple[RankKey, ...] = (by_resolution, by_player, by_source)
 
 @dataclass(frozen=True)
 class Chosen:
-    """The outcome for one slot. `row` is the layout row of the reference; None for the marks `none` and `unfit`."""
+    """The outcome for one slot. `row` is the layout row of the reference; None for the marks `none` and `unfit`, and for
+    a reference held while the layout does not have its row (its file stands for the slot)."""
 
     reference: Reference
     row: CompositionRow | None = None
@@ -92,18 +97,25 @@ class _Levers:
     def allows(self, row: CompositionRow) -> bool:
         return (row.voice_label, row.source_id, row.player) not in self.denied
 
+    def allows_reference(self, reference: Reference) -> bool:
+        return (reference.voice_group or "", reference.source_id, reference.player) not in self.denied
+
 
 def choose(rows: Sequence[CompositionRow], settings: Iterable[EpisodeSettings], players: Sequence[str],
            sources: Sequence[int], ranking: Sequence[RankKey] = RANKING,
-           previous: Iterable[Reference] = (), player_groups: Groups = NO_GROUPS) -> list[Chosen]:
+           previous: Iterable[Reference] = (), player_groups: Groups = NO_GROUPS,
+           on_disk: Collection[tuple[int, str]] = ()) -> list[Chosen]:
     """One outcome per slot of every episode that has a row in the layout, in the order of season, episode, part.
 
     `players` is the order of players of the settings, best first; `sources` the ids of the sources of the series in
-    their order; `previous` the references chosen last time, of which a slot may hold on to its own. An episode with no
-    row in the layout has no outcome."""
+    their order; `previous` the references chosen last time, of which a slot may hold on to its own. `on_disk` are the
+    rows (source id, row key) whose video is downloaded; a previous reference of one of them that the layout does not
+    have is held, with no row (`Chosen.row` is None). An episode with no row in the layout and none held has no outcome.
+    `rows` may hold the excluded rows: they are never candidates, but they tell a row taken out from a row not brought."""
     order = Order(tuple(players), {source_id: place for place, source_id in enumerate(sources)}, player_groups)
     singles: dict[tuple[int, int], list[Candidate]] = {}
     compilations: dict[tuple[int, int], list[Candidate]] = {}
+    seen = {(row.source_id, row.row_key) for row in rows if row.decided}
     for position, row in enumerate(rows):
         if row.excluded:
             continue  # a row that is not excluded has its numbers: the layout gives it a season and an episode
@@ -119,16 +131,29 @@ def choose(rows: Sequence[CompositionRow], settings: Iterable[EpisodeSettings], 
     levers = {(each.season, each.episode): _levers_of(each.levers) for each in settings}
     held = {(each.season, each.episode, each.part): each for each in previous
             if each.source_id is not None and each.row_key is not None}
+    kept = {slot: each for slot, each in held.items()
+            if (each.source_id, each.row_key) not in seen and (each.source_id, each.row_key) in on_disk
+            and each.source_id in order.sources}
     chosen: list[Chosen] = []
-    for season, episode in sorted(set(singles) | set(compilations)):
+    for season, episode in sorted(set(singles) | set(compilations) | {(slot[0], slot[1]) for slot in kept}):
         here = singles.get((season, episode), [])
-        parts = sorted({candidate.row.part for candidate in here}, key=lambda part: (part is not None, part or 0))
-        for part in parts or [None]:
+        parts = {candidate.row.part for candidate in here} | {slot[2] for slot in kept if slot[:2] == (season, episode)}
+        for part in sorted(parts, key=lambda part: (part is not None, part or 0)) or [None]:
             slot = [candidate for candidate in here if candidate.row.part == part]
+            episode_levers = levers.get((season, episode), _Levers())
+            gone = kept.get((season, episode, part))
+            if gone is not None and episode_levers.choice is None and episode_levers.allows_reference(gone):
+                chosen.append(_held(gone, episode_levers))
+                continue
             chosen.append(_decide(season, episode, part, slot, compilations.get((season, episode), []),
-                                  levers.get((season, episode), _Levers()), order, ranking,
-                                  held.get((season, episode, part))))
+                                  episode_levers, order, ranking, held.get((season, episode, part))))
     return chosen
+
+
+def _held(previous: Reference, levers: _Levers) -> Chosen:
+    """The previous reference kept with no row of the layout: its file stands for the slot as it stood before."""
+    mark = ReferenceMark.OWN if levers.own else ReferenceMark.BY_LEVEL
+    return Chosen(previous.model_copy(update={"mark": mark, "reason": None}))
 
 
 def _decide(season: int, episode: int, part: int | None, singles: list[Candidate], compilations: list[Candidate],

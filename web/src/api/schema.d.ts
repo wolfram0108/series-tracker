@@ -1892,10 +1892,11 @@ export interface components {
         };
         /**
          * Exclusion
-         * @description Why a row is out of the layout: the constructor excluded it, or it gave the row no episode number.
+         * @description Why a row is out of the layout: the constructor excluded it, it gave the row no episode number, or the source's
+         *     own choice left it out (a switched-off player, another season of a catalog).
          * @enum {string}
          */
-        Exclusion: "rule" | "no_number";
+        Exclusion: "rule" | "no_number" | "source";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */

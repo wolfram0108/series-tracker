@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from core.contracts import (CompositionRow, PlayerSummary, ReleaseTable, RowState, RowVoice, RuleLine, RuleResult,
+from core.contracts import (CompositionRow, Exclusion, PlayerSummary, ReleaseTable, RowState, RowVoice, RuleLine, RuleResult,
                             RulesApplyReply, SeriesSource, SourceStatus, SourceType, TableRow, line_of)
 from core.voice_names import fold_name
 from modules.composition.project import (UNKNOWN_VOICE_LABEL, SourceInput, group_renames, layout_episodes, lines_for,
@@ -234,14 +234,41 @@ def test_only_the_chosen_season_of_the_catalog_player_is_in_play(chosen, keys):
     assert [r.key for r in selected_rows(source(vibix_season=chosen), catalog_table())] == keys
 
 
-def test_a_switched_off_player_is_neither_asked_about_nor_in_the_layout_but_stays_in_the_summary():
+def test_a_switched_off_player_is_not_asked_about_and_is_in_the_layout_as_left_out_by_the_source():
     src = source(players_off=["kodik"])
     tbl = catalog_table()
     assert [line.key for line in lines_for(src, tbl)] == ["v11", "v12", "v21", "v22"]
     results = {key: {"episode": 1} for key in ("v11", "v12", "v21", "v22", "k1")}
     out = project([item(src, tbl, results)], {}, {})
-    assert [r.row_key for r in out.rows] == ["v11", "v12", "v21", "v22"]
+    assert [(r.row_key, r.excluded, r.exclusion) for r in out.rows] == [
+        ("v11", False, None), ("v12", False, None), ("v21", False, None), ("v22", False, None),
+        ("k1", True, Exclusion.SOURCE)]
+    [left] = [r for r in out.rows if r.excluded]
+    assert left.left_out and left.decided and (left.season, left.episode_start, left.voice_label) == (None, None, "")
+    # A row the source leaves out names no voice-over: it takes no number of an unknown one.
+    assert (left.voice_group, left.voice_unknown) == (None, None)
+    alone = project([item(source(), table(*[r for r in tbl.rows if r.player == "kodik"]), results)], {}, {})
+    assert project([item(src, table(*[r for r in tbl.rows if r.player == "kodik"]), results)], {}, {}).unknown_voices == {}
+    assert alone.unknown_voices != {}  # the same row in play does take one
     assert [p.player for p in out.sources[0].players] == ["vibix", "kodik"]
+
+
+@pytest.mark.parametrize("chosen", [None, 0, 1, 2, 3])
+@pytest.mark.parametrize("off", [(), ("kodik",), ("vibix",), ("vibix", "kodik")])
+def test_every_row_of_the_table_is_in_the_layout_once_and_only_the_choice_of_the_source_leaves_it_out(chosen, off):
+    src = source(vibix_season=chosen, players_off=list(off))
+    tbl = catalog_table()
+    out = project([item(src, tbl, {key: {"episode": 1} for key in ("v11", "v12", "v21", "v22", "k1")})], {}, {})
+    in_play = {r.key for r in selected_rows(src, tbl)}
+    assert sorted(r.row_key for r in out.rows) == sorted(r.key for r in tbl.rows)
+    assert {r.row_key for r in out.rows if r.exclusion == Exclusion.SOURCE} == {r.key for r in tbl.rows} - in_play
+    assert {r.row_key for r in out.rows if not r.excluded} == in_play
+
+
+def test_a_source_without_a_profile_or_an_answer_still_has_no_rows():
+    tbl = catalog_table()
+    assert project([item(source(profile=None, players_off=["kodik"]), tbl, {})], {}, {}).rows == []
+    assert project([item(source(players_off=["kodik"]), tbl)], {}, {}).rows == []
 
 
 # ---- the lines the constructor is asked about --------------------------------------------------------------------
@@ -625,3 +652,9 @@ def test_two_groups_dissolved_into_the_unknown_ones_are_renames_back():
     before = labelled(("a", "AniStar", "Стар"))
     after = labelled(("a", "AniStar", "Неизвестная озвучка 1"))
     assert group_renames(before, after) == {"Стар": "Неизвестная озвучка 1"}
+
+
+def test_a_player_switched_off_or_on_renames_no_group():
+    named = labelled(("a", "AniStar", "Стар"))
+    left = [row.model_copy(update={"excluded": True, "exclusion": Exclusion.SOURCE, "voice_label": ""}) for row in named]
+    assert group_renames(named, left) == {} and group_renames(left, named) == {}

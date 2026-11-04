@@ -243,3 +243,47 @@ def test_the_same_video_behind_a_row_with_a_task_stays_that_row():
     waiting = item(mine, "https://a", resolution=480)
     placed = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://a", height=1080)), [waiting], busy={mine})[0]
     assert (placed.unique_id, placed.is_new) == (mine, False)
+
+
+# --- a reference held while its row is not in the layout -------------------------------------------------------------
+
+def _held(**fields):
+    previous = reference.Reference(season=1, episode=1, mark=reference.ReferenceMark.BY_LEVEL, source_id=SRC,
+                                   row_key="k1", player="vk", height=1080, **fields)
+    return reference.choose([], (), ["vk"], [SRC], previous=[previous], on_disk={(SRC, "k1")})
+
+
+@pytest.mark.parametrize("status, filename", [("completed", "e01.mp4"), ("pending", "e01.mp4"), ("completed", None)])
+def test_the_downloaded_row_of_a_held_reference_stands_for_its_slot_and_nothing_of_it_is_rewritten(status, filename):
+    mine = item("u1", "https://a", resolution=1080, status=status, filename=filename, source_id=SRC, row_key="k1")
+    placements = place(S, _held(), [mine])
+    assert [(each.unique_id, each.fields, each.is_new) for each in placements] == [("u1", {}, False)]
+
+
+@pytest.mark.parametrize("case", ["not_downloaded", "other_row", "other_slot", "compilation"])
+def test_a_held_reference_with_no_downloaded_row_of_its_own_in_its_slot_has_no_placement(case):
+    fields = {"source_id": SRC, "row_key": "k1", "status": "completed", "filename": "e01.mp4"}
+    if case == "not_downloaded":
+        fields.update(status="pending", filename=None)
+    elif case == "other_row":
+        fields.update(row_key="k2")
+    elif case == "other_slot":
+        fields.update(episode=2)
+    mine = item("u1", "https://a", **fields)
+    if case == "compilation":
+        mine["episode_end"] = 3
+    assert place(S, _held(), [mine]) == []
+
+
+def test_of_several_downloaded_rows_of_a_held_reference_the_best_resolution_stands():
+    rows = [item("u1", "https://a", resolution=720, status="completed", source_id=SRC, row_key="k1"),
+            item("u2", "https://a2", resolution=1080, status="completed", source_id=SRC, row_key="k1")]
+    assert [each.unique_id for each in place(S, _held(), rows)] == ["u2"]
+
+
+def test_the_rows_on_disk_are_the_downloaded_rows_with_a_row_of_the_layout():
+    rows = [item("u1", "a", status="completed", source_id=SRC, row_key="k1"),
+            item("u2", "b", filename="x.mp4", source_id=SRC, row_key="k2"),
+            item("u3", "c", source_id=SRC, row_key="k3"),
+            item("u4", "d", status="completed", source_id=None, row_key=None)]
+    assert candidates.on_disk(rows) == {(SRC, "k1"), (SRC, "k2")}

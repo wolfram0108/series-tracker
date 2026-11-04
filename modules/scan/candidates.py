@@ -74,6 +74,9 @@ def place(series_id: int, chosen: Iterable[Chosen], existing: list[dict[str, Any
     for each in chosen:
         row = each.row
         if row is None:
+            kept = _held_row(each, existing)
+            if kept is not None:  # the file stands as it is: nothing of the row is rewritten from a layout without it
+                placements.append(Placement(each, kept["unique_id"], {}, False))
             continue
         # The height of the reference, not of the row: a row held back while its answer is unsure has none of its own.
         resolution = each.reference.height
@@ -117,6 +120,23 @@ def new_row(series_id: int, placement: Placement, ignored: dict[int, set[int]] |
     fields = placement.fields
     return {**fields, "series_id": series_id, "unique_id": placement.unique_id,
             "is_ignored_by_user": covered(fields["season"], {fields["episode_start"]}, ignored or {})}
+
+
+def on_disk(existing: Iterable[dict[str, Any]]) -> set[tuple[int, str]]:
+    """The rows of the layout (source id, row key) whose video is downloaded: the references that are held while a read
+    does not bring their rows."""
+    return {(item["source_id"], item["row_key"]) for item in existing
+            if is_downloaded(item) and item.get("source_id") is not None and item.get("row_key") is not None}
+
+
+def _held_row(chosen: Chosen, existing: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The downloaded row of a reference held without its row in the layout, the best of them if there are several."""
+    reference = chosen.reference
+    if reference.source_id is None or reference.row_key is None:
+        return None
+    mine = [item for item in existing if slot_of(item) == chosen.slot and not is_compilation(item) and is_downloaded(item)
+            and (item.get("source_id"), item.get("row_key")) == (reference.source_id, reference.row_key)]
+    return max(mine, key=lambda item: item.get("resolution") or 0, default=None)
 
 
 def obsolete(existing: list[dict[str, Any]], kept: Collection[str], busy: Collection[str]) -> list[str]:

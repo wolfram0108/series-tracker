@@ -210,15 +210,19 @@ def candidate_of(row: dict[str, Any]) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class Videos:
-    """The videos the layout has: the keys of its rows and their links. What a started work is compared with."""
+    """The videos the layout has: the keys of its rows and their links. What a started work is compared with.
+
+    A row the configuration took out (`CompositionRow.left_out`) is a video the layout has and gives to no voice-over;
+    a row with no number is not counted, as it is no choice of the user."""
 
     keys: frozenset[tuple[int, str]] = frozenset()
     links: frozenset[str] = frozenset()
 
     @classmethod
     def of(cls, rows: Iterable[CompositionRow]) -> "Videos":
-        live = [row for row in rows if not row.excluded]
-        return cls(frozenset((row.source_id, row.row_key) for row in live), frozenset(row.link for row in live if row.link))
+        known = [row for row in rows if row.decided]
+        return cls(frozenset((row.source_id, row.row_key) for row in known),
+                   frozenset(row.link for row in known if row.link))
 
 
 def moved(row: dict[str, Any], chain: Iterable[Candidate], videos: Videos) -> bool:
@@ -226,9 +230,10 @@ def moved(row: dict[str, Any], chain: Iterable[Candidate], videos: Videos) -> bo
 
     A work is valid while its inputs are the inputs of the plan: the reference (told by `ref_uid`) and the video of the
     voice-over (this). The video is the row it was made from, by its key (a chain recorded before keys is told by its
-    link). It is not valid when the layout has that video and the plan of this voice-over does not offer it. A video the
-    layout does not have at all is no evidence of a change (a page read short, a video not found by a quick search): the
-    work stands, as it stood before. A row that has not begun has no work: the plan gives it its chain anew."""
+    link). It is not valid when the layout has that video and the plan of this voice-over does not offer it: another
+    episode or voice-over took it, or the configuration took it out (a rule, a switched-off player). A video the layout
+    does not have at all is no evidence of a change (a page read short, a video not found by a quick search): the work
+    stands, as it stood before. A row that has not begun has no work: the plan gives it its chain anew."""
     if row.get("status") not in STARTED:
         return False
     active = candidate_of(row)

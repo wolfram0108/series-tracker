@@ -1,5 +1,5 @@
 """The plan of voice-overs: which voices an episode gets and where each comes from (M-15, M-16, M-17, T-17)."""
-from core.contracts import (CompositionRow, EffectiveLever, EpisodeSettings, Level, Reference, ReferenceMark,
+from core.contracts import (CompositionRow, EffectiveLever, EpisodeSettings, Exclusion, Level, Reference, ReferenceMark,
                             RowState, group_target, variant_target)
 from core.voice_names import NO_GROUPS, Groups
 from modules.voices.planning import STARTED, Candidate, PlannedDub, Videos, adopt, moved, plan, rank
@@ -348,19 +348,22 @@ def test_a_voice_over_names_the_source_and_the_player_its_work_is_on_the_first_o
 
 
 def test_a_started_work_stands_exactly_while_the_layout_does_not_give_its_video_to_another_episode_or_voice_over():
-    """Every placing of two videos (each: not in the layout, excluded, or a row of the voice-over X or Y at episode 1 or 2),
-    for a recorded work of the voice-over X at episode 1 or 2, on either video, in any step, with a chain that knows the
-    keys of its videos or only their links. The work stands unless the layout has its video and gives it to another episode
-    or another voice-over; that is told by the layout alone, whatever the plan and the chain are."""
+    """Every placing of two videos (each: not in the layout, or a row of the voice-over X or Y at episode 1 or 2, numbered,
+    excluded by a rule, left out by the source's choice or given no number), for a recorded work of the voice-over X at
+    episode 1 or 2, on either video, in any step, with a chain that knows the keys of its videos or only their links. The
+    work stands unless the layout has its video and gives it to another episode or another voice-over, or the
+    configuration took it out; a row with no number says nothing, like a row not brought. That is told by the layout
+    alone, whatever the plan and the chain are."""
     def video(key, placing):
         if placing is None:
             return []
-        voice, episode, excluded = placing
+        voice, episode, exclusion = placing
         return [CompositionRow(series_id=7, source_id=1, row_key=key, season=1, episode_start=episode, episode_end=episode,
-                               voice_label=voice, player="kodik", state=RowState.PLAYABLE, excluded=excluded,
-                               link=f"https://site/{key}")]
+                               voice_label=voice, player="kodik", state=RowState.PLAYABLE, excluded=exclusion is not None,
+                               exclusion=exclusion, link=f"https://site/{key}")]
 
-    placings = [None] + [(voice, episode, excluded) for voice in "XY" for episode in (1, 2) for excluded in (False, True)]
+    exclusions = (None, Exclusion.RULE, Exclusion.SOURCE, Exclusion.NO_NUMBER)
+    placings = [None] + [(voice, episode, exclusion) for voice in "XY" for episode in (1, 2) for exclusion in exclusions]
     checked = 0
     for first in placings:
         for second in placings:
@@ -376,9 +379,9 @@ def test_a_started_work_stands_exactly_while_the_layout_does_not_give_its_video_
                         for keyed in (True, False):
                             candidate = Candidate("kodik", "X", f"https://site/{key}", None, 1, key if keyed else None)
                             recorded = {"status": status, "attempt": 0, "chain": [candidate.as_json()]}
-                            here = placing is not None and not placing[2] and placing[0] == "X" and placing[1] == dub.episode
-                            gone = placing is None or placing[2]
+                            here = placing is not None and placing[2] is None and placing[0] == "X" and placing[1] == dub.episode
+                            gone = placing is None or placing[2] == Exclusion.NO_NUMBER
                             expected = status in STARTED and not here and not gone
                             assert moved(recorded, dub.chain, videos) is expected, (first, second, dub.episode, key, status, keyed)
                             checked += 1
-    assert checked > 1000  # the space is not empty: every case that plans X is checked
+    assert checked > 4000  # the space is not empty: every case that plans X is checked

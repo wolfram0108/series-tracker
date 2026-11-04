@@ -146,7 +146,8 @@ class World(BaseModule):
         series_id = env.payload["series_id"]
         sources = [SourceSummary(source_id=source_id, url=url, status=SourceStatus.READY)
                    for source_id, url in self.sources]
-        return CompositionReply(series_id=series_id, rev=self.rev, rows=self.rows, sources=sources,
+        rows = [row for row in self.rows if env.payload.get("include_excluded") or not row.excluded]
+        return CompositionReply(series_id=series_id, rev=self.rev, rows=rows, sources=sources,
                                 settings=self.settings).model_dump(mode="json")
 
     async def on_recompute(self, env) -> dict:

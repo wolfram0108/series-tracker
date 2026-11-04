@@ -8,8 +8,8 @@ import random
 
 import pytest
 
-from core.contracts import (REFERENCE_CHOICE, VARIANT_ALLOW, Level, Reference, ReferenceChoice, ReferenceMark,
-                            RowState, variant_target)
+from core.contracts import (REFERENCE_CHOICE, VARIANT_ALLOW, Exclusion, Level, Reference, ReferenceChoice,
+                            ReferenceMark, RowState, variant_target)
 from core.reasons import parse
 from core.voice_names import Groups
 from modules.scan import reference
@@ -415,6 +415,91 @@ def test_a_reference_held_once_is_held_again_and_stays_the_same():
     first = choose(rows, previous=[held()])
     again = choose(rows, previous=[each.reference for each in first])
     assert [each.reference for each in again] == [each.reference for each in first]
+
+
+# --- the hold of a file on disk: a row a read did not bring is no "no"; a row the configuration took out is ------------
+
+# Where the row of the previous reference "a" (vk, 720p, source 1) stands in the layout now.
+PLACES = ("playable", "not_obtained", "absent", "rule", "source", "no_number", "elsewhere", "missing")
+OTHERS = ("none", "worse", "better")  # the other candidate "b": none, kodik 720p (ranks below a), kodik 1080p
+LEVERS = ("none", "pick_b", "deny_a")
+
+
+def _a_row(place):
+    if place == "missing":
+        return []
+    if place == "elsewhere":
+        return [row(S, 1, "a", 1, 2, height=720)]  # the configuration numbers it as another episode
+    if place in ("rule", "source", "no_number"):
+        excluded = row(S, 1, "a", None, None, height=720, excluded=True)
+        return [excluded.model_copy(update={"exclusion": Exclusion(place)})]
+    state = {"playable": RowState.PLAYABLE, "not_obtained": RowState.NOT_OBTAINED, "absent": RowState.ABSENT}[place]
+    return [row(S, 1, "a", 1, 1, height=720, state=state)]
+
+
+def _b_row(other):
+    height = {"worse": 720, "better": 1080}.get(other)
+    return [] if height is None else [row(S, 2, "b", 1, 1, player="kodik", voice="AniLibria", height=height)]
+
+
+def _levers(name):
+    if name == "pick_b":
+        return [episode_settings(1, 1, pick("AniLibria", 2, "kodik"))]
+    if name == "deny_a":
+        return [episode_settings(1, 1, deny(1, "vk"))]
+    return []
+
+
+def _expected(place, other, levers, disk, standing):
+    """The law told on its own, not by the code: what stands for episode 1."""
+    if levers == "pick_b":
+        return "b" if other != "none" else None
+    if levers == "none" and place == "not_obtained":
+        return "a"
+    if levers == "none" and place in ("missing", "no_number") and disk and standing:
+        return "held"
+    candidates = []
+    if place == "playable" and levers != "deny_a":
+        candidates.append(("a", 720, 0))
+    if other != "none":
+        candidates.append(("b", 1080 if other == "better" else 720, 1))
+    return min(candidates, key=lambda each: (-each[1], each[2]))[0] if candidates else None
+
+
+@pytest.mark.parametrize("standing", [True, False])
+@pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize("levers", LEVERS)
+@pytest.mark.parametrize("other", OTHERS)
+@pytest.mark.parametrize("place", PLACES)
+def test_a_downloaded_reference_is_held_only_while_the_layout_has_no_word_on_its_row(place, other, levers, disk,
+                                                                                   standing):
+    rows = _a_row(place) + _b_row(other)
+    sources = (1, 2) if standing else (2,)
+    previous = held(height=720).model_copy(update={"voice_group": "Ruchime"})
+    chosen = choose(rows, _levers(levers), sources=sources, previous=[previous], on_disk={(1, "a")} if disk else set())
+    first = next(each for each in chosen if each.slot == (1, 1, None)) if any(
+        each.slot == (1, 1, None) for each in chosen) else None
+    expected = _expected(place, other, levers, disk, standing)
+    if expected == "held":
+        assert first is not None and first.row is None
+        assert (first.reference.source_id, first.reference.row_key, first.reference.height) == (1, "a", 720)
+        assert first.reference.mark == ReferenceMark.BY_LEVEL and first.reference.reason is None
+    elif expected is None:
+        assert first is None or first.row is None and first.reference.source_id is None
+    else:
+        assert first is not None and first.row is not None and first.row.row_key == expected
+
+
+def test_a_held_reference_is_held_again_on_the_next_pass_and_keeps_its_file():
+    first = choose([], previous=[held(height=720)], on_disk={(1, "a")})
+    again = choose([], previous=[each.reference for each in first], on_disk={(1, "a")})
+    assert [each.reference for each in again] == [each.reference for each in first]
+    assert [(each.reference.row_key, each.row) for each in again] == [("a", None)]
+
+
+def test_a_held_reference_stays_in_its_own_part():
+    chosen = choose([row(S, 2, "b", 1, 1, player="kodik", height=1080)], previous=[held(part=2)], on_disk={(1, "a")})
+    assert [(each.slot, each.reference.row_key) for each in chosen] == [((1, 1, None), "b"), ((1, 1, 2), "a")]
 
 
 def test_a_previous_reference_that_had_no_row_holds_nothing():

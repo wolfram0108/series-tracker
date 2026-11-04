@@ -11,10 +11,17 @@ from .rules import RuleResult
 
 
 class Exclusion(StrEnum):
-    """Why a row is out of the layout: the constructor excluded it, or it gave the row no episode number."""
+    """Why a row is out of the layout: the constructor excluded it, it gave the row no episode number, or the source's
+    own choice left it out (a switched-off player, another season of a catalog)."""
 
     RULE = "rule"
     NO_NUMBER = "no_number"
+    SOURCE = "source"
+
+
+# The exclusions that are a choice of the user: the video is taken out on purpose. A row with no number is not one: a
+# site that changed its wording is no choice, and like a row a read did not bring it proves nothing.
+CHOSEN_EXCLUSIONS = frozenset({Exclusion.RULE, Exclusion.SOURCE})
 
 
 class CompositionRow(BaseModel):
@@ -55,6 +62,17 @@ class CompositionRow(BaseModel):
     @property
     def height(self) -> int | None:
         return max(self.heights) if self.heights else None
+
+    @property
+    def left_out(self) -> bool:
+        """The configuration took this video out on purpose: what was made from it is withdrawn, not kept."""
+        return self.excluded and self.exclusion in CHOSEN_EXCLUSIONS
+
+    @property
+    def decided(self) -> bool:
+        """The layout has a word on this video: it numbers it, or the configuration took it out. A row with no number
+        has none, like a row a read did not bring: what was made from it stands."""
+        return not self.excluded or self.left_out
 
 
 class SourceStatus(StrEnum):

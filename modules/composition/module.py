@@ -7,7 +7,8 @@ and the group of its voice-over; the pure rules are in `project.py`, the levers 
 
 Queries:
   composition.get {series_id, include_excluded?} → CompositionReply: the rows of the layout in the order of the sources
-      (rows the constructor excluded, or gave no episode number, only with include_excluded), the summary of every
+      (rows the constructor excluded, gave no episode number, or the source's own choice left out — a switched-off
+      player, another season of a catalog, `exclusion='source'` — only with include_excluded), the summary of every
       source (status waiting / no_profile / ready / failed, players with rows, seasons, resolutions and voice-overs
       with their groups), the levers of the series and of each season of the layout as the headers of those levels
       show them (`levels`, the series first), and the levers of every episode of the layout with the level each comes

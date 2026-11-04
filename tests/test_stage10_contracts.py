@@ -16,39 +16,39 @@ def row(**fields) -> TableRow:
     return TableRow(**{"key": "k", "player": "vk", "state": RowState.PLAYABLE, **fields})
 
 
-def test_a_line_has_the_fields_in_the_fixed_order_with_the_text_last():
+def test_a_line_has_the_fields_in_the_fixed_order_each_with_its_code_and_the_name_and_text_without_one():
     line = line_of(table("Асура: Безумный король 2"),
                    row(player="vibix", player_label="Vibix", voice=RowVoice(name="Ruchime"), group="Сезон 2",
                        heights=[480, 720, 1080], text="Серия 1"))
-    assert line == "Асура: Безумный король 2 | Vibix | Ruchime | Сезон 2 | 1080p | Серия 1"
+    assert line == "PID:example.org | P:Vibix | Асура: Безумный король 2 | Серия 1 | G:Сезон 2 | V:Ruchime | R:1080p"
 
 
 def test_a_missing_field_is_left_out_with_its_separator():
     line = line_of(table(), row(player_label="VK", heights=[2160], text="Непревзойденный царь небес - 525 серия 3 сезон (653 эпизод)"))
-    assert line == "VK | 2160p | Непревзойденный царь небес - 525 серия 3 сезон (653 эпизод)"
+    assert line == "PID:example.org | P:VK | Непревзойденный царь небес - 525 серия 3 сезон (653 эпизод) | R:2160p"
 
 
 def test_the_type_of_the_voice_is_the_one_the_player_names():
     line = line_of(table("Практикуя ци сто тысяч лет"),
                    row(player="kodik", player_label="Kodik", voice=RowVoice(name="Студия Константина Исаева", kind="voice"),
                        group="1 сезон", heights=[720], text="1-3 серия"))
-    assert line == "Практикуя ци сто тысяч лет | Kodik | Студия Константина Исаева | voice | 1 сезон | 720p | 1-3 серия"
+    assert line == "PID:example.org | P:Kodik | Практикуя ци сто тысяч лет | 1-3 серия | G:1 сезон | V:Студия Константина Исаева | VT:voice | R:720p"
 
 
 def test_the_text_of_a_cvh_row_is_given_by_the_player_and_taken_as_it_is():
     line = line_of(table("Практикуя ци сто тысяч лет"),
                    row(player="cvh", player_label="CVH", voice=RowVoice(name="AniStar", kind="Многоголосый"),
                        group="1 сезон", heights=[480, 1080], text="5 серия"))
-    assert line == "Практикуя ци сто тысяч лет | CVH | AniStar | Многоголосый | 1 сезон | 1080p | 5 серия"
+    assert line == "PID:example.org | P:CVH | Практикуя ци сто тысяч лет | 5 серия | G:1 сезон | V:AniStar | VT:Многоголосый | R:1080p"
 
 
 @pytest.mark.parametrize("state", [RowState.ABSENT, RowState.NOT_OBTAINED])
 def test_a_row_that_does_not_play_has_no_resolution_in_its_line(state):
-    assert line_of(table(), row(player_label="VK", state=state, heights=[720], text="Серия 3")) == "VK | Серия 3"
+    assert line_of(table(), row(player_label="VK", state=state, heights=[720], text="Серия 3")) == "PID:example.org | P:VK | Серия 3"
 
 
 def test_the_player_stands_in_for_a_missing_label():
-    assert line_of(table(), row(player="allvideo", text="Серия 3")) == "allvideo | Серия 3"
+    assert line_of(table(), row(player="allvideo", text="Серия 3")) == "PID:example.org | P:allvideo | Серия 3"
 
 
 def test_a_row_takes_no_field_the_contract_does_not_know():

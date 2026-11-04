@@ -30,20 +30,22 @@ from modules.composition import CompositionModule, levers
 from modules.composition.levers import Lever
 
 ROOT = Path(__file__).resolve().parent.parent
-MIGRATION = ROOT / "alembic" / "versions" / "0027_composition_tables.py"
+MIGRATIONS = [ROOT / "alembic" / "versions" / name
+              for name in ("0027_composition_tables.py", "0035_composition_source_exclusion.py")]
 # A test that waits longer than this for an event is stuck: the event is the signal, the number only ends a broken test.
 STUCK_S = 5.0
 
 
 def migrate(path: Path, direction: str) -> None:
-    """The migration of this package alone, so that the migrations of other packages cannot break these tests."""
-    spec = importlib.util.spec_from_file_location("migration_0027", MIGRATION)
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
+    """The migrations of this package alone, so that the migrations of other packages cannot break these tests."""
     engine = create_engine(f"sqlite:///{path}")
-    with engine.begin() as connection:
-        with Operations.context(MigrationContext.configure(connection)):
-            getattr(migration, direction)()
+    for file in MIGRATIONS if direction == "upgrade" else reversed(MIGRATIONS):
+        spec = importlib.util.spec_from_file_location(f"migration_{file.stem}", file)
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+        with engine.begin() as connection:
+            with Operations.context(MigrationContext.configure(connection)):
+                getattr(migration, direction)()
     engine.dispose()
 
 
@@ -330,6 +332,10 @@ async def test_the_choice_made_for_a_source_is_counted(system):
     [event] = s.taken(s.changed)
     off = await s.get(series_id)
     assert off.rows == [] and event["episodes"] == season_one(1, 2, 3)
+    # The rows the choice left out stay in the layout, excluded by the source: their videos are there and not wanted.
+    left = (await s.probe.request("composition.get", {"series_id": series_id, "include_excluded": True},
+                                  timeout=STUCK_S))["rows"]
+    assert [(row["excluded"], row["exclusion"]) for row in left] == [(True, "source")] * 3
     assert [player.rows for player in off.sources[0].players] == [3]
     await s.counted(lambda: s.catalog.update_source(source_id, players_off=[]))
     assert len((await s.get(series_id)).rows) == 3

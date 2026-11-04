@@ -635,11 +635,13 @@ async def test_rows_of_an_earlier_version_that_nothing_stands_for_are_dropped_or
 
 
 async def test_a_reference_of_a_lower_resolution_displaces_a_downloaded_higher_one_but_leaves_its_file(rig):
-    """The reference is what the table offers now; the better file that is already fetched is displaced, not deleted."""
+    """The reference is what the table offers now; the better file that is already fetched is displaced, not deleted.
+    The table still has the row of the better one and says it cannot be played: a row it does not bring is held."""
     rig.world.rows = [rig.row("big", 1, 1, height=2160)]
     await rig.run()
     rig.downloaded("big")
-    rig.world.rows = [rig.row("small", 1, 1, height=1080, player="kodik")]
+    rig.world.rows = [rig.row("big", 1, 1, height=2160, state=RowState.ABSENT),
+                      rig.row("small", 1, 1, height=1080, player="kodik")]
     await rig.run()
     media = rig.media()
     assert media["small"]["plan_status"] == "in_plan_single"
@@ -923,3 +925,65 @@ async def test_a_series_that_is_deleted_takes_its_references_and_plan_with_it(ri
     while (await next_event(purged))["owner"] != "scan":
         pass
     assert rig.query("SELECT * FROM scan_references") == [] and rig.query("SELECT * FROM media_items") == []
+
+
+# --- after a change: a row taken out by the configuration is withdrawn, a row not brought is held (И-58) ----------
+
+from core.contracts import Exclusion  # noqa: E402
+
+AFTER = ("playable", "rule", "source", "no_number", "missing")
+OTHER = ("none", "worse", "better")
+
+
+def _expected_plan(after: str, other: str, downloaded: bool) -> str:
+    """The law on its own: where the row of the earlier reference "a" (vk 720p) stands after the pass.
+
+    "out" is any status that is not the plan and not `removed`: a row with no file has nothing to remove."""
+    if after in ("missing", "no_number"):
+        return "in_plan_single" if downloaded else "out"
+    if after == "playable" and other != "better":
+        return "in_plan_single"
+    if not downloaded:  # a row with no file that stands for nothing is dropped
+        return "out"
+    if after == "playable":
+        return "replaced"
+    return "replaced" if other != "none" else "removed"
+
+
+@pytest.mark.parametrize("downloaded", [True, False])
+@pytest.mark.parametrize("other", OTHER)
+@pytest.mark.parametrize("after", AFTER)
+async def test_the_row_of_a_reference_follows_the_word_of_the_configuration_and_not_a_read_that_did_not_bring_it(
+        db_path, after, other, downloaded):
+    rig = await build(db_path, (URL1, URL2))
+    try:
+        rig.world.rows = [rig.row("a", 1, 1, height=720)]
+        await rig.run()
+        if downloaded:
+            rig.downloaded("a")
+        rows = []
+        if after == "playable":
+            rows.append(rig.row("a", 1, 1, height=720))
+        elif after in ("rule", "source", "no_number"):
+            rows.append(rig.row("a", None, None, height=720, excluded=True).model_copy(update={"exclusion": Exclusion(after)}))
+        if other != "none":
+            rows.append(rig.row("b", 1, 1, source=1, player="kodik", voice="AniLibria",
+                                height=1080 if other == "better" else 720))
+        rig.world.rows = rows
+        await rig.run()
+        media = rig.media()
+        status = media["a"]["plan_status"] if "a" in media else None
+        expected = _expected_plan(after, other, downloaded)
+        if expected == "out":
+            assert status not in ("in_plan_single", "removed")
+        else:
+            assert status == expected
+        found = [each for each in await rig.output() if (each.season, each.episode) == (1, 1)]
+        if expected == "in_plan_single":
+            assert [(each.source_id, each.row_key) for each in found] == [(rig.source_ids[0], "a")]
+        elif other != "none":
+            assert [each.row_key for each in found] == ["b"] and media["b"]["plan_status"] == "in_plan_single"
+        else:
+            assert all(each.row_key is None for each in found)
+    finally:
+        await rig.runner.stop()

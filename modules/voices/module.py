@@ -509,8 +509,9 @@ class VoicesModule(BaseModule):
 
     async def _plan_series(self, series_id: int, *, offer: bool) -> None:
         """Read the layout and the references, plan the voice-overs, bring the rows in line, and begin what is allowed."""
+        # The excluded rows too: a work on a video the configuration took out is withdrawn, on one not brought it stands.
         layout = CompositionReply.model_validate(
-            await self.request("composition.get", {"series_id": series_id}))
+            await self.request("composition.get", {"series_id": series_id, "include_excluded": True}))
         references = [Reference.model_validate(item) for item in
                       await self.request("scan.output.get", {"series_id": series_id})]
         settings = await self._settings()
@@ -530,7 +531,8 @@ class VoicesModule(BaseModule):
             if key in recorded and planning.moved(recorded[key], dub.chain, videos):
                 # The video the work runs on is another episode's or voice-over's now: the work, what it made and the
                 # track go; the voice-over is planned again from its own videos, in this pass.
-                self.log.info("сериал %d, s%02de%02d: озвучка %s шла с видео, которое раскладка отдала другой серии, — снята",
+                self.log.info("сериал %d, s%02de%02d: озвучка %s шла с видео, которое раскладка отдала другой серии "
+                              "или исключила, — снята",
                               series_id, dub.season, dub.episode, dub.voice_label)
                 await self._retire_started(series_id, recorded.pop(key))
             if (dub.left_out or dub.left_out_links) and key in recorded:
