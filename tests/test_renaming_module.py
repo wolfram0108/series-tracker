@@ -466,19 +466,17 @@ async def test_a_video_series_is_renamed_by_its_numbers_without_any_profile(syst
 
 
 @pytest.mark.asyncio
-async def test_a_plan_that_was_counted_brings_the_files_of_a_video_series_to_their_names_and_asks_nothing_of_a_torrent(system):
+async def test_a_plan_that_was_counted_renames_nothing_the_names_follow_it_in_a_sync(system):
+    """A recount of the plan is a plan (И-59): the files move when the sync asks renaming.reprocess."""
     bus, fake, probe, _, media = system
     finished = bus.subscribe("renaming.finished")
     fake.media_items = [_item("u1", 2, "Show s01e01.mp4")]
     open(os.path.join(media, "Show s01e01.mp4"), "wb").close()
     probe.publish_event("scan.plan.updated", {"series_id": 2})
-    assert (await asyncio.wait_for(finished.queue.get(), 5)).payload == {"series_id": 2}
-    assert fake.rename_calls[-1]["names"] == {"u1": "Show s01e02.mp4"}
-    calls = len(fake.rename_calls)
-    fake.series = _torrent(fake.series)
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
     await bus.settled()
-    assert len(fake.rename_calls) == calls and finished.queue.empty()
+    assert fake.rename_calls == [] and finished.queue.empty()
+    await probe.request("renaming.reprocess", {"series_id": 2}, timeout=10)
+    assert fake.rename_calls[-1]["names"] == {"u1": "Show s01e02.mp4"}
 
 
 @pytest.mark.asyncio

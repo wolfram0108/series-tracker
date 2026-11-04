@@ -81,7 +81,7 @@ async def test_the_file_a_row_of_another_series_holds_is_not_removed_when_a_row_
     _held_by_another_series(db_path, media_dir)
     _add_item(db_path, "mine", 1, series_id=2, status="completed", filename="Серия 01.mp4", ignored=1)
 
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=5)  # a sync brings the disk to the plan (И-59)
 
     assert await _wait(lambda: _rows(db_path, 2)["mine"]["final_filename"] is None)
     assert os.path.isfile(os.path.join(media_dir, "Серия 01.mp4")) and _rows(db_path, 3)["other"]["final_filename"] == "Серия 01.mp4"

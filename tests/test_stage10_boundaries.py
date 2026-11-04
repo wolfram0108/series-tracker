@@ -126,6 +126,11 @@ async def rig(tmp_path):
     await runner.stop()
 
 
+async def plan_heard(rig) -> None:
+    """downloads has handled what came before: its handlers of the plan and of the queue take their turns."""
+    await rig.probe.request("downloads.queue.get", {}, timeout=STUCK_S)
+
+
 async def test_an_episode_the_user_switches_off_loses_its_waiting_download_and_the_one_under_way_goes_on(rig):
     rig.downloader.gate = asyncio.Event()
     rig.world.rows = [rig.row("a", 1, link="https://v/1"), rig.row("b", 2, link="https://v/2")]
@@ -136,6 +141,9 @@ async def test_an_episode_the_user_switches_off_loses_its_waiting_download_and_t
 
     await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": episode, "off": True},
                             timeout=STUCK_S)
+    await plan_heard(rig)
+    assert waiting in rig.tasks()  # switching off is a plan: the queue follows it at the next sync (И-59)
+    await rig.run(download=False)
     await rig.until(lambda: waiting not in rig.tasks(), "the waiting download dropped")
     assert list(rig.tasks().values()) == ["downloading"]
 
@@ -281,6 +289,9 @@ async def test_an_episode_the_user_switches_off_loses_the_download_under_way_and
 
     await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": episode, "off": True},
                             timeout=STUCK_S)
+    await plan_heard(rig)
+    assert rig.tasks()[running] == "downloading"  # a plan: the download goes on until a sync
+    await rig.run(download=False)
     await rig.until(lambda: running not in rig.tasks(), "the download of the switched off episode stopped")
     assert rig.query("SELECT status, final_filename FROM media_items WHERE unique_id=?", (running,)) == [
         {"status": "pending", "final_filename": None}]
@@ -300,6 +311,9 @@ async def test_an_episode_the_user_switches_off_loses_its_whole_file_and_the_oth
 
     await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": 1, "off": True},
                             timeout=STUCK_S)
+    await plan_heard(rig)
+    assert sorted(each.name for each in rig.media.iterdir()) == ["Серия 01.mp4", "Серия 02.mp4"]  # a plan: the disk waits
+    await rig.run(download=False)
     # The file goes first and the row lets it go after: a stop between the two leaves a name without a file, which the next look mends.
     await rig.until(lambda: not (rig.media / "Серия 01.mp4").exists() and rig.query(
         "SELECT status, final_filename FROM media_items WHERE episode_start=1") == [{"status": "pending", "final_filename": None}],
@@ -349,6 +363,9 @@ async def test_a_season_the_user_switches_off_loses_its_whole_files_and_the_othe
                     "three episodes fetched")
 
     await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "off": True}, timeout=STUCK_S)
+    await plan_heard(rig)
+    assert len(list(rig.media.iterdir())) == 3  # a plan: the disk waits for a sync
+    await rig.run(download=False)
     await rig.until(lambda: sorted(each.name for each in rig.media.iterdir()) == ["Серия 03.mp4"],
                     "the files of the switched off season are gone")
     assert rig.query("SELECT episode_start, status, final_filename FROM media_items WHERE season=1 ORDER BY episode_start") == [
@@ -364,6 +381,9 @@ async def test_a_season_the_user_switches_off_loses_the_downloads_under_way_and_
     await rig.until(lambda: sorted(rig.tasks().values()) == ["downloading", "pending"], "one download under way, one waiting")
 
     await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "off": True}, timeout=STUCK_S)
+    await plan_heard(rig)
+    assert sorted(rig.tasks().values()) == ["downloading", "pending"]  # a plan: the queue waits for a sync
+    await rig.run(download=False)
     await rig.until(lambda: rig.tasks() == {}, "both tasks dropped")
     assert sorted(each["status"] for each in rig.query("SELECT status FROM media_items")) == ["pending", "pending"]
     rig.downloader.gate.set()

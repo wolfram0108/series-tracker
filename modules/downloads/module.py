@@ -9,13 +9,14 @@ video in a step that survives any stop. This module is the bus facade and the qu
 look, and runs the downloads.
 
 Obligations that come from the state of the database (a file of a row the user switched off, a task of a row that left the
-plan, a publication a stop interrupted) are carried out by `_reconcile`, which reads the state as it is now. It runs at the
-start of the process, on every plan update, dispatch and disk check, so that no obligation lives in an event alone.
+plan, a publication a stop interrupted) are carried out by `_reconcile`, which reads the state as it is now. What the plan
+alone decides (a file displaced or taken out, a task that ends) is done in a sync only: dispatch and settle, which scan sends
+after the plan of a sync. The look at the beginning of the process, a plan update and the disk check only finish what a sync
+or a download began and read the disk: a rule saved or an episode switched off changes the plan, never the disk.
 
 Events in:
-  scan.plan.updated {series_id} - the plan was counted: reconcile (adopt the files that lie, drop the tasks the plan does not
-      want, retire the files another video displaced, remove the files of what the configuration took out). It does not start
-      a download (adopting is not downloading; opening the composition or saving a setting must not fetch).
+  scan.plan.updated {series_id} - the plan was counted: the statuses of the series follow it and the files that lie under the
+      names of the plan are adopted. Nothing on the disk changes and nothing is fetched (saving a rule or a setting is a plan).
   system.started - reconcile every video series (the neighbours it asks are up).
   settings.changed - max_parallel_downloads, max_parallel_dub_downloads, yt_dlp_concurrent_fragments.
   work.withdrawn {series_id, keys?} - the owner does not need the work: the downloads of a series, or the jobs of these keys,
@@ -23,6 +24,8 @@ Events in:
   series.deleted - the downloads of the series stop, what they wrote goes, its tasks go.
 
 Queries / commands:
+  downloads.settle {series_id} -> {removed, retired, dropped} - a sync without download: the disk follows the plan (the
+      files another video displaced and those the configuration took out go, the tasks nobody needs end); nothing is fetched.
   downloads.dispatch {series_id} - the command of scan to fetch what is missing: reconcile, make the tasks of the rows the
       plan wants and that have no file, keep the paths of the live ones current, start the pool. The only place where a
       download starts.
@@ -164,6 +167,7 @@ class DownloadsModule(BaseModule):
     def register(self) -> None:
         self.handle("scan.plan.updated", self.on_plan_updated)
         self.handle("downloads.dispatch", self.on_dispatch)
+        self.handle("downloads.settle", self.on_settle)
         self.handle("settings.changed", self.on_settings_changed)
         self.handle("downloads.queue.get", self.on_queue_get)
         self.handle("downloads.queue.clear", self.on_queue_clear)
@@ -328,7 +332,7 @@ class DownloadsModule(BaseModule):
             self.log.error("серия %d: путь сохранения не абсолютный (%r) — загрузка не запущена", series_id, series.get("save_path"))
             raise ValueError(f"путь сохранения не абсолютный: {series.get('save_path')!r}")
         async with self._lock(series_id):
-            done = await self._reconcile(series)
+            done = await self._reconcile(series, sync=True)
             created = await self._make_tasks(series)
         self.log.info("диспетч %d: сверка — %s; задач создано %d", series_id, done, created)
         if done.changed or created:
@@ -336,6 +340,21 @@ class DownloadsModule(BaseModule):
         if done.dropped or done.finished or created:
             await self._broadcast_queue()
         await self._pump()
+
+    async def on_settle(self, env: Envelope) -> dict:
+        """A sync without download: the disk follows the plan (displaced and unwanted files go, tasks nobody needs end),
+        and nothing is fetched."""
+        series_id = env.payload["series_id"]
+        series = await self.request("catalog.series.get", {"series_id": series_id})
+        async with self._lock(series_id):
+            done = await self._reconcile(series, sync=True)
+        self.log.info("синхронизация %d без загрузки: сверка — %s", series_id, done)
+        if done.changed:
+            await self._contribute(series_id)
+        if done.dropped or done.finished:
+            await self._broadcast_queue()
+            await self._pump()
+        return {"removed": done.removed, "retired": done.retired, "dropped": done.dropped}
 
     async def _make_tasks(self, series: dict) -> int:
         """A task for every row the plan wants that waits for a file and has none alive; the paths of the live ones follow the
@@ -364,20 +383,26 @@ class DownloadsModule(BaseModule):
 
     # --- the state of the series is the truth: one look ----------------------------------
 
-    async def _reconcile(self, series: dict) -> Reconciled:
+    async def _reconcile(self, series: dict, *, sync: bool = False) -> Reconciled:
         """Bring the files, the rows and the tasks of a series to what the plan says, reading the state as it is now. The
         order matters: a stopped publication is finished first (it makes rows ready), the files on their way to other names
         arrive (they free names), ready rows adopt the files that lie, the tasks that nobody needs end, then the files that
-        are not wanted go."""
+        are not wanted go.
+
+        What the plan alone decides (a task that ends, a file displaced or taken out) is done in a sync only (`sync`, from
+        dispatch and settle): a recount of the plan on an event changes nothing on the disk. Any look finishes what a sync
+        or a download began (a publication, a recorded rename, a work file without its task) and reads the disk."""
         if series.get("kind") != SeriesKind.VIDEO or not os.path.isabs(series.get("save_path") or ""):
             return Reconciled()
         finished = await self._publication.finish_unfinished(series)
         renamed = await self._settle(series)
         released = await self.library.release_unbacked(series)
         adopted = await self.library.adopt(series)
-        dropped = await self._drop_tasks_without_need(series["id"])
-        retired = await self.library.retire_superseded(series)
-        removed = await self.library.remove_unwanted(series)
+        dropped = retired = removed = 0
+        if sync:  # what the plan alone decides reaches the disk in a sync only
+            dropped = await self._drop_tasks_without_need(series["id"])
+            retired = await self.library.retire_superseded(series)
+            removed = await self.library.remove_unwanted(series)
         swept = await self.library.sweep_work(series)
         return Reconciled(finished, released, adopted, dropped, retired, removed, swept, renamed)
 

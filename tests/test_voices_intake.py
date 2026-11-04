@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from test_voices import (db_path, dubs, layout_changed, library_files, linked, pass_over, placed_set, quiet,  # noqa: F401
+from test_voices import (synced, db_path, dubs, layout_changed, library_files, linked, pass_over, placed_set, quiet,  # noqa: F401
                          rows, settled, until_true)
 
 
@@ -40,7 +40,7 @@ async def test_a_group_made_after_the_download_keeps_the_voice_over_its_key_and_
     for source in neighbours.sources:  # the user made a group for BlackCat: the layout calls it by the group's name
         if source["studio"] == "BlackCat":
             source["studio"] = "Black Group"
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, 2)
     found = await stored(voices)
     assert {(r["episode"], r["id"]) for r in found} == before  # no row was made, none was dropped
@@ -62,7 +62,7 @@ async def test_a_group_renamed_gives_the_same_voice_over_a_new_name_and_two_voic
         if source["studio"] == "BlackCat":
             source["studio"] = "Renamed"
     neighbours.sources.append(linked("kodik", "Other", range(1, 4)))  # a voice-over with links of its own
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, 2)
     found = await stored(voices)
     assert sorted({(r["voice_key"], r["voice_label"]) for r in found}) == [("BlackCat", "Renamed"), ("Other", "Other")]
@@ -86,7 +86,7 @@ async def test_a_placed_track_follows_the_new_name_of_its_voice_over(dubs):
     probe, neighbours, bus, sub, ref = await placed_set(dubs)
     voices = dubs[2]
     neighbours.sources[-1]["studio"] = "Red Group"  # RedHeadSound was put into a group
-    layout_changed(probe)
+    synced(probe)
     async def moved():
         return "Series s01e01.Red Group.ru.flac" in library_files(neighbours)
 

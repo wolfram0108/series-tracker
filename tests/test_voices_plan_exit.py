@@ -4,8 +4,8 @@ import os
 
 import pytest
 
-from core.contracts import CompositionRow, EffectiveLever, Level, RowState, group_target, variant_target
-from test_voices import (db_path, dubs, layout_changed, library_files, pass_over, placed_set, quiet, rows,  # noqa: F401
+from core.contracts import CompositionRow, EffectiveLever, Level, ReferenceMark, RowState, group_target, variant_target
+from test_voices import (synced, db_path, dubs, layout_changed, library_files, pass_over, placed_set, quiet, rows,  # noqa: F401
                          settled, until_true)
 
 
@@ -24,7 +24,7 @@ async def test_a_voice_over_the_user_takes_off_while_it_downloads_is_dropped_and
     assert all(r["status"] == "downloading" and r["file_id"] is None for r in await voices.repo.for_series(7))
     take_off(neighbours, "BlackCat")
     asks = neighbours.layout_asks + 1
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, asks)
     assert sorted(r["episode"] for r in await voices.repo.for_series(7)) == [2, 3]
     assert neighbours.cancelled_keys == [f"dub:{taken[1]}"]
@@ -39,7 +39,7 @@ async def test_a_track_already_placed_is_removed_when_its_voice_over_leaves_the_
     assert tracks and any("BlackCat" in name for name in before)
     take_off(neighbours, "RedHeadSound")
     asks = neighbours.layout_asks + 1
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, asks)
 
     async def gone():
@@ -70,7 +70,7 @@ async def test_a_variant_the_user_leaves_out_stops_the_download_that_runs_from_i
     assert players_of(before[1]) == ["cvh", "kodik"] and before[1]["status"] == "downloading"
     leave_out(neighbours, "BlackCat", "cvh")
     asks = neighbours.layout_asks + 1
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, asks)
 
     after = {r["episode"]: r for r in await voices.repo.for_series(7)}
@@ -88,7 +88,7 @@ async def test_a_variant_left_out_is_taken_out_of_the_chain_of_work_that_runs_fr
     before = {r["episode"]: r for r in await voices.repo.for_series(7)}
     leave_out(neighbours, "BlackCat", "kodik")  # the next candidate: the download under way is from cvh
     asks = neighbours.layout_asks + 1
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, asks)
 
     after = {r["episode"]: r for r in await voices.repo.for_series(7)}
@@ -106,7 +106,7 @@ async def test_a_track_made_from_a_variant_the_user_leaves_out_is_removed_and_th
     used = black["chain"][black["attempt"]]["player"]
     leave_out(neighbours, "BlackCat", used)
     asks = neighbours.layout_asks + 1
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, asks)
 
     async def gone():
@@ -128,7 +128,7 @@ async def test_two_voice_overs_the_user_makes_one_leave_one_track_under_the_name
         if source["studio"] == "RedHeadSound":
             source["studio"] = "BlackCat"
     asks = neighbours.layout_asks + 1
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, asks)
 
     async def one_track():
@@ -156,7 +156,7 @@ async def merged_into_blackcat(dubs):
     # A new player for the source keeps the rows of the layout apart; the link of the row is the one the row has had.
     neighbours.sources[-1]["studio"], neighbours.sources[-1]["player"] = "BlackCat", "alloha"
     asks = neighbours.layout_asks + 1
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, asks)
     return probe, neighbours, voices, ref
 
@@ -186,7 +186,7 @@ async def test_a_variant_the_user_leaves_out_stops_the_download_that_runs_from_i
     neighbours.sources[2]["links"]["1"] = "https://site/moved#cvh-BlackCat-1"  # the page gave the row another address
     leave_out(neighbours, "BlackCat", "cvh")
     asks = neighbours.layout_asks + 1
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, asks)
 
     after = {r["episode"]: r for r in await voices.repo.for_series(7)}
@@ -207,7 +207,7 @@ async def test_a_job_two_voice_overs_share_goes_on_for_the_one_that_is_left_and_
 
     leave_voices(neighbours, "RedHeadSound")
     asks = neighbours.layout_asks + 1
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, asks)
     [left] = await voices.repo.for_series(7)
     assert left["voice_key"] == "BlackCat" and left["status"] == "aligning" and neighbours.conform_cancels == []
@@ -229,7 +229,7 @@ async def test_the_job_is_cancelled_when_every_voice_over_that_shared_it_has_gon
 
     leave_voices(neighbours, "RedHeadSound", "BlackCat")
     asks = neighbours.layout_asks + 1
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, asks)
 
     async def cancelled():
@@ -254,7 +254,7 @@ async def test_a_chain_recorded_before_candidates_said_their_source_is_judged_sa
     neighbours.sources[2]["links"]["1"] = "https://site/moved#cvh-BlackCat-1"
     leave_out(neighbours, "BlackCat", "cvh")
     asks = neighbours.layout_asks + 1
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, asks)
 
     after = {r["episode"]: r for r in await voices.repo.for_series(7)}
@@ -285,7 +285,7 @@ async def test_work_on_a_video_the_layout_gives_to_another_episode_is_taken_back
     assert all(r["status"] == "downloading" for r in before.values())
     shift_cvh_black_cat(neighbours)
     asks = neighbours.layout_asks + 1
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, asks)
 
     after = {r["episode"]: r for r in await voices.repo.for_series(7)}
@@ -312,3 +312,36 @@ async def test_work_on_a_video_the_layout_does_not_have_at_all_stands_as_a_page_
     after = {r["episode"]: r for r in await voices.repo.for_series(7)}
     assert {n: after[n]["id"] for n in (1, 2, 3)} == {n: before[n]["id"] for n in (1, 2, 3)}
     assert all(r["status"] == "downloading" for r in after.values()) and neighbours.cancelled_keys == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["take_off", "leave_out", "reference_gone"])
+async def test_a_change_without_a_sync_takes_nothing_away_and_the_sync_does(dubs, change):
+    """И-59: a rule saved, a voice-over taken off, a variant left out, a reference gone — a recount of the plan does not
+    cancel a download, remove a track or a file; the sync of the series does."""
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    voices = dubs[2]
+    before = {(r["episode"], r["voice_key"]): r for r in await voices.repo.for_series(7)}
+    files = sorted(library_files(neighbours))
+    if change == "take_off":
+        take_off(neighbours, "BlackCat")
+    elif change == "leave_out":
+        black = next(r for r in before.values() if r["voice_key"] == "BlackCat")
+        leave_out(neighbours, "BlackCat", black["chain"][black["attempt"]]["player"])
+    else:
+        neighbours.marks[(1, 1)] = ReferenceMark.NONE
+    asks = neighbours.layout_asks + 1
+    layout_changed(probe)
+    await pass_over(voices, neighbours, asks)
+    after = {(r["episode"], r["voice_key"]): r for r in await voices.repo.for_series(7)}
+    assert {key: (row["id"], row["status"]) for key, row in after.items()} == {
+        key: (row["id"], row["status"]) for key, row in before.items()}
+    assert sorted(library_files(neighbours)) == files and neighbours.cancelled_keys == [] and neighbours.conform_cancels == []
+
+    if change == "reference_gone":
+        return  # without a reference only the temporary files go, at the sync (_drop_without_reference)
+    asks = neighbours.layout_asks + 1
+    synced(probe)
+    await pass_over(voices, neighbours, asks)
+    assert {(r["episode"], r["voice_key"]): r["id"] for r in await voices.repo.for_series(7)} != {
+        key: row["id"] for key, row in before.items()}

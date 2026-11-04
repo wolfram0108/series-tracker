@@ -190,6 +190,7 @@ from modules.voices import planning as voices_planning
 from modules.voices.settings import DEFAULT_PRIORITY
 from test_voices import (db_path, dubs, downloads, conform_dir, library_files, placed_set, quiet, settled,  # noqa: F401
                          statuses_until, two_voices_ready, until_true)
+from test_voices import synced  # noqa: E402
 from test_voices_plan_exit import layout_changed, leave_out, pass_over, take_off
 
 
@@ -305,7 +306,7 @@ async def test_the_voice_overs_of_an_episode_keep_their_invariants_under_every_c
     probe, neighbours, voices, bus = dubs
     await OPS[op](dubs)
     asks = neighbours.layout_asks + 1
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, asks)
     assert await voice_violations(dubs) == []
 

@@ -8,7 +8,7 @@ import pytest
 from core.contracts import CompositionRow, RowState
 from modules.voices import VoicesModule
 from core.db import Database
-from test_voices import (db_path, dubs, finish, job_result, layout_changed, linked, quiet, reference_on_disk, restarted,  # noqa: F401
+from test_voices import (synced, db_path, dubs, finish, job_result, layout_changed, linked, quiet, reference_on_disk, restarted,  # noqa: F401
                          rows, settled, statuses_until, touch, until_true, downloads)
 
 LINK = "https://site/title.html#kodik-Red-1-3"
@@ -160,7 +160,7 @@ async def test_a_source_that_left_the_layout_during_a_transfer_takes_its_voice_o
     path = neighbours.fetches[0]["path"]
     touch(path, b"half")  # what the transfer has written so far
     neighbours.extra_rows = []
-    layout_changed(probe)
+    synced(probe)
     await statuses_until(sub, ["removed"] * 3)
 
     async def freed():
@@ -177,7 +177,7 @@ async def test_a_source_that_left_the_layout_during_a_transfer_takes_its_voice_o
     assert await voices.repo.cleanup_list() == [] and await files(voices) == []
     # The source is back: the voice-overs need a file again and get a transfer of their own.
     neighbours.extra_rows = [compilation()]
-    layout_changed(probe)
+    synced(probe)
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 2)
     again = neighbours.fetches[1]

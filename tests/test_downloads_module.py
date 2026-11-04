@@ -427,7 +427,7 @@ async def test_pending_outside_plan_dropped(system):
                      "WHERE unique_id='uid2'")
         conn.commit()
 
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
     assert await _wait(lambda: not any(
         t["task_key"] == "uid2" for t in _tasks(db_path)))
     dl.gate.set()
@@ -920,7 +920,7 @@ async def test_superseded_file_is_removed_once_winner_is_on_disk(system):
     _add_item(db_path, "lose", 1, plan="replaced", status="completed",
               filename="e01 360p.mp4", superseded_by="win")
 
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
 
     assert await _wait(lambda: not os.path.exists(loser))
     assert os.path.exists(winner)
@@ -987,7 +987,7 @@ async def test_retirement_is_idempotent_and_survives_fs_sync(system):
 
     await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=10)
     await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=10)
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
     await _quiet()
 
     items = _items(db_path)
@@ -1038,7 +1038,7 @@ async def test_retired_file_leaves_downloaded_counter(system):
               filename="e01 360p.mp4", superseded_by="win")
     sub = bus.subscribe("series.downloaded.changed")
 
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
 
     count = None
 
@@ -1062,7 +1062,7 @@ async def test_error_task_outside_plan_is_dropped(system):
                      "('gone', 2, 'u', '/tmp/x', 'error', 'vk_video')")
         conn.commit()
 
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
 
     assert await _wait(lambda: _tasks(db_path) == [])
 
@@ -1083,7 +1083,7 @@ async def test_a_waiting_or_failed_task_without_a_row_goes_with_what_it_left(sys
     open(leftover, "wb").close()
     _add_task(db_path, "ghost", state, save_path)
 
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
 
     assert await _wait(lambda: _tasks(db_path) == [] and not os.path.exists(leftover))
 
@@ -1105,7 +1105,7 @@ async def test_an_active_task_without_a_row_is_cancelled_and_leaves_nothing_behi
         conn.execute("DELETE FROM media_items WHERE unique_id='uid1'")
         conn.commit()
 
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
 
     assert await _wait(lambda: _tasks(db_path) == [] and dl.concurrent == 0)
     assert not os.path.exists(partial)
@@ -1119,7 +1119,7 @@ async def test_a_finished_file_of_a_task_without_a_row_stays(system):
     open(finished, "wb").close()
     _add_task(db_path, "ghost", "error", finished)
 
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
 
     assert await _wait(lambda: _tasks(db_path) == [])
     assert os.path.exists(finished)
@@ -1143,7 +1143,7 @@ async def test_an_active_task_whose_row_left_the_plan_is_stopped_with_what_it_wr
         conn.execute("UPDATE media_items SET plan_status='redundant' WHERE unique_id='uid1'")
         conn.commit()
 
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
 
     assert await _wait(lambda: "uid1" not in [t["task_key"] for t in _tasks(db_path)])
     assert await _wait(lambda: not os.path.exists(work))
@@ -1367,7 +1367,7 @@ async def test_the_file_of_a_row_the_configuration_took_out_of_the_plan_goes_and
     path = os.path.join(media_dir, "e1.mp4")
     open(path, "wb").close()
     _add_item(db_path, "uid1", 1, status="completed", filename="e1.mp4", **({"plan": "candidate"} | how))
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
     assert await _wait(lambda: not os.path.exists(path))
     assert _items(db_path)["uid1"]["status"] == "pending" and not _items(db_path)["uid1"]["final_filename"]
 
@@ -1422,3 +1422,51 @@ async def test_the_download_of_a_reference_asks_for_a_whole_video_and_the_fetch_
     assert await _wait(lambda: "https://cdn.test/dub.m3u8" in dl.kwargs)
     assert dl.kwargs["https://cdn.test/ref.m3u8"].get("whole_video") is True
     assert "whole_video" not in dl.kwargs["https://cdn.test/dub.m3u8"]
+
+
+# --- И-59: the disk changes in a sync alone ------------------------------------------------------------------------------
+
+SITUATIONS = ("displaced", "taken_out", "switched_off", "task_outside_plan")
+
+
+def _situation(db_path, media_dir, name) -> list[str]:
+    """A state the plan alone decides about; returns the files that a sync removes."""
+    if name == "displaced":
+        _touch(media_dir, "e01 1080p.mp4")
+        _add_item(db_path, "win", 1, status="completed", filename="e01 1080p.mp4")
+        _add_item(db_path, "lose", 1, plan="replaced", status="completed", filename="e01 360p.mp4", superseded_by="win")
+        return [_touch(media_dir, "e01 360p.mp4")]
+    if name in ("taken_out", "switched_off"):
+        how = {"plan": "removed"} if name == "taken_out" else {"plan": "candidate", "ignored": 1}
+        _add_item(db_path, "out", 1, status="completed", filename="e1.mp4", **how)
+        return [_touch(media_dir, "e1.mp4")]
+    _add_item(db_path, "gone", 2, plan="redundant")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO download_tasks (task_key, series_id, video_url, save_path, status, task_type) "
+                     "VALUES ('gone', 2, 'u', '/tmp/x', 'pending', 'vk_video')")
+        conn.commit()
+    return []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("trigger", ["plan", "disk_check", "settle", "dispatch"])
+@pytest.mark.parametrize("name", SITUATIONS)
+async def test_what_the_plan_alone_decides_reaches_the_disk_in_a_sync_and_never_on_a_recount_or_a_disk_check(
+        system, name, trigger):
+    _, _, dl, probe, db_path, media_dir = system
+    dl.gate = asyncio.Event()  # nothing is fetched while it is looked at
+    files = _situation(db_path, media_dir, name)
+    tasks_before = len(_tasks(db_path))
+    if trigger == "plan":
+        probe.publish_event("scan.plan.updated", {"series_id": 2})
+        await probe.request("downloads.queue.get", {}, timeout=10)  # the plan was heard: its handler took its turn
+    elif trigger == "disk_check":
+        await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=10)
+    else:
+        await probe.request(f"downloads.{trigger}", {"series_id": 2}, timeout=10)
+    synced = trigger in ("settle", "dispatch")
+    if synced:
+        assert await _wait(lambda: not any(os.path.exists(path) for path in files))
+    assert all(os.path.exists(path) for path in files) is (not synced or not files)
+    if name == "task_outside_plan":
+        assert len(_tasks(db_path)) == (0 if synced else tasks_before)

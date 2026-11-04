@@ -38,8 +38,9 @@ Commands:
       schedule from the settings).
 
 Events (outgoing):
-  scan.plan.updated {series_id} — the plan was counted again; downloads only adopts finished files on it (it does NOT
-      download). The download is started by an explicit scan alone (downloads.dispatch).
+  scan.plan.updated {series_id} — the plan was counted again; it changes nothing on the disk (downloads counts the
+      statuses of the series on it). The disk follows the plan in a sync alone: renaming.reprocess, then
+      downloads.dispatch / voices.dispatch (with download) or downloads.settle / voices.settle (without).
   scan.reference.changed (ReferenceChanged: series_id and the whole Reference) — the reference or the mark of a slot
       differs from the stored one (a slot whose row left the layout reports `none` with the reason `reference_none`; a
       slot the user switched off reports `off` with the reason `reference_off`); sent
@@ -61,8 +62,8 @@ Events (incoming):
   torrents.queue.changed {count} — the pipeline is empty: after a full pass the next scan is set when count=0.
 
 Neighbours (all over the bus): catalog.series.get / .list (kind, sources), composition.get / .recompute,
-voices.settings.get (the order of players), sources.table.get, downloads.dispatch / .fs.sync / .queue.get,
-voices.dispatch, renaming.reprocess. Scan asks nothing of composition at start: its state is its own database.
+voices.settings.get (the order of players), sources.table.get, downloads.dispatch / .settle / .fs.sync / .queue.get,
+voices.dispatch / .settle, renaming.reprocess. Scan asks nothing of composition at start: its state is its own database.
 
 Resumability: the plan of replacements of a torrent scan is in scan_tasks BEFORE it is carried out; additions are
 idempotent (local infohash, R-2: adding again = existed); on_start goes on with the unfinished tasks. A video series
@@ -443,7 +444,6 @@ class ScanModule(BaseModule):
             # Прошлая ошибка сбрасывается новым сканом (Р-11).
             await self.repo.delete_error_tasks(series_id)
             if video:
-                # The names of its files follow the plan by the event `scan.plan.updated`, whenever the plan changes.
                 result = await self._sync_video(series, download, inventory)
                 await self.repo.delete_task(intent)
             else:
@@ -561,21 +561,26 @@ class ScanModule(BaseModule):
         await self._step("composition.recompute", {"series_id": series_id}, units=len(_sources_of(series)))
         self._alive(series_id)
         refreshed = await self._refresh(series, announce=True)
+        # The disk follows the plan here and nowhere else: a recount on an event (a rule saved, an episode switched off)
+        # changes the plan alone; a sync names the files after the plan, then removes, displaces and withdraws what the
+        # plan does not want. Only a scan with download fetches what is missing.
+        self._alive(series_id)
+        await self._reprocess_names(series_id)
+        self._alive(series_id)
+        await self._hand_over(series_id, download)
         changed = before != await self._fingerprint(series_id)
-        # An explicit scan is the only way to a download: after the plan, downloads is told to fetch what is missing and
-        # voices to take the voice-overs of the same episodes; a plain save (download=False) and a recount on an event do not.
-        if download:
-            await self._hand_over(series_id)
         return {"kind": "video", "changed": changed, "sources": [each.as_dict() for each in tables],
                 "references": output.marks(refreshed.references), "in_plan": refreshed.in_plan}
 
-    async def _hand_over(self, series_id: int) -> None:
+    async def _hand_over(self, series_id: int, download: bool = True) -> None:
         """The work goes to those who do it, and the command of the user is kept until each of them has written the work
         down: a receiver answers after its record, so a stop at any point of the hand-over finds the command again and
-        the next run gives the work again (a receiver takes the same work twice as once)."""
+        the next run gives the work again (a receiver takes the same work twice as once). Without download the receivers
+        bring the disk in line with the plan (`downloads.settle`, `voices.settle`) and fetch nothing."""
+        downloads, voices = ("downloads.dispatch", "voices.dispatch") if download else ("downloads.settle", "voices.settle")
         answers = await asyncio.gather(
-            self.request("downloads.dispatch", {"series_id": series_id}),
-            self.request("voices.dispatch", {"series_id": series_id}),
+            self.request(downloads, {"series_id": series_id}),
+            self.request(voices, {"series_id": series_id}),
             return_exceptions=True)
         for answer in answers:
             if isinstance(answer, BusRequestError) and _NO_HANDLER in str(answer):
@@ -669,12 +674,17 @@ class ScanModule(BaseModule):
     def _removed_by_configuration(series: dict, layout: CompositionReply, rows: list[dict], winners: set[str],
                                   seasons: set[int], statuses: dict[str, str]) -> list[str]:
         """The rows the configuration took out of the plan: those of a season the user switched off, of a source they took
-        away, or of a source whose profile they took away. This is the one place the reason is told; downloads removes
-        the files of the rows it names and no others, so that a site that fails is never taken for a choice of the user.
-        A row a rule or the source's choice excluded is not named: the rules are edited through states in between, every
-        save counts the layout again, and a file removed on such a state is lost for good. With no source known the rows
-        of a source are not told from a layout that has not been counted yet."""
+        away, of a source whose profile they took away, and those whose row of the layout the configuration excluded (a
+        rule, a switched-off player) while nothing else holds their slot. This is the one place the reason is told;
+        downloads removes the files of the rows it names and no others, and only in a sync, so that a site that fails is
+        never taken for a choice of the user and a rule being edited removes nothing. A displaced row whose slot has a
+        winner waits for it: its file goes once the winner is on disk. With no source known the rows of a source are not
+        told from a layout that has not been counted yet."""
         gone = [item["unique_id"] for item in rows if item.get("season") in seasons]
+        left_out = {(row.source_id, row.row_key) for row in layout.rows if row.left_out}
+        gone += [item["unique_id"] for item in rows
+                 if item["unique_id"] not in gone and statuses.get(item["unique_id"]) == "redundant"
+                 and (item.get("source_id"), item.get("row_key")) in left_out]
         mine = {each.id for each in _sources_of(series)}
         if not mine:
             return gone

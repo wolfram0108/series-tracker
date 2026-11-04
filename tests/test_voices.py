@@ -2906,6 +2906,11 @@ def layout_changed(probe, **fields):
     probe.publish_event("composition.changed", {"series_id": 7, "rev": 2, "episodes": [], **fields})
 
 
+def synced(probe):
+    """The user ran a sync after a change: the disk and the service follow the plan only now (И-59)."""
+    probe.send_command("voices.settle", {"series_id": 7})
+
+
 def reference_changed(probe, season=1, episode=1, mark="by_level"):
     probe.publish_event("scan.reference.changed", {"series_id": 7, "season": season, "episode": episode, "mark": mark})
 
@@ -2938,10 +2943,10 @@ async def test_a_change_of_the_layout_plans_the_voice_overs_but_downloads_nothin
 async def test_a_voice_over_that_left_the_layout_before_any_work_leaves_the_plan_with_an_event(dubs):
     probe, neighbours, voices, bus = dubs
     sub = bus.subscribe("voices.dub.changed")
-    layout_changed(probe)
+    synced(probe)
     await statuses_until(sub, ["pending"] * 3)
     del neighbours.sources[1:]  # only the voice of the reference is left
-    layout_changed(probe)
+    synced(probe)
     await statuses_until(sub, ["removed"] * 3)
     assert await rows(probe) == [] and neighbours.fetches == []
 
@@ -2961,10 +2966,10 @@ async def test_an_episode_whose_reference_is_none_or_unfit_gets_no_voice_over(du
 async def test_a_reference_that_turns_none_takes_the_planned_voice_overs_of_its_episode_with_it(dubs):
     probe, neighbours, voices, bus = dubs
     sub = bus.subscribe("voices.dub.changed")
-    layout_changed(probe)
+    synced(probe)
     await statuses_until(sub, ["pending"] * 3)
     neighbours.marks[(1, 3)] = ReferenceMark.NONE
-    reference_changed(probe, 1, 3, "none")
+    synced(probe)
     await statuses_until(sub, ["removed"])
     assert [r["episode"] for r in await rows(probe)] == [1, 2]
 
@@ -2976,7 +2981,7 @@ async def test_a_reference_that_turns_none_hands_the_downloaded_files_of_its_epi
     paths = [row["temp_path"] for row in await rows(probe)]
     assert len(paths) == 2 and all(os.path.isfile(path) for path in paths)
     neighbours.marks[(1, 1)] = ReferenceMark.NONE
-    reference_changed(probe, 1, 1, "none")
+    synced(probe)
     await statuses_until(sub, ["removed", "removed"])
     assert await rows(probe) == [] and not any(os.path.exists(path) for path in paths)
     assert await voices.repo.cleanup_list() == []
@@ -2996,16 +3001,16 @@ async def test_a_reference_that_turns_none_leaves_the_tracks_of_a_video_that_is_
 async def test_an_episode_whose_reference_row_the_layout_lost_keeps_its_rows_until_the_reference_is_decided(dubs):
     probe, neighbours, voices, bus = dubs
     sub = bus.subscribe("voices.dub.changed")
-    layout_changed(probe)
+    synced(probe)
     await statuses_until(sub, ["pending"] * 3)
     reference = neighbours.sources[0]
     reference["episodes"].remove(2)
     reference["links"].pop("2")  # the reference still points at the row of episode 2, the layout no longer has it
-    layout_changed(probe)
+    synced(probe)
     await pass_over(voices, neighbours, 2)
     assert [r["episode"] for r in await rows(probe)] == [1, 2, 3] and sub.queue.empty()
     neighbours.marks[(1, 2)] = ReferenceMark.NONE  # the reference is decided: there is none
-    reference_changed(probe, 1, 2, "none")
+    synced(probe)
     await statuses_until(sub, ["removed"])
     assert [r["episode"] for r in await rows(probe)] == [1, 3]
 
@@ -3150,7 +3155,7 @@ async def test_a_reference_that_turns_none_while_a_voice_over_downloads_takes_it
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
     neighbours.marks[(1, 3)] = ReferenceMark.NONE
-    reference_changed(probe, 1, 3, "none")
+    synced(probe)
     await pass_over(voices, neighbours, 2)
     victim = next(f for f in neighbours.fetches if f["url"].endswith("kodik-BlackCat-3"))
     assert [r["episode"] for r in await rows(probe)] == [1, 2] and victim["key"] in neighbours.cancelled_keys

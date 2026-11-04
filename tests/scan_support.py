@@ -107,6 +107,8 @@ class World(BaseModule):
         h("downloads.queue.get", self.on_queue)
         h("downloads.dispatch", self.on_dispatch)
         h("voices.dispatch", self.on_dispatch)
+        h("downloads.settle", self.on_dispatch)
+        h("voices.settle", self.on_dispatch)
         h("voices.settings.get", self.on_voice_settings)
         h("composition.get", self.on_layout)
         h("composition.recompute", self.on_recompute)

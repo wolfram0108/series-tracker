@@ -172,8 +172,37 @@ async def test_the_steps_of_a_synchronization_follow_one_another_by_signals(rig)
     await rig.world.dispatched.get()
     assert rig.world.order == [
         "downloads.fs.sync", f"sources.table.get {URL1}", "composition.recompute",
-        "composition.get", "voices.settings.get", f"downloads.dispatch {rig.series_id}",
+        "composition.get", "voices.settings.get", "renaming.reprocess", f"downloads.dispatch {rig.series_id}",
         f"voices.dispatch {rig.series_id}"]
+
+
+async def test_a_synchronization_without_download_brings_the_disk_to_the_plan_and_fetches_nothing(rig):
+    """The disk follows the plan in a sync alone (И-59): the names after the plan of the same pass, then the files and the
+    voice-overs; without download nothing is dispatched to fetch."""
+    rig.world.rows = [rig.row("a", 1, 1)]
+    await rig.run(download=False)
+    await rig.world.dispatched.get()
+    await rig.world.dispatched.get()
+    order = rig.world.order
+    assert order[order.index("voices.settings.get"):] == [
+        "voices.settings.get", "renaming.reprocess", f"downloads.settle {rig.series_id}", f"voices.settle {rig.series_id}"]
+    assert not any(each.startswith(("downloads.dispatch", "voices.dispatch")) for each in order)
+
+
+async def test_a_recount_on_an_event_changes_the_plan_alone(rig):
+    """A rule saved, an episode switched off: the plan is counted again, nothing is renamed, settled or dispatched."""
+    rig.world.rows = [rig.row("a", 1, 1)]
+    await rig.run()
+    await rig.world.dispatched.get()
+    await rig.world.dispatched.get()
+    rig.world.order.clear()
+    rig.world.rows = [rig.row("a", 1, 2)]
+    updates = rig.bus.subscribe("scan.plan.updated")
+    rig.probe.publish_event("composition.changed", {"series_id": rig.series_id, "rev": 2, "episodes": []})
+    await next_event(updates)
+    assert "composition.get" in rig.world.order
+    assert not any(each.startswith(("renaming", "downloads.dispatch", "downloads.settle", "voices.dispatch", "voices.settle"))
+                   for each in rig.world.order)
 
 
 async def test_a_synchronization_waits_for_the_verdict_of_a_page_that_is_being_read(rig):
@@ -947,7 +976,7 @@ def _expected_plan(after: str, other: str, downloaded: bool) -> str:
         return "out"
     if after == "playable":
         return "replaced"
-    return "replaced" if other != "none" else "redundant"  # an exclusion removes no file
+    return "replaced" if other != "none" else "removed"
 
 
 @pytest.mark.parametrize("downloaded", [True, False])

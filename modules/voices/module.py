@@ -31,6 +31,8 @@ Command:
       begin when conform.settings.changed says it was named). Before a job is sent the reference video is copied into
       the service's folder of the episode, so that the service reads and writes only inside the work folder; the copy
       goes with the other temporary files of the episode. Only a series of kind `video` is planned (catalog.series.get).
+  voices.settle {series_id} — a sync without download: the voice-overs follow the plan as in dispatch (what the plan
+      does not want is withdrawn with what it made, tracks follow the names of their voice-overs), nothing is admitted.
 Commands out: downloads.fetch. Event out: work.withdrawn (the downloads of dropped voice-overs and files stop). Queries to conform: workspace (the folders of the service
             for a place, asked of the bridge: this module does not know its layout), submit (with a key that
             finds the job again; the reply is a SubmitReply: accepted, rejected, unavailable (not sent) or
@@ -39,12 +41,12 @@ Commands out: downloads.fetch. Event out: work.withdrawn (the downloads of dropp
             could not be cancelled is retried from the cleanup journal).
 
 Events in:  composition.changed {series_id, rev, episodes, summary_only} and scan.reference.changed {series_id, season,
-            episode, mark}: the layout or a reference changed. They do not start a download: the rows are brought in line with
-            the plan (a voice-over that left the plan before any work on it is removed with an event, a new one is
-            recorded as planned, an episode whose reference is none or unfit loses its downloaded temporary files to
-            the cleanup journal; a row whose work has begun on a video that the layout now gives to another episode or
-            voice-over is taken back with what it made, and planned again: `planning.moved`). A row they record is not admitted: it
-            waits, planned, for a sync. An event that says
+            episode, mark}: the layout or a reference changed. They change the plan alone: a new voice-over is recorded as
+            planned, a row with no work yet takes its fresh chain, and nothing on the disk or at the service changes and
+            nothing is downloaded. What the plan takes away — a voice-over that left the plan, an episode whose reference
+            is none or unfit, a work on a video the layout gives to another episode or voice-over or took out
+            (`planning.moved`), a variant left out, a track renamed after its voice-over — is done by a sync
+            (voices.dispatch, voices.settle). A row they record is not admitted: it waits, planned, for a sync. An event that says
             only the summaries of the sources changed is not acted on. Nothing is asked of composition or scan at start:
             the first event or dispatch of a series makes the whole plan of that series; conform.settings.changed (the
             work folder may be named now);
@@ -300,6 +302,7 @@ class VoicesModule(BaseModule):
         self.handle("voices.settings.get", self.on_settings_get)
         self.handle("voices.settings.set", self.on_settings_set)
         self.handle("voices.dispatch", self.on_dispatch, concurrent=True)
+        self.handle("voices.settle", self.on_settle, concurrent=True)
         self.handle("system.started", self.on_system_started)
         self.handle("composition.changed", self.on_composition_changed)
         self.handle("scan.reference.changed", self.on_reference_changed)
@@ -443,6 +446,16 @@ class VoicesModule(BaseModule):
                 self.log.warning("сериал %d: озвучки не подготовлены: %s", series_id, exc)
                 raise  # the sender keeps its command: the reply is the word that the work is written down
 
+    async def on_settle(self, env: Envelope) -> None:
+        """A sync without download: the voice-overs follow the plan (works the plan does not want are withdrawn, tracks
+        follow the names of their voice-overs), and nothing new is admitted to download."""
+        series_id = int(env.payload["series_id"])
+        async with self._locks.setdefault(series_id, asyncio.Lock()):
+            if series_id in self._deleted or not await self._is_video(series_id):
+                return
+            await self._plan_series(series_id, offer=False, settle=True)
+        self._kick(series_id)
+
     async def _dispatch(self, series_id: int) -> None:
         """The explicit sync: the series may download from now on, and what failed is offered again."""
         if series_id in self._deleted or not await self._is_video(series_id):
@@ -507,8 +520,13 @@ class VoicesModule(BaseModule):
             raise
         return series.get("kind") == "video"
 
-    async def _plan_series(self, series_id: int, *, offer: bool) -> None:
-        """Read the layout and the references, plan the voice-overs, bring the rows in line, and begin what is allowed."""
+    async def _plan_series(self, series_id: int, *, offer: bool, settle: bool | None = None) -> None:
+        """Read the layout and the references, plan the voice-overs, bring the rows in line, and begin what is allowed.
+
+        What the plan alone takes away — a work withdrawn, a track removed, a job cancelled, a track renamed after its
+        voice-over — is done in a sync only (`settle`, by default with `offer`): a recount on an event records the plan
+        of the rows that have no work yet and changes nothing on the disk."""
+        settle = offer if settle is None else settle
         # The excluded rows too: a work on a video the configuration took out is withdrawn, on one not brought it stands.
         layout = CompositionReply.model_validate(
             await self.request("composition.get", {"series_id": series_id, "include_excluded": True}))
@@ -528,29 +546,31 @@ class VoicesModule(BaseModule):
         for dub in plan.dubs:
             key = (dub.season, dub.episode, dub.part, keys[(dub.season, dub.episode, dub.part, dub.voice_key)])
             planned.add(key)
-            if key in recorded and planning.moved(recorded[key], dub.chain, videos):
+            if settle and key in recorded and planning.moved(recorded[key], dub.chain, videos):
                 # The video the work runs on is another episode's or voice-over's now: the work, what it made and the
                 # track go; the voice-over is planned again from its own videos, in this pass.
                 self.log.info("сериал %d, s%02de%02d: озвучка %s шла с видео, которое раскладка отдала другой серии "
                               "или исключила, — снята",
                               series_id, dub.season, dub.episode, dub.voice_label)
                 await self._retire_started(series_id, recorded.pop(key))
-            if (dub.left_out or dub.left_out_links) and key in recorded:
+            if settle and (dub.left_out or dub.left_out_links) and key in recorded:
                 await self._follow_variants(series_id, recorded[key], dub)
-            if await self.repo.relabel(series_id, *key, dub.voice_label):
+            if settle and await self.repo.relabel(series_id, *key, dub.voice_label):
                 relabeled.add(key)
             if await self.repo.upsert(series_id, *key, dub.voice_label, [each.as_json() for each in dub.chain],
                                       offer=offer):
                 touched.add(key)
         if offer:
             await self.repo.admit(series_id, planned)
-        for gone in await self.repo.drop_unplanned(series_id, planned, plan.undecided, plan.with_reference):
+        for gone in (await self.repo.drop_unplanned(series_id, planned, plan.undecided, plan.with_reference)
+                     if settle else []):
             self.log.info("сериал %d: озвучка %s серии %d вышла из плана", series_id, gone["voice_label"], gone["episode"])
             if gone["status"] == S.DOWNLOADING and gone["file_id"] is None:  # its own download goes with it
                 self._fetching.discard(gone["id"])
                 self._withdraw(series_id, [f"{DUB_KEY}{gone['id']}"])
             await self._announce(gone, E.REMOVED)
-        await self._drop_without_reference(series_id, plan, before)
+        if settle:
+            await self._drop_without_reference(series_id, plan, before)
         await self._cleanup.work_off()
         after = await self.repo.for_series(series_id)
         await self._announce_difference(before, [row for row in after
@@ -558,7 +578,7 @@ class VoicesModule(BaseModule):
         for row in after:
             if (row["season"], row["episode"], row["part"], row["voice_key"]) in relabeled:
                 await self._announce(row)
-        if relabeled:
+        if relabeled and settle:
             self._kick(series_id)  # a track that is placed follows the name of its voice-over
         if series_id in self._deleted:  # the series went while the pass was writing: what it wrote goes too
             await self._forget(series_id)

@@ -14,9 +14,9 @@ Queries:
       и запись в torrent_files (статус pending_rename), qBit не
       трогается: состав нужен до закачки, чтобы отобрать серии.
 
-Событие scan.plan.updated {series_id} (входящее): план пересчитан. Имя готового файла видео-сериала — функция строки плана,
-поэтому при любом изменении плана, чем бы оно ни было вызвано, файлы приводятся к своим именам тем же проходом, что и
-renaming.reprocess; перед сканом видео-сериала проход не нужен. Торренты событием не затрагиваются.
+Имя готового файла видео-сериала — функция строки плана, но файлы переименовываются только в синхронизации: скан вызывает
+renaming.reprocess после пересчёта плана, в том же проходе. Пересчёт плана по событию (правка правил, выключение серии)
+файлы не трогает.
 
 Событие renaming.finished {series_id} — контракт SSE renaming_complete.
 
@@ -93,7 +93,6 @@ class RenamingModule(BaseModule):
 
     def register(self) -> None:
         self.handle("renaming.reprocess", self.on_reprocess, concurrent=True)
-        self.handle("scan.plan.updated", self.on_plan_updated, concurrent=True)
         self.handle("renaming.process_torrent", self.on_process_torrent,
                     concurrent=True)
         self.handle("renaming.tasks.active", self.on_tasks_active)
@@ -165,19 +164,6 @@ class RenamingModule(BaseModule):
     async def on_reprocess(self, env: Envelope) -> dict:
         return await self._reprocess(env.payload["series_id"])
 
-    async def on_plan_updated(self, env: Envelope) -> None:
-        """The plan was counted: the files of a video series follow the names the plan gives them now."""
-        series_id = env.payload["series_id"]
-        try:
-            series = await self.request("catalog.series.get", {"series_id": series_id})
-        except BusRequestError:
-            return  # the series is gone: there is nothing to name
-        if series.get("kind") != SeriesKind.VIDEO:
-            return
-        try:
-            await self._reprocess(series_id)
-        except Exception:  # noqa: BLE001 - the error is written to the task; the next change of the plan names the files again
-            self.log.exception("имена файлов сериала %d не приведены к плану", series_id)
 
     async def _safe_reprocess(self, series_id: int,
                               resume_of: int | None = None) -> None:
