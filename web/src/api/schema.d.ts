@@ -2073,6 +2073,8 @@ export interface components {
             /** Line */
             line: string;
             result?: components["schemas"]["RuleResult"] | null;
+            /** Heights */
+            heights?: number[];
         };
         /**
          * QueueTask

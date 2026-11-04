@@ -140,6 +140,8 @@ class PreviewLine(BaseModel):
     key: str
     line: str
     result: RuleResult | None = None
+    # The resolutions the page gives the row, when the row can be played; empty for a line a window holds itself.
+    heights: list[int] = Field(default_factory=list)
 
 
 class CompositionPreviewRequest(BaseModel):

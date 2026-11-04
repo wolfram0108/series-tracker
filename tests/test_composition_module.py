@@ -1233,8 +1233,19 @@ async def test_an_address_without_a_profile_shows_the_summary_of_its_page_and_th
     assert reply.rows == [] and s.voices.asked == []
     assert len(reply.lines) == 7 and all(each.result is None for each in reply.lines)
     assert (reply.lines[0].key, reply.lines[0].line) == ("vk-1-1", "Асура | VK | Ruchime | Сезон 1 | 1080p | Серия 1")
+    assert all(each.heights == [720, 1080] for each in reply.lines)
     assert s.rules.calls == [] and s.sources.requests[-1].refresh is True
     nothing_was_written(s)
+
+
+@pytest.mark.asyncio
+async def test_a_line_carries_the_resolutions_of_its_row_only_while_the_row_can_be_played(system):
+    s = system
+    s.sources.tables[PAGE] = page(
+        row("a", "Серия 1"), row("b", "Серия 2", heights=[4320], state=RowState.ABSENT),
+    ).model_copy(update={"url": PAGE, "complete": True})
+    reply = await preview(s)
+    assert [(each.key, each.heights) for each in reply.lines] == [("a", [720, 1080]), ("b", [])]
 
 
 @pytest.mark.asyncio
@@ -1264,6 +1275,7 @@ async def test_lines_the_window_holds_get_the_answer_of_the_profile_and_no_page_
     reply = CompositionPreviewReply.model_validate(reply)
     assert (reply.state, reply.summary, reply.names) == (TableState.READY, None, [])
     assert [(each.key, each.line) for each in reply.lines] == [("0", "Серия 1 [Мой дубляж]"), ("1", "Трейлер")]
+    assert [each.heights for each in reply.lines] == [[], []]
     [call] = s.rules.calls
     assert (call.profile_id, call.series_season, [(l.key, l.text) for l in call.lines]) == (
         7, "4", [("0", "Серия 1 [Мой дубляж]"), ("1", "Трейлер")])

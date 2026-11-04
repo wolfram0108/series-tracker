@@ -1,7 +1,7 @@
 // How the answer of a profile to one line is shown in the test of rules. The numbers are the constructor's alone: the
 // window only names them, it computes none.
 import type { components } from "../api/schema"
-import { t } from "../i18n"
+import { t, type MessageKey } from "../i18n"
 
 type Schemas = components["schemas"]
 
@@ -48,4 +48,12 @@ export function pillsOf(result: TestResult | null | undefined): Pill[] {
   add("quality", t("rulesTest.pill.quality"), shown(result.quality), "pi pi-star")
   add("resolution", t("rulesTest.pill.resolution"), shown(result.resolution), "pi pi-arrows-h")
   return pills
+}
+
+/** The badge of the card: the best resolution the page gives the row, named by its class (4K, FHD, HD, SD); null when it gives none. */
+export function resolutionBadge(heights: number[] | null | undefined): string | null {
+  const top = heights && heights.length > 0 ? Math.max(...heights) : 0
+  if (top <= 0) return null
+  const key = top >= 2160 ? "uhd" : top >= 1080 ? "fhd" : top >= 720 ? "hd" : top >= 480 ? "sd" : "low"
+  return t(`rulesTest.resolution.${key}` as MessageKey, { height: top })
 }

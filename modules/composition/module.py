@@ -79,7 +79,7 @@ from typing import Iterable
 from core import BaseModule
 from core.contracts import (REFERENCE_CHOICE, VOICE_PLAYER, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
-                            GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RulesApplyReply,
+                            GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
                             RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
                             SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState)
 from core.db import Database
@@ -233,7 +233,9 @@ class CompositionModule(BaseModule):
                 summary = projection.sources[0]
                 rows = [row for row in projection.rows if not row.excluded]
                 results = answer.results if answer is not None else {}
-                lines = [PreviewLine(key=line.key, line=line.text, result=results.get(line.key))
+                heights = {row.key: list(row.heights) for row in table.rows if row.state == RowState.PLAYABLE}
+                lines = [PreviewLine(key=line.key, line=line.text, result=results.get(line.key),
+                                     heights=heights.get(line.key, []))
                          for line in project.lines_for(source, table)]
         except _Unavailable as exc:
             raise ValueError(exc.reason) from exc

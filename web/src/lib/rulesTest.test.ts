@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { cardState, excludingRule, pillsOf, type TestResult } from "./rulesTest"
+import { cardState, excludingRule, pillsOf, resolutionBadge, type TestResult } from "./rulesTest"
 
 const result = (over: Partial<TestResult> = {}): TestResult => ({ excluded: false, events: [], errors: [], ...over })
 const extracted = { rule: "серия", action: "extract" }
@@ -33,5 +33,16 @@ describe("pillsOf", () => {
     expect(pillsOf(result({ start: 4 })).map((pill) => pill.value)).toEqual(["4-4"])
     expect(pillsOf(result({ quality: "" }))).toEqual([])
     expect(pillsOf(null)).toEqual([])
+  })
+})
+
+describe("resolutionBadge", () => {
+  it("names the best resolution of the row by its class and says nothing for a row with none", () => {
+    expect(resolutionBadge([720, 2160, 1080])).toBe("4K 2160")
+    expect(resolutionBadge([1080])).toBe("FHD 1080")
+    expect(resolutionBadge([480, 720])).toBe("HD 720")
+    expect(resolutionBadge([360, 480])).toBe("SD 480")
+    expect(resolutionBadge([240])).toBe("240p")
+    expect([resolutionBadge([]), resolutionBadge(null), resolutionBadge(undefined)]).toEqual([null, null, null])
   })
 })

@@ -137,7 +137,7 @@ async def test_the_last_source_of_a_series_is_refused_with_its_code(tmp_path):
 
 
 async def test_a_preview_carries_the_request_to_composition_whole_and_the_answer_back(tmp_path):
-    reply = {**PREVIEW, "state": "reading", "names": [], "lines": [{"key": "k1", "line": "Т | VK | Серия 1", "result": None}]}
+    reply = {**PREVIEW, "state": "reading", "names": [], "lines": [{"key": "k1", "line": "Т | VK | Серия 1", "result": None, "heights": []}]}
     async with serving(tmp_path, {"composition.preview": reply}) as (client, owners, _, spy):
         response = await client.post("/api/sources/preview", json={
             "url": "https://x.test/p", "options": {"vk_search_mode": "get_all"}, "profile_id": 2,

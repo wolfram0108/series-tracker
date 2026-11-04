@@ -7,7 +7,7 @@ import StInput from "../StInput.vue"
 import { useRulesTest } from "../../composables/useRulesTest"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
-import { cardState, excludingRule, pillsOf } from "../../lib/rulesTest"
+import { cardState, excludingRule, pillsOf, resolutionBadge } from "../../lib/rulesTest"
 import { progressText } from "../../lib/sources"
 
 // The test of a profile: the rows of a page (a site, or a channel of VK) or the file names of a series, or titles
@@ -149,6 +149,7 @@ function runTest(): Promise<void> {
         <div class="info-column">
           <div class="card-title-block">
             <span class="card-title" :title="row.line">{{ row.line }}</span>
+            <div v-if="resolutionBadge(row.heights)" class="quality-badge">{{ resolutionBadge(row.heights) }}</div>
           </div>
         </div>
         <div class="pills-column">
