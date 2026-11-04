@@ -195,4 +195,18 @@ describe("StatusOutput", () => {
     await flushPromises()
     expect(w.findAll(".output-reading")).toHaveLength(0)
   })
+
+  it("takes no change while a sync of the series is under way: the buttons and the levers are not available", async () => {
+    useSeriesStore().upsert({ id: 1, name: "Тайтл", is_busy: true, statuses: ["scanning"] } as never)
+    const w = mountOutput()
+    await flushPromises()
+    for (const label of [t("output.reprocess"), t("output.adopt"), t("output.sync")]) {
+      const button = w.findAll(".output-bar button").find((each) => each.text().includes(label))
+      expect(button?.attributes("disabled"), label).toBeDefined()
+    }
+    useSeriesStore().upsert({ id: 1, name: "Тайтл", is_busy: false, statuses: [] } as never)
+    await flushPromises()
+    const reprocess = w.findAll(".output-bar button").find((each) => each.text().includes(t("output.reprocess")))
+    expect(reprocess?.attributes("disabled")).toBeUndefined()
+  })
 })
