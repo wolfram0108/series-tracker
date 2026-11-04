@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from packing_support import FakePacker
 from core import BaseModule, Bus, BusRequestError, Envelope, Runner
 from core.db import Database
 from modules.catalog import CatalogModule
@@ -100,12 +101,23 @@ class FakeNeighbours(BaseModule):
         self.stream_raises: set[str] = set()
         self.stream_requests: list[str] = []
         self.stream_payloads: list[dict] = []
+        # What packing asks (ЭТАП_11): the reference of each episode and the order of the voice-overs of each season.
+        self.references: list[dict] = []
+        self.orders: list[dict] = []
         super().__init__(bus)
 
     def register(self):
         self.handle("rules.format_filename", self.on_format)
         self.handle("settings.value.get", self.on_get)
         self.handle("sources.video.stream", self.on_stream)
+        self.handle("scan.output.get", self.on_references)
+        self.handle("composition.get", self.on_layout)
+
+    async def on_references(self, env):
+        return self.references
+
+    async def on_layout(self, env):
+        return {"voice_orders": self.orders}
 
     async def on_stream(self, env):
         url = env.payload["url"]
@@ -117,7 +129,8 @@ class FakeNeighbours(BaseModule):
 
     async def on_format(self, env):
         item = env.payload["media_item"]
-        return {"filename": f"Серия {item['episode_start']:02d}.mp4"}
+        packed = (env.payload.get("original_filename") or "").endswith(".mkv")
+        return {"filename": f"Серия {item['episode_start']:02d}.{'mkv' if packed else 'mp4'}"}
 
     async def on_get(self, env):
         return {"key": env.payload["key"],
@@ -233,7 +246,7 @@ async def system(env_paths):
     dl = FakeDownloader()
     dl.bus = bus
     catalog = CatalogModule(bus, db)
-    downloads = DownloadsModule(bus, db, downloader=dl)
+    downloads = DownloadsModule(bus, db, downloader=dl, packer=FakePacker())
     probe = Probe(bus)
     runner = Runner(bus, [fake, catalog, downloads, probe])
     await runner.start()
@@ -911,25 +924,48 @@ def _touch(media_dir, name):
     return path
 
 
+def _slot(db_path, fake, winner, *losers, voice="Ruchime"):
+    """The rows of one slot as scan leaves them: season 1, the rows of source 7, the reference of the slot the winner's."""
+    with sqlite3.connect(db_path) as conn:
+        for uid in (winner, *losers):
+            conn.execute("UPDATE media_items SET season=1, source_id=7, row_key=? WHERE unique_id=?", (f"vk:{uid}", uid))
+        conn.commit()
+    episode = _items(db_path)[winner]["episode_start"]
+    fake.references = [{"season": 1, "episode": episode, "part": None, "mark": "by_level", "source_id": 7,
+                        "row_key": f"vk:{winner}", "player": "vk", "voice_group": voice, "height": 1080, "reason": None}]
+
+
+def _fake_of(system):
+    return system[1]
+
+
+async def _pack(probe):
+    """The last step of a run of a sync: the containers of the series (ЭТАП_11)."""
+    return await probe.request("downloads.pack", {"series_id": 2}, timeout=10)
+
+
 @pytest.mark.asyncio
-async def test_superseded_file_is_removed_once_winner_is_on_disk(system):
-    _, _, dl, probe, db_path, media_dir = system
+async def test_a_displaced_file_goes_when_the_container_of_its_winner_is_made(system):
+    bus, fake, dl, probe, db_path, media_dir = system
     loser = _touch(media_dir, "e01 360p.mp4")
     winner = _touch(media_dir, "e01 1080p.mp4")
     _add_item(db_path, "win", 1, status="completed", filename="e01 1080p.mp4")
     _add_item(db_path, "lose", 1, plan="replaced", status="completed",
               filename="e01 360p.mp4", superseded_by="win")
+    _slot(db_path, fake, "win", "lose")
 
-    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)
+    assert os.path.exists(loser)  # the displaced file lives until the container of the winner is whole (ЭТАП_11, 3)
+    assert await _pack(probe) == {"packed": 1, "failed": 0, "unchanged": 0}
 
-    assert await _wait(lambda: not os.path.exists(loser))
-    assert os.path.exists(winner)
+    assert not os.path.exists(loser) and not os.path.exists(winner)
+    assert os.path.isfile(os.path.join(media_dir, "e01 1080p.mkv"))
     items = _items(db_path)
     assert items["lose"]["final_filename"] is None
     assert items["lose"]["status"] == "pending"     # holds no file, so it is not ready; the plan does not want it, so it is not fetched
-    assert items["win"]["final_filename"] == "e01 1080p.mp4"
+    assert items["win"]["final_filename"] == "e01 1080p.mkv" and items["win"]["status"] == "completed"
     assert dl.started == []
-
+    assert await _pack(probe) == {"packed": 0, "failed": 0, "unchanged": 1}  # the container is what the plan asks
 
 @pytest.mark.asyncio
 async def test_superseded_file_stays_while_winner_is_not_downloaded(system):
@@ -961,41 +997,46 @@ async def test_superseded_file_stays_when_winner_file_is_missing(system):
 
 
 @pytest.mark.asyncio
-async def test_winner_download_retires_superseded_file(system):
-    """The lower file survives until the better one is actually downloaded."""
-    _, _, dl, probe, db_path, media_dir = system
+async def test_the_file_a_better_download_displaces_lives_until_the_container_of_the_winner_is_made(system):
+    """The lower file survives the download of the better one, and goes when its container is made."""
+    _, fake, dl, probe, db_path, media_dir = system
     loser = _touch(media_dir, "Серия 01 old.mp4")
     _add_item(db_path, "win", 1)
     _add_item(db_path, "lose", 1, plan="replaced", status="completed",
               filename="Серия 01 old.mp4", superseded_by="win")
+    _slot(db_path, fake, "win", "lose")
 
     probe.publish_event("downloads.dispatch", {"series_id": 2})
 
-    assert await _wait(lambda: not os.path.exists(loser))
-    assert os.path.exists(os.path.join(media_dir, "Серия 01.mp4"))
-    assert _items(db_path)["win"]["status"] == "completed"
-
+    assert await _wait(lambda: _items(db_path)["win"]["status"] == "completed")
+    assert os.path.exists(loser) and os.path.exists(os.path.join(media_dir, "Серия 01.mp4"))
+    await _pack(probe)
+    assert not os.path.exists(loser) and os.path.exists(os.path.join(media_dir, "Серия 01.mkv"))
+    assert _items(db_path)["win"]["final_filename"] == "Серия 01.mkv"
 
 @pytest.mark.asyncio
-async def test_retirement_is_idempotent_and_survives_fs_sync(system):
-    _, _, dl, probe, db_path, media_dir = system
+async def test_packing_is_idempotent_and_survives_fs_sync(system):
+    _, fake, dl, probe, db_path, media_dir = system
     _touch(media_dir, "e01 360p.mp4")
     _touch(media_dir, "e01 1080p.mp4")
     _add_item(db_path, "win", 1, status="completed", filename="e01 1080p.mp4")
     _add_item(db_path, "lose", 1, plan="replaced", status="completed",
               filename="e01 360p.mp4", superseded_by="win")
+    _slot(db_path, fake, "win", "lose")
 
     await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=10)
+    await _pack(probe)
     await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=10)
-    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
+    await _pack(probe)
     await _quiet()
 
     items = _items(db_path)
     assert items["lose"]["status"] == "pending"         # holds no file; not in the plan, so no task is made for it
     assert items["lose"]["final_filename"] is None
+    assert items["win"]["final_filename"] == "e01 1080p.mkv" and items["win"]["status"] == "completed"
+    assert sorted(os.listdir(media_dir)) == ["e01 1080p.mkv"]
     assert dl.started == []
     assert _tasks(db_path) == []
-
 
 @pytest.mark.asyncio
 async def test_superseded_row_sharing_the_winner_file_is_not_deleted(system):
@@ -1036,9 +1077,10 @@ async def test_retired_file_leaves_downloaded_counter(system):
     _add_item(db_path, "win", 1, status="completed", filename="e01 1080p.mp4")
     _add_item(db_path, "lose", 1, plan="replaced", status="completed",
               filename="e01 360p.mp4", superseded_by="win")
+    _slot(db_path, _fake_of(system), "win", "lose")
     sub = bus.subscribe("series.downloaded.changed")
 
-    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
+    await _pack(probe)  # the container of the winner is made: the displaced row holds nothing
 
     count = None
 
@@ -1464,7 +1506,8 @@ async def test_what_the_plan_alone_decides_reaches_the_disk_in_a_sync_and_never_
         await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=10)
     else:
         await probe.request(f"downloads.{trigger}", {"series_id": 2}, timeout=10)
-    synced = trigger in ("settle", "dispatch")
+    # A displaced file goes when the container of its winner is made (packing, ЭТАП_11), not at settle or dispatch.
+    synced = trigger in ("settle", "dispatch") and name != "displaced"
     if synced:
         assert await _wait(lambda: not any(os.path.exists(path) for path in files))
     assert all(os.path.exists(path) for path in files) is (not synced or not files)

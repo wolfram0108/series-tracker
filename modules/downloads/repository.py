@@ -367,9 +367,25 @@ class DownloadsRepository:
     async def reference_items(self, series_id: int) -> list[dict]:
         """Single-episode rows of the plan in any download state: the reference episodes."""
         return await self._db.fetch_all(
-            "SELECT unique_id, season, episode_start, part, source_url, status, final_filename, superseded_by "
-            "FROM media_items WHERE series_id=? AND plan_status='in_plan_single' "
+            "SELECT unique_id, season, episode_start, part, source_url, status, final_filename, superseded_by, source_id, "
+            "row_key FROM media_items WHERE series_id=? AND plan_status='in_plan_single' "
             "AND is_ignored_by_user=0 ORDER BY season, episode_start", (series_id,))
+
+    async def slot_files(self, series_id: int) -> list[dict]:
+        """The single-episode rows of the series that hold a file, with their place in the plan: what packing reads."""
+        return await self._db.fetch_all(
+            "SELECT unique_id, season, episode_start, part, plan_status, status, final_filename, superseded_by, source_id, "
+            f"row_key, is_ignored_by_user FROM media_items WHERE series_id=? AND final_filename IS NOT NULL AND {_SINGLE}",
+            (series_id,))
+
+    async def take_over_name(self, winner: str, filename: str, losers: list[str]) -> None:
+        """The winner holds the container under `filename`; the rows it displaced hold nothing any more: one transaction, so
+        a name is never held by two rows nor by none in between (L2, L5)."""
+        await self._db.execute_many(
+            [("UPDATE media_items SET status='pending', final_filename=NULL, rename_to=NULL WHERE unique_id=?", (uid,))
+             for uid in losers]
+            + [("UPDATE media_items SET status='completed', final_filename=?, rename_to=NULL WHERE unique_id=?",
+                (filename, winner))])
 
     async def completed_items(self, series_id: int) -> list[dict]:
         return await self._db.fetch_all(

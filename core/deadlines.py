@@ -69,7 +69,9 @@ _FUSES: dict[str, float] = {
     "torrents.composition": 900.0,
     # The fetch of a page of a service with credentials; it covers an anti-bot challenge solved by a browser (up to 45 s).
     "trackerauth.fetch": 150.0,
-    **dict.fromkeys(("downloads.dispatch", "voices.dispatch"), HANDOVER_S),
+    **dict.fromkeys(("downloads.dispatch", "voices.dispatch", "downloads.settle", "voices.settle"), HANDOVER_S),
+    # What an executor has of a series, and the tracks of a series and their packing: reads and writes of records.
+    **dict.fromkeys(("downloads.work.get", "voices.work.get", "voices.tracks.get", "voices.tracks.packed"), QUICK_S),
     # A recount asks the rules once for each source of the series: the fuse of the table is for one source.
     "composition.recompute": RULES_S,
     # A preview reads the table, applies the profile to its lines and asks for the groups of the names, one after another.
@@ -92,7 +94,8 @@ _NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
 }
 
 # The topics whose request has no fuse of its own (see the top).
-_UNBOUNDED = frozenset({"scan.series.run", "scan.series.prepare"})
+# The packing of a series is one build for each episode, each with a fuse of its own (core.container.BUILD_TIMEOUT_S).
+_UNBOUNDED = frozenset({"scan.series.run", "scan.series.prepare", "downloads.pack"})
 
 UNBOUNDED = None
 

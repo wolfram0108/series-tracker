@@ -707,7 +707,11 @@ def test_extension_follows_the_kind_of_the_series_not_a_source_type():
     video = _series(kind="video")
     torrent = _series(kind="torrent")
     metadata = formatter.build_metadata(video, item)
-    assert formatter.format_name(video, metadata, original_filename="x.mkv").endswith(".mp4")
+    # A video series: a download is an .mp4, a container packed at the end of a sync stays an .mkv (ЭТАП_11).
+    assert formatter.format_name(video, metadata, original_filename="x.mkv").endswith(".mkv")
+    assert formatter.format_name(video, metadata, original_filename="x.mp4").endswith(".mp4")
+    assert formatter.format_name(video, metadata, original_filename="x.avi").endswith(".mp4")
+    assert formatter.format_name(video, metadata).endswith(".mp4")
     # a leftover source_type must not decide anything any more
     legacy = _series(kind="torrent", source_type="vk_video")
     assert formatter.format_name(legacy, formatter.build_metadata(legacy, item),

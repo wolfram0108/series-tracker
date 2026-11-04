@@ -140,6 +140,7 @@ class ScanModule(BaseModule):
         self._runs: dict[int, int] = {}
         self._working: dict[int, set[str]] = {}
         self._owed: set[int] = set()
+        self._closing: set[int] = set()
         self._owned: set[int] = set()  # the tasks of scan_tasks that the scans running here keep
         self._aborted: set[int] = set()
         self._scan_all_running = False
@@ -669,8 +670,19 @@ class ScanModule(BaseModule):
             await self._close_run(state.series_id)
 
     async def _close_run(self, series_id: int) -> None:
-        """Every work of the run has ended: the command goes, the series is free, and a recount an event asked for
-        while the run was open is done now (a plan; the disk follows it at the next sync)."""
+        """Every work of the run has ended: the containers of the series are made (the last step of the run, ЭТАП_11),
+        then the command goes, the series is free, and a recount an event asked for while the run was open is done now
+        (a plan; the disk follows it at the next sync)."""
+        if series_id not in self._runs or series_id in self._closing:
+            return  # the run is closing already: one packing, one end
+        self._closing.add(series_id)
+        try:
+            await self.request("downloads.pack", {"series_id": series_id})
+        except BusRequestError as exc:
+            if _NO_HANDLER not in str(exc):
+                self.log.error("сериал %d: контейнеры не собраны: %s", series_id, exc)
+        finally:
+            self._closing.discard(series_id)
         intent = self._runs.pop(series_id, None)
         self._working.pop(series_id, None)
         if intent is not None:

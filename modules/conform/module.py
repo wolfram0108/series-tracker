@@ -269,7 +269,9 @@ class ConformModule(BaseModule):
                 "dubs": [translate(path, mapping) for path in payload["dubs"]],
                 "out_dir": translate(payload["out_dir"], mapping),
                 "cache_dir": translate(payload["cache_dir"], mapping),
-                "keep_tmp": False, "label": job_label(payload.get("label"), payload.get("key"))}
+                "keep_tmp": False, "label": job_label(payload.get("label"), payload.get("key")),
+                # A reference that is a container holds several tracks: the alignment listens to the video's own sound.
+                **({"ref_atrack": int(payload["ref_atrack"])} if payload.get("ref_atrack") else {})}
 
     async def on_workspace(self, env: Envelope) -> dict:
         if not env.payload.get("dub_folder"):

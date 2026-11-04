@@ -180,6 +180,7 @@ from collections import OrderedDict, defaultdict
 from core import BaseModule, BusRequestError
 from pydantic import ValidationError
 
+from core import container
 from core.contracts import (RUN_CHANGED, WORK_STATE, WORK_WITHDRAWN, RunChanged, WorkState, WorkWithdrawn, AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
                             DubRecord, DubsSnapshot, DubStatus as S, GroupsResolveReply, GroupsResolveRequest,
                             JobStatus, Reference, ReferenceChanged, SnapshotItem, SubmitOutcome, SubmitReply,
@@ -309,6 +310,8 @@ class VoicesModule(BaseModule):
         self.handle("voices.dispatch", self.on_dispatch, concurrent=True)
         self.handle("voices.settle", self.on_settle, concurrent=True)
         self.handle("voices.work.get", self.on_work_get, concurrent=True)
+        self.handle("voices.tracks.get", self.on_tracks_get, concurrent=True)
+        self.handle("voices.tracks.packed", self.on_tracks_packed)
         self.handle(RUN_CHANGED, self.on_run_changed)
         self.handle("system.started", self.on_system_started)
         self.handle("composition.changed", self.on_composition_changed)
@@ -490,6 +493,23 @@ class VoicesModule(BaseModule):
             self._owed_plans.add(series_id)
             return
         self._want_plan(series_id)
+
+    async def on_tracks_get(self, env: Envelope) -> dict:
+        """The tracks that are at their end (placed) of a series, for the packing of its containers (ЭТАП_11): where the
+        file of each lies (none once it is packed) and the identity of the video it is aligned to."""
+        rows = await self.repo.for_series(int(env.payload["series_id"]))
+        return {"tracks": [{"dub_id": row["id"], "season": row["season"], "episode": row["episode"], "part": row["part"],
+                            "label": row["voice_label"], "path": row["output_path"], "aligned_to": row.get("aligned_to"),
+                            "ref_uid": row["ref_uid"]} for row in rows if row["status"] == S.PLACED]}
+
+    async def on_tracks_packed(self, env: Envelope) -> None:
+        """The tracks went into the container of their episode: their own files are gone, the container holds them."""
+        dub_ids = [int(each) for each in env.payload.get("dub_ids", [])]
+        await self.repo.mark_packed(dub_ids, env.payload["container"])
+        for dub_id in dub_ids:
+            row = await self.repo.get(dub_id)
+            if row is not None:
+                await self._announce(row)
 
     async def on_run_changed(self, env: Envelope) -> None:
         run = RunChanged.model_validate(env.payload)
@@ -1027,8 +1047,8 @@ class VoicesModule(BaseModule):
                 if (season, episode, part) not in in_plan:
                     await self._drop_orphans(series_id, season, episode, part, group, root)
                 continue
-            reference, uid = current
-            if await self._follow(series_id, season, episode, part, group, reference, uid):
+            reference, uid, identity = current
+            if await self._follow(series_id, season, episode, part, group, reference, uid, identity):
                 restart = True
                 continue
             for row in group:
@@ -1037,7 +1057,7 @@ class VoicesModule(BaseModule):
             group = await self.repo.for_episode(series_id, season, episode, part)
             ready = [row for row in group if row["status"] == S.READY]
             if ready and not any(row["status"] in WORKING for row in group):
-                owed = await self._submit(series, season, episode, part, reference, uid, ready) or owed
+                owed = await self._submit(series, season, episode, part, reference, uid, ready, identity) or owed
             await self._tidy(series_id, season, episode, part, root)
         await self._admit()
         await self._cleanup.work_off()
@@ -1050,8 +1070,9 @@ class VoicesModule(BaseModule):
                     await self._io(remove_if_empty, os.path.join(base, str(series_id)))
         return owed
 
-    async def _reference_state(self, series: dict) -> tuple[set, dict[tuple[int, int, int], tuple[str, str]]]:
-        """The planned episodes, and (file, media item) of the reference that is on disk, by episode and part.
+    async def _reference_state(self, series: dict) -> tuple[set, dict[tuple[int, int, int], tuple[str, str, str]]]:
+        """The planned episodes, and (file, media item, identity of its video) of the reference that is on disk, by
+        episode and part.
 
         When a slot holds a superseded file and its winner, the winner is the reference."""
         reply = await self.request("downloads.episodes.get", {"series_id": series["id"]})
@@ -1065,12 +1086,21 @@ class VoicesModule(BaseModule):
             if not await self._io(os.path.isfile, path):
                 continue
             if slot not in found or not item.get("superseded_by"):
-                found[slot] = (path, item["unique_id"])
+                found[slot] = (path, item["unique_id"], container.identity(item.get("source_id"), item.get("row_key")))
         return in_plan, found
 
     async def _follow(self, series_id: int, season: int, episode: int, part: int, group: list[dict],
-                      reference: str, uid: str) -> bool:
-        """Keep the tracks of an episode in step with its reference; True when they went stale."""
+                      reference: str, uid: str, identity: str = "") -> bool:
+        """Keep the tracks of an episode in step with its reference; True when they went stale. A track aligned to a video
+        of the same identity (the same source and row, another resolution) stays valid and follows it (ЭТАП_11, п. 5)."""
+        same = [row for row in group if row["ref_uid"] and row["ref_uid"] != uid
+                and identity and row.get("aligned_to") == identity]
+        for row in same:
+            await self.repo.follow_reference(row["id"], uid, reference)
+            self.log.info("сериал %d, s%02de%02d: дорожка %s остаётся — то же видео в другом разрешении",
+                          series_id, season, episode, row["voice_label"])
+        if same:
+            group = await self.repo.for_episode(series_id, season, episode, part)
         stale = [row for row in group if row["ref_uid"] and row["ref_uid"] != uid]
         if stale:
             for row in stale:
@@ -1212,7 +1242,7 @@ class VoicesModule(BaseModule):
         return True
 
     async def _submit(self, series: dict, season: int, episode: int, part: int, reference: str, uid: str,
-                      ready: list[dict]) -> bool:
+                      ready: list[dict], identity: str = "") -> bool:
         """Send the ready voice-overs of an episode as one job; True when the service was certainly not reached
         and another try is owed. What may have reached it is carried by the recovery from the key."""
         label = f"{series['name']} {slot_tag(season, episode, part)}"
@@ -1240,23 +1270,25 @@ class VoicesModule(BaseModule):
         except Exception:
             await self._io(shutil.rmtree, ref_dir, True, owns=(ref_dir,))
             raise
-        await self.repo.mark_submitting([row["id"] for row in ready], key, uid, reference, out_dir)
+        await self.repo.mark_submitting([row["id"] for row in ready], key, uid, reference, out_dir, identity)
+        # A reference that is a container already holds voice-overs: the alignment listens to the video's own sound.
+        held = await container.contents(reference)
         self._sending.add(key)
         try:
-            return await self._send(label, key, ready, copy, out_dir, cache_dir)
+            return await self._send(label, key, ready, copy, out_dir, cache_dir, held.own_track if held else 0)
         finally:
             self._sending.discard(key)
             self._recovery.poke("cleanup:")  # what waited for the answer to this submission may go on now
             self._recovery.poke("submission:")
 
     async def _send(self, label: str, key: str, ready: list[dict], reference: str, out_dir: str,
-                    cache_dir: str) -> bool:
+                    cache_dir: str, ref_atrack: int = 0) -> bool:
         """Send the job and take its outcome: until this returns the service may still take the job."""
         try:
             reply = SubmitReply.model_validate(await self.request("conform.submit", {
                 "ref": reference, "dubs": [row["temp_path"] for row in ready],
                 "out_dir": out_dir, "cache_dir": cache_dir,
-                "label": label, "key": key}))
+                "label": label, "key": key, **({"ref_atrack": ref_atrack} if ref_atrack else {})}))
         except (BusRequestError, asyncio.TimeoutError, ValidationError) as exc:
             self.log.warning("%s: ответа на постановку нет, спросим сервис, есть ли задача: %s", label, exc)
             await self._ask_service(key, ready)

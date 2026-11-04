@@ -161,6 +161,7 @@ class Neighbours(BaseModule):
         self.references = {}  # episode -> file name of the reference video on disk
         self.uids = {}  # episode -> media item of its reference (default: u<episode>)
         self.extra_items = []  # more media items of the plan, as downloads.episodes.get shows them
+        self.item_keys: dict[int, str] = {}  # episode -> the row of the reference video, when not the reference's own
         self.marks = {}  # (season, episode) -> mark of the reference when it is not the usual one
         self.levers = {}  # (season, episode) -> [EffectiveLever] of the output levers
         self.settings = {}
@@ -258,7 +259,8 @@ class Neighbours(BaseModule):
         items = [{"unique_id": self.uids.get(episode, f"u{episode}"), "season": season,
                   "episode_start": episode, "part": None, "source_url": reference["links"].get(str(episode), ""),
                   "status": "pending", "final_filename": self.references.get(episode),
-                  "superseded_by": None} for season, episode in self.plan]
+                  "superseded_by": None, "source_id": 1,
+                  "row_key": self.item_keys.get(episode, self.row_key(reference, episode))} for season, episode in self.plan]
         return {"items": items + self.extra_items}
 
     # --- the rest of the neighbours ---------------------------------------------------------------------------
@@ -3159,3 +3161,27 @@ async def test_a_reference_that_turns_none_while_a_voice_over_downloads_takes_it
     await pass_over(voices, neighbours, 2)
     victim = next(f for f in neighbours.fetches if f["url"].endswith("kodik-BlackCat-3"))
     assert [r["episode"] for r in await rows(probe)] == [1, 2] and victim["key"] in neighbours.cancelled_keys
+
+
+
+# --- a track is valid while it is aligned to a video of the same identity (ЭТАП_11, п. 5) ---------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("video", ["same_video_other_file", "other_video"])
+async def test_a_track_follows_a_better_version_of_its_video_and_goes_stale_for_another_video(dubs, video):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    voices = dubs[2]
+    before = {row["voice_key"]: row for row in await voices.repo.for_series(7) if row["episode"] == 1}
+    assert all(row["aligned_to"] for row in before.values())  # the identity of the video is written down with the job
+    neighbours.uids[1] = "u1-better"  # the row of a better resolution of the slot, or of another video
+    if video == "other_video":
+        neighbours.item_keys[1] = "elsewhere-1"
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
+    await quiet(voices)
+    after = {row["voice_key"]: row for row in await voices.repo.for_series(7) if row["episode"] == 1}
+    if video == "same_video_other_file":
+        assert {key: (row["status"], row["ref_uid"]) for key, row in after.items()} == {
+            key: ("placed", "u1-better") for key in before}
+        assert {key: row["id"] for key, row in after.items()} == {key: row["id"] for key, row in before.items()}
+    else:
+        assert all(row["status"] != "placed" for row in after.values())  # aligned to another video: aligned anew

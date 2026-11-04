@@ -494,7 +494,9 @@ async def test_a_single_episode_is_named_alike_whether_its_end_is_empty_or_equal
 @pytest.mark.asyncio
 async def test_the_extension_follows_the_kind_of_the_series(system):
     probe = system.probe
-    assert (await filename(probe, card(kind="video"), item(), original_filename="x.mkv")).endswith(".mp4")
+    assert (await filename(probe, card(kind="video"), item(), original_filename="x.mkv")).endswith(".mkv")  # packed
+    assert (await filename(probe, card(kind="video"), item(), original_filename="x.mp4")).endswith(".mp4")
+    assert (await filename(probe, card(kind="video"), item())).endswith(".mp4")
     assert (await filename(probe, card(kind="torrent"), item(), original_filename="x.AVI")).endswith(".avi")
     assert (await filename(probe, card(kind="torrent"), item())).endswith(".mkv")
     # the column that left the series decides nothing

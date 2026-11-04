@@ -74,7 +74,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from core import BaseModule, BusRequestError, storage
 from core.contracts import WORK_STATE, WORK_WITHDRAWN, SeriesKind, SourceType, WorkState, WorkWithdrawn, availability
@@ -85,6 +85,7 @@ from core.retry import UNTIMED, Budget, retrying
 from . import ytdlp
 from .library import Library
 from .publication import PUBLISHED, REFUSED, WAITING, Publication, PublicationUnfinished
+from .packing import FfmpegPacker, Packed, Packer, Packing
 from .repository import LIVE_STATES, DownloadsRepository
 
 PROGRESS_DB_THROTTLE = 2.0     # seconds between writes of progress to the database: the window needs a picture, not every tick
@@ -145,9 +146,10 @@ class Reconciled:
 class DownloadsModule(BaseModule):
     name = "downloads"
 
-    def __init__(self, bus, db: Database, *, downloader=ytdlp.download) -> None:
+    def __init__(self, bus, db: Database, *, downloader=ytdlp.download, packer: Packer | None = None) -> None:
         self.repo = DownloadsRepository(db)
         self._download = downloader  # replaced in tests
+        self._packer = packer or FfmpegPacker()
         self._limit = 2               # parallel files (max_parallel_downloads)
         self._fetch_limit = 2         # parallel general downloads (downloads.fetch)
         self._fetch_queue: list[dict] = []
@@ -162,6 +164,7 @@ class DownloadsModule(BaseModule):
         self._work_told: dict[int, bool] = {}  # what the run of each series was last told about the work of it
         super().__init__(bus)
         self.library = Library(self.repo, self._naming, self.log, self._neighbours)
+        self._packing = Packing(self.repo, self._packer, self.request, self.publish_event, self.log, self.library.guard)
         self._publication = Publication(self.repo, self.library, self.log, running=lambda task_id: task_id in self._active,
                                         resume=self._look_again, end_task=self._end_task)
 
@@ -170,6 +173,7 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.dispatch", self.on_dispatch)
         self.handle("downloads.settle", self.on_settle)
         self.handle("downloads.work.get", self.on_work_get, concurrent=True)  # reads only: never behind a look
+        self.handle("downloads.pack", self.on_pack)
         self.handle("settings.changed", self.on_settings_changed)
         self.handle("downloads.queue.get", self.on_queue_get)
         self.handle("downloads.queue.clear", self.on_queue_clear)
@@ -343,6 +347,19 @@ class DownloadsModule(BaseModule):
             await self._broadcast_queue()
         await self._pump()
 
+    async def on_pack(self, env: Envelope) -> dict:
+        """The last step of a run of a sync: the container of every episode becomes what the plan asks (ЭТАП_11)."""
+        series_id = env.payload["series_id"]
+        series = await self.request("catalog.series.get", {"series_id": series_id})
+        if series.get("kind") != SeriesKind.VIDEO:
+            return asdict(Packed())
+        async with self._lock(series_id):
+            done = await self._packing.pack(series)
+        if done.packed:
+            await self._contribute(series_id)
+            self.log.info("серия %d: контейнеров собрано %d, не собрано %d", series_id, done.packed, done.failed)
+        return asdict(done)
+
     async def on_settle(self, env: Envelope) -> dict:
         """A sync without download: the disk follows the plan (displaced and unwanted files go, tasks nobody needs end),
         and nothing is fetched."""
@@ -403,7 +420,7 @@ class DownloadsModule(BaseModule):
         dropped = retired = removed = 0
         if sync:  # what the plan alone decides reaches the disk in a sync only
             dropped = await self._drop_tasks_without_need(series["id"])
-            retired = await self.library.retire_superseded(series)
+            retired = 0  # a displaced file goes when the container of its winner is made (packing, ЭТАП_11)
             removed = await self.library.remove_unwanted(series)
         swept = await self.library.sweep_work(series)
         return Reconciled(finished, released, adopted, dropped, retired, removed, swept, renamed)
@@ -683,7 +700,6 @@ class DownloadsModule(BaseModule):
         """A download is whole: put it under the name of its video, and do what the outcome asks."""
         outcome = await self._publish(task, series)
         if outcome == PUBLISHED:
-            await self.library.retire_superseded(series)
             self.send_command("catalog.series.touch_scan_time", {"series_id": series["id"]})
             self.log.info("загрузка завершена: %s", task["task_key"])
         elif outcome == WAITING:

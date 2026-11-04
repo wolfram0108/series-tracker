@@ -29,6 +29,7 @@ from modules.renaming import RenamingModule
 from modules.scan import ScanModule
 from core import BusRequestError
 from core.contracts import RUN_CHANGED
+from packing_support import FakePacker
 from scan_support import STUCK_S, row
 from series_factory import create_series, source
 from settle import path_free, settle, wait_until
@@ -90,6 +91,7 @@ class Harness:
         self.downloader = ScriptedDownloader()
         self.armed = False  # the failures of a scenario happen after its step is reached, not on the way to it
         self.refused = 0  # the changes refused while a run was open, made when it ended
+        self.packer = FakePacker()  # the containers of the run's end (ЭТАП_11); a test video is its address, not media
 
     async def up(self) -> None:
         db = self.db = Database(self.db_path)
@@ -103,7 +105,7 @@ class Harness:
         self.world.sources = [(self.source_id, URL)]
         self.push_rows()
         self.probe = Probe(self.bus)
-        self.downloads = DownloadsModule(self.bus, db, downloader=self.downloader)
+        self.downloads = DownloadsModule(self.bus, db, downloader=self.downloader, packer=self.packer)
         self.runner = Runner(self.bus, [self.world, CatalogModule(self.bus, db),
                                         ScanModule(self.bus, db, scheduler_tick=None, table_wait_s=STUCK_S),
                                         RenamingModule(self.bus, db), self.downloads, self.probe])
@@ -211,7 +213,7 @@ def video_of(item: dict) -> bytes:
 
 
 def name_of(item: dict) -> str:
-    return f"Серия {item['episode_start']:02d}.mp4"
+    return f"Серия {item['episode_start']:02d}.mkv"  # converged: the run's end packs it (ЭТАП_11)
 
 
 def check(h: Harness, *, converged: bool) -> list[str]:
