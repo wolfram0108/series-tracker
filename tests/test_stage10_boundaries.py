@@ -11,7 +11,9 @@ import sqlite3
 
 import pytest
 
-from core import BaseModule, Bus, Runner
+from core.contracts import RUN_CHANGED
+
+from core import BusRequestError, BaseModule, Bus, Runner
 from core.db import Database
 from core.envelope import Envelope
 from modules.catalog import CatalogModule
@@ -103,6 +105,27 @@ class Rig:
         if not await wait_until(condition, self.runner.bus, *self.runner.modules, seconds=8.0):
             raise AssertionError((what, self.tasks(), self.query("SELECT unique_id, status, plan_status FROM media_items")))
 
+    def run_open(self) -> bool:
+        """Whether a sync of the series is under way, as the events of its run tell (ЭТАП_11)."""
+        while not self.runs.queue.empty():
+            self.open = self.runs.queue.get_nowait().payload["active"]
+        return self.open
+
+    async def free(self) -> None:
+        """The run of the sync ends once its works end: the downloads are let go and the end of the run is awaited."""
+        if self.downloader.gate is not None:
+            self.downloader.gate.set()
+        await self.until(lambda: not self.run_open(), "the run of the series ended")
+
+    async def refused(self, act) -> None:
+        """A change the user makes while a sync of the series is under way is refused and changes nothing (ЭТАП_11)."""
+        with pytest.raises(BusRequestError, match="not_allowed"):
+            await act()
+
+    async def switch(self, episode: int | None, off: bool) -> dict:
+        payload = {"series_id": self.series_id, "season": 1, "off": off} | ({} if episode is None else {"episode": episode})
+        return await self.probe.request("scan.output.switch", payload, timeout=STUCK_S)
+
 
 @pytest.fixture
 async def rig(tmp_path):
@@ -121,6 +144,7 @@ async def rig(tmp_path):
     await runner.start()
     world.sources = [(created.source_ids[0], URL)]
     made = Rig(db_path, created.series_id, created.source_ids[0], runner, world, downloader, probe, tmp_path / "media")
+    made.runs, made.open = bus.subscribe(RUN_CHANGED), False
     yield made
     downloader.gate and downloader.gate.set()
     await runner.stop()
@@ -131,7 +155,7 @@ async def plan_heard(rig) -> None:
     await rig.probe.request("downloads.queue.get", {}, timeout=STUCK_S)
 
 
-async def test_an_episode_the_user_switches_off_loses_its_waiting_download_and_the_one_under_way_goes_on(rig):
+async def test_an_episode_the_user_switches_off_during_a_sync_is_refused_and_after_the_run_the_next_sync_takes_its_file(rig):
     rig.downloader.gate = asyncio.Event()
     rig.world.rows = [rig.row("a", 1, link="https://v/1"), rig.row("b", 2, link="https://v/2")]
     await rig.run()
@@ -139,19 +163,20 @@ async def test_an_episode_the_user_switches_off_loses_its_waiting_download_and_t
     waiting = next(key for key, status in rig.tasks().items() if status == "pending")
     episode = rig.query("SELECT episode_start FROM media_items WHERE unique_id=?", (waiting,))[0]["episode_start"]
 
-    await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": episode, "off": True},
-                            timeout=STUCK_S)
-    await plan_heard(rig)
-    assert waiting in rig.tasks()  # switching off is a plan: the queue follows it at the next sync (И-59)
-    await rig.run(download=False)
-    await rig.until(lambda: waiting not in rig.tasks(), "the waiting download dropped")
-    assert list(rig.tasks().values()) == ["downloading"]
+    await rig.refused(lambda: rig.switch(episode, True))  # the sync is under way: the series is busy (ЭТАП_11)
+    assert sorted(rig.tasks().values()) == ["downloading", "pending"]  # the run goes on as it was given
+    await rig.free()
+    assert sorted(each.name for each in rig.media.iterdir()) == ["Серия 01.mp4", "Серия 02.mp4"]
 
-    await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": episode, "off": False},
-                            timeout=STUCK_S)
+    await rig.switch(episode, True)  # a plan: the file stays until the next sync (И-59)
+    assert len(list(rig.media.iterdir())) == 2
+    await rig.run(download=False)
+    await rig.until(lambda: sorted(each.name for each in rig.media.iterdir()) == [f"Серия {3 - episode:02d}.mp4"],
+                    "the file of the switched off episode is gone at the sync")
+    await rig.free()
+    await rig.switch(episode, False)
     assert rig.query("SELECT plan_status FROM media_items WHERE unique_id=?", (waiting,))[0]["plan_status"] == "in_plan_single"
     assert waiting not in rig.tasks()  # switching on only gives the place back: a download is asked for by a scan
-
 
 async def test_another_video_behind_the_row_of_a_fetched_one_is_fetched_and_the_old_file_is_displaced(rig):
     rig.world.rows = [rig.row("a", 1, link="https://v/old")]
@@ -159,6 +184,7 @@ async def test_another_video_behind_the_row_of_a_fetched_one_is_fetched_and_the_
     await rig.until(lambda: rig.query("SELECT status FROM media_items")[0]["status"] == "completed", "the first video fetched")
     [old] = rig.query("SELECT unique_id, final_filename FROM media_items")
     assert rig.downloader.started == ["https://v/old"] and old["final_filename"]
+    await rig.free()
 
     rig.world.rows = [rig.row("a", 1, link="https://v/new")]
     await rig.run()
@@ -171,42 +197,39 @@ async def test_another_video_behind_the_row_of_a_fetched_one_is_fetched_and_the_
     # The plan holds one file for the slot: the new video, the old one displaced by it (its file is retired by downloads).
     assert rows[old["unique_id"]]["plan_status"] in ("replaced", "redundant", "candidate")
 
-
-async def test_a_waiting_download_is_not_turned_to_another_video_when_the_address_of_its_row_changes(rig):
+async def test_a_sync_while_the_downloads_of_the_last_one_go_is_refused_and_the_next_one_takes_the_new_address(rig):
     rig.downloader.gate = asyncio.Event()
     rig.world.rows = [rig.row("a", 1, link="https://v/a"), rig.row("b", 2, link="https://v/old")]
     await rig.run()
     await rig.until(lambda: sorted(rig.tasks().values()) == ["downloading", "pending"], "one download under way, one waiting")
 
     rig.world.rows = [rig.row("a", 1, link="https://v/a"), rig.row("b", 2, link="https://v/new")]
+    await rig.refused(rig.run)  # the run of the last sync is open: it works by its snapshot
+    await rig.free()
+    assert (rig.media / "Серия 02.mp4").read_bytes() == b"https://v/old"  # what the run was given, whole
+
     await rig.run()
-    rig.downloader.gate.set()
     await rig.until(lambda: sorted(each["source_url"] for each in rig.query(
         "SELECT source_url FROM media_items WHERE status='completed' AND plan_status='in_plan_single'")) == [
             "https://v/a", "https://v/new"], "both videos of the plan fetched")
+    await rig.until(lambda: (rig.media / "Серия 02.mp4").read_bytes() == b"https://v/new", "the new video under its name")
 
-    assert "https://v/old" not in rig.downloader.started
-    assert (rig.media / "Серия 02.mp4").read_bytes() == b"https://v/new"
-
-
-async def test_a_download_of_a_video_the_plan_no_longer_wants_stops_and_the_new_video_takes_its_name(rig):
+async def test_a_video_the_next_sync_no_longer_wants_is_displaced_by_the_new_one_under_its_name(rig):
     rig.downloader.gate = asyncio.Event()
     rig.world.rows = [rig.row("a", 1, link="https://v/old")]
     await rig.run()
     await rig.until(lambda: list(rig.tasks().values()) == ["downloading"], "the download under way")
 
     rig.world.rows = [rig.row("a", 1, link="https://v/new")]
+    await rig.refused(rig.run)
+    await rig.free()
     await rig.run()
-    rig.downloader.gate.set()
     await rig.until(lambda: any(each["source_url"] == "https://v/new" and each["status"] == "completed"
                                 for each in rig.query("SELECT source_url, status FROM media_items")), "the new video fetched")
     rows = {each["source_url"]: each for each in rig.query("SELECT source_url, status, final_filename FROM media_items")}
-    # The old video is no longer in the plan: its download was stopped, so the row is not fetched and holds no file.
-    assert rows["https://v/old"]["status"] == "pending" and rows["https://v/old"]["final_filename"] is None
     assert rows["https://v/new"]["status"] == "completed"
+    await rig.until(lambda: sorted(each.name for each in rig.media.iterdir()) == ["Серия 01.mp4"], "one file for the slot")
     assert (rig.media / "Серия 01.mp4").read_bytes() == b"https://v/new"
-    assert sorted(each.name for each in rig.media.iterdir()) == ["Серия 01.mp4"]
-
 
 async def test_a_better_version_of_another_video_never_takes_the_row_of_the_better_version_of_the_first(rig):
     names = {}
@@ -227,6 +250,7 @@ async def test_a_replacement_that_cannot_be_fetched_leaves_the_file_of_the_video
     await rig.run()
     await rig.until(lambda: rig.query("SELECT status FROM media_items")[0]["status"] == "completed", "the first video fetched")
     [old] = rig.query("SELECT unique_id, final_filename FROM media_items")
+    await rig.free()
 
     rig.downloader.fail_urls.add("https://v/new")
     rig.world.rows = [rig.row("a", 1, link="https://v/new")]
@@ -243,6 +267,7 @@ async def test_a_replacement_that_is_fetched_takes_the_place_of_the_old_file_and
     await rig.run()
     await rig.until(lambda: rig.query("SELECT status FROM media_items")[0]["status"] == "completed", "the first video fetched")
     [old] = rig.query("SELECT unique_id, final_filename FROM media_items")
+    await rig.free()
 
     rig.world.rows = [rig.row("a", 1, link="https://v/new")]
     await rig.run()
@@ -266,7 +291,9 @@ async def test_the_command_to_synchronize_is_kept_until_downloads_has_written_th
 
     rig.world.format_gate.set()
     await asyncio.wait_for(run, STUCK_S * 2)
-    assert list(rig.tasks()) and rig.query("SELECT id FROM scan_tasks") == []
+    assert list(rig.tasks())
+    await rig.free()  # the command is the run's until every work of it has ended (ЭТАП_11)
+    assert rig.query("SELECT id FROM scan_tasks") == []
 
 
 async def test_a_synchronization_whose_work_downloads_cannot_take_ends_as_a_failure_with_its_command_kept(rig):
@@ -278,29 +305,18 @@ async def test_a_synchronization_whose_work_downloads_cannot_take_ends_as_a_fail
     assert rig.tasks() == {}
 
 
-async def test_an_episode_the_user_switches_off_loses_the_download_under_way_and_the_next_one_takes_its_place(rig):
+async def test_an_episode_the_user_switches_off_while_its_download_runs_is_refused_and_the_download_goes_on(rig):
     rig.downloader.gate = asyncio.Event()
     rig.world.rows = [rig.row("a", 1, link="https://v/1"), rig.row("b", 2, link="https://v/2")]
     await rig.run()
     await rig.until(lambda: sorted(rig.tasks().values()) == ["downloading", "pending"], "one download under way, one waiting")
     running = next(key for key, status in rig.tasks().items() if status == "downloading")
-    other = next(key for key in rig.tasks() if key != running)
     episode = rig.query("SELECT episode_start FROM media_items WHERE unique_id=?", (running,))[0]["episode_start"]
 
-    await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": episode, "off": True},
-                            timeout=STUCK_S)
-    await plan_heard(rig)
-    assert rig.tasks()[running] == "downloading"  # a plan: the download goes on until a sync
-    await rig.run(download=False)
-    await rig.until(lambda: running not in rig.tasks(), "the download of the switched off episode stopped")
-    assert rig.query("SELECT status, final_filename FROM media_items WHERE unique_id=?", (running,)) == [
-        {"status": "pending", "final_filename": None}]
-
-    rig.downloader.gate.set()
-    await rig.until(lambda: rig.query("SELECT status FROM media_items WHERE unique_id=?", (other,))[0]["status"] == "completed",
-                    "the other episode fetched")
-    assert sorted(each.name for each in rig.media.iterdir()) == [f"Серия {2 if episode == 1 else 1:02d}.mp4"]
-
+    await rig.refused(lambda: rig.switch(episode, True))
+    assert rig.tasks()[running] == "downloading"
+    await rig.free()
+    assert sorted(each.name for each in rig.media.iterdir()) == ["Серия 01.mp4", "Серия 02.mp4"]
 
 async def test_an_episode_the_user_switches_off_loses_its_whole_file_and_the_other_files_stay(rig):
     rig.world.rows = [rig.row("a", 1, link="https://v/1"), rig.row("b", 2, link="https://v/2")]
@@ -308,9 +324,9 @@ async def test_an_episode_the_user_switches_off_loses_its_whole_file_and_the_oth
     await rig.until(lambda: [each["status"] for each in rig.query("SELECT status FROM media_items")] == ["completed"] * 2,
                     "both episodes fetched")
     assert sorted(each.name for each in rig.media.iterdir()) == ["Серия 01.mp4", "Серия 02.mp4"]
+    await rig.free()
 
-    await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": 1, "off": True},
-                            timeout=STUCK_S)
+    await rig.switch(1, True)
     await plan_heard(rig)
     assert sorted(each.name for each in rig.media.iterdir()) == ["Серия 01.mp4", "Серия 02.mp4"]  # a plan: the disk waits
     await rig.run(download=False)
@@ -321,10 +337,9 @@ async def test_an_episode_the_user_switches_off_loses_its_whole_file_and_the_oth
     assert sorted(each.name for each in rig.media.iterdir()) == ["Серия 02.mp4"]
     assert rig.query("SELECT status FROM media_items WHERE episode_start=2") == [{"status": "completed"}]
 
-
-async def test_a_task_made_after_the_queue_was_read_fetches_the_address_the_scan_then_writes(rig, monkeypatch):
-    """The scan reads the queue first and writes the plan after: a task made between the two waits with the old address
-    while its row gets the new one. What the task fetches is the video its row has when the task begins."""
+async def test_a_task_cancelled_during_a_sync_leaves_the_run_open_for_the_others_and_a_sync_is_refused_meanwhile(rig):
+    """While a sync runs, no other sync can write the plan: the race of a task made between the reading of the queue and
+    the writing of the plan has no second sync to come from (ЭТАП_11)."""
     rig.downloader.gate = asyncio.Event()
     rig.world.rows = [rig.row("a", 1, link="https://v/a"), rig.row("b", 2, link="https://v/old")]
     await rig.run()
@@ -332,28 +347,15 @@ async def test_a_task_made_after_the_queue_was_read_fetches_the_address_the_scan
     waiting = next(key for key, status in rig.tasks().items() if status == "pending")
     [task] = rig.query("SELECT id FROM download_tasks WHERE task_key=?", (waiting,))
     await rig.probe.request("downloads.cancel", {"task_id": task["id"]}, timeout=STUCK_S)
-    assert waiting not in rig.tasks()  # the row waits and has no task: the queue the scan reads next does not name it
-
-    scan = next(each for each in rig.runner.modules if isinstance(each, ScanModule))
-    downloads = next(each for each in rig.runner.modules if isinstance(each, DownloadsModule))
-    real = scan._queued
-
-    async def read_then_dispatch(series_id):
-        queue = await real(series_id)
-        monkeypatch.setattr(scan, "_queued", real)
-        await downloads.on_dispatch(Envelope(topic="downloads.dispatch", kind="event", payload={"series_id": series_id}))
-        return queue
-
-    monkeypatch.setattr(scan, "_queued", read_then_dispatch)
+    assert waiting not in rig.tasks()
     rig.world.rows = [rig.row("a", 1, link="https://v/a"), rig.row("b", 2, link="https://v/new")]
+    await rig.refused(rig.run)
+    assert rig.run_open()  # the download under way is still work of the run
+    await rig.free()
     await rig.run()
-    assert rig.tasks()[waiting] == "pending"  # made after the queue was read
-    rig.downloader.gate.set()
-    await rig.until(lambda: (rig.media / "Серия 01.mp4").exists() and (rig.media / "Серия 02.mp4").exists(), "both fetched")
-
+    await rig.until(lambda: (rig.media / "Серия 02.mp4").exists(), "the next sync fetches the episode")
     assert "https://v/old" not in rig.downloader.started
     assert (rig.media / "Серия 02.mp4").read_bytes() == b"https://v/new"
-
 
 async def test_a_season_the_user_switches_off_loses_its_whole_files_and_the_other_seasons_stay(rig):
     rig.world.rows = [rig.row("a", 1, link="https://v/1"), rig.row("b", 2, link="https://v/2"),
@@ -361,8 +363,9 @@ async def test_a_season_the_user_switches_off_loses_its_whole_files_and_the_othe
     await rig.run()
     await rig.until(lambda: [each["status"] for each in rig.query("SELECT status FROM media_items")] == ["completed"] * 3,
                     "three episodes fetched")
+    await rig.free()
 
-    await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "off": True}, timeout=STUCK_S)
+    await rig.switch(None, True)
     await plan_heard(rig)
     assert len(list(rig.media.iterdir())) == 3  # a plan: the disk waits for a sync
     await rig.run(download=False)
@@ -373,18 +376,13 @@ async def test_a_season_the_user_switches_off_loses_its_whole_files_and_the_othe
         {"episode_start": 2, "status": "pending", "final_filename": None}]
     assert rig.query("SELECT status FROM media_items WHERE season=2") == [{"status": "completed"}]
 
-
-async def test_a_season_the_user_switches_off_loses_the_downloads_under_way_and_waiting(rig):
+async def test_a_season_the_user_switches_off_during_a_sync_is_refused_and_its_downloads_go_on(rig):
     rig.downloader.gate = asyncio.Event()
     rig.world.rows = [rig.row("a", 1, link="https://v/1"), rig.row("b", 2, link="https://v/2")]
     await rig.run()
     await rig.until(lambda: sorted(rig.tasks().values()) == ["downloading", "pending"], "one download under way, one waiting")
 
-    await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "off": True}, timeout=STUCK_S)
-    await plan_heard(rig)
-    assert sorted(rig.tasks().values()) == ["downloading", "pending"]  # a plan: the queue waits for a sync
-    await rig.run(download=False)
-    await rig.until(lambda: rig.tasks() == {}, "both tasks dropped")
-    assert sorted(each["status"] for each in rig.query("SELECT status FROM media_items")) == ["pending", "pending"]
-    rig.downloader.gate.set()
-    assert not rig.media.exists() or list(rig.media.iterdir()) == []  # nothing took a name
+    await rig.refused(lambda: rig.switch(None, True))
+    assert sorted(rig.tasks().values()) == ["downloading", "pending"]
+    await rig.free()
+    assert sorted(each.name for each in rig.media.iterdir()) == ["Серия 01.mp4", "Серия 02.mp4"]

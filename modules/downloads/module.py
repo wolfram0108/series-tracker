@@ -77,7 +77,7 @@ import time
 from dataclasses import dataclass
 
 from core import BaseModule, BusRequestError, storage
-from core.contracts import WORK_WITHDRAWN, SeriesKind, SourceType, WorkWithdrawn, availability
+from core.contracts import WORK_STATE, WORK_WITHDRAWN, SeriesKind, SourceType, WorkState, WorkWithdrawn, availability
 from core.db import Database
 from core.envelope import Envelope
 from core.retry import UNTIMED, Budget, retrying
@@ -85,7 +85,7 @@ from core.retry import UNTIMED, Budget, retrying
 from . import ytdlp
 from .library import Library
 from .publication import PUBLISHED, REFUSED, WAITING, Publication, PublicationUnfinished
-from .repository import DownloadsRepository
+from .repository import LIVE_STATES, DownloadsRepository
 
 PROGRESS_DB_THROTTLE = 2.0     # seconds between writes of progress to the database: the window needs a picture, not every tick
 PROGRESS_EVENT_THROTTLE = 1.0  # seconds between queue events on progress
@@ -159,6 +159,7 @@ class DownloadsModule(BaseModule):
         self._last_event = 0.0
         self._stopping = False        # a module that is stopping starts no work
         self._locks: dict[int, asyncio.Lock] = {}  # one look at a series at a time
+        self._work_told: dict[int, bool] = {}  # what the run of each series was last told about the work of it
         super().__init__(bus)
         self.library = Library(self.repo, self._naming, self.log, self._neighbours)
         self._publication = Publication(self.repo, self.library, self.log, running=lambda task_id: task_id in self._active,
@@ -168,6 +169,7 @@ class DownloadsModule(BaseModule):
         self.handle("scan.plan.updated", self.on_plan_updated)
         self.handle("downloads.dispatch", self.on_dispatch)
         self.handle("downloads.settle", self.on_settle)
+        self.handle("downloads.work.get", self.on_work_get, concurrent=True)  # reads only: never behind a look
         self.handle("settings.changed", self.on_settings_changed)
         self.handle("downloads.queue.get", self.on_queue_get)
         self.handle("downloads.queue.clear", self.on_queue_clear)
@@ -570,6 +572,9 @@ class DownloadsModule(BaseModule):
     async def _broadcast_queue(self) -> None:
         tasks = await self._queue()
         self.publish_event("downloads.queue.changed", {"tasks": tasks, "count": len(tasks)})
+        # The queue changed: the run of every series that has, or had, work here hears where it stands now.
+        for series_id in {task["series_id"] for task in tasks if task.get("series_id")} | set(self._work_told):
+            await self._tell_work(series_id)
 
     def _announce_queue(self) -> None:
         """A fetch began, waits or ended: the window sees it, though no task of the plan changed."""
@@ -810,7 +815,23 @@ class DownloadsModule(BaseModule):
 
     # --- свёртка статусов (Р-11) -----------------------------------------------------
 
+    async def _has_work(self, series_id: int) -> bool:
+        """A download of the series waits, runs or is being put under its name: work of the run of the series."""
+        return any(task["status"] in LIVE_STATES for task in await self.repo.tasks_for_series(series_id))
+
+    async def on_work_get(self, env: Envelope) -> dict:
+        series_id = env.payload["series_id"]
+        return WorkState(owner=self.name, series_id=series_id, active=await self._has_work(series_id)).model_dump()
+
+    async def _tell_work(self, series_id: int) -> None:
+        """The run of the series hears when this module's work of it begins or ends (the run owner is scan)."""
+        active = await self._has_work(series_id)
+        if self._work_told.get(series_id) != active:
+            self._work_told[series_id] = active
+            self.publish_event(WORK_STATE, WorkState(owner=self.name, series_id=series_id, active=active).model_dump())
+
     async def _contribute(self, series_id: int) -> None:
+        await self._tell_work(series_id)
         flags = await self.repo.series_flags(series_id)
         self.publish_event("series.status.contribution", {
             "source": "downloads", "series_id": series_id, "flags": flags})

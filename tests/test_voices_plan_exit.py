@@ -345,3 +345,24 @@ async def test_a_change_without_a_sync_takes_nothing_away_and_the_sync_does(dubs
     await pass_over(voices, neighbours, asks)
     assert {(r["episode"], r["voice_key"]): r["id"] for r in await voices.repo.for_series(7)} != {
         key: row["id"] for key, row in before.items()}
+
+
+@pytest.mark.asyncio
+async def test_the_run_of_a_series_hears_whether_voices_has_work_of_it(dubs):
+    """A voice-over a sync admitted and not at its end is work of the run of the series (ЭТАП_11); placed ones are not."""
+    probe, neighbours, voices, bus = dubs
+    assert (await probe.request("voices.work.get", {"series_id": 7}, timeout=5))["active"] is False
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    await quiet(voices)
+    assert (await probe.request("voices.work.get", {"series_id": 7}, timeout=5)) == {
+        "owner": "voices", "series_id": 7, "active": True}
+
+
+@pytest.mark.asyncio
+async def test_a_series_whose_voice_overs_are_all_placed_has_no_voices_work(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    voices = dubs[2]
+    rows = await voices.repo.for_series(7)
+    active = any(row["admitted"] and row["status"] not in ("placed", "rejected", "failed") for row in rows)
+    assert (await probe.request("voices.work.get", {"series_id": 7}, timeout=5))["active"] is active

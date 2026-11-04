@@ -146,9 +146,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/series/{series_id}", response_model=OkResponse,
             response_model_exclude_none=True, responses=_ERRORS)
     async def update_series(series_id: int, body: SeriesUpdate):
-        """Saving the properties: catalog, then metadata, then library or renaming.
+        """Saving the properties: catalog, then metadata, then library when the folder moves.
         The sources are not changed here; the layout of a video series is counted again on
-        series.updated, and what renaming does for each kind of series is renaming's own."""
+        series.updated. The files take the names of the new properties at the next sync (И-59)."""
         sent = body.model_dump(mode="json", exclude_unset=True)
         try:
             series = await gw.request("catalog.series.get",
@@ -169,9 +169,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                     "series_id": series_id, "new_path": new_path})
             except BusRequestError as exc:
                 return _error_response(exc)
-        else:
-            # Without a move the files are renamed in place; on a move library does it.
-            gw.send_command("renaming.reprocess", {"series_id": series_id})
         return {"success": True,
                 "message": "Задача на обновление принята в обработку."}
 

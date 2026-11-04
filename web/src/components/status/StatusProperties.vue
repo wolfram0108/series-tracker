@@ -12,13 +12,16 @@ import { useApi } from "../../composables/useApi"
 import { fetchProfiles } from "../../composables/sourceCalls"
 import { useSeriesSources } from "../../composables/useSeriesSources"
 import { t } from "../../i18n"
-import type { Series } from "../../stores/series"
+import { useSeriesStore, type Series } from "../../stores/series"
 import { compareNames } from "../../lib/collate"
 
 // "Properties" tab of the status window. Saving is POST /api/series/{id}; the fields of the sources are not in it:
 // a source changes at once by its own request (the "Sources" block). save() is called from the footer of
 // StatusModal through a ref and returns the success.
 const props = defineProps<{ series: Series }>()
+// A series whose sync is under way is busy until every work of the run has ended: nothing here is saved meanwhile.
+const seriesStore = useSeriesStore()
+const seriesBusy = computed(() => !!(seriesStore.byId(props.series.id)?.is_busy ?? props.series.is_busy))
 const emit = defineEmits<{ (e: "saving", v: boolean): void }>()
 const { request } = useApi()
 const toast = useToast()
@@ -369,7 +372,7 @@ onMounted(() => {
       <div class="fieldset-header"><span class="fieldset-title">{{ t("sources.title") }}</span></div>
       <div class="fieldset-content">
         <SourcesEditor
-          :items="sources.items.value" :profiles="profiles" :error="sources.error.value || sources.layoutFailure.value" :busy="sources.busy.value"
+          :items="sources.items.value" :profiles="profiles" :error="sources.error.value || sources.layoutFailure.value" :busy="sources.busy.value || seriesBusy"
           :editable="isVideo" :adder="sources.add" @remove="sources.remove" @change="sources.change" @reread="sources.reread"
         />
       </div>

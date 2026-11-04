@@ -173,7 +173,7 @@ async def test_the_steps_of_a_synchronization_follow_one_another_by_signals(rig)
     assert rig.world.order == [
         "downloads.fs.sync", f"sources.table.get {URL1}", "composition.recompute",
         "composition.get", "voices.settings.get", "renaming.reprocess", f"downloads.dispatch {rig.series_id}",
-        f"voices.dispatch {rig.series_id}"]
+        f"voices.dispatch {rig.series_id}", f"downloads.work.get {rig.series_id}", f"voices.work.get {rig.series_id}"]
 
 
 async def test_a_synchronization_without_download_brings_the_disk_to_the_plan_and_fetches_nothing(rig):
@@ -185,7 +185,8 @@ async def test_a_synchronization_without_download_brings_the_disk_to_the_plan_an
     await rig.world.dispatched.get()
     order = rig.world.order
     assert order[order.index("voices.settings.get"):] == [
-        "voices.settings.get", "renaming.reprocess", f"downloads.settle {rig.series_id}", f"voices.settle {rig.series_id}"]
+        "voices.settings.get", "renaming.reprocess", f"downloads.settle {rig.series_id}", f"voices.settle {rig.series_id}",
+        f"downloads.work.get {rig.series_id}", f"voices.work.get {rig.series_id}"]
     assert not any(each.startswith(("downloads.dispatch", "voices.dispatch")) for each in order)
 
 
@@ -1016,3 +1017,87 @@ async def test_the_row_of_a_reference_follows_the_word_of_the_configuration_and_
             assert all(each.row_key is None for each in found)
     finally:
         await rig.runner.stop()
+
+
+
+# --- a sync is one run: the series is busy until every work of it ends, and works by the snapshot (ЭТАП_11) ----------
+
+from core.contracts import RUN_CHANGED, WORK_STATE  # noqa: E402
+
+
+def runs_of(events: list[dict]) -> list[bool]:
+    return [each["active"] for each in events]
+
+
+def work_state(rig: "Rig", owner: str, active: bool) -> None:
+    rig.probe.publish_event(WORK_STATE, {"owner": owner, "series_id": rig.series_id, "active": active})
+
+
+async def test_a_sync_is_one_run_and_the_series_is_busy_until_every_work_it_gave_out_has_ended(rig):
+    rig.world.rows = [rig.row("a", 1, 1)]
+    rig.world.work = {"downloads": True, "voices": True}
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    await rig.run()
+    assert runs_of(drain(runs)) == [True]
+    assert [each["results_data"] for each in rig.query("SELECT results_data FROM scan_tasks")] != []
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await switch(rig, 1, 1, True)
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await rig.run()  # a second sync of a busy series is refused too
+
+    work_state(rig, "downloads", False)
+    await rig.bus.settled()
+    assert drain(runs) == [] and rig.query("SELECT id FROM scan_tasks") != []  # voices still works
+    work_state(rig, "voices", False)
+    assert runs_of([await next_event(runs)]) == [False]
+    assert rig.query("SELECT id FROM scan_tasks") == []
+    assert await switch(rig, 1, 1, True) == {"success": True}  # free again
+
+
+async def test_a_run_whose_executors_have_no_work_ends_with_its_pass(rig):
+    rig.world.rows = [rig.row("a", 1, 1)]
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    await rig.run(download=False)
+    assert runs_of(drain(runs)) == [True, False] and rig.query("SELECT id FROM scan_tasks") == []
+
+
+async def test_a_recount_an_event_asks_for_while_the_run_is_open_is_done_when_the_run_ends(rig):
+    rig.world.rows = [rig.row("a", 1, 1)]
+    rig.world.work = {"downloads": True}
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    await rig.run()
+    drain(runs)
+    rig.world.order.clear()
+    rig.world.rows = [rig.row("a", 1, 2)]
+    rig.probe.publish_event("composition.changed", {"series_id": rig.series_id, "rev": 2, "episodes": []})
+    await rig.bus.settled()
+    assert "composition.get" not in rig.world.order  # the plan stays the one the sync found
+    assert [(each.season, each.episode) for each in await rig.output()] == [(1, 1)]
+    updates = rig.bus.subscribe("scan.plan.updated")
+    work_state(rig, "downloads", False)
+    await next_event(updates)
+    assert [(each.season, each.episode) for each in await rig.output()] == [(1, 2)]
+
+
+async def test_a_run_found_open_after_a_restart_waits_for_its_works_again(db_path):
+    first = await build(db_path)
+    first.world.rows = [first.row("a", 1, 1)]
+    first.world.work = {"voices": True}
+    await first.run()
+    series_id, source_ids = first.series_id, first.source_ids
+    await first.runner.stop()
+
+    again = await build(db_path, series_id=series_id, source_ids=source_ids)
+    try:
+        again.world.work = {"voices": True}
+        runs = again.bus.subscribe(RUN_CHANGED)
+        again.probe.publish_event("system.started", {})
+        assert runs_of([await next_event(runs)]) == [True]
+        with pytest.raises(BusRequestError, match="not_allowed"):
+            await switch(again, 1, 1, True)
+        assert "composition.get" not in again.world.order  # the pass is not done again: only the works are waited for
+        work_state(again, "voices", False)
+        assert runs_of([await next_event(runs)]) == [False]
+        assert again.query("SELECT id FROM scan_tasks") == []
+    finally:
+        await again.runner.stop()

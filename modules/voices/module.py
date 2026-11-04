@@ -180,7 +180,7 @@ from collections import OrderedDict, defaultdict
 from core import BaseModule, BusRequestError
 from pydantic import ValidationError
 
-from core.contracts import (WORK_WITHDRAWN, WorkWithdrawn, AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
+from core.contracts import (RUN_CHANGED, WORK_STATE, WORK_WITHDRAWN, RunChanged, WorkState, WorkWithdrawn, AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
                             DubRecord, DubsSnapshot, DubStatus as S, GroupsResolveReply, GroupsResolveRequest,
                             JobStatus, Reference, ReferenceChanged, SnapshotItem, SubmitOutcome, SubmitReply,
                             VoiceSettingsDraft, VoiceSettingsSaved)
@@ -291,6 +291,11 @@ class VoicesModule(BaseModule):
         # Series with an episode that has no reference and a download or the work folder to wait for: the end of the
         # download, or the naming of the folder, asks for the plan again.
         self._deferred: set[int] = set()
+        # The series whose sync is under way: the plan of their voice-overs is the one the sync made (the snapshot);
+        # a change of the layout or a reference that comes meanwhile is planned when the run ends.
+        self._in_run: set[int] = set()
+        self._owed_plans: set[int] = set()
+        self._work_told: dict[int, bool] = {}
         super().__init__(bus)
         self._recovery = Recovery(self.log, pause=_pause, report_after=lambda: SUBMIT_RETRIES)
         self._cleanup = Cleanup(self.repo, self._output, self.log, io=self._io, request=self.request,
@@ -303,6 +308,8 @@ class VoicesModule(BaseModule):
         self.handle("voices.settings.set", self.on_settings_set)
         self.handle("voices.dispatch", self.on_dispatch, concurrent=True)
         self.handle("voices.settle", self.on_settle, concurrent=True)
+        self.handle("voices.work.get", self.on_work_get, concurrent=True)
+        self.handle(RUN_CHANGED, self.on_run_changed)
         self.handle("system.started", self.on_system_started)
         self.handle("composition.changed", self.on_composition_changed)
         self.handle("scan.reference.changed", self.on_reference_changed)
@@ -473,10 +480,26 @@ class VoicesModule(BaseModule):
     async def on_composition_changed(self, env: Envelope) -> None:
         changed = CompositionChanged.model_validate(env.payload)
         if not changed.summary_only:  # only the summaries of the sources moved: no row and no lever did
-            self._want_plan(changed.series_id)
+            self._plan_after_change(changed.series_id)
 
     async def on_reference_changed(self, env: Envelope) -> None:
-        self._want_plan(ReferenceChanged.model_validate(env.payload).series_id)
+        self._plan_after_change(ReferenceChanged.model_validate(env.payload).series_id)
+
+    def _plan_after_change(self, series_id: int) -> None:
+        if series_id in self._in_run:
+            self._owed_plans.add(series_id)
+            return
+        self._want_plan(series_id)
+
+    async def on_run_changed(self, env: Envelope) -> None:
+        run = RunChanged.model_validate(env.payload)
+        if run.active:
+            self._in_run.add(run.series_id)
+            return
+        self._in_run.discard(run.series_id)
+        if run.series_id in self._owed_plans:
+            self._owed_plans.discard(run.series_id)
+            self._want_plan(run.series_id)
 
     async def on_conform_settings_changed(self, env: Envelope) -> None:
         """The work folder may have been named: what waited for it begins, and the episodes that waited to be looked at are."""
@@ -862,11 +885,29 @@ class VoicesModule(BaseModule):
         if current is None:
             if event is E.REMOVED:
                 self._publish_event(row, E.REMOVED, None, epoch, rev)
+            await self._tell_work(row["series_id"])
             return
         status = E(current["status"])
         if (event is E.STALE and status == S.PENDING) or (event is E.MOVED and status == S.PLACED):
             status = event
         self._publish_event(current, status, current["outcome"] or current["error"], epoch, rev)
+        await self._tell_work(current["series_id"])
+
+    async def _has_work(self, series_id: int) -> bool:
+        """A voice-over a sync admitted and that is not at its end: work of the run of the series. A row a recount
+        planned outside a sync is not admitted and is no work yet."""
+        return any(row["admitted"] and row["status"] not in FINAL for row in await self.repo.for_series(series_id))
+
+    async def on_work_get(self, env: Envelope) -> dict:
+        series_id = int(env.payload["series_id"])
+        return WorkState(owner=self.name, series_id=series_id, active=await self._has_work(series_id)).model_dump()
+
+    async def _tell_work(self, series_id: int) -> None:
+        """The run of the series hears when this module's work of it begins or ends (the run owner is scan)."""
+        active = await self._has_work(series_id)
+        if self._work_told.get(series_id) != active:
+            self._work_told[series_id] = active
+            self.publish_event(WORK_STATE, WorkState(owner=self.name, series_id=series_id, active=active).model_dump())
 
     def _is_fetching(self, row: dict) -> bool:
         """Whether the download behind a voice-over has begun: its own, or the one of the file it reads."""

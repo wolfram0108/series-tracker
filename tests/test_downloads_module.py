@@ -1470,3 +1470,26 @@ async def test_what_the_plan_alone_decides_reaches_the_disk_in_a_sync_and_never_
     assert all(os.path.exists(path) for path in files) is (not synced or not files)
     if name == "task_outside_plan":
         assert len(_tasks(db_path)) == (0 if synced else tasks_before)
+
+
+@pytest.mark.asyncio
+async def test_the_run_of_a_series_hears_whether_downloads_has_work_of_it(system):
+    """A task that waits or runs is work of the run of the series (ЭТАП_11); when the last ends, the run is told."""
+    _, _, dl, probe, db_path, _ = system
+    states = probe.bus.subscribe("work.series.state")
+    assert (await probe.request("downloads.work.get", {"series_id": 2}, timeout=10))["active"] is False
+    dl.gate = asyncio.Event()
+    _add_item(db_path, "uid1", 1)
+    await probe.request("downloads.dispatch", {"series_id": 2}, timeout=10)
+    assert await _wait(lambda: len(_tasks(db_path)) == 1)
+    assert (await probe.request("downloads.work.get", {"series_id": 2}, timeout=10)) == {
+        "owner": "downloads", "series_id": 2, "active": True}
+    dl.gate.set()
+    assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "completed")
+    assert await _wait(lambda: not any(task["status"] in ("pending", "downloading", "processing", "publishing")
+                                       for task in _tasks(db_path)))
+    assert (await probe.request("downloads.work.get", {"series_id": 2}, timeout=10))["active"] is False
+    told = [(await asyncio.wait_for(states.queue.get(), 5)).payload["active"]]
+    while told[-1] is not False:  # the run hears the end of the work by its event
+        told.append((await asyncio.wait_for(states.queue.get(), 5)).payload["active"])
+    assert told == [True, False]

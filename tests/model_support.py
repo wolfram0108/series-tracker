@@ -8,8 +8,8 @@ invariants say what the mechanism guarantees whatever the operations were; a vio
 
 L1 a name a row holds is a file with the video of that row (while the file is on its way to another name it may lie aside
 or under the new one); L2 a name is held by one row; L3 no whole file lies in the library that no row holds; L4 no work file
-lies without a task; L5 a row is ready exactly when it holds a name; L6 no task is left half-way; L7 the file of a row the
-configuration took out is gone; L8 (converged) every row the plan wants has its file, under the name its number gives, with
+lies without a task; L5 a row is ready exactly when it holds a name; L6 no task is left half-way; L7 (converged) the file of a row the
+configuration took out is gone — after the sync, as the disk follows the plan in a sync alone (И-59); L8 (converged) every row the plan wants has its file, under the name its number gives, with
 its video; L10 (converged) no row owes a move and no file lies aside.
 """
 from __future__ import annotations
@@ -27,6 +27,8 @@ from modules.catalog import CatalogModule
 from modules.downloads import DownloadsModule
 from modules.renaming import RenamingModule
 from modules.scan import ScanModule
+from core import BusRequestError
+from core.contracts import RUN_CHANGED
 from scan_support import STUCK_S, row
 from series_factory import create_series, source
 from settle import path_free, settle, wait_until
@@ -84,8 +86,10 @@ class Harness:
         self.series_id = self.source_id = 0
         self.publish_gate = asyncio.Event()
         self.publish_gate.set()
+        self.at_gate = asyncio.Event()  # a whole download has come to the gate of its publication: the signal of phase 1
         self.downloader = ScriptedDownloader()
         self.armed = False  # the failures of a scenario happen after its step is reached, not on the way to it
+        self.refused = 0  # the changes refused while a run was open, made when it ended
 
     async def up(self) -> None:
         db = self.db = Database(self.db_path)
@@ -103,6 +107,8 @@ class Harness:
         self.runner = Runner(self.bus, [self.world, CatalogModule(self.bus, db),
                                         ScanModule(self.bus, db, scheduler_tick=None, table_wait_s=STUCK_S),
                                         RenamingModule(self.bus, db), self.downloads, self.probe])
+        self._runs = self.bus.subscribe(RUN_CHANGED)
+        self._open = False
         await self.runner.start()
         self.bus.publish(Envelope(topic="system.started", kind="event"))  # what run.py says when every module is up
 
@@ -118,14 +124,36 @@ class Harness:
         self.world.rows = [row(self.series_id, self.source_id, key, season, episode, link=link)
                            for key, (season, episode, link) in self.rows.items()]
 
+    def run_open(self) -> bool:
+        """Whether a sync of the series is under way, as the events of its run tell."""
+        while not self._runs.queue.empty():
+            self._open = self._runs.queue.get_nowait().payload["active"]
+        return self._open
+
+    async def when_free(self, act) -> None:
+        """A change the user makes: while a sync of the series is under way it is refused (ЭТАП_11), so the user waits
+        for the end of the run, which the works of the run reach once the world lets them, and makes it then."""
+        try:
+            await act()
+            return
+        except BusRequestError as exc:
+            if "not_allowed" not in str(exc):
+                raise
+        self.refused += 1
+        self.downloader.let_go()
+        self.publish_gate.set()
+        await self.until(lambda: not self.run_open(), "the run of the series ended")
+        await act()
+
     async def scan(self) -> None:
         self.push_rows()
-        await self.probe.request("scan.series.run", {"series_id": self.series_id}, timeout=STUCK_S * 2)
+        await self.when_free(lambda: self.probe.request("scan.series.run", {"series_id": self.series_id},
+                                                        timeout=STUCK_S * 2))
 
     async def switch(self, season: int, episode: int | None, off: bool) -> None:
         payload = {"series_id": self.series_id, "season": season, "off": off}
-        await self.probe.request("scan.output.switch", payload | ({} if episode is None else {"episode": episode}),
-                                 timeout=STUCK_S)
+        await self.when_free(lambda: self.probe.request(
+            "scan.output.switch", payload | ({} if episode is None else {"episode": episode}), timeout=STUCK_S))
 
     # --- what is there -----------------------------------------------------------------------------------------
 
@@ -208,7 +236,7 @@ def check(h: Harness, *, converged: bool) -> list[str]:
             found.append(f"L1 {label(item)} holds {name!r}, which has {files[here]!r}, not {video_of(item)!r}")
         if converged and item.get("rename_to"):
             found.append(f"L10 {label(item)} still owes a move to {item['rename_to']!r}")
-        if item["is_ignored_by_user"] or item["plan_status"] == "removed":
+        if converged and (item["is_ignored_by_user"] or item["plan_status"] == "removed"):
             found.append(f"L7 {label(item)} was taken out and still holds {name!r}")
     live_keys = {task["task_key"] for task in tasks if task["status"] in LIVE}
     owed = {item.get("rename_to") for item in items if item.get("rename_to")}

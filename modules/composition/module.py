@@ -78,7 +78,7 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from core import BaseModule
-from core.contracts import (REFERENCE_CHOICE, VOICE_PLAYER, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
+from core.contracts import (REFERENCE_CHOICE, RUN_CHANGED, VOICE_PLAYER, RunChanged, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
                             RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
@@ -133,6 +133,10 @@ class CompositionModule(BaseModule):
         self._flights: dict[int, _Flight] = {}
         self._locks: dict[int, asyncio.Lock] = {}
         self._deleted: set[int] = set()
+        # The series whose sync is under way (`scan.run.changed`), and the counts events asked for meanwhile.
+        self._frozen: set[int] = set()
+        self._owed: set[int] = set()
+        self._owed_refresh: dict[int, set[int]] = {}
         # The pages of our sources by canonical address, so that an event of `sources` finds them without a query.
         self._pages: dict[str, dict[int, int]] = {}
         self._page_of: dict[int, str] = {}
@@ -155,6 +159,7 @@ class CompositionModule(BaseModule):
         self.handle("sources.table.failed", self.on_table_failed)
         self.handle("rules.profile.changed", self.on_profile_changed)
         self.handle("voices.settings.changed", self.on_groups_changed)
+        self.handle(RUN_CHANGED, self.on_run_changed)
 
     # --- start ------------------------------------------------------------------------------
 
@@ -265,7 +270,7 @@ class CompositionModule(BaseModule):
         series_id = env.payload["series_id"]
         if series_id in self._deleted:
             raise LookupError(f"сериал {series_id} не найден")
-        self._schedule(series_id)
+        self._schedule(series_id, ordered=True)
         flight = self._flights[series_id]
         answer: asyncio.Future = asyncio.get_running_loop().create_future()
         # The count that is running began before this request; the one it is made to run again is the first to begin after.
@@ -282,8 +287,15 @@ class CompositionModule(BaseModule):
         problem = settings.validate(record)
         if problem is not None:
             raise ValueError(problem)
+        self._require_editable(record.series_id)
         await self._require_pickable(record)
         return await self._edit(record.series_id, lambda records: settings.apply_set(records, record))
+
+    def _require_editable(self, series_id: int) -> None:
+        """A lever of a series whose sync is under way is not changed: the sync works by what it found (the table of
+        what is allowed, as every owner of the series refuses)."""
+        availability.require(availability.Action.EDIT,
+                             availability.SERIES_SCANNING if series_id in self._frozen else availability.SERIES_IDLE)
 
     async def _require_pickable(self, record: SettingsSet) -> None:
         """A variant is picked as the reference, or as the first one of its group, only where the table of what is allowed
@@ -304,6 +316,7 @@ class CompositionModule(BaseModule):
         problem = settings.validate_reset(scope)
         if problem is not None:
             raise ValueError(problem)
+        self._require_editable(scope.series_id)
         return await self._edit(scope.series_id, lambda records: settings.apply_reset(records, scope))
 
     async def _edit(self, series_id: int, change) -> dict:
@@ -379,8 +392,26 @@ class CompositionModule(BaseModule):
 
     # --- the count of a series -----------------------------------------------------------------
 
-    def _schedule(self, series_id: int, refresh: Iterable[int] = ()) -> None:
+    def on_run_changed(self, env: Envelope) -> None:
+        """A sync of the series opened or closed its run. While it is open the layout stays as the sync counted it (the
+        snapshot); what an event asked for meanwhile is counted once the run is closed."""
+        run = RunChanged.model_validate(env.payload)
+        if run.active:
+            self._frozen.add(run.series_id)
+            return
+        self._frozen.discard(run.series_id)
+        if run.series_id in self._owed:
+            self._owed.discard(run.series_id)
+            self._schedule(run.series_id, self._owed_refresh.pop(run.series_id, set()))
+
+    def _schedule(self, series_id: int, refresh: Iterable[int] = (), *, ordered: bool = False) -> None:
+        """`ordered` is the count the sync itself asks for (composition.recompute); any other count of a series whose
+        run is open waits for the end of the run."""
         if series_id in self._deleted:
+            return
+        if series_id in self._frozen and not ordered:
+            self._owed.add(series_id)
+            self._owed_refresh.setdefault(series_id, set()).update(refresh)
             return
         flight = self._flights.get(series_id)
         if flight is not None:

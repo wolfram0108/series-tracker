@@ -94,6 +94,8 @@ class World(BaseModule):
         self.fs_sync_calls = 0
         self.reprocess_calls = 0
         self.settings_values = {"scan_interval_minutes": "60"}
+        # Whether each executor has work of the series when a run asks (`<owner>.work.get`); none by default.
+        self.work: dict[str, bool] = {}
         # One token per request for a table: the signal that scan has asked.
         self.asked: asyncio.Queue[str] = asyncio.Queue()
         # One token per command to download or to take the voice-overs: the signal that scan has sent it.
@@ -109,6 +111,8 @@ class World(BaseModule):
         h("voices.dispatch", self.on_dispatch)
         h("downloads.settle", self.on_dispatch)
         h("voices.settle", self.on_dispatch)
+        h("downloads.work.get", self.on_work_get)
+        h("voices.work.get", self.on_work_get)
         h("voices.settings.get", self.on_voice_settings)
         h("composition.get", self.on_layout)
         h("composition.recompute", self.on_recompute)
@@ -137,6 +141,11 @@ class World(BaseModule):
     async def on_dispatch(self, env) -> None:
         self.order.append(f"{env.topic} {env.payload['series_id']}")
         self.dispatched.put_nowait(env.topic)
+
+    async def on_work_get(self, env) -> dict:
+        owner = env.topic.split(".")[0]
+        self.order.append(f"{env.topic} {env.payload['series_id']}")
+        return {"owner": owner, "series_id": env.payload["series_id"], "active": self.work.get(owner, False)}
 
     async def on_voice_settings(self, env) -> dict:
         self.order.append("voices.settings.get")

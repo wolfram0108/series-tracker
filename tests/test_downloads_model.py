@@ -1,17 +1,18 @@
 """The mechanism row - task - file of downloads under every operation of the plan, at every step of the work, with every
 failure of the world. The invariants are in `model_support.check`; a scenario is one point of the product
 phase x operation x failure (and a few pairs of operations), explored on the real catalog, scan and downloads."""
+import asyncio
 import os
 import time
 
 import pytest
 
-from core import storage
+from core import BusRequestError, storage
 from core.db import Database
 from modules.downloads import DownloadsModule
 from modules.downloads.repository import DownloadsRepository
 from model_support import Harness, check
-from scan_support import migrated_db
+from scan_support import STUCK_S, migrated_db
 
 A1, A2, B1, B2, C1 = ("https://v/a1", "https://v/a2", "https://v/b1", "https://v/b2", "https://v/c1")
 
@@ -36,6 +37,7 @@ async def phase_1(h: Harness) -> None:
     h.publish_gate.clear()
     h.downloader.hold(B1)
     await h.scan()
+    await asyncio.wait_for(h.at_gate.wait(), STUCK_S)  # the work file is whole and waits at the gate: no event says it
     await h.until(lambda: any(name.startswith(".") for name in h.files()), "phase 1")
 
 
@@ -211,6 +213,7 @@ async def test_the_mechanism_holds_its_invariants(phase, operation, failure, tem
     real = DownloadsModule._publish
 
     async def gated(self, *args, **kwargs):
+        h.at_gate.set()
         await h.publish_gate.wait()
         return await real(self, *args, **kwargs)
 
@@ -228,7 +231,16 @@ async def test_the_mechanism_holds_its_invariants(phase, operation, failure, tem
         h.publish_gate.set()
         await h.quiesce()
         before = check(h, converged=False)
-        await h.scan()
+        for attempt in range(2):
+            try:
+                await h.scan()
+                break
+            except BusRequestError as exc:
+                # The disk changes in a sync alone (И-59), so a write the world fails once fails that sync; the user
+                # runs it again, and the next one finishes what the failed one left.
+                if attempt or "OSError" not in str(exc):
+                    raise
+                await h.quiesce()
         await h.quiesce()
         after = check(h, converged=True)
         assert not before and not after, {"before the next pass": before, "after the next pass": after}

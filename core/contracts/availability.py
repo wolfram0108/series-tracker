@@ -18,11 +18,13 @@ from .release_table import RowState
 
 class Action(StrEnum):
     SYNC = "sync"                          # of a series: fetch what the plan wants
+    EDIT = "edit"                          # of a series: save its card, its sources, the levers of its output
     CANCEL_DOWNLOAD = "cancel_download"    # of a download task
     CHOOSE_REFERENCE = "choose_reference"  # of a variant: make it the reference
     PREFER_VARIANT = "prefer_variant"      # of a variant: take it first for the voice-over of its group
 
 
+# A series is scanning from the start of a sync until every work of that run has ended (`work.RunChanged`).
 SERIES_IDLE, SERIES_SCANNING = "idle", "scanning"
 # The states of a download task are the ones of `download_tasks.status`.
 VARIANT_REFERABLE = "referable"  # a line of it is one episode that plays
@@ -31,6 +33,7 @@ VARIANT_ABSENT = "absent"        # nothing of it plays
 
 ALLOWED: dict[Action, frozenset[str]] = {
     Action.SYNC: frozenset({SERIES_IDLE}),
+    Action.EDIT: frozenset({SERIES_IDLE}),
     Action.CANCEL_DOWNLOAD: frozenset({"pending", "downloading", "processing"}),
     Action.CHOOSE_REFERENCE: frozenset({VARIANT_REFERABLE}),
     Action.PREFER_VARIANT: frozenset({VARIANT_REFERABLE, VARIANT_PLAYABLE}),

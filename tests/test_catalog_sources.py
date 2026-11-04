@@ -531,3 +531,28 @@ async def test_a_series_with_children_of_other_modules_is_still_deleted_with_its
     await CatalogRepository(db).delete_series(made.series_id)
     assert await db.fetch_all("SELECT id FROM series_sources") == []
     assert await db.fetch_all("SELECT id FROM series") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("busy_by", ["sync", "library", None])
+async def test_the_card_and_the_sources_of_a_busy_series_are_not_changed(system, busy_by):
+    """A series is busy from the start of its sync until every work of the run has ended (ЭТАП_11): its card and its
+    sources are refused with the reason of the table of what is allowed; a free series takes them."""
+    _, probe = system
+    made = await create_series(probe, sources=[source(url=RUCHIME)])
+    if busy_by:
+        probe.publish_event("series.busy.contribution", {"source": busy_by, "series_id": made.series_id, "busy": True})
+        await probe.request("catalog.series.get", {"series_id": made.series_id}, timeout=5)  # the event was heard
+    [own] = (await probe.request("catalog.series.get", {"series_id": made.series_id}, timeout=5))["sources"]
+    calls = [
+        ("catalog.series.update", {"series_id": made.series_id, "fields": {"season": "2"}}),
+        ("catalog.sources.add", {"series_id": made.series_id, "source": source(url=RUCHIME + "-2")}),
+        ("catalog.sources.update", {"series_id": made.series_id, "source_id": own["id"], "fields": {"voice_name": "X"}}),
+        ("catalog.sources.remove", {"series_id": made.series_id, "source_id": own["id"]}),
+    ]
+    for topic, payload in calls:
+        if busy_by:
+            with pytest.raises(BusRequestError, match="not_allowed"):
+                await probe.request(topic, payload, timeout=5)
+        else:
+            await probe.request(topic, payload, timeout=5)

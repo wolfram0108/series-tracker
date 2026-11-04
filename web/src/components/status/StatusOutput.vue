@@ -18,6 +18,8 @@ const output = useSeriesOutput(props.seriesId, "video")
 const series = useSeriesStore()
 // The state of the series for the table of what is allowed: a pass is on when the core reports it (every window hears it)
 // or when the call of this window has not been answered yet.
+// A series whose sync is under way is busy until every work of the run has ended: no lever is changed meanwhile.
+const seriesBusy = computed(() => !!series.byId(props.seriesId)?.is_busy)
 const passing = computed(() => output.syncing.value || (series.byId(props.seriesId)?.statuses ?? []).includes("scanning"))
 // While the table is not known the core decides; a layout that did not load can be mended by a pass.
 const canSync = computed(() => {
@@ -69,11 +71,11 @@ const switchSeason = (season: number, off: boolean) => changed(output.switchTo(s
       />
       <Button
         :label="t('output.reprocess')" :icon="output.reprocessing.value ? 'pi pi-spin pi-spinner' : 'pi pi-pencil'"
-        size="small" severity="warn" :disabled="output.reprocessing.value" @click="output.reprocess()"
+        size="small" severity="warn" :disabled="output.reprocessing.value || seriesBusy" @click="output.reprocess()"
       />
       <Button
         :label="t('output.adopt')" :icon="output.adopting.value ? 'pi pi-spin pi-spinner' : 'pi pi-sparkles'"
-        size="small" severity="info" :disabled="output.adopting.value" @click="output.adopt()"
+        size="small" severity="info" :disabled="output.adopting.value || seriesBusy" @click="output.adopt()"
       />
     </div>
 
@@ -87,15 +89,15 @@ const switchSeason = (season: number, off: boolean) => changed(output.switchTo(s
     <div v-else-if="seriesViews.length === 0" class="empty-state">{{ t("output.empty") }}</div>
     <OutputLevel
       v-else :key="renders" scope="series" :title="seriesName" :views="seriesViews" :levers="levelLevers(null)"
-      :specs="output.specs.value" :busy="output.busy.value" @set="setLever" @reset="resetLever"
+      :specs="output.specs.value" :busy="output.busy.value || seriesBusy" @set="setLever" @reset="resetLever"
     >
       <OutputLevel
         v-for="season in shownSeasons" :key="season.season" scope="season" :season="season.season"
         :title="t('output.season', { n: season.season })" :views="season.episodes" :levers="levelLevers(season.season)"
-        :specs="output.specs.value" :busy="output.busy.value" @set="setLever" @reset="resetLever" @switch="switchSeason"
+        :specs="output.specs.value" :busy="output.busy.value || seriesBusy" @set="setLever" @reset="resetLever" @switch="switchSeason"
       >
         <OutputEpisode
-          v-for="view in season.shown" :key="view.episode" :view="view" :specs="output.specs.value" :busy="output.busy.value"
+          v-for="view in season.shown" :key="view.episode" :view="view" :specs="output.specs.value" :busy="output.busy.value || seriesBusy"
           :file-names="fileNamesOf(output.names.value, view.season, view.episode)"
           @set="setLever" @reset="resetLever" @switch="switchEpisode"
         />

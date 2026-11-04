@@ -1463,3 +1463,32 @@ async def test_a_variant_is_judged_by_the_lines_of_the_level_it_is_set_for_as_th
                     target=group_target(choice(source_id)["group"]), season=1, episode=2)
     with pytest.raises(BusRequestError, match="not_allowed"):  # a season that has no line of the variant
         await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=2)
+
+
+# --- a sync of the series is one run: its layout is the snapshot, its levers are not changed (ЭТАП_11) ---------------
+
+@pytest.mark.asyncio
+async def test_a_series_whose_sync_is_under_way_keeps_its_layout_and_refuses_its_levers_until_the_run_ends(system):
+    from core.contracts import RUN_CHANGED
+    s = system
+    s.rules.profiles[7] = lambda text: {key: value for key, value in lecturer(text).items() if key != "season"}
+    series_id = await laid_out(s, page(*season_rows(1, range(1, 3))))
+    before = await s.get(series_id)
+    s.probe.publish_event(RUN_CHANGED, {"series_id": series_id, "active": True})
+    await s.bus.settled()
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await s.set(series_id, "voice.take", False, target=group_target("Ruchime"))
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await s.reset(series_id)
+
+    s.catalog.set_season(series_id, "2")  # an event that would count the layout again
+    s.profile_changed()
+    await s.bus.settled()
+    held = await s.get(series_id)
+    assert held.rev == before.rev and {r.season for r in held.rows} == {1}  # the snapshot stands
+
+    reply = await s.probe.request("composition.recompute", {"series_id": series_id}, timeout=STUCK_S)
+    assert reply["rev"] >= before.rev  # the count the sync itself asks for is done
+    await s.counted(lambda: s.probe.publish_event(RUN_CHANGED, {"series_id": series_id, "active": False}))
+    await s.bus.settled()
+    assert {r.season for r in (await s.get(series_id)).rows} == {2}  # what was owed is counted once the run is over

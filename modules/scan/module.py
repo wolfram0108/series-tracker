@@ -49,6 +49,11 @@ Events (outgoing):
       of the scheduler (the contract of the old scanner_status_update).
   series.status.contribution — the fold of scanning/error (R-11); the carrier of the error is scan_tasks.status='error'.
   series.purged {series_id, owner} — report: the tables of the series are cleaned.
+  scan.run.changed (RunChanged) — a sync of the series opened or closed its run: open from the start of the sync until
+      every executor (downloads, voices) has no work of the series left (events work.series.state, queries
+      <owner>.work.get). While it is open the series is busy (Action.EDIT and SYNC are refused, series.busy.contribution
+      {source: sync}) and its plan stays as the sync found it: a recount an event asks for is done when the run closes.
+      An open run is kept in scan_tasks (phase=working) and taken up again after a restart.
   scan.series.progress (SeriesReadProgress) — how far the read of a page is that a scan of the series waits for, per
       source, with the rate; `active` false ends it (read, failed or given up). The card of the series shows it.
 
@@ -79,8 +84,9 @@ from datetime import datetime, timedelta, timezone
 
 from core import BaseModule, BusRequestError, torrent_source
 from core.deadlines import TABLE_WAIT_S
-from core.contracts import (availability, CompositionReply, OutputSwitch, Reference, ReferenceChanged, SeriesReadProgress,
-                            SeriesSource, SourceStatus, TableProgress, VoiceSettingsView)
+from core.contracts import (RUN_CHANGED, WORK_STATE, availability, CompositionReply, OutputSwitch, Reference,
+                            ReferenceChanged, RunChanged, SeriesReadProgress, SeriesSource, SourceStatus, TableProgress,
+                            VoiceSettingsView, WorkState)
 from core.db import Database
 from core.envelope import Envelope
 from core.voice_names import Groups
@@ -93,6 +99,8 @@ from .torrent import TorrentScan
 from .sync import TableSignals
 
 _NO_HANDLER = "нет обработчика"
+# The executors whose works a run of a video series waits for (`<owner>.work.get`, events `work.series.state`).
+RUN_EXECUTORS = ("downloads", "voices")
 
 
 @dataclass(frozen=True)
@@ -127,6 +135,11 @@ class ScanModule(BaseModule):
         self._signals = TableSignals(announce=self._announce_reading)
         self._locks: dict[int, asyncio.Lock] = {}
         self._running: set[int] = set()
+        # The open runs: series -> its command in scan_tasks, the executors that still have work of it, and the
+        # series whose recount an event asked for while its run was open (counted when the run ends).
+        self._runs: dict[int, int] = {}
+        self._working: dict[int, set[str]] = {}
+        self._owed: set[int] = set()
         self._owned: set[int] = set()  # the tasks of scan_tasks that the scans running here keep
         self._aborted: set[int] = set()
         self._scan_all_running = False
@@ -153,6 +166,7 @@ class ScanModule(BaseModule):
         self.handle("sources.table.ready", self.on_table_ready)
         self.handle("sources.table.failed", self.on_table_failed)
         self.handle("sources.table.progress", self.on_table_progress)
+        self.handle(WORK_STATE, self.on_work_state)
         self.handle("torrents.queue.changed", self.on_queue_changed)
         self.handle("series.deleted", self.on_series_deleted)
         self.handle("settings.changed", self.on_settings_changed)
@@ -219,6 +233,7 @@ class ScanModule(BaseModule):
         new release; what the output shows of it goes out as references. Switching a season on switches on all of it."""
         request = OutputSwitch.model_validate(env.payload)
         series_id = request.series_id
+        self._require_idle(series_id, availability.Action.EDIT)
 
         async def apply() -> None:
             series = await self.request("catalog.series.get", {"series_id": series_id})
@@ -310,6 +325,10 @@ class ScanModule(BaseModule):
         async with self._lock(series_id):
             await self.repo.delete_for_series(series_id)
         self._locks.pop(series_id, None)
+        if self._runs.pop(series_id, None) is not None:  # its works go with the series: the run is over
+            self._working.pop(series_id, None)
+            self._owed.discard(series_id)
+            self._announce_run(series_id, False)
         self.publish_event("series.purged",
                            {"series_id": series_id, "owner": self.name})
 
@@ -385,7 +404,11 @@ class ScanModule(BaseModule):
 
     async def _follow_layout(self, series_id: int) -> None:
         """Counts the references of a video series again after an event; a failure is logged, the next event or the
-        next scan counts again."""
+        next scan counts again. While a run of the series is open its plan is the one the sync found (the snapshot):
+        the recount is owed and done when the run ends."""
+        if series_id in self._runs or series_id in self._running:
+            self._owed.add(series_id)
+            return
         try:
             series = await self.request("catalog.series.get", {"series_id": series_id})
             if series.get("kind") == "video":
@@ -434,6 +457,8 @@ class ScanModule(BaseModule):
             if not video:  # a torrent scan writes the task of its own plan
                 await self.repo.delete_task(intent)
                 intent = None
+            else:
+                self._announce_run(series_id, True)
             if video:
                 if not any(each.parser_profile_id for each in _sources_of(series)):
                     raise SyncFailed(reason("scan_no_profile"))
@@ -445,11 +470,12 @@ class ScanModule(BaseModule):
             await self.repo.delete_error_tasks(series_id)
             if video:
                 result = await self._sync_video(series, download, inventory)
-                await self.repo.delete_task(intent)
+                await self._hold_run(series_id, intent)
+                intent = None  # the run keeps the command now: it ends when the works of the run end
             else:
                 await self._reprocess_names(series_id)
                 result = await self._torrents.scan(series, _torrent_source(series), force)
-            self._contribute(series_id, scanning=False, error=False)
+            self._contribute(series_id, scanning=series_id in self._runs, error=False)
             # Многосезонный агрегат TMDB: реальные сезоны могли измениться
             # (новый сезон/файлы) — пересчитать число серий по сезонам.
             self.send_command("metadata.seasons.recompute",
@@ -459,6 +485,7 @@ class ScanModule(BaseModule):
             self.log.info("скан сериала %d прерван: %s", series_id, exc)
             if intent is not None:
                 await self.repo.delete_task(intent)
+            self._announce_run(series_id, False)
             self._contribute(series_id, scanning=False, error=False)
             return {"changed": False, "aborted": True}
         except Exception as exc:
@@ -472,6 +499,7 @@ class ScanModule(BaseModule):
             elif alive and not await self._has_error_task(series_id):
                 task_id = await self.repo.create_task(series_id, [])
                 await self.repo.set_error(task_id, str(exc))
+            self._announce_run(series_id, False)
             self._contribute(series_id, scanning=False, error=True)
             raise
         finally:
@@ -588,10 +616,71 @@ class ScanModule(BaseModule):
             if isinstance(answer, BaseException):
                 raise answer
 
-    def _require_idle(self, series_id: int) -> None:
-        """A scan of a series that is being scanned is refused by the table of what is allowed, as every module refuses."""
-        availability.require(availability.Action.SYNC,
-                             availability.SERIES_SCANNING if series_id in self._running else availability.SERIES_IDLE)
+    def _state(self, series_id: int) -> str:
+        return availability.SERIES_SCANNING if series_id in self._running or series_id in self._runs \
+            else availability.SERIES_IDLE
+
+    def _require_idle(self, series_id: int, action: availability.Action = availability.Action.SYNC) -> None:
+        """An action on a series that is being synchronized is refused by the table of what is allowed, as every module
+        refuses: a sync is busy from its start until every work of its run has ended."""
+        availability.require(action, self._state(series_id))
+
+    # --- the run: a sync and every work it gave out ---------------------------------------------------------------
+
+    def _announce_run(self, series_id: int, active: bool) -> None:
+        """The modules hear the run (the snapshot, the refusals); the card of the series is busy for all of it."""
+        self.publish_event(RUN_CHANGED, RunChanged(series_id=series_id, active=active).model_dump())
+        self.publish_event("series.busy.contribution", {"source": "sync", "series_id": series_id, "busy": active})
+
+    async def _hold_run(self, series_id: int, intent: int) -> None:
+        """The pass of the sync is over and its works are given out: the run stays open, with its command written down,
+        until each executor says it has no work of the series left. An executor that has none at once closes nothing."""
+        task = await self.repo.get_task(intent)
+        await self.repo.update_results(intent, {**(task["results_data"] if task else {}), "phase": "working"})
+        self._runs[series_id] = intent
+        await self._ask_working(series_id)
+
+    async def _ask_working(self, series_id: int) -> None:
+        """What each executor has of the series now; the run waits for those that have work (their events end it)."""
+        working: set[str] = set()
+        for owner in RUN_EXECUTORS:
+            try:
+                state = WorkState.model_validate(await self.request(f"{owner}.work.get", {"series_id": series_id}))
+            except BusRequestError as exc:
+                if _NO_HANDLER in str(exc):
+                    continue  # nobody does that kind of work in this process
+                raise
+            if state.active:
+                working.add(owner)
+        self._working[series_id] = working | self._working.get(series_id, set())
+        if not self._working[series_id]:
+            await self._close_run(series_id)
+
+    async def on_work_state(self, env: Envelope) -> None:
+        state = WorkState.model_validate(env.payload)
+        if state.series_id not in self._runs:
+            return
+        working = self._working.setdefault(state.series_id, set())
+        if state.active:
+            working.add(state.owner)
+            return
+        working.discard(state.owner)
+        if not working:
+            await self._close_run(state.series_id)
+
+    async def _close_run(self, series_id: int) -> None:
+        """Every work of the run has ended: the command goes, the series is free, and a recount an event asked for
+        while the run was open is done now (a plan; the disk follows it at the next sync)."""
+        intent = self._runs.pop(series_id, None)
+        self._working.pop(series_id, None)
+        if intent is not None:
+            await self.repo.delete_task(intent)
+        self.log.info("сериал %d: синхронизация завершена — все её работы закончились", series_id)
+        self._announce_run(series_id, False)
+        self._contribute(series_id, scanning=series_id in self._running, error=False)
+        if series_id in self._owed:
+            self._owed.discard(series_id)
+            await self._follow_layout(series_id)
 
     async def _fingerprint(self, series_id: int) -> tuple:
         """The references and the rows of the plan as stored: two equal fingerprints mean the run changed nothing."""
@@ -744,6 +833,15 @@ class ScanModule(BaseModule):
         if task["id"] in self._owned:  # the scan of this very command is running in this process
             return
         series_id = task["series_id"]
+        if task["results_data"].get("phase") == "working":  # the pass was over: the run waits for its works again
+            self._runs[series_id] = task["id"]
+            self._announce_run(series_id, True)
+            self._contribute(series_id, scanning=True, error=False)
+            try:
+                await self._ask_working(series_id)
+            except Exception:  # noqa: BLE001 - the run stays open; an event of an executor or the next start closes it
+                self.log.exception("сериал %d: работы прогона не опрошены после перезапуска", series_id)
+            return
         if series_id in self._running:  # a command that came after the restart is the scan of the series already
             await self.repo.delete_task(task["id"])
             return
@@ -819,6 +917,9 @@ class ScanModule(BaseModule):
                 if await self._pipeline_busy(s["id"]):
                     self.log.info("автоскан: сериал %d пропущен — у него "
                                   "активные задачи конвейера", s["id"])
+                    continue
+                if self._state(s["id"]) != availability.SERIES_IDLE:
+                    self.log.info("автоскан: сериал %d пропущен — идёт его синхронизация", s["id"])
                     continue
                 try:
                     await self._run_series(s["id"], force, inventory=True)

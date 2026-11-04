@@ -78,7 +78,7 @@ import asyncio
 import os
 
 from core import BaseModule, sanitize_name, sanitize_path
-from core.contracts import SourceEvent
+from core.contracts import SourceEvent, availability
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
@@ -244,9 +244,16 @@ class CatalogModule(BaseModule):
             self._publish_source("added", series_id, source["id"])
         return row
 
+    def _require_free(self, series_id: int) -> None:
+        """The card and the sources of a busy series are not changed: a sync, a move or a renaming of it is under way
+        and works by what it found (the table of what is allowed, as every owner of the series refuses)."""
+        availability.require(availability.Action.EDIT,
+                             availability.SERIES_SCANNING if self._busy.get(series_id) else availability.SERIES_IDLE)
+
     async def on_series_update(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
         fields = env.payload["fields"]
+        self._require_free(series_id)
         refuse_removed_fields(fields)
         if "sources" in fields:
             raise ValueError("поле сериала 'sources' не пишется: источники меняются запросами catalog.sources.*")
@@ -290,6 +297,7 @@ class CatalogModule(BaseModule):
     async def on_source_add(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
         await self._require_series(series_id)
+        self._require_free(series_id)
         draft = checked_fields(env.payload["source"])
         refuse_mixed_kinds([each["source_type"] for each in await self.repo.list_sources(series_id)]
                            + [draft["source_type"]])
@@ -302,6 +310,7 @@ class CatalogModule(BaseModule):
         source_id = env.payload["source_id"]
         stored = await self._require_source(source_id)
         await self._require_own(stored, env.payload.get("series_id"))
+        self._require_free(stored["series_id"])
         values = checked_fields(env.payload["fields"], stored)
         if "source_type" in values:
             others = [each["source_type"] for each in await self.repo.list_sources(stored["series_id"])
@@ -318,6 +327,7 @@ class CatalogModule(BaseModule):
         source_id = env.payload["source_id"]
         stored = await self._require_source(source_id)
         await self._require_own(stored, env.payload.get("series_id"))
+        self._require_free(stored["series_id"])
         if not await self.repo.remove_source(source_id):
             # Either the last source, or the series took it along between the read and the delete.
             await self._require_source(source_id)
