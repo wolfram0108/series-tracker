@@ -356,8 +356,9 @@ async def test_delete_cascade_by_owners(db_path, tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("series_id", [1, 2])
-async def test_update_without_path_change_asks_renaming_whatever_the_kind(system, series_id):
-    """What renaming does with a video and a torrent series is its own; the gateway does not branch or start a scan."""
+async def test_update_without_path_change_touches_no_file_whatever_the_kind(system, series_id):
+    """A save changes the card and the plan only: the files follow it at the next sync (И-59), so the gateway asks no
+    renaming, no relocation and no scan."""
     bus, db, client, neighbours = system
     spy = bus.subscribe("#")
     resp = await client.post(f"/api/series/{series_id}", json={
@@ -366,8 +367,7 @@ async def test_update_without_path_change_asks_renaming_whatever_the_kind(system
     row = await db.fetch_one("SELECT name FROM series WHERE id=?", (series_id,))
     assert row["name"] == "Переименован"
     await settle(bus, neighbours)  # the command is background work of the gateway: done when the bus is quiet
-    assert ("reprocess", {"series_id": series_id}) in neighbours.calls
-    assert all(c[0] != "relocate" for c in neighbours.calls)
+    assert all(c[0] not in ("reprocess", "relocate") for c in neighbours.calls)
     # the layout of a video series is counted again on series.updated; the gateway starts no sync
     assert "scan.series.run" not in topics(spy)
 

@@ -500,12 +500,12 @@ class VoicesModule(BaseModule):
         rows = await self.repo.for_series(int(env.payload["series_id"]))
         return {"tracks": [{"dub_id": row["id"], "season": row["season"], "episode": row["episode"], "part": row["part"],
                             "label": row["voice_label"], "path": row["output_path"], "aligned_to": row.get("aligned_to"),
-                            "ref_uid": row["ref_uid"]} for row in rows if row["status"] == S.PLACED]}
+                            "ref_uid": row["ref_uid"], "ref_path": row["ref_path"]} for row in rows if row["status"] == S.PLACED]}
 
     async def on_tracks_packed(self, env: Envelope) -> None:
         """The tracks went into the container of their episode: their own files are gone, the container holds them."""
         dub_ids = [int(each) for each in env.payload.get("dub_ids", [])]
-        await self.repo.mark_packed(dub_ids, env.payload["container"])
+        await self.repo.mark_packed(dub_ids, env.payload["container"], env.payload.get("aligned_to") or "")
         for dub_id in dub_ids:
             row = await self.repo.get(dub_id)
             if row is not None:

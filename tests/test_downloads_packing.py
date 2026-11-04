@@ -37,6 +37,9 @@ class FakeVoices(BaseModule):
 
     async def on_packed(self, env):
         self.packed.append(dict(env.payload))
+        for track in self.tracks:  # as voices records it: the track lives in the container, aligned to its video
+            if track["dub_id"] in env.payload["dub_ids"]:
+                track.update(path=None, ref_path=env.payload["container"], aligned_to=env.payload["aligned_to"])
 
 
 @pytest.fixture
@@ -68,7 +71,7 @@ def place(db_path, uid, **columns):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("order", [[OWN, DUB], [DUB, OWN]])
-@pytest.mark.parametrize("placed", ["none", "same", "other"])
+@pytest.mark.parametrize("placed", ["none", "same", "other", "legacy"])
 @pytest.mark.parametrize("displaced", ["none", "same", "other"])
 async def test_a_track_goes_into_the_container_while_it_is_aligned_to_the_video_of_the_winner(rig, displaced, placed, order):
     fake, voices, packer, probe, db_path, media_dir = rig
@@ -87,11 +90,14 @@ async def test_a_track_goes_into_the_container_while_it_is_aligned_to_the_video_
     sidecar = None
     if placed != "none":
         sidecar = put(media_dir, f"e01 2160p.{DUB}.ru.flac", b"track")
+        # A legacy track was aligned before the identity was recorded: its reference is the winner itself.
         voices.tracks = [{"dub_id": 5, "season": 1, "episode": 1, "part": 0, "label": DUB, "path": sidecar,
-                          "aligned_to": SAME if placed == "same" else OTHER, "ref_uid": "win"}]
+                          "aligned_to": {"same": SAME, "other": OTHER, "legacy": ""}[placed], "ref_uid": "win",
+                          "ref_path": os.path.join(media_dir, "e01 2160p.mp4")}]
     elif displaced != "none":
         voices.tracks = [{"dub_id": 5, "season": 1, "episode": 1, "part": 0, "label": DUB, "path": None,
-                          "aligned_to": SAME if displaced == "same" else OTHER, "ref_uid": "old"}]
+                          "aligned_to": SAME if displaced == "same" else OTHER, "ref_uid": "old",
+                          "ref_path": os.path.join(media_dir, "e01 1080p.mkv")}]
     fake.references = [{"season": 1, "episode": 1, "part": None, "mark": "by_level", "source_id": 7, "row_key": "vk:win",
                         "player": "vk", "voice_group": OWN, "height": 2160, "reason": None}]
     fake.orders = [{"season": 1, "voices": [{"label": label, "episodes": "1"} for label in order]}]
@@ -99,13 +105,13 @@ async def test_a_track_goes_into_the_container_while_it_is_aligned_to_the_video_
     reply = await probe.request("downloads.pack", {"series_id": 2}, timeout=10)
 
     # The rule, told on its own: the dub is in while voices has it aligned to the winner's video and a copy of it is there.
-    dub_in = placed == "same" or (placed == "none" and displaced == "same")
+    dub_in = placed in ("same", "legacy") or (placed == "none" and displaced == "same")
     expected = [label for label in order if label == OWN or (label == DUB and dub_in)]
     name, identity, tracks = packer.builds[-1]
     assert reply["packed"] == 1 and identity == SAME and [label for label, _, _ in tracks] == expected
     if dub_in:
         source = dict((label, path) for label, path, _ in tracks)[DUB]
-        assert source == (os.path.basename(sidecar) if placed == "same" else "e01 1080p.mkv")  # the fresh one wins
+        assert source == (os.path.basename(sidecar) if sidecar else "e01 1080p.mkv")  # the fresh one wins
     left = sorted(os.listdir(media_dir))
     assert "e01 2160p.mkv" in left and "e01 2160p.mp4" not in left and "e01 1080p.mkv" not in left
     if sidecar:
@@ -114,8 +120,8 @@ async def test_a_track_goes_into_the_container_while_it_is_aligned_to_the_video_
     assert items["win"]["final_filename"] == "e01 2160p.mkv" and items["win"]["status"] == "completed"
     if displaced != "none":
         assert items["old"]["final_filename"] is None
-    told = [dub for each in voices.packed for dub in each["dub_ids"]]
-    assert told == ([5] if dub_in else [])
+    told = [(dub, each["aligned_to"], each["container"]) for each in voices.packed for dub in each["dub_ids"]]
+    assert told == ([(5, SAME, os.path.join(media_dir, "e01 2160p.mkv"))] if dub_in else [])
 
 
 @pytest.mark.asyncio
@@ -127,7 +133,7 @@ async def test_a_container_that_is_what_the_plan_asks_is_left_alone_and_one_that
     _add_item(db_path, "win", 1, status="completed", filename="e01.mkv")
     place(db_path, "win", season=1, source_id=7, row_key="vk:win")
     voices.tracks = [{"dub_id": 5, "season": 1, "episode": 1, "part": 0, "label": DUB, "path": None,
-                      "aligned_to": SAME, "ref_uid": "win"}]
+                      "aligned_to": SAME, "ref_uid": "win", "ref_path": path}]
     fake.references = [{"season": 1, "episode": 1, "part": None, "mark": "by_level", "source_id": 7, "row_key": "vk:win",
                         "player": "vk", "voice_group": OWN, "height": 2160, "reason": None}]
     for order, expected in [([OWN, DUB], {"unchanged": 1}), ([DUB, OWN], {"packed": 1}), ([DUB, OWN], {"unchanged": 1})]:
@@ -136,6 +142,29 @@ async def test_a_container_that_is_what_the_plan_asks_is_left_alone_and_one_that
         assert {key: value for key, value in reply.items() if value} == expected
     assert [label for label, _, _ in packer.builds[-1][2]] == [DUB, OWN]
     assert sorted(os.listdir(media_dir)) == ["e01.mkv"]
+    assert [each["dub_ids"] for each in voices.packed] == [[5]]  # told once: by the rebuild, not by the slots left alone
     voices.tracks = []  # the voice-over left the plan: the next packing takes its track out
     await probe.request("downloads.pack", {"series_id": 2}, timeout=10)
     assert [label for label, _, _ in packer.builds[-1][2]] == [OWN]
+
+
+@pytest.mark.asyncio
+async def test_a_container_left_alone_brings_the_record_of_its_tracks_into_step_with_itself(rig):
+    """A track packed before its identity was recorded (or whose record drifted) is recorded as the container holds it, so
+    that a later change of the resolution of the same video keeps it (ЭТАП_11, п. 5); a record in step is not told."""
+    fake, voices, packer, probe, db_path, media_dir = rig
+    path = put(media_dir, "e01.mkv", b"https://v/win")
+    await packer.build(path + ".tmp", path, SAME, [AudioIn(OWN, path, 0, SAME, own=True), AudioIn(DUB, path, 1, SAME)])
+    os.replace(path + ".tmp", path)
+    _add_item(db_path, "win", 1, status="completed", filename="e01.mkv")
+    place(db_path, "win", season=1, source_id=7, row_key="vk:win")
+    voices.tracks = [{"dub_id": 5, "season": 1, "episode": 1, "part": 0, "label": DUB, "path": None,
+                      "aligned_to": "", "ref_uid": "win", "ref_path": path}]
+    fake.references = [{"season": 1, "episode": 1, "part": None, "mark": "by_level", "source_id": 7, "row_key": "vk:win",
+                        "player": "vk", "voice_group": OWN, "height": 2160, "reason": None}]
+    fake.orders = [{"season": 1, "voices": [{"label": label, "episodes": "1"} for label in [OWN, DUB]]}]
+    for _ in range(2):
+        reply = await probe.request("downloads.pack", {"series_id": 2}, timeout=10)
+        assert {key: value for key, value in reply.items() if value} == {"unchanged": 1}
+    assert [(each["dub_ids"], each["aligned_to"]) for each in voices.packed] == [([5], SAME)]
+    assert len(packer.builds) == 1  # only the build of the fixture: nothing was rebuilt

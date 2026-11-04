@@ -201,7 +201,8 @@ async def test_composition_routes_by_the_kind_of_the_series(system):
     # a video series: the layout of composition as it is; the plan and the scan are not mixed in
     resp = await client.get("/api/series/2/composition")
     assert resp.status_code == 200
-    assert resp.json() == {"series_id": 2, "rev": 2, "rows": [], "sources": [], "levels": [], "settings": [], "levers": [], "availability": {}}
+    assert resp.json() == {"series_id": 2, "rev": 2, "rows": [], "sources": [], "levels": [], "settings": [], "levers": [], "availability": {},
+                           "voice_orders": []}
     assert ("composition.get",
             {"series_id": 2, "include_excluded": False, "sources_only": False}) in neighbours.calls
     assert not any(call[0] in ("torrents.composition", "scan.series.prepare") and call[1]["series_id"] == 2

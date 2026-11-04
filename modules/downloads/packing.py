@@ -107,11 +107,12 @@ class Packing:
             for track in (contents.audio if contents else []):
                 if not track.own and track.aligned_to == identity and track.label not in sources:
                     sources[track.label] = AudioIn(track.label, path, track.index, identity)
-        placed, wanted = [], set()
+        placed, wanted, synchronous = [], set(), []
         for track in tracks:
             if track["aligned_to"] != identity and not (not track["aligned_to"] and track["ref_uid"] == winner["unique_id"]):
                 continue
             wanted.add(track["label"])
+            synchronous.append(track)
             if track["path"] and await storage.call(os.path.isfile, track["path"]):
                 sources[track["label"]] = AudioIn(track["label"], track["path"], 0, identity)
                 placed.append(track)
@@ -123,8 +124,12 @@ class Packing:
         target_name = os.path.splitext(winner["final_filename"])[0] + CONTAINER_EXT
         target = os.path.join(base, target_name)
         left = [row for row in losers if row["final_filename"] and row["final_filename"] != target_name]
+        inside = [track for track in synchronous if track["label"] in labels and track["label"] != own_label]
         if (winner["final_filename"] == target_name and held.video == identity and held.labels == labels
                 and not placed and not left and not [row for row in losers if row["final_filename"] == target_name]):
+            # The record of voices follows the container, which is the truth of what it holds.
+            await self._tell_packed(series, target, identity,
+                                    [track for track in inside if track["aligned_to"] != identity or track["ref_path"] != target])
             return "unchanged"
         staging = os.path.join(os.path.dirname(target), f"{PACK_PREFIX}{winner['unique_id']}{CONTAINER_EXT}")
         async with self._guard(target):
@@ -135,19 +140,24 @@ class Packing:
                 return "failed"
             await storage.call(os.replace, staging, target, owns=target)
             await self._repo.take_over_name(winner["unique_id"], target_name, [row["unique_id"] for row in losers])
-        if tracks:
-            await self._ask("voices.tracks.packed", {"series_id": series["id"], "container": target,
-                                                     "dub_ids": [track["dub_id"] for track in tracks
-                                                                 if track["label"] in labels and track["label"] != own_label]})
-        for leftover in {os.path.join(base, winner["final_filename"]), *[os.path.join(base, row["final_filename"])
-                                                                          for row in losers if row["final_filename"]],
-                         *[track["path"] for track in placed]} - {target}:
+        leftovers = {os.path.join(base, winner["final_filename"]), *[os.path.join(base, row["final_filename"])
+                                                                      for row in losers if row["final_filename"]],
+                     *[track["path"] for track in placed]} - {target}
+        await self._tell_packed(series, target, identity, inside)
+        for leftover in leftovers:
             await storage.call(_remove_quietly, leftover, owns=leftover)
         if winner["final_filename"] != target_name:
             self._publish("downloads.item.renamed", {"series_id": series["id"], "unique_id": winner["unique_id"],
                                                      "filename": target_name})
         self._log.info("серия %s: контейнер %s собран — %s", series["id"], target_name, ", ".join(labels))
         return "packed"
+
+    async def _tell_packed(self, series: dict, target: str, identity: str, inside: list[dict]) -> None:
+        """The tracks are in the container, aligned to its video: voices records both, so that a later change of the
+        resolution of the same video keeps them (ЭТАП_11, п. 5)."""
+        if inside:
+            await self._ask("voices.tracks.packed", {"series_id": series["id"], "container": target, "aligned_to": identity,
+                                                     "dub_ids": [track["dub_id"] for track in inside]})
 
 
 def _remove_quietly(path: str) -> None:

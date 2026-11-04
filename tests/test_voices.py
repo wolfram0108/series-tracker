@@ -1105,10 +1105,7 @@ async def test_a_track_the_user_deleted_is_not_made_again(dubs):
 @pytest.mark.asyncio
 async def test_a_replaced_reference_removes_the_tracks_and_the_voices_start_over(dubs):
     probe, neighbours, bus, sub, ref = await placed_set(dubs)
-    new_ref = os.path.join(neighbours.library, "Series s01e01 2160p.mp4")
-    touch(new_ref)
-    neighbours.uids[1] = "u1-new"
-    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    new_ref = another_video(neighbours)
     # The old file is still there with the winner beside it: the winner is the reference.
     neighbours.extra_items.append({"unique_id": "u1", "season": 1, "episode_start": 1, "part": None,
                                    "source_url": "x", "status": "completed", "superseded_by": "u1-new",
@@ -1137,10 +1134,7 @@ async def test_the_result_of_a_job_for_a_replaced_reference_is_ignored(dubs):
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     old_job = job_done(neighbours, "job-1")
-    new_ref = os.path.join(neighbours.library, "Series s01e01 2160p.mp4")
-    touch(new_ref)
-    neighbours.uids[1] = "u1-new"
-    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    another_video(neighbours)
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
     await statuses_until(sub, ["stale", "stale"])
     probe.publish_event("conform.job.finished", old_job)
@@ -1415,10 +1409,7 @@ async def test_a_waiting_voice_over_is_taken_for_download_only_once(dubs):
 async def test_the_job_of_a_replaced_reference_is_cancelled_in_the_service(dubs):
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    new_ref = os.path.join(neighbours.library, "Series s01e01 2160p.mp4")
-    touch(new_ref)
-    neighbours.uids[1] = "u1-new"
-    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    another_video(neighbours)
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
     await statuses_until(sub, ["stale", "stale"])
     await idle()
@@ -1439,9 +1430,7 @@ async def test_deleting_a_series_cancels_its_running_job_in_the_service(dubs):
 @pytest.mark.asyncio
 async def test_a_finished_job_is_taken_out_of_the_history_once_when_its_reference_is_replaced(dubs):
     probe, neighbours, bus, sub, ref = await placed_set(dubs)
-    touch(os.path.join(neighbours.library, "Series s01e01 2160p.mp4"))
-    neighbours.uids[1] = "u1-new"
-    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    another_video(neighbours)
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
     await statuses_until(sub, ["stale", "stale"])
 
@@ -2075,9 +2064,7 @@ async def test_a_cancel_that_could_not_be_made_is_kept_and_made_when_the_service
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     await quiet(voices)
     neighbours.cancel_done = False
-    touch(os.path.join(neighbours.library, "Series s01e01 2160p.mp4"))
-    neighbours.uids[1] = "u1-new"
-    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    another_video(neighbours)
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
     await statuses_until(sub, ["stale", "stale"])
 
@@ -2275,10 +2262,7 @@ async def test_another_form_of_output_places_follows_and_removes_without_a_chang
     placed = await rows(probe)
     assert all(os.path.join(os.path.dirname(ref), "audio") in r["output_path"] and os.path.isfile(r["output_path"])
                for r in placed)
-    new_ref = os.path.join(neighbours.library, "Series s01e01 2160p.mp4")
-    touch(new_ref)
-    neighbours.uids[1] = "u1-new"
-    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    another_video(neighbours)
     neighbours.extra_items.append({"unique_id": "u1", "season": 1, "episode_start": 1, "part": None, "source_url": "x",
                                    "status": "completed", "superseded_by": "u1-new",
                                    "final_filename": os.path.basename(ref)})
@@ -2407,11 +2391,20 @@ async def test_a_sent_download_is_announced_before_its_command_goes_out(dubs, mo
     assert announced_at_send == [1, 2, 3], "each command finds its announcement already published"
 
 
+def another_video(neighbours) -> str:
+    """The reference of episode 1 becomes a file of another video (another row of the table), so the tracks made for the
+    old one are stale; a better resolution of the same video would keep them (ЭТАП_11, п. 5)."""
+    path = os.path.join(neighbours.library, "Series s01e01 2160p.mp4")
+    touch(path)
+    neighbours.uids[1] = "u1-new"
+    neighbours.item_keys[1] = "elsewhere-1"
+    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    return path
+
+
 async def reference_replaced(neighbours, probe):
     """The video of the episode is replaced by another one: the tracks made for the old one are stale."""
-    touch(os.path.join(neighbours.library, "Series s01e01 2160p.mp4"))
-    neighbours.uids[1] = "u1-new"
-    neighbours.references[1] = "Series s01e01 2160p.mp4"
+    another_video(neighbours)
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
 
 
@@ -3185,3 +3178,26 @@ async def test_a_track_follows_a_better_version_of_its_video_and_goes_stale_for_
         assert {key: row["id"] for key, row in after.items()} == {key: row["id"] for key, row in before.items()}
     else:
         assert all(row["status"] != "placed" for row in after.values())  # aligned to another video: aligned anew
+
+
+@pytest.mark.asyncio
+async def test_a_track_packed_without_its_identity_takes_it_from_the_container_and_then_follows_its_video(dubs):
+    """A track aligned before the identity was recorded is told it by the packing (the container holds the truth);
+    then a better resolution of the same video keeps it instead of aligning it anew."""
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    voices = dubs[2]
+    before = {row["id"]: row for row in await voices.repo.for_series(7) if row["episode"] == 1}
+    identity = next(iter(before.values()))["aligned_to"]
+    await voices.repo._db.execute(f"UPDATE voice_dubs SET aligned_to='' WHERE id IN ({','.join('?' * len(before))})",
+                                  tuple(before))
+    await probe.request("voices.tracks.packed", {"series_id": 7, "container": "/media/e01.mkv", "aligned_to": identity,
+                                                 "dub_ids": list(before)}, timeout=5)
+    packed = {row["id"]: row for row in await voices.repo.for_series(7) if row["episode"] == 1}
+    assert {(row["aligned_to"], row["output_path"], row["ref_path"]) for row in packed.values()} == {
+        (identity, None, "/media/e01.mkv")}
+    neighbours.uids[1] = "u1-better"
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
+    await quiet(voices)
+    after = {row["id"]: row for row in await voices.repo.for_series(7) if row["episode"] == 1}
+    assert {key: (row["status"], row["ref_uid"]) for key, row in after.items()} == {
+        key: ("placed", "u1-better") for key in before}

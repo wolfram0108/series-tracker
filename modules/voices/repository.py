@@ -396,13 +396,13 @@ class VoicesRepository:
         await self._db.execute("UPDATE voice_dubs SET ref_uid=?, ref_path=?, updated_at=? WHERE id=?",
                                (ref_uid, ref_path, _now(), dub_id))
 
-    async def mark_packed(self, dub_ids: list[int], container: str) -> None:
-        """The tracks are inside the container of their episode now: no file of their own is left to follow or remove;
-        what is packed is the container's (ЭТАП_11)."""
+    async def mark_packed(self, dub_ids: list[int], container: str, aligned_to: str) -> None:
+        """The tracks are inside the container of their episode now, aligned to its video: no file of their own is left
+        to follow or remove; what is packed is the container's (ЭТАП_11)."""
         if dub_ids:
             marks = ",".join("?" * len(dub_ids))
-            await self._db.execute(f"UPDATE voice_dubs SET output_path=NULL, ref_path=?, updated_at=? WHERE id IN ({marks})",
-                                   (container, _now(), *dub_ids))
+            await self._db.execute(f"UPDATE voice_dubs SET output_path=NULL, ref_path=?, aligned_to=?, updated_at=? "
+                                   f"WHERE id IN ({marks})", (container, aligned_to, _now(), *dub_ids))
 
     async def set_output(self, dub_id: int, output_path: str, ref_path: str) -> None:
         await self._db.execute(

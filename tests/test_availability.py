@@ -8,12 +8,13 @@ from core.reasons import parse
 
 STATES = {
     Action.SYNC: ["idle", "scanning"],
+    Action.EDIT: ["idle", "scanning"],
     Action.CANCEL_DOWNLOAD: ["pending", "downloading", "processing", "error"],
     Action.CHOOSE_REFERENCE: ["referable", "playable", "absent"],
     Action.PREFER_VARIANT: ["referable", "playable", "absent"],
 }
 EXPECTED = {
-    (Action.SYNC, "idle"), (Action.CANCEL_DOWNLOAD, "pending"), (Action.CANCEL_DOWNLOAD, "downloading"),
+    (Action.SYNC, "idle"), (Action.EDIT, "idle"), (Action.CANCEL_DOWNLOAD, "pending"), (Action.CANCEL_DOWNLOAD, "downloading"),
     (Action.CANCEL_DOWNLOAD, "processing"), (Action.CHOOSE_REFERENCE, "referable"), (Action.PREFER_VARIANT, "referable"),
     (Action.PREFER_VARIANT, "playable"),
 }
