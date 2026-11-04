@@ -773,3 +773,32 @@ def test_assign_range_next_to_a_voice_over_gives_both():
         {"action_type": "assign_range", "action_pattern": "3-4"},
         {"action_type": "assign_voiceover", "action_pattern": "Студия"}])])
     assert process_title(profile, "x")["extracted"] == {"start": 3, "end": 4, "voiceover": "Студия"}
+
+
+# --- the block of the source every line ends with ----------------------------------------------------------------
+
+def _assign_voiceover(name):
+    return {"action_type": "assign_voiceover", "action_pattern": name}
+
+
+def test_an_ordinary_condition_on_the_block_of_the_source_names_the_voice_over_of_that_source_only():
+    profile = compile_profile(1, [_rule(1, "тег канала", [_assign_voiceover("ПВА ШОУ")],
+                                        [_cond(_blocks("(PID:vkvideo.ru)"))], continue_after=True)])
+    vk = process_title(profile, "Тайтл | VK | 1080p | Серия 1 (PID:vkvideo.ru)")
+    site = process_title(profile, "Тайтл | VK | 1080p | Серия 1 (PID:1.ruchime.org)")
+    assert vk["extracted"] == {"voiceover": "ПВА ШОУ"} and site["extracted"] == {}
+
+
+def test_a_condition_that_is_not_from_a_source_leaves_that_source_out():
+    profile = compile_profile(1, [_rule(1, "не с рутайма", [_assign_voiceover("Чужая")],
+                                        [_cond(_blocks("(PID:1.ruchime.org)"), ctype="not_contains")], continue_after=True)])
+    assert process_title(profile, "Серия 1 (PID:vkvideo.ru)")["extracted"] == {"voiceover": "Чужая"}
+    assert process_title(profile, "Серия 1 (PID:1.ruchime.org)")["extracted"] == {}
+
+
+def test_the_end_of_the_line_is_the_end_of_the_title_and_stops_before_the_block_of_the_source():
+    profile = compile_profile(1, [_rule(1, "номер в конце", [
+        _extract("extract_single", "серия", "_", "N", ("end_of_line", ""))])])
+    assert process_title(profile, "Тайтл | Серия 7 (PID:vkvideo.ru)")["extracted"] == {"episode": 7}
+    assert process_title(profile, "Тайтл | Серия 7")["extracted"] == {"episode": 7}
+    assert process_title(profile, "Тайтл | Серия 7 финал (PID:vkvideo.ru)")["extracted"] == {}

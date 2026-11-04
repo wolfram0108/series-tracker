@@ -205,7 +205,7 @@ async def test_every_number_comes_from_the_answer_of_the_constructor_and_is_stor
     series_id = await laid_out(s)
     [call] = s.rules.calls
     assert call.profile_id == 7 and call.series_season is None
-    assert call.lines[0].key == "vk-1-1" and call.lines[0].text == "Асура | VK | Ruchime | Сезон 1 | 1080p | Серия 1"
+    assert call.lines[0].key == "vk-1-1" and call.lines[0].text == "Асура | VK | Ruchime | Сезон 1 | 1080p | Серия 1 (PID:fake.test)"
     given = [(line.key, lecturer(line.text)) for line in call.lines]
     stored = s.sql("SELECT row_key, season, episode_start, episode_end FROM composition_rows WHERE series_id = ?"
                    " ORDER BY seq", series_id)
@@ -1232,7 +1232,7 @@ async def test_an_address_without_a_profile_shows_the_summary_of_its_page_and_th
     assert (player.player, player.rows, player.groups) == ("vk", 7, 2)
     assert reply.rows == [] and s.voices.asked == []
     assert len(reply.lines) == 7 and all(each.result is None for each in reply.lines)
-    assert (reply.lines[0].key, reply.lines[0].line) == ("vk-1-1", "Асура | VK | Ruchime | Сезон 1 | 1080p | Серия 1")
+    assert (reply.lines[0].key, reply.lines[0].line) == ("vk-1-1", "Асура | VK | Ruchime | Сезон 1 | 1080p | Серия 1 (PID:fake.test)")
     assert all(each.heights == [720, 1080] for each in reply.lines)
     assert s.rules.calls == [] and s.sources.requests[-1].refresh is True
     nothing_was_written(s)

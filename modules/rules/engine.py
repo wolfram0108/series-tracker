@@ -15,6 +15,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.contracts import PID_TAIL_PATTERN
+
 EXTRACT_KEYS = {
     "extract_single": "episode",
     "extract_season": "season",
@@ -137,7 +139,8 @@ def _blocks_to_regex(blocks: list[dict], *, capture_numbers: bool,
         elif b_type == "start_of_line":
             parts.append(r"^")
         elif b_type == "end_of_line":
-            parts.append(r"$")
+            # The end of the title: the block of the source that every line ends with is not a part of it.
+            parts.append(rf"(?={PID_TAIL_PATTERN}\s*$)")
         else:
             raise ValueError(f"тип блока не поддерживается: {b_type!r}")
     regex = "".join(parts)

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from typing import Any
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -72,12 +73,24 @@ class ReleaseTable(BaseModel):
         return next((row for row in self.rows if row.key == key), None)
 
 
+# Every line ends with the host of the page its row was read from, so that one ordinary condition of a profile tells the
+# source of a line (`(PID:vkvideo.ru)`). The tail is no part of the title: `end_of_line` of the constructor stops before it.
+PID_BLOCK = "(PID:{host})"
+PID_TAIL_PATTERN = r"(?:\s*\(PID:[^()]*\))?"
+
+
+def pid_of(table: ReleaseTable) -> str:
+    """The block of the source of a table's lines; empty when its address names no host."""
+    host = (urlparse(table.url).hostname or "").lower()
+    return PID_BLOCK.format(host=host) if host else ""
+
+
 def line_of(table: ReleaseTable, row: TableRow) -> str:
     """The text the constructor gets for a row; a missing field is left out together with its separator."""
     height = row.height if row.state == RowState.PLAYABLE else None
     fields = [table.names[0] if table.names else "", row.player_label or row.player, row.voice.name, row.voice.kind,
               row.group, f"{height}p" if height else "", row.text]
-    return LINE_SEPARATOR.join(field for field in fields if field)
+    return " ".join(part for part in (LINE_SEPARATOR.join(field for field in fields if field), pid_of(table)) if part)
 
 
 class TableState(StrEnum):
