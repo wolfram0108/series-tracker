@@ -30,7 +30,7 @@ export function useRulesTest(profileId: () => number) {
   const state = ref<TestState>("idle")
   const reason = ref<string | null>(null)
   const error = ref("")
-  // The lines of the last page that was read to its end: the window offers them for editing.
+  // The lines the cards of the last page answer are drawn from: the window offers them for editing.
   const fetched = ref<string[]>([])
 
   let page: Page | null = null
@@ -57,12 +57,10 @@ export function useRulesTest(profileId: () => number) {
     current.handled = before
     lines.value = answer.data.lines ?? []
     reason.value = answer.data.reason ?? null
-    if (answer.data.state === "ready") {
-      state.value = "ready"
-      fetched.value = lines.value.map((line) => line.line)
-    } else {
-      state.value = answer.data.state === "reading" ? "reading" : "failed"
-    }
+    // A page that is being read, or whose last read failed, answers with the rows of its last complete table: the cards
+    // drawn from them and the field of the rows are one set in every state, never cards without their rows.
+    if (answer.data.state === "ready" || lines.value.length > 0) fetched.value = lines.value.map((line) => line.line)
+    state.value = answer.data.state === "ready" ? "ready" : answer.data.state === "reading" ? "reading" : "failed"
     await settle(current)
   }
 

@@ -44,6 +44,28 @@ describe("useRulesTest", () => {
     expect(test.fetched.value).toEqual(["Серия 1", "Трейлер"])
   })
 
+  it("offers the rows of the cards in the field in every state: while the page is read and after a failed read too", async () => {
+    site()
+    const stale = [line("a", "Серия 1", 1), line("b", "Трейлер")]
+    for (const state of ["reading", "failed"] as const) {
+      vi.mocked(calls.testProfile).mockResolvedValue(ok(reply({ state, lines: stale })))
+      const test = useRulesTest(() => 5)
+      await test.readPage(PAGE, "", "search")
+      expect(test.state.value).toBe(state)
+      expect(test.lines.value).toHaveLength(2)
+      expect(test.fetched.value).toEqual(["Серия 1", "Трейлер"])
+    }
+  })
+
+  it("leaves the field as it is when a page that is being read has no table yet and so no cards", async () => {
+    site()
+    vi.mocked(calls.testProfile).mockResolvedValue(ok(reply({ state: "reading", lines: [] })))
+    const test = useRulesTest(() => 5)
+    await test.readPage(PAGE, "", "search")
+    expect(test.lines.value).toEqual([])
+    expect(test.fetched.value).toEqual([])
+  })
+
   it("joins the query to the channel of VK and sends the mode of the search as an option of the read", async () => {
     site("https://vk.com/video/@chan|", "vk_video")
     const test = useRulesTest(() => 5)
