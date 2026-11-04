@@ -12,8 +12,8 @@ from .output_settings import (LEVER_FORMS, REFERENCE_CHOICE, VARIANT_ALLOW, VOIC
                               Level, LevelSettings, PlayerPick, ReferenceChoice, SettingRecord, SettingsReset, SettingsSet,
                               TargetKind, ValueShape, group_target, parse_group_target, parse_variant_target, variant_target)
 from .reference import OutputSwitch, Reference, ReferenceChanged, ReferenceMark
-from .release_table import (LINE_SEPARATOR, PID_BLOCK, PID_TAIL_PATTERN, ReleaseTable, RowState, RowVoice, SiteResolveReply, SiteResolveRequest,
-                            TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableRow, TableState, line_of, pid_of)
+from .release_table import (LINE_FIELDS, LINE_SEPARATOR, ReleaseTable, RowState, RowVoice, SiteResolveReply, SiteResolveRequest,
+                            TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableRow, TableState, line_of)
 from .rules import RuleLine, RuleResult, RulesApplyReply, RulesApplyRequest, RulesProfileChanged
 from .series_sources import SeriesKind, SeriesSource, SourceChanged, SourceEvent, SourceType
 from .voice_groups import GroupsResolveReply, GroupsResolveRequest
@@ -28,7 +28,7 @@ __all__ = ["Action", "NotAllowed", "allowed", "refusal", "require", "variant_sta
            "VoiceSettingsSaved", "VoiceSettingsView", "ConformSettingsDraft", "ConformSettingsSaved",
            "ConformSettingsView",
            "LINE_SEPARATOR", "ReleaseTable", "RowState", "RowVoice", "SiteResolveReply", "SiteResolveRequest", "TableFailed", "TableGetReply", "TableGetRequest",
-           "TableProgress", "TableReady", "TableRow", "TableState", "line_of", "pid_of", "PID_BLOCK", "PID_TAIL_PATTERN",
+           "TableProgress", "TableReady", "TableRow", "TableState", "line_of", "LINE_FIELDS",
            "RuleLine", "RuleResult", "RulesApplyReply", "RulesApplyRequest", "RulesProfileChanged",
            "SeriesKind", "SeriesSource", "SourceChanged", "SourceEvent", "SourceType",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",

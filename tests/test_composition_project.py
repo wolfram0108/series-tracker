@@ -253,7 +253,7 @@ def test_the_lines_are_those_of_line_of_with_the_key_of_the_row():
     assert lines_for(source(), tbl) == [
         RuleLine(key=r.key, text=line_of(tbl, r), player=r.player, voice=r.voice.name) for r in tbl.rows]
     assert [line.text for line in lines_for(source(), tbl)] == [
-        "Асура: Безумный король 2 | VK | 1080p | Серия 1 (PID:example.org)", "Асура: Безумный король 2 | VK | Серия 2 (PID:example.org)"]
+        "PID:example.org | P:VK | Асура: Безумный король 2 | Серия 1 | R:1080p", "PID:example.org | P:VK | Асура: Безумный король 2 | Серия 2"]
 
 
 def test_the_lines_and_the_layout_of_real_values_of_ruchime_dunhuatv_kodik_and_cvh():
@@ -271,11 +271,11 @@ def test_the_lines_and_the_layout_of_real_values_of_ruchime_dunhuatv_kodik_and_c
         names=("Практикуя ци сто тысяч лет",), site="dunhuatv")
     first, second = source(id=1, position=0), source(id=2, position=1, profile=8)
     assert [line.text for line in lines_for(first, ruchime)] == [
-        "Асура: Безумный король 2 | Vibix | Ruchime | Сезон 2 | 1080p | Серия 1 (PID:example.org)",
-        "Асура: Безумный король 2 | Vibix | Ruchime | Сезон 2 | 1080p | Серия 2 (PID:example.org)"]
+        "PID:example.org | P:Vibix | Асура: Безумный король 2 | Серия 1 | G:Сезон 2 | V:Ruchime | R:1080p",
+        "PID:example.org | P:Vibix | Асура: Безумный король 2 | Серия 2 | G:Сезон 2 | V:Ruchime | R:1080p"]
     assert [line.text for line in lines_for(second, dunhuatv)] == [
-        "Практикуя ци сто тысяч лет | Kodik | Студия Константина Исаева | voice | 1 сезон | 720p | 1-3 серия (PID:example.org)",
-        "Практикуя ци сто тысяч лет | CVH | AniStar | Многоголосый | 1 сезон | 1080p | 5 серия (PID:example.org)"]
+        "PID:example.org | P:Kodik | Практикуя ци сто тысяч лет | 1-3 серия | G:1 сезон | V:Студия Константина Исаева | VT:voice | R:720p",
+        "PID:example.org | P:CVH | Практикуя ци сто тысяч лет | 5 серия | G:1 сезон | V:AniStar | VT:Многоголосый | R:1080p"]
     out = project(
         [item(first, ruchime, {"2:1": {"season": 2, "episode": 1}, "2:2": {"season": 2, "episode": 2}}),
          item(second, dunhuatv, {"1468548": {"season": 1, "start": 1, "end": 3},
@@ -508,14 +508,15 @@ def test_a_difference_that_names_no_episode_is_an_empty_set_and_one_that_cannot_
 # ---- snapshots of real answers -----------------------------------------------------------------------------------
 
 
-def test_a_line_ends_with_the_block_of_the_host_the_page_was_read_from_and_the_block_is_one_for_the_whole_table():
-    def line(url: str) -> str:
-        tbl = table(row("a", "Серия 1", player="vk", label="VK")).model_copy(update={"url": url})
+def test_a_line_is_the_coded_fields_of_the_registry_in_their_order_and_a_field_with_no_value_is_left_out():
+    def line(url: str, **fields) -> str:
+        tbl = table(row("a", "Серия 1", player="vk", label="VK", **fields), names=("Тайтл ",)).model_copy(update={"url": url})
         return line_of(tbl, tbl.rows[0])
 
-    assert line("https://vkvideo.ru/@pvashow|Почтенный мастер всех миров|search").endswith(" Серия 1 (PID:vkvideo.ru)")
-    assert line("https://1.ruchime.org/release/test").endswith(" Серия 1 (PID:1.ruchime.org)")
-    assert line("").endswith(" Серия 1")
+    assert line("https://vkvideo.ru/@pvashow|Тайтл|search") == "PID:vkvideo.ru | P:VK | Тайтл | Серия 1 | R:720p"
+    assert line("https://dunhuatv.ru/anime/x", voice="ПВА ШОУ", kind="Многоголосый", group="3 сезон", heights=(480, 1080)) == (
+        "PID:dunhuatv.ru | P:VK | Тайтл | Серия 1 | G:3 сезон | V:ПВА ШОУ | VT:Многоголосый | R:1080p")
+    assert line("", state=RowState.ABSENT) == "P:VK | Тайтл | Серия 1"
 
 
 def test_the_390_episodes_of_the_ruchime_list_give_390_lines_with_the_text_of_the_site():
@@ -526,7 +527,7 @@ def test_the_390_episodes_of_the_ruchime_list_give_390_lines_with_the_text_of_th
     lines = lines_for(source(), tbl)
     assert len(lines) == len(listing) == 390 and len({line.key for line in lines}) == 390
     assert lines[1].key == "93451"
-    assert lines[1].text == "Практикуя ци сто тысяч лет | VK | Ruchime | 1080p | Серия 2 (PID:example.org)"
+    assert lines[1].text == "PID:example.org | P:VK | Практикуя ци сто тысяч лет | Серия 2 | V:Ruchime | R:1080p"
 
 
 def test_the_607_rows_of_cvh_become_a_layout_whose_unknown_voices_are_numbered_by_name_not_by_type():
@@ -555,8 +556,8 @@ def test_the_kodik_list_of_a_voice_over_keeps_its_compilations_as_ranges():
     assert compilations and compilations[0] == ("1468548", "1-3 серия")
     tbl = table(*rows, names=("Практикуя ци сто тысяч лет",), site="dunhuatv")
     texts = {line.key: line.text for line in lines_for(source(), tbl)}
-    assert texts["1468548"] == ("Практикуя ци сто тысяч лет | Kodik | Студия Константина Исаева | voice | 1 сезон | "
-                                "720p | 1-3 серия (PID:example.org)")
+    assert texts["1468548"] == ("PID:example.org | P:Kodik | Практикуя ци сто тысяч лет | 1-3 серия | G:1 сезон | "
+                                "V:Студия Константина Исаева | VT:voice | R:720p")
     answers = {}
     for key, title in items:
         numbers = [int(number) for number in re.findall(r"\d+", title)]
@@ -575,7 +576,7 @@ def test_the_two_seasons_of_the_asura_vibix_catalog_are_told_apart_by_the_choice
     tbl = table(*rows, names=("Асура: Безумный король 2",))
     assert [len(selected_rows(source(vibix_season=chosen), tbl)) for chosen in (None, 1, 2, 3)] == [23, 9, 14, 0]
     second = lines_for(source(vibix_season=2), tbl)
-    assert second[0].text == "Асура: Безумный король 2 | Vibix | Ruchime | Сезон 2 | 1080p | Серия 1 (PID:example.org)"
+    assert second[0].text == "PID:example.org | P:Vibix | Асура: Безумный король 2 | Серия 1 | G:Сезон 2 | V:Ruchime | R:1080p"
 
 
 def test_the_summary_of_a_player_names_its_groups_in_the_order_of_the_table_once_each():

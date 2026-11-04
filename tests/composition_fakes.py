@@ -2,8 +2,8 @@
 constructor and the voice-over groups. They answer as their contracts say and signal what they were asked, so that
 a test waits for events and never for time.
 
-`FakeRules` reads the text of a line the way a real profile of the stage would: the last field of the line is the text
-of the row; "Серия 3" and "3 серия" are an episode, "1-3 серия" a range, "Трейлер" is excluded, "Сезон 2" or "2 сезон"
+`FakeRules` reads the text of a line the way a real profile of the stage would: the last field of the line that has no
+code (`CODE:value`) is the text of the row; "Серия 3" and "3 серия" are an episode, "1-3 серия" a range, "Трейлер" is excluded, "Сезон 2" or "2 сезон"
 anywhere in the line is the season (else the season of the card), and "[Имя]" in the text assigns a voice-over.
 """
 import asyncio
@@ -199,7 +199,7 @@ Constructor = Callable[[str], dict]
 
 def lecturer(text: str) -> dict:
     """What a profile of the stage extracts from a line; see the module docstring."""
-    last = text.rsplit(" | ", 1)[-1]
+    last = [field for field in text.split(" | ") if not re.match(r"[A-Z]+:", field)][-1]
     found: dict = {}
     if "Трейлер" in last:
         return {"excluded": True}
