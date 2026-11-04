@@ -3,13 +3,13 @@ import { t } from "../i18n"
 import { reasonText } from "../lib/reason"
 import {
   draftBody, itemOfSource, readOptions, summaryOf, vkModeOf,
-  type SeriesSource, type SourceItem, type SourceSummary,
+  type LayoutRow, type SeriesSource, type SourceItem, type SourceSummary,
 } from "../lib/sources"
 import { useCompositionStore } from "../stores/composition"
 import { useSourceTablesStore } from "../stores/sourceTables"
 import { useSSE } from "./useSSE"
 import {
-  changeSource, createSource, fetchSources, fetchSummaries, readPageNow, removeSource, resolveAddress,
+  changeSource, createSource, fetchLayout, fetchSources, readPageNow, removeSource, resolveAddress,
 } from "./sourceCalls"
 import { typeAddress } from "./sourceAddress"
 import type { DraftPatch } from "./useSourceDrafts"
@@ -24,6 +24,8 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
   const composition = useCompositionStore()
   const sources = ref<SeriesSource[]>(initial)
   const summaries = ref<SourceSummary[]>([])
+  // The rows the constructor made by the rules of the profiles: the episodes of a player and of its voice-overs are read from them.
+  const layout = ref<LayoutRow[]>([])
   // The address the core names the page of a source with in its events, by source id.
   const canonical = ref<Record<number, string>>({})
   const error = ref("")
@@ -36,7 +38,7 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
   })
 
   const items = computed<SourceItem[]>(() => sources.value.map((source) => itemOfSource(
-    source, summaryOf(summaries.value, source.id), tables.forUrl(canonical.value[source.id] ?? ""))))
+    source, summaryOf(summaries.value, source.id), tables.forUrl(canonical.value[source.id] ?? ""), layout.value)))
 
   async function nameThePage(source: SeriesSource): Promise<void> {
     const answer = await resolveAddress(source.url, readOptions({ sourceType: source.source_type, vkSearchMode: source.vk_search_mode }))
@@ -51,9 +53,12 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     if (ask !== asked) return
     if (listed.ok) sources.value = listed.data
     if (kind !== "video") return
-    const summary = await fetchSummaries(seriesId)
+    const answer = await fetchLayout(seriesId)
     if (ask !== asked) return
-    if (summary.ok) summaries.value = summary.data
+    if (answer.ok) {
+      summaries.value = answer.data.sources
+      layout.value = answer.data.rows
+    }
     await Promise.all(sources.value.filter((source) => !(source.id in canonical.value)).map(nameThePage))
   }
 

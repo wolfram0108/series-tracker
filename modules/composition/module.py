@@ -213,11 +213,13 @@ class CompositionModule(BaseModule):
                 url=request.url, options=request.options, refresh=request.refresh).model_dump(mode="json"),
                 model=TableGetReply)
             table = got.table if got.table is not None and got.table.complete else None
-            summary, lines = None, []
+            summary, lines, rows = None, [], []
             if table is not None:
                 source = SeriesSource(id=0, series_id=0, url=request.url, source_type=SourceType.WEB_VIDEO,
                                       parser_profile_id=request.profile_id,
-                                      vk_search_mode=request.options.get("vk_search_mode", "search"))
+                                      vk_search_mode=request.options.get("vk_search_mode", "search"),
+                                      players_off=request.players_off, vibix_season=request.vibix_season,
+                                      voice_name=request.voice_name)
                 answer = None
                 if request.profile_id is not None:
                     answer = await self._answer(source, table, request.series_season)
@@ -225,7 +227,9 @@ class CompositionModule(BaseModule):
                                    got.url)
                 names = project.voice_names([item])
                 groups = await self._groups(names) if names else {}
-                summary = project.project([item], groups, {}).sources[0]
+                projection = project.project([item], groups, {})
+                summary = projection.sources[0]
+                rows = [row for row in projection.rows if not row.excluded]
                 results = answer.results if answer is not None else {}
                 lines = [PreviewLine(key=line.key, line=line.text, result=results.get(line.key))
                          for line in project.lines_for(source, table)]
@@ -233,7 +237,7 @@ class CompositionModule(BaseModule):
             raise ValueError(exc.reason) from exc
         return CompositionPreviewReply(url=got.url, state=got.state, reason=got.reason,
                                        names=list(table.names) if table is not None else [], summary=summary,
-                                       lines=lines).model_dump(mode="json")
+                                       lines=lines, rows=rows).model_dump(mode="json")
 
     async def _preview_lines(self, request: CompositionPreviewRequest, texts: list[str]) -> dict:
         """Lines the window holds itself: no page and no table, only the profile's answer to each line."""

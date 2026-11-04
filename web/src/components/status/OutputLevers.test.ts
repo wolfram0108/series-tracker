@@ -151,17 +151,16 @@ describe("OutputLevers", () => {
     expect(picked.emitted("reset")?.[0]).toEqual(["voice.player", groupTarget("Ruchime")])
   })
 
-  it("offers to make a group in the head of a column of a voice-over that is in none, and in no other", () => {
+  it("offers no way to make a group in a column, whatever group the voice-over is in: groups are made in the settings", () => {
     const rows = [
       rowOf({ row_key: "a", voice_label: "AniStar", voice_group: "AniStar" }),
       rowOf({ row_key: "b", voice_label: "Неизвестная озвучка 1", voice_group: null, voice_name: "Animy" }),
       rowOf({ row_key: "c", voice_label: "Неизвестная озвучка 2", voice_group: null, voice_name: "" }),
     ]
     const w = mountLevers({ view: viewOf(rows) })
-    expect(columnOf(w, "AniStar").find(".group-maker").exists()).toBe(false)
-    expect(columnOf(w, "Неизвестная озвучка 1").find(".group-maker").exists()).toBe(true)
-    expect(columnOf(w, "Неизвестная озвучка 2").find(".group-maker").exists()).toBe(false)
-    expect(columnOf(w, "Неизвестная озвучка 2").text()).toContain(t("voices.group.nameless"))
+    for (const group of ["AniStar", "Неизвестная озвучка 1", "Неизвестная озвучка 2"]) {
+      expect(columnOf(w, group).find("input[type=text], .group-maker").exists()).toBe(false)
+    }
   })
 
   it("draws a lever registered later from its description alone, titled by its own name until the catalog has a title", () => {

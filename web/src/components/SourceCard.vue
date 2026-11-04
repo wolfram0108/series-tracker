@@ -5,17 +5,17 @@ import StGroup from "./StGroup.vue"
 import StIcon from "./StIcon.vue"
 import StInput from "./StInput.vue"
 import StSelect from "./StSelect.vue"
-import VoiceGroupMaker from "./VoiceGroupMaker.vue"
 import { t, type MessageKey } from "../i18n"
 import { reasonText } from "../lib/reason"
 import {
-  heightText, joinVkAddress, playerCaption, profileOptions, progressText, seasonPositions, sourceCaption, splitVkAddress,
-  stepsText, togglePlayer, type SourceItem,
+  joinVkAddress, playerCaption, profileOptions, progressText, seasonPositions, sourceCaption, splitVkAddress,
+  togglePlayer, type SourceItem,
 } from "../lib/sources"
 import type { DraftPatch } from "../composables/useSourceDrafts"
 
-// One source of a series: its address, its constructor profile, and what its table holds — players with their
-// voice-overs and the group of each. The numbers of episodes are not here: they exist only as the constructor's answer.
+// One source of a series: its address, its constructor profile, and what its table holds — players with the episodes
+// and the voice-overs that the rules of the profile made of its rows, and the group of each voice-over. The numbers of
+// episodes exist only as the constructor's answer; a group is made in the settings, nowhere else.
 const props = defineProps<{ item: SourceItem; profiles: { id: number; name: string }[]; busy?: boolean }>()
 const emit = defineEmits<{ (e: "change", patch: DraftPatch): void; (e: "remove"): void; (e: "reread"): void }>()
 const toast = useToast()
@@ -156,7 +156,6 @@ async function copyAddress(): Promise<void> {
         </div>
         <div class="cluster muted">
           <span>{{ playerCaption(player) }}</span>
-          <span v-if="player.topHeight !== null" :title="stepsText(player)">{{ heightText(player) }}</span>
         </div>
         <div v-if="player.chooseSeason" class="stack">
           <StGroup>
@@ -170,15 +169,15 @@ async function copyAddress(): Promise<void> {
           </StGroup>
           <small v-if="item.vibixSeason === null" class="muted">{{ t("sources.vibix.hint") }}</small>
         </div>
-        <ul v-if="player.voices.length" class="voices stack">
-          <li v-for="voice in player.voices" :key="voice.name" class="cluster voice">
-            <span class="voice-name">{{ voice.name }}</span>
-            <span class="voice-group" :class="{ 'is-none': voice.group === null }">{{
-              voice.group === null ? t("sources.voice.noGroup") : t("sources.voice.group", { group: voice.group })
-            }}</span>
-            <VoiceGroupMaker v-if="voice.group === null" class="voice-maker" :names="[voice.name]" />
-          </li>
+        <ul v-if="player.coverage.length" class="lines coverage">
+          <li v-for="line in player.coverage" :key="line">{{ line }}</li>
         </ul>
+        <ul v-if="player.voiceLines.length" class="lines voices">
+          <li v-for="line in player.voiceLines" :key="line">{{ line }}</li>
+        </ul>
+        <small v-if="item.profileId !== null && view.state === 'ready' && !player.coverage.length && !player.off" class="muted">
+          {{ t("sources.range.none") }}
+        </small>
       </li>
     </ul>
     <div v-else-if="!isTorrent && view.state === 'ready'" class="muted">{{ t("sources.player.none") }}</div>
@@ -206,12 +205,7 @@ async function copyAddress(): Promise<void> {
 .source-reread { color: var(--color-blue); }
 .players { list-style: none; margin: 0; padding: 0; }
 .player { padding: var(--space); border: var(--border-width) solid var(--border-color); border-radius: var(--border-radius); }
-.player.is-off .voices, .player.is-off .player-switch b { opacity: 0.5; }
+.player.is-off .lines, .player.is-off .player-switch b { opacity: 0.5; }
 .player-switch { cursor: pointer; }
-.voices { list-style: none; margin: 0; padding: 0; gap: calc(var(--space) / 2); }
-.voice { justify-content: space-between; }
-.voice-maker { flex-basis: 100%; }
-.voice-name { overflow-wrap: anywhere; }
-.voice-group { color: var(--color-green-1); font-size: smaller; }
-.voice-group.is-none { color: var(--text-muted); }
+.lines { list-style: none; margin: 0; padding: 0; display: grid; gap: calc(var(--space) / 2); overflow-wrap: anywhere; }
 </style>

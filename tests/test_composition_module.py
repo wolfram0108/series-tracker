@@ -22,7 +22,7 @@ from composition_fakes import (HOST, OTHER_PAGE, PAGE, FakeCatalog, FakeRules, F
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.contracts import (CompositionPreviewReply, CompositionReply, EffectiveLever, Level, ReleaseTable, RowState,
                             TargetKind, ValueShape,
-                            RowVoice, SettingsReset, SettingsSet, SourceStatus, TableRow, TableState, VoiceSummary,
+                            RowVoice, SettingsReset, SettingsSet, SourceStatus, TableRow, TableState,
                             group_target, variant_target)
 from core.db import Database
 from core.reasons import parse, reason
@@ -270,18 +270,12 @@ async def test_a_source_without_a_profile_is_only_a_summary_until_a_profile_is_a
     summary = bare.sources[0]
     assert summary.status == SourceStatus.NO_PROFILE and summary.reason is None
     [player] = summary.players
-    assert (player.player, player.rows, player.groups, player.heights) == ("vk", 7, 2, [720, 1080])
-    assert player.voices == [VoiceSummary(name="Ruchime", group=None, rows=7)]
-    assert s.voices.asked[-1] == ["Ruchime"]
-
-    await s.counted(lambda: s.voices.set_groups({"Рутина": ["Ruchime"]}))
-    [event] = s.taken(s.changed)
-    assert (event["summary_only"], event["episodes"], event["rev"]) == (True, [], 3)
-    assert (await s.get(series_id)).sources[0].players[0].voices == [VoiceSummary(name="Ruchime", group="Рутина", rows=7)]
+    assert (player.player, player.rows, player.groups) == ("vk", 7, 2)
+    assert s.voices.asked == []
 
     await s.counted(lambda: s.catalog.update_source(only_source(s, series_id), parser_profile_id=7))
     [event] = s.taken(s.changed)
-    assert event["rev"] == 4 and len(event["episodes"]) == 7 and event["summary_only"] is False
+    assert event["rev"] == 3 and len(event["episodes"]) == 7 and event["summary_only"] is False
     assert len((await s.get(series_id)).rows) == 7 and s.rules.calls
 
 
@@ -477,7 +471,6 @@ async def test_the_name_the_constructor_assigned_beats_the_one_of_the_player_and
     assert [r.voice_name for r in reply.rows] == ["Мой дубляж", "AniStar"]
     assert s.sql("SELECT voice_name FROM composition_rows WHERE series_id = ? ORDER BY seq", series_id) == [
         ("Мой дубляж",), ("AniStar",)]
-    assert [(v.name, v.group) for v in reply.sources[0].players[0].voices] == [("Мой дубляж", "Моя"), ("AniStar", "Стар")]
 
 
 @pytest.mark.asyncio
@@ -1228,7 +1221,6 @@ def nothing_was_written(s: System) -> None:
 @pytest.mark.asyncio
 async def test_an_address_without_a_profile_shows_the_summary_of_its_page_and_the_lines_of_the_constructor(system):
     s = system
-    s.voices.groups = {"Рутина": ["Ruchime"]}
     s.sources.tables[PAGE] = standard().model_copy(
         update={"url": PAGE, "complete": True, "read_at": "2026-11-01T12:00:00+00:00"})
     reply = await preview(s)
@@ -1237,8 +1229,8 @@ async def test_an_address_without_a_profile_shows_the_summary_of_its_page_and_th
     assert (summary.source_id, summary.url, summary.status, summary.read_at) == (
         0, PAGE, SourceStatus.NO_PROFILE, "2026-11-01T12:00:00+00:00")
     [player] = summary.players
-    assert (player.player, player.rows, player.groups, player.heights) == ("vk", 7, 2, [720, 1080])
-    assert player.voices == [VoiceSummary(name="Ruchime", group="Рутина", rows=7)]
+    assert (player.player, player.rows, player.groups) == ("vk", 7, 2)
+    assert reply.rows == [] and s.voices.asked == []
     assert len(reply.lines) == 7 and all(each.result is None for each in reply.lines)
     assert (reply.lines[0].key, reply.lines[0].line) == ("vk-1-1", "Асура | VK | Ruchime | Сезон 1 | 1080p | Серия 1")
     assert s.rules.calls == [] and s.sources.requests[-1].refresh is True
@@ -1259,7 +1251,8 @@ async def test_an_address_with_a_profile_shows_the_answer_of_the_constructor_for
     assert got["t"].excluded and got["n"].episode is None and not got["n"].excluded
     [call] = s.rules.calls
     assert (call.profile_id, call.series_season, [line.key for line in call.lines]) == (7, "4", ["a", "b", "t", "n"])
-    assert [(v.name, v.group) for v in reply.summary.players[0].voices] == [("Мой дубляж", None), ("Ruchime", None)]
+    assert [(r.source_id, r.row_key, r.season, r.episode_start, r.episode_end, r.voice_name) for r in reply.rows] == [
+        (0, "a", 4, 1, 1, "Мой дубляж"), (0, "b", 2, 1, 3, "Ruchime")]
     nothing_was_written(s)
 
 

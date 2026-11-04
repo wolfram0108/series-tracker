@@ -18,7 +18,7 @@ const source = (over: Partial<SeriesSource> = {}): SeriesSource => ({
 })
 const summary: SourceSummary = {
   source_id: 7, url: PAGE, status: "no_profile",
-  players: [{ player: "vk", player_label: "VK", rows: 3, groups: 0, heights: [720], voices: [] }],
+  players: [{ player: "vk", player_label: "VK", rows: 3, groups: 0 }],
 }
 const ok = <T>(data: T) => ({ ok: true as const, data })
 
@@ -31,7 +31,7 @@ function setup(kind: "torrent" | "video" = "video", initial: SeriesSource[] = [s
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.mocked(calls.fetchSources).mockReset().mockResolvedValue(ok([source()]))
-  vi.mocked(calls.fetchSummaries).mockReset().mockResolvedValue(ok([summary]))
+  vi.mocked(calls.fetchLayout).mockReset().mockResolvedValue(ok({ sources: [summary], rows: [] }))
   vi.mocked(calls.resolveAddress).mockReset().mockResolvedValue(ok({ site: "ruchime", canonical_url: PAGE }))
   vi.mocked(calls.createSource).mockReset().mockResolvedValue(ok({ id: 8 }))
   vi.mocked(calls.changeSource).mockReset().mockResolvedValue(ok({ success: true }))
@@ -66,7 +66,7 @@ describe("useSeriesSources", () => {
     setup("torrent", [source({ source_type: "torrent", url: "https://kinozal.tv/details.php?id=1" })])
     await flushPromises()
     expect(calls.fetchSources).toHaveBeenCalledTimes(1)
-    expect(calls.fetchSummaries).not.toHaveBeenCalled()
+    expect(calls.fetchLayout).not.toHaveBeenCalled()
   })
 
   it("reads the sources again when the layout of the series changes, and not for another series", async () => {

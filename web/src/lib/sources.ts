@@ -1,6 +1,7 @@
 // The sources of a series as the add window and the series properties draw them: one group per source, its players,
-// their voice-overs. Nothing here computes an episode or a season number — those are the constructor's alone; the
-// window shows counts, resolution steps and voice-overs with their groups, and the numbers only through the answer.
+// their voice-overs. Nothing here computes an episode, a season, a voice-over or a resolution — those are the rows the
+// rules of the assigned profile made (the layout); the ranges below only join the numbers of the rows that follow one
+// another. A source without such rows shows no line of episodes or voice-overs.
 import type { components } from "../api/schema"
 import { ru } from "../i18n/ru"
 import { t, tn, type MessageKey } from "../i18n"
@@ -16,6 +17,7 @@ export type SourceType = Schemas["SourceType"]
 export type PreviewReply = Schemas["CompositionPreviewReply"]
 export type TableState = Schemas["TableState"]
 export type ResolveReply = Schemas["SiteResolveReply"]
+export type LayoutRow = Schemas["CompositionRow"]
 
 /** The player whose list holds several seasons of a catalog; the user picks the one that belongs to the source. */
 export const CATALOG_PLAYER = "vibix"
@@ -26,21 +28,17 @@ export type VkMode = (typeof VK_MODES)[number]
 
 export type SourceState = "reading" | "failed" | "absent" | "waiting" | "noProfile" | "ready"
 
-export interface VoiceView {
-  name: string
-  /** The user's group of the voice-over; null: it is in no group. */
-  group: string | null
-  rows: number
-}
-
 export interface PlayerView {
   player: string
   title: string
+  /** How many rows the page gave the player; a count of the table, not an episode. */
   rows: number
+  /** How many groups the player keeps (the seasons of a catalog): only the choice of a catalog season needs it. */
   groups: number
-  topHeight: number | null
-  steps: number[]
-  voices: VoiceView[]
+  /** The episodes the constructor took from the player, with the gaps left in, one line to a season: `1-50 (480p-2160p), 61-120`. */
+  coverage: string[]
+  /** One line to a voice-over: its episodes, its name and its group (or `Нет`); both lists come from the rows of the constructor. */
+  voiceLines: string[]
   off: boolean
   /** The player shows a catalog of several seasons, so the source may name the one it takes. */
   chooseSeason: boolean
@@ -70,21 +68,101 @@ export interface SourceItem {
 
 // --- the view of one source ------------------------------------------------------------------------------------------
 
-export function topHeight(heights: number[]): number | null {
-  return heights.length ? Math.max(...heights) : null
+// --- the episodes of a source as the constructor numbered them ---------------------------------------------------------------
+
+interface Span {
+  from: number
+  to: number
+  low: number | null
+  high: number | null
 }
 
-function playerView(player: PlayerSummary, playersOff: string[]): PlayerView {
-  const heights = player.heights ?? []
+/** The rows that carry an episode of the constructor and that it has not left out. */
+function numbered(rows: LayoutRow[]): LayoutRow[] {
+  return rows.filter((row) => !row.excluded && row.episode_start != null)
+}
+
+const lowest = (a: number | null, b: number | null): number | null => (a === null ? b : b === null ? a : Math.min(a, b))
+const highest = (a: number | null, b: number | null): number | null => (a === null ? b : b === null ? a : Math.max(a, b))
+
+/** The rows of one season as ranges: a row that begins inside the range or right after it joins it, a gap starts a new one. */
+function spansOf(rows: LayoutRow[]): Span[] {
+  const spans: Span[] = []
+  for (const row of [...rows].sort((a, b) => (a.episode_start ?? 0) - (b.episode_start ?? 0))) {
+    const from = row.episode_start as number
+    const to = row.episode_end ?? from
+    const heights = row.heights ?? []
+    const low = heights.length ? Math.min(...heights) : null
+    const high = heights.length ? Math.max(...heights) : null
+    const last = spans[spans.length - 1]
+    if (last && from <= last.to + 1) {
+      last.to = Math.max(last.to, to)
+      last.low = lowest(last.low, low)
+      last.high = highest(last.high, high)
+    } else {
+      spans.push({ from, to, low, high })
+    }
+  }
+  return spans
+}
+
+function spanText(span: Span, withSteps: boolean): string {
+  const range = span.from === span.to ? `${span.from}` : `${span.from}-${span.to}`
+  if (!withSteps || span.low === null || span.high === null) return range
+  const low = t("sources.height.step", { height: span.low })
+  const steps = span.low === span.high ? low : `${low}-${t("sources.height.step", { height: span.high })}`
+  return t("sources.range.steps", { range, steps })
+}
+
+/** The ranges of the rows, a line to a season (a season is named only when there are several). */
+function rangeLines(rows: LayoutRow[], withSteps: boolean): string[] {
+  const seasons = new Map<number, LayoutRow[]>()
+  for (const row of numbered(rows)) seasons.set(row.season ?? 0, [...(seasons.get(row.season ?? 0) ?? []), row])
+  const ordered = [...seasons.entries()].sort(([a], [b]) => a - b)
+  return ordered.map(([season, group]) => {
+    const text = spansOf(group).map((span) => spanText(span, withSteps)).join(", ")
+    return ordered.length > 1 && season > 0 ? t("sources.range.season", { season, ranges: text }) : text
+  })
+}
+
+/** The episodes of a player, with the gaps the constructor left, and the resolution steps of each range. */
+export function coverageOf(rows: LayoutRow[]): string[] {
+  return rangeLines(rows, true)
+}
+
+const groupText = (group: string | null | undefined): string =>
+  group ? t("sources.voice.group", { group }) : t("sources.voice.noGroup")
+
+/** A line to a voice-over: its episodes, its name (or the label of the layout when it has none) and its group. */
+export function voiceLinesOf(rows: LayoutRow[]): string[] {
+  const voices = new Map<string, { name: string; group: string | null; rows: LayoutRow[] }>()
+  for (const row of numbered(rows)) {
+    const name = row.voice_name.trim() || row.voice_label
+    const key = `${name}\u0000${row.voice_group ?? ""}`
+    const known = voices.get(key) ?? { name, group: row.voice_group || null, rows: [] }
+    known.rows.push(row)
+    voices.set(key, known)
+  }
+  return [...voices.values()]
+    .map((voice) => ({ voice, first: Math.min(...voice.rows.map((row) => row.episode_start as number)) }))
+    .sort((a, b) => a.first - b.first || a.voice.name.localeCompare(b.voice.name))
+    .map(({ voice }) => t("sources.voice.line", {
+      ranges: rangeLines(voice.rows, false).join("; "), name: voice.name, group: groupText(voice.group),
+    }))
+}
+
+function playerView(player: PlayerSummary, playersOff: string[], layout: LayoutRow[]): PlayerView {
+  const rows = layout.filter((row) => row.player === player.player)
   return {
     player: player.player,
     // The label comes from the table row (`player_label`): the window keeps no map of players.
     title: player.player_label || player.player,
     rows: player.rows,
     groups: player.groups,
-    topHeight: topHeight(heights),
-    steps: [...heights].sort((a, b) => b - a),
-    voices: (player.voices ?? []).map((voice) => ({ name: voice.name, group: voice.group ?? null, rows: voice.rows })),
+    // The lines are built from the rows the constructor made by the rules of the assigned profile and from nothing else:
+    // without a profile (no rows of the layout) there is no line, and the card tells to assign one.
+    coverage: coverageOf(rows),
+    voiceLines: voiceLinesOf(rows),
     off: playersOff.includes(player.player),
     chooseSeason: player.player === CATALOG_PLAYER && player.groups > 1,
   }
@@ -93,6 +171,8 @@ function playerView(player: PlayerSummary, playersOff: string[]): PlayerView {
 export interface ViewInput {
   summary: SourceSummary | null
   playersOff: string[]
+  /** The rows of the layout that belong to this source: the numbers come from the constructor's answer only. */
+  rows?: LayoutRow[]
   /** The page as the core's events last said (progress, ready, failed); wins over the stored summary. */
   live?: PageStatus | null
   /** The answer of the last preview request, for a draft that is no source of a series yet. */
@@ -102,7 +182,7 @@ export interface ViewInput {
 /** One state for the source: the newest news of its page, else what the request or the summary said. */
 export function viewOf(input: ViewInput): SourceView {
   const { summary, live, asked } = input
-  const players = (summary?.players ?? []).map((player) => playerView(player, input.playersOff))
+  const players = (summary?.players ?? []).map((player) => playerView(player, input.playersOff, input.rows ?? []))
   const settled = (state: SourceState, reason: string | null = null): SourceView =>
     ({ state, reason, progress: null, players })
   if (live?.state === "reading") return { state: "reading", reason: null, progress: live.progress, players }
@@ -137,18 +217,9 @@ export function sourceCaption(players: PlayerView[]): string {
   return t("sources.caption.source", { players: tn("sources.count.players", players.length), rows: tn("sources.count.rows", rows) })
 }
 
-/** Rows and seasons of a player; a player that keeps no seasons says only its rows. */
+/** The rows the page gave a player: a count of the table, never a season or a resolution. */
 export function playerCaption(player: PlayerView): string {
-  const rows = tn("sources.count.rows", player.rows)
-  return player.groups > 0 ? t("sources.caption.player", { rows, groups: tn("sources.count.groups", player.groups) }) : rows
-}
-
-export function heightText(player: PlayerView): string {
-  return player.topHeight === null ? "" : t("sources.height", { height: player.topHeight })
-}
-
-export function stepsText(player: PlayerView): string {
-  return player.steps.map((height) => t("sources.height.step", { height })).join(", ")
+  return tn("sources.count.rows", player.rows)
 }
 
 // --- the choices that belong to a source -----------------------------------------------------------------------------
@@ -225,7 +296,9 @@ export function draftBody(item: Pick<SourceItem, "url" | "sourceType" | "profile
   }
 }
 
-export function itemOfSource(source: SeriesSource, summary: SourceSummary | null, live: PageStatus | null): SourceItem {
+export function itemOfSource(
+  source: SeriesSource, summary: SourceSummary | null, live: PageStatus | null, layout: LayoutRow[] = [],
+): SourceItem {
   const playersOff = source.players_off ?? []
   return {
     id: source.id,
@@ -236,7 +309,7 @@ export function itemOfSource(source: SeriesSource, summary: SourceSummary | null
     vibixSeason: source.vibix_season ?? null,
     playersOff,
     voiceName: source.voice_name ?? "",
-    view: viewOf({ summary, playersOff, live }),
+    view: viewOf({ summary, playersOff, live, rows: layout.filter((row) => row.source_id === source.id) }),
   }
 }
 

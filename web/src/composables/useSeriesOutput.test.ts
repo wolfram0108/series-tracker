@@ -34,7 +34,7 @@ const packet = (over: Partial<ReferencePacket> = {}): ReferencePacket => ({
 })
 const summary: SourceSummary = {
   source_id: 7, url: PAGE, status: "no_profile",
-  players: [{ player: "vk", player_label: "VK", rows: 3, groups: 0, heights: [720], voices: [] }],
+  players: [{ player: "vk", player_label: "VK", rows: 3, groups: 0 }],
 }
 const composition = (over: Partial<Composition> = {}): Composition => ({
   series_id: 1, rev: 1, rows: [row()], sources: [summary],

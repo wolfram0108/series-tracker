@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from core.contracts import (CompositionRow, PlayerSummary, ReleaseTable, RowState, RowVoice, RuleLine, RuleResult,
-                            RulesApplyReply, SeriesSource, SourceStatus, SourceType, TableRow, VoiceSummary, line_of)
+                            RulesApplyReply, SeriesSource, SourceStatus, SourceType, TableRow, line_of)
 from core.voice_names import fold_name
 from modules.composition.project import (UNKNOWN_VOICE_LABEL, SourceInput, group_renames, layout_episodes, lines_for,
                                          project, selected_rows, touched_episodes, voice_name_of, voice_names)
@@ -184,7 +184,7 @@ def test_a_ready_source_has_no_reason():
     assert (out.sources[0].status, out.sources[0].reason) == (SourceStatus.READY, None)
 
 
-def test_the_summary_counts_players_rows_seasons_and_resolutions_without_a_number():
+def test_the_summary_counts_players_rows_and_seasons_without_a_number():
     tbl = table(
         row("1", "Серия 1", player="vibix", label="Vibix", group="Сезон 1", heights=(480, 1080)),
         row("2", "Серия 2", player="vibix", label="Vibix", group="Сезон 2", heights=(720,)),
@@ -194,8 +194,12 @@ def test_the_summary_counts_players_rows_seasons_and_resolutions_without_a_numbe
         row("6", "Серия 3", player="vk", label="VK", heights=(), state=RowState.NOT_OBTAINED))
     players = project([item(source(profile=None), tbl)], {}, {}).sources[0].players
     assert players == [PlayerSummary(player="vibix", player_label="Vibix", rows=3, groups=2,
-                                     group_names=["Сезон 1", "Сезон 2"], heights=[480, 720, 1080]),
-                       PlayerSummary(player="vk", player_label="VK", rows=3, groups=0, heights=[1080, 2160])]
+                                     group_names=["Сезон 1", "Сезон 2"]),
+                       PlayerSummary(player="vk", player_label="VK", rows=3, groups=0)]
+
+
+def test_the_summary_of_a_player_holds_no_voice_and_no_resolution_that_a_window_could_draw_beside_the_layout():
+    assert set(PlayerSummary.model_fields) == {"player", "player_label", "rows", "groups", "group_names"}
 
 
 # ---- order -------------------------------------------------------------------------------------------------------
@@ -369,7 +373,7 @@ def test_an_excluded_row_names_its_voice_like_any_other():
     assert (out.rows[0].voice_unknown, out.unknown_voices) == (1, {"чужая": 1})
 
 
-def test_the_names_to_ask_the_groups_about_are_those_of_every_table_and_those_the_constructors_assigned():
+def test_the_names_to_ask_the_groups_about_are_those_of_the_rows_the_constructors_answered():
     first = item(source(id=1, position=0, players_off=["allvideo"]),
                  table(row("a", voice="AniStar"), row("b", voice="Animy", player="allvideo"), row("c", voice=""),
                        row("d", voice="AniStar", kind="x"), row("e", voice="Table name")),
@@ -378,21 +382,7 @@ def test_the_names_to_ask_the_groups_about_are_those_of_every_table_and_those_th
     bare = item(source(id=2, position=1, profile=None), table(row("f", voice="Никто")),
                 {"f": {"episode": 1, "voiceover": "Stale"}})
     waiting = item(source(id=3, position=2))
-    assert voice_names([waiting, bare, first]) == ["AniStar", "Animy", "Table name", "Assigned", "Никто"]
-
-
-def test_a_player_lists_its_voices_with_their_groups_before_a_profile_and_the_assigned_ones_after():
-    tbl = table(row("a", voice="Animy", player="cvh"), row("b", voice="animy", player="cvh"),
-                row("c", voice="AniStar", player="cvh"), row("d", player="vk"), row("e", player="vk"))
-    before = project([item(source(profile=None), tbl)], {"Animy": "Ани", "animy": "Ани"}, {}).sources[0].players
-    assert before[0].voices == [VoiceSummary(name="Animy", group="Ани", rows=1),
-                                VoiceSummary(name="animy", group="Ани", rows=1),
-                                VoiceSummary(name="AniStar", group=None, rows=1)]
-    assert before[1].voices == []
-    after = project([item(source(), tbl, {"d": {"episode": 1, "voiceover": "Мой"},
-                                          "e": {"episode": 2, "voiceover": "Мой"}})], {"Мой": "Моя"}, {})
-    assert after.sources[0].players[1].voices == [VoiceSummary(name="Мой", group="Моя", rows=2)]
-    assert [voice.name for voice in after.sources[0].players[0].voices] == ["Animy", "animy", "AniStar"]
+    assert voice_names([waiting, bare, first]) == ["AniStar", "Assigned"]
 
 
 def test_a_row_carries_the_name_of_its_voice_over_as_it_came_and_the_name_the_constructor_assigned_wins():
@@ -421,12 +411,11 @@ def test_the_name_the_user_gave_a_source_is_the_name_of_the_rows_that_have_none_
     assert voice_name_of(nameless, None, "  ") == "" and voice_name_of(nameless, None) == ""
 
 
-def test_a_source_with_a_name_for_its_voice_has_the_name_in_its_rows_its_summary_its_lines_and_its_groups():
+def test_a_source_with_a_name_for_its_voice_has_the_name_in_its_rows_its_lines_and_its_groups():
     tbl = table(row("a", "Серия 1"), row("b", "Серия 2", voice="Animy"))
     one = item(source(voice_name="AniStar"), tbl, {"a": {"episode": 1}, "b": {"episode": 2}})
     out = project([one], {"AniStar": "Стар"}, {})
     assert [(r.voice_name, r.voice_label) for r in out.rows] == [("AniStar", "Стар"), ("Animy", "Неизвестная озвучка 1")]
-    assert [(v.name, v.group) for v in out.sources[0].players[0].voices] == [("AniStar", "Стар"), ("Animy", None)]
     assert [line.voice for line in lines_for(one.source, tbl)] == ["AniStar", "Animy"]
     assert voice_names([one]) == ["AniStar", "Animy"]
 

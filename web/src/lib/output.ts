@@ -208,10 +208,6 @@ export function canDo(view: EpisodeView, action: string, state: string): boolean
 export interface VoiceColumn {
   group: string
   variants: Variant[]
-  /** The voice-over is in no group of the user. */
-  groupless: boolean
-  /** The names the lines of the voice-over carry: what puts it into a group. Empty for a voice-over with no name. */
-  names: string[]
 }
 
 // A label belongs to the player, not to one line, so the first non-empty one of the whole level is taken.
@@ -250,13 +246,6 @@ export function voiceColumns(view: EpisodeView): VoiceColumn[] {
     }
     found.set(key, variant)
   }
-  const lineNames = new Map<string, { groupless: boolean; names: Set<string> }>()
-  for (const row of view.rows) {
-    const known = lineNames.get(row.voice_label) ?? { groupless: false, names: new Set<string>() }
-    if (!row.voice_group) known.groupless = true
-    if (row.voice_name.trim()) known.names.add(row.voice_name)
-    lineNames.set(row.voice_label, known)
-  }
   const columns = new Map<string, VoiceColumn>()
   for (const { heights, ...pair } of found.values()) {
     const variant: Variant = {
@@ -266,12 +255,7 @@ export function voiceColumns(view: EpisodeView): VoiceColumn[] {
     }
     const column = columns.get(variant.group)
     if (column) column.variants.push(variant)
-    else {
-      const known = lineNames.get(variant.group)
-      columns.set(variant.group, {
-        group: variant.group, variants: [variant], groupless: known?.groupless ?? false, names: [...(known?.names ?? [])],
-      })
-    }
+    else columns.set(variant.group, { group: variant.group, variants: [variant] })
   }
   return [...columns.values()]
     .sort((a, b) => compareNames(a.group, b.group))

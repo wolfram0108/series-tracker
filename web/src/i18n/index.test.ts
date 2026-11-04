@@ -35,7 +35,7 @@ describe("tn", () => {
   })
 
   it("takes the many-form for zero and for a fraction", () => {
-    expect(tn("sources.count.groups", 0)).toBe("0 сезонов")
-    expect(tn("sources.count.groups", 1.5)).toBe("1.5 сезонов")
+    expect(tn("sources.count.rows", 0)).toBe("0 строк")
+    expect(tn("sources.count.rows", 1.5)).toBe("1.5 строк")
   })
 })

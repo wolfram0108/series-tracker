@@ -9,8 +9,7 @@ from dataclasses import dataclass
 from typing import Iterable, Iterator, Mapping, Sequence
 
 from core.contracts import (CompositionRow, Exclusion, PlayerSummary, ReleaseTable, RowState, RuleLine, RuleResult,
-                            RulesApplyReply, SeriesSource, SourceStatus, SourceSummary, TableRow, VoiceSummary,
-                            line_of)
+                            RulesApplyReply, SeriesSource, SourceStatus, SourceSummary, TableRow, line_of)
 from core.voice_names import fold_name
 
 # One template for the name of a voice-over that belongs to no user group.
@@ -78,16 +77,11 @@ def voice_name_of(row: TableRow, result: RuleResult | None, fallback: str = "") 
 
 
 def voice_names(inputs: Sequence[SourceInput]) -> list[str]:
-    """The distinct voice-over names to ask the groups about: those of every table, with or without a profile,
-    and those the constructors assigned. A window shows the voices of a source before any profile is set."""
+    """The distinct voice-over names of the rows the constructors answered: the names the groups are asked about."""
     names: dict[str, None] = {}
     for item in _ordered(inputs):
-        if item.table is None:
-            continue
-        names.update((voice_name_of(row, None, item.source.voice_name), None) for row in item.table.rows
-                     if voice_name_of(row, None, item.source.voice_name).strip())
-        names.update((result.voiceover, None) for result in _results_of(item).values()
-                     if result.voiceover and result.voiceover.strip())
+        names.update((voice_name_of(row, result, item.source.voice_name), None) for row, result in _answered_rows(item)
+                     if voice_name_of(row, result, item.source.voice_name).strip())
     return list(names)
 
 
@@ -100,7 +94,7 @@ def project(inputs: Sequence[SourceInput], groups: Mapping[str, str | None],
     rows: list[CompositionRow] = []
     summaries: list[SourceSummary] = []
     for item in _ordered(inputs):
-        summaries.append(_summary(item, groups))
+        summaries.append(_summary(item))
         for row, result in _answered_rows(item):
             rows.append(_row_of(item.source, row, result, voice_name_of(row, result, item.source.voice_name), groups,
                                 numbering))
@@ -159,13 +153,6 @@ def _ordered(inputs: Sequence[SourceInput]) -> list[SourceInput]:
     return sorted(inputs, key=lambda item: (item.source.position, item.source.id))
 
 
-def _results_of(item: SourceInput) -> dict[str, RuleResult]:
-    """The answers of the constructor that count: none while the source has no profile, whatever was answered before."""
-    if item.reply is None or item.source.parser_profile_id is None:
-        return {}
-    return item.reply.results
-
-
 def _answered_rows(item: SourceInput) -> Iterator[tuple[TableRow, RuleResult]]:
     """The rows of a source with a table and a profile; a row the constructor gave no answer for has no numbers."""
     if item.table is None or item.reply is None or item.source.parser_profile_id is None:
@@ -210,13 +197,13 @@ def _voice_of(name: str, groups: Mapping[str, str | None], numbering: dict[str, 
     return None, UNKNOWN_VOICE_LABEL.format(number=numbering[key]), numbering[key]
 
 
-def _summary(item: SourceInput, groups: Mapping[str, str | None]) -> SourceSummary:
+def _summary(item: SourceInput) -> SourceSummary:
     table = item.table
     return SourceSummary(
         source_id=item.source.id, url=item.source.url, canonical_url=table.url if table else item.table_url,
         status=_status_of(item),
         reason=item.failure or None, read_at=table.read_at if table else None,
-        players=_players_of(table, _results_of(item), groups, item.source.voice_name) if table else [])
+        players=_players_of(table) if table else [])
 
 
 def _status_of(item: SourceInput) -> SourceStatus:
@@ -229,27 +216,13 @@ def _status_of(item: SourceInput) -> SourceStatus:
     return SourceStatus.READY if item.reply is not None else SourceStatus.WAITING
 
 
-def _players_of(table: ReleaseTable, results: Mapping[str, RuleResult], groups: Mapping[str, str | None],
-                fallback: str = "") -> list[PlayerSummary]:
-    """What a window shows before any number exists: per player the rows, the seasons it keeps, its resolutions and
-    its voice-overs with their groups. A voice-over the constructor assigned is shown as soon as it answered."""
+def _players_of(table: ReleaseTable) -> list[PlayerSummary]:
+    """What a window shows before any rule has read the rows: per player the rows and the seasons a catalog keeps."""
     by_player: dict[str, list[TableRow]] = {}
     for row in table.rows:
         by_player.setdefault(row.player, []).append(row)
     return [PlayerSummary(
         player=player, player_label=next((row.player_label for row in rows if row.player_label), ""),
         rows=len(rows), groups=len({row.group for row in rows if row.group}),
-        group_names=list(dict.fromkeys(row.group for row in rows if row.group)),
-        heights=sorted({height for row in rows if row.state == RowState.PLAYABLE for height in row.heights}),
-        voices=_voices_of(rows, results, groups, fallback))
+        group_names=list(dict.fromkeys(row.group for row in rows if row.group)))
         for player, rows in by_player.items()]
-
-
-def _voices_of(rows: Sequence[TableRow], results: Mapping[str, RuleResult],
-               groups: Mapping[str, str | None], fallback: str = "") -> list[VoiceSummary]:
-    counts: dict[str, int] = {}
-    for row in rows:
-        name = voice_name_of(row, results.get(row.key), fallback)
-        if name.strip():
-            counts[name] = counts.get(name, 0) + 1
-    return [VoiceSummary(name=name, group=groups.get(name) or None, rows=count) for name, count in counts.items()]

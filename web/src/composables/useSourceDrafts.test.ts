@@ -19,9 +19,11 @@ const page = (over: Partial<PreviewReply> = {}) => ({
 })
 const summary = {
   source_id: 0, url: PAGE, status: "no_profile" as const, players: [
-    { player: "vibix", player_label: "Vibix", rows: 23, groups: 2, heights: [1080], voices: [] },
+    { player: "vibix", player_label: "Vibix", rows: 23, groups: 2 },
   ],
 }
+// The choices of a source that the preview takes beside the address: they decide which rows of the page are in play.
+const NO_CHOICES = { players_off: [], vibix_season: null, voice_name: "" }
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -35,7 +37,7 @@ describe("useSourceDrafts", () => {
     preview.mockResolvedValueOnce(page())
     const drafts = useSourceDrafts()
     expect(await drafts.add(`${PAGE}?x=1`)).toEqual({ kind: "added" })
-    expect(preview).toHaveBeenCalledWith({ url: PAGE, options: {}, profile_id: null, refresh: true })
+    expect(preview).toHaveBeenCalledWith({ url: PAGE, options: {}, profile_id: null, refresh: true, ...NO_CHOICES })
     expect(drafts.items.value).toHaveLength(1)
     expect(drafts.items.value[0]).toMatchObject({ sourceType: "web_video", url: PAGE, profileId: null })
     expect(drafts.items.value[0].view.state).toBe("reading")
@@ -133,14 +135,31 @@ describe("useSourceDrafts", () => {
     expect(drafts.bodies.value[0]).toMatchObject({ parser_profile_id: 4, vk_search_mode: "get_all" })
   })
 
-  it("keeps the choices of a draft that need no new read without asking", async () => {
+  it("recounts a draft from the table in hand when a choice of the source changes, reading nothing", async () => {
     site({ site: "ruchime", canonical_url: PAGE })
-    preview.mockResolvedValueOnce(page({ state: "ready", summary }))
+    preview.mockResolvedValue(page({ state: "ready", summary }))
     const drafts = useSourceDrafts()
     await drafts.add(PAGE)
     await drafts.change(drafts.items.value[0].id, { vibixSeason: 2, playersOff: ["kodik"] })
-    expect(preview).toHaveBeenCalledTimes(1)
+    expect(preview).toHaveBeenCalledTimes(2)
+    expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ refresh: false, vibix_season: 2, players_off: ["kodik"] }))
     expect(drafts.bodies.value[0]).toMatchObject({ vibix_season: 2, players_off: ["kodik"] })
+    await drafts.change(drafts.items.value[0].id, { playersOff: ["kodik"] })
+    expect(preview).toHaveBeenCalledTimes(2)
+  })
+
+  it("draws the lines of a draft from the rows the core made by the profile, and from no other data", async () => {
+    site({ site: "ruchime", canonical_url: PAGE })
+    const row = {
+      series_id: 0, source_id: 0, row_key: "a", excluded: false, season: 1, episode_start: 1, episode_end: 12,
+      voice_label: "Неизвестная озвучка 1", voice_name: "", voice_group: null, player: "vibix", player_label: "Vibix",
+      group: "", text: "", heights: [720], state: "playable", link: "",
+    }
+    preview.mockResolvedValueOnce(page({ state: "ready", summary, rows: [row] as PreviewReply["rows"] }))
+    const drafts = useSourceDrafts()
+    await drafts.add(PAGE)
+    const [player] = drafts.items.value[0].view.players
+    expect([player.coverage, player.voiceLines]).toEqual([["1-12 (720p)"], ["1-12 Неизвестная озвучка 1 (Нет)"]])
   })
 
   it("blocks the series while a source could not be read, and frees it once that source is removed", async () => {
@@ -167,7 +186,7 @@ describe("useSourceDrafts", () => {
     preview.mockResolvedValueOnce(page({ state: "ready", summary }))
     useSourceTablesStore().applyReady({ url: PAGE, read_at: "2026-11-01T10:00:00Z" })
     await flushPromises()
-    expect(preview).toHaveBeenLastCalledWith({ url: PAGE, options: {}, profile_id: null, refresh: false })
+    expect(preview).toHaveBeenLastCalledWith({ url: PAGE, options: {}, profile_id: null, refresh: false, ...NO_CHOICES })
     expect(drafts.items.value[0].view.state).toBe("noProfile")
   })
 

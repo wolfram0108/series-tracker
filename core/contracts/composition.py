@@ -64,16 +64,9 @@ class SourceStatus(StrEnum):
     FAILED = "failed"
 
 
-class VoiceSummary(BaseModel):
-    """A voice-over of a player as the table names it and the user group it belongs to (None: no group)."""
-
-    name: str = ""
-    group: str | None = None
-    rows: int = 0
-
-
 class PlayerSummary(BaseModel):
-    """What a window may show before a profile is assigned: counts, resolutions and voices, never numbers."""
+    """What a window may show of a player before any rule has read its rows: how many rows it has and how a catalog
+    splits them. Episodes, voice-overs and resolutions of a player are the constructor's answer: the rows of the layout."""
 
     player: str
     player_label: str = ""
@@ -81,8 +74,6 @@ class PlayerSummary(BaseModel):
     groups: int = 0
     # The groups of the player as it names them, in the order of the table (a season of a catalog is one).
     group_names: list[str] = Field(default_factory=list)
-    heights: list[int] = Field(default_factory=list)
-    voices: list[VoiceSummary] = Field(default_factory=list)
 
 
 class SourceSummary(BaseModel):
@@ -162,6 +153,11 @@ class CompositionPreviewRequest(BaseModel):
     series_season: str | int | None = None
     refresh: bool = True
     lines: list[str] | None = None
+    # The choices a source of a series keeps; they decide which rows of the page are in play, so the preview takes them
+    # to make the rows the series would make.
+    players_off: list[str] = Field(default_factory=list)
+    vibix_season: int | None = None
+    voice_name: str = ""
 
     @model_validator(mode="after")
     def _names_a_page_or_lines(self) -> "CompositionPreviewRequest":
@@ -180,3 +176,6 @@ class CompositionPreviewReply(BaseModel):
     names: list[str] = Field(default_factory=list)
     summary: SourceSummary | None = None
     lines: list[PreviewLine] = Field(default_factory=list)
+    # The rows of the layout this address would make with the profile, without the rows the constructor left out: the
+    # same rows a series keeps (source_id 0), so a window draws the episodes and voice-overs of a draft from them too.
+    rows: list[CompositionRow] = Field(default_factory=list)

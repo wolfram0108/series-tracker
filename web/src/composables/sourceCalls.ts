@@ -1,7 +1,7 @@
 import { api } from "../api/client"
 import { t, type MessageKey } from "../i18n"
 import { reasonText } from "../lib/reason"
-import type { PreviewReply, ResolveReply, SeriesSource, SourceDraft, SourceSummary } from "../lib/sources"
+import type { LayoutRow, PreviewReply, ResolveReply, SeriesSource, SourceDraft, SourceSummary } from "../lib/sources"
 
 /** The answer of a call to the core: the data, or the words for the refusal (the reason worded by the catalog). */
 export type Answer<T> = { ok: true; data: T } | { ok: false; text: string }
@@ -45,8 +45,11 @@ export function previewAddress(body: {
   options?: Record<string, string>
   profile_id?: number | null
   refresh?: boolean
+  players_off?: string[]
+  vibix_season?: number | null
+  voice_name?: string
 }): Promise<Answer<PreviewReply>> {
-  return call(() => api.POST("/api/sources/preview", { body: { refresh: true, ...body } }))
+  return call(() => api.POST("/api/sources/preview", { body: { refresh: true, voice_name: "", ...body } }))
 }
 
 /** Reads the page now, whatever the age of its table; how the read goes and where it ends come as events. */
@@ -63,11 +66,11 @@ export function fetchSources(seriesId: number): Promise<Answer<SeriesSource[]>> 
   return call(() => api.GET("/api/series/{series_id}/sources", { params: { path: { series_id: seriesId } } }))
 }
 
-/** The summaries of the sources of a video series: the part of the layout a window of the sources needs. */
-export async function fetchSummaries(seriesId: number): Promise<Answer<SourceSummary[]>> {
-  const answer = await call<{ sources?: SourceSummary[] }>(() =>
+/** The part of the layout a window of the sources needs: the summaries of the sources and the rows the constructor numbered. */
+export async function fetchLayout(seriesId: number): Promise<Answer<{ sources: SourceSummary[]; rows: LayoutRow[] }>> {
+  const answer = await call<{ sources?: SourceSummary[]; rows?: LayoutRow[] }>(() =>
     api.GET("/api/series/{series_id}/composition", { params: { path: { series_id: seriesId } } }))
-  return answer.ok ? { ok: true, data: answer.data.sources ?? [] } : answer
+  return answer.ok ? { ok: true, data: { sources: answer.data.sources ?? [], rows: answer.data.rows ?? [] } } : answer
 }
 
 export function createSource(seriesId: number, draft: SourceDraft): Promise<Answer<{ id: number }>> {

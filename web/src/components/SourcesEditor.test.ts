@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import ToastService from "primevue/toastservice"
 import SourcesEditor from "./SourcesEditor.vue"
-import { itemOfSource, type SeriesSource, type SourceSummary } from "../lib/sources"
+import { itemOfSource, type LayoutRow, type SeriesSource, type SourceSummary } from "../lib/sources"
 
 const PAGE = "https://1.ruchime.org/release/test"
 const stored = (over: Partial<SeriesSource> = {}): SeriesSource => ({
@@ -12,9 +12,9 @@ const stored = (over: Partial<SeriesSource> = {}): SeriesSource => ({
 })
 const summary: SourceSummary = {
   source_id: 7, url: PAGE, status: "no_profile", read_at: "2026-11-01T10:00:00Z", players: [
-    { player: "vk", player_label: "VK", rows: 13, groups: 0, heights: [720, 1080], voices: [{ name: "Ruchime", group: "Ruchime", rows: 13 }] },
-    { player: "vibix", player_label: "Vibix", rows: 23, groups: 2, heights: [1080], voices: [] },
-    { player: "kodik", player_label: "", rows: 5, groups: 1, heights: [720], voices: [{ name: "Студия Константина Исаева", group: null, rows: 5 }] },
+    { player: "vk", player_label: "VK", rows: 13, groups: 0 },
+    { player: "vibix", player_label: "Vibix", rows: 23, groups: 2 },
+    { player: "kodik", player_label: "", rows: 5, groups: 1 },
   ],
 }
 const mountEditor = (items = [itemOfSource(stored(), summary, null)], props: Record<string, unknown> = {}) =>
@@ -24,15 +24,35 @@ const mountEditor = (items = [itemOfSource(stored(), summary, null)], props: Rec
   })
 
 describe("SourcesEditor", () => {
-  it("draws a group per source with its players, their counts and the voice-overs with their groups", () => {
+  it("draws a group per source with its players and their counts, and no episode, season, resolution or voice-over of the table", () => {
     const text = mountEditor().text()
     expect(text).toContain("3 плеера, 41 строка")
     expect(text).toContain("13 строк")
-    expect(text).toContain("23 строки, 2 сезона")
-    expect(text).toContain("до 1080p")
-    expect(text).toContain("группа «Ruchime»")
-    expect(text).toContain("нет группы")
-    expect(text).toContain("Студия Константина Исаева")
+    expect(text).toContain("23 строки")
+    for (const word of ["сезона", "до 1080p", "группа"]) expect(text).not.toContain(word)
+    expect(mountEditor().findAll("ul.lines")).toHaveLength(0)
+  })
+
+  it("draws the ranges with their resolutions and a line per voice-over with its group, from the rows of the constructor only", () => {
+    const part = (over: Partial<LayoutRow>): LayoutRow => ({
+      series_id: 1, source_id: 7, row_key: "r", excluded: false, season: 1, episode_start: 1, episode_end: 1,
+      voice_label: "", voice_name: "", voice_group: null, player: "vk", player_label: "VK", group: "", text: "",
+      heights: [], state: "playable", link: "", ...over,
+    })
+    const rows = [
+      part({ row_key: "a", episode_start: 1, episode_end: 10, heights: [480, 2160], voice_name: "ПВА ШОУ", voice_label: "ПВА ШОУ", voice_group: "ПВА ШОУ" }),
+      part({ row_key: "b", episode_start: 11, episode_end: 50, heights: [480, 720], voice_label: "Неизвестная озвучка 2" }),
+      part({ row_key: "c", episode_start: 61, episode_end: 120, heights: [360, 1440], voice_label: "Неизвестная озвучка 2" }),
+    ]
+    const w = mountEditor([itemOfSource(stored({ parser_profile_id: 4 }), { ...summary, status: "ready" }, null, rows)])
+    expect(w.findAll("li.player")[0].findAll("ul.coverage li").map((li) => li.text())).toEqual([
+      "1-50 (480p-2160p), 61-120 (360p-1440p)",
+    ])
+    expect(w.findAll("li.player")[0].findAll("ul.voices li").map((li) => li.text())).toEqual([
+      "1-10 ПВА ШОУ (Группа ПВА ШОУ)", "11-50, 61-120 Неизвестная озвучка 2 (Нет)",
+    ])
+    expect(w.findAll("li.player")[1].findAll("ul.lines")).toHaveLength(0)
+    expect(w.findAll("li.player")[1].text()).toContain("Правила профиля не определили ни одной серии")
   })
 
   it("offers the season of the catalog only at the player that keeps several", () => {
@@ -117,10 +137,11 @@ describe("SourcesEditor", () => {
     expect(w.emitted("change")?.[0]).toEqual([7, { voiceName: "AniLibria" }])
   })
 
-  it("offers a group to a voice-over that is in none and not to one that is in a group", () => {
+  it("offers no way to make a group of voice-overs: the groups are made in the settings only", () => {
     const w = mountEditor()
-    const voices = w.findAll(".voices .voice")
-    expect(voices.map((voice) => voice.find(".group-maker").exists())).toEqual([false, true])
+    expect(w.find(".group-maker").exists()).toBe(false)
+    expect(w.text()).not.toContain("Завести группу")
+    expect(w.text()).not.toContain("Название группы")
   })
 
   it("edits the channel of VK and sends it when the field is left", async () => {

@@ -11,7 +11,9 @@ from gateway_fakes import published, serving
 
 SOURCE = {"id": 4, "series_id": 1, "position": 0, "url": "https://x.test/p", "source_type": "web_video",
           "parser_profile_id": 2, "vk_search_mode": "search", "vibix_season": None, "players_off": []}
-PREVIEW = {"url": "https://x.test/p", "state": "ready", "reason": None, "summary": None, "lines": []}
+PREVIEW = {"url": "https://x.test/p", "state": "ready", "reason": None, "summary": None, "lines": [], "rows": []}
+# The choices of a source the preview carries beside the address; a window that sends none asks for the defaults.
+NO_CHOICES = {"players_off": [], "vibix_season": None, "voice_name": ""}
 
 
 def code_of(response) -> str:
@@ -143,7 +145,7 @@ async def test_a_preview_carries_the_request_to_composition_whole_and_the_answer
     assert response.status_code == 200 and response.json() == reply
     assert owners.asked("composition.preview") == [{
         "url": "https://x.test/p", "options": {"vk_search_mode": "get_all"}, "profile_id": 2,
-        "series_season": "s02", "refresh": False, "lines": None}]
+        "series_season": "s02", "refresh": False, "lines": None, **NO_CHOICES}]
     # The gateway reads no table and applies no rule itself.
     assert [t for t in topics(spy) if t != "composition.preview"] == []
 
@@ -153,7 +155,7 @@ async def test_a_preview_without_a_profile_asks_for_a_read_by_default(tmp_path):
         await client.post("/api/sources/preview", json={"url": "https://x.test/p"})
     assert owners.asked("composition.preview") == [{
         "url": "https://x.test/p", "options": {}, "profile_id": None, "series_season": None, "refresh": True,
-        "lines": None}]
+        "lines": None, **NO_CHOICES}]
 
 
 async def test_a_preview_refused_by_composition_carries_the_reason(tmp_path):
@@ -205,7 +207,7 @@ async def test_the_test_of_rules_is_the_preview_of_the_page_with_the_profile_giv
     assert response.json()["lines"][0]["key"] == "k1" and response.json()["lines"][0]["result"]["start"] == 1
     assert owners.asked("composition.preview") == [{
         "url": "https://x.test/p", "options": {"vk_search_mode": "search"}, "profile_id": 5, "series_season": 2,
-        "refresh": True, "lines": None}]
+        "refresh": True, "lines": None, **NO_CHOICES}]
     assert "rules.test" not in topics(spy) and "rules.apply" not in topics(spy)
 
 
@@ -216,7 +218,8 @@ async def test_the_test_of_rules_takes_lines_the_user_holds_instead_of_a_page(tm
         response = await client.post("/api/parser-profiles/test", json={"profile_id": 5, "lines": ["Тайтл s01e02"]})
     assert response.status_code == 200 and response.json()["lines"][0]["result"]["episode"] == 2
     assert owners.asked("composition.preview") == [{
-        "url": "", "options": {}, "profile_id": 5, "series_season": None, "refresh": True, "lines": ["Тайтл s01e02"]}]
+        "url": "", "options": {}, "profile_id": 5, "series_season": None, "refresh": True, "lines": ["Тайтл s01e02"],
+        **NO_CHOICES}]
 
 
 async def test_the_test_of_rules_asks_for_no_read_when_the_window_only_takes_the_table(tmp_path):

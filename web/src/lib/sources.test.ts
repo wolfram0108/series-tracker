@@ -1,25 +1,16 @@
 import { describe, expect, it } from "vitest"
 import {
-  draftBody, heightText, itemOfSource, joinVkAddress, phaseText, playerCaption, profileOptions, progressText,
-  readEnded, readOptions, seasonPositions, siteOf, sourceCaption, sourceTypeOf, splitVkAddress, stepsText, summaryOf, togglePlayer,
-  viewOf, vkModeOf, type PlayerSummary, type SeriesSource, type SourceSummary,
+  coverageOf, draftBody, itemOfSource, joinVkAddress, phaseText, playerCaption, profileOptions, progressText,
+  readEnded, readOptions, seasonPositions, siteOf, sourceCaption, sourceTypeOf, splitVkAddress, summaryOf, togglePlayer,
+  viewOf, vkModeOf, voiceLinesOf, type LayoutRow, type PlayerSummary, type SeriesSource, type SourceSummary,
 } from "./sources"
 import type { PageStatus } from "../stores/sourceTables"
 
 // Samples have the shape of CompositionPreviewReply.summary in api/schema.d.ts: the page of a release with four
 // players and a catalog of two seasons, and a channel of VK whose rows have no voice-over of their own.
-const vk: PlayerSummary = {
-  player: "vk", player_label: "VK", rows: 13, groups: 0, heights: [720, 1080],
-  voices: [{ name: "Ruchime", group: "Ruchime", rows: 13 }],
-}
-const vibix: PlayerSummary = {
-  player: "vibix", player_label: "Vibix", rows: 23, groups: 2, heights: [1080],
-  voices: [{ name: "Ruchime", group: "Ruchime", rows: 23 }],
-}
-const kodik: PlayerSummary = {
-  player: "kodik", player_label: "", rows: 5, groups: 1, heights: [480, 720],
-  voices: [{ name: "Студия Константина Исаева", group: null, rows: 3 }, { name: "AniStar", group: "AniStar", rows: 2 }],
-}
+const vk: PlayerSummary = { player: "vk", player_label: "VK", rows: 13, groups: 0 }
+const vibix: PlayerSummary = { player: "vibix", player_label: "Vibix", rows: 23, groups: 2 }
+const kodik: PlayerSummary = { player: "kodik", player_label: "", rows: 5, groups: 1 }
 const release: SourceSummary = {
   source_id: 7, url: "https://1.ruchime.org/release/test", status: "no_profile", reason: null,
   read_at: "2026-11-01T10:00:00Z", players: [vk, vibix, kodik],
@@ -27,13 +18,11 @@ const release: SourceSummary = {
 const idle: PageStatus = { state: "ready", progress: null, reason: null, readAt: null }
 
 describe("viewOf", () => {
-  it("shows the players of the table with their counts and steps, never a number of an episode", () => {
+  it("shows the players of the table with their counts, and no line of episodes or voice-overs without rows of the constructor", () => {
     const view = viewOf({ summary: release, playersOff: [] })
     expect(view.state).toBe("noProfile")
-    expect(view.players.map((p) => [p.title, p.rows, p.groups, p.topHeight])).toEqual([
-      ["VK", 13, 0, 1080], ["Vibix", 23, 2, 1080], ["kodik", 5, 1, 720],
-    ])
-    expect(view.players[0].steps).toEqual([1080, 720])
+    expect(view.players.map((p) => [p.title, p.rows, p.groups])).toEqual([["VK", 13, 0], ["Vibix", 23, 2], ["kodik", 5, 1]])
+    expect(view.players.map((p) => [p.coverage, p.voiceLines])).toEqual([[[], []], [[], []], [[], []]])
   })
 
   it("takes the label of a player from the table and falls back to the kind of the player", () => {
@@ -41,9 +30,13 @@ describe("viewOf", () => {
     expect([players[0].title, players[2].title]).toEqual(["VK", "kodik"])
   })
 
-  it("keeps the group of a voice-over and marks a voice-over that is in no group", () => {
-    const voices = viewOf({ summary: release, playersOff: [] }).players[2].voices
-    expect(voices.map((v) => [v.name, v.group])).toEqual([["Студия Константина Исаева", null], ["AniStar", "AniStar"]])
+  it("builds the lines of a player from the rows of the layout of that player and of no other", () => {
+    const rows = [
+      layoutRow({ player: "vk", episode_start: 1, episode_end: 3 }),
+      layoutRow({ player: "kodik", row_key: "k", episode_start: 5, episode_end: 5 }),
+    ]
+    const players = viewOf({ summary: release, playersOff: [], rows }).players
+    expect(players.map((p) => p.coverage)).toEqual([["1-3 (720p-1080p)"], [], ["5 (720p-1080p)"]])
   })
 
   it("offers the choice of a season only for a catalog with several seasons", () => {
@@ -96,6 +89,39 @@ describe("viewOf", () => {
   })
 })
 
+const layoutRow = (over: Partial<LayoutRow> = {}): LayoutRow => ({
+  series_id: 1, source_id: 7, row_key: "r", excluded: false, season: 1, episode_start: 1, episode_end: 1,
+  voice_label: "Ruchime", voice_name: "Ruchime", voice_group: null, player: "vk", player_label: "VK", group: "", text: "",
+  heights: [720, 1080], state: "playable", link: "", ...over,
+})
+
+describe("the lines of a player from the rows of the constructor", () => {
+  const pva = layoutRow({ row_key: "a", episode_start: 1, episode_end: 10, heights: [480, 1080, 2160], voice_name: "ПВА ШОУ", voice_label: "ПВА ШОУ", voice_group: "ПВА ШОУ" })
+  const two = layoutRow({ row_key: "b", episode_start: 11, episode_end: 50, heights: [480, 720], voice_name: "", voice_label: "Неизвестная озвучка 2" })
+  const late = layoutRow({ row_key: "c", episode_start: 61, episode_end: 120, heights: [360, 1440], voice_name: "", voice_label: "Неизвестная озвучка 2" })
+
+  it("joins the episodes that follow one another, leaves the gaps, and gives each range the steps of its rows", () => {
+    expect(coverageOf([pva, two, late])).toEqual(["1-50 (480p-2160p), 61-120 (360p-1440p)"])
+  })
+
+  it("gives a voice-over a line with its episodes, its name and its group, or `Нет` when it has none", () => {
+    expect(voiceLinesOf([pva, two, late])).toEqual([
+      "1-10 ПВА ШОУ (Группа ПВА ШОУ)", "11-50, 61-120 Неизвестная озвучка 2 (Нет)",
+    ])
+  })
+
+  it("names a season only when there are several, and takes a single episode as a number", () => {
+    expect(coverageOf([layoutRow({ season: 1, episode_start: 3, episode_end: 3, heights: [] })])).toEqual(["3"])
+    expect(coverageOf([layoutRow({ season: 1 }), layoutRow({ season: 2, episode_start: 4, episode_end: 6, heights: [1080] })]))
+      .toEqual(["Сезон 1: 1 (720p-1080p)", "Сезон 2: 4-6 (1080p)"])
+  })
+
+  it("leaves out the rows the constructor excluded or gave no number", () => {
+    const lost = [layoutRow({ excluded: true }), layoutRow({ episode_start: null, episode_end: null })]
+    expect([coverageOf(lost), voiceLinesOf(lost)]).toEqual([[], []])
+  })
+})
+
 describe("texts", () => {
   const view = viewOf({ summary: release, playersOff: [] })
 
@@ -104,17 +130,10 @@ describe("texts", () => {
     expect(sourceCaption([view.players[0]])).toBe("1 плеер, 13 строк")
   })
 
-  it("counts the rows and the seasons of a player, and leaves out seasons it does not keep", () => {
-    expect(playerCaption(view.players[1])).toBe("23 строки, 2 сезона")
+  it("counts only the rows of a player: its seasons and resolutions are the constructor's and come with the rows of the layout", () => {
+    expect(playerCaption(view.players[1])).toBe("23 строки")
     expect(playerCaption(view.players[0])).toBe("13 строк")
-    expect(playerCaption({ ...view.players[2], rows: 21, groups: 1 })).toBe("21 строка, 1 сезон")
-    expect(playerCaption({ ...view.players[2], rows: 11, groups: 5 })).toBe("11 строк, 5 сезонов")
-  })
-
-  it("names the top step and all steps of a player", () => {
-    expect(heightText(view.players[0])).toBe("до 1080p")
-    expect(stepsText(view.players[2])).toBe("720p, 480p")
-    expect(heightText({ ...view.players[0], topHeight: null, steps: [] })).toBe("")
+    expect(playerCaption({ ...view.players[2], rows: 21 })).toBe("21 строка")
   })
 
   it("words the progress of a read by phase and by how far it is", () => {

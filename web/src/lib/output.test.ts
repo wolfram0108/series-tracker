@@ -146,19 +146,6 @@ describe("the choices of an episode", () => {
     expect(voiceColumns(only)[0].variants[0]).toMatchObject({ state: "playable" })
   })
 
-  it("says whether a voice-over is in no group of the user and which names its lines carry", () => {
-    const columns = voiceColumns(episodeOf({ rows: [
-      row({ voice_label: "AniStar", voice_group: "AniStar", voice_name: "anistar" }),
-      row({ voice_label: "Неизвестная озвучка 1", voice_group: null, voice_name: "Animy" }),
-      row({ voice_label: "Неизвестная озвучка 1", voice_group: null, voice_name: "Animy", source_id: 8 }),
-      row({ voice_label: "Неизвестная озвучка 2", voice_group: null, voice_name: "  " }),
-    ] }))
-    const by = (group: string) => columns.find((column) => column.group === group)
-    expect([by("AniStar")?.groupless, by("AniStar")?.names]).toEqual([false, ["anistar"]])
-    expect([by("Неизвестная озвучка 1")?.groupless, by("Неизвестная озвучка 1")?.names]).toEqual([true, ["Animy"]])
-    expect([by("Неизвестная озвучка 2")?.groupless, by("Неизвестная озвучка 2")?.names]).toEqual([true, []])
-  })
-
   it("makes no column for no lines", () => {
     expect(voiceColumns(episodeOf({ rows: [] }))).toEqual([])
   })

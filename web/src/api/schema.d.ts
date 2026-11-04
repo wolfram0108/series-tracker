@@ -1594,6 +1594,8 @@ export interface components {
             summary?: components["schemas"]["SourceSummary"] | null;
             /** Lines */
             lines?: components["schemas"]["PreviewLine"][];
+            /** Rows */
+            rows?: components["schemas"]["CompositionRow"][];
         };
         /**
          * CompositionPreviewRequest
@@ -1622,6 +1624,15 @@ export interface components {
             refresh: boolean;
             /** Lines */
             lines?: string[] | null;
+            /** Players Off */
+            players_off?: string[];
+            /** Vibix Season */
+            vibix_season?: number | null;
+            /**
+             * Voice Name
+             * @default
+             */
+            voice_name: string;
         };
         /** CompositionReply */
         CompositionReply: {
@@ -2028,7 +2039,8 @@ export interface components {
         };
         /**
          * PlayerSummary
-         * @description What a window may show before a profile is assigned: counts, resolutions and voices, never numbers.
+         * @description What a window may show of a player before any rule has read its rows: how many rows it has and how a catalog
+         *     splits them. Episodes, voice-overs and resolutions of a player are the constructor's answer: the rows of the layout.
          */
         PlayerSummary: {
             /** Player */
@@ -2050,10 +2062,6 @@ export interface components {
             groups: number;
             /** Group Names */
             group_names?: string[];
-            /** Heights */
-            heights?: number[];
-            /** Voices */
-            voices?: components["schemas"]["VoiceSummary"][];
         };
         /**
          * PreviewLine
@@ -2590,24 +2598,6 @@ export interface components {
             player_groups?: {
                 [key: string]: string[];
             };
-        };
-        /**
-         * VoiceSummary
-         * @description A voice-over of a player as the table names it and the user group it belongs to (None: no group).
-         */
-        VoiceSummary: {
-            /**
-             * Name
-             * @default
-             */
-            name: string;
-            /** Group */
-            group?: string | null;
-            /**
-             * Rows
-             * @default 0
-             */
-            rows: number;
         };
         /**
          * DubEventStatus

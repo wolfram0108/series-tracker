@@ -2,7 +2,7 @@ import { computed, ref, watch } from "vue"
 import { t } from "../i18n"
 import {
   draftBody, readOptions, readEnded, viewOf, vkModeOf,
-  type PreviewReply, type SourceDraft, type SourceItem, type SourceSummary, type SourceType,
+  type LayoutRow, type PreviewReply, type SourceDraft, type SourceItem, type SourceSummary, type SourceType,
 } from "../lib/sources"
 import { useSourceTablesStore, type PageStatus } from "../stores/sourceTables"
 import { previewAddress, readPageNow } from "./sourceCalls"
@@ -21,6 +21,8 @@ interface Draft {
   /** The address the core names the page with in its events; known after the first preview. */
   canonical: string
   summary: SourceSummary | null
+  /** The rows the rules of the profile made of the page, as the core's last complete answer gave them. */
+  rows: LayoutRow[]
   asked: { state: PreviewReply["state"]; reason?: string | null } | null
   /** The news of the page that the last answer already knew; only news after it asks the preview again. */
   handled: PageStatus | null
@@ -53,7 +55,8 @@ export function useSourceDrafts() {
     playersOff: draft.playersOff,
     voiceName: draft.voiceName,
     view: viewOf({
-      summary: draft.summary, playersOff: draft.playersOff, live: tables.forUrl(draft.canonical), asked: draft.asked,
+      summary: draft.summary, playersOff: draft.playersOff, rows: draft.rows, live: tables.forUrl(draft.canonical),
+      asked: draft.asked,
     }),
   })))
 
@@ -66,6 +69,7 @@ export function useSourceDrafts() {
     const before = tables.forUrl(draft.canonical)
     const answer = await previewAddress({
       url: draft.url, options: readOptions(draft), profile_id: draft.profileId, refresh,
+      players_off: draft.playersOff, vibix_season: draft.vibixSeason, voice_name: draft.voiceName,
     })
     if (!drafts.value.includes(draft)) return
     if (!answer.ok) {
@@ -76,6 +80,8 @@ export function useSourceDrafts() {
     draft.canonical = answer.data.url
     draft.asked = { state: answer.data.state, reason: answer.data.reason }
     draft.summary = answer.data.summary ?? draft.summary
+    // Rows come with a summary: a failed read that kept no complete table leaves the earlier rows in force.
+    draft.rows = answer.data.summary ? (answer.data.rows ?? []) : draft.rows
     draft.handled = before
     await settle(draft)
   }
@@ -110,7 +116,7 @@ export function useSourceDrafts() {
       }
       const draft: Draft = {
         key: `draft-${++counter}`, url, sourceType, profileId: null, vkSearchMode: vkModeOf(null), vibixSeason: null,
-        playersOff: [], voiceName: "", canonical: "", summary: null, asked: { state: "reading" }, handled: null,
+        playersOff: [], voiceName: "", canonical: "", summary: null, rows: [], asked: { state: "reading" }, handled: null,
       }
       drafts.value.push(draft)
       await ask(drafts.value[drafts.value.length - 1], true)
@@ -124,20 +130,25 @@ export function useSourceDrafts() {
     drafts.value = drafts.value.filter((draft) => draft.key !== key)
   }
 
-  /** A choice of a draft. What changes the page asked for (address, mode) reads again; a profile only recounts. */
+  /** A choice of a draft. What changes the page asked for (address, mode) reads again; a profile or a choice of the source only recounts. */
   async function change(key: string | number, patch: DraftPatch): Promise<void> {
     const draft = find(key)
     if (!draft) return
     const rereads = (patch.url !== undefined && patch.url !== draft.url)
       || (patch.vkSearchMode !== undefined && patch.vkSearchMode !== draft.vkSearchMode)
-    const reprofiles = patch.profileId !== undefined && patch.profileId !== draft.profileId
+    // What a profile or a choice of the source changes is recounted from the table in hand, reading nothing.
+    const recounts = (patch.profileId !== undefined && patch.profileId !== draft.profileId)
+      || (patch.vibixSeason !== undefined && patch.vibixSeason !== draft.vibixSeason)
+      || (patch.voiceName !== undefined && patch.voiceName !== draft.voiceName)
+      || (patch.playersOff !== undefined && patch.playersOff.join("\u0000") !== draft.playersOff.join("\u0000"))
     Object.assign(draft, patch)
     if (rereads) {
       draft.summary = null
+      draft.rows = []
       draft.asked = { state: "reading" }
       draft.canonical = ""
       await ask(draft, true)
-    } else if (reprofiles) {
+    } else if (recounts) {
       await ask(draft, false)
     }
   }
