@@ -70,6 +70,8 @@ export interface EpisodeView {
   dubs: VoiceDub[]
   /** The files of the plan of the series: the status of the video of a reference is read from them. */
   files?: MediaFile[]
+  /** The labels of the players of the sources, by `source:player`: a player the episode has no line for is still named. */
+  labels?: Record<string, string>
   /** What may be done with an object in each of its states, as the core gives it with the layout. */
   availability?: Record<string, string[]>
 }
@@ -123,6 +125,7 @@ export function joinEpisodes(
   dubs: VoiceDub[],
   availability: Record<string, string[]> = {},
   files: MediaFile[] = [],
+  labels: Record<string, string> = {},
 ): EpisodeView[] {
   const slots = new Map<string, Slot>()
   const note = (slot: Slot): void => {
@@ -168,6 +171,7 @@ export function joinEpisodes(
       levers: settingsBy.get(key)?.levers ?? [],
       dubs: dubsBy.get(key) ?? [],
       files,
+      labels,
       availability,
     }
   })
@@ -398,8 +402,8 @@ export interface OutputLine {
 export function outputLines(view: EpisodeView): OutputLine[] {
   const variants = voiceColumns(view).flatMap((column) => column.variants)
   const labelOf = (sourceId: number | null, player: string | null): string | null =>
-    player === null ? null : (variants.find((each) => each.sourceId === sourceId && each.player === player)?.playerLabel
-      ?? sourcePlayers(view).find((each) => each.sourceId === sourceId && each.player === player)?.playerLabel ?? player)
+    player === null ? null : (view.labels?.[`${sourceId}:${player}`]
+      ?? variants.find((each) => each.sourceId === sourceId && each.player === player)?.playerLabel ?? player)
   const lines: OutputLine[] = []
   for (const reference of view.references) {
     if ((reference.source_id ?? null) === null) continue

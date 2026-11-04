@@ -26,7 +26,7 @@ const dub = (season: number, episode: number, state: VoiceDub["state"] = "done")
   season, episode, part: null, voice_key: "ruchime", voice_label: "Ruchime", status: "placed", state, hint: null, detail: null,
 })
 const episodeOf = (over: Partial<EpisodeView> = {}): EpisodeView => ({
-  season: 1, episode: 1, references: [], rows: [], levers: [], dubs: [], files: [], ...over,
+  season: 1, episode: 1, references: [], rows: [], levers: [], dubs: [], files: [], labels: {}, ...over,
 })
 
 describe("joinEpisodes", () => {
@@ -357,6 +357,11 @@ describe("outputLines", () => {
     const lines = outputLines(episodeOf({ references: [ref1()], files, dubs: [dubOn("AniStar", { state: "align_queued" })] }))
     expect([lines[0].file, lines[0].dub, lines[1].file, lines[1].dub?.state]).toEqual(["completed", null, null, "align_queued"])
     expect(outputLines(episodeOf({ references: [ref1()], files: [] }))[0].file).toBeNull()
+  })
+
+  it("names the player of a voice-over by the label of its source's table, though the episode has no line of that player", () => {
+    const [line] = outputLines(episodeOf({ dubs: [dubOn("AniStar")], labels: { "9:kodik": "Kodik" } }))
+    expect(line.playerLabel).toBe("Kodik")
   })
 
   it("makes no line for a reference with no source, and names no player for a voice-over the core names none for", () => {

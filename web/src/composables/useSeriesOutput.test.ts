@@ -87,6 +87,7 @@ describe("useSeriesOutput", () => {
       levers: [{ lever: "voice.take", target: groupTarget("Ruchime"), value: true, level: "episode" }],
       dubs: [expect.objectContaining({ voice_label: "Ruchime", state: "align_queued" })],
       files: [],
+      labels: { "7:vk": "VK" },
       availability: composition().availability,
     }])
     expect(output.levels.value).toEqual(composition().levels)

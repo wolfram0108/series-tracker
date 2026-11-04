@@ -53,6 +53,12 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const namesWanted = ref(false)
   const naming = ref(false)
 
+  // The label of a player is a fact of the table of its source, so a voice-over of a player the episode has no line for is named too.
+  const labels = computed<Record<string, string>>(() => Object.fromEntries(
+    (composition.value?.sources ?? []).flatMap((source) => (source.players ?? [])
+      .filter((player) => player.player_label)
+      .map((player) => [`${source.source_id}:${player.player}`, player.player_label] as const))))
+
   const views = computed(() => joinEpisodes(
     composition.value?.rows ?? [],
     references.value,
@@ -60,6 +66,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     voices.forSeries(seriesId),
     composition.value?.availability ?? {},
     files.value,
+    labels.value,
   ))
   const levels = computed(() => composition.value?.levels ?? [])
   const sources = computed(() => composition.value?.sources ?? [])
