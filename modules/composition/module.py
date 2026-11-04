@@ -18,14 +18,16 @@ Queries:
       not the answer: the request sets the flag and waits for the next one. Refused with ValueError(reason) when a
       neighbour did not answer (the same reason goes out as composition.failed), with LookupError for a series the
       catalog no longer has.
-  composition.preview {url?, options?, profile_id?, series_season?, refresh?, lines?} → CompositionPreviewReply {url, state,
-      reason?, summary?, lines}: an address that is no source of a series yet, as the add window and the test of rules
+  composition.preview {url?, options?, profile_id?, series_season?, refresh?, lines?, players_off?, vibix_season?, voice_name?}
+      → CompositionPreviewReply {url, state, reason?, summary?, lines, rows}: an address that is no source of a series yet, as the add window and the test of rules
       show it. The table is asked of `sources.table.get` (refresh true begins a read, false reads nothing); `state`
       and `reason` are the sources' own. From the last complete table, when there is one (also while it is being read
       or the last read failed): `summary` is the summary of a source made by the same code as for a series (no
       profile: no_profile; a profile: ready; a failed read: failed), `lines` are the rows as the constructor gets
-      them, each with its answer when `profile_id` is given (`series_season` is the fallback season). Without a table
-      `summary` is empty and so are `lines`. Nothing is written and no source is made; a neighbour that does not answer
+      them, each with its answer when `profile_id` is given (`series_season` is the fallback season); `rows` are the rows of
+      the layout the profile makes of them (the same code as for a series, source_id 0, without the rows the constructor
+      left out), made with the choices of the source (`players_off`, `vibix_season`, `voice_name`): the only data a
+      window draws episodes and voice-overs of a draft from. Without a table `summary` is empty and so are `lines`, `rows`. Nothing is written and no source is made; a neighbour that does not answer
       refuses the request with ValueError(reason). With `lines` (typed, or the file names of a release) no table is
       asked: the reply is `ready`, has no summary, and its lines are those given (key = their place in the list),
       each with the answer of the profile when one is given.

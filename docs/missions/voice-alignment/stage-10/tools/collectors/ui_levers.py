@@ -305,31 +305,32 @@ def clean(c: Campaign) -> None:
 
 
 def make_groups(c: Campaign, page: Page, unnamed_ok: bool = False) -> dict:
-    """The groups of the voice-overs, made the way a user makes them: in the column of a voice-over of the output, by its button."""
-    made = {}
+    """The groups of the voice-overs, made where the owner makes them: in the settings, by the route their screen saves by.
+    A group is the group of its own name; any other name of a voice-over becomes a name the group takes."""
+    wanted: dict[str, list[str]] = {}
     for raw, group in MAKE:
-        label = next((r["voice_label"] for r in layout_rows(c) if r["voice_name"] == raw), None)
-        if label is None:
+        if not any(r["voice_name"] == raw for r in layout_rows(c)):
             continue  # no source of the series has this voice-over
-        root = grid(page, "series")
-        box = column(page, root, label)
-        if not box.locator(".group-maker-name").count():
-            made[raw] = group  # the voice-over is in a group already (the name of the group covers it)
-            continue
-        box.locator(".group-maker-name").fill(group)
-        box.locator(".group-maker-make").click()
-        # The column of the new group is there, and the column the voice-over left is gone.
-        page.wait_for_function(
-            "(a) => { const r = document.querySelector('section.output-level[data-scope=series] > .output-levers');"
-            " const has = (g) => r.querySelector('.voice-column[data-group=\"' + g + '\"]');"
-            " return has(a.group) && (a.label === a.group || !has(a.label)) }",
-            arg={"group": group, "label": label}, timeout=c.left_ms())
-        made[raw] = group
+        names = wanted.setdefault(group, [])
+        if raw != group and raw not in names:
+            names.append(raw)
+    current = c.api("/api/voices/settings")
+    saved = c.http.put("/api/voices/settings", json={
+        "priority": current["priority"], "voice_groups": {**current["voice_groups"], **wanted}})
+    saved.raise_for_status()
+    assert saved.json()["saved"], saved.json()
+    # The voice-overs the user named are in their groups in the layout, and the output shows a column of each group.
+    eventually(c, lambda: all(r["voice_group"] == group for raw, group in MAKE for r in layout_rows(c)
+                              if r["voice_name"] == raw), "the voice-overs are in their groups")
+    page.wait_for_function(
+        "(groups) => { const r = document.querySelector('section.output-level[data-scope=series] > .output-levers');"
+        " return groups.every((g) => r.querySelector('.voice-column[data-group=\"' + g + '\"]')) }",
+        arg=[group for group in GROUPS if group in wanted], timeout=c.left_ms())
     columns = sorted(each.get_attribute("data-group") for each in grid(page, "series").locator(".voice-column").all())
     extra = [each for each in columns if each not in GROUPS]
-    assert set(GROUPS) <= set(columns) and (unnamed_ok or not extra), f"columns {columns}"
+    assert set(wanted) <= set(columns) and (unnamed_ok or not extra), f"columns {columns}"
     assert all(each.startswith(UNKNOWN_VOICE) for each in extra), f"columns that are neither a group nor an unknown voice-over: {extra}"
-    return {"columns": columns, "unnamed": extra}
+    return {"columns": columns, "unnamed": extra, "made": wanted}
 
 
 def levers(c: Campaign, page: Page, context) -> None:
@@ -359,7 +360,7 @@ def levers(c: Campaign, page: Page, context) -> None:
 
     c.scenario("озвучка канала VK названа в карточке источника «AniStar» и слилась с озвучкой AniStar плеера CVH", page, name_the_channel)
 
-    c.scenario("пять групп озвучек заведены кнопкой «Завести группу» в колонках «Выхода», без настроек", page, lambda: make_groups(c, page))
+    c.scenario("пять групп озвучек заведены в настройках", page, lambda: make_groups(c, page))
 
     def variants_of_groups() -> dict:
         root = grid(page, "series")
@@ -658,7 +659,7 @@ def sync(c: Campaign, page: Page) -> None:
         return {"rows": len(rows), "name_in_card": typed, "voice": "AniStar", "player": "vk"}
 
     c.scenario("Ж-1: озвучка канала VK названа правилом профиля, собранного руками; в карточке источника имя не набрано", page, named_by_the_rule)
-    c.scenario("Ж-6: пять групп озвучек заведены кнопкой в колонках «Выхода»", page, lambda: make_groups(c, page, unnamed_ok=c.three))
+    c.scenario("Ж-6: пять групп озвучек заведены в настройках", page, lambda: make_groups(c, page, unnamed_ok=c.three))
 
     if c.three:
         def drop_unnamed() -> dict:
