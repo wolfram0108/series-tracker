@@ -5,6 +5,8 @@ import { useSeriesOutput } from "../../composables/useSeriesOutput"
 import { t } from "../../i18n"
 import { allowedIn, fileNamesOf, isDeviation, type Scope } from "../../lib/output"
 import { useSeriesStore } from "../../stores/series"
+import { useSeriesReadsStore } from "../../stores/seriesReads"
+import { pageHost, progressText } from "../../lib/sources"
 import OutputEpisode from "./OutputEpisode.vue"
 import OutputLevel from "./OutputLevel.vue"
 
@@ -22,6 +24,10 @@ const canSync = computed(() => {
   const table = output.composition.value?.availability
   return table ? allowedIn(table, "sync", passing.value ? "scanning" : "idle") : !passing.value
 })
+// The reads of site pages a pass of this series waits for (Р-36), as the core pushes them.
+const reads = useSeriesReadsStore()
+const reading = computed(() => reads.forSeries(props.seriesId)
+  .map((read) => ({ key: read.sourceId, text: t("output.reading", { site: pageHost(read.url), text: progressText(read) }) })))
 const onlyDeviations = ref(false)
 // A refusal of the core leaves the controls as the user set them; rendering them anew brings back what the core holds.
 const renders = ref(0)
@@ -71,6 +77,9 @@ const switchSeason = (season: number, off: boolean) => changed(output.switchTo(s
       />
     </div>
 
+    <p v-for="read in reading" :key="read.key" class="cluster output-reading">
+      <i class="pi pi-spin pi-spinner" /><span>{{ read.text }}</span>
+    </p>
     <p v-if="output.failure.value" class="output-failure" role="alert">{{ output.failure.value }}</p>
     <p v-if="output.layoutFailure.value" class="output-failure output-layout-failure" role="alert">{{ output.layoutFailure.value }}</p>
 
@@ -97,5 +106,6 @@ const switchSeason = (season: number, off: boolean) => changed(output.switchTo(s
 
 <style scoped>
 .output-bar { align-items: center; }
+.output-reading { margin: 0; align-items: center; color: var(--text-muted); overflow-wrap: anywhere; }
 .output-failure { margin: 0; color: var(--color-red-1); overflow-wrap: anywhere; }
 </style>

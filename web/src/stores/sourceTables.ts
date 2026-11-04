@@ -11,6 +11,8 @@ export interface PageProgress {
   phase: string
   current: number
   total: number
+  /** Steps of the phase per second since it began; null before the first step. */
+  rate: number | null
 }
 
 export interface PageStatus {
@@ -37,7 +39,7 @@ export const useSourceTablesStore = defineStore("sourceTables", () => {
   function applyProgress(packet: Schemas["TableProgress"]): void {
     put(packet.url, {
       state: "reading",
-      progress: { phase: packet.phase, current: packet.current, total: packet.total },
+      progress: { phase: packet.phase, current: packet.current, total: packet.total, rate: packet.rate ?? null },
     })
   }
 

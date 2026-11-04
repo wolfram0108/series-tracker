@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
-  coverageOf, draftBody, itemOfSource, joinVkAddress, phaseText, playerCaption, profileOptions, progressText,
+  coverageOf, draftBody, itemOfSource, joinVkAddress, pageHost, phaseText, playerCaption, profileOptions, progressText,
   readEnded, readOptions, seasonPositions, siteOf, sourceCaption, sourceTypeOf, splitVkAddress, summaryOf, togglePlayer,
   viewOf, vkModeOf, voiceLinesOf, type LayoutRow, type PlayerSummary, type SeriesSource, type SourceSummary,
 } from "./sources"
@@ -63,7 +63,7 @@ describe("viewOf", () => {
   })
 
   it("lets the progress of the core win over the stored summary and carries it", () => {
-    const live: PageStatus = { state: "reading", progress: { phase: "episodes", current: 3, total: 20 }, reason: null, readAt: null }
+    const live: PageStatus = { state: "reading", progress: { phase: "episodes", current: 3, total: 20, rate: null }, reason: null, readAt: null }
     const view = viewOf({ summary: { ...release, status: "ready" }, playersOff: [], live })
     expect(view).toMatchObject({ state: "reading", progress: { phase: "episodes", current: 3, total: 20 } })
     expect(view.players).toHaveLength(3)
@@ -137,9 +137,16 @@ describe("texts", () => {
   })
 
   it("words the progress of a read by phase and by how far it is", () => {
-    expect(progressText({ phase: "episodes", current: 3, total: 20 })).toBe("Страницы серий: 3 из 20")
-    expect(progressText({ phase: "catalog", current: 0, total: 0 })).toBe("Каталог плеера")
+    expect(progressText({ phase: "episodes", current: 3, total: 20, rate: null })).toBe("Страницы серий: 3 из 20")
+    expect(progressText({ phase: "episodes", current: 34, total: 391, rate: 0.625 })).toBe("Страницы серий: 34 из 391 | 0.6 с/с")
+    expect(progressText({ phase: "catalog", current: 0, total: 0, rate: null })).toBe("Каталог плеера")
     expect(phaseText("from_the_future")).toBe("Чтение страницы")
+  })
+
+  it("names the site of a page by its address, a VK channel without its name and mode", () => {
+    expect(pageHost("https://1.ruchime.org/release/x")).toBe("1.ruchime.org")
+    expect(pageHost("https://vkvideo.ru/@pvashow|Почтенный мастер|search")).toBe("vkvideo.ru")
+    expect(pageHost("not an address")).toBe("not an address")
   })
 })
 

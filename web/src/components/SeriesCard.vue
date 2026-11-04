@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import type { Series } from "../stores/series"
+import { useSeriesReadsStore } from "../stores/seriesReads"
+import { progressText } from "../lib/sources"
+import { t } from "../i18n"
 
 // Карточка сериала — кастом-островок. Порт логики из app.js
 // (getLayerStyle/getAnimationClass/seriesWithPills) на реальную модель серии.
@@ -33,6 +36,12 @@ const stateConfig: Record<string, { title: string; icon: string }> = {
 
 const states = computed(() => props.series.statuses ?? [])
 const busy = computed(() => Boolean(props.series.is_busy) || Boolean(props.saving))
+// The read of a site page the scan of the series waits for (Р-36): pushed by the core, gone when the wait ends.
+const reads = useSeriesReadsStore()
+const reading = computed(() => {
+  const lead = reads.lead(props.series.id)
+  return lead ? progressText(lead) : null
+})
 
 function layerStyle(layer: string) {
   // idle рисуется зелёным слоем downloading (Р-24); остальное — по имени.
@@ -135,6 +144,10 @@ const scanTime = computed(() => {
             <span v-if="p.title">{{ p.title }}</span>
           </div>
         </TransitionGroup>
+        <div v-if="reading" class="status-pill" :title="t('series.reading', { text: reading })">
+          <i class="pi pi-spin pi-spinner"></i>
+          <span>{{ reading }}</span>
+        </div>
         <div v-if="tmdb" class="status-pill ms-auto" title="Прогресс эпизодов">
           <i class="pi pi-images"></i>
           <span>{{ tmdb.downloaded }} / {{ tmdb.total }}</span>

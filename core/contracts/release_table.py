@@ -150,10 +150,28 @@ class SiteResolveReply(BaseModel):
 
 
 class TableProgress(BaseModel):
+    """How far a read of a page is; `rate` is the steps of the phase per second since the phase began (None before the
+    first step)."""
+
     url: str
     phase: str
     current: int
     total: int
+    rate: float | None = None
+
+
+class SeriesReadProgress(BaseModel):
+    """The event `scan.series.progress`: how far the read of a page is that the scan of a series waits for. `active`
+    false says the wait for that source is over (read, failed or given up); the other fields are then those it last had."""
+
+    series_id: int
+    source_id: int
+    url: str
+    phase: str = ""
+    current: int = 0
+    total: int = 0
+    rate: float | None = None
+    active: bool = True
 
 
 class TableReady(BaseModel):

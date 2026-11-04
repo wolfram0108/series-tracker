@@ -10,6 +10,7 @@ import type { Answer } from "../../composables/sourceCalls"
 import { useSSE } from "../../composables/useSSE"
 import { useCompositionStore } from "../../stores/composition"
 import { useSeriesStore } from "../../stores/series"
+import { useSeriesReadsStore } from "../../stores/seriesReads"
 import { t } from "../../i18n"
 import type { Reference, Row } from "../../lib/output"
 import { AVAILABILITY } from "../../lib/output.fixtures"
@@ -177,5 +178,21 @@ describe("StatusOutput", () => {
     const w = mountOutput()
     await flushPromises()
     expect(w.find(".output-bar button").attributes("disabled")).toBeUndefined()
+  })
+
+  it("shows how far the reads of the pages the pass waits for are, by site, and drops each when its wait ends", async () => {
+    const reads = useSeriesReadsStore()
+    const w = mountOutput()
+    await flushPromises()
+    expect(w.findAll(".output-reading")).toHaveLength(0)
+    reads.apply({ series_id: 1, source_id: 7, url: "https://1.ruchime.org/release/x", phase: "episodes", current: 34,
+      total: 391, rate: 0.6 })
+    reads.apply({ series_id: 2, source_id: 9, url: "https://other.test/p", phase: "episodes", current: 1, total: 2 })
+    await flushPromises()
+    expect(w.findAll(".output-reading").map((line) => line.text())).toEqual([
+      t("output.reading", { site: "1.ruchime.org", text: "Страницы серий: 34 из 391 | 0.6 с/с" })])
+    reads.apply({ series_id: 1, source_id: 7, url: "https://1.ruchime.org/release/x", active: false })
+    await flushPromises()
+    expect(w.findAll(".output-reading")).toHaveLength(0)
   })
 })

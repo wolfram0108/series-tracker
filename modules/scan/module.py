@@ -48,6 +48,8 @@ Events (outgoing):
       of the scheduler (the contract of the old scanner_status_update).
   series.status.contribution — the fold of scanning/error (R-11); the carrier of the error is scan_tasks.status='error'.
   series.purged {series_id, owner} — report: the tables of the series are cleaned.
+  scan.series.progress (SeriesReadProgress) — how far the read of a page is that a scan of the series waits for, per
+      source, with the rate; `active` false ends it (read, failed or given up). The card of the series shows it.
 
 Events (incoming):
   composition.changed {series_id, rev, episodes, summary_only} — the layout or the levers changed: the references
@@ -55,6 +57,7 @@ Events (incoming):
       change did not touch comes out the same). Never starts a download. `summary_only` is skipped.
   voices.settings.changed — the order of players is an input of the choice: every video series is counted again.
   sources.table.ready / .failed {url, ...} — the verdicts a synchronization waits for.
+  sources.table.progress (TableProgress) — how far a read is; told again as scan.series.progress for the series waiting.
   torrents.queue.changed {count} — the pipeline is empty: after a full pass the next scan is set when count=0.
 
 Neighbours (all over the bus): catalog.series.get / .list (kind, sources), composition.get / .recompute,
@@ -75,8 +78,8 @@ from datetime import datetime, timedelta, timezone
 
 from core import BaseModule, BusRequestError, torrent_source
 from core.deadlines import TABLE_WAIT_S
-from core.contracts import (availability, CompositionReply, OutputSwitch, Reference, ReferenceChanged, SeriesSource, SourceStatus,
-                            VoiceSettingsView)
+from core.contracts import (availability, CompositionReply, OutputSwitch, Reference, ReferenceChanged, SeriesReadProgress,
+                            SeriesSource, SourceStatus, TableProgress, VoiceSettingsView)
 from core.db import Database
 from core.envelope import Envelope
 from core.voice_names import Groups
@@ -120,7 +123,7 @@ class ScanModule(BaseModule):
         self.repo = ScanRepository(db)
         self._tick = scheduler_tick  # None — без планировщика (тесты)
         self._table_wait_s = table_wait_s
-        self._signals = TableSignals()
+        self._signals = TableSignals(announce=self._announce_reading)
         self._locks: dict[int, asyncio.Lock] = {}
         self._running: set[int] = set()
         self._owned: set[int] = set()  # the tasks of scan_tasks that the scans running here keep
@@ -148,6 +151,7 @@ class ScanModule(BaseModule):
         self.handle("system.started", self.on_system_started)
         self.handle("sources.table.ready", self.on_table_ready)
         self.handle("sources.table.failed", self.on_table_failed)
+        self.handle("sources.table.progress", self.on_table_progress)
         self.handle("torrents.queue.changed", self.on_queue_changed)
         self.handle("series.deleted", self.on_series_deleted)
         self.handle("settings.changed", self.on_settings_changed)
@@ -354,6 +358,12 @@ class ScanModule(BaseModule):
 
     def on_table_failed(self, env: Envelope) -> None:
         self._signals.failed(env.payload["url"], env.payload.get("reason"))
+
+    def on_table_progress(self, env: Envelope) -> None:
+        self._signals.progress(TableProgress.model_validate(env.payload))
+
+    def _announce_reading(self, packet: SeriesReadProgress) -> None:
+        self.publish_event("scan.series.progress", packet.model_dump(mode="json"))
 
     async def on_composition_changed(self, env: Envelope) -> None:
         """The layout or the levers changed: the references and the plan follow, nothing is downloaded."""

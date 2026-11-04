@@ -8,6 +8,7 @@ middle of a read makes the read begin again at the next start.
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Mapping
 
@@ -34,6 +35,23 @@ Publish = Callable[[str, dict], None]
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class Pace:
+    """The speed of one read, phase by phase: steps per second since the phase began. The time is the subject here
+    (how fast a page is read is what the user is shown), not a way to wait for anything."""
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._phase: str | None = None
+        self._began = 0.0
+
+    def rate(self, phase: str, current: int) -> float | None:
+        now = self._clock()
+        if phase != self._phase:
+            self._phase, self._began = phase, now
+        elapsed = now - self._began
+        return round(current / elapsed, 2) if current > 0 and elapsed > 0 else None
 
 
 class TableReader:
@@ -159,9 +177,13 @@ class TableReader:
             self._publish(FAILED_TOPIC, TableFailed(url=key, reason=problem or "").model_dump(mode="json"))
 
     async def _read(self, site: Site, key: str) -> ReleaseTable:
-        context = ReadContext(http=self._http(), progress=lambda phase, current, total: self._publish(
-            PROGRESS_TOPIC, TableProgress(url=key, phase=phase, current=current, total=total).model_dump(mode="json")),
-            recent=self._recent)
+        pace = Pace()
+
+        def progress(phase: str, current: int, total: int) -> None:
+            self._publish(PROGRESS_TOPIC, TableProgress(url=key, phase=phase, current=current, total=total,
+                                                        rate=pace.rate(phase, current)).model_dump(mode="json"))
+
+        context = ReadContext(http=self._http(), progress=progress, recent=self._recent)
         limit = asyncio.timeout(self._safeguard_s)
         try:
             async with limit:

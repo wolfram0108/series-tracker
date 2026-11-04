@@ -205,10 +205,23 @@ export function phaseText(phase: string): string {
   return key in ru ? t(key as MessageKey) : t("sources.phase.unknown")
 }
 
-/** The phase and how far it is; a read that does not know its total yet says only the phase. */
+/** The site of a page by the address the core keys its table with (a VK channel adds "|name|mode" to its address). */
+export function pageHost(url: string): string {
+  try {
+    return new URL(url.split("|")[0]).host
+  } catch {
+    return url
+  }
+}
+
+/** The phase, how far it is and how fast (Р-36); a read that does not know its total yet says only the phase. */
 export function progressText(progress: PageProgress): string {
   const phase = phaseText(progress.phase)
-  return progress.total > 0 ? t("sources.progress", { phase, current: progress.current, total: progress.total }) : phase
+  if (progress.total <= 0) return phase
+  const values = { phase, current: progress.current, total: progress.total }
+  return progress.rate != null
+    ? t("sources.progress.rate", { ...values, rate: progress.rate.toFixed(1) })
+    : t("sources.progress", values)
 }
 
 /** Players and rows of a source, with plural forms, for its head. */

@@ -93,7 +93,7 @@ describe("SourcesEditor", () => {
 
   it("shows the progress of a read and the words of a failure", () => {
     const reading = itemOfSource(stored(), summary, {
-      state: "reading", progress: { phase: "episodes", current: 3, total: 20 }, reason: null, readAt: null,
+      state: "reading", progress: { phase: "episodes", current: 3, total: 20, rate: null }, reason: null, readAt: null,
     })
     expect(mountEditor([reading]).text()).toContain("Страницы серий: 3 из 20")
     const failed = itemOfSource(stored(), summary, { state: "failed", progress: null, reason: '{"code":"read_failed"}', readAt: null })

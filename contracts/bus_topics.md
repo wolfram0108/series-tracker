@@ -46,7 +46,8 @@
 | `series.status.changed {series_id, statuses, is_busy}` | catalog | gateway | `series_updated` |
 | `series.busy.contribution` / `series.busy.changed` | library, renaming / catalog | catalog / gateway | `series_updated` |
 | `series.downloaded.changed {series_id, count}` | downloads, torrents | voices, gateway | `series_updated` (счётчик скачанного) |
-| `sources.table.progress {url, phase, current, total}` | sources | gateway | `sources_table_progress` |
+| `sources.table.progress {url, phase, current, total, rate}` | sources | gateway, scan | `sources_table_progress` |
+| `scan.series.progress {series_id, source_id, url, phase, current, total, rate, active}` — прогресс чтения страницы, которую ждёт скан сериала; `active: false` — ожидание закончено | scan | gateway | `series_scan_progress` |
 | `sources.table.ready {url, read_at}` — полная таблица сохранена | sources | composition, scan, gateway | `sources_table_ready` |
 | `sources.table.failed {url, reason}` — чтение не удалось, действует прежняя полная таблица | sources | composition, scan, gateway | `sources_table_failed` |
 | `rules.profile.changed {profile_id}` | rules | composition | — |

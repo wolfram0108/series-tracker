@@ -507,8 +507,27 @@ async def test_progress_of_a_read_goes_out_under_the_address_of_the_page(system)
     await system.get(PAGE + "?utm=1")
     await system.next(system.ready)
 
-    assert await system.next(system.progress) == {"url": PAGE, "phase": "players", "current": 1, "total": 4}
-    assert await system.next(system.progress) == {"url": PAGE, "phase": "rows", "current": 23, "total": 23}
+    first, second = await system.next(system.progress), await system.next(system.progress)
+    assert {key: first[key] for key in ("url", "phase", "current", "total")} == {
+        "url": PAGE, "phase": "players", "current": 1, "total": 4}
+    assert {key: second[key] for key in ("url", "phase", "current", "total")} == {
+        "url": PAGE, "phase": "rows", "current": 23, "total": 23}
+    assert first["rate"] is None and second["rate"] is None  # each is the first step of its phase
+
+
+def test_the_pace_of_a_read_is_the_steps_of_its_phase_per_second_since_the_phase_began():
+    from modules.sources.table import Pace
+    now = [100.0]
+    pace = Pace(clock=lambda: now[0])
+    assert pace.rate("episodes", 0) is None  # the phase begins: no time has passed yet
+    now[0] = 104.0
+    assert pace.rate("episodes", 10) == 2.5
+    now[0] = 110.0
+    assert pace.rate("episodes", 20) == 2.0
+    assert pace.rate("players", 5) is None  # a new phase counts from its own beginning
+    now[0] = 112.0
+    assert pace.rate("players", 5) == 2.5
+    assert pace.rate("players", 0) is None
 
 
 # --- the parameters of a request: choices of a source, a table as it is, the site of an address ------------------------------

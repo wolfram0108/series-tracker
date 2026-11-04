@@ -25,7 +25,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import BaseModule, BusRequestError
 from core.contracts import (CompositionChanged, CompositionFailed, DubEvent, DubsSnapshot, ReferenceChanged,
-                            SourceChanged, TableFailed, TableProgress, TableReady)
+                            SeriesReadProgress, SourceChanged, TableFailed, TableProgress, TableReady)
 
 
 class AuthGateMiddleware:
@@ -164,6 +164,7 @@ SSE_MAP: dict[str, tuple[str, object]] = {
     "composition.changed": ("composition_changed", None),
     "composition.failed": ("composition_failed", None),
     "scan.reference.changed": ("reference_changed", None),
+    "scan.series.progress": ("series_scan_progress", None),
     "conform.queue.changed": ("conform_queue_update", None),
     "voices.dub.changed": ("voice_dub_update", None),
     "voices.dubs.snapshot": ("voice_dubs_snapshot", None),
@@ -176,7 +177,7 @@ SSE_MAP: dict[str, tuple[str, object]] = {
 
 # The packets of the event stream that the interface types: their models go into the schema of the API.
 EVENT_PACKETS = (DubEvent, DubsSnapshot, TableProgress, TableReady, TableFailed, CompositionChanged,
-                 CompositionFailed, ReferenceChanged, SourceChanged)
+                 CompositionFailed, ReferenceChanged, SourceChanged, SeriesReadProgress)
 
 _KEEPALIVE_SECONDS = 15.0
 # Put into a stream's queue to end it: uvicorn waits for open responses before it stops the app.

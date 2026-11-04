@@ -2260,6 +2260,41 @@ export interface components {
          */
         SeriesKind: "torrent" | "video";
         /**
+         * SeriesReadProgress
+         * @description The event `scan.series.progress`: how far the read of a page is that the scan of a series waits for. `active`
+         *     false says the wait for that source is over (read, failed or given up); the other fields are then those it last had.
+         */
+        SeriesReadProgress: {
+            /** Series Id */
+            series_id: number;
+            /** Source Id */
+            source_id: number;
+            /** Url */
+            url: string;
+            /**
+             * Phase
+             * @default
+             */
+            phase?: string;
+            /**
+             * Current
+             * @default 0
+             */
+            current?: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total?: number;
+            /** Rate */
+            rate?: number | null;
+            /**
+             * Active
+             * @default true
+             */
+            active?: boolean;
+        };
+        /**
          * SeriesObject
          * @description A series (list and card). The fields that are always there are declared; the conditional ones
          *     (tracker_info for a series with a tracker address, downloaded_episodes_count in the list) pass through
@@ -2713,7 +2748,11 @@ export interface components {
             /** Items */
             items: components["schemas"]["SnapshotItem"][];
         };
-        /** TableProgress */
+        /**
+         * TableProgress
+         * @description How far a read of a page is; `rate` is the steps of the phase per second since the phase began (None before the
+         *     first step).
+         */
         TableProgress: {
             /** Url */
             url: string;
@@ -2723,6 +2762,8 @@ export interface components {
             current: number;
             /** Total */
             total: number;
+            /** Rate */
+            rate?: number | null;
         };
         /** TableReady */
         TableReady: {

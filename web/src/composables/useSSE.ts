@@ -17,6 +17,7 @@ export const SSE_EVENTS = [
   "conform_settings_update",
   "scanner_status_update",
   "sources_table_progress",
+  "series_scan_progress",
   "sources_table_ready",
   "sources_table_failed",
   "composition_changed",
