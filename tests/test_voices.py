@@ -3195,6 +3195,7 @@ async def test_a_track_packed_without_its_identity_takes_it_from_the_container_a
     packed = {row["id"]: row for row in await voices.repo.for_series(7) if row["episode"] == 1}
     assert {(row["aligned_to"], row["output_path"], row["ref_path"]) for row in packed.values()} == {
         (identity, None, "/media/e01.mkv")}
+    assert {item["hint"] for item in await rows(probe) if item["episode"] == 1} == {"packed"}
     neighbours.uids[1] = "u1-better"
     probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 1})
     await quiet(voices)

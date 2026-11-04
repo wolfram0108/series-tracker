@@ -938,7 +938,7 @@ class VoicesModule(BaseModule):
         self.publish_event("voices.dub.changed", DubEvent(
             series_id=row["series_id"], season=row["season"], episode=row["episode"], part=row["part"] or None,
             voice_key=row["voice_key"], voice_label=row["voice_label"], status=status, state=state,
-            hint=public_hint(status, state, row.get("job_id")), detail=parse_reason(detail), epoch=epoch,
+            hint=public_hint(status, state, row.get("job_id"), _packed(row)), detail=parse_reason(detail), epoch=epoch,
             rev=rev, job_id=row.get("job_id"), file=sent_as(row),
             source_id=candidate_of(row).get("source_id"), player=candidate_of(row).get("player")).model_dump(mode="json"))
 
@@ -955,7 +955,8 @@ class VoicesModule(BaseModule):
         state = public_state(row["status"], self._job_status.get(row["job_id"]), self._is_fetching(row))
         return DubRecord(**{field: row[field] for field in DubRecord.model_fields
                             if field in row and field not in ("state", "hint", "detail", "part")},
-                         part=row["part"] or None, state=state, hint=public_hint(row["status"], state, row["job_id"]),
+                         part=row["part"] or None, state=state,
+                         hint=public_hint(row["status"], state, row["job_id"], _packed(row)),
                          detail=parse_reason(row["outcome"] or row["error"]),
                          source_id=candidate_of(row).get("source_id"), player=candidate_of(row).get("player"))
 
@@ -1521,3 +1522,8 @@ class VoicesModule(BaseModule):
         await self._cleanup.work_off()
         await self._admit()
         self.publish_event("series.purged", {"series_id": series_id, "owner": self.name})
+
+
+def _packed(row: dict) -> bool:
+    """A placed track with no file of its own lives inside the container of its episode (voices.tracks.packed)."""
+    return row.get("status") == S.PLACED and not row.get("output_path")

@@ -54,6 +54,7 @@ const HINT: Record<Schemas["DubHint"], MessageKey> = {
   aligning_run: "voices.hint.aligning_run",
   aligned: "voices.hint.aligned",
   done: "voices.hint.done",
+  packed: "voices.hint.packed",
 }
 
 const open = ref(false)

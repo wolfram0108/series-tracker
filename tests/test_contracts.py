@@ -110,6 +110,12 @@ def test_a_voice_over_that_was_sent_and_has_no_job_number_says_that_its_answer_i
     assert public_hint("ready", public_state("ready")) is DubHint.READY
 
 
+def test_a_done_voice_over_says_whether_its_track_lies_beside_the_video_or_is_inside_the_container():
+    state = public_state("placed")
+    assert public_hint("placed", state) is DubHint.DONE
+    assert public_hint("placed", state, packed=True) is DubHint.PACKED
+
+
 def test_the_end_of_a_job_is_built_and_read_with_one_model():
     view = finished_view({"id": "j1", "status": "done", "error": None, "results": [
         {"dub": "a__rus__x__720p.mp4", "ok": True, "out_path": "/mnt/meganas/media/x/a.flac",

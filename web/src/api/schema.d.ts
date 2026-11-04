@@ -1819,7 +1819,7 @@ export interface components {
          * @description Which sentence explains a state when there is no reason to show (several steps share a state).
          * @enum {string}
          */
-        DubHint: "planned" | "download_queued" | "downloading" | "ready" | "awaiting_answer" | "aligning_wait" | "aligning_run" | "aligned" | "done";
+        DubHint: "planned" | "download_queued" | "downloading" | "ready" | "awaiting_answer" | "aligning_wait" | "aligning_run" | "aligned" | "done" | "packed";
         /**
          * DubItem
          * @description `part` is None for an episode without parts: a voice-over belongs to one part of an episode.

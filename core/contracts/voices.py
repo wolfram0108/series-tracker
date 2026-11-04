@@ -58,6 +58,7 @@ class DubHint(StrEnum):
     ALIGNING_RUN = "aligning_run"
     ALIGNED = "aligned"
     DONE = "done"
+    PACKED = "packed"
 
 
 class Reason(BaseModel):

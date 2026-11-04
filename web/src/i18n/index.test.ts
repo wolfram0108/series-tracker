@@ -18,7 +18,7 @@ describe("t", () => {
     for (const state of ["planned", "download_queued", "downloading", "align_queued", "running", "done", "error"]) {
       expect(t(`voices.state.${state}` as MessageKey)).not.toBe("")
     }
-    for (const hint of ["planned", "download_queued", "downloading", "ready", "awaiting_answer", "aligning_wait", "aligning_run", "aligned", "done"]) {
+    for (const hint of ["planned", "download_queued", "downloading", "ready", "awaiting_answer", "aligning_wait", "aligning_run", "aligned", "done", "packed"]) {
       expect(t(`voices.hint.${hint}` as MessageKey)).not.toBe("")
     }
     expect(t("voices.state.download_queued")).toBe("в очереди на загрузку")
