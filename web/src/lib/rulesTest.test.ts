@@ -39,6 +39,7 @@ describe("pillsOf", () => {
 describe("resolutionBadge", () => {
   it("names the best resolution of the row by its class and says nothing for a row with none", () => {
     expect(resolutionBadge([720, 2160, 1080])).toBe("4K 2160")
+    expect(resolutionBadge([1440, 1080])).toBe("QHD 1440")
     expect(resolutionBadge([1080])).toBe("FHD 1080")
     expect(resolutionBadge([480, 720])).toBe("HD 720")
     expect(resolutionBadge([360, 480])).toBe("SD 480")

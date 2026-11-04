@@ -50,10 +50,10 @@ export function pillsOf(result: TestResult | null | undefined): Pill[] {
   return pills
 }
 
-/** The badge of the card: the best resolution the page gives the row, named by its class (4K, FHD, HD, SD); null when it gives none. */
+/** The badge of the card: the best resolution the page gives the row, named by its class (4K, QHD, FHD, HD, SD); null when it gives none. */
 export function resolutionBadge(heights: number[] | null | undefined): string | null {
   const top = heights && heights.length > 0 ? Math.max(...heights) : 0
   if (top <= 0) return null
-  const key = top >= 2160 ? "uhd" : top >= 1080 ? "fhd" : top >= 720 ? "hd" : top >= 480 ? "sd" : "low"
+  const key = top >= 2160 ? "uhd" : top >= 1440 ? "qhd" : top >= 1080 ? "fhd" : top >= 720 ? "hd" : top >= 480 ? "sd" : "low"
   return t(`rulesTest.resolution.${key}` as MessageKey, { height: top })
 }

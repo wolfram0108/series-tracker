@@ -229,6 +229,7 @@ export const ru = {
   "rulesTest.pill.quality": "Качество",
   "rulesTest.pill.resolution": "Разрешение",
   "rulesTest.resolution.uhd": "4K {height}",
+  "rulesTest.resolution.qhd": "QHD {height}",
   "rulesTest.resolution.fhd": "FHD {height}",
   "rulesTest.resolution.hd": "HD {height}",
   "rulesTest.resolution.sd": "SD {height}",
