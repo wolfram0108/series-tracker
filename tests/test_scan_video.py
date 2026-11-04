@@ -171,7 +171,7 @@ async def test_the_steps_of_a_synchronization_follow_one_another_by_signals(rig)
     await rig.world.dispatched.get()
     await rig.world.dispatched.get()
     assert rig.world.order == [
-        "renaming.reprocess", "downloads.fs.sync", f"sources.table.get {URL1}", "composition.recompute",
+        "downloads.fs.sync", f"sources.table.get {URL1}", "composition.recompute",
         "composition.get", "voices.settings.get", f"downloads.dispatch {rig.series_id}",
         f"voices.dispatch {rig.series_id}"]
 

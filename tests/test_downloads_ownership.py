@@ -1,6 +1,7 @@
 """Who owns a path in the library, and what a file does on its way to another name: series that share a folder never hold one
 file between them, what a task could not remove stays recorded until it is removed, and the files of a ring of names (a swap
 of two episode numbers) reach the names their numbers give, without losing a file or taking one that is not theirs."""
+import itertools
 import os
 import sqlite3
 
@@ -189,6 +190,26 @@ async def test_three_files_that_pass_each_others_names_in_a_ring_all_arrive(syst
     assert [_read(os.path.join(media_dir, f"Серия {number:02d}.mp4")) for number in (1, 2, 3)] == [b"c", b"a", b"b"]
     assert {key: row["final_filename"] for key, row in _rows(db_path, 2).items()} == {
         "u1": "Серия 02.mp4", "u2": "Серия 03.mp4", "u3": "Серия 01.mp4"}
+
+
+@pytest.mark.asyncio
+async def test_files_reach_the_names_of_any_placing_from_any_other_and_none_is_lost(system):
+    """Three files and four names, one of them free: every way to give each file its own name, one after another, so that every
+    placing follows every other in some order (swaps, rings, shifts along a chain into the free name): each file holds the
+    content it held and lies under the name it was given, and nothing is left aside."""
+    _, _, _, probe, db_path, media_dir = system
+    names = [f"Серия {number:02d}.mp4" for number in (1, 2, 3, 4)]
+    contents = {"u1": b"a", "u2": b"b", "u3": b"c"}
+    for episode, name in zip((1, 2, 3), names):
+        _ready(db_path, media_dir, episode, name, contents[f"u{episode}"])
+    placings = list(itertools.permutations(names, 3))
+    for placing in placings + placings[::-1]:
+        target = dict(zip(("u1", "u2", "u3"), placing))
+        await _rename(probe, target)
+        assert {key: row["final_filename"] for key, row in _rows(db_path, 2).items()} == target
+        assert all(row["rename_to"] is None for row in _rows(db_path, 2).values())
+        assert {name: _read(os.path.join(media_dir, name)) for name in os.listdir(media_dir)} == {
+            target[key]: data for key, data in contents.items()}
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 """Тесты модуля renaming: соседи — фейки, ФС и renaming_tasks настоящие."""
 import asyncio
+import itertools
 import os
 import sqlite3
 import subprocess
@@ -462,6 +463,36 @@ async def test_a_video_series_is_renamed_by_its_numbers_without_any_profile(syst
     assert reply == {"renamed": 1}
     assert fake.rename_calls[0]["names"] == {"u1": "Show s01e01.mp4"}
     assert fake.format_series[0]["kind"] == "video"
+
+
+@pytest.mark.asyncio
+async def test_a_plan_that_was_counted_brings_the_files_of_a_video_series_to_their_names_and_asks_nothing_of_a_torrent(system):
+    bus, fake, probe, _, media = system
+    finished = bus.subscribe("renaming.finished")
+    fake.media_items = [_item("u1", 2, "Show s01e01.mp4")]
+    open(os.path.join(media, "Show s01e01.mp4"), "wb").close()
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    assert (await asyncio.wait_for(finished.queue.get(), 5)).payload == {"series_id": 2}
+    assert fake.rename_calls[-1]["names"] == {"u1": "Show s01e02.mp4"}
+    calls = len(fake.rename_calls)
+    fake.series = _torrent(fake.series)
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await bus.settled()
+    assert len(fake.rename_calls) == calls and finished.queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_the_name_of_a_file_is_the_function_of_its_row_whatever_the_rows_were_before_and_however_they_moved(system):
+    """Every placing of the rows of four episodes, from every earlier placing: the names are those of the rows as they are."""
+    _, fake, probe, _, media = system
+    slots = (1, 2, 3, 4)
+    for before in itertools.permutations(slots):
+        for after in itertools.permutations(slots):
+            fake.media_items = [_item(f"u{row}", slot, f"Show s01e{earlier:02d}.mp4")
+                                for row, slot, earlier in zip(slots, after, before)]
+            reply = await probe.request("renaming.reprocess", {"series_id": 2}, timeout=10)
+            assert fake.rename_calls[-1]["names"] == {f"u{row}": f"Show s01e{slot:02d}.mp4" for row, slot in zip(slots, after)}
+            assert reply["renamed"] == sum(1 for slot, earlier in zip(after, before) if slot != earlier)
 
 
 @pytest.mark.asyncio

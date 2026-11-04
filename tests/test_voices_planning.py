@@ -2,7 +2,7 @@
 from core.contracts import (CompositionRow, EffectiveLever, EpisodeSettings, Level, Reference, ReferenceMark,
                             RowState, group_target, variant_target)
 from core.voice_names import NO_GROUPS, Groups
-from modules.voices.planning import Candidate, PlannedDub, adopt, plan, rank
+from modules.voices.planning import STARTED, Candidate, PlannedDub, Videos, adopt, moved, plan, rank
 from modules.voices.settings import DEFAULT_PRIORITY
 
 PRIORITY = ("cvh", "kodik")
@@ -338,7 +338,7 @@ def test_a_variant_the_user_left_out_is_named_by_its_source_and_player_not_by_th
 
 
 def test_a_voice_over_names_the_source_and_the_player_its_work_is_on_the_first_one_before_it_begins_and_the_last_after_all():
-    from modules.voices.module import candidate_of
+    from modules.voices.planning import candidate_of
 
     chain = [{"player": "kodik", "source_id": 29, "url": "u1"}, {"player": "cvh", "source_id": 29, "url": "u2"}]
     assert candidate_of({"chain": chain, "attempt": 0})["player"] == "kodik"
@@ -346,3 +346,39 @@ def test_a_voice_over_names_the_source_and_the_player_its_work_is_on_the_first_o
     assert candidate_of({"chain": chain, "attempt": 5})["player"] == "cvh"
     assert candidate_of({"chain": [], "attempt": 0}) == {} and candidate_of({}) == {}
 
+
+def test_a_started_work_stands_exactly_while_the_layout_does_not_give_its_video_to_another_episode_or_voice_over():
+    """Every placing of two videos (each: not in the layout, excluded, or a row of the voice-over X or Y at episode 1 or 2),
+    for a recorded work of the voice-over X at episode 1 or 2, on either video, in any step, with a chain that knows the
+    keys of its videos or only their links. The work stands unless the layout has its video and gives it to another episode
+    or another voice-over; that is told by the layout alone, whatever the plan and the chain are."""
+    def video(key, placing):
+        if placing is None:
+            return []
+        voice, episode, excluded = placing
+        return [CompositionRow(series_id=7, source_id=1, row_key=key, season=1, episode_start=episode, episode_end=episode,
+                               voice_label=voice, player="kodik", state=RowState.PLAYABLE, excluded=excluded,
+                               link=f"https://site/{key}")]
+
+    placings = [None] + [(voice, episode, excluded) for voice in "XY" for episode in (1, 2) for excluded in (False, True)]
+    checked = 0
+    for first in placings:
+        for second in placings:
+            rows = [row(1, "cvh", "Ref", 1), row(1, "cvh", "Ref", 2), *video("a", first), *video("b", second)]
+            references = [reference_of(rows, "Ref", 1), reference_of(rows, "Ref", 2)]
+            result = planned(rows, references)
+            videos = Videos.of(rows)
+            for dub in result.dubs:
+                if dub.voice_key != "X":
+                    continue
+                for key, placing in (("a", first), ("b", second)):
+                    for status in STARTED | {"pending", "failed"}:
+                        for keyed in (True, False):
+                            candidate = Candidate("kodik", "X", f"https://site/{key}", None, 1, key if keyed else None)
+                            recorded = {"status": status, "attempt": 0, "chain": [candidate.as_json()]}
+                            here = placing is not None and not placing[2] and placing[0] == "X" and placing[1] == dub.episode
+                            gone = placing is None or placing[2]
+                            expected = status in STARTED and not here and not gone
+                            assert moved(recorded, dub.chain, videos) is expected, (first, second, dub.episode, key, status, keyed)
+                            checked += 1
+    assert checked > 1000  # the space is not empty: every case that plans X is checked

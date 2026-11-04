@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from core.contracts import EffectiveLever, Level, group_target, variant_target
+from core.contracts import CompositionRow, EffectiveLever, Level, RowState, group_target, variant_target
 from test_voices import (db_path, dubs, layout_changed, library_files, pass_over, placed_set, quiet, rows,  # noqa: F401
                          settled, until_true)
 
@@ -260,3 +260,55 @@ async def test_a_chain_recorded_before_candidates_said_their_source_is_judged_sa
     after = {r["episode"]: r for r in await voices.repo.for_series(7)}
     assert neighbours.cancelled_keys == [f"dub:{before[1]['id']}"]
     assert after[1]["id"] != before[1]["id"] and players_of(after[1]) == ["kodik"]
+
+
+def shift_cvh_black_cat(neighbours, keep=True):
+    """The layout gives the videos of the voice-over BlackCat of CVH, the rows of episodes 1 and 2, to the episodes after them
+    (the row keys and the links are the same); with `keep` False the layout has no such video at all."""
+    source = neighbours.sources[2]
+    moved_rows = [CompositionRow(
+        series_id=7, source_id=1, row_key=f"cvh:BlackCat:{number}", season=1, episode_start=number + 1,
+        episode_end=number + 1, voice_label="BlackCat", player="cvh", heights=[720], state=RowState.PLAYABLE,
+        link=source["links"][str(number)]) for number in (1, 2)]
+    source["episodes"] = []
+    neighbours.extra_rows = moved_rows if keep else []
+
+
+@pytest.mark.asyncio
+async def test_work_on_a_video_the_layout_gives_to_another_episode_is_taken_back_and_planned_again_and_the_rest_stands(dubs):
+    probe, neighbours, voices, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    await quiet(voices)
+    before = {r["episode"]: r for r in await voices.repo.for_series(7)}
+    assert players_of(before[1]) == ["cvh", "kodik"] and players_of(before[3]) == ["kodik"]
+    assert all(r["status"] == "downloading" for r in before.values())
+    shift_cvh_black_cat(neighbours)
+    asks = neighbours.layout_asks + 1
+    layout_changed(probe)
+    await pass_over(voices, neighbours, asks)
+
+    after = {r["episode"]: r for r in await voices.repo.for_series(7)}
+    assert sorted(neighbours.cancelled_keys) == sorted(f"dub:{before[number]['id']}" for number in (1, 2))
+    assert after[1]["id"] != before[1]["id"] and after[2]["id"] != before[2]["id"]
+    assert [after[number]["status"] for number in (1, 2)] == ["pending", "pending"]
+    assert players_of(after[1]) == ["kodik"] and players_of(after[2]) == ["cvh", "kodik"]
+    assert after[2]["chain"][0]["row_key"] == "cvh:BlackCat:1"  # the video that was episode 1 is episode 2 now
+    assert after[3]["id"] == before[3]["id"] and after[3]["status"] == "downloading"  # its own video is where it was
+
+
+@pytest.mark.asyncio
+async def test_work_on_a_video_the_layout_does_not_have_at_all_stands_as_a_page_read_short_is_no_evidence(dubs):
+    probe, neighbours, voices, bus = dubs
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    await quiet(voices)
+    before = {r["episode"]: r for r in await voices.repo.for_series(7)}
+    shift_cvh_black_cat(neighbours, keep=False)
+    asks = neighbours.layout_asks + 1
+    layout_changed(probe)
+    await pass_over(voices, neighbours, asks)
+
+    after = {r["episode"]: r for r in await voices.repo.for_series(7)}
+    assert {n: after[n]["id"] for n in (1, 2, 3)} == {n: before[n]["id"] for n in (1, 2, 3)}
+    assert all(r["status"] == "downloading" for r in after.values()) and neighbours.cancelled_keys == []

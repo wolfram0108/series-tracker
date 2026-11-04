@@ -14,7 +14,7 @@ Queries:
       `stale` — the read of the page failed and the last complete table stays in force; `skipped` — it failed and there is no table.
       A scan of a series that is being scanned is refused by the table of what is allowed (`not_allowed`, the state
       `scanning`; finding 27) with the code every module refuses by. The steps of a video series
-      are tied by signals: renaming.reprocess, downloads.fs.sync, sources.table.get for every source at once and
+      are tied by signals: downloads.fs.sync, sources.table.get for every source at once and
       the wait for sources.table.ready / .failed of its page, composition.recompute (its answer means the layout is
       counted from these tables), composition.get with voices.settings.get, the choice and the plan, and with
       download (the default) downloads.dispatch and voices.dispatch. A failed step is the one signal of failure:
@@ -432,11 +432,12 @@ class ScanModule(BaseModule):
                     "профиль правил")
             # Прошлая ошибка сбрасывается новым сканом (Р-11).
             await self.repo.delete_error_tasks(series_id)
-            await self._reprocess_names(series_id)
             if video:
+                # The names of its files follow the plan by the event `scan.plan.updated`, whenever the plan changes.
                 result = await self._sync_video(series, download, inventory)
                 await self.repo.delete_task(intent)
             else:
+                await self._reprocess_names(series_id)
                 result = await self._torrents.scan(series, _torrent_source(series), force)
             self._contribute(series_id, scanning=False, error=False)
             # Многосезонный агрегат TMDB: реальные сезоны могли измениться

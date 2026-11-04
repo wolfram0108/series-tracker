@@ -28,13 +28,15 @@ class Candidate(NamedTuple):
     """One place a voice-over of an episode can be downloaded from: the form of a link of `voice_dubs.chain`.
 
     `file` is (source id, row key) of a row that covers several episodes: its video is downloaded once for all of them.
-    `source_id` and `player` are what the variant is: the link is only where it shows its video now, and it may change."""
+    `source_id` and `player` are what the variant is: the link is only where it shows its video now, and it may change.
+    `row_key` with `source_id` is which video it is: the identity a started work is told by, whatever its link."""
 
     player: str
     studio: str
     url: str
     file: tuple[int, str] | None = None
     source_id: int | None = None
+    row_key: str | None = None
 
     def as_json(self) -> dict[str, Any]:
         found: dict[str, Any] = {"player": self.player, "studio": self.studio, "url": self.url}
@@ -42,6 +44,8 @@ class Candidate(NamedTuple):
             found["file"] = {"source_id": self.file[0], "row_key": self.file[1]}
         if self.source_id is not None:
             found["source_id"] = self.source_id
+        if self.row_key is not None:
+            found["row_key"] = self.row_key
         return found
 
 
@@ -147,7 +151,8 @@ def _chain(rows: Sequence[CompositionRow], pick: tuple[int, str] | None, priorit
     chain: dict[str, Candidate] = {}
     for _, row in ordered:
         chain.setdefault(row.link, Candidate(row.player, row.voice_label, row.link,
-                                             (row.source_id, row.row_key) if row.is_compilation else None, row.source_id))
+                                             (row.source_id, row.row_key) if row.is_compilation else None, row.source_id,
+                                             row.row_key))
     return tuple(chain.values())
 
 
@@ -188,3 +193,49 @@ def adopt(dubs: Iterable[PlannedDub], rows: Iterable[dict[str, Any]]) -> dict[tu
             taken.add((*slot, key))
         keys[(*slot, dub.voice_key)] = key
     return keys
+
+
+# --- the input of a started work ------------------------------------------------------------------------------------
+
+# Steps in which the work on a voice-over has begun: it holds a download, a file, a job or a track made from one video.
+STARTED = frozenset({S.DOWNLOADING, S.READY, S.ALIGNING, S.ALIGNED, S.PLACED, S.REJECTED})
+
+
+def candidate_of(row: dict[str, Any]) -> dict[str, Any]:
+    """The candidate of the chain the work of a row is on: the one it began with, the first for a row that has not begun
+    (the last one tried for a row that went through them all); empty for a row with no candidate."""
+    chain = row.get("chain") or []
+    return chain[min(row.get("attempt") or 0, len(chain) - 1)] if chain else {}
+
+
+@dataclass(frozen=True)
+class Videos:
+    """The videos the layout has: the keys of its rows and their links. What a started work is compared with."""
+
+    keys: frozenset[tuple[int, str]] = frozenset()
+    links: frozenset[str] = frozenset()
+
+    @classmethod
+    def of(cls, rows: Iterable[CompositionRow]) -> "Videos":
+        live = [row for row in rows if not row.excluded]
+        return cls(frozenset((row.source_id, row.row_key) for row in live), frozenset(row.link for row in live if row.link))
+
+
+def moved(row: dict[str, Any], chain: Iterable[Candidate], videos: Videos) -> bool:
+    """Whether the work of a started row is on a video that the layout now gives to another episode or voice-over.
+
+    A work is valid while its inputs are the inputs of the plan: the reference (told by `ref_uid`) and the video of the
+    voice-over (this). The video is the row it was made from, by its key (a chain recorded before keys is told by its
+    link). It is not valid when the layout has that video and the plan of this voice-over does not offer it. A video the
+    layout does not have at all is no evidence of a change (a page read short, a video not found by a quick search): the
+    work stands, as it stood before. A row that has not begun has no work: the plan gives it its chain anew."""
+    if row.get("status") not in STARTED:
+        return False
+    active = candidate_of(row)
+    if not active:
+        return False
+    if active.get("row_key") is not None and active.get("source_id") is not None:
+        mine = (active["source_id"], active["row_key"])
+        return mine in videos.keys and mine not in {(each.source_id, each.row_key) for each in chain}
+    link = active.get("url")
+    return bool(link) and link in videos.links and link not in {each.url for each in chain}

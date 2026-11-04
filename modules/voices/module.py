@@ -42,7 +42,9 @@ Events in:  composition.changed {series_id, rev, episodes, summary_only} and sca
             episode, mark}: the layout or a reference changed. They do not start a download: the rows are brought in line with
             the plan (a voice-over that left the plan before any work on it is removed with an event, a new one is
             recorded as planned, an episode whose reference is none or unfit loses its downloaded temporary files to
-            the cleanup journal). A row they record is not admitted: it waits, planned, for a sync. An event that says
+            the cleanup journal; a row whose work has begun on a video that the layout now gives to another episode or
+            voice-over is taken back with what it made, and planned again: `planning.moved`). A row they record is not admitted: it
+            waits, planned, for a sync. An event that says
             only the summaries of the sources changed is not acted on. Nothing is asked of composition or scan at start:
             the first event or dispatch of a series makes the whole plan of that series; conform.settings.changed (the
             work folder may be named now);
@@ -187,6 +189,7 @@ from core.envelope import Envelope
 from core.reasons import describe, parse as parse_reason, reason
 
 from . import editor, planning
+from .planning import candidate_of
 from .alignment import ENDED, job_failure, refusal, result_for, told, track_of, turned_down
 from .cleanup import ARTIFACT, JOB, PATH, SUBMISSION, TREE, Cleanup, prune, remove_if_empty
 from .lifecycle import FINAL, WORKING
@@ -235,13 +238,6 @@ def file_path(root: str, series_id: int, file_id: int, studio: str) -> str:
     """Where the file of a source row that covers several episodes is downloaded: a folder of its own, so that the
     folder goes to the journal with the file whatever the episodes that read it do."""
     return os.path.join(root, str(series_id), f"f{file_id}", f"{series_id}_f{file_id}_{_safe(studio)}.mp4")
-
-
-def candidate_of(row: dict) -> dict:
-    """The candidate of the chain the work of a row is on: the one it began with, the first for a row that has not begun
-    (the last one tried for a row that went through them all); empty for a row with no candidate."""
-    chain = row.get("chain") or []
-    return chain[min(row.get("attempt") or 0, len(chain) - 1)] if chain else {}
 
 
 def sent_as(row: dict) -> str:
@@ -527,9 +523,16 @@ class VoicesModule(BaseModule):
         touched: set[tuple[int, int, int, str]] = set()
         relabeled: set[tuple[int, int, int, str]] = set()
         recorded = {(row["season"], row["episode"], row["part"], row["voice_key"]): row for row in before}
+        videos = planning.Videos.of(layout.rows)
         for dub in plan.dubs:
             key = (dub.season, dub.episode, dub.part, keys[(dub.season, dub.episode, dub.part, dub.voice_key)])
             planned.add(key)
+            if key in recorded and planning.moved(recorded[key], dub.chain, videos):
+                # The video the work runs on is another episode's or voice-over's now: the work, what it made and the
+                # track go; the voice-over is planned again from its own videos, in this pass.
+                self.log.info("сериал %d, s%02de%02d: озвучка %s шла с видео, которое раскладка отдала другой серии, — снята",
+                              series_id, dub.season, dub.episode, dub.voice_label)
+                await self._retire_started(series_id, recorded.pop(key))
             if (dub.left_out or dub.left_out_links) and key in recorded:
                 await self._follow_variants(series_id, recorded[key], dub)
             if await self.repo.relabel(series_id, *key, dub.voice_label):
@@ -562,6 +565,15 @@ class VoicesModule(BaseModule):
         await self._release_files()
         await self._admit()
 
+    async def _retire_started(self, series_id: int, row: dict) -> None:
+        """The work of a row is not wanted: its download stops, what it made goes to the journal with the track and the job
+        at the service, the row leaves, and the interface is told."""
+        if row["status"] == S.DOWNLOADING and row["file_id"] is None:  # its own download goes with it
+            self._fetching.discard(row["id"])
+            self._withdraw(series_id, [f"{DUB_KEY}{row['id']}"])
+        await self.repo.retire(row["id"])
+        await self._announce(row, E.REMOVED)
+
     async def _follow_variants(self, series_id: int, row: dict, dub: planning.PlannedDub) -> None:
         """The user left variants out. Work that runs from one of them, or a track made from it, is not wanted at any
         step: it stops, what it made goes to the journal, and the voice-over is planned again from the others. Work
@@ -586,11 +598,7 @@ class VoicesModule(BaseModule):
         if active is not None and left_out(active):
             self.log.info("сериал %d, s%02de%02d: озвучка %s шла из варианта, который исключили, — снята", series_id,
                           row["season"], row["episode"], row["voice_label"])
-            if row["status"] == S.DOWNLOADING and row["file_id"] is None:
-                self._fetching.discard(row["id"])
-                self._withdraw(series_id, [f"{DUB_KEY}{row['id']}"])
-            await self.repo.retire(row["id"])
-            await self._announce(row, E.REMOVED)
+            await self._retire_started(series_id, row)
             return
         kept = [each for each in chain if not left_out(each)]
         if len(kept) != len(chain):
