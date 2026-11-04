@@ -5,13 +5,16 @@
     live_three.py two   --work <dir> [--safeguard 170]   a new stand on the same database waits for the service and checks the files
 
 The tables are read once (the table of a page keeps for an hour), so the later phases do not read the sites again while
-the hour lasts. The work folder keeps the database of the stand between the phases. The last line printed in any outcome is
-`ИЗМЕРЕНИЕ M-24: ...` (read and build) or `ИЗМЕРЕНИЕ M-25: ...` (two). Run it only through `progon_runner.py`.
+the hour lasts. A table that does not name the episode the later phases work on is not a result (the search of the VK channel
+answers with a different set of videos each time): `read` says `ЕЩЁ` and is run again. The work folder keeps the database of
+the stand between the phases. The last line printed in any outcome is `ИЗМЕРЕНИЕ M-24: ...` (read and build) or
+`ИЗМЕРЕНИЕ M-25: ...` (two). Run it only through `progon_runner.py`.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 import traceback
@@ -29,8 +32,8 @@ from verdicts import judge_alignment  # noqa: E402
 REAL_DB = "/home/user/series-tracker/app.db"
 SERIES = "Расколотая битвой синева небес 5"
 SERIES_EN = "Raskolotaia Bitva Sineva Nebes 5"
-LOCAL = "/nas/torrents/track-muxer/stage10-live6"
-REMOTE = "/mnt/meganas/media/torrents/track-muxer/stage10-live6"
+LOCAL = "/nas/torrents/track-muxer/stage10-live8"
+REMOTE = "/mnt/meganas/media/torrents/track-muxer/stage10-live8"
 LIBRARY = f"{LOCAL}/library/{SERIES_EN}"
 CUT = "1-207"  # the range filter: the episodes up to 207 are out, 208-217 stay
 FIRST, LAST = 208, 217
@@ -107,14 +110,20 @@ def read_phase(work: str, safeguard: float) -> str:
             lines = final.get("lines") or []
             Path(work, f"lines_{index}.json").write_text(json.dumps(lines, ensure_ascii=False), encoding="utf-8")
             players = (final.get("summary") or {}).get("players") or []
+            names_keep = any(re.search(rf"(?<!\d){KEEP}(?!\d)", each.get("line", "")) for each in lines)
             report.append({"url": url, "state": final.get("state"), "reason": final.get("reason"), "lines": len(lines),
-                           "ended_by": ended.get(canonical[url]),
+                           "names_keep": names_keep, "ended_by": ended.get(canonical[url]),
                            "players": [{"player": p["player"], "rows": p["rows"], "heights": p["heights"][-3:],
                                         "voices": [v["name"] for v in p.get("voices", [])]} for p in players]})
             print("  ", json.dumps(report[-1], ensure_ascii=False)[:900], flush=True)
         ready = all(item["state"] == "ready" and item["lines"] for item in report)
-        verdict = (f"PASS таблицы источников прочитаны за {elapsed} с: {[item['lines'] for item in report]} строк"
-                   if ready else f"FAIL чтение за {elapsed} с: {[(i['state'], i['lines']) for i in report]}")
+        lacking = [item["url"] for item in report if not item["names_keep"]]
+        if not ready:
+            verdict = f"FAIL чтение за {elapsed} с: {[(i['state'], i['lines']) for i in report]}"
+        elif lacking:
+            verdict = f"ЕЩЁ в таблице нет серии {KEEP}: {lacking}; строк {[item['lines'] for item in report]}, чтение повторяется"
+        else:
+            verdict = f"PASS таблицы источников прочитаны за {elapsed} с: {[item['lines'] for item in report]} строк"
     return verdict
 
 
