@@ -6,8 +6,6 @@ voice-overs. It records the order in which scan used it, so that a test proves t
 and it ends a read of a page only when the test says so, so that a test waits for events and never for time.
 """
 import asyncio
-import subprocess
-import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +15,7 @@ from core.contracts import (CompositionChanged, CompositionReply, CompositionRow
                             EpisodeSettings, Level, ReleaseTable, RowState, SourceStatus, SourceSummary, TableFailed,
                             TableGetReply, TableGetRequest, TableReady, TableState, VoiceSettingsView)
 from core.reasons import reason
+from schema_db import migrated
 
 ROOT = Path(__file__).resolve().parent.parent
 READ_AT = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc).isoformat()
@@ -28,9 +27,7 @@ STUCK_S = 5.0
 def migrated_db(path: Path) -> str:
     """A database at the head of the migrations with the one profile the sources of the tests name."""
     import sqlite3
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{path}", "PATH": "/usr/bin:/bin"}, cwd=ROOT, check=True,
-                   capture_output=True)
+    migrated(path)
     with sqlite3.connect(path) as conn:
         conn.execute("INSERT INTO parser_profiles (id, name) VALUES (1, 'профиль')")
         conn.commit()

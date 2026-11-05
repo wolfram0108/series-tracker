@@ -3,8 +3,6 @@
 import asyncio
 import json
 import sqlite3
-import subprocess
-import sys
 
 import httpx
 import pytest
@@ -22,15 +20,13 @@ from modules.scan.repository import ScanRepository
 from modules.slicing.repository import SlicingRepository
 from series_factory import insert_series, source
 from settle import settle
+from schema_db import migrated
 
 
 @pytest.fixture
 def db_path(tmp_path):
     path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{path}",
-                        "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
+    migrated(path)
     with sqlite3.connect(path) as conn:
         insert_series(conn, id=1, url="http://kinozal.tv/details.php?id=7", source_type="torrent")
         insert_series(conn, id=2, name="ВК", name_en="Show", site="vk", save_path="/media/s",

@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from test_voices import (synced, db_path, dubs, layout_changed, library_files, linked, pass_over, placed_set, quiet,  # noqa: F401
+from test_voices import (synced, dubs, layout_changed, library_files, linked, pass_over, placed_set, quiet,  # noqa: F401
                          rows, settled, until_true)
 
 

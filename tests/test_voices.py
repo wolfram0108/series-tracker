@@ -4,8 +4,6 @@ import json
 import os
 import shutil
 import sqlite3
-import subprocess
-import sys
 from types import SimpleNamespace
 
 import pytest
@@ -41,14 +39,6 @@ def src(player, studio, episodes, kind="", url=None):
     return {"url": url or f"https://site/?player={player}&voice={studio}", "player": player,
             "studio": studio, "kind": kind, "episodes": list(episodes)}
 
-
-@pytest.fixture
-def db_path(tmp_path):
-    path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{path}", "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
-    return str(path)
 
 
 class Probe(BaseModule):
@@ -821,6 +811,7 @@ async def test_a_pair_the_service_turned_down_goes_on_to_the_next_source_of_its_
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={
         "ok": False, "refused": True, "error": "чужое видео: сопоставлено 1% (< 60%) — выравнивание прервано"}))
     await statuses_until(sub, ["aligned", "placed", "downloading"])
+    await settled(neighbours, 3)  # the event goes out before the command of the download: the test waits for the command
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
     assert by_voice["BlackCat"]["status"] == "downloading" and by_voice["BlackCat"]["attempt"] == 1
     # The next source is a file of its own name: the file turned down goes to the cleanup and the two never meet.

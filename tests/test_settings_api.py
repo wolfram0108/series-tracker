@@ -3,8 +3,6 @@ parse_url, настройки и debug-группы, конструктор пр
 каталоги, админ-вкладка БД."""
 import json
 import sqlite3
-import subprocess
-import sys
 
 import httpx
 import pytest
@@ -23,15 +21,13 @@ from modules.voices import VoicesModule
 from core import ids
 from core.reasons import parse
 from series_factory import insert_series
+from schema_db import migrated
 
 
 @pytest.fixture
 def db_path(tmp_path):
     path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{path}",
-                        "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
+    migrated(path)
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA journal_mode=WAL")  # до конкурентных подключений
     with conn:

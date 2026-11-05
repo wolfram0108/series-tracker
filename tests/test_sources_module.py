@@ -11,7 +11,8 @@ from modules.sources.module import SourcesModule
 from modules.sources.players.vibix import link_of
 from modules.sources.sites import PHASES
 from modules.sources.sites.builtin import builtin_sites
-from sources_support import OWNED, ROOT, STEP_LIMIT_S, Web, host_that, migrate
+from schema_db import migrated
+from sources_support import OWNED, ROOT, STEP_LIMIT_S, Web, host_that
 
 DOLLS = "https://dunhuatv.ru/28-praktikuja-ci-sto-tysjach-let-smotret-onlajn.html"
 
@@ -22,8 +23,7 @@ class Probe(BaseModule):
 
 @pytest.fixture
 async def stand(tmp_path):
-    path = tmp_path / "sources.db"
-    migrate(path)
+    path = migrated(tmp_path / "sources.db")
     bus = Bus()
     sources, probe = SourcesModule(bus, Database(str(path)), torrent_cache_dir=str(tmp_path / "cache")), Probe(bus)
     await sources.start()

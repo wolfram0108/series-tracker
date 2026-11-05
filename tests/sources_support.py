@@ -1,20 +1,15 @@
 """Support for the tests of the sites and the players: an in-process web (routes over `httpx.MockTransport`), the synthetic
-answers of the sites and the players by name (`site_samples`), and the schema of the tables of pages in a database file
-(the database of a test is a real file: every operation of `Database` opens its own connection,
-so an in-memory one would be empty each time)."""
+answers of the sites and the players by name (`site_samples`). The database of a test is `schema_db.migrated`: a real
+file, since every operation of `Database` opens its own connection."""
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 import json
 from pathlib import Path
 from typing import Callable
 
 import httpx
 import pytest
-from alembic.operations import Operations
-from alembic.runtime.migration import MigrationContext
-from sqlalchemy import create_engine
 
 from site_samples import SAMPLES
 
@@ -44,23 +39,6 @@ def text_of(name: str) -> str:
 
 def json_of(name: str):
     return json.loads(text_of(name))
-
-
-MIGRATIONS = [ROOT / "alembic" / "versions" / name
-              for name in ("0026_sources_release_tables.py", "0042_release_table_channel.py")]
-
-
-def migrate(path: Path, direction: str = "upgrade") -> None:
-    """The migrations of the tables of pages alone, so that the migrations of other packages cannot break these tests."""
-    engine = create_engine(f"sqlite:///{path}")
-    with engine.begin() as connection:
-        with Operations.context(MigrationContext.configure(connection)):
-            for path_of in MIGRATIONS if direction == "upgrade" else reversed(MIGRATIONS):
-                spec = importlib.util.spec_from_file_location(f"migration_{path_of.stem}", path_of)
-                migration = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(migration)
-                getattr(migration, direction)()
-    engine.dispose()
 
 
 Answer = str | tuple[int, str] | httpx.Response

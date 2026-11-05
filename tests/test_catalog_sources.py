@@ -3,8 +3,6 @@ sources, the events they raise, the refusals, and the cascade when a series is d
 """
 import asyncio
 import sqlite3
-import subprocess
-import sys
 
 import pytest
 
@@ -16,6 +14,7 @@ from modules.catalog import CatalogModule
 from modules.catalog.repository import CatalogRepository
 from modules.catalog.series_sources import REMOVED_FIELDS, kind_of
 from series_factory import create_series, source
+from schema_db import migrated
 
 VK = "https://vkvideo.ru/@chan|запрос"
 RUCHIME = "https://1.ruchime.org/release/a"
@@ -25,9 +24,7 @@ DUNHUATV = "https://dunhuatv.ru/title/x"
 @pytest.fixture
 def db_path(tmp_path):
     path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{path}", "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
+    migrated(path)
     with sqlite3.connect(path) as conn:
         conn.execute("INSERT INTO parser_profiles (id, name) VALUES (1, 'один'), (2, 'два')")
         conn.commit()

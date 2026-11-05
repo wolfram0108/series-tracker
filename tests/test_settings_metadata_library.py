@@ -1,7 +1,5 @@
 """Тесты модулей settings, metadata, library (этап 2)."""
 import asyncio
-import subprocess
-import sys
 
 import httpx
 import pytest
@@ -13,15 +11,6 @@ from modules.metadata import MetadataModule
 from modules.settings import SettingsModule
 from series_factory import create_series, insert_series
 
-
-@pytest.fixture
-def db_path(tmp_path):
-    path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{path}",
-                        "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
-    return str(path)
 
 
 class Probe(BaseModule):

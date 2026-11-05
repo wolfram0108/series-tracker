@@ -188,7 +188,7 @@ import os
 from core.voice_names import NO_GROUPS
 from modules.voices import planning as voices_planning
 from modules.voices.settings import DEFAULT_PRIORITY
-from test_voices import (db_path, dubs, downloads, conform_dir, library_files, placed_set, quiet, settled,  # noqa: F401
+from test_voices import (dubs, downloads, conform_dir, library_files, placed_set, quiet, settled,  # noqa: F401
                          statuses_until, two_voices_ready, until_true)
 from test_voices import synced  # noqa: E402
 from test_voices_plan_exit import layout_changed, leave_out, pass_over, take_off

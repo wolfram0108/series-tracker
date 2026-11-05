@@ -6,8 +6,6 @@
 """
 import asyncio
 import sqlite3
-import subprocess
-import sys
 
 import pytest
 
@@ -17,6 +15,7 @@ from modules.catalog import CatalogModule
 from modules.catalog.aggregator import StatusAggregator
 from series_factory import insert_series
 from settle import settle
+from schema_db import migrated
 
 
 # --- агрегатор: чистая логика ----------------------------------------------------
@@ -149,10 +148,7 @@ def test_forget_series():
 @pytest.fixture
 def db_path(tmp_path):
     path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{path}",
-                        "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
+    migrated(path)
     with sqlite3.connect(path) as conn:
         insert_series(conn, id=1, url="http://x", state="error, scanning")
         conn.commit()

@@ -6,16 +6,12 @@ time. The one number below (STUCK_S) only ends a test that is stuck.
 """
 import asyncio
 import json
-import importlib.util
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from alembic.operations import Operations
-from alembic.runtime.migration import MigrationContext
-from sqlalchemy import create_engine, inspect
 
 from composition_fakes import (HOST, OTHER_PAGE, PAGE, FakeCatalog, FakeRules, FakeSources, FakeVoices, lecturer,
                                source)
@@ -28,33 +24,15 @@ from core.db import Database
 from core.reasons import parse, reason
 from modules.composition import CompositionModule, levers
 from modules.composition.levers import Lever
+from schema_db import migrated
 
-ROOT = Path(__file__).resolve().parent.parent
-MIGRATIONS = [ROOT / "alembic" / "versions" / name
-              for name in ("0027_composition_tables.py", "0035_composition_source_exclusion.py",
-                           "0036_composition_voice_orders.py")]
 # A test that waits longer than this for an event is stuck: the event is the signal, the number only ends a broken test.
 STUCK_S = 5.0
 
 
-def migrate(path: Path, direction: str) -> None:
-    """The migrations of this package alone, so that the migrations of other packages cannot break these tests."""
-    engine = create_engine(f"sqlite:///{path}")
-    for file in MIGRATIONS if direction == "upgrade" else reversed(MIGRATIONS):
-        spec = importlib.util.spec_from_file_location(f"migration_{file.stem}", file)
-        migration = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(migration)
-        with engine.begin() as connection:
-            with Operations.context(MigrationContext.configure(connection)):
-                getattr(migration, direction)()
-    engine.dispose()
-
-
 @pytest.fixture
 def db_path(tmp_path):
-    path = tmp_path / "composition.db"
-    migrate(path, "upgrade")
-    return path
+    return migrated(tmp_path / "composition.db")
 
 
 class Probe(BaseModule):
@@ -1010,23 +988,8 @@ async def test_an_event_of_a_page_that_overtakes_the_answer_that_names_it_makes_
 
 # --- the tables --------------------------------------------------------------------------------------------------------
 
-def test_the_migration_makes_the_tables_and_takes_them_away(tmp_path):
-    path = tmp_path / "m.db"
-    migrate(path, "upgrade")
-    expected = {"composition_rows", "composition_state", "composition_sources",
-                "unknown_voices", "output_settings"}
-    engine = create_engine(f"sqlite:///{path}")
-    assert expected <= set(inspect(engine).get_table_names())
-    engine.dispose()
-    migrate(path, "downgrade")
-    engine = create_engine(f"sqlite:///{path}")
-    assert not expected & set(inspect(engine).get_table_names())
-    engine.dispose()
-
-
 def test_a_level_of_a_lever_is_kept_once_whether_or_not_it_has_a_season_or_an_episode(tmp_path):
-    path = tmp_path / "m.db"
-    migrate(path, "upgrade")
+    path = migrated(tmp_path / "m.db")
     insert = ("INSERT INTO output_settings (series_id, season, episode, lever, target, value)"
               " VALUES (?, ?, ?, ?, ?, 'true')")
     levels = [(1, None, None, "voice.take", "group:a"), (1, 1, None, "voice.take", "group:a"),

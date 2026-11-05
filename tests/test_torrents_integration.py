@@ -17,6 +17,7 @@ import pytest
 from core import Bus, Runner
 from modules.torrents import TorrentsModule, infohash_candidates
 from settle import settle
+from schema_db import migrated
 
 QBIT_URL = os.environ.get("ST_QBIT_URL")
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "torrents")
@@ -27,14 +28,9 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 async def torrents_module(tmp_path):
-    import subprocess
-    import sys
     bus = Bus()
     db_file = tmp_path / "t.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{db_file}",
-                        "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
+    migrated(db_file)
     from core.db import Database
     module = TorrentsModule(
         bus, Database(str(db_file)),

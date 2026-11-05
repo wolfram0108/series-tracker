@@ -2,6 +2,8 @@ import faulthandler
 
 import pytest
 
+from schema_db import migrated
+
 # The slowest test takes about half a minute: a test that stands longer than this is stuck, and a
 # stuck suite must say where instead of waiting for ever.
 STUCK_AFTER_S = 180
@@ -15,7 +17,7 @@ def stuck_test_guard():
 
 
 def _relaxed_paces():
-    """(module, name, value) of every pause that spares a real host; a name that no longer exists is skipped."""
+    """(module, name, value) of every pause that spares a real host."""
     from core.retry import UNTIMED, Budget
     from modules.sources import policy
     sites = "modules.sources.sites"
@@ -34,15 +36,17 @@ def _relaxed_paces():
 
 @pytest.fixture(autouse=True)
 def hosts_are_not_paced_in_tests(monkeypatch):
-    """The pauses that spare a real host (between requests, probes and repeated asks) would only slow fakes down."""
+    """The pauses that spare a real host (between requests, probes and repeated asks) would only slow fakes down. A pause
+    that was renamed or moved fails here: kept silently, it would make every test wait for real."""
     import importlib
     for module_name, name, value in _relaxed_paces():
-        try:
-            module = importlib.import_module(module_name)
-        except ImportError:
-            continue
-        if hasattr(module, name):
-            monkeypatch.setattr(module, name, value)
+        monkeypatch.setattr(importlib.import_module(module_name), name, value)
+
+
+@pytest.fixture
+def db_path(tmp_path):
+    """An empty database at the head of the schema; a test that needs rows of its own defines its own `db_path`."""
+    return migrated(tmp_path / "test.db")
 
 
 @pytest.fixture(autouse=True)

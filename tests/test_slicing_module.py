@@ -5,7 +5,6 @@ import asyncio
 import json
 import os
 import sqlite3
-import subprocess
 import sys
 
 import pytest
@@ -17,6 +16,7 @@ from modules.slicing import chapters as ch
 from modules.slicing.module import run_ffmpeg
 from series_factory import insert_series
 from settle import wait_until
+from schema_db import migrated
 
 
 # --- фильтр глав (порт эвристик 1:1) -------------------------------------------------
@@ -223,10 +223,7 @@ class Probe(BaseModule):
 @pytest.fixture
 async def system(tmp_path):
     db_path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{db_path}",
-                        "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
+    migrated(db_path)
     media = tmp_path / "media"
     media.mkdir()
     with sqlite3.connect(db_path) as conn:
@@ -688,10 +685,7 @@ async def test_chapters_check_does_not_block_slicing(tmp_path):
     поэтому нарезка после проверки оглавления запускается; повторный
     запуск при уже созданной задаче — отвергается."""
     db_path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": "sqlite:///%s" % db_path,
-                        "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
+    migrated(db_path)
     media = tmp_path / "media"; media.mkdir()
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO parser_profiles (id, name) VALUES (1, 'p')")

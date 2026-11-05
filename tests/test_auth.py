@@ -3,8 +3,6 @@ HTTP-замок, сессия в куке, защита от перебора.
 
 cookie_secure=False — иначе SessionMiddleware ставит Secure-куку, а httpx
 по http её не сохранит (тестовый клиент ходит на http://test)."""
-import subprocess
-import sys
 
 import httpx
 import pytest
@@ -14,14 +12,6 @@ from core.db import Database
 from modules.auth import AuthModule
 from modules.gateway import GatewayModule
 
-
-@pytest.fixture
-def db_path(tmp_path):
-    path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{path}", "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
-    return str(path)
 
 
 class _Queue(BaseModule):

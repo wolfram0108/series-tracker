@@ -5,8 +5,6 @@ import asyncio
 import logging
 import os
 import sqlite3
-import subprocess
-import sys
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -22,6 +20,7 @@ from modules.downloads import ytdlp
 from modules.downloads.module import source_of_candidate
 from series_factory import insert_series, source
 from settle import settle, wait_until
+from schema_db import migrated
 
 
 # --- чистые функции разбора yt-dlp ----------------------------------------------
@@ -189,10 +188,7 @@ def env_paths(tmp_path):
     db_path = tmp_path / "test.db"
     media_dir = tmp_path / "media"
     media_dir.mkdir()
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{db_path}",
-                        "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
+    migrated(db_path)
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO parser_profiles (id, name) "
                      "VALUES (1, 'профиль')")

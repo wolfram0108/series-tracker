@@ -3,7 +3,6 @@
 import asyncio
 import importlib
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -12,6 +11,7 @@ import pytest
 
 from core import logging as core_logging
 from core.envelope import topic_matches
+from schema_db import migrated
 
 GATEWAY = Path(__file__).resolve().parent.parent / "modules" / "gateway"
 
@@ -20,9 +20,7 @@ GATEWAY = Path(__file__).resolve().parent.parent / "modules" / "gateway"
 def assembled(tmp_path, monkeypatch):
     """`run` imported afresh over a database with the schema of the migrations."""
     path = tmp_path / "assembly.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{path}", "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
+    migrated(path)
     for name, value in {"ST_DB_PATH": str(path), "ST_AUTH_REQUIRED": "false", "ST_COOKIE_SECURE": "false",
                         "ST_SECRET_KEY": "assembly", "ST_DOCS_ENABLED": "true"}.items():
         monkeypatch.setenv(name, value)

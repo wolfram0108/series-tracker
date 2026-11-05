@@ -5,8 +5,6 @@ import asyncio
 import logging
 import json
 import sqlite3
-import subprocess
-import sys
 
 import pytest
 
@@ -17,6 +15,7 @@ from modules.torrents import TorrentsModule
 from modules.torrents import pipeline as pl
 from series_factory import insert_series
 from settle import settle, wait_until
+from schema_db import migrated
 
 
 # --- чистая машина -----------------------------------------------------------------
@@ -153,10 +152,7 @@ class Probe(BaseModule):
 @pytest.fixture
 def db_path(tmp_path):
     path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{path}",
-                        "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
+    migrated(path)
     with sqlite3.connect(path) as conn:
         insert_series(conn, id=1, name="Т", name_en="T", site="kinozal", save_path="/media/t", state="waiting",
                       url="http://x", source_type="torrent")

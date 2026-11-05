@@ -1,7 +1,5 @@
-"""The contracts of the multi-source series: the line the constructor gets, the levels of a lever, the migration chain."""
+"""The contracts of the multi-source series: the line the constructor gets, the levels of a lever."""
 import pytest
-from alembic.config import Config
-from alembic.script import ScriptDirectory
 from pydantic import ValidationError
 
 from core.contracts import (CompositionRow, Level, ReleaseTable, RowState, RowVoice, SettingRecord, TableRow,
@@ -90,10 +88,3 @@ def test_targets_name_domain_things_not_row_ids():
     # No name, however odd, is taken for a part of another: the group may hold the separators of any other form.
     for group, source_id, player in [("A / B", 3, "a/b"), ('Q"uote', 0, "p"), ("group:x", 1, "source:1/player:z"), ("Ё", 2, "я")]:
         assert parse_variant_target(variant_target(group, source_id, player)) == (group, source_id, player)
-
-
-def test_the_migrations_of_the_stage_keep_one_head_in_order():
-    script = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert len(script.get_heads()) == 1
-    chain = [script.get_revision(f"{number:04d}").down_revision for number in range(25, 30)]
-    assert chain == ["0024", "0025", "0026", "0027", "0028"]

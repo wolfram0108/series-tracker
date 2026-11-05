@@ -11,7 +11,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
-from sqlalchemy import create_engine, inspect
 
 from core import BaseModule, Bus
 from core.contracts import ReleaseTable, RowState, RowVoice, TableGetRequest, TableRow
@@ -20,7 +19,7 @@ from core.reasons import parse, reason
 from modules.sources.module import SourcesModule
 from modules.sources.repository import SourcesRepository
 from modules.sources.sites import ReadContext, SiteError, SiteRegistry, TableDraft, on_domain
-from sources_support import migrate
+from schema_db import migrated
 
 PAGE = "https://fake.test/p/1"
 OTHER_PAGE = "https://fake.test/p/2"
@@ -32,9 +31,7 @@ ABSENCE_WINDOW_S = 0.3
 
 @pytest.fixture
 def db_path(tmp_path):
-    path = tmp_path / "tables.db"
-    migrate(path, "upgrade")
-    return path
+    return migrated(tmp_path / "tables.db")
 
 
 # --- the fake site ----------------------------------------------------------------------------------------------------
@@ -686,24 +683,3 @@ def test_the_sites_of_two_module_instances_do_not_meet(db_path, tmp_path):
     second = SourcesModule(Bus(), Database(str(db_path)))
 
     assert first.sites.find(PAGE) is not None and second.sites.find(PAGE) is None
-
-
-# --- the schema -------------------------------------------------------------------------------------------------------
-
-def test_the_migration_creates_the_tables_of_pages_and_takes_them_away(tmp_path):
-    path = tmp_path / "m.db"
-    migrate(path, "upgrade")
-    engine = create_engine(f"sqlite:///{path}")
-    tables = inspect(engine)
-    assert {column["name"] for column in tables.get_columns("release_tables")} == {
-        "url", "site", "names", "site_voice", "channel", "read_at", "complete", "state", "reason", "reading_since"}
-    assert {column["name"] for column in tables.get_columns("release_rows")} == {
-        "url", "seq", "key", "player", "player_label", "grp", "text", "voice_name", "voice_kind", "heights", "state",
-        "reason", "duration_s", "published", "link", "site_fields"}
-    assert tables.get_pk_constraint("release_rows")["constrained_columns"] == ["url", "key"]
-    engine.dispose()
-
-    migrate(path, "downgrade")
-    engine = create_engine(f"sqlite:///{path}")
-    assert inspect(engine).get_table_names() == []
-    engine.dispose()

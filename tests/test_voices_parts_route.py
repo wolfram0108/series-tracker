@@ -22,7 +22,7 @@ from modules.voices import VoicesModule
 from series_factory import insert_series
 from settle import wait_until
 from test_downloads_module import FakeDownloader
-from test_voices import Neighbours, db_path, restarted, touch  # noqa: F401
+from test_voices import Neighbours, restarted, touch  # noqa: F401
 
 PARTS = (1, 2)
 LABEL = "Dub"

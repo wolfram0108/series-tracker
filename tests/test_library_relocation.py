@@ -4,8 +4,6 @@
 import asyncio
 import os
 import sqlite3
-import subprocess
-import sys
 
 import pytest
 
@@ -16,6 +14,7 @@ from modules.catalog import CatalogModule
 from modules.library import LibraryModule
 from series_factory import insert_series
 from settle import settle, wait_until
+from schema_db import migrated
 
 
 class FakeNeighbours(BaseModule):
@@ -63,10 +62,7 @@ class Probe(BaseModule):
 @pytest.fixture
 async def started(tmp_path):
     db_path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{db_path}",
-                        "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
+    migrated(db_path)
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
     old_dir.mkdir()

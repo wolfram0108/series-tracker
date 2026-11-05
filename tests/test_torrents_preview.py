@@ -2,8 +2,6 @@
 do between three modules, and the module is the only one that publishes the outcomes."""
 import asyncio
 import base64
-import subprocess
-import sys
 
 import pytest
 
@@ -90,14 +88,6 @@ class FakeQbt:
 class Probe(BaseModule):
     name = "probe"
 
-
-@pytest.fixture
-def db_path(tmp_path):
-    path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{path}", "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
-    return str(path)
 
 
 @pytest.fixture

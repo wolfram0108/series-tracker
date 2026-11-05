@@ -8,7 +8,7 @@ import pytest
 from core.contracts import CompositionRow, RowState
 from modules.voices import VoicesModule
 from core.db import Database
-from test_voices import (synced, db_path, dubs, finish, job_result, layout_changed, linked, quiet, reference_on_disk, restarted,  # noqa: F401
+from test_voices import (synced, dubs, finish, job_result, layout_changed, linked, quiet, reference_on_disk, restarted,  # noqa: F401
                          rows, settled, statuses_until, touch, until_true, downloads)
 
 LINK = "https://site/title.html#kodik-Red-1-3"

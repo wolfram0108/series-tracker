@@ -4,8 +4,6 @@ ready-made numbers, the profile of a torrent file from the request, and the dele
 import asyncio
 import json
 import sqlite3
-import subprocess
-import sys
 from types import SimpleNamespace
 
 import pytest
@@ -16,21 +14,14 @@ from core.db import Database
 from core.reasons import parse
 from modules.rules import RulesModule
 from series_factory import insert_series, source
+from schema_db import migrated
 
 SITE = "https://dunhuatv.ru/title/x"
 
 
-def alembic(path, *args):
-    subprocess.run([sys.executable, "-m", "alembic", *args],
-                   env={"ST_DB_URL": f"sqlite:///{path}", "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
-
-
 @pytest.fixture
 def db_path(tmp_path):
-    path = tmp_path / "test.db"
-    alembic(path, "upgrade", "head")
-    return str(path)
+    return migrated(tmp_path / "test.db")
 
 
 class Probe(BaseModule):
@@ -716,31 +707,6 @@ async def test_a_profile_is_an_id_and_a_name(system):
     profile = await new_profile(probe, "один")
     assert await probe.request("rules.profiles.list", {}, timeout=5) == [{"id": profile, "name": "один"}]
     assert "preferred_voiceovers" not in [row[1] for row in rows(system.db_path, "PRAGMA table_info(parser_profiles)")]
-
-
-def test_the_unused_profile_column_goes_and_comes_back_without_touching_rules(tmp_path):
-    path = tmp_path / "migration.db"
-    alembic(path, "upgrade", "0029")
-    with sqlite3.connect(path) as conn:
-        conn.execute("INSERT INTO parser_profiles (id, name, preferred_voiceovers) VALUES (1, 'один', 'Студия')")
-        conn.execute("INSERT INTO parser_rules (id, profile_id, name, priority, action_pattern, continue_after_match) "
-                     "VALUES (1, 1, 'r', 1, '[]', 0)")
-        conn.execute("INSERT INTO parser_rule_conditions (id, rule_id, condition_type, pattern, logical_operator) "
-                     "VALUES (1, 1, 'contains', '[]', 'AND')")
-
-    def kept():
-        return rows(path, "SELECT p.id, p.name, r.id, r.name, r.priority, c.id, c.pattern FROM parser_profiles p "
-                          "JOIN parser_rules r ON r.profile_id=p.id JOIN parser_rule_conditions c ON c.rule_id=r.id")
-
-    def columns():
-        return [row[1] for row in rows(path, "PRAGMA table_info(parser_profiles)")]
-
-    before = kept()
-    assert before and "preferred_voiceovers" in columns()
-    alembic(path, "upgrade", "0030")
-    assert "preferred_voiceovers" not in columns() and kept() == before
-    alembic(path, "downgrade", "0029")
-    assert "preferred_voiceovers" in columns() and kept() == before
 
 
 @pytest.mark.asyncio

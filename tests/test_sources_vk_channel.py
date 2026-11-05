@@ -18,7 +18,8 @@ from modules.sources.sites.vk_channel import VkChannelSite
 from modules.sources.sites.vk_channel import site as channel_site
 from modules.sources.sites.vk_channel.api import (PAGE_SIZE, dedupe, error_code_of, heights_of, is_external,
                                                    keep_by_terms, parse_address)
-from sources_support import READ_LIMIT_S, Web, migrate, within
+from schema_db import migrated
+from sources_support import READ_LIMIT_S, Web, within
 
 OWNER = -170515668
 CHANNEL = "https://vkvideo.ru/@ruchime"
@@ -455,8 +456,7 @@ class Probe(BaseModule):
 async def stand(tmp_path, monkeypatch):
     # Two videos to a page, so that a listing of three has two pages.
     monkeypatch.setattr(channel_site, "PAGE_SIZE", 2)
-    path = tmp_path / "sources.db"
-    migrate(path)
+    path = migrated(tmp_path / "sources.db")
     bus = Bus()
     pages = {"video.get": [[video(1, "Тайтл 1 серия"), video(2, "Трейлер другого")], [video(3, "Тайтл 2 серия")]]}
     trackerauth, probe = FakeTrackerauth(bus, pages), Probe(bus)

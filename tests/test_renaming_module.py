@@ -3,8 +3,6 @@ import asyncio
 import itertools
 import os
 import sqlite3
-import subprocess
-import sys
 
 import pytest
 
@@ -14,6 +12,7 @@ from core.envelope import Envelope
 from modules.renaming import RenamingModule
 from series_factory import insert_series
 from settle import settle
+from schema_db import migrated
 
 
 class FakeNeighbours(BaseModule):
@@ -136,10 +135,7 @@ def _torrent(series, profile_id=1):
 @pytest.fixture
 async def started(tmp_path):
     db_path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{db_path}",
-                        "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
+    migrated(db_path)
     media = tmp_path / "media"
     media.mkdir()
     with sqlite3.connect(db_path) as conn:

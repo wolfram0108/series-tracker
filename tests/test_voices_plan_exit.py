@@ -6,7 +6,7 @@ import pytest
 
 from core.contracts import CompositionRow, EffectiveLever, Level, ReferenceMark, RowState, group_target, variant_target
 from modules.voices.module import series_status
-from test_voices import (synced, db_path, dubs, layout_changed, library_files, pass_over, placed_set, quiet, rows,  # noqa: F401
+from test_voices import (synced, dubs, layout_changed, library_files, pass_over, placed_set, quiet, rows,  # noqa: F401
                          settled, until_true)
 
 

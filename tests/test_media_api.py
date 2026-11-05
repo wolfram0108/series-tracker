@@ -3,8 +3,6 @@
 плана, композиция по владельцам, rename_preview, переобработки."""
 import os
 import sqlite3
-import subprocess
-import sys
 
 import httpx
 import pytest
@@ -19,6 +17,7 @@ from modules.scan import ScanModule
 from modules.slicing import SlicingModule
 from series_factory import insert_series
 from settle import settle
+from schema_db import migrated
 
 CHAPTERS = [
     {"time": "00:01:00", "title": "Серия 1"},
@@ -38,10 +37,7 @@ async def fake_ffmpeg(source, start, duration, output):
 @pytest.fixture
 def db_path(tmp_path):
     path = tmp_path / "test.db"
-    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
-                   env={"ST_DB_URL": f"sqlite:///{path}",
-                        "PATH": "/usr/bin:/bin"},
-                   cwd=".", check=True, capture_output=True)
+    migrated(path)
     # save_path VK-серии — реальный каталог в tmp: нарезка проверяет
     # наличие исходника на диске (исходник кладёт тест перед slice).
     media_s = tmp_path / "media_s"

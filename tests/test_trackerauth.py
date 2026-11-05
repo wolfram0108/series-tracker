@@ -5,8 +5,6 @@ rate-limit, антибот-челлендж. Сеть замокана на ур
 """
 import asyncio
 import json
-import subprocess
-import sys
 
 import pytest
 import requests
@@ -21,15 +19,6 @@ from modules.trackerauth.repository import account_fingerprint
 KZ_URL = "https://kinozal.me/details.php?id=1"
 RT_URL = "https://rutracker.org/forum/viewtopic.php?t=1"
 
-
-@pytest.fixture
-def db_path(tmp_path):
-    path = tmp_path / "test.db"
-    subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        env={"ST_DB_URL": f"sqlite:///{path}", "PATH": "/usr/bin:/bin"},
-        cwd=".", check=True, capture_output=True)
-    return str(path)
 
 
 def _response(url, *, text="", status=200, content_type="text/html",
