@@ -303,7 +303,7 @@ class VoicesModule(BaseModule):
         # a change of the layout or a reference that comes meanwhile is planned when the run ends.
         self._in_run: set[int] = set()
         # The settings of the voice-overs each open run took (RunSnapshot.voices): every pass of a series in a run works
-        # by them, not by the settings as they are now (И-60).
+        # by them, not by the settings as they are now (I-60).
         self._run_values: dict[int, dict] = {}
         self._owed_plans: set[int] = set()
         self._work = WorkReport(self.name, self._has_work, self.publish_event)

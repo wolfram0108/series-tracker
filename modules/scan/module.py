@@ -81,6 +81,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -171,7 +172,7 @@ class ScanModule(BaseModule):
         self._owned: set[int] = set()  # the tasks of scan_tasks that the scans running here keep
         # The changes of a series by the user under way (scan.edit.begin/end) and the signal that none is left: a run
         # opens only after them, and none is admitted while a run is open or opening.
-        self._edits: dict[int, int] = {}
+        self._edits: dict[int, set[str]] = {}
         # The configuration each open run works by (RunSnapshot), kept with its command in scan_tasks.
         self._snapshots: dict[int, RunSnapshot] = {}
         self._failed: set[int] = set()  # the series whose last run ended failed (its error stays until the next scan)
@@ -278,19 +279,24 @@ class ScanModule(BaseModule):
     # --- the admission of a change by the user (I-60) ------------------------------------------------------------
 
     async def on_edit_begin(self, env: Envelope) -> dict:
-        """A change of the series by the user begins: refused while a sync of it runs or opens; admitted, it holds off
-        the opening of a sync until scan.edit.end."""
+        """A change of the series by the user begins: refused while a sync of it runs or opens; admitted, it gets its
+        number and holds off the opening of a sync until scan.edit.end with that number, which its admission sends once
+        every request of the change is answered (core/admission.py)."""
         series_id = int(env.payload["series_id"])
         self._require_idle(series_id, availability.Action.EDIT)
-        self._edits[series_id] = self._edits.get(series_id, 0) + 1
+        token = uuid.uuid4().hex
+        self._edits.setdefault(series_id, set()).add(token)
         self._edits_over.setdefault(series_id, asyncio.Event()).clear()
-        return {"ok": True}
+        return {"ok": True, "token": token}
 
     async def on_edit_end(self, env: Envelope) -> None:
+        """The change of that number is written whole; an end told twice is the same as once."""
         series_id = int(env.payload["series_id"])
-        left = max(self._edits.get(series_id, 0) - 1, 0)
-        if left:
-            self._edits[series_id] = left
+        open_ = self._edits.get(series_id)
+        if open_ is None:
+            return
+        open_.discard(env.payload.get("token") or "")
+        if open_:
             return
         self._edits.pop(series_id, None)
         over = self._edits_over.pop(series_id, None)
@@ -310,7 +316,7 @@ class ScanModule(BaseModule):
         new release; what the output shows of it goes out as references. Switching a season on switches on all of it."""
         request = OutputSwitch.model_validate(env.payload)
         series_id = request.series_id
-        self._require_idle(series_id, availability.Action.EDIT)
+        self._require_idle(series_id, availability.Action.EDIT, env)
 
         async def apply() -> None:
             series = await self.request("catalog.series.get", {"series_id": series_id})
@@ -544,7 +550,7 @@ class ScanModule(BaseModule):
                 if not any(each.parser_profile_id for each in _sources_of(series)):
                     self._announce_run(series_id, True)
                     raise SyncFailed(reason("scan_no_profile"))
-                # The run is told once, with its snapshot: no step of it has begun before (И-60).
+                # The run is told once, with its snapshot: no step of it has begun before (I-60).
                 await self._take_snapshot(series, intent)
                 self._announce_run(series_id, True)
             elif not _torrent_source(series).parser_profile_id:
@@ -723,9 +729,13 @@ class ScanModule(BaseModule):
         return availability.SERIES_SCANNING if series_id in self._running or series_id in self._runs \
             else availability.SERIES_IDLE
 
-    def _require_idle(self, series_id: int, action: availability.Action = availability.Action.SYNC) -> None:
+    def _require_idle(self, series_id: int, action: availability.Action = availability.Action.SYNC,
+                      env: Envelope | None = None) -> None:
         """An action on a series that is being synchronized is refused by the table of what is allowed, as every module
-        refuses: a sync is busy from its start until every work of its run has ended."""
+        refuses: a sync is busy from its start until every work of its run has ended. A change admitted before the sync
+        (its request carries the number of an admission still open) is not a new one: the opening sync waits for it."""
+        if env is not None and env.admission and env.admission in self._edits.get(series_id, ()):
+            return
         availability.require(action, self._state(series_id))
 
     # --- the run: a sync and every work it gave out ---------------------------------------------------------------

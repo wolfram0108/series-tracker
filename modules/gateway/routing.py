@@ -9,6 +9,8 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from core import BusRequestError
+from core.admission import Admission
+from core.admission import current as current_admission
 
 _NOT_THERE = "нет обработчика"
 
@@ -41,15 +43,21 @@ def refusal(exc: BusRequestError, status: int | None = None, *, with_success: bo
 async def admitted(gw: Any, series_id: int) -> AsyncIterator[None]:
     """A change of a series by the user, admitted by the owner of its runs (scan.edit.begin): refused while a sync of the
     series runs, and a sync does not open until the change is written whole, however many modules it writes to (И-60).
-    The refusal is a BusRequestError like any other, answered by `refusal`."""
+    The admission lasts until every request of the change is answered, not until this block stops waiting: a fuse or a
+    dropped HTTP request leaves a write in the hands of its handler (core/admission.py). The refusal is a BusRequestError
+    like any other, answered by `refusal`."""
     try:
-        await gw.request("scan.edit.begin", {"series_id": series_id})
+        reply = await gw.request("scan.edit.begin", {"series_id": series_id})
     except BusRequestError as exc:
         if _NOT_THERE not in str(exc):
             raise
         yield  # no runs in this process: nothing to hold off
         return
+    token = (reply or {}).get("token") or ""
+    admission = Admission(token, lambda: gw.send_command("scan.edit.end", {"series_id": series_id, "token": token}))
+    current = current_admission.set(admission)
     try:
         yield
     finally:
-        gw.send_command("scan.edit.end", {"series_id": series_id})
+        current_admission.reset(current)
+        admission.close()

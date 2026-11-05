@@ -18,6 +18,8 @@ import asyncio
 import inspect
 from typing import Any, Awaitable, Callable
 
+from .admission import Admission
+from .admission import current as current_admission
 from .bus import Bus, Subscription
 from .deadlines import deadline_of
 from .envelope import Envelope
@@ -49,6 +51,8 @@ class BaseModule:
         self._bg: set[asyncio.Task] = set()
         self._subs: list[Subscription] = []
         self._pending: dict[str, asyncio.Future] = {}
+        # Requests sent under an admission whose answer has not come yet (it is counted however late it comes).
+        self._admitted: dict[str, Admission] = {}
         self._reply_topic = f"{REPLY_PREFIX}.{self.name}"
         self.register()
 
@@ -115,17 +119,29 @@ class BaseModule:
         whose work is one step for each unit; `None` waits without one."""
         if timeout is _FROM_TABLE:
             timeout = deadline_of(topic, units)
+        admission = current_admission.get()
+        if admission is not None and not admission.covers():
+            admission = None  # a task started inside the change is other work
         env = Envelope(topic=topic, kind="query", payload=payload,
-                       reply_to=self._reply_topic)
+                       reply_to=self._reply_topic, admission=admission.token if admission else None)
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[env.correlation_id] = fut
+        unanswerable = False
+        if admission is not None:
+            admission.sent(env.correlation_id)
+            self._admitted[env.correlation_id] = admission
         try:
             delivered = self.bus.publish(env)
             if delivered == 0:
+                unanswerable = True
                 raise BusRequestError(f"{NO_HANDLER} для query '{topic}'")
             return await asyncio.wait_for(fut, timeout)
         finally:
             self._pending.pop(env.correlation_id, None)
+            # A fuse or a cancellation of the caller cancels the future, not the work: the admission waits for the answer.
+            if admission is not None and (unanswerable or (fut.done() and not fut.cancelled())):
+                self._admitted.pop(env.correlation_id, None)
+                admission.answered(env.correlation_id)
 
     def background(self) -> set[asyncio.Task]:
         """Задачи, в которых модуль работает вне обработчиков шины; тот, кто ждёт тишины, ждёт и их."""
@@ -172,6 +188,9 @@ class BaseModule:
         while True:
             env: Envelope = await sub.queue.get()
             try:
+                late = self._admitted.pop(env.correlation_id, None)
+                if late is not None and env.correlation_id not in self._pending:
+                    late.answered(env.correlation_id)  # the caller stopped waiting; the admission did not
                 fut = self._pending.get(env.correlation_id)
                 if fut is None or fut.done():
                     continue  # a reply that came after the fuse is ignored

@@ -1189,7 +1189,7 @@ async def test_a_change_admitted_before_a_sync_holds_its_opening_and_none_is_adm
     """Н-8: the check of a change and its write are not apart from the opening of a run: a sync waits for a change admitted
     before it, and a change asked once the sync is starting is refused."""
     rig.world.rows = [rig.row("a", 1, 1)]
-    await rig.probe.request("scan.edit.begin", {"series_id": rig.series_id}, timeout=STUCK_S)
+    token = (await rig.probe.request("scan.edit.begin", {"series_id": rig.series_id}, timeout=STUCK_S))["token"]
     runs = rig.bus.subscribe(RUN_CHANGED)
     running = rig.start_run(download=False)
     # The sync is started and holds at its opening (the bus does not go quiet: its request is still being answered).
@@ -1197,11 +1197,12 @@ async def test_a_change_admitted_before_a_sync_holds_its_opening_and_none_is_adm
     assert rig.world.order == [] and drain(runs) == []  # the sync waits for the change
     with pytest.raises(BusRequestError, match="not_allowed"):
         await rig.probe.request("scan.edit.begin", {"series_id": rig.series_id}, timeout=STUCK_S)
-    rig.probe.send_command("scan.edit.end", {"series_id": rig.series_id})
+    rig.probe.send_command("scan.edit.end", {"series_id": rig.series_id, "token": token})
     await running
     assert runs_of(drain(runs)) == [True, False]
-    assert await rig.probe.request("scan.edit.begin", {"series_id": rig.series_id}, timeout=STUCK_S) == {"ok": True}
-    rig.probe.send_command("scan.edit.end", {"series_id": rig.series_id})
+    again = await rig.probe.request("scan.edit.begin", {"series_id": rig.series_id}, timeout=STUCK_S)
+    assert again["ok"] is True and again["token"] != token
+    rig.probe.send_command("scan.edit.end", {"series_id": rig.series_id, "token": again["token"]})
 
 
 async def test_a_run_works_by_the_configuration_it_took_when_it_started(rig):
@@ -1250,3 +1251,121 @@ async def test_the_run_is_told_with_its_snapshot_and_the_open_runs_are_given_wit
     work_state(rig, "downloads", False)
     await rig.bus.settled()
     assert (await rig.probe.request("scan.runs.get", {}, timeout=5))["runs"] == []
+
+
+# --- an admission lasts until the change is answered, not until its caller stops waiting (N-12, N-14) -------------------
+
+class SlowWriter(BaseModule):
+    """A module whose write is held until the test lets it go, and which notes whether a run was open when it wrote."""
+    name = "review_writer"
+
+    def __init__(self, bus, scan):
+        self.entered, self.release, self.written = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        self.run_open_at_write: list[bool] = []
+        self._scan = scan
+        super().__init__(bus)
+
+    def register(self):
+        self.handle("review.write", self.write)
+
+    async def write(self, env):
+        self.entered.set()
+        await self.release.wait()
+        self.run_open_at_write.append(bool(self._scan._runs))
+        self.written.set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stops", ["fuse", "dropped"])
+async def test_a_change_whose_caller_stops_waiting_still_holds_off_the_sync_until_it_is_written(rig, stops):
+    """The fuse of the gateway ran out, or the HTTP request was dropped: the write is still in the hands of its handler, so
+    the admission holds until it is answered, and the sync opens after it."""
+    from modules.gateway.routing import admitted
+
+    writer = SlowWriter(rig.bus, rig.scan)
+    await writer.start()
+    rig.world.rows = [rig.row("a", 1, 1)]
+    try:
+        async def edit():
+            async with admitted(rig.probe, rig.series_id):
+                await rig.probe.request("review.write", {}, timeout=0.05 if stops == "fuse" else 30)
+
+        editing = asyncio.create_task(edit())
+        await asyncio.wait_for(writer.entered.wait(), 5)
+        if stops == "dropped":
+            editing.cancel()
+        with pytest.raises((asyncio.TimeoutError, asyncio.CancelledError)):
+            await editing
+        assert rig.scan._edits.get(rig.series_id)  # held: the write has not been answered
+        running = asyncio.create_task(rig.run())
+        assert await wait_until(lambda: rig.series_id in rig.scan._running, rig.bus, *rig.runner.modules)
+        assert rig.series_id not in rig.scan._runs  # the sync waits for the change
+
+        writer.release.set()
+        await asyncio.wait_for(writer.written.wait(), 5)
+        await asyncio.wait_for(running, 10)
+        assert writer.run_open_at_write == [False]
+    finally:
+        writer.release.set()
+        await writer.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_change_admitted_before_a_sync_is_not_refused_by_the_sync_that_waits_for_it(rig):
+    from modules.gateway.routing import admitted
+
+    rig.world.rows = [rig.row("a", 1, 1)]
+    async with admitted(rig.probe, rig.series_id):
+        running = rig.start_run(download=False)
+        assert await wait_until(lambda: rig.series_id in rig.scan._running, rig.bus, *rig.runner.modules)
+        await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": 1, "off": True},
+                                timeout=5)
+    await asyncio.wait_for(running, 10)
+
+    # A change that was not admitted before the sync is refused as before, whatever number it names.
+    rig.scan._running.add(rig.series_id)
+    try:
+        with pytest.raises(BusRequestError, match="NotAllowed"):
+            await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": 1,
+                                                           "off": False}, timeout=5)
+    finally:
+        rig.scan._running.discard(rig.series_id)
+
+
+@pytest.mark.asyncio
+async def test_a_card_written_by_the_real_catalog_after_the_fuse_is_written_before_the_sync_opens(rig, monkeypatch):
+    from modules.catalog import CatalogModule
+    from modules.gateway.routing import admitted
+
+    catalog = next(module for module in rig.runner.modules if isinstance(module, CatalogModule))
+    update = catalog.repo.update_series
+    entered, release = asyncio.Event(), asyncio.Event()
+    run_open_at_commit: list[bool] = []
+
+    async def held_update(series_id, fields):
+        entered.set()
+        await release.wait()
+        run_open_at_commit.append(series_id in rig.scan._runs)
+        return await update(series_id, fields)
+
+    monkeypatch.setattr(catalog.repo, "update_series", held_update)
+    rig.world.rows = [rig.row("a", 1, 1)]
+
+    async def edit():
+        async with admitted(rig.probe, rig.series_id):
+            await rig.probe.request("catalog.series.update", {"series_id": rig.series_id, "fields": {"name": "LATE"}},
+                                    timeout=0.05)
+
+    editing = asyncio.create_task(edit())
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        with pytest.raises(asyncio.TimeoutError):
+            await editing
+        running = asyncio.create_task(rig.run())
+        assert await wait_until(lambda: rig.series_id in rig.scan._running, rig.bus, *rig.runner.modules)
+        release.set()
+        await asyncio.wait_for(running, 10)
+        assert run_open_at_commit == [False]
+        assert rig.query("SELECT name FROM series WHERE id=?", (rig.series_id,))[0]["name"] == "LATE"
+    finally:
+        release.set()

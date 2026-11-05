@@ -27,6 +27,8 @@ class Envelope:
     correlation_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     reply_to: str | None = None
     ts: str = field(default_factory=_now_iso)
+    # The number of the admitted change a request belongs to (core/admission.py): its handler may tell it from a new one.
+    admission: str | None = None
 
 
 def topic_matches(pattern: str, topic: str) -> bool:
