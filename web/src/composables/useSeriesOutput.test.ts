@@ -67,8 +67,6 @@ beforeEach(() => {
   vi.mocked(calls.resetLever).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.syncSeries).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.switchOutput).mockReset().mockResolvedValue(ok({ success: true }))
-  vi.mocked(calls.reprocessSeries).mockReset().mockResolvedValue(ok({ success: true }))
-  vi.mocked(calls.adoptSeries).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.fetchRenames).mockReset().mockResolvedValue(ok({
     preview: [{ unique_id: "u1", season: 1, episode: 2, part: null, new_filename_preview: "Show s01e02.mp4" }] }))
 })
@@ -255,20 +253,6 @@ describe("useSeriesOutput", () => {
     vi.mocked(calls.switchOutput).mockResolvedValueOnce({ ok: false, text: "Сериал не найден" })
     expect(await output.switchTo(9, null, true)).toBe("Сериал не найден")
     expect(output.failure.value).toBe("Сериал не найден")
-  })
-
-  it("holds its own flag while the renaming is counted again or the library is adopted, and words a refusal", async () => {
-    const output = setup()
-    await flushPromises()
-    const counting = output.reprocess()
-    expect([output.reprocessing.value, output.adopting.value]).toEqual([true, false])
-    expect(await counting).toBeNull()
-    vi.mocked(calls.adoptSeries).mockResolvedValueOnce({ ok: false, text: "Идёт другой процесс" })
-    const adopting = output.adopt()
-    expect(output.adopting.value).toBe(true)
-    expect(await adopting).toBe("Идёт другой процесс")
-    expect([output.reprocessing.value, output.adopting.value]).toEqual([false, false])
-    expect(calls.reprocessSeries).toHaveBeenCalledWith(1)
   })
 
   it("reads the names of the files only when asked for them, again with the layout while they are shown, and drops them when not", async () => {

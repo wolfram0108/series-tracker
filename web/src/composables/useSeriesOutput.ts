@@ -7,7 +7,7 @@ import { useQueuesStore } from "../stores/queues"
 import { useSeriesStore } from "../stores/series"
 import { useVoicesStore } from "../stores/voices"
 import {
-  adoptSeries, fetchComposition, fetchMedia, fetchOutput, fetchRenames, reprocessSeries, resetLever, setLever, setVoiceOrder, switchOutput,
+  fetchComposition, fetchMedia, fetchOutput, fetchRenames, resetLever, setLever, setVoiceOrder, switchOutput,
   syncSeries,
   type Composition, type MediaFile, type RenameRow,
 } from "./outputCalls"
@@ -47,8 +47,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   // A lever is on its way to the core / a pass over the series is running: the controls that start them wait.
   const busy = ref(false)
   const syncing = ref(false)
-  const reprocessing = ref(false)
-  const adopting = ref(false)
   // The names the files would get: asked for by the user, counted by the rules as they are now, so read again with the layout.
   const names = ref<RenameRow[]>([])
   const namesWanted = ref(false)
@@ -155,10 +153,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const switchTo = (season: number, episode: number | null, off: boolean): Promise<string | null> =>
     act(() => switchOutput(seriesId, { season, ...(episode === null ? {} : { episode }), off }), busy)
 
-  const reprocess = (): Promise<string | null> => act(() => reprocessSeries(seriesId), reprocessing)
-
-  const adopt = (): Promise<string | null> => act(() => adoptSeries(seriesId), adopting)
-
   const sync = (): Promise<string | null> => act(() => syncSeries(seriesId), syncing)
 
   // The order of the voice-overs of a season (the tracks of its containers); the new order comes back as an event.
@@ -187,6 +181,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     })
   }
 
-  return { composition, references, loading, failure, busy, syncing, reprocessing, adopting, names, namesWanted, naming, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
-    sync, reprocess, adopt, showNames, voiceOrders, order }
+  return { composition, references, loading, failure, busy, syncing, names, namesWanted, naming, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
+    sync, showNames, voiceOrders, order }
 }

@@ -52,8 +52,6 @@ beforeEach(() => {
   vi.mocked(calls.fetchMedia).mockReset().mockResolvedValue(ok([]))
   vi.mocked(calls.switchOutput).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.syncSeries).mockReset().mockResolvedValue(ok({ success: true }))
-  vi.mocked(calls.reprocessSeries).mockReset().mockResolvedValue(ok({ success: true }))
-  vi.mocked(calls.adoptSeries).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.setLever).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.fetchRenames).mockReset().mockResolvedValue(ok({
     preview: [{ unique_id: "u2", season: 1, episode: 2, part: null, new_filename_preview: "Show s01e02.mp4" }] }))
@@ -140,23 +138,19 @@ describe("StatusOutput", () => {
     expect(w.find(".episode-file").exists()).toBe(false)
   })
 
-  it("asks for a pass over the series, the renaming and the adoption by their buttons, each waiting for its own answer", async () => {
+  it("has one button, the sync of the series, which waits for its answer", async () => {
     let finish!: (value: Answer<unknown>) => void
     vi.mocked(calls.syncSeries).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
     const w = mountOutput()
     await flushPromises()
-    const [sync, reprocess, adopt] = w.findAll(".output-bar button")
-    await sync.trigger("click")
-    expect(sync.attributes("disabled")).toBeDefined()
-    expect(reprocess.attributes("disabled")).toBeUndefined()
+    const buttons = w.findAll(".output-bar button")
+    expect(buttons.map((each) => each.text())).toEqual([t("output.sync")])
+    await buttons[0].trigger("click")
+    expect(buttons[0].attributes("disabled")).toBeDefined()
     finish(ok({ success: true }))
     await flushPromises()
-    expect(sync.attributes("disabled")).toBeUndefined()
-    await reprocess.trigger("click")
-    await adopt.trigger("click")
+    expect(buttons[0].attributes("disabled")).toBeUndefined()
     expect(calls.syncSeries).toHaveBeenCalledWith(1)
-    expect(calls.reprocessSeries).toHaveBeenCalledWith(1)
-    expect(calls.adoptSeries).toHaveBeenCalledWith(1)
   })
 
   it("draws the button of the pass by the table of the core and the state the core reports, not only by its own call", async () => {
@@ -200,13 +194,10 @@ describe("StatusOutput", () => {
     useSeriesStore().upsert({ id: 1, name: "Тайтл", is_busy: true, statuses: ["scanning"] } as never)
     const w = mountOutput()
     await flushPromises()
-    for (const label of [t("output.reprocess"), t("output.adopt"), t("output.sync")]) {
-      const button = w.findAll(".output-bar button").find((each) => each.text().includes(label))
-      expect(button?.attributes("disabled"), label).toBeDefined()
-    }
+    const sync = () => w.findAll(".output-bar button").find((each) => each.text().includes(t("output.sync")))
+    expect(sync()?.attributes("disabled")).toBeDefined()
     useSeriesStore().upsert({ id: 1, name: "Тайтл", is_busy: false, statuses: [] } as never)
     await flushPromises()
-    const reprocess = w.findAll(".output-bar button").find((each) => each.text().includes(t("output.reprocess")))
-    expect(reprocess?.attributes("disabled")).toBeUndefined()
+    expect(sync()?.attributes("disabled")).toBeUndefined()
   })
 })

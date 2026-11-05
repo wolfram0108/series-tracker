@@ -69,14 +69,6 @@ const switchSeason = (season: number, off: boolean) => changed(output.switchTo(s
         :label="t('output.sync')" :icon="passing ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'"
         size="small" :disabled="!canSync" @click="output.sync()"
       />
-      <Button
-        :label="t('output.reprocess')" :icon="output.reprocessing.value ? 'pi pi-spin pi-spinner' : 'pi pi-pencil'"
-        size="small" severity="warn" :disabled="output.reprocessing.value || seriesBusy" @click="output.reprocess()"
-      />
-      <Button
-        :label="t('output.adopt')" :icon="output.adopting.value ? 'pi pi-spin pi-spinner' : 'pi pi-sparkles'"
-        size="small" severity="info" :disabled="output.adopting.value || seriesBusy" @click="output.adopt()"
-      />
     </div>
 
     <p v-for="read in reading" :key="read.key" class="cluster output-reading">

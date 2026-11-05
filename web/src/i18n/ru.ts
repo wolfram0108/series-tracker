@@ -146,8 +146,6 @@ export const ru = {
   "sources.title": "Источники",
   "output.tab": "Выход",
   "output.sync": "Синхронизировать",
-  "output.reprocess": "Переприменить правила",
-  "output.adopt": "Глубокое усыновление",
   "output.filter.deviations": "Только отклонения",
   "output.names": "Имена файлов",
   "output.file": "Имя файла: {name}",

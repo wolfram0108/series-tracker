@@ -43,12 +43,10 @@ export function fetchOutput(seriesId: number): Promise<Answer<Reference[]>> {
   return call(() => api.GET("/api/series/{series_id}/output", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
 }
 
-/** A pass over the series now; the core answers when the pass is over, and what it changed comes as events. */
+/** The sync of the series, the same run the series card starts: tables, plan, download, voice-overs, containers. The core
+ * answers when its pass is over; the run goes on with the works it gave out, and what it changes comes as events. */
 export function syncSeries(seriesId: number): Promise<Answer<unknown>> {
-  // The status of the files and of the plan is brought up to date; a download is the scan of the series card.
-  return call(() => api.POST("/api/series/{series_id}/scan", {
-    params: { path: { series_id: seriesId }, query: { download: false } },
-  }), OUTPUT_WORDS)
+  return call(() => api.POST("/api/series/{series_id}/scan", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
 }
 
 /** The names the files of the series get by the rules as they are now, each with the slot it belongs to. */
@@ -62,16 +60,6 @@ export interface RenameRow {
 
 export function fetchRenames(seriesId: number): Promise<Answer<{ preview: RenameRow[] }>> {
   return call(() => api.GET("/api/series/{series_id}/rename_preview", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
-}
-
-/** The renaming of the files of the series is counted again by the rules as they are now. */
-export function reprocessSeries(seriesId: number): Promise<Answer<unknown>> {
-  return call(() => api.POST("/api/series/{series_id}/reprocess", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
-}
-
-/** The files already in the library are looked for and adopted into the plan. */
-export function adoptSeries(seriesId: number): Promise<Answer<unknown>> {
-  return call(() => api.POST("/api/series/{series_id}/deep-adoption", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
 }
 
 /** Switches an episode (without `episode`, a whole season) off or on; the references that follow come as events. */
