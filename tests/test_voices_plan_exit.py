@@ -368,6 +368,22 @@ async def test_the_run_of_a_series_hears_whether_voices_has_work_of_it(dubs):
 
 
 @pytest.mark.asyncio
+async def test_the_status_of_a_series_shows_alignment_while_its_voice_overs_are_worked_on(dubs):
+    probe, neighbours, voices, bus = dubs
+    contributions = bus.subscribe("series.status.contribution")
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await settled(neighbours, 3)
+    await quiet(voices)
+    told = []
+    while not contributions.queue.empty():
+        payload = contributions.queue.get_nowait().payload
+        if payload["source"] == "voices" and payload["series_id"] == 7:
+            told.append(payload["flags"])
+    assert told and told[-1] == {"aligning": True}  # told once when it changes, not on every event of a row
+    assert len(told) == len([each for index, each in enumerate(told) if index == 0 or told[index - 1] != each])
+
+
+@pytest.mark.asyncio
 async def test_a_series_whose_voice_overs_are_all_placed_has_no_voices_work(dubs):
     probe, neighbours, bus, sub, ref = await placed_set(dubs)
     voices = dubs[2]

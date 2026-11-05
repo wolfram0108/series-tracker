@@ -26,4 +26,17 @@ describe("SeriesCard", () => {
     await flushPromises()
     expect(pill()).toBeUndefined()
   })
+
+  it("names an open run processing and gives slicing, alignment and packing a pill and a layer of their own", () => {
+    const working = { ...series, statuses: ["slicing", "aligning", "packing"] } as unknown as Series
+    const w = mount(SeriesCard, { props: { series: working } })
+    expect(w.findAll(".status-pill").map((each) => each.text()).sort()).toEqual(
+      ["Выравнивание", "Нарезка", "Упаковка"])
+    for (const layer of ["slicing", "aligning", "packing"]) {
+      expect(w.find(`.layer-${layer}`).attributes("style")).not.toContain("width: 0%")
+    }
+    expect(w.find(".layer-downloading").attributes("style")).toContain("width: 0%")
+    const processing = mount(SeriesCard, { props: { series } })
+    expect(processing.findAll(".status-pill").map((each) => each.text())).toContain("Обработка")
+  })
 })

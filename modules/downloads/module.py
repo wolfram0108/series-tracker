@@ -63,7 +63,8 @@ Events out:
       connects (gateway.sse.clients): SSE pack_queue_update. A task: {id, series_id, series_name, season, episode, part,
       name, status: queued | building | packed | unchanged | waiting | failed | interrupted, tracks}.
   downloads.fetch.started {key, series_id, path}, downloads.fetch.finished {key, ok, error, transient, path, series_id}.
-  series.status.contribution {source: downloads, ...} - the fold of statuses (Р-11).
+  series.status.contribution {source: downloads, ...} - the fold of statuses (Р-11); `packing` while the containers of
+      the series are being built.
   series.downloaded.changed {series_id, count}.
 
 One file per slot of an episode: a row with media_items.superseded_by (written by scan with the plan) loses its file, and
@@ -181,6 +182,7 @@ class DownloadsModule(BaseModule):
                                 on_queue=self._broadcast_pack_queue)
         # Packings run one at a time, as they always did; the turn is taken after the series shows in the queue.
         self._pack_turn = asyncio.Lock()
+        self._packing_now: set[int] = set()  # the series whose containers are being built now (the status `packing`)
         self._publication = Publication(self.repo, self.library, self.log, running=lambda task_id: task_id in self._active,
                                         resume=self._look_again, end_task=self._end_task)
 
@@ -388,9 +390,13 @@ class DownloadsModule(BaseModule):
                       for name in ("only", "skip"))
         self._packing.waits(series)
         async with self._pack_turn, self._lock(series_id):
-            done = await self._packing.pack(series, only=only, skip=skip or set())
-        if done.packed:
+            self._packing_now.add(series_id)
             await self._contribute(series_id)
+            try:
+                done = await self._packing.pack(series, only=only, skip=skip or set())
+            finally:
+                self._packing_now.discard(series_id)
+                await self._contribute(series_id)
         if done.packed or done.failed or done.waiting:
             self.log.info("серия %d: контейнеров собрано %d, не собрано %d, ждут загрузки %d", series_id, done.packed,
                           done.failed, done.waiting)
@@ -903,7 +909,8 @@ class DownloadsModule(BaseModule):
 
     async def _contribute(self, series_id: int) -> None:
         await self._tell_work(series_id)
-        flags = await self.repo.series_flags(series_id)
+        # Packing is the module's own state of the moment, not a fact of its tables: the card shows it while it goes.
+        flags = {**await self.repo.series_flags(series_id), "packing": series_id in self._packing_now}
         self.publish_event("series.status.contribution", {
             "source": "downloads", "series_id": series_id, "flags": flags})
         # Д1: состав скачанного мог измениться (усыновление/докачка/сброс) —

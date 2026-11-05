@@ -361,7 +361,7 @@ async def test_dispatch_creates_downloads_and_completes(system):
     # свёртка дошла до ready (финальная публикуется после завершения
     # воркера — дожидаемся именно её)
     expected = {"downloading": False, "error": False,
-                "ready": True, "waiting": False}
+                "ready": True, "waiting": False, "packing": False}
     flags = None
 
     def reached_ready():
@@ -1526,6 +1526,19 @@ async def test_what_the_plan_alone_decides_reaches_the_disk_in_a_sync_and_never_
     assert all(os.path.exists(path) for path in files) is (not synced or not files)
     if name == "task_outside_plan":
         assert len(_tasks(db_path)) == (0 if synced else tasks_before)
+
+
+@pytest.mark.asyncio
+async def test_the_status_of_a_series_shows_packing_while_its_containers_are_built(system):
+    _, _, _, probe, _, _ = system
+    contributions = probe.bus.subscribe("series.status.contribution")
+    await probe.request("downloads.pack", {"series_id": 2}, timeout=10)
+    told = []
+    while not contributions.queue.empty():
+        payload = contributions.queue.get_nowait().payload
+        if payload["source"] == "downloads" and payload["series_id"] == 2:
+            told.append(payload["flags"]["packing"])
+    assert told == [True, False]
 
 
 @pytest.mark.asyncio

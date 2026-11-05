@@ -3,7 +3,7 @@ import { computed } from "vue"
 import type { Series } from "../stores/series"
 import { useSeriesReadsStore } from "../stores/seriesReads"
 import { progressText } from "../lib/sources"
-import { t } from "../i18n"
+import { t, type MessageKey } from "../i18n"
 
 // Карточка сериала — кастом-островок. Порт логики из app.js
 // (getLayerStyle/getAnimationClass/seriesWithPills) на реальную модель серии.
@@ -16,23 +16,16 @@ const emit = defineEmits<{
 }>()
 
 const layerHierarchy = [
-  "waiting", "ready", "downloading", "queued", "activating",
+  "waiting", "ready", "downloading", "queued", "slicing", "aligning", "packing", "activating",
   "checking", "renaming", "metadata", "scanning", "viewing", "error",
 ]
-const stateConfig: Record<string, { title: string; icon: string }> = {
-  waiting: { title: "Ожидание", icon: "pi-clock" },
-  viewing: { title: "Просмотр", icon: "pi-eye" },
-  scanning: { title: "Сканирование", icon: "pi-th-large" },
-  metadata: { title: "Метадата", icon: "pi-file" },
-  renaming: { title: "Переименование", icon: "pi-pencil" },
-  checking: { title: "Проверка", icon: "pi-sync" },
-  activating: { title: "Активация", icon: "pi-bolt" },
-  downloading: { title: "Загрузка", icon: "pi-download" },
-  idle: { title: "Простой", icon: "pi-pause" },
-  queued: { title: "В очереди", icon: "pi-hourglass" },
-  ready: { title: "Готов", icon: "pi-database" },
-  error: { title: "Ошибка", icon: "pi-exclamation-triangle" },
+// The words of a status are `series.status.<name>`; `scanning` is an open run of a sync, shown as processing.
+const stateIcons: Record<string, string> = {
+  waiting: "pi-clock", viewing: "pi-eye", scanning: "pi-th-large", metadata: "pi-file", renaming: "pi-pencil",
+  checking: "pi-sync", activating: "pi-bolt", downloading: "pi-download", idle: "pi-pause", queued: "pi-hourglass",
+  ready: "pi-database", error: "pi-exclamation-triangle", slicing: "pi-clone", aligning: "pi-sliders-h", packing: "pi-box",
 }
+const stateTitle = (state: string) => (state in stateIcons ? t(`series.status.${state}` as MessageKey) : state)
 
 const states = computed(() => props.series.statuses ?? [])
 const busy = computed(() => Boolean(props.series.is_busy) || Boolean(props.saving))
@@ -64,7 +57,8 @@ const animationClass = computed(() => {
     if (["error", "ready"].includes(s[0])) return "stripes-stopped"
     if (["waiting", "viewing"].includes(s[0])) return "stripes-slow"
   }
-  const stillActive = ["scanning", "checking", "activating", "renaming", "metadata", "downloading"]
+  const stillActive = ["scanning", "checking", "activating", "renaming", "metadata", "downloading", "slicing", "aligning",
+    "packing"]
   if ((s.includes("idle") || s.includes("queued")) && !s.some((x) => stillActive.includes(x)))
     return "stripes-stopped"
   return "stripes-normal"
@@ -80,7 +74,7 @@ const pills = computed(() => {
     out.push({ key: "overflow", title: `+${s.length - maxVisible}`, icon: "pi-ellipsis-h" })
   }
   visible.forEach((k) =>
-    out.push({ key: k, title: stateConfig[k]?.title || k, icon: stateConfig[k]?.icon || "" }))
+    out.push({ key: k, title: stateTitle(k), icon: stateIcons[k] || "" }))
   return out.reverse()
 })
 

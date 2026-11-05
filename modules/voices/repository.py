@@ -311,6 +311,13 @@ class VoicesRepository:
                                "ON CONFLICT (id) DO UPDATE SET value = value + 1")
         return (await self._db.fetch_all("SELECT value FROM voice_epoch WHERE id=1"))[0]["value"]
 
+    async def series_with_live_dubs(self) -> list[int]:
+        """Series with a voice-over a sync admitted that is not at its end: work of a run."""
+        marks, steps = _in(lifecycle.FINAL)
+        rows = await self._db.fetch_all(
+            f"SELECT DISTINCT series_id FROM voice_dubs WHERE admitted = 1 AND NOT (status {marks})", steps)
+        return [row["series_id"] for row in rows]
+
     async def series_with_open_work(self) -> list[int]:
         """Series that have something to carry on after a stop: a voice-over that waits for its reference, or
         an operation that was begun and not finished, whatever step the voice-over is at."""

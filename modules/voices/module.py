@@ -54,7 +54,9 @@ Events in:  composition.changed {series_id, rev, episodes, summary_only} and sca
             jobs of the service), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished, conform.job.removed,
             conform.daemon.up, series.deleted.
-Events out: voices.dub.changed {series_id, season, episode, part, voice_key, voice_label, status, state, hint, detail,
+Events out: series.status.contribution {source: voices, series_id, flags: {aligning}} — the voice-overs of the series are
+            fetched and aligned (work of a run); told when it changes, and for every series with such work at the start.
+            voices.dub.changed {series_id, season, episode, part, voice_key, voice_label, status, state, hint, detail,
             epoch, rev} — epoch is the number of this start of the module, kept in the database and raised at every
             start; rev grows with every event of a run: the interface keeps the newest (epoch, rev) of two it
             receives out of order, and no clock takes part;
@@ -281,6 +283,7 @@ class VoicesModule(BaseModule):
         self._kicked: set[int] = set()
         self._job_status: dict[str, str] = {}
         self._fetching: set[int] = set()
+        self._aligning: dict[int, bool] = {}  # what the status of each series was last told: voice-over work goes on
         self._file_fetching: set[int] = set()
         self._admit_lock = asyncio.Lock()
         # The number of a job and its ending arrive in any order; each looks for the other under this lock.
@@ -362,6 +365,8 @@ class VoicesModule(BaseModule):
         await self._resume_obligations()
         for series_id in await self.repo.series_with_open_work():
             self._kick(series_id)
+        for series_id in await self.repo.series_with_live_dubs():  # the status of a series is rebuilt from the tables
+            await self._tell_work(series_id)
 
     async def on_stop(self) -> None:
         await self._recovery.stop()
@@ -975,8 +980,13 @@ class VoicesModule(BaseModule):
         return (await self._work.tell(int(env.payload["series_id"]))).model_dump()
 
     async def _tell_work(self, series_id: int) -> None:
-        """The run of the series hears when this module's work of it begins or ends (the run owner is scan)."""
-        await self._work.tell(series_id)
+        """The run of the series hears when this module's work of it begins or ends (the run owner is scan), and the
+        status of the series shows it (`aligning`: the voice-overs are fetched and aligned)."""
+        state = await self._work.tell(series_id)
+        if self._aligning.get(series_id) != state.active:
+            self._aligning[series_id] = state.active
+            self.publish_event("series.status.contribution", {
+                "source": "voices", "series_id": series_id, "flags": {"aligning": state.active}})
 
     def _is_fetching(self, row: dict) -> bool:
         """Whether the download behind a voice-over has begun: its own, or the one of the file it reads."""

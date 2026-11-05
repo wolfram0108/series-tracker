@@ -25,17 +25,22 @@ const cards = [
   { id: 3, name: "Фронт кровавой блокады", site: "kinozal.me", auto_scan_enabled: true, statuses: ["downloading"], last_scan_time: "18.06, 00:31", tmdb: { downloaded: 5, total: 12 } },
   { id: 4, name: "Простой (нет пиров)", site: "rutracker", auto_scan_enabled: false, statuses: ["idle"], last_scan_time: "18.06, 00:30" },
   { id: 5, name: "В очереди", site: "rutracker", auto_scan_enabled: true, statuses: ["queued"] },
-  { id: 6, name: "Сканирование", site: "anilibria", auto_scan_enabled: true, statuses: ["scanning"] },
+  { id: 6, name: "Обработка", site: "anilibria", auto_scan_enabled: true, statuses: ["scanning"] },
   { id: 7, name: "Ошибка", site: "kinozal.me", auto_scan_enabled: true, statuses: ["error"] },
   { id: 8, name: "Несколько статусов", site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "downloading", "metadata"] },
   { id: 9, name: "Готов + ожидание (VK)", site: "vk_video", auto_scan_enabled: true, statuses: ["ready", "waiting"], tmdb: { downloaded: 7, total: 24 } },
+  { id: 10, name: "Нарезка", site: "kinozal.me", auto_scan_enabled: true, statuses: ["slicing"] },
+  { id: 11, name: "Обработка: выравнивание и упаковка", site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "aligning", "packing", "downloading"] },
 ]
 
 // Симуляция анимаций карточки: смена статусов → перетекание слоёв (0.8s),
 // fade пилюль (badge-fade), смена скорости полос. Эталон — старый фронт.
 const simStates: Record<string, string[]> = {
   "Ожидание": ["waiting"],
-  "Сканирование": ["scanning"],
+  "Обработка": ["scanning"],
+  "Нарезка": ["slicing"],
+  "Выравнивание": ["aligning"],
+  "Упаковка": ["packing"],
   "Загрузка": ["downloading"],
   "Простой": ["idle"],
   "В очереди": ["queued"],
