@@ -91,7 +91,8 @@ the key it was recorded under for good. When the layout calls a recorded voice-o
 or renamed) the plan finds it by a link: a planned voice-over that has a candidate with the link of a row of the same
 episode under another key is that row (planning.adopt); the row keeps its key and its work, and takes the new label
 (a placed track follows it). The key is the identity, not what the user reads: the file of a voice-over is named by the
-label it has when its download begins (dub_name; the key when it has none), and the row keeps that path.
+label it has when its download begins (dub_name; the key when it has none) with the player and the place of its source
+(two sources of one voice never share a file name), and the row keeps that path.
 
 A row of the layout that covers several episodes (a compilation: one video) is a candidate like a single one. Its video
 is one file, a row of voice_files, downloaded once (downloads.fetch with the key `file:<id>`) and read by the voice-overs
@@ -184,7 +185,8 @@ import re
 import shutil
 import uuid
 from collections import OrderedDict, defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from core import NO_HANDLER, BaseModule, BusRequestError
 from pydantic import ValidationError
@@ -247,27 +249,36 @@ def _another_file(row: dict, rev: int | None) -> bool:
     return rev is not None and row.get("ref_rev") is not None and row["ref_rev"] != rev
 
 
-def dub_file(series_id: int, season: int, episode: int, part: int, name: str) -> str:
-    """The name a voice-over is downloaded and sent to the service under: series, episode, part and the name of the voice."""
-    return f"{series_id}_{slot_tag(season, episode, part)}_{_safe(name)}.mp4"
+def _video_name(head: str, voice: str, candidate: Mapping[str, Any]) -> str:
+    """The one form of the name of a downloaded video: what it is for (`head`), the voice, then the player and the place
+    of the source it comes from (release_table.place_of), so that the sources of one voice never share a name."""
+    tail = [candidate.get("player") or "", *candidate.get("place", ())]
+    return "_".join([head, _safe(voice), *(_safe(part) for part in tail if part)]) + ".mp4"
 
 
-def dub_name(row: dict, slot_rows: Iterable[dict]) -> str:
+def dub_file(row: Mapping[str, Any], name: str, candidate: Mapping[str, Any]) -> str:
+    """The name a voice-over is downloaded and sent to the service under: series, episode, part, the name of the voice
+    and its source."""
+    return _video_name(f"{row['series_id']}_{slot_tag(row['season'], row['episode'], row['part'])}", name, candidate)
+
+
+def dub_name(row: dict, slot_rows: Iterable[dict], candidate: Mapping[str, Any]) -> str:
     """The name of the voice in the name of its file: the name the voice-over has now, so that the user sees the one they
     gave; its key when it has none, or when another row of the episode holds a file of that name (two files never share
     one). Chosen once, when its download begins: the row keeps the path, and everything after reads the path."""
     held = {os.path.basename(each["temp_path"]) for each in slot_rows
             if each.get("temp_path") and each.get("id") != row.get("id")}
     for name in (row.get("voice_label") or "", row["voice_key"]):
-        if name and dub_file(row["series_id"], row["season"], row["episode"], row["part"], name) not in held:
+        if name and dub_file(row, name, candidate) not in held:
             return name
     return row["voice_key"]
 
 
-def file_path(root: str, series_id: int, file_id: int, studio: str) -> str:
+def file_path(root: str, series_id: int, file_id: int, candidate: Mapping[str, Any]) -> str:
     """Where the file of a source row that covers several episodes is downloaded: a folder of its own, so that the
     folder goes to the journal with the file whatever the episodes that read it do."""
-    return os.path.join(root, str(series_id), f"f{file_id}", f"{series_id}_f{file_id}_{_safe(studio)}.mp4")
+    return os.path.join(root, str(series_id), f"f{file_id}",
+                        _video_name(f"{series_id}_f{file_id}", candidate["studio"], candidate))
 
 
 def sent_as(row: dict) -> str:
@@ -275,7 +286,7 @@ def sent_as(row: dict) -> str:
     the name it would take now."""
     if row.get("temp_path"):
         return os.path.basename(row["temp_path"])
-    return dub_file(row["series_id"], row["season"], row["episode"], row["part"], row.get("voice_label") or row["voice_key"])
+    return dub_file(row, row.get("voice_label") or row["voice_key"], candidate_of(row))
 
 
 def reference_file(series_id: int, season: int, episode: int, part: int, reference: str) -> str:
@@ -287,9 +298,9 @@ def episode_dir(root: str, series_id: int, season: int, episode: int, part: int)
     return os.path.join(root, str(series_id), slot_tag(season, episode, part))
 
 
-def temp_path(root: str, series_id: int, season: int, episode: int, part: int, name: str) -> str:
-    return os.path.join(episode_dir(root, series_id, season, episode, part),
-                        dub_file(series_id, season, episode, part, name))
+def temp_path(root: str, row: Mapping[str, Any], name: str, candidate: Mapping[str, Any]) -> str:
+    return os.path.join(episode_dir(root, row["series_id"], row["season"], row["episode"], row["part"]),
+                        dub_file(row, name, candidate))
 
 
 class VoicesModule(BaseModule):
@@ -651,7 +662,8 @@ class VoicesModule(BaseModule):
         # A sync plans by the settings its run took (RunSnapshot.voices), and so does every pass while the run is open (a
         # replan after a change of the reference, a recovery); a recount after the run by the current ones.
         settings = await self._settings(values if values is not None else self._run_values.get(series_id))
-        plan = planning.plan(layout.rows, references, layout.settings, settings.priority, settings.players)
+        plan = planning.plan(layout.rows, references, layout.settings, settings.priority, settings.players,
+                             {source.source_id: source.place for source in layout.sources})
         self.log.info("сериал %d: озвучки — раскладка %d, серий с референсом %d, озвучек к плану %d", series_id,
                       layout.rev, len(plan.with_reference), len(plan.dubs))
         before = await self.repo.for_series(series_id)
@@ -811,7 +823,8 @@ class VoicesModule(BaseModule):
             return
         slot_rows = [each for each in await self.repo.for_series(row["series_id"])
                      if (each["season"], each["episode"], each["part"]) == (row["season"], row["episode"], row["part"])]
-        path = temp_path(root, row["series_id"], row["season"], row["episode"], row["part"], dub_name(row, slot_rows))
+        candidate = chain[row["attempt"]]
+        path = temp_path(root, row, dub_name(row, slot_rows, candidate), candidate)
         if storage.busy(path):  # an earlier removal of this name has not ended: a file written now could be lost
             self._when_free(path, row["series_id"])
             return
@@ -821,7 +834,7 @@ class VoicesModule(BaseModule):
         # Announced before the command goes out: a quick download could end first and this event would repeat its end.
         await self._announce(row)
         self.send_command("downloads.fetch", {
-            "key": f"{DUB_KEY}{row['id']}", "url": chain[row["attempt"]]["url"], "path": path,
+            "key": f"{DUB_KEY}{row['id']}", "url": candidate["url"], "path": path,
             "max_height": DUB_MAX_HEIGHT, "series_id": row["series_id"]})
 
     async def _start_on_file(self, row: dict, candidate: dict, root: str) -> None:
@@ -835,7 +848,7 @@ class VoicesModule(BaseModule):
             return
         file = await self.repo.join_file(
             row["id"], row["series_id"], key[0], key[1], key[2],
-            lambda file_id: file_path(root, row["series_id"], file_id, candidate["studio"]))
+            lambda file_id: file_path(root, row["series_id"], file_id, candidate))
         if file is None:
             return
         self._fetching.discard(row["id"])

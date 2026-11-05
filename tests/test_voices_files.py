@@ -51,7 +51,7 @@ async def test_a_compilation_is_downloaded_once_and_each_episode_it_covers_is_al
     await quiet(voices)
     fetch = neighbours.fetches[0]
     assert len(neighbours.fetches) == 1 and fetch["key"] == "file:1" and fetch["url"] == LINK
-    assert fetch["max_height"] == 720 and fetch["path"] == os.path.join(downloads(neighbours), "7", "f1", "7_f1_Red.mp4")
+    assert fetch["max_height"] == 720 and fetch["path"] == os.path.join(downloads(neighbours), "7", "f1", "7_f1_Red_kodik_site.mp4")
     assert [(r["episode"], r["voice_key"], r["status"], r["temp_path"]) for r in await rows(probe)] == [
         (number, "Red", "downloading", fetch["path"]) for number in (1, 2, 3)]
     touch(fetch["path"], b"video")
@@ -87,7 +87,7 @@ async def test_the_voice_overs_of_the_episodes_wait_on_one_transfer_and_show_it(
         event = (await asyncio.wait_for(sub.queue.get(), 3)).payload
         if event["state"] == "downloading":
             shown[event["episode"]] = event["file"]
-    assert set(shown) == {1, 2, 3} and set(shown.values()) == {"7_f1_Red.mp4"}  # the queue names the file it reads
+    assert set(shown) == {1, 2, 3} and set(shown.values()) == {"7_f1_Red_kodik_site.mp4"}  # the queue names the file it reads
     assert {r["state"] for r in await rows(probe)} == {"downloading"}
 
 

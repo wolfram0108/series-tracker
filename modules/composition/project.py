@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Iterable, Iterator, Mapping, Sequence
 
 from core.contracts import (CompositionRow, Exclusion, PlayerSummary, SeasonVoiceOrder, VoiceSpan, ReleaseTable, RowState, RuleLine, RuleResult,
-                            RulesApplyReply, SeriesSource, SourceStatus, SourceSummary, TableRow, line_of)
+                            RulesApplyReply, SeriesSource, SourceStatus, SourceSummary, TableRow, line_of, place_of)
 from core.voice_names import fold_name
 
 # One template for the name of a voice-over that belongs to no user group.
@@ -221,7 +221,7 @@ def _summary(item: SourceInput) -> SourceSummary:
         source_id=item.source.id, url=item.source.url, canonical_url=table.url if table else item.table_url,
         status=_status_of(item),
         reason=item.failure or None, read_at=table.read_at if table else None,
-        players=_players_of(table) if table else [])
+        players=_players_of(table) if table else [], place=list(place_of(table)) if table else [])
 
 
 def _status_of(item: SourceInput) -> SourceStatus:

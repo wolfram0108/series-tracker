@@ -10,7 +10,7 @@ Queries:
       (rows the constructor excluded, gave no episode number, or the source's own choice left out — a switched-off
       player, another season of a catalog, `exclusion='source'` — only with include_excluded), the summary of every
       source (status waiting / no_profile / ready / failed, players with rows, seasons, resolutions and voice-overs
-      with their groups), the levers of the series and of each season of the layout as the headers of those levels
+      with their groups, `place`: the site and the channel its rows come from, as the line of the constructor names them), the levers of the series and of each season of the layout as the headers of those levels
       show them (`levels`, the series first), and the levers of every episode of the layout with the level each comes
       from. A series not counted yet has revision 0 and nothing else.
   composition.recompute {series_id} → {rev, changed}: counts the series now, with the tables as they are stored (no

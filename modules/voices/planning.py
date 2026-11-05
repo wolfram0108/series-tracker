@@ -11,7 +11,7 @@ episode it covers.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, NamedTuple, Sequence
+from typing import Any, Iterable, Mapping, NamedTuple, Sequence
 
 from core.voice_names import rank
 from core.contracts import (DubStatus as S, VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, CompositionRow, EffectiveLever, EpisodeSettings,
@@ -29,7 +29,8 @@ class Candidate(NamedTuple):
 
     `file` is (source id, row key) of a row that covers several episodes: its video is downloaded once for all of them.
     `source_id` and `player` are what the variant is: the link is only where it shows its video now, and it may change.
-    `row_key` with `source_id` is which video it is: the identity a started work is told by, whatever its link."""
+    `row_key` with `source_id` is which video it is: the identity a started work is told by, whatever its link.
+    `place` is where its source has its rows (release_table.place_of): with the player it names the file of the video."""
 
     player: str
     studio: str
@@ -37,6 +38,7 @@ class Candidate(NamedTuple):
     file: tuple[int, str] | None = None
     source_id: int | None = None
     row_key: str | None = None
+    place: tuple[str, ...] = ()
 
     def as_json(self) -> dict[str, Any]:
         found: dict[str, Any] = {"player": self.player, "studio": self.studio, "url": self.url}
@@ -46,6 +48,8 @@ class Candidate(NamedTuple):
             found["source_id"] = self.source_id
         if self.row_key is not None:
             found["row_key"] = self.row_key
+        if self.place:
+            found["place"] = list(self.place)
         return found
 
 
@@ -77,8 +81,9 @@ class Plan:
 
 
 def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settings: Iterable[EpisodeSettings],
-         priority: Sequence[str], players) -> Plan:
-    """The voice-overs to plan; `players` is the user's groups of players (`core.voice_names.Groups`)."""
+         priority: Sequence[str], players, places: Mapping[int, Sequence[str]] | None = None) -> Plan:
+    """The voice-overs to plan; `players` is the user's groups of players (`core.voice_names.Groups`), `places` where
+    each source (by its id) has its rows."""
     by_key: dict[tuple[int, str], CompositionRow] = {}
     by_voice: dict[tuple[int, str], list[CompositionRow]] = {}
     voices: dict[str, None] = {}
@@ -107,7 +112,7 @@ def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settin
                 continue
             fitting = [row for row in by_voice.get((ref.season, label), ()) if _covers(row, ref.episode, ref_row.part)]
             covering = [row for row in fitting if (label, row.source_id, row.player) not in denied]
-            chain = _chain(covering, picks.get(group_target(label)), priority, players)
+            chain = _chain(covering, picks.get(group_target(label)), priority, players, places or {})
             kept = {each.url for each in chain}
             left = [row for row in fitting if (label, row.source_id, row.player) in denied and row.link not in kept]
             dubs.append(PlannedDub(ref.season, ref.episode, slot[2], label, label, chain,
@@ -143,7 +148,7 @@ def _covers(row: CompositionRow, episode: int, part: int | None) -> bool:
 
 
 def _chain(rows: Sequence[CompositionRow], pick: tuple[int, str] | None, priority: Sequence[str],
-           players) -> tuple[Candidate, ...]:
+           players, places: Mapping[int, Sequence[str]]) -> tuple[Candidate, ...]:
     """The playing rows, the picked player first, then by the order of players, then as the sources are ordered."""
     playing = [row for row in rows if row.state == RowState.PLAYABLE and row.link]
     ordered = sorted(enumerate(playing), key=lambda item: (
@@ -152,7 +157,7 @@ def _chain(rows: Sequence[CompositionRow], pick: tuple[int, str] | None, priorit
     for _, row in ordered:
         chain.setdefault(row.link, Candidate(row.player, row.voice_label, row.link,
                                              (row.source_id, row.row_key) if row.is_compilation else None, row.source_id,
-                                             row.row_key))
+                                             row.row_key, tuple(places.get(row.source_id, ()))))
     return tuple(chain.values())
 
 

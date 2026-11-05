@@ -75,9 +75,15 @@ class ReleaseTable(BaseModel):
         return next((row for row in self.rows if row.key == key), None)
 
 
-def _source_of(table: ReleaseTable, row: TableRow) -> str:
-    """The host of the page the table was read from: it tells a rule which site a line comes from."""
+def pid_of(table: ReleaseTable) -> str:
+    """The host of the page the table was read from (`PID` of the line): it tells which site a row comes from."""
     return (urlparse(table.url).hostname or "").lower()
+
+
+def place_of(table: ReleaseTable) -> tuple[str, ...]:
+    """Where the rows of a table come from, as the line names it: the site, then the channel where the site has them
+    (two channels of VK are one site). The constructor and the names of the files of voice-overs read it alike."""
+    return tuple(part for part in (pid_of(table), table.channel) if part)
 
 
 def _resolution_of(table: ReleaseTable, row: TableRow) -> str:
@@ -90,7 +96,7 @@ def _resolution_of(table: ReleaseTable, row: TableRow) -> str:
 # Only what a rule needs is here: another column of the table joins the line by one more entry. A field with no value is
 # left out together with its separator.
 LINE_FIELDS: tuple[tuple[str, Any], ...] = (
-    ("PID", _source_of),
+    ("PID", lambda table, row: pid_of(table)),
     ("", lambda table, row: table.channel),
     ("P", lambda table, row: row.player_label or row.player),
     ("", lambda table, row: table.names[0].strip() if table.names else ""),

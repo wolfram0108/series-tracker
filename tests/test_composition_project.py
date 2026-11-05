@@ -601,6 +601,16 @@ def test_the_summary_of_a_player_names_its_groups_in_the_order_of_the_table_once
     assert by_player["vk"].group_names == []
 
 
+def test_the_summary_names_the_place_of_the_rows_as_the_line_does():
+    """The site and the channel are the `PID` and the channel of the line: the files of voice-overs are named by them."""
+    vk = table(row("a", "Серия 1")).model_copy(update={"url": "https://vkvideo.ru/@mir.donghua|Тайтл", "channel": "mir.donghua"})
+    page = table(row("a", "Серия 1")).model_copy(update={"url": "https://Dunhuatv.ru/anime/x"})
+    assert project([item(source(), vk)], {}, {}).sources[0].place == ["vkvideo.ru", "mir.donghua"]
+    assert project([item(source(), page)], {}, {}).sources[0].place == ["dunhuatv.ru"]
+    assert line_of(vk, vk.rows[0]).startswith("PID:vkvideo.ru | mir.donghua | ")
+    assert project([item(source(), None)], {}, {}).sources[0].place == []
+
+
 def test_the_summary_carries_the_canonical_address_of_the_page_before_and_after_the_table_arrives():
     waiting = project([SourceInput(source(), None, None, None, "https://example.org/canonical")], {}, {}).sources[0]
     assert waiting.status == SourceStatus.WAITING and waiting.canonical_url == "https://example.org/canonical"

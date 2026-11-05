@@ -105,6 +105,8 @@ class SourceSummary(BaseModel):
     reason: str | None = None
     read_at: str | None = None
     players: list[PlayerSummary] = Field(default_factory=list)
+    # Where the rows of its table come from (release_table.place_of); empty before a table was read.
+    place: list[str] = Field(default_factory=list)
 
 
 class CompositionGetRequest(BaseModel):

@@ -13,7 +13,8 @@ import pytest
 from conform_fakes import FakeClient
 from core import BaseModule, Bus, Runner
 from core.contracts import (CompositionReply, CompositionRow, EffectiveLever, EpisodeSettings,
-                            Level, Reference, ReferenceMark, RowState, SubmitReply, group_target)
+                            Level, Reference, ReferenceMark, RowState, SourceStatus, SourceSummary, SubmitReply,
+                            group_target)
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import parse
@@ -265,6 +266,7 @@ class Neighbours(BaseModule):
             raise RuntimeError("composition does not answer")
         return CompositionReply(
             series_id=env.payload["series_id"], rev=1, rows=self.rows(),
+            sources=[SourceSummary(source_id=1, url="https://site/title.html", status=SourceStatus.READY, place=["site"])],
             settings=[EpisodeSettings(season=season, episode=episode, levers=levers)
                       for (season, episode), levers in self.levers.items()]).model_dump(mode="json")
 
@@ -710,7 +712,9 @@ def job_result(submit, job_id, **per_dub):
         touch(out, b"flac")
         result = {"dub": name, "ok": True, "skipped": False, "out_path": out, "suspect": False,
                   "critical": [], "warnings": [], "resid_ms": 12.0, "error": None}
-        result.update(per_dub.get(os.path.splitext(name)[0].split("_", 2)[-1], {}))  # the voice key ends the name
+        # The voice follows the episode in the name, then its player and place: a voice is told by what its part begins with.
+        voice = os.path.splitext(name)[0].split("_", 2)[-1]
+        result.update(next((fields for key, fields in per_dub.items() if voice == key or voice.startswith(key + "_")), {}))
         results.append(result)
     return {"job_id": job_id, "status": "done", "error": None, "results": results}
 
@@ -724,7 +728,7 @@ async def test_an_episode_goes_to_alignment_and_its_tracks_land_next_to_the_vide
     assert submit["ref"] != ref and os.path.basename(submit["ref"]) == "7_s01e01_ref.mp4"
     assert submit["ref"].startswith(conform_dir(neighbours) + "/7/s01e01/_ref/")
     assert open(submit["ref"], "rb").read() == open(ref, "rb").read() and os.path.isfile(ref)
-    assert sorted(os.path.basename(p) for p in submit["dubs"]) == ["7_s01e01_BlackCat.mp4", "7_s01e01_RedHeadSound.mp4"]
+    assert sorted(os.path.basename(p) for p in submit["dubs"]) == ["7_s01e01_BlackCat_cvh_site.mp4", "7_s01e01_RedHeadSound_kodik_site.mp4"]
     key = os.path.basename(submit["out_dir"])
     assert os.path.dirname(submit["out_dir"]).endswith("/7/s01e01/_aligned")
     assert os.path.dirname(submit["cache_dir"]).endswith("/7/s01e01/_cache") and os.path.basename(submit["cache_dir"]) == key
@@ -781,7 +785,7 @@ async def test_a_voice_that_could_not_be_downloaded_does_not_hold_the_episode_ba
     touch(black["path"], b"video")
     finish(probe, black["key"])
     await statuses_until(sub, ["failed", "ready", "aligning"])
-    assert [os.path.basename(p) for p in neighbours.submits[0]["dubs"]] == ["7_s01e01_BlackCat.mp4"]
+    assert [os.path.basename(p) for p in neighbours.submits[0]["dubs"]] == ["7_s01e01_BlackCat_cvh_site.mp4"]
 
 
 @pytest.mark.asyncio
@@ -819,8 +823,9 @@ async def test_a_pair_the_service_turned_down_goes_on_to_the_next_source_of_its_
     await statuses_until(sub, ["aligned", "placed", "downloading"])
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
     assert by_voice["BlackCat"]["status"] == "downloading" and by_voice["BlackCat"]["attempt"] == 1
-    # The next source downloads under the same name: the cleanup sees the name owned again and leaves it to the download.
-    assert by_voice["BlackCat"]["job_id"] is None and by_voice["BlackCat"]["temp_path"] == first["path"]
+    # The next source is a file of its own name: the file turned down goes to the cleanup and the two never meet.
+    assert by_voice["BlackCat"]["job_id"] is None and os.path.basename(first["path"]) == "7_s01e01_BlackCat_cvh_site.mp4"
+    assert os.path.basename(by_voice["BlackCat"]["temp_path"]) == "7_s01e01_BlackCat_kodik_site.mp4"
     assert neighbours.fetches[-1]["url"] == "https://site/title.html#kodik-BlackCat-1" != first["url"]
     assert by_voice["RedHeadSound"]["status"] == "placed"
     # The verdict on the file the source gave stays in the journal: the next download clears it from the row.
@@ -1000,7 +1005,7 @@ async def test_a_voice_that_arrives_later_makes_a_job_of_its_own(dubs):
     finish(probe, retry["key"])
     await statuses_until(sub, ["ready", "aligning"])
     assert len(neighbours.submits) == 2
-    assert [os.path.basename(p) for p in neighbours.submits[1]["dubs"]] == ["7_s01e01_RedHeadSound.mp4"]
+    assert [os.path.basename(p) for p in neighbours.submits[1]["dubs"]] == ["7_s01e01_RedHeadSound_kodik_site.mp4"]
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-2"))
     await statuses_until(sub, ["aligned", "placed"])
     assert {r["status"] for r in await rows(probe)} == {"placed"}
@@ -2847,30 +2852,58 @@ async def test_a_voice_over_in_alignment_tells_the_queue_its_job_and_the_file_it
         payload = (await asyncio.wait_for(sub.queue.get(), end - asyncio.get_running_loop().time())).payload
         if payload["job_id"]:
             named[payload["voice_key"]] = (payload["job_id"], payload["file"])
-    assert named == {"BlackCat": ("job-1", "7_s01e01_BlackCat.mp4"), "RedHeadSound": ("job-1", "7_s01e01_RedHeadSound.mp4")}
+    assert named == {"BlackCat": ("job-1", "7_s01e01_BlackCat_cvh_site.mp4"),
+                     "RedHeadSound": ("job-1", "7_s01e01_RedHeadSound_kodik_site.mp4")}
+
+
+CVH = {"player": "cvh", "place": ["dunhuatv.ru"]}
+KODIK = {"player": "kodik", "place": ["dunhuatv.ru"]}
+VK = {"player": "vk", "place": ["vkvideo.ru", "mir.donghua"]}
+
+
+def slot(series_id=7, season=1, episode=1, part=0):
+    return {"series_id": series_id, "season": season, "episode": episode, "part": part}
 
 
 def test_the_file_a_voice_over_is_sent_as_is_named_in_one_place():
-    assert os.path.basename(temp_path("/w", 7, 1, 1, 0, "BlackCat")) == dub_file(7, 1, 1, 0, "BlackCat") == "7_s01e01_BlackCat.mp4"
-    assert dub_file(7, 1, 2, 0, "BlackCat") != dub_file(8, 1, 1, 0, "BlackCat") != dub_file(7, 1, 1, 0, "BlackCat")
-    assert dub_file(7, 1, 1, 2, "BlackCat") == "7_s01e01p2_BlackCat.mp4" != dub_file(7, 1, 1, 1, "BlackCat")
+    assert os.path.basename(temp_path("/w", slot(), "BlackCat", CVH)) == dub_file(slot(), "BlackCat", CVH) == (
+        "7_s01e01_BlackCat_cvh_dunhuatv.ru.mp4")
+    assert dub_file(slot(episode=2), "BlackCat", CVH) != dub_file(slot(8), "BlackCat", CVH) != dub_file(slot(), "BlackCat", CVH)
+    assert dub_file(slot(part=2), "BlackCat", CVH) == "7_s01e01p2_BlackCat_cvh_dunhuatv.ru.mp4" != dub_file(
+        slot(part=1), "BlackCat", CVH)
+    # A chain recorded before its links knew their place names the player alone.
+    assert dub_file(slot(), "BlackCat", {"player": "cvh"}) == "7_s01e01_BlackCat_cvh.mp4"
+
+
+def test_the_sources_of_one_voice_never_share_a_file_name():
+    """CVH and Kodik of one page, and two channels of VK, are files of their own: a source turned down and the next one
+    never meet under one name ("Вечная воля", 05.11)."""
+    names = {dub_file(slot(), "FumoDub", candidate) for candidate in (
+        CVH, KODIK, VK, {"player": "vk", "place": ["vkvideo.ru", "other.channel"]})}
+    assert names == {"7_s01e01_FumoDub_cvh_dunhuatv.ru.mp4", "7_s01e01_FumoDub_kodik_dunhuatv.ru.mp4",
+                     "7_s01e01_FumoDub_vk_vkvideo.ru_mir.donghua.mp4", "7_s01e01_FumoDub_vk_vkvideo.ru_other.channel.mp4"}
+
+
+def test_the_file_of_a_compilation_is_named_like_a_voice_over_by_its_source():
+    from modules.voices.module import file_path
+    assert file_path("/w", 7, 3, {"studio": "Red", **KODIK}) == "/w/7/f3/7_f3_Red_kodik_dunhuatv.ru.mp4"
 
 
 def test_the_file_of_a_voice_over_is_named_by_the_name_it_has_now_and_by_its_key_only_when_that_name_cannot_be_taken():
     """A voice-over first planned unnamed keeps its key ("Неизвестная озвучка 2") when a group names it; its file is named
     by the name the user gave (the downloads of "Вечная воля" on 05.11 showed the key). The name is chosen once, at the
     start of the download: everything after reads the path the row keeps."""
-    row = {"id": 1, "series_id": 49, "season": 4, "episode": 9, "part": 0, "voice_key": "Неизвестная озвучка 2",
-           "voice_label": "ChinaTown"}
-    assert dub_name(row, [row]) == "ChinaTown"
-    assert dub_name({**row, "voice_label": ""}, []) == "Неизвестная озвучка 2"
+    row = {"id": 1, **slot(49, 4, 9), "voice_key": "Неизвестная озвучка 2", "voice_label": "ChinaTown", "chain": [KODIK],
+           "attempt": 0}
+    assert dub_name(row, [row], KODIK) == "ChinaTown"
+    assert dub_name({**row, "voice_label": ""}, [], KODIK) == "Неизвестная озвучка 2"
     # Another row of the episode holds a file of that name: two files never share one.
-    other = {"id": 2, "temp_path": "/w/49/s04e09/" + dub_file(49, 4, 9, 0, "ChinaTown")}
-    assert dub_name(row, [row, other]) == "Неизвестная озвучка 2"
+    other = {"id": 2, "temp_path": "/w/49/s04e09/" + dub_file(row, "ChinaTown", KODIK)}
+    assert dub_name(row, [row, other], KODIK) == "Неизвестная озвучка 2"
     # Once downloaded, the name sent is the name of the file, whatever the voice-over is called later.
-    downloaded = {**row, "voice_label": "Другое имя", "temp_path": "/w/49/s04e09/49_s04e09_ChinaTown.mp4"}
-    assert sent_as(downloaded) == "49_s04e09_ChinaTown.mp4"
-    assert sent_as(row) == "49_s04e09_ChinaTown.mp4"
+    downloaded = {**row, "voice_label": "Другое имя", "temp_path": "/w/49/s04e09/49_s04e09_ChinaTown_kodik_dunhuatv.ru.mp4"}
+    assert sent_as(downloaded) == "49_s04e09_ChinaTown_kodik_dunhuatv.ru.mp4"
+    assert sent_as(row) == "49_s04e09_ChinaTown_kodik_dunhuatv.ru.mp4"
 
 
 async def settled_with_a_record(dubs, **per_dub):
@@ -2891,7 +2924,7 @@ async def settled_with_a_record(dubs, **per_dub):
 async def test_the_folder_a_job_wrote_in_stays_while_its_record_is_in_the_history_and_goes_with_the_record(dubs):
     probe, neighbours, voices, submit = await settled_with_a_record(dubs, RedHeadSound={"ok": False})
     out_dir, episode = submit["out_dir"], os.path.dirname(os.path.dirname(submit["out_dir"]))
-    assert sorted(os.listdir(out_dir)) == ["7_s01e01_RedHeadSound.flac"]  # the refused track stays, the placed one moved
+    assert sorted(os.listdir(out_dir)) == ["7_s01e01_RedHeadSound_kodik_site.flac"]  # the refused track stays, the placed one moved
     assert not os.path.exists(os.path.join(episode, "_ref")) and not os.path.exists(os.path.join(downloads(neighbours), "7", "s01e01"))
     assert neighbours.conform_cancels == [] and await voices.repo.cleanup_list() == []
     del neighbours.jobs["job-1"]  # the owner deletes the record

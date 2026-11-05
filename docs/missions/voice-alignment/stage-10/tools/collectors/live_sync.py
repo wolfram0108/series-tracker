@@ -74,16 +74,19 @@ def evidence_of(work: str, episode: int) -> tuple[dict[str, str], dict[str, str]
     path of the track of each that is placed, and the name each was sent to the service as."""
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
-    from modules.voices.module import dub_file
+    from modules.voices.module import sent_as  # the module's own rule: the name is never rebuilt here
     with sqlite3.connect(f"file:{work}/app.db?mode=ro", uri=True) as conn:
-        rows = conn.execute("SELECT series_id, season, episode, part, voice_key, status, output_path FROM voice_dubs "
-                            "WHERE episode=?", (episode,)).fetchall()
+        conn.row_factory = sqlite3.Row
+        rows = [dict(row) for row in conn.execute(
+            "SELECT series_id, season, episode, part, voice_key, voice_label, chain, attempt, temp_path, status, output_path "
+            "FROM voice_dubs WHERE episode=?", (episode,))]
     tracks, inputs = {}, {}
-    for series_id, season, number, part, voice_key, status, output_path in rows:
-        key = slot_key({"season": season, "episode": number, "part": part, "voice_key": voice_key})
-        inputs[key] = dub_file(series_id, season, number, part, voice_key)
-        if status == "placed" and output_path:
-            tracks[key] = output_path
+    for row in rows:
+        row["chain"] = json.loads(row["chain"] or "[]")
+        key = slot_key(row)
+        inputs[key] = sent_as(row)
+        if row["status"] == "placed" and row["output_path"]:
+            tracks[key] = row["output_path"]
     return tracks, inputs
 
 

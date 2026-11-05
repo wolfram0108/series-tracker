@@ -2512,6 +2512,8 @@ export interface components {
             read_at?: string | null;
             /** Players */
             players?: components["schemas"]["PlayerSummary"][];
+            /** Place */
+            place?: string[];
         };
         /**
          * SourceType

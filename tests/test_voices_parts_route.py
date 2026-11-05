@@ -171,7 +171,7 @@ async def test_two_parts_of_one_voice_over_go_to_the_service_each_with_its_own_r
     rows = await route.rows()
     assert [row["part"] for row in rows] == [1, 2] and len({row["job_id"] for row in rows}) == 2  # a job for each part
     assert len(route.service.enqueued) == 2
-    assert sorted(os.path.basename(body["dubs"][0]) for body in route.service.enqueued) == ["7_s01e01p1_Dub.mp4", "7_s01e01p2_Dub.mp4"]
+    assert sorted(os.path.basename(body["dubs"][0]) for body in route.service.enqueued) == ["7_s01e01p1_Dub_kodik_site.mp4", "7_s01e01p2_Dub_kodik_site.mp4"]
     for body in route.service.enqueued:
         part = 1 if "p1" in os.path.basename(body["dubs"][0]) else 2
         # The reference the service is given is the video of that part, not of the other.
