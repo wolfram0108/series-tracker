@@ -246,7 +246,7 @@ async def test_a_cvh_stream_takes_the_best_rung_within_the_cap():
     assert (await resolved(link, listed_web(), 2160))["stream_url"].endswith("/v1s/1080")
 
 
-async def test_unlabelled_rungs_are_measured_only_when_nothing_else_is_left_and_a_rung_is_measured_once():
+async def test_unlabelled_rungs_are_measured_only_when_one_may_be_the_answer_and_a_rung_is_measured_once():
     calls = []
 
     async def counting(rung) -> int:
@@ -258,8 +258,11 @@ async def test_unlabelled_rungs_are_measured_only_when_nothing_else_is_left_and_
     assert calls == []
     stream = await resolved(f"{DUNHUA}#cvh=only4k", listed_web(), 720, players)
     await resolved(f"{DUNHUA}#cvh=only4k", listed_web(), 720, players)
-
     assert stream["stream_url"].endswith("/only4k/4k") and calls == ["mpeg4kUrl"]
+
+    # A cap above the labelled rungs: the unlabelled one may fit it, so it is measured.
+    above = await resolved(f"{DUNHUA}#cvh=v4k", listed_web(), 2160, players)
+    assert above["stream_url"].endswith("/v4k/4k") and calls == ["mpeg4kUrl", "mpeg4kUrl"]
 
 
 async def test_a_kodik_item_resolves_to_its_best_quality_within_the_cap_with_the_referer_of_the_player():

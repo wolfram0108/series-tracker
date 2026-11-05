@@ -269,6 +269,48 @@ async def test_the_best_rung_measures_the_labels_that_are_not_resolutions():
     assert (await cdnvideohub.best_rung(rungs, unreadable)).key == "mpegHighUrl"
 
 
+# One video as the CDN gave it: the label "4k" was measured at 1440 and the label "2k" at 2160.
+SWAPPED = {"mpegHighUrl": "https://okcdn.test/sw/720", "mpegFullHdUrl": "https://okcdn.test/sw/1080",
+           "mpeg2kUrl": "https://okcdn.test/sw/2k", "mpeg4kUrl": "https://okcdn.test/sw/4k"}
+
+
+async def swapped(rung: Rung) -> int | None:
+    return {"mpeg2kUrl": 2160, "mpeg4kUrl": 1440}.get(rung.key)
+
+
+async def test_the_labels_above_full_hd_do_not_order_the_frames_so_every_one_is_measured():
+    rungs = cdnvideohub.read_rungs(json.dumps({"sources": SWAPPED}))
+
+    assert (await cdnvideohub.best_rung(rungs, swapped)).key == "mpeg2kUrl"
+    assert [(r.key, r.height) for r in await cdnvideohub.measured_rungs(rungs, swapped)] == [
+        ("mpegHighUrl", 720), ("mpegFullHdUrl", 1080), ("mpeg2kUrl", 2160), ("mpeg4kUrl", 1440)]
+    assert {cap: (await cdnvideohub.rung_within(rungs, cap, swapped)).key for cap in (2160, 1440, 1200)} == {
+        2160: "mpeg2kUrl", 1440: "mpeg4kUrl", 1200: "mpegFullHdUrl"}
+
+
+async def test_a_cap_met_by_a_labelled_rung_measures_nothing():
+    calls: list[str] = []
+
+    async def counting(rung: Rung) -> int | None:
+        calls.append(rung.key)
+        return await swapped(rung)
+
+    rungs = cdnvideohub.read_rungs(json.dumps({"sources": SWAPPED}))
+
+    assert (await cdnvideohub.rung_within(rungs, 1080, counting)).key == "mpegFullHdUrl" and calls == []
+
+
+async def test_a_video_reads_every_frame_it_has_whatever_the_labels_say():
+    player = CdnVideoHubPlayer(swapped)
+    web = playlist_web({"items": []})
+    web.route("/video/sw", json.dumps({"sources": SWAPPED}), first=True)
+    async with web.client() as http:
+        playable = await ask(player, player.ref_of(PAGE, "sw"), http)
+
+    assert playable.resolutions == (720, 1080, 1440, 2160)
+    assert dict(playable.files)[2160] == "https://okcdn.test/sw/2k"
+
+
 async def test_a_video_reads_with_the_measured_height_and_every_known_file_and_a_missing_one_is_missing():
     player = CdnVideoHubPlayer(measured)
     web = playlist_web({"items": []})

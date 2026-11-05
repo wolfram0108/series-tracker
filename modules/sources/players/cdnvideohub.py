@@ -44,7 +44,9 @@ LADDER: tuple[tuple[str, int | None], ...] = (
     ("mpegMediumUrl", 480), ("mpegHighUrl", 720), ("mpegFullHdUrl", 1080),
     ("mpegQhdUrl", None), ("mpeg2kUrl", None), ("mpeg4kUrl", None),
 )
-LADDER_ORDER = {key: index for index, (key, _height) in enumerate(LADDER)}
+# The labels above Full HD do not order the frames (one video: mpeg4kUrl measured 1440, mpeg2kUrl 2160), but they all
+# lie above the labelled rungs: a cap within those, met by one of them, needs nothing measured.
+LABELLED_TOP = 1080
 
 _WIDGET = re.compile(r"<video-player\b([^>]*)>", re.IGNORECASE)
 _ATTR = re.compile(r"""([\w-]+)\s*=\s*["']([^"']*)["']""")
@@ -178,28 +180,40 @@ async def measure_rung(rung: Rung) -> int | None:
     return await measure_height(rung.url)
 
 
-async def best_rung(rungs: list[Rung], measure: Measure = measure_rung) -> Rung:
-    """Highest rung whose real height is known; an unmeasurable top rung yields to the next one."""
-    for rung in sorted(rungs, key=lambda r: LADDER_ORDER[r.key], reverse=True):
-        if rung.height:
-            return rung
-        height = await measure(rung)
+async def measured_rungs(rungs: list[Rung], measure: Measure = measure_rung) -> list[Rung]:
+    """Every rung with its real frame height: each unlabelled one is measured, one that cannot be measured is left out."""
+    known: list[Rung] = []
+    for rung in rungs:
+        height = rung.height or await measure(rung)
         if height:
-            return Rung(rung.key, height, rung.url)
-    raise CdnVideoHubError(reason("vk_no_known_resolution"))
+            known.append(Rung(rung.key, height, rung.url))
+    return known
+
+
+async def best_rung(rungs: list[Rung], measure: Measure = measure_rung) -> Rung:
+    """The rung of the highest real frame among all of them, whatever their labels say."""
+    known = await measured_rungs(rungs, measure)
+    if not known:
+        raise CdnVideoHubError(reason("vk_no_known_resolution"))
+    return max(known, key=lambda rung: rung.height)
 
 
 async def rung_within(rungs: list[Rung], cap: int, measure: Measure = measure_rung) -> Rung:
     """Best rung not above `cap` frame height; the lowest one above it when none fits.
 
-    Rungs of unknown height (above 1080p) are measured only when nothing else is left."""
-    known = [rung for rung in rungs if rung.height]
+    The unlabelled rungs are measured whenever one of them may be the answer: unless the cap is within the labelled
+    rungs and one of those meets it."""
+    labelled = [rung for rung in rungs if rung.height]
+    if cap <= LABELLED_TOP and any(rung.height <= cap for rung in labelled):
+        known = labelled
+    else:
+        known = await measured_rungs(rungs, measure)
+    if not known:
+        raise CdnVideoHubError(reason("vk_no_known_resolution"))
     fitting = [rung for rung in known if rung.height <= cap]
     if fitting:
         return max(fitting, key=lambda rung: rung.height)
-    if known:
-        return min(known, key=lambda rung: rung.height)
-    return await best_rung(rungs, measure)
+    return min(known, key=lambda rung: rung.height)
 
 
 class CdnVideoHubPlayer:
@@ -281,15 +295,13 @@ class CdnVideoHubPlayer:
 
     async def _files(self, rungs: list[Rung], vk_id: str, cap: int | None) -> tuple[tuple[int, str], ...]:
         measure = self._cached_measure(vk_id)
-        try:
-            if cap:
+        if cap:
+            try:
                 rung = await rung_within(rungs, cap, measure)
-                return ((rung.height, rung.url),)
-            best = await best_rung(rungs, measure)
-        except CdnVideoHubError:
-            return ()
-        known = {(rung.height, rung.url) for rung in rungs if rung.height}
-        return tuple(sorted(known | {(best.height, best.url)}))
+            except CdnVideoHubError:
+                return ()
+            return ((rung.height, rung.url),)
+        return tuple(sorted((rung.height, rung.url) for rung in await measured_rungs(rungs, measure)))
 
     def _cached_measure(self, vk_id: str) -> Measure:
         async def measure(rung: Rung) -> int | None:
