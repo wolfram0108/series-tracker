@@ -218,6 +218,11 @@ class VibixPlayer:
         return Reading(Kind.PLAYABLE, 200, (stream.quality,), files=((stream.quality, stream.url),)), text
 
     @staticmethod
+    def video_of(url: str) -> str:
+        """Empty: `vibix=<season>/<position>` is a place in the catalog of its page, and two pages number theirs apart."""
+        return ""
+
+    @staticmethod
     def owns(url: str) -> bool:
         """A candidate link of this player: a page address with the catalog entry named in its fragment."""
         return parse_link(url) is not None

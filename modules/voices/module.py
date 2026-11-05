@@ -120,9 +120,9 @@ sent (conform.submit). A voice-over that was not downloaded does not hold the ep
 that arrives later makes a job of its own. When a job ends, a voice-over that the service
 calls `ok` becomes `aligned` (what it adds, `suspect` or `warnings`, is what it found and put right: it goes to the
 journal); a pair the service turned down itself (`refused`: its trace holds a decision that aborted, e.g. a foreign video)
-is a verdict on the file of that source, not on the voice-over: the next source of its chain is downloaded and sent (CVH
-gave another video under the number where Kodik gave the episode), and it is `rejected` with the reason when no source is
-left; any other that is not `ok` (a crash in the service, no result for the file, a success naming no file), a job
+is a verdict on the video of that source, not on the voice-over: the next source of its chain that is another video is
+downloaded and sent (CVH gave another video under the number where Kodik gave the episode; the same video on another
+page, by its player and `video`, is passed over), and it is `rejected` with the reason when no other video is left; any other that is not `ok` (a crash in the service, no result for the file, a success naming no file), a job
 that failed (for the pairs it did not reach: those it had finished keep their results) and a job the service refused to take
 make the voice-over `failed` with the reason (the next sync offers it again). An `aligned`
 track is moved next to the reference video as `<video name>.<voice title>.<lang>.<ext>` and the row
@@ -1564,13 +1564,15 @@ class VoicesModule(BaseModule):
             if told(result):
                 self.log.info("сериал %d, s%02de%02d: озвучка %s выровнена, сервис сообщил: %s", row["series_id"],
                               row["season"], row["episode"], row["voice_label"], told(result))
-        elif turned_down(result) and row["attempt"] + 1 < len(row["chain"]):
-            # The verdict is on the file of this source, not on the voice-over: another player may give the right video.
-            await self.repo.turn_to_next(row["id"], verdict)
-            self.log.warning("сериал %d, s%02de%02d: озвучка %s из %s отклонена: %s — беру следующий источник %s",
+        elif turned_down(result) and (following := planning.other_video(row["chain"], row["attempt"])) is not None:
+            # The verdict is on the video of this source, not on the voice-over: the same video on other pages is passed
+            # over, another video may be the episode.
+            await self.repo.turn_to_next(row["id"], verdict, following)
+            skipped = following - row["attempt"] - 1
+            self.log.warning("сериал %d, s%02de%02d: озвучка %s из %s отклонена: %s — беру следующий источник %s%s",
                              row["series_id"], row["season"], row["episode"], row["voice_label"],
-                             row["chain"][row["attempt"]]["player"], describe(verdict),
-                             row["chain"][row["attempt"] + 1]["player"])
+                             row["chain"][row["attempt"]]["player"], describe(verdict), row["chain"][following]["player"],
+                             f" (тот же ролик на других страницах пропущен: {skipped})" if skipped else "")
             await self._announce(row)
             await self._start(await self.repo.get(row["id"]))
             return

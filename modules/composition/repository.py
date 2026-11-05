@@ -15,7 +15,7 @@ from core.db import Database
 
 _ROW_COLUMNS = ("series_id", "source_id", "row_key", "seq", "excluded", "exclusion", "season", "episode_start",
                 "episode_end", "part", "voice_group", "voice_label", "voice_name", "voice_unknown", "player",
-                "player_label", "grp", "text", "heights", "state", "published", "link")
+                "player_label", "grp", "text", "heights", "state", "published", "link", "video")
 
 
 @dataclass(frozen=True)

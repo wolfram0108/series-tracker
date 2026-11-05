@@ -163,6 +163,19 @@ async def system(db_path, tmp_path):
 
 # --- the term of a table (M-3, T-2) -----------------------------------------------------------------------------------
 
+async def test_each_row_of_a_table_says_which_video_it_is_as_its_player_reads_the_link(system):
+    """One video shown by two pages is known as one: the player of a row reads its link, whatever site read the page."""
+    system.site.rows = lambda _read: [
+        row("v", "VK", link="https://vk.com/video-1_2"), row("c", "CVH", player="cvh", link=f"{PAGE}#cvh=777"),
+        row("x", "Vibix", player="vibix", link=f"{PAGE}#vibix=1/1")]
+    await system.get()
+    await system.next(system.ready)
+    stored = await system.get()
+    assert [each["video"] for each in stored["table"]["rows"]] == ["-1_2", "777", ""]
+    records = await system.db.fetch_all("SELECT video FROM release_rows WHERE url = ? ORDER BY seq", (PAGE,))
+    assert [record["video"] for record in records] == ["-1_2", "777", ""]
+
+
 async def test_a_page_asked_again_within_the_hour_is_not_read_again(system):
     first = await system.get()
     assert first["state"] == "reading" and first["table"] is None

@@ -113,7 +113,7 @@ class SourcesModule(BaseModule):
         self.sites.configure(players=self.players, vk_call=self._vk_call)
         self.tables = TableReader(
             self.repo, self.sites, lambda topic, payload: self.publish_event(topic, payload), lambda: self._http,
-            clock=table_clock, safeguard_s=table_safeguard_s, recent=read_recent)
+            players=self.players, clock=table_clock, safeguard_s=table_safeguard_s, recent=read_recent)
         super().__init__(bus)
         # Late binding on purpose: tests replace the transport, not the bus.
         self._delivery = Delivery(

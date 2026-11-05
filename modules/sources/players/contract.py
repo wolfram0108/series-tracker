@@ -65,6 +65,11 @@ class Player(Protocol):
 
     def read(self, answer: Answer) -> Reading: ...
 
+    def video_of(self, url: str) -> str:
+        """The video a link of this player names, as its host numbers it; '' when the link names a place on its page
+        instead (the same on every page, so that one video shown by two pages is known as one)."""
+        ...
+
 
 # The page that embeds the players, as the hosts see it: VK asks the API on behalf of this domain.
 EMBED_PAGE = "https://1.ruchime.org/"

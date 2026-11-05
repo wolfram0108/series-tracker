@@ -54,6 +54,9 @@ def _sure(reading: Reading, want_files: bool) -> bool:
         return True
     return reading.kind is Kind.PLAYABLE and (bool(reading.files) or not want_files)
 
+# The address of a video on VK: `vk.com/video<oid>_<id>`.
+_VIDEO_PATH = re.compile(r"/video(-?\d+)_(\d+)")
+
 
 class VkPlayer:
     name = "vk"
@@ -79,6 +82,15 @@ class VkPlayer:
         parts = embed_parts(url)
         canonical = f"https://vk.com/video{parts.oid}_{parts.id}" if parts else url
         return PlayerRef(name="vk", url=canonical, raw_url=url)
+
+    @staticmethod
+    def video_of(url: str) -> str:
+        """`oid_id`: of a player link (`video_ext.php`) or of the address of the video (`vk.com/video<oid>_<id>`)."""
+        parts = embed_parts(url)
+        if parts is not None:
+            return f"{parts.oid}_{parts.id}"
+        found = _VIDEO_PATH.search(urlsplit(url).path)
+        return f"{found.group(1)}_{found.group(2)}" if found else ""
 
     @staticmethod
     def owns(url: str) -> bool:

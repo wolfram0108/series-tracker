@@ -45,6 +45,10 @@ class PlayerRegistry:
     def get(self, name: str) -> Player:
         return self._players[name]
 
+    def video_of(self, player: str, link: str) -> str:
+        """Which video a row is, as the player of the row reads its link."""
+        return self._players[player].video_of(link)
+
     def __contains__(self, name: str) -> bool:
         return name in self._players
 

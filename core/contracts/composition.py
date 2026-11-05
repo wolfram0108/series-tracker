@@ -53,6 +53,9 @@ class CompositionRow(BaseModel):
     state: RowState
     published: str | None = None
     link: str = ""
+    # Which video the row is, as its host numbers it (release players' `video_of` of the link): two rows of one player with
+    # one video are the same video whatever page shows them. Empty when the link names no video of its host's own.
+    video: str = ""
 
     @property
     def is_compilation(self) -> bool:

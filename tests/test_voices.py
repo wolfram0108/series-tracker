@@ -221,13 +221,14 @@ class Neighbours(BaseModule):
         return next((season for season, number in self.plan if number == episode), 1)
 
     def row_key(self, source, episode):
-        return f"{source['player']}:{source['studio']}:{episode}"
+        return f"{source['player']}:{source['studio']}:{episode}{source.get('tag', '')}"
 
     def rows(self):
         return [CompositionRow(
             series_id=7, source_id=1, row_key=self.row_key(source, number), season=self.season_of(number),
             episode_start=number, episode_end=number, voice_group=None, voice_label=source["studio"],
-            player=source["player"], heights=[720], state=RowState.PLAYABLE, link=source["links"][str(number)])
+            player=source["player"], heights=[720], state=RowState.PLAYABLE, link=source["links"][str(number)],
+            video=source.get("videos", {}).get(str(number), ""))
             for source in self.sources for number in source["episodes"]] + list(self.extra_rows)
 
     def references_list(self):
@@ -822,6 +823,32 @@ async def test_a_pair_the_service_turned_down_goes_on_to_the_next_source_of_its_
     # The verdict on the file the source gave stays in the journal: the next download clears it from the row.
     assert any("беру следующий источник" in record.getMessage() and "чужое видео" in record.getMessage()
                for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_a_video_the_service_turned_down_is_passed_over_on_the_other_pages_that_show_it(dubs, caplog):
+    """Two pages show one video of CVH ("Вечная воля", 06.11): the verdict is on the video, so its link on the other page
+    is not downloaded and judged again; the next other video, Kodik, is."""
+    probe, neighbours, voices, bus = dubs
+    shown = next(s for s in neighbours.sources if (s["player"], s["studio"]) == ("cvh", "BlackCat"))
+    shown["videos"] = {"1": "777", "2": "778"}
+    other_page = linked("cvh", "BlackCat", [1, 2])
+    other_page.update(links={n: link.replace("title.html", "other.html") for n, link in other_page["links"].items()},
+                      videos={"1": "777", "2": "778"}, tag="@other")
+    neighbours.sources.append(other_page)
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    first = next(f for f in neighbours.fetches if "BlackCat" in f["url"])
+    assert first["url"] == "https://site/title.html#cvh-BlackCat-1"
+    caplog.set_level("WARNING")
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={
+        "ok": False, "refused": True, "error": "чужое видео: сопоставлено 2% (< 60%) — выравнивание прервано"}))
+    await statuses_until(sub, ["aligned", "placed", "downloading"])
+    await settled(neighbours, 3)
+    assert neighbours.fetches[-1]["url"] == "https://site/title.html#kodik-BlackCat-1"
+    assert not any("other.html" in f["url"] for f in neighbours.fetches)
+    assert {r["voice_key"]: r["attempt"] for r in await rows(probe)}["BlackCat"] == 2
+    assert any("тот же ролик на других страницах пропущен: 1" in record.getMessage() for record in caplog.records)
 
 
 @pytest.mark.asyncio

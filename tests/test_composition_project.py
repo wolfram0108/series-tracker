@@ -409,6 +409,12 @@ def test_a_row_carries_the_name_of_its_voice_over_as_it_came_and_the_name_the_co
         ("VK-озвучка", None, "Неизвестная озвучка 2"), ("  ", None, "Неизвестная озвучка 3")]
 
 
+def test_a_row_of_the_layout_keeps_which_video_it_is():
+    tbl = table(row("a", "Серия 1").model_copy(update={"video": "777"}), row("b", "Серия 2"))
+    out = project([item(source(), tbl, {"a": {"episode": 1}, "b": {"episode": 2}})], {}, {}).rows
+    assert [(r.row_key, r.video) for r in out] == [("a", "777"), ("b", "")]
+
+
 def test_the_name_of_a_voice_is_the_assigned_one_or_the_one_of_the_row():
     plain = row("a", voice="AniStar")
     assert voice_name_of(plain, None) == "AniStar"

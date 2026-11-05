@@ -76,6 +76,11 @@ class AllVideoPlayer:
         r"switchSource\(['\"](https?://(?:fsst\.online|incvideo1\.online)/"
         r"embed/\d+/?)")
 
+    @staticmethod
+    def video_of(url: str) -> str:
+        found = re.search(r"/embed/(\d+)", urlparse(url).path)
+        return found.group(1) if found else ""
+
     @classmethod
     def owns(cls, url: str) -> bool:
         host = (urlparse(url).hostname or "").lower()

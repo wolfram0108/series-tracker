@@ -30,7 +30,8 @@ class Candidate(NamedTuple):
     `file` is (source id, row key) of a row that covers several episodes: its video is downloaded once for all of them.
     `source_id` and `player` are what the variant is: the link is only where it shows its video now, and it may change.
     `row_key` with `source_id` is which video it is: the identity a started work is told by, whatever its link.
-    `place` is where its source has its rows (release_table.place_of): with the player it names the file of the video."""
+    `place` is where its source has its rows (release_table.place_of): with the player it names the file of the video.
+    `video` is which video it is as its host numbers it: one video shown by two pages is two links of one video."""
 
     player: str
     studio: str
@@ -39,6 +40,7 @@ class Candidate(NamedTuple):
     source_id: int | None = None
     row_key: str | None = None
     place: tuple[str, ...] = ()
+    video: str = ""
 
     def as_json(self) -> dict[str, Any]:
         found: dict[str, Any] = {"player": self.player, "studio": self.studio, "url": self.url}
@@ -50,6 +52,8 @@ class Candidate(NamedTuple):
             found["row_key"] = self.row_key
         if self.place:
             found["place"] = list(self.place)
+        if self.video:
+            found["video"] = self.video
         return found
 
 
@@ -157,7 +161,7 @@ def _chain(rows: Sequence[CompositionRow], pick: tuple[int, str] | None, priorit
     for _, row in ordered:
         chain.setdefault(row.link, Candidate(row.player, row.voice_label, row.link,
                                              (row.source_id, row.row_key) if row.is_compilation else None, row.source_id,
-                                             row.row_key, tuple(places.get(row.source_id, ()))))
+                                             row.row_key, tuple(places.get(row.source_id, ())), row.video))
     return tuple(chain.values())
 
 
@@ -204,6 +208,17 @@ def adopt(dubs: Iterable[PlannedDub], rows: Iterable[dict[str, Any]]) -> dict[tu
 
 # Steps in which the work on a voice-over has begun: it holds a download, a file, a job or a track made from one video.
 STARTED = frozenset({S.DOWNLOADING, S.READY, S.ALIGNING, S.ALIGNED, S.PLACED, S.REJECTED})
+
+
+def other_video(chain: Sequence[dict[str, Any]], attempt: int) -> int | None:
+    """The next candidate of the chain that is another video than the one at `attempt`: the service judged that video,
+    so its links on other pages (the same player, the same video) would be judged the same. None when none is left."""
+    judged = chain[attempt]
+
+    def same(each: dict[str, Any]) -> bool:
+        return bool(judged.get("video")) and (each.get("player"), each.get("video")) == (judged.get("player"), judged["video"])
+
+    return next((index for index in range(attempt + 1, len(chain)) if not same(chain[index])), None)
 
 
 def candidate_of(row: dict[str, Any]) -> dict[str, Any]:

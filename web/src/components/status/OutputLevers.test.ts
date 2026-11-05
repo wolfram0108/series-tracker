@@ -10,7 +10,7 @@ import { AVAILABILITY, SPECS } from "../../lib/output.fixtures"
 const rowOf = (over: Partial<Row>): Row => ({
   series_id: 1, source_id: 7, row_key: "a", excluded: false, season: 1, episode_start: 5, episode_end: 5,
   voice_label: "Ruchime", voice_group: over.voice_label ?? "Ruchime", voice_name: "Ruchime", player: "vk", player_label: "VK",
-  group: "", text: "", link: "", state: "playable", heights: [1080], ...over,
+  group: "", text: "", link: "", video: "", state: "playable", heights: [1080], ...over,
 })
 
 // Source 7 has two players of one group; source 9 has a voice-over of its own, a compilation of it, and a line absent.

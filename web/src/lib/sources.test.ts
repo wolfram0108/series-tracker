@@ -92,7 +92,7 @@ describe("viewOf", () => {
 const layoutRow = (over: Partial<LayoutRow> = {}): LayoutRow => ({
   series_id: 1, source_id: 7, row_key: "r", excluded: false, season: 1, episode_start: 1, episode_end: 1,
   voice_label: "Ruchime", voice_name: "Ruchime", voice_group: null, player: "vk", player_label: "VK", group: "", text: "",
-  heights: [720, 1080], state: "playable", link: "", ...over,
+  heights: [720, 1080], state: "playable", link: "", video: "", ...over,
 })
 
 describe("the lines of a player from the rows of the constructor", () => {

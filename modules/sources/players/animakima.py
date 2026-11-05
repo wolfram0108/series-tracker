@@ -122,6 +122,11 @@ class AnimakimaPlayer:
         return PlayerRef("animakima", link_of(page_url, aid, sid))
 
     @staticmethod
+    def video_of(url: str) -> str:
+        target = parse_link(url)
+        return "/".join(target) if target else ""
+
+    @staticmethod
     def owns(url: str) -> bool:
         return parse_link(url) is not None
 

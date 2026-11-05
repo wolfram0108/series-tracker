@@ -384,16 +384,16 @@ class VoicesRepository:
         return await self._move(lifecycle.REFUSE, "outcome=?, aligned_path=NULL, move_from=NULL",
                                 (outcome,), "id=?", (dub_id,))
 
-    async def turn_to_next(self, dub_id: int, outcome: str) -> bool:
-        """The service turned the pair down: the file of the current source is not the episode. The next source of the
-        chain is tried, from its download; what the row owned (the file, its share of the job) goes to the cleanup journal
-        in the same transaction."""
+    async def turn_to_next(self, dub_id: int, outcome: str, attempt: int) -> bool:
+        """The service turned the pair down: the video of the current source is not the episode. The candidate `attempt`
+        of the chain (the next other video) is tried, from its download; what the row owned (the file, its share of the
+        job) goes to the cleanup journal in the same transaction."""
         marks, steps = _in(lifecycle.NEXT_SOURCE.sources)
         return await self._move(
-            lifecycle.NEXT_SOURCE, "attempt=attempt+1, job_id=NULL, submit_key=NULL, out_dir=NULL, ref_uid=NULL, "
+            lifecycle.NEXT_SOURCE, "attempt=?, job_id=NULL, submit_key=NULL, out_dir=NULL, ref_uid=NULL, "
             "ref_path=NULL, aligned_to=NULL, ref_rev=NULL, aligned_path=NULL, output_path=NULL, move_from=NULL, "
             "temp_path=NULL, file_id=NULL, outcome=NULL, error=?",
-            (outcome,), "id=?", (dub_id,), before=_hand_over(f"id=? AND status {marks}", (dub_id, *steps)))
+            (attempt, outcome), "id=?", (dub_id,), before=_hand_over(f"id=? AND status {marks}", (dub_id, *steps)))
 
     async def release_to_ready(self, dub_ids: list[int]) -> None:
         """The daemon lost the job: the voice-overs are offered to it again."""

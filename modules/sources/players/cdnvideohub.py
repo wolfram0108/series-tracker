@@ -217,6 +217,10 @@ class CdnVideoHubPlayer:
         return PlayerRef("cvh", link_of(page_url, vk_id))
 
     @staticmethod
+    def video_of(url: str) -> str:
+        return vk_id_of(url) or ""
+
+    @staticmethod
     def owns(url: str) -> bool:
         return vk_id_of(url) is not None
 

@@ -11,7 +11,7 @@ import type { VoiceDub } from "../../stores/voices"
 // A playable single-episode line of the VK player; each test changes only the fields it is about.
 const rowOf = (over: Partial<Row>): Row => ({
   series_id: 1, source_id: 7, row_key: "a", excluded: false, season: 1, episode_start: 5, episode_end: 5,
-  voice_label: "Ruchime", voice_group: "Ruchime", voice_name: "Ruchime", player: "vk", player_label: "VK", group: "", text: "", link: "",
+  voice_label: "Ruchime", voice_group: "Ruchime", voice_name: "Ruchime", player: "vk", player_label: "VK", group: "", text: "", link: "", video: "",
   state: "playable", heights: [1080], ...over,
 })
 

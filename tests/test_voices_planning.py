@@ -385,3 +385,17 @@ def test_a_started_work_stands_exactly_while_the_layout_does_not_give_its_video_
                             assert moved(recorded, dub.chain, videos) is expected, (first, second, dub.episode, key, status, keyed)
                             checked += 1
     assert checked > 4000  # the space is not empty: every case that plans X is checked
+
+
+def test_after_a_verdict_the_next_candidate_is_another_video_and_the_same_video_on_other_pages_is_passed_over():
+    from modules.voices.planning import other_video
+    cvh, again, kodik = ({"player": "cvh", "video": "777"}, {"player": "cvh", "video": "777"},
+                         {"player": "kodik", "video": "1/2/3"})
+    assert other_video([cvh, again, kodik], 0) == 2
+    assert other_video([cvh, again], 0) is None  # no other video: the voice-over is rejected
+    assert other_video([cvh, {"player": "cvh", "video": "778"}, kodik], 0) == 1
+    # A video that has no number of its host (a place on a page) is never taken for another one.
+    assert other_video([{"player": "vibix", "video": ""}, {"player": "vibix", "video": ""}], 0) == 1
+    assert other_video([{"player": "cvh"}, {"player": "cvh"}], 0) == 1  # a chain recorded before videos were known
+    # The same number of another player is another video.
+    assert other_video([{"player": "cvh", "video": "5"}, {"player": "vk", "video": "5"}], 0) == 1

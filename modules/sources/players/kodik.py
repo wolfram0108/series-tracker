@@ -262,6 +262,11 @@ class KodikPlayer:
         return PlayerRef("kodik", link_of(page_url, media_id, media_hash, item_id))
 
     @staticmethod
+    def video_of(url: str) -> str:
+        parts = parse_link(url)
+        return "/".join(parts) if parts else ""
+
+    @staticmethod
     def owns(url: str) -> bool:
         return parse_link(url) is not None
 

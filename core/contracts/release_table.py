@@ -48,6 +48,9 @@ class TableRow(BaseModel):
     # The stable address of the candidate (a page of the video); a signed stream address never goes here: it changes
     # with every reading and would make every reading a change of the layout. The stream is resolved before download.
     link: str = ""
+    # Which video the row is, as its host numbers it (release players' `video_of` of the link): two rows of one player with
+    # one video are the same video whatever page shows them. Empty when the link names no video of its host's own.
+    video: str = ""
     # The site's own numbers and marks, for a human and for debugging; no decision reads them.
     site_fields: dict[str, Any] = Field(default_factory=dict)
 

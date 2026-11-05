@@ -1748,6 +1748,11 @@ export interface components {
              * @default
              */
             link: string;
+            /**
+             * Video
+             * @default
+             */
+            video: string;
         };
         /**
          * ConformJobChange

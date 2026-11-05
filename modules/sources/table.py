@@ -20,6 +20,7 @@ from core.deadlines import TABLE_READ_S
 from core.logging import get_logger
 from core.reasons import describe, reason
 
+from .players.registry import PlayerRegistry
 from .repository import SourcesRepository, Stored
 from .sites import ReadContext, Site, SiteError, SiteRegistry
 
@@ -58,9 +59,9 @@ class TableReader:
     """Answers for the table of a page, and reads the page when its table is missing or past its term."""
 
     def __init__(self, repo: SourcesRepository, sites: SiteRegistry, publish: Publish,
-                 http: Callable[[], httpx.AsyncClient], *, clock: Callable[[], datetime] = utc_now,
+                 http: Callable[[], httpx.AsyncClient], *, players: PlayerRegistry, clock: Callable[[], datetime] = utc_now,
                  term: timedelta = TABLE_TERM, safeguard_s: float = TABLE_READ_S, recent: int | None = None) -> None:
-        self._repo, self._sites, self._publish, self._http = repo, sites, publish, http
+        self._repo, self._sites, self._publish, self._http, self._players = repo, sites, publish, http, players
         self._clock, self._term, self._safeguard_s, self._recent = clock, term, safeguard_s, recent
         self._log = get_logger("sources")
         self._reading: dict[str, asyncio.Task] = {}
@@ -198,8 +199,10 @@ class TableReader:
             if row.key in seen:
                 raise SiteError(reason("duplicate_key", key=row.key, player=row.player))
             seen.add(row.key)
+        # Which video each row is, read by its player from its link: the one place a table learns it, whatever site read it.
+        rows = [row.model_copy(update={"video": self._players.video_of(row.player, row.link)}) for row in draft.rows]
         return ReleaseTable(url=key, site=site.name, names=draft.names, site_voice=draft.site_voice, channel=draft.channel,
-                            read_at=self._stamp(), complete=True, rows=draft.rows)
+                            read_at=self._stamp(), complete=True, rows=rows)
 
     async def _settle(self, site: Site, key: str, table: ReleaseTable | None, problem: str | None) -> str | None:
         """Write the outcome before any event: the stored table, or the failure. Returns the reason of a failure."""
