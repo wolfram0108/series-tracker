@@ -1,8 +1,9 @@
-"""The site dunhuatv.ru read into the table of the page (M-8), on the snapshots of the real answers in `raw/`.
+"""The site dunhuatv.ru read into the table of the page (M-8), on synthetic answers in the shape of the real ones
+(`site_samples`).
 
 The title page, the playlist of CDN VideoHub (607 items), the iframes of the three voice-overs of Kodik and the answers of
-the two players about a video are the snapshots. The videos of the playlist that the snapshots do not cover answer as the
-snapshot of one of them does, so that every item of the playlist has an answer.
+the two players about a video are the samples. The videos of the playlist that the samples do not cover answer as the
+sample of one of them does, so that every item of the playlist has an answer.
 """
 import json
 import re
@@ -20,16 +21,16 @@ from modules.sources.sites.dunhuatv import DunhuaTvSite
 from sources_support import READ_LIMIT_S, Web, json_of, text_of, within
 
 PAGE = "https://dunhuatv.ru/28-praktikuja-ci-sto-tysjach-let-smotret-onlajn.html"
-KODIK_IFRAMES = {"50228": "run1/dunhuatv__kodik_voice0.html", "49002": "run1/dunhuatv__kodik_voice1.html",
-                 "67748": "run1/dunhuatv__kodik_voice2.html"}
-CVH_VIDEOS = {"14244459338480": "run1/dunhuatv__cvh_video__14244459338480.json",
-              "8026395597487": "run1/dunhuatv__cvh_video__8026395597487.json",
-              "9902733417042": "run1/dunhuatv__cvh_video__9902733417042.json"}
+KODIK_IFRAMES = {"50228": "dunhuatv__kodik_voice0.html", "49002": "dunhuatv__kodik_voice1.html",
+                 "67748": "dunhuatv__kodik_voice2.html"}
+CVH_VIDEOS = {"14244459338480": "dunhuatv__cvh_video__14244459338480.json",
+              "8026395597487": "dunhuatv__cvh_video__8026395597487.json",
+              "9902733417042": "dunhuatv__cvh_video__9902733417042.json"}
 UNSTABLE = re.compile(r"expires=|sign=|token|\.mp4|\.m3u8|mp4_|okcdn|api_hash")
 
 
 async def measured(rung: Rung) -> int | None:
-    """The frame height the unlabelled rungs of the snapshots would be measured at."""
+    """The frame height the unlabelled rungs of the samples would be measured at."""
     return {"mpegQhdUrl": 1440, "mpeg2kUrl": 1440, "mpeg4kUrl": 2160}.get(rung.key)
 
 
@@ -44,11 +45,11 @@ def kodik_iframe(request: httpx.Request) -> str | tuple[int, str]:
 
 def web_of(page: str | None = None) -> Web:
     web = Web()
-    web.route("dunhuatv.ru/28-", page if page is not None else text_of("run1/dunhuatv__title.html"))
-    web.route("/player/sv/playlist", text_of("run1/dunhuatv__cvh_playlist.json"))
+    web.route("dunhuatv.ru/28-", page if page is not None else text_of("dunhuatv__title.html"))
+    web.route("/player/sv/playlist", text_of("dunhuatv__cvh_playlist.json"))
     web.route("/player/sv/video/", cvh_video)
     web.route("kodikplayer.com/serial/", kodik_iframe)
-    web.route("kodikplayer.com/ftor", text_of("run1/dunhuatv__kodik_ftor.json"), method="POST")
+    web.route("kodikplayer.com/ftor", text_of("dunhuatv__kodik_ftor.json"), method="POST")
     return web
 
 
@@ -93,7 +94,7 @@ async def test_the_head_of_the_table_has_the_names_of_the_page_and_no_voice(whol
 async def test_the_table_has_every_item_of_cdn_videohub_and_of_the_three_voices_of_kodik(whole):
     draft, *_ = whole
 
-    assert len(players(draft, "cvh")) == len(json_of("run1/dunhuatv__cvh_playlist.json")["items"]) == 607
+    assert len(players(draft, "cvh")) == len(json_of("dunhuatv__cvh_playlist.json")["items"]) == 607
     assert Counter(row.voice.name for row in players(draft, "kodik")) == {
         "Animy": 362, "AniStar": 287, "Студия Константина Исаева": 17}
     assert len({row.key for row in draft.rows}) == len(draft.rows) == 607 + 666
@@ -102,7 +103,7 @@ async def test_the_table_has_every_item_of_cdn_videohub_and_of_the_three_voices_
 async def test_a_cvh_row_is_an_item_of_the_playlist_with_the_voice_the_player_names_and_the_season_it_gives(whole):
     draft, *_ = whole
     cvh = players(draft, "cvh")
-    first = json_of("run1/dunhuatv__cvh_playlist.json")["items"][0]
+    first = json_of("dunhuatv__cvh_playlist.json")["items"][0]
     row = cvh[0]
 
     assert row.key == f"cvh:{first['cvhId']}" and row.link.endswith(f"#cvh={first['vkId']}")
@@ -140,7 +141,7 @@ async def test_the_heights_of_a_row_are_the_steps_the_player_gives(whole):
     draft, *_ = whole
     with_full_hd = next(row for row in players(draft, "cvh") if row.link.endswith("#cvh=14244459338480"))
 
-    # The snapshots of the videos list rungs up to 720p, and one of them up to 1080p; none has a rung above it.
+    # The samples of the videos list rungs up to 720p, and one of them up to 1080p; none has a rung above it.
     assert {tuple(row.heights) for row in players(draft, "cvh")} == {(144, 240, 360, 480, 720), (144, 240, 360, 480, 720, 1080)}
     assert with_full_hd.heights == [144, 240, 360, 480, 720, 1080]
     assert {tuple(row.heights) for row in players(draft, "kodik")} == {(360, 480, 720)}
@@ -177,7 +178,7 @@ async def test_an_item_without_a_season_has_no_group_and_nothing_puts_the_first_
                           {"cvhId": "c2", "vkId": "v2", "voiceStudio": "A", "voiceType": "x", "season": 2, "episode": 4},
                           {"cvhId": "c3", "vkId": "v3", "voiceStudio": "A", "voiceType": "x", "season": 2, "episode": 4.5},
                           {"cvhId": "c4", "vkId": "v4", "voiceStudio": "A", "voiceType": "x", "season": 2}]}
-    web = web_of(text_of("run1/dunhuatv__title.html").replace("iframe", "x-frame"))
+    web = web_of(text_of("dunhuatv__title.html").replace("iframe", "x-frame"))
     web.route("/player/sv/playlist", json.dumps(playlist), first=True)
 
     draft = await Run().read(a_site(), web)
@@ -189,7 +190,7 @@ async def test_an_item_without_a_season_has_no_group_and_nothing_puts_the_first_
 async def test_two_uploads_of_one_episode_are_two_rows_none_is_dropped():
     playlist = {"items": [{"cvhId": "old", "vkId": "v1", "voiceStudio": "A", "season": 1, "episode": 1},
                           {"cvhId": "new", "vkId": "v1b", "voiceStudio": "A", "season": 1, "episode": 1}]}
-    web = web_of(text_of("run1/dunhuatv__title.html").replace("iframe", "x-frame"))
+    web = web_of(text_of("dunhuatv__title.html").replace("iframe", "x-frame"))
     web.route("/player/sv/playlist", json.dumps(playlist), first=True)
 
     draft = await Run().read(a_site(), web)
@@ -200,8 +201,8 @@ async def test_two_uploads_of_one_episode_are_two_rows_none_is_dropped():
 # --- the states of a row (M-6) --------------------------------------------------------------------------------------------------
 
 async def test_a_video_the_player_does_not_have_is_absent_a_busy_host_is_not_obtained_and_a_failed_probe_is_not_obtained():
-    items = json_of("run1/dunhuatv__cvh_playlist.json")["items"][:3]
-    web = web_of(text_of("run1/dunhuatv__title.html").replace("iframe", "x-frame"))
+    items = json_of("dunhuatv__cvh_playlist.json")["items"][:3]
+    web = web_of(text_of("dunhuatv__title.html").replace("iframe", "x-frame"))
     web.route("/player/sv/playlist", json.dumps({"items": items}), first=True)
     web.route(f"/video/{items[0]['vkId']}", (404, ""), first=True)
     web.route(f"/video/{items[1]['vkId']}", (503, "busy"), first=True)
@@ -223,7 +224,7 @@ async def test_a_video_the_player_does_not_have_is_absent_a_busy_host_is_not_obt
 
 
 async def test_an_item_kodik_has_no_answer_for_is_absent():
-    web = web_of(text_of("run1/dunhuatv__title.html").replace("video-player", "x-player"))
+    web = web_of(text_of("dunhuatv__title.html").replace("video-player", "x-player"))
     web.route("kodikplayer.com/ftor", (404, ""), first=True, method="POST")
 
     draft = await Run().read(a_site(), web)

@@ -34,7 +34,7 @@ async def test_a_read_of_a_release_of_hundreds_of_episodes_asks_the_pages_of_the
     async with web.client() as http:
         draft = await within(site.read(RELEASE, ReadContext(http, lambda *step: None, recent=10)), READ_LIMIT_S,
                              "the read of the last ten episodes")
-    listed = json_of("run1/ruchime__ALL_EPS.json")
+    listed = json_of("ruchime__ALL_EPS.json")
     last = [item["number"] for item in listed][-10:]
     assert sorted({row.site_fields.get("number") for row in draft.rows if row.player == "vk"}) == sorted(last)
     assert web.count(f"/release/{SLUG}/episode-") == 10  # the whole read asks 390

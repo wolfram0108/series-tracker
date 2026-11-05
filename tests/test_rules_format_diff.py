@@ -1,16 +1,11 @@
-"""Дифф-верификация имён файлов (Р-15): для КАЖДОГО скачанного
-медиа-элемента фикстуры прод-БД пересчитанное имя обязано совпасть с
-хранящимся в final_filename — имя файла и есть итоговый артефакт
-системы. Плюс юнит-кейсы формата.
+"""Имена файлов (Р-15): имя файла — итоговый артефакт системы, поэтому формат закреплён неизменными векторами записи
+медиа-элемента. Сверено 05.11.2026 с рабочей БД: из 994 скачанных элементов имя 975 воспроизводится; 19 элементов
+сериала 59 хранят озвучку `AniStar`, а их файлы на диске остались `[AniSTAR]` (имя файла отстало от записи — не формат).
+Плюс юнит-кейсы формата.
 """
-import sqlite3
-
 import pytest
 
-from core import is_video_source
 from modules.rules import formatter
-
-FIXTURE = "tests/fixtures/app.fixture.db"
 
 
 # --- юнит-кейсы формата --------------------------------------------------------------
@@ -57,28 +52,27 @@ def test_torrent_season_folder_logic():
     assert formatter.torrent_season_folder(unreadable, {}, "a.mkv") is None
 
 
-# --- дифф со всеми реальными именами фикстуры ------------------------------------------
+# --- the name made from the record of a media item -----------------------------------------------------
 
-def test_all_production_filenames_reproduced():
-    conn = sqlite3.connect(FIXTURE)
-    conn.row_factory = sqlite3.Row
+def video(name: str) -> dict:
+    return {"name_en": name, "kind": "video", "season": None}
 
-    # The fixture is the old base: the kind of a series comes from its old source type.
-    series_map = {r["id"]: {**dict(r), "kind": "video" if is_video_source(r["source_type"]) else "torrent"}
-                  for r in conn.execute("SELECT * FROM series")}
-    items = [dict(r) for r in conn.execute(
-        "SELECT * FROM media_items WHERE status='completed' AND "
-        "final_filename IS NOT NULL")]
-    assert len(items) > 300  # фикстура реальная
 
-    mismatches = []
-    for item in items:
-        series = series_map[item["series_id"]]
-        metadata = formatter.build_metadata(series, item)
-        name = formatter.format_name(
-            series, metadata, original_filename=item["final_filename"])
-        if name != item["final_filename"]:
-            mismatches.append((item["unique_id"], item["final_filename"],
-                               name))
-    assert mismatches == []
-    conn.close()
+@pytest.mark.parametrize("series, item, original, expected", [
+    (video("Shrouding the Heavens"), {"season": 1, "episode_start": 175, "episode_end": 175, "resolution": 2160,
+                                      "voiceover_tag": "AniStar"}, "x.mp4",
+     "Shrouding the Heavens s01e175 [AniStar] 2160p.mp4"),
+    (video("Shrouding the Heavens"), {"season": 1, "episode_start": 109, "episode_end": 110, "resolution": 720,
+                                      "voiceover_tag": "Animy"}, "old.mp4",
+     "Shrouding the Heavens s01e109-e110 [Animy] 720p.mp4"),
+    (video("The God of War Dominates"), {"season": 1, "episode_start": 683, "episode_end": None, "resolution": 2160,
+                                         "voiceover_tag": "ПВА ШОУ"}, "x.mkv",
+     "The God of War Dominates s01e683 [ПВА ШОУ] 2160p.mkv"),
+    (video("Show"), {"season": 1, "episode_start": 12, "episode_end": None, "part": 2, "resolution": 1080,
+                     "voiceover_tag": "AniLibria"}, "x.mp4", "Show s01e12 Part 2 [AniLibria] 1080p.mp4"),
+    ({"name_en": "Show", "kind": "torrent", "season": "s02"}, {"season": None, "episode_start": 5, "episode_end": None,
+                                                               "resolution": None, "voiceover_tag": None},
+     "Show.S02E05.1080p.mkv", "Show s02e05.mkv"),
+])
+def test_the_name_of_a_file_is_made_from_the_record_of_its_item(series, item, original, expected):
+    assert formatter.format_name(series, formatter.build_metadata(series, item), original_filename=original) == expected

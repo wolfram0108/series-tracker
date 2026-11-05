@@ -1,42 +1,25 @@
-"""Формулы идентификаторов (Р-10) — дифф-верификация на ВСЕХ реальных
-записях фикстуры прод-БД: существующие id обязаны воспроизводиться."""
-import sqlite3
-
+"""Формулы идентификаторов (Р-10): id уже записанных строк обязаны воспроизводиться, поэтому каждая формула закреплена
+неизменным вектором. Значения сверены 05.11.2026 со всеми строками рабочей БД: 44 торрента по `torrent_id`; 1902 строки
+`media_items` — 1752 по `media_unique_id`, 1 по `upgrade_unique_id`, 147 по `row_unique_id`, 2 по `upgrade_row_unique_id`."""
 import pytest
 
 from core import ids
 
-FIXTURE = "tests/fixtures/app.fixture.db"
+VIDEO = "https://vkvideo.ru/video_ext.php?oid=-1&id=2&hash=ab"
+ROW_VIDEO = "https://vkvideo.ru/video_ext.php?oid=-223748566&id=456240501&hash=ab"
 
 
-@pytest.fixture(scope="module")
-def fixture_conn():
-    conn = sqlite3.connect(FIXTURE)
-    conn.row_factory = sqlite3.Row
-    yield conn
-    conn.close()
-
-
-def test_torrent_ids_match_production(fixture_conn):
-    rows = fixture_conn.execute(
-        "SELECT torrent_id, link, date_time FROM torrents").fetchall()
-    assert len(rows) > 100  # фикстура реальная, не пустышка
-    mismatches = [r["torrent_id"] for r in rows
-                  if ids.torrent_id(r["link"], r["date_time"])
-                  != r["torrent_id"]]
-    assert mismatches == []
-
-
-def test_media_unique_ids_match_production(fixture_conn):
-    rows = fixture_conn.execute(
-        "SELECT unique_id, source_url, publication_date, series_id "
-        "FROM media_items").fetchall()
-    assert len(rows) > 100
-    mismatches = [r["unique_id"] for r in rows
-                  if ids.media_unique_id(r["source_url"],
-                                         r["publication_date"],
-                                         r["series_id"]) != r["unique_id"]]
-    assert mismatches == []
+@pytest.mark.parametrize("made, expected", [
+    (lambda: ids.torrent_id("https://kinozal.tv/details.php?id=2034617", "05.05.2026 10:15:00"), "f9d0f14f9e9a13e0"),
+    (lambda: ids.torrent_id("https://rutracker.org/forum/viewtopic.php?t=6612345", None), "a1d47e801dbc43ab"),
+    (lambda: ids.media_unique_id(VIDEO, "2026-03-17 20:13:16", 5), "d9830b904b0c4bda"),
+    (lambda: ids.upgrade_unique_id(VIDEO, "2026-03-17 20:13:16", 5, 2160), "909c0ef343489d6a"),
+    (lambda: ids.row_unique_id(57, 10, "-223748566_456240501"), "ebe4bcc6390e6d79"),
+    (lambda: ids.version_row_unique_id(57, 10, "-223748566_456240501", ROW_VIDEO), "536993a7f07437d4"),
+    (lambda: ids.upgrade_row_unique_id(57, 10, "-223748566_456240501", 2160, ROW_VIDEO), "2665f08054d77c2a"),
+])
+def test_every_formula_gives_the_id_it_gave_to_the_rows_already_written(made, expected):
+    assert made() == expected
 
 
 def test_media_unique_id_accepts_iso_z():

@@ -1,6 +1,6 @@
-"""Support for the tests of the sites and the players: an in-process web (routes over `httpx.MockTransport`), the snapshots
-of real answers kept in `raw/` (out of git, so a missing one is a failure that names the file), and the schema of the tables
-of pages in a database file (the database of a test is a real file: every operation of `Database` opens its own connection,
+"""Support for the tests of the sites and the players: an in-process web (routes over `httpx.MockTransport`), the synthetic
+answers of the sites and the players by name (`site_samples`), and the schema of the tables of pages in a database file
+(the database of a test is a real file: every operation of `Database` opens its own connection,
 so an in-memory one would be empty each time)."""
 from __future__ import annotations
 
@@ -16,8 +16,9 @@ from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine
 
+from site_samples import SAMPLES
+
 ROOT = Path(__file__).resolve().parent.parent
-RAW = ROOT / "docs" / "missions" / "voice-alignment" / "stage-10" / "raw"
 
 
 # How long a test waits for what the code under test should end by itself. A read of a whole release is some seconds of
@@ -34,19 +35,15 @@ async def within(awaited, seconds: float, what: str):
         pytest.fail(f"{what} did not end in {seconds:g} s: it waits for something no fake of the test gives")
 
 
-def sample(relative: str) -> Path:
-    path = RAW / relative
-    if not path.exists():
-        pytest.fail(f"нет образца {relative}")
-    return path
+def text_of(name: str) -> str:
+    """A synthetic answer by its name; a name that is not there is a failure that names it."""
+    if name not in SAMPLES:
+        pytest.fail(f"нет образца {name}")
+    return SAMPLES[name]()
 
 
-def text_of(relative: str) -> str:
-    return sample(relative).read_text(encoding="utf-8")
-
-
-def json_of(relative: str):
-    return json.loads(text_of(relative))
+def json_of(name: str):
+    return json.loads(text_of(name))
 
 
 MIGRATIONS = [ROOT / "alembic" / "versions" / name

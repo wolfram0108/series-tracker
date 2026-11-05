@@ -1,28 +1,15 @@
 """The projection of a series: rows of all its sources with the numbers the constructor gave, voice-over groups and
 unknown voice-overs, the summaries a window shows before any number exists."""
-import json
 import re
-from pathlib import Path
 
 import pytest
 
 from core.contracts import (CompositionRow, Exclusion, PlayerSummary, ReleaseTable, RowState, RowVoice, RuleLine, RuleResult,
                             RulesApplyReply, SeriesSource, SourceStatus, SourceType, TableRow, line_of)
 from core.voice_names import fold_name
+from sources_support import json_of, text_of
 from modules.composition.project import (UNKNOWN_VOICE_LABEL, SourceInput, group_renames, layout_episodes, lines_for,
                                          project, selected_rows, touched_episodes, voice_name_of, voice_names)
-
-ROOT = Path(__file__).resolve().parent.parent
-RAW = ROOT / "docs" / "missions" / "voice-alignment" / "stage-10" / "raw"
-
-
-def sample(relative: str) -> Path:
-    """A snapshot of a real site answer; the snapshots are kept out of git, so a missing one is a failure to report."""
-    path = RAW / relative
-    if not path.exists():
-        pytest.fail(f"нет образца {relative}")
-    return path
-
 
 def source(id=1, position=0, profile=7, **fields) -> SeriesSource:
     return SeriesSource(id=id, series_id=5, position=position, url=f"https://example.org/{id}",
@@ -284,8 +271,8 @@ def test_the_lines_are_those_of_line_of_with_the_key_of_the_row():
 
 
 def test_the_lines_and_the_layout_of_real_values_of_ruchime_dunhuatv_kodik_and_cvh():
-    # Values as the snapshots in raw/ have them: a ruchime row of a Vibix season, a Kodik compilation text of three episodes,
-    # a CVH row of AniStar with its multi-voice type.
+    # Values as the sites give them: a ruchime row of a Vibix season, a Kodik compilation text of three episodes, a CVH row
+    # of AniStar with its multi-voice type.
     ruchime = table(
         row("2:1", "Серия 1", player="vibix", label="Vibix", voice="Ruchime", group="Сезон 2", heights=(480, 720, 1080)),
         row("2:2", "Серия 2", player="vibix", label="Vibix", voice="Ruchime", group="Сезон 2", heights=(480, 720, 1080)),
@@ -532,7 +519,7 @@ def test_a_difference_that_names_no_episode_is_an_empty_set_and_one_that_cannot_
     assert touched_episodes([crow("n", None, 3)], []) is None
 
 
-# ---- snapshots of real answers -----------------------------------------------------------------------------------
+# ---- the answers of the sites (synthetic, in the shape of the real ones: site_samples) -----------------------------------------------------------------------------------
 
 
 def test_a_line_is_the_coded_fields_of_the_registry_in_their_order_and_a_field_with_no_value_is_left_out():
@@ -547,7 +534,7 @@ def test_a_line_is_the_coded_fields_of_the_registry_in_their_order_and_a_field_w
 
 
 def test_the_390_episodes_of_the_ruchime_list_give_390_lines_with_the_text_of_the_site():
-    listing = json.loads(sample("run1/ruchime__ALL_EPS.json").read_text(encoding="utf-8"))
+    listing = json_of("ruchime__ALL_EPS.json")
     rows = [row(str(each["id"]), each["title"], player="vk", label="VK", voice="Ruchime", heights=(1080,))
             for each in listing]
     tbl = table(*rows, names=("Практикуя ци сто тысяч лет",))
@@ -558,7 +545,7 @@ def test_the_390_episodes_of_the_ruchime_list_give_390_lines_with_the_text_of_th
 
 
 def test_the_607_rows_of_cvh_become_a_layout_whose_unknown_voices_are_numbered_by_name_not_by_type():
-    playlist = json.loads(sample("run1/dunhuatv__cvh_playlist.json").read_text(encoding="utf-8"))["items"]
+    playlist = json_of("dunhuatv__cvh_playlist.json")["items"]
     rows = [row(each["cvhId"], f"{each['episode']} серия", player="cvh", label="CVH", voice=each.get("voiceStudio", ""),
                 kind=each["voiceType"], group=f"{each['season']} сезон", heights=(1080,)) for each in playlist]
     answers = {each["cvhId"]: {"season": each["season"], "episode": each["episode"]} for each in playlist}
@@ -574,7 +561,7 @@ def test_the_607_rows_of_cvh_become_a_layout_whose_unknown_voices_are_numbered_b
 
 
 def test_the_kodik_list_of_a_voice_over_keeps_its_compilations_as_ranges():
-    html = sample("run1/dunhuatv__kodik_voice2.html").read_text(encoding="utf-8")
+    html = text_of("dunhuatv__kodik_voice2.html")
     box = html.split('class="serial-series-box"', 1)[1].split("</select>", 1)[0]
     items = re.findall(r'data-id="(\d+)"[^>]*?data-title="([^"]*)"', box, re.DOTALL)
     rows = [row(key, title, player="kodik", label="Kodik", voice="Студия Константина Исаева", kind="voice",
@@ -595,8 +582,7 @@ def test_the_kodik_list_of_a_voice_over_keeps_its_compilations_as_ranges():
 
 
 def test_the_two_seasons_of_the_asura_vibix_catalog_are_told_apart_by_the_choice_of_the_source():
-    playlist = json.loads(sample("run3_players/vibix__asura-bezumnyi-korol-2__api_decoded.json").read_text(
-        encoding="utf-8"))["data"]["playlist"]
+    playlist = json_of("vibix__asura-bezumnyi-korol-2__api_decoded.json")["data"]["playlist"]
     rows = [row(f"{position}:{number}", episode["title"], player="vibix", label="Vibix", voice="Ruchime",
                 group=season["title"], heights=(480, 720, 1080))
             for position, season in enumerate(playlist, 1) for number, episode in enumerate(season["folder"], 1)]

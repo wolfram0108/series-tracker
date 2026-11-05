@@ -1,5 +1,5 @@
-"""Тесты sources: разбор реальных фикстур (дамп Kinozal, JSON API
-Anilibria), нормализация дат с историческими форматами, резолв зеркал.
+"""Тесты sources: разбор синтетических ответов устройства настоящих (страница Kinozal, гостевая страница RuTracker,
+JSON API Anilibria — `tests/samples/trackers`), нормализация дат с историческими форматами, резолв зеркал.
 Живые трекеры — этап 6.
 """
 import json
@@ -11,7 +11,7 @@ import pytest
 from core import Bus
 from modules.sources import SourcesModule, anilibria, dates, parsers
 
-FIX = os.path.join(os.path.dirname(__file__), "fixtures", "sources")
+FIX = os.path.join(os.path.dirname(__file__), "samples", "trackers")
 
 
 # --- даты: исторические форматы (находка 13) -------------------------------------
@@ -49,15 +49,14 @@ def test_broken_dates_raise():
 
 # --- Kinozal: реальный дамп прода --------------------------------------------------
 
-def test_kinozal_parse_real_dump():
+def test_kinozal_parse_page():
     html = open(os.path.join(FIX, "kinozal_page.html"), encoding="utf-8").read()
     result = parsers.kinozal_parse(html, "https://kinozal.me/details.php?id=1")
-    assert result["title"]["ru"], "название не извлечено"
+    assert result["title"]["ru"] == "Тайтл / Title / 2026 / ПМ / WEB-DL (1080p)"
     (release,) = result["releases"]
-    assert release["link"].startswith("https://dl.kinozal.me/download.php?id=")
-    # маркер — в историческом формате Kinozal
-    assert __import__("re").match(r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}$",
-                                  release["date_marker"])
+    assert release["link"] == "https://dl.kinozal.me/download.php?id=2034617"
+    # The marker is in the historical format of Kinozal and is the date of the update, not of the upload.
+    assert release["date_marker"] == "05.05.2026 10:15:00"
 
 
 def test_kinozal_parse_garbage_raises():
@@ -77,14 +76,14 @@ def test_rutracker_guest_page_fails_loudly():
         parsers.rutracker_parse(html, "https://rutracker.org/forum/viewtopic.php?t=1")
 
 
-# --- Anilibria: реальный ответ API --------------------------------------------------
+# --- Anilibria: the answer of its API -------------------------------------------------
 
-def test_anilibria_release_from_real_api_fixture():
+def test_anilibria_release_from_api_answer():
     data = json.load(open(os.path.join(FIX, "anilibria_release.json"),
                           encoding="utf-8"))
     result = anilibria.release_to_result(data)
-    assert result["title"]["ru"] and result["title"]["en"]
-    assert len(result["releases"]) >= 1
+    assert (result["title"]["ru"], result["title"]["en"]) == ("Тайтл", "Title")
+    assert len(result["releases"]) == 2 and result["releases"][0]["quality"] == "1080p • AVC"
     for r in result["releases"]:
         assert r["magnet"].startswith("magnet:")
         assert len(r["hash"]) == 40        # infohash готовым полем (Р-2)

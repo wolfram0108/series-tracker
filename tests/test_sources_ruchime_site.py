@@ -1,8 +1,9 @@
-"""The site 1.ruchime.org read into the table of the page (M-6, M-7), on the snapshots of the real answers in `raw/`.
+"""The site 1.ruchime.org read into the table of the page (M-6, M-7), on synthetic answers in the shape of the real ones
+(`site_samples`).
 
-The release page, its list of 390 episodes, the pages of the first and the last episode and their players are the
-snapshots; the episodes between are the page of the last one with a video of their own, so that the table has the whole
-list. The catalog of Vibix is the decoded answer of its API, the manifests its CDN gives are valid ones.
+The release page, its list of 390 episodes, the pages of the first and the last episode and their players are the samples;
+the episodes between are the page of the last one with a video of their own, so that the table has the whole list. The
+catalog of Vibix is the decoded answer of its API, the manifests its CDN gives are valid ones.
 """
 import json
 import re
@@ -26,16 +27,16 @@ MANIFEST = b"#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.000,\nseg.ts\n#EXT-X-EN
 FILLER_VK = '<script>{"mp4_720":"a","mp4_1080":"b"}</script>'
 FILLER_ALLVIDEO = '<script>file:"[360p]https://cdn.test/360.mp4/,[1080p]https://cdn.test/1080.mp4/"</script>'
 DENIED = '{"payload":["8",["\\"Ошибка доступа (1)\\"","false","\\"\\""]]}'
-# The videos of the snapshots: the embed page each player gave for the first and for the last episode.
-RAW_VK = {"456246539": "run1/ruchime__episode-1__vk_embed.html", "456256559": "run1/ruchime__episode-390__vk_embed.html"}
-RAW_ALLVIDEO = {"688273": "run1/ruchime__episode-1__allvideo_embed.html",
-                "1081867": "run1/ruchime__episode-390__allvideo_embed.html"}
+# The videos of the samples: the embed page each player gives for the first and for the last episode.
+SAMPLE_VK = {"456246539": "ruchime__episode-1__vk_embed.html", "456256559": "ruchime__episode-390__vk_embed.html"}
+SAMPLE_ALLVIDEO = {"688273": "ruchime__episode-1__allvideo_embed.html",
+                "1081867": "ruchime__episode-390__allvideo_embed.html"}
 
 
 def episode_page(number: int) -> str:
     if number == 1:
-        return text_of("run1/ruchime__episode-1.html")
-    last = text_of("run1/ruchime__episode-390.html")
+        return text_of("ruchime__episode-1.html")
+    last = text_of("ruchime__episode-390.html")
     if number == 390:
         return last
     return (last.replace("456256559", f"4{number:08d}").replace("844d706ebb47dffa", f"{number:016x}")
@@ -43,9 +44,9 @@ def episode_page(number: int) -> str:
 
 
 def release_with(entries: list[dict]) -> str:
-    """The snapshot of the release page with another list of episodes in place of its own."""
+    """The sample of the release page with another list of episodes in place of its own."""
     return re.sub(r"const ALL_EPS\s*=\s*\[.*?\];", lambda _: "const ALL_EPS = " + json.dumps(entries) + ";",
-                  text_of("run1/ruchime__release.html"), count=1, flags=re.DOTALL)
+                  text_of("ruchime__release.html"), count=1, flags=re.DOTALL)
 
 
 def entry(number: int, **fields) -> dict:
@@ -61,40 +62,40 @@ def embed_by(known: dict, filler: str):
 
 
 def kodik_iframe(request: httpx.Request):
-    """The iframe of Animy, the voice-over the pages of the release name: the snapshot of the iframe of dunhuatv."""
-    return text_of("run1/dunhuatv__kodik_voice0.html") if "/serial/50228/" in str(request.url) else (404, "")
+    """The iframe of Animy, the voice-over the pages of the release name: the sample of the iframe of dunhuatv."""
+    return text_of("dunhuatv__kodik_voice0.html") if "/serial/50228/" in str(request.url) else (404, "")
 
 
 def web_of(release: str | None = None, *, episodes=episode_page) -> Web:
     web = Web()
     web.route(f"/release/{SLUG}/episode-", lambda request: episodes(int(str(request.url).rsplit("-", 1)[1])))
-    web.route(f"/release/{SLUG}", release if release is not None else text_of("run1/ruchime__release.html"))
-    web.route("video_ext.php", embed_by(RAW_VK, FILLER_VK))
-    web.route("/embed/", embed_by(RAW_ALLVIDEO, FILLER_ALLVIDEO))
+    web.route(f"/release/{SLUG}", release if release is not None else text_of("ruchime__release.html"))
+    web.route("video_ext.php", embed_by(SAMPLE_VK, FILLER_VK))
+    web.route("/embed/", embed_by(SAMPLE_ALLVIDEO, FILLER_ALLVIDEO))
     web.route("al_video.php", DENIED, method="POST")
     web.route("kodikplayer.com/serial/", kodik_iframe)
-    web.route("kodikplayer.com/ftor", text_of("run1/dunhuatv__kodik_ftor.json"), method="POST")
+    web.route("kodikplayer.com/ftor", text_of("dunhuatv__kodik_ftor.json"), method="POST")
     web.route("kinescopecdn.net", lambda request: (200, encode_envelope(MANIFEST, KEY).decode()))
     return web
 
 
-def catalog_of(site: RuchimeSite, snapshot: str, failure: Exception | None = None) -> list[str]:
-    """Put the decoded catalog of a snapshot where the browser capture of Vibix would put it; the pages asked are returned."""
+def catalog_of(site: RuchimeSite, release: str, failure: Exception | None = None) -> list[str]:
+    """Put the decoded catalog of a sample where the browser capture of Vibix would put it; the pages asked are returned."""
     asked: list[str] = []
 
     async def playlist(page_url: str):
         asked.append(page_url)
         if failure is not None:
             raise failure
-        return parse_playlist(json_of(f"run3_players/vibix__{snapshot}__api_decoded.json")), KEY
+        return parse_playlist(json_of(f"vibix__{release}__api_decoded.json")), KEY
 
     site.players.get("vibix").playlist = playlist
     return asked
 
 
-def a_site(snapshot: str = "asura-bezumnyi-korol-2") -> RuchimeSite:
+def a_site(release: str = "asura-bezumnyi-korol-2") -> RuchimeSite:
     site = RuchimeSite(PlayerRegistry.standard())
-    catalog_of(site, snapshot)
+    catalog_of(site, release)
     return site
 
 
@@ -137,7 +138,7 @@ async def test_the_head_of_the_table_has_the_names_and_the_voice_the_site_gives(
 async def test_every_entry_of_the_list_is_a_row_of_every_player_its_page_shows_and_the_catalogs_add_their_own(whole):
     draft, *_ = whole
     by_player = {name: [row for row in draft.rows if row.player == name] for name in ("vk", "allvideo", "vibix", "kodik")}
-    listed = json_of("run1/ruchime__ALL_EPS.json")
+    listed = json_of("ruchime__ALL_EPS.json")
 
     assert {name: len(rows) for name, rows in by_player.items()} == {"vk": 390, "allvideo": 390, "vibix": 390, "kodik": 362}
     assert len(listed) == 390 and len({row.key for row in draft.rows}) == len(draft.rows) == 1532
@@ -162,10 +163,10 @@ async def test_the_voice_of_a_row_is_the_voice_of_the_site_for_the_pages_and_the
     assert {row.voice.name for row in draft.rows if row.player == "vibix"} == {"RuChiMe"}
 
 
-async def test_the_rows_of_the_snapshots_say_what_the_players_said(whole):
+async def test_the_rows_of_the_samples_say_what_the_players_said(whole):
     draft, *_ = whole
 
-    # VK closes both videos to the client of the snapshot: a refusal about the video is "no", not "unknown".
+    # VK closes both videos to the client of the release: a refusal about the video is "no", not "unknown".
     for number in (1, 390):
         row = of(draft, "vk", number)
         assert row.state is RowState.ABSENT and row.heights == [] and parse(row.reason)["code"] == "video_private"
@@ -299,8 +300,8 @@ async def test_two_entries_that_share_a_video_are_two_rows_and_the_video_is_aske
 
 async def test_a_series_is_asked_of_vk_in_one_batch_when_the_player_page_issues_a_token():
     web = web_of(release_with([entry(390), entry(2)]))
-    web.route("video_ext.php", lambda request: text_of("run3_players/ruchime__vk_embed_agent0.html"), first=True)
-    web.route("/method/video.get", lambda request: text_of("run3_players/ruchime__vk_video_get_agent0.json"),
+    web.route("video_ext.php", lambda request: text_of("ruchime__vk_embed_agent0.html"), first=True)
+    web.route("/method/video.get", lambda request: text_of("ruchime__vk_video_get_agent0.json"),
               method="POST")
 
     draft = await Run().read(a_site(), web)

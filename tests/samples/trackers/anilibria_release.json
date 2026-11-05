@@ -1,0 +1,29 @@
+{
+  "id": 9001,
+  "alias": "yu-ling-shi",
+  "name": {"main": "Тайтл", "english": "Title", "alternative": null},
+  "is_ongoing": true,
+  "episodes_total": 24,
+  "torrents": [
+    {
+      "id": 31001,
+      "hash": "0123456789abcdef0123456789abcdef01234567",
+      "magnet": "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Title",
+      "label": "Title - AniLibria.TV [WEBRip 1080p]",
+      "description": "1-17",
+      "quality": {"value": "1080p", "description": "1080p"},
+      "codec": {"value": "x264", "label": "AVC"},
+      "updated_at": "2026-03-17T20:13:16+00:00"
+    },
+    {
+      "id": 31002,
+      "hash": "89abcdef0123456789abcdef0123456789abcdef",
+      "magnet": "magnet:?xt=urn:btih:89abcdef0123456789abcdef0123456789abcdef&dn=Title",
+      "label": "Title - AniLibria.TV [WEBRip 720p]",
+      "description": "1-17",
+      "quality": {"value": "720p", "description": "720p"},
+      "codec": {"value": "x264", "label": "AVC"},
+      "updated_at": "2026-03-17T20:10:02+00:00"
+    }
+  ]
+}

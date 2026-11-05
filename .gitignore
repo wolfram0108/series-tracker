@@ -34,7 +34,6 @@ scripts/telegram_phase0/*.session-journal
 # Артефакты новой системы
 .venv*/
 logs/
-tests/golden/
 tests/fixtures/
 
 # Локальные секреты — никогда не синхронизировать
