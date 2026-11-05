@@ -2,7 +2,8 @@
 
 Queries:
   sources.parse {url}            → {service, title, releases[]} — the releases of a tracker; a page of a site
-                                   (ruchime, dunhuatv, animakima, a VK channel) is read by `sources.table.get`, not parsed
+                                   (ruchime, dunhuatv, animakima, animesss, pvashow, yummyani, a VK channel) is read by
+                                   `sources.table.get`, not parsed
   sources.torrent_file.get {url, torrent_id} → {content_b64} (Р-1, с кэшем)
   sources.torrent_file.drop {torrent_id} — чистка кэша (каскад Р-19)
   sources.trackers.list          → [{...}] (владелец таблицы trackers)

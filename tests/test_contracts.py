@@ -174,7 +174,10 @@ def test_only_the_judgement_of_the_service_writes_a_voice_over_off(result, turne
 A_PAGE_OF = {"ruchime": "https://1.ruchime.org/release/x/episode-3?off=vk#top",
              "dunhuatv": "https://www.dunhuatv.ru/28-x-smotret-onlajn.html?a=1#cvh=2",
              "animakima": "https://animakima.ru/pages/vechnaya-volya-4-tv-4?a=1#animakima=1/2",
-             "vk_channel": "https://vk.com/@chan/videos|запрос"}
+             "vk_channel": "https://vk.com/@chan/videos|запрос",
+             "animesss": "https://animesss.com/aniserials/video/action/1171-x.html?a=1#top",
+             "pvashow": "https://anime.pvashow.com/4-boevoj-master.html?a=1",
+             "yummyani": "https://ru.yummyani.me/catalog/item/lyubov-pod-gipnozom/?a=1"}
 
 
 def test_every_registered_site_declares_what_the_contract_asks():
