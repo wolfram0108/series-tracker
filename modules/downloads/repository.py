@@ -1,4 +1,4 @@
-"""The SQL of downloads: the table download_tasks and the columns media_items.status, final_filename and rename_to (column
+"""The SQL of downloads: the table download_tasks and the columns media_items.status, final_filename, rename_to and file_rev (column
 ownership: the rows and plan_status are scan's, slicing_* are slicing's, read only here).
 
 The state of a row of the plan that downloads owns is two columns that say one thing. A row is READY exactly when it holds
@@ -265,7 +265,9 @@ class DownloadsRepository:
         await self._db.execute_many([
             ("UPDATE media_items SET status='pending', final_filename=NULL, rename_to=NULL WHERE final_filename=? AND unique_id != ? "
              "AND series_id=(SELECT series_id FROM media_items WHERE unique_id=?)", (relative, unique_id, unique_id)),
-            ("UPDATE media_items SET status='completed', final_filename=?, rename_to=NULL WHERE unique_id=?", (relative, unique_id)),
+            # A published download is a new file of the row: what was judged against its old file is judged again.
+            ("UPDATE media_items SET status='completed', final_filename=?, rename_to=NULL, file_rev=file_rev+1 "
+             "WHERE unique_id=?", (relative, unique_id)),
             done])
 
     async def fail_publish(self, task_id: int, unique_id: str, message: str) -> None:
@@ -298,7 +300,8 @@ class DownloadsRepository:
     async def register_file(self, unique_id: str, filename: str) -> None:
         """The row holds a file that lies in the library: it is ready."""
         await self._db.execute(
-            "UPDATE media_items SET status='completed', final_filename=?, rename_to=NULL WHERE unique_id=?", (filename, unique_id))
+            "UPDATE media_items SET status='completed', final_filename=?, rename_to=NULL, file_rev=file_rev+1 "
+            "WHERE unique_id=?", (filename, unique_id))
 
     async def release_file(self, unique_id: str) -> None:
         """The row holds no file any more (gone, removed, displaced, overwritten): it is not ready, it waits for one."""
@@ -369,7 +372,7 @@ class DownloadsRepository:
         """Single-episode rows of the plan in any download state: the reference episodes."""
         return await self._db.fetch_all(
             "SELECT unique_id, season, episode_start, part, source_url, status, final_filename, superseded_by, source_id, "
-            "row_key FROM media_items WHERE series_id=? AND plan_status='in_plan_single' "
+            "row_key, file_rev FROM media_items WHERE series_id=? AND plan_status='in_plan_single' "
             "AND is_ignored_by_user=0 ORDER BY season, episode_start", (series_id,))
 
     async def slot_files(self, series_id: int) -> list[dict]:

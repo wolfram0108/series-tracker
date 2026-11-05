@@ -329,14 +329,14 @@ class VoicesRepository:
         return [row["job_id"] for row in rows]
 
     async def mark_submitting(self, dub_ids: list[int], key: str, ref_uid: str, ref_path: str,
-                              out_dir: str, aligned_to: str | None = None) -> bool:
+                              out_dir: str, aligned_to: str | None = None, ref_rev: int | None = None) -> bool:
         """Write down that these voice-overs are being sent as one job, with where its tracks are asked
-        for and the identity of the video they are aligned to, before the request goes out."""
+        for, the identity of the video they are aligned to and the revision of its file, before the request goes out."""
         marks = ",".join("?" * len(dub_ids))
         return await self._move(
-            lifecycle.SEND, "job_id=NULL, submit_key=?, ref_uid=?, ref_path=?, out_dir=?, aligned_to=?, error=NULL, "
-            "outcome=NULL", (key, ref_uid, ref_path, out_dir, aligned_to or None), f"id IN ({marks})", tuple(dub_ids),
-            expected=len(dub_ids))
+            lifecycle.SEND, "job_id=NULL, submit_key=?, ref_uid=?, ref_path=?, out_dir=?, aligned_to=?, ref_rev=?, "
+            "error=NULL, outcome=NULL", (key, ref_uid, ref_path, out_dir, aligned_to or None, ref_rev),
+            f"id IN ({marks})", tuple(dub_ids), expected=len(dub_ids))
 
     async def attach_job(self, key: str, job_id: str) -> None:
         """The service has the job: every voice-over sent with the key gets its number at once."""
@@ -388,13 +388,14 @@ class VoicesRepository:
         marks, steps = _in(lifecycle.RESTART.sources)
         return await self._move(
             lifecycle.RESTART, "attempt=0, job_id=NULL, submit_key=NULL, out_dir=NULL, ref_uid=NULL, ref_path=NULL, aligned_to=NULL, "
+            "ref_rev=NULL, "
             "aligned_path=NULL, output_path=NULL, move_from=NULL, temp_path=NULL, file_id=NULL, outcome=NULL, error=?",
             (reason,), "id=?", (dub_id,), before=_hand_over(f"id=? AND status {marks}", (dub_id, *steps)))
 
-    async def follow_reference(self, dub_id: int, ref_uid: str, ref_path: str) -> None:
+    async def follow_reference(self, dub_id: int, ref_uid: str, ref_path: str, ref_rev: int | None = None) -> None:
         """The reference is a better version of the same video (the same identity): the track stays valid and follows it."""
-        await self._db.execute("UPDATE voice_dubs SET ref_uid=?, ref_path=?, updated_at=? WHERE id=?",
-                               (ref_uid, ref_path, _now(), dub_id))
+        await self._db.execute("UPDATE voice_dubs SET ref_uid=?, ref_path=?, ref_rev=?, updated_at=? WHERE id=?",
+                               (ref_uid, ref_path, ref_rev, _now(), dub_id))
 
     async def mark_packed(self, dub_ids: list[int], container: str, aligned_to: str) -> None:
         """The tracks are inside the container of their episode now, aligned to its video: no file of their own is left

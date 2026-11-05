@@ -68,7 +68,8 @@ Events out: voices.dub.changed {series_id, season, episode, part, voice_key, voi
             a voice-over that was sent to the service and has no job number yet says so in its hint (`awaiting_answer`);
             status is one of
             ready, aligning, aligned, placed, rejected, failed, moved (the track followed its video),
-            stale (its reference was replaced) and removed (the episode and its video are gone);
+            stale (its reference was replaced, or downloaded again: a new file, every verdict on the old one is given again)
+            and removed (the episode and its video are gone);
             series.purged,
             voices.settings.changed VoiceSettingsView — the settings as they apply after a save, so that every open
             settings screen shows them without asking back,
@@ -231,6 +232,11 @@ def _safe(name: str) -> str:
 def slot_tag(season: int, episode: int, part: int) -> str:
     """How an episode is named in file and folder names; the part follows where the episode has parts."""
     return f"s{season:02d}e{episode:02d}" + (f"p{part}" if part else "")
+
+
+def _another_file(row: dict, rev: int | None) -> bool:
+    """Whether the reference file of the row's media item is another than the one the row was judged against."""
+    return rev is not None and row.get("ref_rev") is not None and row["ref_rev"] != rev
 
 
 def dub_file(series_id: int, season: int, episode: int, part: int, voice_key: str) -> str:
@@ -1060,8 +1066,8 @@ class VoicesModule(BaseModule):
                 if (season, episode, part) not in in_plan:
                     await self._drop_orphans(series_id, season, episode, part, group, root)
                 continue
-            reference, uid, identity = current
-            if await self._follow(series_id, season, episode, part, group, reference, uid, identity):
+            reference, uid, identity, rev = current
+            if await self._follow(series_id, season, episode, part, group, reference, uid, identity, rev):
                 restart = True
                 continue
             for row in group:
@@ -1070,7 +1076,7 @@ class VoicesModule(BaseModule):
             group = await self.repo.for_episode(series_id, season, episode, part)
             ready = [row for row in group if row["status"] == S.READY]
             if ready and not any(row["status"] in WORKING for row in group):
-                owed = await self._submit(series, season, episode, part, reference, uid, ready, identity) or owed
+                owed = await self._submit(series, season, episode, part, reference, uid, ready, identity, rev) or owed
             await self._tidy(series_id, season, episode, part, root)
         await self._admit()
         await self._cleanup.work_off()
@@ -1083,9 +1089,9 @@ class VoicesModule(BaseModule):
                     await self._io(remove_if_empty, os.path.join(base, str(series_id)))
         return owed
 
-    async def _reference_state(self, series: dict) -> tuple[set, dict[tuple[int, int, int], tuple[str, str, str]]]:
-        """The planned episodes, and (file, media item, identity of its video) of the reference that is on disk, by
-        episode and part.
+    async def _reference_state(self, series: dict) -> tuple[set, dict[tuple[int, int, int], tuple[str, str, str, int | None]]]:
+        """The planned episodes, and (file, media item, identity of its video, revision of its file) of the reference
+        that is on disk, by episode and part.
 
         When a slot holds a superseded file and its winner, the winner is the reference."""
         reply = await self.request("downloads.episodes.get", {"series_id": series["id"]})
@@ -1099,26 +1105,30 @@ class VoicesModule(BaseModule):
             if not await self._io(os.path.isfile, path):
                 continue
             if slot not in found or not item.get("superseded_by"):
-                found[slot] = (path, item["unique_id"], container.identity(item.get("source_id"), item.get("row_key")))
+                found[slot] = (path, item["unique_id"], container.identity(item.get("source_id"), item.get("row_key")),
+                               item.get("file_rev"))
         return in_plan, found
 
     async def _follow(self, series_id: int, season: int, episode: int, part: int, group: list[dict],
-                      reference: str, uid: str, identity: str = "") -> bool:
+                      reference: str, uid: str, identity: str = "", rev: int | None = None) -> bool:
         """Keep the tracks of an episode in step with its reference; True when they went stale. A track aligned to a video
-        of the same identity (the same source and row, another resolution) stays valid and follows it (ЭТАП_11, п. 5)."""
+        of the same identity (the same source and row, another resolution) stays valid and follows it (ЭТАП_11, п. 5).
+        A reference downloaded again is a new file: every verdict on the old one (an alignment, a refusal) is given again,
+        since the old file may not have been the video its row names (a download cut short)."""
         same = [row for row in group if row["ref_uid"] and row["ref_uid"] != uid
                 and identity and row.get("aligned_to") == identity]
         for row in same:
-            await self.repo.follow_reference(row["id"], uid, reference)
+            await self.repo.follow_reference(row["id"], uid, reference, rev)
             self.log.info("сериал %d, s%02de%02d: дорожка %s остаётся — то же видео в другом разрешении",
                           series_id, season, episode, row["voice_label"])
         if same:
             group = await self.repo.for_episode(series_id, season, episode, part)
-        stale = [row for row in group if row["ref_uid"] and row["ref_uid"] != uid]
+        stale = [row for row in group if row["ref_uid"] and (row["ref_uid"] != uid or _another_file(row, rev))]
         if stale:
             for row in stale:
                 # What the row owns, its job included, goes to the journal in the same transaction.
-                await self.repo.reset(row["id"], reason("reference_replaced"))
+                await self.repo.reset(row["id"], reason("reference_downloaded_again" if row["ref_uid"] == uid
+                                                        else "reference_replaced"))
             await self._cleanup.work_off()
             for row in stale:
                 await self._announce(row, E.STALE)
@@ -1255,7 +1265,7 @@ class VoicesModule(BaseModule):
         return True
 
     async def _submit(self, series: dict, season: int, episode: int, part: int, reference: str, uid: str,
-                      ready: list[dict], identity: str = "") -> bool:
+                      ready: list[dict], identity: str = "", rev: int | None = None) -> bool:
         """Send the ready voice-overs of an episode as one job; True when the service was certainly not reached
         and another try is owed. What may have reached it is carried by the recovery from the key."""
         label = f"{series['name']} {slot_tag(season, episode, part)}"
@@ -1283,7 +1293,7 @@ class VoicesModule(BaseModule):
         except Exception:
             await self._io(shutil.rmtree, ref_dir, True, owns=(ref_dir,))
             raise
-        await self.repo.mark_submitting([row["id"] for row in ready], key, uid, reference, out_dir, identity)
+        await self.repo.mark_submitting([row["id"] for row in ready], key, uid, reference, out_dir, identity, rev)
         # A reference that is a container already holds voice-overs: the alignment listens to the video's own sound.
         held = await container.contents(reference)
         self._sending.add(key)

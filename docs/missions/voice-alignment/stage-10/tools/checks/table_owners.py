@@ -79,6 +79,7 @@ COLUMN_OWNERS: dict[str, dict[str, tuple[str, str]]] = {
         "status": ("downloads", "docstring of modules/downloads/repository.py: media_items.status / final_filename"),
         "rename_to": ("downloads", "docstring of modules/downloads/repository.py: media_items.status / final_filename / rename_to"),
         "final_filename": ("downloads", "docstring of modules/downloads/repository.py: media_items.status / final_filename"),
+        "file_rev": ("downloads", "migration 0039: the revision of the file of a row, counted by downloads"),
         "slicing_status": ("slicing", "docstring of modules/slicing/repository.py: media_items.slicing_status / chapters / chapters_filtered"),
         "chapters": ("slicing", "docstring of modules/slicing/repository.py: media_items.slicing_status / chapters / chapters_filtered"),
         "chapters_filtered": ("slicing", "docstring of modules/slicing/repository.py: media_items.slicing_status / chapters / chapters_filtered"),

@@ -55,6 +55,7 @@ export const ru = {
   "reason.download_failed": "загрузка не удалась",
   "reason.not_in_any_source": "серии нет ни в одном источнике",
   "reason.reference_replaced": "референс серии заменён",
+  "reason.reference_downloaded_again": "референс серии скачан заново",
   "reason.track_removed": "дорожка удалена",
   "reason.track_vanished_on_move": "дорожка пропала при переносе",
   "reason.aligned_file_vanished": "выровненный файл пропал",

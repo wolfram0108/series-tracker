@@ -15,6 +15,7 @@ from core.contracts import (CompositionReply, CompositionRow, EffectiveLever, Ep
                             Level, Reference, ReferenceMark, RowState, SubmitReply, group_target)
 from core.db import Database
 from core.envelope import Envelope
+from core.reasons import parse
 from modules.conform import ConformModule
 from modules.conform.paths import roots, workspace
 from modules.settings import SettingsModule
@@ -173,6 +174,7 @@ class Neighbours(BaseModule):
         self.library = library
         self.references = {}  # episode -> file name of the reference video on disk
         self.uids = {}  # episode -> media item of its reference (default: u<episode>)
+        self.file_revs = {}  # episode -> revision of the file of its reference (default: 0)
         self.extra_items = []  # more media items of the plan, as downloads.episodes.get shows them
         self.item_keys: dict[int, str] = {}  # episode -> the row of the reference video, when not the reference's own
         self.marks = {}  # (season, episode) -> mark of the reference when it is not the usual one
@@ -272,7 +274,7 @@ class Neighbours(BaseModule):
         items = [{"unique_id": self.uids.get(episode, f"u{episode}"), "season": season,
                   "episode_start": episode, "part": None, "source_url": reference["links"].get(str(episode), ""),
                   "status": "pending", "final_filename": self.references.get(episode),
-                  "superseded_by": None, "source_id": 1,
+                  "superseded_by": None, "source_id": 1, "file_rev": self.file_revs.get(episode, 0),
                   "row_key": self.item_keys.get(episode, self.row_key(reference, episode))} for season, episode in self.plan]
         return {"items": items + self.extra_items}
 
@@ -2415,6 +2417,12 @@ def another_video(neighbours) -> str:
     return path
 
 
+async def reference_downloaded_again(neighbours, probe):
+    """The same video of the episode is downloaded once more (its file was lost or cut short): a new file of the same row."""
+    neighbours.file_revs[1] = neighbours.file_revs.get(1, 0) + 1
+    probe.publish_event("series.downloaded.changed", {"series_id": 7, "count": 2})
+
+
 async def reference_replaced(neighbours, probe):
     """The video of the episode is replaced by another one: the tracks made for the old one are stale."""
     another_video(neighbours)
@@ -3215,3 +3223,34 @@ async def test_a_track_packed_without_its_identity_takes_it_from_the_container_a
     after = {row["id"]: row for row in await voices.repo.for_series(7) if row["episode"] == 1}
     assert {key: (row["status"], row["ref_uid"]) for key, row in after.items()} == {
         key: ("placed", "u1-better") for key in before}
+
+
+@pytest.mark.asyncio
+async def test_a_reference_downloaded_again_has_every_verdict_on_its_old_file_given_again(dubs):
+    """A verdict is on a pair of files: the old file of the reference may not have been its video (a download cut short),
+    so the tracks aligned to it and the refusals of it are given again on the new one."""
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    voices = dubs[2]
+    before = await voices.repo.for_series(7)
+    assert {row["ref_rev"] for row in before} == {0}
+
+    await reference_downloaded_again(neighbours, probe)
+
+    async def judged_again():
+        # Each voice-over was let go of the old file: it starts over, or it was sent again with the new one.
+        return all(row["ref_rev"] == 1 or (row["ref_rev"] is None and row["status"] != "placed")
+                   for row in await voices.repo.for_series(7))
+
+    await until_true(judged_again, "the tracks of the old file were kept")
+
+
+@pytest.mark.asyncio
+async def test_a_reference_that_is_the_same_file_keeps_its_verdicts(dubs):
+    probe, neighbours, bus, sub, ref = await placed_set(dubs)
+    voices = dubs[2]
+    group = await voices.repo.for_series(7)
+
+    assert not await voices._follow(7, 1, 1, 0, group, ref, "u1", "", 0)
+    assert {row["status"] for row in await voices.repo.for_series(7)} == {"placed"}
+    assert await voices._follow(7, 1, 1, 0, group, ref, "u1", "", 1)
+    assert {parse(row["error"])["code"] for row in await voices.repo.for_series(7)} == {"reference_downloaded_again"}
