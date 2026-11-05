@@ -965,7 +965,7 @@ async def test_a_displaced_file_goes_when_the_container_of_its_winner_is_made(sy
 
     await probe.request("downloads.settle", {"series_id": 2}, timeout=10)
     assert os.path.exists(loser)  # the displaced file lives until the container of the winner is whole (stage 11, 3)
-    assert await _pack(probe) == {"packed": 1, "failed": 0, "unchanged": 0, "waiting": 0}
+    assert await _pack(probe) == {"packed": 1, "failed": 0, "unchanged": 0, "waiting": 0, "failed_slots": []}
 
     assert not os.path.exists(loser) and not os.path.exists(winner)
     assert os.path.isfile(os.path.join(media_dir, "e01 1080p.mkv"))
@@ -974,7 +974,7 @@ async def test_a_displaced_file_goes_when_the_container_of_its_winner_is_made(sy
     assert items["lose"]["status"] == "pending"     # holds no file, so it is not ready; the plan does not want it, so it is not fetched
     assert items["win"]["final_filename"] == "e01 1080p.mkv" and items["win"]["status"] == "completed"
     assert dl.started == []
-    assert await _pack(probe) == {"packed": 0, "failed": 0, "unchanged": 1, "waiting": 0}  # the container is what the plan asks
+    assert await _pack(probe) == {"packed": 0, "failed": 0, "unchanged": 1, "waiting": 0, "failed_slots": []}  # the container is what the plan asks
 
 @pytest.mark.asyncio
 async def test_superseded_file_stays_while_winner_is_not_downloaded(system):

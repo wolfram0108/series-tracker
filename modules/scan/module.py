@@ -57,7 +57,8 @@ Events (outgoing):
       {source: sync}) and its plan stays as the sync found it: a recount an event asks for is done when the run closes.
       An open run is kept in scan_tasks (phase=working) and taken up again after a restart. Each episode is a process of its
       own: the run asks downloads.pack for the episodes no work is about once it has heard every executor, then for each
-      episode as soon as no executor holds work of it (WorkState.busy), and for the whole series when it closes.
+      episode as soon as no executor holds work of it (WorkState.busy); when it closes, for what is still owed (the episodes
+      whose packing failed, or the whole series when the run packed nothing).
   scan.series.progress (SeriesReadProgress) — how far the read of a page is that a scan of the series waits for, per
       source, with the rate; `active` false ends it (read, failed or given up). The card of the series shows it.
 
@@ -150,11 +151,14 @@ def _listed(slots: set[Slot]) -> list[list]:
 @dataclass
 class _Packs:
     """The packings a run of a series owes while it goes: the episodes whose work ended (`pending`), and `others`, every
-    episode no work is about, asked once when the run has heard every executor. One task does them one after another."""
+    episode no work is about, asked once when the run has heard every executor. One task does them one after another.
+    `failed` are the episodes whose packing failed and `unsure` that a packing failed whole: the close asks again for them."""
 
     pending: set[Slot] = field(default_factory=set)
     others: bool = False
     task: asyncio.Task | None = None
+    failed: set[Slot] = field(default_factory=set)
+    unsure: bool = False
 
 
 @dataclass(frozen=True)
@@ -844,6 +848,8 @@ class ScanModule(BaseModule):
             return
         freed = run.apply(state)
         if run.done:
+            # The episodes the last state freed are owed to the close, which packs what the run still owes.
+            self._packs.setdefault(state.series_id, _Packs()).pending |= freed if not run.polling else set()
             await self._close_run(state.series_id)
         elif freed and not run.polling:
             self._owe_pack(state.series_id, slots=freed)
@@ -862,40 +868,50 @@ class ScanModule(BaseModule):
         while packs.others or packs.pending:
             run = self._working.get(series_id)
             if series_id not in self._runs or run is None or series_id in self._closing:
-                return  # the run ended: its last packing looks at every episode
+                return  # the run closes: the close packs what is still owed
             busy = run.slots
             if packs.others:
                 packs.others, packs.pending = False, set()
-                await self._pack(series_id, {"skip": _listed(busy)})
+                _failure, failed = await self._pack(series_id, {"skip": _listed(busy)})
+                packs.unsure = packs.unsure or failed is None
+                packs.failed |= failed or set()
             else:
                 ready, packs.pending = packs.pending - busy, set()
                 if ready:
-                    await self._pack(series_id, {"only": _listed(ready)})
+                    _failure, failed = await self._pack(series_id, {"only": _listed(ready)})
+                    packs.failed = (packs.failed - ready) | (ready if failed is None else failed)
 
-    async def _pack(self, series_id: int, scope: dict) -> str | None:
-        """Asks downloads to pack the episodes of `scope` (all with none); the reason of a failure, None when all went well."""
+    async def _pack(self, series_id: int, scope: dict) -> tuple[str | None, set[Slot] | None]:
+        """Asks downloads to pack the episodes of `scope` (all with none). The reason of a failure (None when all went well)
+        and the episodes that failed (None when the packing failed whole and no episode of it is known to be done)."""
         try:
             packed = await self.request("downloads.pack", {"series_id": series_id, **scope})
         except BusRequestError as exc:
             if NO_HANDLER in str(exc):
-                return None
+                return None, set()
             self.log.error("сериал %d: упаковка не выполнена: %s", series_id, exc)
-            return reason("scan_step_failed", step="downloads.pack")
-        return reason("sync_pack_failed", failed=packed["failed"]) if packed.get("failed") else None
+            return reason("scan_step_failed", step="downloads.pack"), None
+        failed = {tuple(slot) for slot in packed.get("failed_slots", [])}
+        return (reason("sync_pack_failed", failed=packed["failed"]) if packed.get("failed") else None), failed
 
     async def _close_run(self, series_id: int) -> None:
-        """Every work of the run has ended: the last packing looks at every episode of the series (those packed as they got
-        ready are left as they are, ЭТАП_11), then the command goes, the series is free, and a recount an event asked for
-        while the run was open is done now (a plan; the disk follows it at the next sync)."""
+        """Every work of the run has ended: what is still owed is packed (ЭТАП_11) — every episode when the run packed
+        nothing yet (it had no work at all) or a packing of it failed whole, else the episodes freed and not packed yet and
+        those whose packing failed in it, once more; then the command goes, the series is free, and a recount an event asked
+        for while the run was open is done now (a plan; the disk follows it at the next sync)."""
         if series_id not in self._runs or series_id in self._closing:
             return  # the run is closing already: one packing, one end
         self._closing.add(series_id)
         try:
-            # A packing of ready episodes that goes ends first; the last one looks at every episode, those packed are left.
+            # A packing of ready episodes that goes ends first; then only what the run still owes is asked for.
             packs = self._packs.pop(series_id, None)
             if packs is not None and packs.task is not None and not packs.task.done():
                 await asyncio.gather(packs.task, return_exceptions=True)
-            failure = await self._pack(series_id, {})
+            failure = None
+            if packs is None or packs.unsure or packs.others:
+                failure, _failed = await self._pack(series_id, {})
+            elif packs.pending or packs.failed:
+                failure, _failed = await self._pack(series_id, {"only": _listed(packs.pending | packs.failed)})
         finally:
             self._closing.discard(series_id)
         intent = self._runs.pop(series_id, None)

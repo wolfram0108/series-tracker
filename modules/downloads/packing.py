@@ -2,8 +2,9 @@
 
 The file of an episode is one MKV: the video of the reference, its own sound, and the voice-overs in the order of the
 season. Packing is a step of a run of a sync, and each episode is a process of its own: scan asks `downloads.pack` for the
-episodes no work of the run is about, at once, then for each episode as soon as the last work of it ends, and once more for
-the whole series when the run closes (a slot that is what the plan asks is left alone). So the disk changes in a sync alone
+episodes no work of the run is about, at once, then for each episode as soon as the last work of it ends, and when the run
+closes for what it still owes (the slots that failed, or the whole series when the run packed nothing). A slot that is what
+the plan asks is left alone. So the disk changes in a sync alone
 (И-59) and the old container lives until the new one is whole (ЭТАП_11,
 answer 3): the new one is built aside in the folder of the series, read back, and put under the name in one replace.
 
@@ -38,7 +39,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Protocol, Sequence
 
 from core import NO_HANDLER, BusRequestError, container, storage
@@ -76,6 +77,8 @@ class Packed:
     unchanged: int = 0
     # Slots with a file whose video the plan wants is not downloaded yet: the file there stays as it is.
     waiting: int = 0
+    # The slots that failed, [season, episode, part or 0]: the run asks for them again when it closes.
+    failed_slots: list[list] = field(default_factory=list)
 
 
 Ask = Callable[..., Awaitable[Any]]
@@ -187,6 +190,8 @@ class Packing:
             self._set(series, slot, status=outcome, name=name if outcome != "failed" else winner["final_filename"],
                       tracks=self._built.pop(slot, []))
             setattr(done, outcome, getattr(done, outcome) + 1)
+            if outcome == "failed":
+                done.failed_slots.append([slot[0], slot[1], slot[2] or 0])
 
     async def _tracks(self, series_id: int) -> list[dict]:
         try:

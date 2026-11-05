@@ -104,7 +104,8 @@ async def pack(probe):
 
 
 def outcome(reply):
-    return {key: value for key, value in reply.items() if value}
+    """The counts of a packing that are not zero (the slots that failed are looked at apart)."""
+    return {key: value for key, value in reply.items() if value and key != "failed_slots"}
 
 
 @pytest.mark.asyncio
@@ -498,7 +499,8 @@ async def test_a_packing_takes_the_episodes_it_is_asked_for_and_leaves_the_other
         return "ffmpeg_failed: test"
     build = packer.build
     packer.build = broken
-    assert outcome(await probe.request("downloads.pack", {"series_id": 2, "only": [[1, 1, 0]]}, timeout=10)) == {"failed": 1}
+    failed = await probe.request("downloads.pack", {"series_id": 2, "only": [[1, 1, 0]]}, timeout=10)
+    assert outcome(failed) == {"failed": 1} and failed["failed_slots"] == [[1, 1, 0]]  # the run asks for it again
     packer.build = build
 
     assert outcome(await probe.request("downloads.pack", {"series_id": 2, "only": [[1, 2, 0]]}, timeout=10)) == {"waiting": 1}

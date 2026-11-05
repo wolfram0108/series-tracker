@@ -1115,7 +1115,8 @@ async def test_a_run_is_not_closed_while_an_executor_has_not_answered_however_th
     # Voices works: the run stays open; the episodes no work is about are packed at once, not at its end.
     assert drain(runs) == [] and rig.world.payloads["downloads.pack"] == [{"skip": []}]
     work_state(rig, "voices", False)
-    assert runs_of([await next_event(runs)]) == [False] and rig.world.payloads["downloads.pack"] == [{"skip": []}, {}]
+    # Nothing was left owed: the close asks for no packing of its own.
+    assert runs_of([await next_event(runs)]) == [False] and rig.world.payloads["downloads.pack"] == [{"skip": []}]
 
 
 async def test_each_episode_is_packed_as_soon_as_no_executor_holds_work_of_it_and_the_whole_series_at_the_end(rig):
@@ -1142,8 +1143,30 @@ async def test_each_episode_is_packed_as_soon_as_no_executor_holds_work_of_it_an
     assert await wait_until(lambda: len(packs()) == 3, rig.bus, *rig.runner.modules)
     assert packs()[2] == {"only": [[1, 2, 0]]} and runs_of(drain(runs)) == [True]
 
-    work_state(rig, "downloads", False)  # the last work of the run ends: one packing of the whole series closes it
-    assert runs_of([await next_event(runs)]) == [False] and packs()[3:] == [{}]
+    work_state(rig, "downloads", False)  # the last work of the run ends: the episode it freed is packed by the close
+    assert runs_of([await next_event(runs)]) == [False] and packs()[3:] == [{"only": [[1, 3, 0]]}]
+
+
+async def test_a_run_with_no_work_packs_the_whole_series_once_and_a_failed_episode_is_asked_again_at_the_close(rig):
+    rig.world.rows = [rig.row("a", 1, 1)]
+    packs = lambda: rig.world.payloads.get("downloads.pack", [])  # noqa: E731
+    await rig.run()
+    await rig.bus.settled()
+    assert packs() == [{}]  # nothing was worked on: the one packing looks at every episode
+
+    rig.world.payloads.clear()
+    rig.world.work = {"voices": True}
+    rig.world.busy = {"voices": [[1, 1, 0]]}
+    rig.world.pack_reply = {"packed": 0, "failed": 1, "unchanged": 0, "waiting": 0, "failed_slots": [[1, 1, 0]]}
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    await rig.run()
+    assert await wait_until(lambda: len(packs()) == 1, rig.bus, *rig.runner.modules)
+    work_state(rig, "voices", True, [])  # the episode is ready, its packing fails
+    assert await wait_until(lambda: len(packs()) == 2, rig.bus, *rig.runner.modules)
+    rig.world.pack_reply = {"packed": 1, "failed": 0, "unchanged": 0, "waiting": 0, "failed_slots": []}
+    work_state(rig, "voices", False)
+    assert False in runs_of([await next_event(runs) for _ in range(2)])
+    assert packs() == [{"skip": [[1, 1, 0]]}, {"only": [[1, 1, 0]]}, {"only": [[1, 1, 0]]}]  # asked again at the close
 
 
 async def test_an_episode_that_got_work_again_before_its_packing_waits_for_the_end_of_it(rig):
@@ -1164,7 +1187,7 @@ async def test_an_episode_that_got_work_again_before_its_packing_waits_for_the_e
     assert packs() == [{"skip": [[1, 1, 0]]}]  # nothing of a busy episode is packed
     work_state(rig, "voices", False)
     assert await wait_until(lambda: len(packs()) == 2, rig.bus, *rig.runner.modules)
-    assert packs()[1] == {}  # the run closed: its last packing looks at every episode
+    assert packs()[1] == {"only": [[1, 1, 0], [1, 2, 0]]}  # the close packs the episodes the last state freed
 
 
 async def test_an_answer_counted_before_an_event_does_not_undo_it(rig):

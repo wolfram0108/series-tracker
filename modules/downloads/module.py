@@ -32,9 +32,10 @@ Queries / commands:
   downloads.queue.get {} -> {tasks, count} - the live tasks (the window; the snapshot of scan): the tasks of the plan
       and the fetches of the voice-overs (`task_type` fetch: waiting `pending`, under way `downloading` with its progress,
       speed, time left and size, kept with the job as a task keeps them in its row).
-  downloads.pack {series_id, only?, skip?} -> {packed, failed, unchanged, waiting} - a step of a run of a sync (scan): the
-      container of each episode asked becomes what the plan asks (packing.py). `only` names the episodes whose work ended,
-      `skip` those whose work goes on (slots [season, episode, part]); with neither every episode is looked at.
+  downloads.pack {series_id, only?, skip?} -> {packed, failed, unchanged, waiting, failed_slots} - a step of a run of a sync
+      (scan): the container of each episode asked becomes what the plan asks (packing.py). `only` names the episodes whose
+      work ended, `skip` those whose work goes on (slots [season, episode, part]); with neither every episode is looked at.
+      `failed_slots` are the episodes that failed, asked again when the run closes.
   downloads.queue.clear {} -> {deleted} - waiting and failed tasks with their work files; a download under way stays.
   downloads.cancel {task_id} - one task that waits or runs (the table of what is allowed); a task whose files could not be
       removed stays as a failed one, the record of what is left.
