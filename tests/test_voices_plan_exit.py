@@ -5,6 +5,7 @@ import os
 import pytest
 
 from core.contracts import CompositionRow, EffectiveLever, Level, ReferenceMark, RowState, group_target, variant_target
+from modules.voices.module import series_status
 from test_voices import (synced, db_path, dubs, layout_changed, library_files, pass_over, placed_set, quiet, rows,  # noqa: F401
                          settled, until_true)
 
@@ -368,7 +369,7 @@ async def test_the_run_of_a_series_hears_whether_voices_has_work_of_it(dubs):
 
 
 @pytest.mark.asyncio
-async def test_the_status_of_a_series_shows_alignment_while_its_voice_overs_are_worked_on(dubs):
+async def test_the_status_of_a_series_shows_the_step_its_voice_overs_are_at_and_is_told_when_it_changes(dubs):
     probe, neighbours, voices, bus = dubs
     contributions = bus.subscribe("series.status.contribution")
     probe.send_command("voices.dispatch", {"series_id": 7})
@@ -379,8 +380,22 @@ async def test_the_status_of_a_series_shows_alignment_while_its_voice_overs_are_
         payload = contributions.queue.get_nowait().payload
         if payload["source"] == "voices" and payload["series_id"] == 7:
             told.append(payload["flags"])
-    assert told and told[-1] == {"aligning": True}  # told once when it changes, not on every event of a row
-    assert len(told) == len([each for index, each in enumerate(told) if index == 0 or told[index - 1] != each])
+    assert told and told[-1] == series_status(await voices.repo.for_series(7))
+    assert all(told[index - 1] != each for index, each in enumerate(told) if index)  # told when it changes only
+
+
+@pytest.mark.parametrize("steps, flags", [
+    ([], (False, False, False)),
+    (["pending"], (False, False, True)),
+    (["downloading", "pending"], (True, False, True)),
+    (["ready"], (False, False, True)),            # downloaded, waits for its reference: no alignment yet
+    (["aligning", "ready"], (False, True, True)),
+    (["aligned"], (False, False, True)),          # aligned, waits to be placed
+    (["placed", "failed", "rejected"], (False, False, False)),
+])
+def test_alignment_is_shown_only_while_a_job_is_at_the_service_and_a_fetched_file_is_a_download(steps, flags):
+    rows = [{"status": step, "admitted": 1} for step in steps] + [{"status": "aligning", "admitted": 0}]
+    assert series_status(rows) == dict(zip(("downloading", "aligning", "waiting"), flags))
 
 
 @pytest.mark.asyncio

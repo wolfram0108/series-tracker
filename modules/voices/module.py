@@ -54,8 +54,10 @@ Events in:  composition.changed {series_id, rev, episodes, summary_only} and sca
             jobs of the service), series.downloaded.changed,
             downloads.item.renamed, library.relocation.finished, conform.job.finished, conform.job.removed,
             conform.daemon.up, series.deleted.
-Events out: series.status.contribution {source: voices, series_id, flags: {aligning}} — the voice-overs of the series are
-            fetched and aligned (work of a run); told when it changes, and for every series with such work at the start.
+Events out: series.status.contribution {source: voices, series_id, flags: {downloading, aligning, waiting}} — what the
+            voice-overs a sync admitted are at (series_status): a file being fetched, a job at the service of alignment,
+            or waiting for its turn, its reference or its placing; told when it changes, and at the start for every series
+            with such work.
             voices.dub.changed {series_id, season, episode, part, voice_key, voice_label, status, state, hint, detail,
             epoch, rev} — epoch is the number of this start of the module, kept in the database and raised at every
             start; rev grows with every event of a run: the interface keeps the newest (epoch, rev) of two it
@@ -283,7 +285,7 @@ class VoicesModule(BaseModule):
         self._kicked: set[int] = set()
         self._job_status: dict[str, str] = {}
         self._fetching: set[int] = set()
-        self._aligning: dict[int, bool] = {}  # what the status of each series was last told: voice-over work goes on
+        self._status: dict[int, dict[str, bool]] = {}  # what the status of each series was last told
         self._file_fetching: set[int] = set()
         self._admit_lock = asyncio.Lock()
         # The number of a job and its ending arrive in any order; each looks for the other under this lock.
@@ -981,12 +983,12 @@ class VoicesModule(BaseModule):
 
     async def _tell_work(self, series_id: int) -> None:
         """The run of the series hears when this module's work of it begins or ends (the run owner is scan), and the
-        status of the series shows it (`aligning`: the voice-overs are fetched and aligned)."""
-        state = await self._work.tell(series_id)
-        if self._aligning.get(series_id) != state.active:
-            self._aligning[series_id] = state.active
-            self.publish_event("series.status.contribution", {
-                "source": "voices", "series_id": series_id, "flags": {"aligning": state.active}})
+        status of the series shows what that work is at, step by step (`series_status`)."""
+        await self._work.tell(series_id)
+        flags = series_status(await self.repo.for_series(series_id))
+        if self._status.get(series_id) != flags:
+            self._status[series_id] = flags
+            self.publish_event("series.status.contribution", {"source": "voices", "series_id": series_id, "flags": flags})
 
     def _is_fetching(self, row: dict) -> bool:
         """Whether the download behind a voice-over has begun: its own, or the one of the file it reads."""
@@ -1585,6 +1587,15 @@ class VoicesModule(BaseModule):
         await self._cleanup.work_off()
         await self._admit()
         self.publish_event("series.purged", {"series_id": series_id, "owner": self.name})
+
+
+def series_status(rows: list[dict]) -> dict[str, bool]:
+    """The contribution of the voice-overs to the status of their series, by the step of each admitted one at work: its
+    file is fetched (`downloading`), its job is at the service (`aligning`), or it waits — for its turn, its reference,
+    its placing (`waiting`). A voice-over at its end or not admitted by a sync is no work and shows nothing."""
+    steps = {row["status"] for row in rows if row["admitted"] and row["status"] not in FINAL}
+    return {"downloading": S.DOWNLOADING in steps, "aligning": S.ALIGNING in steps,
+            "waiting": bool(steps - {S.DOWNLOADING, S.ALIGNING})}
 
 
 def _packed(row: dict) -> bool:

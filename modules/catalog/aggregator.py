@@ -15,8 +15,9 @@ HIERARCHY = [
     "renaming", "metadata", "activating",
     "downloading", "idle", "queued", "ready", "viewing", "waiting",
 ]
-# scanning — открытый прогон синхронизации сериала (на экране «Обработка»), aligning — у сериала есть живая работа
-# озвучек (voices: загрузка и выравнивание), packing — идёт сборка контейнеров его серий (downloads).
+# scanning — открытый прогон синхронизации сериала (на экране «Обработка»), aligning — задание озвучки у службы
+# выравнивания (voices; загрузку файлов озвучек voices показывает как downloading), packing — идёт сборка контейнеров
+# его серий (downloads).
 # idle — простой торрент-загрузки (qBit stalledDL): отдельный статус
 # рядом с downloading (Р-11, ревизия). Цвет на фронте тот же, что у
 # downloading; меняется только пилюля. Активность как у downloading —

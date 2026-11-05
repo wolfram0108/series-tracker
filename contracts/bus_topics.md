@@ -42,7 +42,7 @@
 | `series.deleted {series_id, delete_from_qb}` | catalog | все владельцы серийных таблиц (scan, torrents, downloads, slicing, renaming, library, metadata, voices, composition), gateway | `series_deleted {id}` |
 | `series.purged {series_id, owner}` | владельцы серийных таблиц | catalog (учёт отчётов о чистке) | — |
 | `series.source.added \| .updated \| .removed {series_id, source_id}` — `SourceEvent` | catalog | composition, gateway | `series_sources_changed` (`SourceChanged`: плюс `what`) |
-| `series.status.contribution {source, series_id, flags}` — вклад в статус сериала: scan — `scanning` (открытый прогон, на экране «Обработка»), slicing — `slicing`, voices — `aligning` (работа озвучек), downloads — `packing` (сборка контейнеров), загрузка и прочее | scan, downloads, torrents, slicing, voices | catalog | — |
+| `series.status.contribution {source, series_id, flags}` — вклад в статус сериала: scan — `scanning` (открытый прогон, на экране «Обработка»), slicing — `slicing`, voices — по этапам допущенных озвучек: `downloading` (качается файл), `aligning` (задание у службы выравнивания), `waiting` (ждёт очереди, референса или выкладки), downloads — `packing` (сборка контейнеров), загрузка и прочее | scan, downloads, torrents, slicing, voices | catalog | — |
 | `series.status.changed {series_id, statuses, is_busy}` | catalog | gateway | `series_updated` |
 | `series.busy.contribution` / `series.busy.changed` | library, renaming / catalog | catalog / gateway | `series_updated` |
 | `series.downloaded.changed {series_id, count}` | downloads, torrents | voices, gateway | `series_updated` (счётчик скачанного) |
