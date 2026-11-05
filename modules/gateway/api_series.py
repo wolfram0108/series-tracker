@@ -141,14 +141,15 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         reply = await gw.request("metadata.map.get",
                                  {"series_id": series_id})
         _attach_tmdb(s, reply["mapping"])
+        s["planned_save_path"] = (await gw.request("library.relocation.get", {"series_id": series_id}))["new_path"]
         return s
 
     @r.post("/api/series/{series_id}", response_model=OkResponse,
             response_model_exclude_none=True, responses=_ERRORS)
     async def update_series(series_id: int, body: SeriesUpdate):
-        """Saving the properties: catalog, then metadata, then library when the folder moves.
+        """Saving the properties: catalog, then metadata, then the plan of library for the folder.
         The sources are not changed here; the layout of a video series is counted again on
-        series.updated. The files take the names of the new properties at the next sync (И-59)."""
+        series.updated. The files take the new names and folder at the next sync (И-59)."""
         sent = body.model_dump(mode="json", exclude_unset=True)
         try:
             series = await gw.request("catalog.series.get",
@@ -162,10 +163,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         if tmdb_data := sent.get("tmdb_data"):
             await gw.request("metadata.map.set", {
                 "series_id": series_id, "tmdb_data": tmdb_data})
-        new_path = sent.get("save_path")
-        if new_path and new_path != series.get("save_path"):
+        if new_path := sent.get("save_path"):
             try:
-                await gw.request("library.relocate", {
+                await gw.request("library.relocation.plan", {
                     "series_id": series_id, "new_path": new_path})
             except BusRequestError as exc:
                 return _error_response(exc)

@@ -120,6 +120,8 @@ class SeriesObject(ApiModel):
     ignored_episodes: str | None = None
     last_scan_time: str | None = None
     tmdb_info: TmdbInfo | None = None
+    # The folder a save asked for, where the next sync moves the files (И-59); the card only.
+    planned_save_path: str | None = None
 
 
 class SourceDraft(RequestModel):

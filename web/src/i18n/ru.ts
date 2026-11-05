@@ -277,6 +277,7 @@ export const ru = {
   "sources.progress": "{phase}: {current} из {total}",
   "sources.progress.rate": "{phase}: {current} из {total} | {rate} с/с",
   "series.reading": "Чтение сайта: {text}",
+  "series.relocation.planned": "Папка будет перенесена при синхронизации. Сейчас файлы лежат в {path}",
   "output.reading": "Чтение сайта {site}: {text}",
   "output.voices.title": "Порядок озвучек в контейнере",
   "output.voices.label": "{label} ({episodes})",

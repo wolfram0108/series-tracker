@@ -94,8 +94,9 @@ _NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
 }
 
 # The topics whose request has no fuse of its own (see the top).
-# The packing of a series is one build for each episode, each with a fuse of its own (core.container.BUILD_TIMEOUT_S).
-_UNBOUNDED = frozenset({"scan.series.run", "scan.series.prepare", "downloads.pack"})
+# The packing of a series is one build for each episode, each with a fuse of its own (core.container.BUILD_TIMEOUT_S);
+# the move of a series is one move for each file, each with its own (core.storage.MOVE_TIMEOUT_S).
+_UNBOUNDED = frozenset({"scan.series.run", "scan.series.prepare", "downloads.pack", "library.relocation.apply"})
 
 UNBOUNDED = None
 

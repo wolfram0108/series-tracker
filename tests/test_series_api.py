@@ -63,6 +63,7 @@ class Neighbours(BaseModule):
 
     def __init__(self, bus):
         self.calls: list[tuple[str, dict]] = []
+        self.planned: dict[int, str] = {}
         super().__init__(bus)
 
     def register(self):
@@ -100,9 +101,13 @@ class Neighbours(BaseModule):
             self.calls.append(("reprocess", env.payload))
             return {"ok": True}
 
-        async def relocate(env):
-            self.calls.append(("relocate", env.payload))
-            return {"task_id": 7}
+        async def plan_move(env):
+            self.calls.append(("plan", env.payload))
+            self.planned[env.payload["series_id"]] = env.payload["new_path"]
+            return {"new_path": env.payload["new_path"]}
+
+        async def planned_move(env):
+            return {"new_path": self.planned.get(env.payload["series_id"])}
 
         async def db_add(env):
             self.calls.append(("torrents.db.add", env.payload))
@@ -117,7 +122,8 @@ class Neighbours(BaseModule):
         self.handle("downloads.fs.sync", fs_sync)
         self.handle("torrents.fs.verify", fs_verify)
         self.handle("renaming.reprocess", reprocess)
-        self.handle("library.relocate", relocate)
+        self.handle("library.relocation.plan", plan_move)
+        self.handle("library.relocation.get", planned_move)
         self.handle("torrents.db.add", db_add)
 
         async def dubs(env):
@@ -367,23 +373,26 @@ async def test_update_without_path_change_touches_no_file_whatever_the_kind(syst
     row = await db.fetch_one("SELECT name FROM series WHERE id=?", (series_id,))
     assert row["name"] == "Переименован"
     await settle(bus, neighbours)  # the command is background work of the gateway: done when the bus is quiet
-    assert all(c[0] not in ("reprocess", "relocate") for c in neighbours.calls)
+    assert all(c[0] != "reprocess" for c in neighbours.calls)
+    # the path goes to library, which knows the series is there already
+    assert ("plan", {"series_id": series_id, "new_path": "/media/t" if series_id == 1 else "/media/s"}) in neighbours.calls
     # the layout of a video series is counted again on series.updated; the gateway starts no sync
     assert "scan.series.run" not in topics(spy)
 
 
 @pytest.mark.asyncio
-async def test_update_with_path_change_calls_relocate(system):
+async def test_update_with_path_change_plans_the_move_and_the_card_shows_it(system):
     _, db, client, neighbours = system
     resp = await client.post("/api/series/1", json={
         "name": "Тайтл", "save_path": "/media/new"})
     assert resp.status_code == 200
-    assert ("relocate", {"series_id": 1, "new_path": "/media/new"}) \
-        in neighbours.calls
-    # save_path пишет library после перемещения — gateway его не трогает
+    assert ("plan", {"series_id": 1, "new_path": "/media/new"}) in neighbours.calls
+    # save_path пишет library после перемещения в синхронизации — gateway его не трогает
     row = await db.fetch_one("SELECT save_path FROM series WHERE id=1")
     assert row["save_path"] == "/media/t"
     assert all(c[0] != "reprocess" for c in neighbours.calls)
+    card = (await client.get("/api/series/1")).json()
+    assert (card["save_path"], card["planned_save_path"]) == ("/media/t", "/media/new")
 
 
 @pytest.mark.asyncio

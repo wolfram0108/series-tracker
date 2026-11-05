@@ -10,18 +10,30 @@ class LibraryRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    async def create(self, series_id: int, new_path: str) -> int | None:
-        """None — активная задача уже есть (отказ, как в оригинале)."""
-        existing = await self._db.fetch_one(
-            "SELECT id FROM relocation_tasks WHERE series_id=? AND "
-            "status IN ('pending', 'in_progress')", (series_id,))
-        if existing:
-            return None
-        return await self._db.insert(
-            "INSERT INTO relocation_tasks (series_id, new_path, status, "
-            "created_at) VALUES (?, ?, 'pending', ?)",
-            (series_id, new_path,
-             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")))
+    # planned — written by a save, made by the next sync (И-59); in_progress — being made; pending — a move written
+    # before the plans, made when found.
+    async def plan(self, series_id: int, new_path: str) -> None:
+        """One plan per series: a later save replaces the path of the earlier one."""
+        if not await self._db.execute(
+                "UPDATE relocation_tasks SET new_path=?, error_message=NULL WHERE series_id=? AND status='planned'",
+                (new_path, series_id)):
+            await self._db.insert(
+                "INSERT INTO relocation_tasks (series_id, new_path, status, created_at) VALUES (?, ?, 'planned', ?)",
+                (series_id, new_path, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")))
+
+    async def drop_plan(self, series_id: int) -> bool:
+        return bool(await self._db.execute(
+            "DELETE FROM relocation_tasks WHERE series_id=? AND status='planned'", (series_id,)))
+
+    async def moving(self, series_id: int) -> bool:
+        return await self._db.fetch_one(
+            "SELECT id FROM relocation_tasks WHERE series_id=? AND status IN ('pending', 'in_progress')",
+            (series_id,)) is not None
+
+    async def of_series(self, series_id: int) -> dict | None:
+        return await self._db.fetch_one(
+            "SELECT * FROM relocation_tasks WHERE series_id=? AND status IN ('planned', 'pending', 'in_progress') "
+            "ORDER BY created_at DESC", (series_id,))
 
     async def unfinished(self) -> list[dict]:
         return await self._db.fetch_all(

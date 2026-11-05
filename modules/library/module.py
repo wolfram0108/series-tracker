@@ -1,13 +1,16 @@
 """Модуль library — файловая система медиатеки.
 
-Листинг каталогов (этап 2) + перемещение сериалов (Р-17, этап 4):
-  query library.relocate {series_id, new_path} — валидации оригинала
-      (существование путей, один диск), отказ при активной задаче;
-      исполнение асинхронно, по завершении library сам вызывает
-      renaming.reprocess (цепочка «переместили → переименовали»).
-События: library.relocation.started/finished (контракты SSE),
-series.busy.contribution {source: library} — карточка занята на время
-перемещения (и только на время работы — находка 36).
+Листинг каталогов (этап 2) + перемещение сериалов (Р-17, этап 4). Диск меняется только в синхронизации (И-59):
+  query library.relocation.plan {series_id, new_path} -> {new_path | None} — сохранение карточки записывает план
+      переноса (проверки оригинала: абсолютный путь, разрешённый корень, один диск); путь, где сериал уже лежит,
+      снимает план; во время переноса — отказ;
+  query library.relocation.get {series_id} -> {new_path | None} — перенос, который ждёт синхронизации или идёт;
+  query library.relocation.apply {series_id} -> {moved} — первый шаг прогона синхронизации (scan): перенос по плану,
+      ответ после его конца; провал — ошибка запроса, план остаётся до следующей синхронизации. Имена файлов
+      синхронизация приводит к правилам сама, после переноса.
+События: library.relocation.planned {series_id, new_path | None}; library.relocation.started/finished (контракты SSE);
+series.busy.contribution {source: library} — карточка занята на время перемещения (и только на время работы —
+находка 36). Перенос, прерванный остановкой процесса, продолжается на старте (это работа начатой синхронизации).
 
 По разбору старого routes/filebrowser.py (находка №9): список
 allowed_roots содержал '/', что делало проверку фиктивной — ЛЮБОЙ
@@ -51,7 +54,9 @@ class LibraryModule(BaseModule):
 
     def register(self) -> None:
         self.handle("library.directories.list", self.on_list_directories)
-        self.handle("library.relocate", self.on_relocate)
+        self.handle("library.relocation.plan", self.on_plan)
+        self.handle("library.relocation.get", self.on_get)
+        self.handle("library.relocation.apply", self.on_apply)
         self.handle("series.deleted", self.on_series_deleted)
         self.handle("system.started", self.on_system_started)
 
@@ -62,9 +67,7 @@ class LibraryModule(BaseModule):
         for task in await self.repo.unfinished():
             self.log.info("возобновление перемещения: задача %d, сериал %d",
                           task["id"], task["series_id"])
-            t = asyncio.create_task(self._execute(task))
-            self._relocations[task["series_id"]] = t
-            self._tasks.append(t)
+            self._start(task)
 
     def _check_allowed(self, path: str) -> None:
         if self._allowed_roots is None:
@@ -98,28 +101,51 @@ class LibraryModule(BaseModule):
 
     # --- перемещение (Р-17) ----------------------------------------------------------
 
-    async def on_relocate(self, env: Envelope) -> dict:
+    async def on_plan(self, env: Envelope) -> dict:
+        """The save of the card: the move is written down, the files stay where they are until the sync (И-59)."""
         series_id = env.payload["series_id"]
         new_path = sanitize_path(env.payload["new_path"])
+        series = await self.request("catalog.series.get",
+                                    {"series_id": series_id})
+        if series_id in self._relocations or await self.repo.moving(series_id):
+            raise LibraryError("перемещение сериала уже выполняется")
+        if new_path == series["save_path"]:
+            if await self.repo.drop_plan(series_id):
+                self.publish_event("library.relocation.planned", {"series_id": series_id, "new_path": None})
+            return {"new_path": None}
         if not os.path.isabs(new_path):
             raise LibraryError(
                 "путь сохранения должен быть абсолютным (например, /nas/...)")
-        series = await self.request("catalog.series.get",
-                                    {"series_id": series_id})
-        old_path = series["save_path"]
-        if new_path == old_path:
-            raise LibraryError("путь не изменился")
         self._check_allowed(os.path.normpath(new_path))
-        await storage.call(self._check_same_device, old_path, new_path)
-        task_id = await self.repo.create(series_id, new_path)
-        if task_id is None:
-            raise LibraryError("активная задача на перемещение уже "
-                               "выполняется")
-        task = {"id": task_id, "series_id": series_id, "new_path": new_path}
+        await storage.call(self._check_same_device, series["save_path"], new_path)
+        await self.repo.plan(series_id, new_path)
+        self.publish_event("library.relocation.planned", {"series_id": series_id, "new_path": new_path})
+        return {"new_path": new_path}
+
+    async def on_get(self, env: Envelope) -> dict:
+        task = await self.repo.of_series(env.payload["series_id"])
+        return {"new_path": task["new_path"] if task else None}
+
+    async def on_apply(self, env: Envelope) -> dict:
+        """The first step of a sync: the planned move is made and answered when it has ended; a move a restart took up
+        is waited for. A failure is the failure of the request, and the plan stays for the next sync."""
+        series_id = env.payload["series_id"]
+        running = self._relocations.get(series_id)
+        if running is None:
+            task = await self.repo.of_series(series_id)
+            if task is None:
+                return {"moved": False}
+            running = self._start(task)
+        await running
+        return {"moved": True}
+
+    def _start(self, task: dict) -> asyncio.Task:
         t = asyncio.create_task(self._execute(task))
-        self._relocations[series_id] = t
+        # A move taken up at the start has no one waiting: its failure is in the log and on its plan.
+        t.add_done_callback(lambda done: done.cancelled() or done.exception())
+        self._relocations[task["series_id"]] = t
         self._tasks.append(t)
-        return {"task_id": task_id}
+        return t
 
     @staticmethod
     def _check_same_device(old_path: str, new_path: str) -> None:
@@ -150,17 +176,18 @@ class LibraryModule(BaseModule):
             await self.repo.delete(task["id"])
             self.log.info("сериал %d перемещён: %s -> %s", series_id,
                           old_base, new_base)
-            await self._reprocess_names(series_id)
             self.publish_event("library.relocation.finished", {
                 "series_id": series_id, "success": True,
                 "message": "Сериал успешно перемещен."})
-        except Exception as exc:  # noqa: BLE001 — ошибка остаётся носителем
+        except Exception as exc:
+            # The plan stays with its error: the next sync makes the move again (a moved file is skipped).
             self.log.exception("перемещение сериала %d не удалось",
                                series_id)
-            await self.repo.set_status(task["id"], "error", str(exc))
+            await self.repo.set_status(task["id"], "planned", str(exc))
             self.publish_event("library.relocation.finished", {
                 "series_id": series_id, "success": False,
                 "message": str(exc)})
+            raise
         finally:
             # busy — только активная работа (находка 36)
             self._relocations.pop(series_id, None)
@@ -201,19 +228,6 @@ class LibraryModule(BaseModule):
             if torrent.get("qb_hash"):
                 await self.request("torrents.set_location", {
                     "hash": torrent["qb_hash"], "location": new_base})
-
-    async def _reprocess_names(self, series_id: int) -> None:
-        """Цепочка оригинала: после перемещения — переименование."""
-        try:
-            await self.request("renaming.reprocess",
-                               {"series_id": series_id})
-        except BusRequestError as exc:
-            if _NO_HANDLER in str(exc):
-                self.log.warning("модуль renaming недоступен — "
-                                 "переименование после перемещения "
-                                 "пропущено")
-            else:
-                self.log.error("переименование после перемещения: %s", exc)
 
     def _busy(self, series_id: int, busy: bool) -> None:
         self.publish_event("series.busy.contribution", {

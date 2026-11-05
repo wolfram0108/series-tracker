@@ -216,9 +216,9 @@ export interface paths {
         put?: never;
         /**
          * Update Series
-         * @description Saving the properties: catalog, then metadata, then library when the folder moves.
+         * @description Saving the properties: catalog, then metadata, then the plan of library for the folder.
          *     The sources are not changed here; the layout of a video series is counted again on
-         *     series.updated. The files take the names of the new properties at the next sync (И-59).
+         *     series.updated. The files take the new names and folder at the next sync (И-59).
          */
         post: operations["update_series_api_series__series_id__post"];
         /** Delete Series */
@@ -2334,6 +2334,8 @@ export interface components {
             /** Last Scan Time */
             last_scan_time?: string | null;
             tmdb_info?: components["schemas"]["TmdbInfo"] | null;
+            /** Planned Save Path */
+            planned_save_path?: string | null;
         } & {
             [key: string]: unknown;
         };

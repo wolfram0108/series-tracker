@@ -171,7 +171,7 @@ async def test_the_steps_of_a_synchronization_follow_one_another_by_signals(rig)
     await rig.world.dispatched.get()
     await rig.world.dispatched.get()
     assert rig.world.order == [
-        "downloads.fs.sync", f"sources.table.get {URL1}", "composition.recompute",
+        f"library.relocation.apply {rig.series_id}", "downloads.fs.sync", f"sources.table.get {URL1}", "composition.recompute",
         "composition.get", "voices.settings.get", "renaming.reprocess", f"downloads.dispatch {rig.series_id}",
         f"voices.dispatch {rig.series_id}", f"downloads.work.get {rig.series_id}", f"voices.work.get {rig.series_id}"]
 
@@ -409,6 +409,25 @@ async def test_a_failed_step_fails_the_scan_with_its_reason_and_the_next_scan_cl
     rig.world.recompute_error = None
     await rig.run()
     assert rig.query("SELECT * FROM scan_tasks WHERE series_id=?", (rig.series_id,)) == []
+
+
+async def test_the_folder_a_save_planned_is_moved_first_and_the_sync_works_in_it(rig):
+    """The disk changes in a sync alone (И-59): the move a save planned is its first step."""
+    rig.world.rows = [rig.row("a", 1, 1)]
+    rig.world.planned_path = "/media/moved"
+    await rig.run(download=False)
+    assert rig.world.order[0] == f"library.relocation.apply {rig.series_id}"
+    assert rig.query("SELECT save_path FROM series WHERE id=?", (rig.series_id,)) == [{"save_path": "/media/moved"}]
+
+
+async def test_a_move_that_fails_fails_the_sync_before_anything_else_is_done(rig):
+    rig.world.rows = [rig.row("a", 1, 1)]
+    rig.world.move_error = "перемещение между разными дисками не поддерживается"
+    with pytest.raises(BusRequestError, match="разными дисками"):
+        await rig.run()
+    assert rig.world.order == [f"library.relocation.apply {rig.series_id}"]
+    carrier = rig.query("SELECT status FROM scan_tasks WHERE series_id=?", (rig.series_id,))
+    assert [each["status"] for each in carrier] == ["error"]
 
 
 async def test_a_series_whose_sources_have_no_profile_is_refused(db_path):

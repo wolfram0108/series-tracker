@@ -38,7 +38,8 @@ const isVideo = s.kind === "video"
 const form = reactive({
   name: String(s.name ?? ""),
   name_en: String((s as Record<string, unknown>).name_en ?? ""),
-  save_path: String((s as Record<string, unknown>).save_path ?? ""),
+  // A folder a save asked for and the next sync moves to is what the card holds (И-59).
+  save_path: String(s.planned_save_path ?? (s as Record<string, unknown>).save_path ?? ""),
   season: String(s.season ?? ""),
   quality: String((s as Record<string, unknown>).quality ?? ""),
   quality_override: String((s as Record<string, unknown>).quality_override ?? ""),
@@ -347,6 +348,9 @@ onMounted(() => {
             <StIcon icon="pi pi-hashtag" />
             <StInput v-model="form.season" label="Сезон (формат s01)" />
           </StGroup>
+        </div>
+        <div v-if="s.planned_save_path" class="relocation-planned">
+          {{ t("series.relocation.planned", { path: String(s.save_path ?? "") }) }}
         </div>
         <div v-if="form.save_path && !isAbsolutePath(form.save_path)" class="add-error">
           Путь должен быть абсолютным и начинаться с «/», например /nas/...

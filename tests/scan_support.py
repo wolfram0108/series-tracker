@@ -96,6 +96,9 @@ class World(BaseModule):
         self.settings_values = {"scan_interval_minutes": "60"}
         # Whether each executor has work of the series when a run asks (`<owner>.work.get`); none by default.
         self.work: dict[str, bool] = {}
+        # The folder a save planned for the series (library), made by the first step of a sync, and its failure.
+        self.planned_path: str | None = None
+        self.move_error: str | None = None
         # One token per request for a table: the signal that scan has asked.
         self.asked: asyncio.Queue[str] = asyncio.Queue()
         # One token per command to download or to take the voice-overs: the signal that scan has sent it.
@@ -105,6 +108,7 @@ class World(BaseModule):
     def register(self) -> None:
         h = self.handle
         h("renaming.reprocess", self.on_reprocess)
+        h("library.relocation.apply", self.on_relocation_apply)
         h("downloads.fs.sync", self.on_fs_sync)
         h("downloads.queue.get", self.on_queue)
         h("downloads.dispatch", self.on_dispatch)
@@ -127,6 +131,17 @@ class World(BaseModule):
         self.reprocess_calls += 1
         self.order.append("renaming.reprocess")
         return {"ok": True}
+
+    async def on_relocation_apply(self, env) -> dict:
+        self.order.append(f"library.relocation.apply {env.payload['series_id']}")
+        if self.move_error:
+            raise RuntimeError(self.move_error)
+        if self.planned_path is None:
+            return {"moved": False}
+        await self.request("catalog.series.set_save_path", {"series_id": env.payload["series_id"],
+                                                            "save_path": self.planned_path})
+        self.planned_path = None
+        return {"moved": True}
 
     async def on_fs_sync(self, env) -> dict:
         self.fs_sync_calls += 1

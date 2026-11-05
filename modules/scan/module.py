@@ -469,6 +469,7 @@ class ScanModule(BaseModule):
                     "профиль правил")
             # Прошлая ошибка сбрасывается новым сканом (Р-11).
             await self.repo.delete_error_tasks(series_id)
+            series = await self._relocate(series)
             if video:
                 result = await self._sync_video(series, download, inventory)
                 await self._hold_run(series_id, intent)
@@ -552,6 +553,19 @@ class ScanModule(BaseModule):
             return True
         except BusRequestError:
             return False
+
+    async def _relocate(self, series: dict) -> dict:
+        """The first step of a sync: the move of the folder a save planned (И-59); everything after it works in the new
+        folder. A failed move fails the sync, and its plan waits for the next one."""
+        try:
+            reply = await self.request("library.relocation.apply", {"series_id": series["id"]})
+        except BusRequestError as exc:
+            if _NO_HANDLER in str(exc):
+                return series
+            raise
+        if not reply["moved"]:
+            return series
+        return await self.request("catalog.series.get", {"series_id": series["id"]})
 
     async def _reprocess_names(self, series_id: int) -> None:
         """Переобработка имён до скана — request/reply вместо
