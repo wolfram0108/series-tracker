@@ -175,7 +175,9 @@
   flex-wrap: wrap;
   gap: var(--pattern-gap);
   min-height: 38px;
-  align-items: flex-start;
+  /* Every block of a line is as tall as the tallest one: a text with its field, a number, «или» alike. */
+  align-items: stretch;
+  align-content: flex-start;
   padding: 0.25rem;
   flex-grow: 1;
   position: relative;
@@ -188,14 +190,12 @@
   font-size: 0.9rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   position: relative;
-  height: 30px;
 }
-.block-type-text { background-color: #e9ecef; height: auto; }
+.block-type-text { background-color: #e9ecef; }
 .block-type-operation {
   background-color: #ffedd5;
   color: #9a3412;
   font-weight: bold;
-  height: auto;
 }
 .block-type-number { background-color: #cfe2ff; color: #004085; font-weight: bold; }
 .block-type-range {
