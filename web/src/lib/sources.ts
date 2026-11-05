@@ -58,8 +58,6 @@ export interface SourceItem {
   profileId: number | null
   vibixSeason: number | null
   playersOff: string[]
-  /** The name of the voice-over of the lines that have none; empty when the user gave none. */
-  voiceName: string
   view: SourceView
 }
 
@@ -291,14 +289,13 @@ export function siteOf(address: string): string {
 }
 
 /** The body of a new source for `POST /api/series` and `POST /api/series/{id}/sources`. */
-export function draftBody(item: Pick<SourceItem, "url" | "sourceType" | "profileId" | "vibixSeason" | "playersOff" | "voiceName">): SourceDraft {
+export function draftBody(item: Pick<SourceItem, "url" | "sourceType" | "profileId" | "vibixSeason" | "playersOff">): SourceDraft {
   return {
     url: item.url,
     source_type: item.sourceType,
     parser_profile_id: item.profileId,
     vibix_season: item.vibixSeason,
     players_off: item.playersOff,
-    voice_name: item.voiceName,
   }
 }
 
@@ -313,7 +310,6 @@ export function itemOfSource(
     profileId: source.parser_profile_id ?? null,
     vibixSeason: source.vibix_season ?? null,
     playersOff,
-    voiceName: source.voice_name ?? "",
     view: viewOf({ summary, playersOff, live, rows: layout.filter((row) => row.source_id === source.id) }),
   }
 }

@@ -45,14 +45,6 @@ watch(() => props.item.url, (url) => {
   query.value = parts.query
 }, { immediate: true })
 
-// The name of the voice-over of the source is typed and sent when the field is left, like the channel.
-const voiceName = ref("")
-watch(() => props.item.voiceName, (name) => { voiceName.value = name }, { immediate: true })
-function commitVoiceName(): void {
-  const name = voiceName.value.trim()
-  if (name !== props.item.voiceName) emit("change", { voiceName: name })
-}
-
 // A channel is read whole and only the query keeps its videos: an address without one is not sent.
 function commitChannel(): void {
   if (!vkQuery(query.value)) return
@@ -125,13 +117,6 @@ async function copyAddress(): Promise<void> {
       />
     </StGroup>
     <small v-if="item.profileId === null && !isTorrent" class="muted">{{ t("sources.profile.hint") }}</small>
-    <div v-if="!isTorrent" class="stack source-voice-name" @focusout="commitVoiceName" @keyup.enter="commitVoiceName">
-      <StGroup>
-        <StIcon icon="pi pi-microphone" />
-        <StInput v-model="voiceName" :label="t('sources.voiceName.label')" />
-      </StGroup>
-      <small class="muted">{{ t("sources.voiceName.hint") }}</small>
-    </div>
     <div v-if="view.reason" class="source-reason">{{ reasonText(view.reason) }}</div>
 
     <ul v-if="!isTorrent && view.players.length" class="players grid-fit">

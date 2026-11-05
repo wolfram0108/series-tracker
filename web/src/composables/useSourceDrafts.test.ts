@@ -24,7 +24,7 @@ const summary = {
   ],
 }
 // The choices of a source that the preview takes beside the address: they decide which rows of the page are in play.
-const NO_CHOICES = { players_off: [], vibix_season: null, voice_name: "" }
+const NO_CHOICES = { players_off: [], vibix_season: null }
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -44,7 +44,6 @@ describe("useSourceDrafts", () => {
     expect(drafts.items.value[0].view.state).toBe("reading")
     expect(drafts.bodies.value).toEqual([{
       url: PAGE, source_type: "web_video", parser_profile_id: null, vibix_season: null, players_off: [],
-      voice_name: "",
     }])
   })
 

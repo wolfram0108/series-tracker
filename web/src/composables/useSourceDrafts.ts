@@ -16,7 +16,6 @@ interface Draft {
   profileId: number | null
   vibixSeason: number | null
   playersOff: string[]
-  voiceName: string
   /** The address the core names the page with in its events; known after the first preview. */
   canonical: string
   summary: SourceSummary | null
@@ -27,7 +26,7 @@ interface Draft {
   handled: PageStatus | null
 }
 
-export type DraftPatch = Partial<Pick<SourceItem, "url" | "profileId" | "vibixSeason" | "playersOff" | "voiceName">>
+export type DraftPatch = Partial<Pick<SourceItem, "url" | "profileId" | "vibixSeason" | "playersOff">>
 /** `kind`: the address is no site's, so it is not a video source (the window goes on as with a torrent). */
 export type AddOutcome = { kind: "added" } | { kind: "other" } | { kind: "refused"; text: string }
 
@@ -51,7 +50,6 @@ export function useSourceDrafts() {
     profileId: draft.profileId,
     vibixSeason: draft.vibixSeason,
     playersOff: draft.playersOff,
-    voiceName: draft.voiceName,
     view: viewOf({
       summary: draft.summary, playersOff: draft.playersOff, rows: draft.rows, live: tables.forUrl(draft.canonical),
       asked: draft.asked,
@@ -67,7 +65,7 @@ export function useSourceDrafts() {
     const before = tables.forUrl(draft.canonical)
     const answer = await previewAddress({
       url: draft.url, profile_id: draft.profileId, refresh,
-      players_off: draft.playersOff, vibix_season: draft.vibixSeason, voice_name: draft.voiceName,
+      players_off: draft.playersOff, vibix_season: draft.vibixSeason,
     })
     if (!drafts.value.includes(draft)) return
     if (!answer.ok) {
@@ -114,7 +112,7 @@ export function useSourceDrafts() {
       }
       const draft: Draft = {
         key: `draft-${++counter}`, url, sourceType, profileId: null, vibixSeason: null,
-        playersOff: [], voiceName: "", canonical: "", summary: null, rows: [], asked: { state: "reading" }, handled: null,
+        playersOff: [], canonical: "", summary: null, rows: [], asked: { state: "reading" }, handled: null,
       }
       drafts.value.push(draft)
       await ask(drafts.value[drafts.value.length - 1], true)
@@ -136,7 +134,6 @@ export function useSourceDrafts() {
     // What a profile or a choice of the source changes is recounted from the table in hand, reading nothing.
     const recounts = (patch.profileId !== undefined && patch.profileId !== draft.profileId)
       || (patch.vibixSeason !== undefined && patch.vibixSeason !== draft.vibixSeason)
-      || (patch.voiceName !== undefined && patch.voiceName !== draft.voiceName)
       || (patch.playersOff !== undefined && patch.playersOff.join("\u0000") !== draft.playersOff.join("\u0000"))
     Object.assign(draft, patch)
     if (rereads) {

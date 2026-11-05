@@ -46,9 +46,8 @@ export function previewAddress(body: {
   refresh?: boolean
   players_off?: string[]
   vibix_season?: number | null
-  voice_name?: string
 }): Promise<Answer<PreviewReply>> {
-  return call(() => api.POST("/api/sources/preview", { body: { refresh: true, voice_name: "", ...body } }))
+  return call(() => api.POST("/api/sources/preview", { body: { refresh: true, ...body } }))
 }
 
 /** Reads the page now, whatever the age of its table; how the read goes and where it ends come as events. */

@@ -321,8 +321,6 @@ export const ru = {
   "sources.player.use": "Использовать плеер {player}",
   "sources.player.off": "отключён",
   "sources.player.none": "Плееры на странице не найдены",
-  "sources.voiceName.label": "Название озвучки источника",
-  "sources.voiceName.hint": "Для строк, у которых нет названия озвучки и которое не назначили правила (у канала VK его нет).",
   "sources.voice.noGroup": "Нет",
   "sources.voice.group": "Группа {group}",
   "sources.voice.line": "{ranges} {name} ({group})",

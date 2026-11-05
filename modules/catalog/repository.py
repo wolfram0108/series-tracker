@@ -30,12 +30,12 @@ _WRITABLE = {"name", "name_en", "site", "save_path", "season", "quality",
              "ignored_seasons", "ignored_episodes"}
 
 _SOURCE_COLUMNS = ("id, series_id, position, url, source_type, parser_profile_id, "
-                   "vibix_season, players_off, voice_name")
+                   "vibix_season, players_off")
 
 _ADD_SOURCE = ("INSERT INTO series_sources (series_id, position, url, source_type, parser_profile_id, "
-               "vibix_season, players_off, voice_name) "
+               "vibix_season, players_off) "
                "VALUES (?, COALESCE(?, (SELECT MAX(position) + 1 FROM series_sources WHERE series_id=?), 0), "
-               "?, ?, ?, ?, ?, ?)")
+               "?, ?, ?, ?, ?)")
 
 
 def _source(row: dict) -> dict:
@@ -51,8 +51,7 @@ def _stored(values: dict) -> dict:
 def _add_source_args(series_id: int, values: dict) -> tuple:
     stored = _stored(values)
     return (series_id, stored.get("position"), series_id, stored["url"], stored["source_type"],
-            stored["parser_profile_id"], stored["vibix_season"], stored["players_off"],
-            stored["voice_name"])
+            stored["parser_profile_id"], stored["vibix_season"], stored["players_off"])
 
 
 def _refusal(exc: sqlite3.IntegrityError, values: dict) -> Exception:

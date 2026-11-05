@@ -87,7 +87,7 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     if (typed.kind === "other") return refused(t("sources.add.notSite"))
     const { sourceType, url } = typed
     const done = await act(() => createSource(seriesId, draftBody({
-      url, sourceType, profileId: null, vibixSeason: null, playersOff: [], voiceName: "",
+      url, sourceType, profileId: null, vibixSeason: null, playersOff: [],
     })))
     if (done) await load()
     return done
@@ -103,7 +103,6 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     ...(patch.profileId !== undefined && { parser_profile_id: patch.profileId }),
     ...(patch.vibixSeason !== undefined && { vibix_season: patch.vibixSeason }),
     ...(patch.playersOff !== undefined && { players_off: patch.playersOff }),
-    ...(patch.voiceName !== undefined && { voice_name: patch.voiceName }),
   })
 
   async function change(id: string | number, patch: DraftPatch): Promise<void> {

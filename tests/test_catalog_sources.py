@@ -90,7 +90,7 @@ async def test_a_series_is_given_with_its_kind_and_its_sources(system):
     assert [s["id"] for s in two["sources"]] == list(video.source_ids)
     assert two["sources"][0] == {"id": video.source_ids[0], "series_id": video.series_id, "position": 0,
                                  "url": RUCHIME, "source_type": "web_video", "parser_profile_id": 2,
-                                 "vibix_season": 2, "players_off": ["vk"], "voice_name": ""}
+                                 "vibix_season": 2, "players_off": ["vk"]}
     assert two["sources"][1]["url"] == VK
     for each in (*one["sources"], *two["sources"]):
         assert list(each) == list(SeriesSource.model_fields)
@@ -313,7 +313,7 @@ async def test_a_source_is_added_at_the_end_and_announced(system):
     added = (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[-1]
     assert added == {"id": reply["id"], "series_id": made.series_id, "position": 1, "url": RUCHIME,
                      "source_type": "web_video", "parser_profile_id": 2,
-                     "vibix_season": None, "players_off": ["vk"], "voice_name": ""}
+                     "vibix_season": None, "players_off": ["vk"]}
 
 
 @pytest.mark.asyncio
@@ -359,7 +359,7 @@ async def test_update_applies_what_changed_and_announces_it_once(system):
     sub = bus.subscribe("series.source.*")
     reply = await probe.request("catalog.sources.update", {
         "source_id": made.source_id,
-        "fields": {"parser_profile_id": 2, "vibix_season": 3, "players_off": ["vibix"], "voice_name": ""}},
+        "fields": {"parser_profile_id": 2, "vibix_season": 3, "players_off": ["vibix"]}},
         timeout=5)
     # the name of the voice-over was already empty: it is not an applied change
     assert reply == {"applied": {"parser_profile_id": 2, "vibix_season": 3, "players_off": ["vibix"]}}
@@ -381,22 +381,15 @@ async def test_update_that_changes_nothing_says_nothing(system):
 
 
 @pytest.mark.asyncio
-async def test_a_source_is_given_a_name_for_its_voice_over_that_is_trimmed_kept_and_taken_back(system):
+async def test_the_name_of_a_voice_over_is_no_field_of_a_source_and_a_caller_that_sends_it_is_refused(system):
+    """Voice-overs are named by the rules and the groups; the name a source once had (0033) is gone, and a caller that
+    still sends it is told so instead of being ignored."""
     bus, probe = system
     made = await create_series(probe, sources=[source(url=VK, source_type="vk_video", parser_profile_id=1)])
-    sub = bus.subscribe("series.source.*")
-
-    reply = await probe.request("catalog.sources.update", {"source_id": made.source_id, "fields": {"voice_name": "  AniStar "}},
-                                timeout=5)
-    assert reply == {"applied": {"voice_name": "AniStar"}} and len(drain(sub)) == 1
-    stored = (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[0]
-    assert stored["voice_name"] == "AniStar"
-    again = await probe.request("catalog.sources.update", {"source_id": made.source_id, "fields": {"voice_name": "AniStar"}},
-                                timeout=5)
-    assert again == {"applied": {}} and drain(sub) == []
-    taken = await probe.request("catalog.sources.update", {"source_id": made.source_id, "fields": {"voice_name": " "}},
-                                timeout=5)
-    assert taken == {"applied": {"voice_name": ""}}
+    with pytest.raises(BusRequestError, match="voice_name"):
+        await probe.request("catalog.sources.update", {"source_id": made.source_id, "fields": {"voice_name": "AniStar"}},
+                            timeout=5)
+    assert "voice_name" not in (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[0]
 
 
 @pytest.mark.asyncio
@@ -544,7 +537,7 @@ async def test_the_card_and_the_sources_of_a_busy_series_are_not_changed(system,
     calls = [
         ("catalog.series.update", {"series_id": made.series_id, "fields": {"season": "2"}}),
         ("catalog.sources.add", {"series_id": made.series_id, "source": source(url=RUCHIME + "-2")}),
-        ("catalog.sources.update", {"series_id": made.series_id, "source_id": own["id"], "fields": {"voice_name": "X"}}),
+        ("catalog.sources.update", {"series_id": made.series_id, "source_id": own["id"], "fields": {"players_off": ["vk"]}}),
         ("catalog.sources.remove", {"series_id": made.series_id, "source_id": own["id"]}),
     ]
     for topic, payload in calls:

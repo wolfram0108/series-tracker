@@ -30,8 +30,6 @@ class SeriesSource(BaseModel):
     parser_profile_id: int | None = None
     vibix_season: int | None = None
     players_off: list[str] = Field(default_factory=list)
-    # The voice-over of the rows that have no name of their own and none from the constructor (a VK channel gives none).
-    voice_name: str = ""
 
 
 class SourceEvent(BaseModel):

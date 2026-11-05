@@ -19,7 +19,7 @@ Queries:
       not the answer: the request sets the flag and waits for the next one. Refused with ValueError(reason) when a
       neighbour did not answer (the same reason goes out as composition.failed), with LookupError for a series the
       catalog no longer has.
-  composition.preview {url?, profile_id?, series_season?, refresh?, lines?, players_off?, vibix_season?, voice_name?}
+  composition.preview {url?, profile_id?, series_season?, refresh?, lines?, players_off?, vibix_season?}
       → CompositionPreviewReply {url, state, reason?, summary?, lines, rows}: an address that is no source of a series yet, as the add window and the test of rules
       show it. The table is asked of `sources.table.get` (refresh true begins a read, false reads nothing); `state`
       and `reason` are the sources' own. From the last complete table, when there is one (also while it is being read
@@ -27,7 +27,7 @@ Queries:
       profile: no_profile; a profile: ready; a failed read: failed), `lines` are the rows as the constructor gets
       them, each with its answer when `profile_id` is given (`series_season` is the fallback season); `rows` are the rows of
       the layout the profile makes of them (the same code as for a series, source_id 0, without the rows the constructor
-      left out), made with the choices of the source (`players_off`, `vibix_season`, `voice_name`): the only data a
+      left out), made with the choices of the source (`players_off`, `vibix_season`): the only data a
       window draws episodes and voice-overs of a draft from. Without a table `summary` is empty and so are `lines`, `rows`. Nothing is written and no source is made; a neighbour that does not answer
       refuses the request with ValueError(reason). With `lines` (typed, or the file names of a release) no table is
       asked: the reply is `ready`, has no summary, and its lines are those given (key = their place in the list),
@@ -255,8 +255,7 @@ class CompositionModule(BaseModule):
             if table is not None:
                 source = SeriesSource(id=0, series_id=0, url=request.url, source_type=SourceType.WEB_VIDEO,
                                       parser_profile_id=request.profile_id,
-                                      players_off=request.players_off, vibix_season=request.vibix_season,
-                                      voice_name=request.voice_name)
+                                      players_off=request.players_off, vibix_season=request.vibix_season)
                 answer = None
                 if request.profile_id is not None:
                     answer = await self._answer(source, table, request.series_season)

@@ -64,24 +64,24 @@ def selected_rows(source: SeriesSource, table: ReleaseTable) -> list[TableRow]:
 def lines_for(source: SeriesSource, table: ReleaseTable) -> list[RuleLine]:
     """What the constructor is asked about the source: one line with its key for every row in play."""
     return [RuleLine(key=row.key, text=line_of(table, row), player=row.player,
-                     voice=voice_name_of(row, None, source.voice_name)) for row in selected_rows(source, table)]
+                     voice=voice_name_of(row, None)) for row in selected_rows(source, table)]
 
 
-def voice_name_of(row: TableRow, result: RuleResult | None, fallback: str = "") -> str:
-    """The name the constructor assigned beats the one the player or the site gave, which beats the one the user gave
-    the source for rows that have no name."""
+def voice_name_of(row: TableRow, result: RuleResult | None) -> str:
+    """The name the constructor assigned beats the one the player or the site gave: a voice-over is named by the rules
+    and the groups, not by the source."""
     assigned = result.voiceover if result is not None else None
     if assigned and assigned.strip():
         return assigned
-    return fallback if not row.voice.name.strip() and fallback.strip() else row.voice.name
+    return row.voice.name
 
 
 def voice_names(inputs: Sequence[SourceInput]) -> list[str]:
     """The distinct voice-over names of the rows the constructors answered: the names the groups are asked about."""
     names: dict[str, None] = {}
     for item in _ordered(inputs):
-        names.update((voice_name_of(row, result, item.source.voice_name), None) for row, result in _answered_rows(item)
-                     if voice_name_of(row, result, item.source.voice_name).strip())
+        names.update((voice_name_of(row, result), None) for row, result in _answered_rows(item)
+                     if voice_name_of(row, result).strip())
     return list(names)
 
 
@@ -96,7 +96,7 @@ def project(inputs: Sequence[SourceInput], groups: Mapping[str, str | None],
     for item in _ordered(inputs):
         summaries.append(_summary(item))
         for row, result in _answered_rows(item):
-            rows.append(_row_of(item.source, row, result, voice_name_of(row, result, item.source.voice_name), groups,
+            rows.append(_row_of(item.source, row, result, voice_name_of(row, result), groups,
                                 numbering))
         rows.extend(_left_by_source(item))
     return Projection(rows, summaries, numbering)

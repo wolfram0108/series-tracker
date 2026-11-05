@@ -13,7 +13,7 @@ SOURCE = {"id": 4, "series_id": 1, "position": 0, "url": "https://x.test/p", "so
           "parser_profile_id": 2, "vibix_season": None, "players_off": []}
 PREVIEW = {"url": "https://x.test/p", "state": "ready", "reason": None, "summary": None, "lines": [], "rows": []}
 # The choices of a source the preview carries beside the address; a window that sends none asks for the defaults.
-NO_CHOICES = {"players_off": [], "vibix_season": None, "voice_name": ""}
+NO_CHOICES = {"players_off": [], "vibix_season": None}
 
 
 def code_of(response) -> str:

@@ -202,7 +202,6 @@ class CompositionPreviewRequest(BaseModel):
     # to make the rows the series would make.
     players_off: list[str] = Field(default_factory=list)
     vibix_season: int | None = None
-    voice_name: str = ""
 
     @model_validator(mode="after")
     def _names_a_page_or_lines(self) -> "CompositionPreviewRequest":

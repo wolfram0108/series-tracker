@@ -12,7 +12,7 @@ from core.reasons import reason
 REMOVED_FIELDS = ("url", "source_type", "parser_profile_id", "vk_search_mode", "vk_quality_priority")
 
 # What a caller may write to a source; `id` and `series_id` belong to the table.
-SOURCE_FIELDS = ("position", "url", "source_type", "parser_profile_id", "vibix_season", "players_off", "voice_name")
+SOURCE_FIELDS = ("position", "url", "source_type", "parser_profile_id", "vibix_season", "players_off")
 
 
 def kind_of_type(source_type: str) -> str:
@@ -58,7 +58,6 @@ def checked_fields(fields: dict, stored: dict | None = None) -> dict:
         raise ValueError("vibix_season: сезоны каталога Vibix считаются с 1")
     values = model.model_dump(mode="json")
     values["players_off"] = list(dict.fromkeys(values["players_off"]))
-    values["voice_name"] = values["voice_name"].strip()
     names = tuple(fields) if stored else tuple(name for name in SOURCE_FIELDS
                                                if name != "position" or "position" in fields)
     return {name: values[name] for name in names}
