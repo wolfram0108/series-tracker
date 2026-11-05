@@ -4,6 +4,8 @@
 # умолчанию app.db в каталоге проекта, поэтому в .env не обязателен.
 cd "$(dirname "$0")"
 [ -f .env ] && { set -a; . ./.env; set +a; }
+# The logs of the service are its own: a process without ST_LOG_DIR (a script, a test) writes none of them.
+export ST_LOG_DIR="${ST_LOG_DIR:-$(pwd)/logs}"
 # SSE-соединения бесконечны: без лимита graceful shutdown рестарт
 # зависает, пока открыт браузер.
 # --proxy-headers: доверять X-Forwarded-* ТОЛЬКО от reverse-proxy

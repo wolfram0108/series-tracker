@@ -27,14 +27,13 @@ from __future__ import annotations
 import asyncio
 import os
 
-from core import BaseModule, BusRequestError, sanitize_path, storage
+from core import NO_HANDLER, BaseModule, BusRequestError, sanitize_path, storage
 from core.contracts import SeriesKind
 from core.db import Database
 from core.envelope import Envelope
 
 from .repository import LibraryRepository
 
-_NO_HANDLER = "нет обработчика"
 
 
 class LibraryError(RuntimeError):
@@ -209,7 +208,7 @@ class LibraryModule(BaseModule):
             return await self.request("slicing.files.list",
                                       {"series_id": series_id})
         except BusRequestError as exc:
-            if _NO_HANDLER in str(exc):
+            if NO_HANDLER in str(exc):
                 return []
             raise
 

@@ -39,13 +39,12 @@ import uuid
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, Protocol, Sequence
 
-from core import BusRequestError, container, storage
+from core import NO_HANDLER, BusRequestError, container, storage
 from core.container import AudioIn, Contents
 
 from .repository import DownloadsRepository
 
 PACK_PREFIX = ".st-pack."
-NO_HANDLER = "нет обработчика"
 CONTAINER_EXT = ".mkv"
 PLACED = "placed"
 

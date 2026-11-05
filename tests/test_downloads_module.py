@@ -1548,3 +1548,16 @@ async def test_the_run_of_a_series_hears_whether_downloads_has_work_of_it(system
         told.append((await asyncio.wait_for(states.queue.get(), 5)).payload)
     assert [each["active"] for each in told][-2:] == [True, False]
     assert [each["seq"] for each in told] == sorted({each["seq"] for each in told})
+
+
+@pytest.mark.asyncio
+async def test_an_interface_that_connects_gets_the_queues_as_they_are(system):
+    bus, _, dl, probe, db_path, media_dir = system
+    downloads = bus.subscribe("downloads.queue.changed")
+    packing = bus.subscribe("downloads.pack.queue.changed")
+
+    probe.publish_event("gateway.sse.clients", {"count": 1})
+
+    got = await asyncio.wait_for(downloads.queue.get(), 5)
+    assert "tasks" in got.payload and "count" in got.payload
+    assert (await asyncio.wait_for(packing.queue.get(), 5)).payload == {"tasks": [], "count": 0}

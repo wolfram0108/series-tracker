@@ -423,8 +423,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         def read_logs() -> list[dict]:
             entries = []
             for fname in files:
-                path = os.path.join(core_logging.LOG_DIR, fname)
-                if not os.path.exists(path):
+                path = core_logging.log_file(fname)
+                if path is None or not os.path.exists(path):
                     continue
                 with open(path, encoding="utf-8") as f:
                     for line in reversed(f.readlines()):
@@ -448,8 +448,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         def collect() -> list[str]:
             groups: set[str] = set()
             for fname in ("error.log", "warning.log", "info.log", "debug.log"):
-                path = os.path.join(core_logging.LOG_DIR, fname)
-                if not os.path.exists(path):
+                path = core_logging.log_file(fname)
+                if path is None or not os.path.exists(path):
                     continue
                 with open(path, encoding="utf-8") as f:
                     for line in f:

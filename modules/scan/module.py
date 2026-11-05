@@ -85,7 +85,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from core import BaseModule, BusRequestError, torrent_source
+from core import NO_HANDLER, BaseModule, BusRequestError, torrent_source
 from core.deadlines import TABLE_WAIT_S
 from core.contracts import (RUN_CHANGED, WORK_STATE, RunSnapshot, availability, CompositionReply, OutputSwitch, Reference,
                             ReferenceChanged, RunChanged, SeriesReadProgress, SeriesSource, SourceStatus, TableProgress,
@@ -101,7 +101,6 @@ from .repository import ScanRepository
 from .torrent import TorrentScan
 from .sync import TableSignals
 
-_NO_HANDLER = "нет обработчика"
 # The executors whose works a run of a video series waits for (`<owner>.work.get`, events `work.series.state`).
 RUN_EXECUTORS = ("downloads", "voices")
 
@@ -652,7 +651,7 @@ class ScanModule(BaseModule):
         try:
             reply = await self.request("library.relocation.apply", {"series_id": series["id"]})
         except BusRequestError as exc:
-            if _NO_HANDLER in str(exc):
+            if NO_HANDLER in str(exc):
                 return series
             raise
         if not reply["moved"]:
@@ -665,7 +664,7 @@ class ScanModule(BaseModule):
         try:
             await self.request("renaming.reprocess", {"series_id": series_id})
         except BusRequestError as exc:
-            if _NO_HANDLER in str(exc):
+            if NO_HANDLER in str(exc):
                 self.log.warning("модуль renaming ещё не подключён — "
                                  "переобработка перед сканом пропущена")
             else:
@@ -720,7 +719,7 @@ class ScanModule(BaseModule):
             self.request("voices.dispatch" if download else "voices.settle", {"series_id": series_id, **settings}),
             return_exceptions=True)
         for answer in answers:
-            if isinstance(answer, BusRequestError) and _NO_HANDLER in str(answer):
+            if isinstance(answer, BusRequestError) and NO_HANDLER in str(answer):
                 continue  # nobody does that kind of work in this process
             if isinstance(answer, BaseException):
                 raise answer
@@ -777,7 +776,7 @@ class ScanModule(BaseModule):
         try:
             return await self.request(topic, payload)
         except (BusRequestError, asyncio.TimeoutError) as exc:
-            if _NO_HANDLER in str(exc):
+            if NO_HANDLER in str(exc):
                 return {}  # no such owner in this process: nothing of it to keep
             self.log.error("синхронизация: запрос %s не выполнен: %s: %s", topic, type(exc).__name__, exc)
             raise SyncFailed(reason("scan_step_failed", step=topic)) from exc
@@ -791,7 +790,7 @@ class ScanModule(BaseModule):
                 try:
                     run.apply(WorkState.model_validate(await self.request(f"{owner}.work.get", {"series_id": series_id})))
                 except BusRequestError as exc:
-                    if _NO_HANDLER not in str(exc):
+                    if NO_HANDLER not in str(exc):
                         raise
                     run.working.discard(owner)  # nobody does that kind of work in this process
         finally:
@@ -821,7 +820,7 @@ class ScanModule(BaseModule):
             if packed.get("failed"):
                 failure = reason("sync_pack_failed", failed=packed["failed"])
         except BusRequestError as exc:
-            if _NO_HANDLER not in str(exc):
+            if NO_HANDLER not in str(exc):
                 self.log.error("сериал %d: упаковка не выполнена: %s", series_id, exc)
                 failure = reason("scan_step_failed", step="downloads.pack")
         finally:
@@ -955,7 +954,7 @@ class ScanModule(BaseModule):
         try:
             queue = await self.request("downloads.queue.get", {})
         except BusRequestError as exc:
-            if _NO_HANDLER not in str(exc):
+            if NO_HANDLER not in str(exc):
                 self.log.warning("сериал %d: очередь загрузок недоступна: %s", series_id, exc)
                 return None
             return set()
@@ -1112,7 +1111,7 @@ class ScanModule(BaseModule):
                                        {"series_id": series_id})
             return queue.get("count", 0) > 0
         except BusRequestError as exc:
-            if _NO_HANDLER in str(exc):
+            if NO_HANDLER in str(exc):
                 return False
             raise
 
@@ -1124,7 +1123,7 @@ class ScanModule(BaseModule):
             count = queue.get("count", 0) if isinstance(queue, dict) \
                 else len(queue)
         except BusRequestError as exc:
-            if _NO_HANDLER not in str(exc):
+            if NO_HANDLER not in str(exc):
                 raise
             self.log.warning("конвейер torrents ещё не подключён — "
                              "следующий скан назначается сразу")

@@ -21,9 +21,11 @@ from typing import Any, Awaitable, Callable
 from .admission import Admission
 from .admission import current as current_admission
 from .bus import Bus, Subscription
+from .contracts.availability import NotAllowed
 from .deadlines import deadline_of
 from .envelope import Envelope
 from .logging import get_logger
+from .reasons import describe
 
 Handler = Callable[[Envelope], Awaitable[Any]]
 
@@ -175,6 +177,14 @@ class BaseModule:
                     correlation_id=env.correlation_id))
         except asyncio.CancelledError:
             raise
+        except NotAllowed as exc:
+            # A refusal by the table of what is allowed is the module's answer, not its failure: no trace is due.
+            self.log.info("отказ на топике '%s': %s", env.topic, describe(str(exc)))
+            if env.kind == "query" and env.reply_to:
+                self.bus.publish(Envelope(
+                    topic=env.reply_to, kind="reply",
+                    payload={ERROR_KEY: f"{type(exc).__name__}: {exc}"},
+                    correlation_id=env.correlation_id))
         except Exception as exc:  # noqa: BLE001 — модуль не должен умирать
             self.log.exception("ошибка обработчика '%s' на топике '%s'",
                                getattr(handler, "__name__", "?"), env.topic)

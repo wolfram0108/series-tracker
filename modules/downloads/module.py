@@ -52,7 +52,8 @@ Queries / commands:
 Events out:
   downloads.item.renamed {series_id, unique_id, filename} - the file name of an episode changed, after the file lies under it
       (voices follow it).
-  downloads.queue.changed {tasks, count} - the queue changed (throttled on progress): SSE download_queue_update.
+  downloads.queue.changed {tasks, count} - the queue changed (throttled on progress), and when an interface connects
+      (gateway.sse.clients): SSE download_queue_update.
   downloads.pack.queue.changed {tasks, count} - the queue of the packing of containers changed, and when an interface
       connects (gateway.sse.clients): SSE pack_queue_update. A task: {id, series_id, series_name, season, episode, part,
       name, status: queued | building | packed | unchanged | waiting | failed | interrupted, tracks}.
@@ -617,9 +618,11 @@ class DownloadsModule(BaseModule):
         self.publish_event("downloads.pack.queue.changed", {"tasks": tasks, "count": len(tasks)})
 
     async def on_sse_clients(self, env: Envelope) -> None:
-        """An interface connected: it gets the queue of the packing as it is, with no question of its own."""
+        """An interface connected: it gets the queues of the downloads and of the packing as they are, with no question of
+        its own."""
         if (env.payload or {}).get("count"):
             self._broadcast_pack_queue()
+            await self._broadcast_queue()
 
     async def _broadcast_queue(self) -> None:
         tasks = await self._queue()

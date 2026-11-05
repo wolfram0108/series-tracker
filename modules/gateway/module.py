@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any, Callable
 import os
 import secrets
 import signal
@@ -175,6 +176,35 @@ SSE_MAP: dict[str, tuple[str, object]] = {
     "library.relocation.started": ("relocation_started", None),
     "library.relocation.finished": ("relocation_finished", None),
 }
+
+# Events that are the whole state of their part of the screen, by the key of that part: of several queued at once only
+# the last one is sent, since each replaces the one before (a burst of the progress of a table is one packet). Every
+# other event goes, in order.
+SSE_LATEST: dict[str, Callable[[Any], Any]] = {
+    "sources.table.progress": lambda payload: payload.get("url"),
+    "torrents.queue.changed": lambda payload: None,
+    "torrents.progress.changed": lambda payload: None,
+    "downloads.queue.changed": lambda payload: None,
+    "slicing.queue.changed": lambda payload: None,
+    "downloads.pack.queue.changed": lambda payload: None,
+    "conform.queue.changed": lambda payload: None,
+}
+
+
+def latest_only(batch: list) -> list:
+    """The envelopes of a batch in order, with each event of SSE_LATEST kept only as the last of its key."""
+    seen: set = set()
+    kept = []
+    for env in reversed(batch):
+        latest = SSE_LATEST.get(getattr(env, "topic", None)) if getattr(env, "kind", None) == "event" else None
+        if latest is not None:
+            key = (env.topic, latest(env.payload or {}))
+            if key in seen:
+                continue
+            seen.add(key)
+        kept.append(env)
+    return kept[::-1]
+
 
 # The packets of the event stream that the interface types: their models go into the schema of the API.
 EVENT_PACKETS = (DubEvent, DubsSnapshot, TableProgress, TableReady, TableFailed, CompositionChanged,
@@ -425,17 +455,22 @@ class GatewayModule(BaseModule):
                     # Комментарий держит соединение живым через прокси.
                     yield ": keepalive\n\n"
                     continue
-                if env is _STREAM_END:
-                    return
-                if env.kind != "event":
-                    continue
-                mapping = SSE_MAP.get(env.topic)
-                if mapping is None:
-                    continue
-                sse_name, transform = mapping
-                payload = transform(env.payload) if transform else env.payload
-                data = json.dumps(payload, ensure_ascii=False)
-                yield f"event: {sse_name}\ndata: {data}\n\n"
+                # What queued up while the last packet was being written goes in one turn, each state once.
+                batch = [env]
+                while not sub.queue.empty():
+                    batch.append(sub.queue.get_nowait())
+                for env in latest_only(batch):
+                    if env is _STREAM_END:
+                        return
+                    if env.kind != "event":
+                        continue
+                    mapping = SSE_MAP.get(env.topic)
+                    if mapping is None:
+                        continue
+                    sse_name, transform = mapping
+                    payload = transform(env.payload) if transform else env.payload
+                    data = json.dumps(payload, ensure_ascii=False)
+                    yield f"event: {sse_name}\ndata: {data}\n\n"
         finally:
             self._sse_subs.pop(sub.sub_id, None)
             self.bus.unsubscribe(sub)

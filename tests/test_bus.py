@@ -242,3 +242,81 @@ async def test_a_waiter_that_took_the_step_signal_loses_no_step_between_the_look
     await asyncio.wait_for(step.wait(), 1)  # the step happened after the signal was taken, so it is not missed
     assert bus.next_step() is not step
 
+
+
+class Refuser(BaseModule):
+    name = "refuser"
+
+    def register(self):
+        self.handle("refuser.edit", self.on_edit)
+
+    async def on_edit(self, env):
+        from core.contracts.availability import Action, require
+        require(Action.EDIT, "scanning")
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_is_the_answer_of_the_module_and_is_logged_without_a_trace(caplog):
+    bus = Bus()
+    refuser, client = Refuser(bus), ClientModule(bus)
+    await refuser.start()
+    await client.start()
+    try:
+        with caplog.at_level("INFO"), pytest.raises(BusRequestError, match="NotAllowed"):
+            await client.request("refuser.edit", {}, timeout=2)
+    finally:
+        await refuser.stop()
+        await client.stop()
+    found = [record for record in caplog.records if record.name == "refuser" and "refuser.edit" in record.getMessage()]
+    assert found and all(record.levelname == "INFO" and record.exc_info is None for record in found)
+
+
+def test_a_process_without_a_folder_of_logs_writes_no_log_files(tmp_path):
+    """A script run from the folder of the project must not write into the logs of the service (start.sh names them)."""
+    import os
+    import subprocess
+    import sys
+
+    env = {key: value for key, value in os.environ.items() if key != "ST_LOG_DIR"}
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    code = "from core.logging import get_logger, log_file; get_logger('probe').error('строка'); print(log_file('x.log'))"
+    done = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+
+    assert done.returncode == 0 and done.stdout.strip() == "None"
+    assert "строка" in done.stderr and not (tmp_path / "logs").exists()
+
+
+def test_a_queue_that_grows_is_told_once_per_burst(caplog):
+    from core import bus as bus_module
+
+    bus = Bus()
+    sub = bus.subscribe("#")
+    with caplog.at_level("WARNING"):
+        for number in range(bus_module._QUEUE_WARN_SIZE + 50):
+            bus.publish(Envelope(topic="x.y", kind="event", payload=number))
+    assert len([r for r in caplog.records if "разрослась" in r.getMessage()]) == 1
+    while not sub.queue.empty():
+        sub.queue.get_nowait()
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        for number in range(bus_module._QUEUE_WARN_SIZE + 2):
+            bus.publish(Envelope(topic="x.y", kind="event", payload=number))
+    assert len([r for r in caplog.records if "разрослась" in r.getMessage()]) == 1  # a new burst is told again
+
+
+def test_a_burst_of_states_goes_as_the_last_of_each_and_other_events_all_in_order():
+    from modules.gateway.module import latest_only
+
+    def event(topic, payload):
+        return Envelope(topic=topic, kind="event", payload=payload)
+
+    batch = [event("sources.table.progress", {"url": "a", "current": 1}), event("voices.dub.changed", {"n": 1}),
+             event("sources.table.progress", {"url": "b", "current": 1}),
+             event("sources.table.progress", {"url": "a", "current": 2}), event("voices.dub.changed", {"n": 2}),
+             event("downloads.queue.changed", {"tasks": [1]}), event("downloads.queue.changed", {"tasks": []})]
+
+    kept = [(env.topic, env.payload) for env in latest_only(batch)]
+
+    assert kept == [("voices.dub.changed", {"n": 1}), ("sources.table.progress", {"url": "b", "current": 1}),
+                    ("sources.table.progress", {"url": "a", "current": 2}), ("voices.dub.changed", {"n": 2}),
+                    ("downloads.queue.changed", {"tasks": []})]

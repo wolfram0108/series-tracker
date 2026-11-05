@@ -36,6 +36,7 @@ class Subscription:
     pattern: str
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     tracked: bool = False  # the consumer reports each envelope it is done with (`Bus.processed`)
+    warned: bool = False  # the growth of its queue has been told and has not gone down since
 
 
 class Bus:
@@ -91,10 +92,14 @@ class Bus:
                 if sub.tracked:
                     self._unfinished += 1
                     self._quiet.clear()
-                if sub.queue.qsize() > _QUEUE_WARN_SIZE:
+                # Told once as the queue crosses the size, and again only after it has gone down: one burst, one line.
+                if sub.queue.qsize() > _QUEUE_WARN_SIZE and not sub.warned:
+                    sub.warned = True
                     _log.warning(
                         "Очередь подписки '%s' разрослась до %d — "
                         "подписчик не успевает разбирать сообщения",
                         sub.pattern, sub.queue.qsize(),
                     )
+                elif sub.warned and sub.queue.qsize() <= _QUEUE_WARN_SIZE // 2:
+                    sub.warned = False
         return delivered

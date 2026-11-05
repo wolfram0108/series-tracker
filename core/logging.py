@@ -1,8 +1,11 @@
 """Категоризированное логирование (принцип 6).
 
 Группа = имя модуля. Формат и раскладка сохранены от старой системы:
-ротируемые JSON-строки в logs/, по файлу на уровень (debug.log,
+ротируемые JSON-строки в папке ST_LOG_DIR, по файлу на уровень (debug.log,
 info.log, warning.log, error.log). Без внешних зависимостей.
+
+Files are written only where ST_LOG_DIR names a folder: the service sets it (start.sh), so a script or a test run from
+the folder of the project does not write into the logs of the service. Without it the lines go to stderr.
 """
 from __future__ import annotations
 
@@ -12,7 +15,7 @@ import os
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 
-LOG_DIR = os.environ.get("ST_LOG_DIR", "logs")
+LOG_DIR = os.environ.get("ST_LOG_DIR") or None
 _LEVELS = {
     logging.DEBUG: "debug.log",
     logging.INFO: "info.log",
@@ -25,6 +28,11 @@ _configured = False
 # уровни). Пустой набор = DEBUG не пишется никому; INFO+ — всегда.
 # Управляется вкладкой отладки через gateway (Р-22).
 _debug_groups: set[str] = set()
+
+
+def log_file(name: str) -> str | None:
+    """The path of a log file of this process; None when it writes no files (no ST_LOG_DIR)."""
+    return os.path.join(LOG_DIR, name) if LOG_DIR else None
 
 
 def set_debug_groups(groups: set[str]) -> None:
@@ -68,10 +76,17 @@ def configure(level: int = logging.DEBUG) -> None:
     global _configured
     if _configured:
         return
-    os.makedirs(LOG_DIR, exist_ok=True)
     root = logging.getLogger()
     root.setLevel(level)
     fmt = _JsonFormatter()
+    if LOG_DIR is None:
+        stream = logging.StreamHandler()
+        stream.setLevel(logging.INFO)
+        stream.setFormatter(fmt)
+        root.addHandler(stream)
+        _configured = True
+        return
+    os.makedirs(LOG_DIR, exist_ok=True)
     for lvl, fname in _LEVELS.items():
         handler = RotatingFileHandler(
             os.path.join(LOG_DIR, fname),

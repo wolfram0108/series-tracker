@@ -8,11 +8,10 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from core import BusRequestError
+from core import NO_HANDLER, BusRequestError
 from core.admission import Admission
 from core.admission import current as current_admission
 
-_NOT_THERE = "нет обработчика"
 
 
 def route_per_method(router: APIRouter, path: str, *, methods: list[str], **options: Any) -> Callable:
@@ -33,7 +32,7 @@ def refusal(exc: BusRequestError, status: int | None = None, *, with_success: bo
     message = str(exc)
     if status is None:
         status = (404 if message.startswith("LookupError") else 409 if message.startswith("NotAllowed")
-                  else 400 if message.startswith("ValueError") else 503 if message.startswith(_NOT_THERE) else 500)
+                  else 400 if message.startswith("ValueError") else 503 if message.startswith(NO_HANDLER) else 500)
     text = message.split(": ", 1)[-1]
     body = {"success": False, "error": text} if with_success else {"error": text}
     return JSONResponse(body, status_code=status)
@@ -49,7 +48,7 @@ async def admitted(gw: Any, series_id: int) -> AsyncIterator[None]:
     try:
         reply = await gw.request("scan.edit.begin", {"series_id": series_id})
     except BusRequestError as exc:
-        if _NOT_THERE not in str(exc):
+        if NO_HANDLER not in str(exc):
             raise
         yield  # no runs in this process: nothing to hold off
         return

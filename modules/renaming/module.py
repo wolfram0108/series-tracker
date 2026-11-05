@@ -40,14 +40,13 @@ import asyncio
 import os
 import re
 
-from core import BaseModule, BusRequestError, storage, torrent_profile_id
+from core import NO_HANDLER, BaseModule, BusRequestError, storage, torrent_profile_id
 from core.contracts import SeriesKind
 from core.db import Database
 from core.envelope import Envelope
 
 from .repository import RenamingRepository
 
-_NO_HANDLER = "нет обработчика"
 # What became of a file the renaming was to move.
 MOVED, ABSENT, BLOCKED = "moved", "absent", "blocked"
 _VIDEO_EXT = (".mkv", ".avi", ".mp4", ".mov", ".wmv", ".webm", ".ts", ".m4v")
@@ -254,7 +253,7 @@ class RenamingModule(BaseModule):
             return await self.request("slicing.files.list",
                                       {"series_id": series_id})
         except BusRequestError as exc:
-            if _NO_HANDLER in str(exc):
+            if NO_HANDLER in str(exc):
                 self.log.warning("модуль slicing ещё не подключён — "
                                  "нарезанные файлы пропущены")
                 return []
