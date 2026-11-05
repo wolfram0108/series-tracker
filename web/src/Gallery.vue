@@ -17,6 +17,7 @@ import StSelect from "./components/StSelect.vue"
 import StBtn from "./components/StBtn.vue"
 import SeriesCard from "./components/SeriesCard.vue"
 import Toast from "primevue/toast"
+import { t } from "./i18n"
 
 // Карточки сериала — по состояниям, по порядку.
 const cards = [
@@ -29,8 +30,8 @@ const cards = [
   { id: 7, name: "Ошибка", site: "kinozal.me", auto_scan_enabled: true, statuses: ["error"] },
   { id: 8, name: "Несколько статусов", site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "downloading", "metadata"] },
   { id: 9, name: "Готов + ожидание (VK)", site: "vk_video", auto_scan_enabled: true, statuses: ["ready", "waiting"], tmdb: { downloaded: 7, total: 24 } },
-  { id: 10, name: "Нарезка", site: "kinozal.me", auto_scan_enabled: true, statuses: ["slicing"] },
-  { id: 11, name: "Обработка: выравнивание и упаковка", site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "aligning", "packing", "downloading"] },
+  { id: 10, name: t("series.status.slicing"), site: "kinozal.me", auto_scan_enabled: true, statuses: ["slicing"] },
+  { id: 11, name: t("gallery.card.alignAndPack"), site: "vk_video", auto_scan_enabled: true, statuses: ["scanning", "aligning", "packing", "downloading"] },
 ]
 
 // Симуляция анимаций карточки: смена статусов → перетекание слоёв (0.8s),
@@ -38,9 +39,9 @@ const cards = [
 const simStates: Record<string, string[]> = {
   "Ожидание": ["waiting"],
   "Обработка": ["scanning"],
-  "Нарезка": ["slicing"],
-  "Выравнивание": ["aligning"],
-  "Упаковка": ["packing"],
+  [t("series.status.slicing")]: ["slicing"],
+  [t("series.status.aligning")]: ["aligning"],
+  [t("series.status.packing")]: ["packing"],
   "Загрузка": ["downloading"],
   "Простой": ["idle"],
   "В очереди": ["queued"],

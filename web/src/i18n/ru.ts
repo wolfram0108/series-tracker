@@ -276,6 +276,7 @@ export const ru = {
   "series.status.slicing": "Нарезка",
   "series.status.aligning": "Выравнивание",
   "series.status.packing": "Упаковка",
+  "gallery.card.alignAndPack": "Обработка: выравнивание и упаковка",
   "sources.add.label": "Адрес страницы сайта или канала VK",
   "sources.add.button": "Добавить источник",
   "sources.add.checking": "Определяем адрес…",
