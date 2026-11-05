@@ -93,13 +93,14 @@ function clear(): void {
     />
     <div v-if="editable" class="stack">
       <div class="source-add cluster">
+        <!-- A channel of VK stays one field: its address and its query are the two parts of it. -->
         <StGroup>
           <StIcon icon="pi pi-link" />
           <StInput v-model="address" :label="t('sources.add.label')" @keyup.enter="add" />
-        </StGroup>
-        <StGroup v-if="channel" class="source-query">
-          <StIcon icon="pi pi-search" />
-          <StInput v-model="query" :label="t('sources.vk.query')" @keyup.enter="add" />
+          <template v-if="channel">
+            <StIcon icon="pi pi-search" />
+            <StInput v-model="query" class="source-query" :label="t('sources.vk.query')" @keyup.enter="add" />
+          </template>
         </StGroup>
         <button type="button" class="source-action" :disabled="busy || adding || !ready" @click="add">
           <i class="pi" :class="adding ? 'pi-spin pi-spinner' : 'pi-plus'" />{{ t("sources.add.button") }}
@@ -112,7 +113,7 @@ function clear(): void {
 </template>
 
 <style scoped>
-.source-add > :first-child, .source-add > .source-query { flex: 1 1 var(--measure); }
+.source-add > :first-child { flex: 1 1 var(--measure); }
 .source-hint { color: var(--text-muted); font-size: smaller; }
 .source-error { color: var(--color-red-1); overflow-wrap: anywhere; }
 </style>

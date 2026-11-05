@@ -501,19 +501,21 @@ onBeforeUnmount(() => {
     <div v-show="activeTab === 'add'">
     <!-- URL -->
     <div v-if="kind === 'torrent'" class="field-group add-url-row">
+      <!-- A channel of VK stays one field: its address and its query are the two parts of it. -->
       <StGroup :state="urlState">
         <StIcon icon="pi pi-link" />
         <StInput v-model="newSeries.url" label="URL для парсинга" />
+        <template v-if="candidate && candidateChannel">
+          <StIcon icon="pi pi-search" />
+          <StInput
+            v-model="candidateQuery" class="source-query" :label="t('sources.vk.query')"
+            @keyup.enter="vkQuery(candidateQuery) && addCandidate()"
+          />
+        </template>
       </StGroup>
       <div v-if="urlError" class="add-error">{{ urlError }}</div>
       <div v-if="parsing" class="add-hint">Распознаём ссылку…</div>
-      <template v-if="candidate && candidateChannel">
-        <StGroup>
-          <StIcon icon="pi pi-search" />
-          <StInput v-model="candidateQuery" :label="t('sources.vk.query')" @keyup.enter="vkQuery(candidateQuery) && addCandidate()" />
-        </StGroup>
-        <div class="add-hint">{{ t("sources.vk.hint") }}</div>
-      </template>
+      <div v-if="candidate && candidateChannel" class="add-hint">{{ t("sources.vk.hint") }}</div>
       <button
         v-if="candidate" type="button" class="source-action" :disabled="candidateChannel && !vkQuery(candidateQuery)"
         @click="addCandidate"
