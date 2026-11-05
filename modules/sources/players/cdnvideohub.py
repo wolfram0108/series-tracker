@@ -1,4 +1,5 @@
-"""CDN VideoHub aggregator: VK-hosted voice-overs of a title (embedded by dunhuatv.ru and animakima.ru).
+"""CDN VideoHub aggregator: VK-hosted voice-overs of a title (embedded by dunhuatv.ru, animakima.ru, animesss.com,
+yummyani.me).
 
 The playlist lists every voice-over of a title; each item is a VK video whose signed
 mp4 links are bound to the User-Agent of the request that issued them. An item has the numbers the player gives
@@ -210,7 +211,13 @@ class CdnVideoHubPlayer:
 
     def find(self, text: str, page_url: str) -> PlayerRef | None:
         title, publisher, aggregator = widget_of(text)
-        return PlayerRef(self.name, page_url, f"{title}/{publisher}/{aggregator}") if title is not None else None
+        return self.listing(page_url, title, publisher, aggregator) if title is not None else None
+
+    @staticmethod
+    def listing(page_url: str, title: int, publisher: int = DEFAULT_PUBLISHER,
+                aggregator: str = DEFAULT_AGGREGATOR) -> PlayerRef:
+        """The playlist of a title, wherever a site gives the numbers of its widget (a page, an answer of its API)."""
+        return PlayerRef("cvh", page_url, f"{title}/{publisher}/{aggregator}")
 
     @staticmethod
     def ref_of(page_url: str, vk_id: str) -> PlayerRef:

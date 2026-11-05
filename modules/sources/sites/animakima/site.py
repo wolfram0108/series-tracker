@@ -13,25 +13,22 @@ import logging
 import re
 from urllib.parse import urlparse
 
-from core.contracts import RowVoice, TableRow
+from core.contracts import RowVoice
 from core.reasons import reason
 
 from ...players.animakima import VIEW, AnimakimaError, AnimakimaPlayer, read_view, view_request
-from ...players.asking import catalog_rows
 from ...players.catalog import Entry
 from ...players.contract import PlayerRef
-from ...players.http import USER_AGENT, get_answer
 from ...players.registry import PlayerRegistry
 from ...policy import ask
-from .. import PHASE_PLAYERS, PHASE_RELEASE, ReadContext, SiteError, TableDraft
-from ..catalogs import AskCount, read_catalogs, rows_of_catalogs
+from .. import PHASE_RELEASE, ReadContext, SiteError, TableDraft
+from ..catalogs import Listed, read_page, table_rows
 from ..recent import last_of_each
 
 logger = logging.getLogger("sources")
 
 SITE = "https://animakima.ru"
 SITE_NAME = "animakima.ru"
-PAGE_TIMEOUT = 20.0
 
 _TITLE_PATH = re.compile(r"^/pages/([^/]+)/?$")
 _PLAYER = re.compile(r"<title-player\b([^>]*)>", re.IGNORECASE)
@@ -120,23 +117,13 @@ class AnimakimaSite:
         own = self._own_entries(url, aid, page, ctx) if VIEW in views else []
         if not refs and not own:
             raise SiteError(reason("no_players_empty", site=SITE_NAME))
-        catalogs = await read_catalogs(self.players, [(url, refs)], ctx) if refs else []
-        asked = AskCount(ctx, sum(len(catalog.entries) for catalog in catalogs) + len(own))
-        ctx.progress(PHASE_PLAYERS, 0, asked.total)
-        rows: list[TableRow] = await rows_of_catalogs(catalogs, ctx, self.players.pacer, asked)
-        if own:
-            rows += await catalog_rows(self.players.get(AnimakimaPlayer.name), own, ctx.http, url, self.players.pacer,
-                                       on_asked=asked)
+        listed = [Listed(self.players.get(AnimakimaPlayer.name), url, own)] if own else []
+        rows = await table_rows(self.players, [(url, refs)] if refs else [], ctx, listed)
         return TableDraft(names=title_names(page), rows=rows)
 
     async def _page(self, url: str, ctx: ReadContext) -> str:
         ctx.progress(PHASE_RELEASE, 0, 1)
-        answer = await ask(lambda: get_answer(ctx.http, url, "", headers={"User-Agent": USER_AGENT}, timeout=PAGE_TIMEOUT))
-        if answer.status is None:
-            raise SiteError(reason("site_unreachable", site=SITE_NAME, error=answer.error))
-        if answer.status != 200:
-            raise SiteError(reason("site_status", site=SITE_NAME, status=answer.status, url=url))
-        return answer.text
+        return (await read_page(url, ctx, SITE_NAME)).text
 
     async def _listed(self, url: str, aid: str, view: str, ctx: ReadContext) -> PlayerRef | None:
         """The player that lists the whole title behind a button; None, and a line in the log, for a view no player knows."""

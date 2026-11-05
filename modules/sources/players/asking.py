@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 import httpx
 
@@ -59,13 +59,17 @@ async def read_batch(player: Player, refs: Sequence[PlayerRef], http: httpx.Asyn
 async def ask_many(player: Player, refs: Sequence[PlayerRef], http: httpx.AsyncClient,
                    page_url: "str | Callable[[PlayerRef], str]", pacer: Pacer, *,
                    gate: asyncio.Semaphore | None = None,
-                   on_asked: Callable[[], None] | None = None) -> dict[PlayerRef, Verdict | Exception]:
+                   on_asked: Callable[[], None] | None = None,
+                   known: Mapping[PlayerRef, Reading] | None = None) -> dict[PlayerRef, Verdict | Exception]:
     """The verdict of the player on each video; an ask that raised comes back as its exception, so that one video cannot
     take the others with it. `page_url` is the page that shows the videos, or a function from a video to its page.
-    `gate` bounds the asks in flight and `on_asked` is told as each one ends."""
+    `gate` bounds the asks in flight and `on_asked` is told as each one ends. `known` is what an answer of the player
+    already said of some videos (a playlist of its own that lists their files): those are not asked again."""
     page_of = page_url if callable(page_url) else (lambda ref: page_url)
     unique = list(dict.fromkeys(refs))
-    settled = await read_batch(player, unique, http, page_of(unique[0])) if unique else {}
+    known = known or {}
+    unknown = [ref for ref in unique if ref not in known]
+    settled = {**known, **(await read_batch(player, unknown, http, page_of(unknown[0])) if unknown else {})}
 
     async def ask(ref: PlayerRef) -> Verdict:
         try:
@@ -87,9 +91,11 @@ async def ask_many(player: Player, refs: Sequence[PlayerRef], http: httpx.AsyncC
 
 
 async def catalog_rows(player, entries: Sequence[Entry], http: httpx.AsyncClient, page_url: str, pacer: Pacer, *,
-                       on_asked: Callable[[], None] | None = None) -> list[TableRow]:
+                       on_asked: Callable[[], None] | None = None,
+                       known: Mapping[PlayerRef, Reading] | None = None) -> list[TableRow]:
     """A row for each entry of a catalog: the entry as the player words it, with what the player says of its video."""
-    verdicts = await ask_many(player, [entry.ref for entry in entries], http, page_url, pacer, on_asked=on_asked)
+    verdicts = await ask_many(player, [entry.ref for entry in entries], http, page_url, pacer, on_asked=on_asked,
+                              known=known)
     rows = []
     for entry in entries:
         outcome = outcome_of(verdicts[entry.ref], entry.ref, player.label)

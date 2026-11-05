@@ -173,6 +173,45 @@ async def test_an_iframe_that_lists_no_voices_is_the_one_voice_its_address_names
     assert [(e.key, e.voice.name, e.group) for e in found] == [("1043:401", "", "")]
 
 
+def season_page(*triples: tuple[str, str, str, str]) -> str:
+    """The iframe of one season of one voice-over, as a site embeds it: no list of voices, the page names the one it plays."""
+    return (signed() + '<script>var seasonId = Number(64820); var translationId = 910; var translationTitle = "AniStar";'
+            "</script>" + items(*triples))
+
+
+def season_web() -> Web:
+    web = Web()
+    web.route("kodikplayer.com/season/64820/", season_page(("501", "1", "1 серия", ""), ("502", "2", "2 серия", "")))
+    web.route("kodikplayer.com/ftor", lambda request: json.dumps(ftor_links(360, 720)), method="POST")
+    return web
+
+
+async def test_an_iframe_of_one_season_is_the_voice_its_page_names_and_its_items_are_asked_through_that_season():
+    player, web = kodik.KodikPlayer(), season_web()
+    source = PlayerRef("kodik", "https://kodikplayer.com/season/64820/8cc4/720p?translations=false&episode=1")
+    async with web.client() as http:
+        found = await within(read_catalog(player, source, http, PAGE), STEP_LIMIT_S, "the catalog of the season")
+        reading = await ask(player, found[1].ref, http)
+
+    assert [(e.key, e.voice.name, e.text) for e in found] == [("910:501", "AniStar", "1 серия"), ("910:502", "AniStar", "2 серия")]
+    # The link says the list is a season, so the item is asked of the season it is in; a serial keeps its old spelling.
+    assert found[0].ref.url == f"{PAGE}#kodik=season/64820/8cc4/501"
+    assert kodik.parse_link(found[0].ref.url) == ("season", "64820", "8cc4", "501")
+    assert kodik.KodikPlayer.video_of(found[0].ref.url) == "season/64820/8cc4/501"
+    assert kodik.KodikPlayer.video_of(kodik.link_of(PAGE, "50228", "7bbb", "1")) == "50228/7bbb/1"
+    assert reading.kind is Kind.PLAYABLE and web.count("/season/64820/") == 1 and web.count("/serial/") == 0
+
+
+def test_the_addresses_of_one_list_for_each_of_its_episodes_are_one_catalog_and_a_limit_to_a_voice_is_another():
+    of = lambda url: kodik.KodikPlayer.catalog_id(PlayerRef("kodik", url))  # noqa: E731
+
+    assert of("https://kodikplayer.com/season/64820/8cc4/720p?translations=false&episode=1") == of(
+        "https://kodikplayer.com/season/64820/8cc4/720p?translations=false&episode=7")
+    assert of("https://kodikplayer.com/serial/50228/7bbb/720p?only_translations=1043") != of(
+        "https://kodikplayer.com/serial/50228/7bbb/720p?only_translations=910")
+    assert of("https://kodikplayer.com/season/64820/8cc4/720p") != of("https://kodikplayer.com/serial/64820/8cc4/720p")
+
+
 @pytest.mark.parametrize("pages, code", [({}, "player_status"), ({"50228": (500, "")}, "player_status"),
                                          ({"50228": "<html></html>"}, "kodik_no_episode_list")])
 async def test_an_iframe_that_does_not_open_is_a_catalog_that_cannot_be_read(pages, code):
@@ -201,7 +240,7 @@ async def test_an_item_reads_by_its_id_and_the_iframe_is_opened_once_for_all_the
 def test_the_link_of_an_item_names_the_serial_and_the_id_of_the_item_and_nothing_else_is_a_link():
     link = kodik.link_of(PAGE, "50228", "7bbb4c6b", "1144202")
 
-    assert kodik.parse_link(link) == ("50228", "7bbb4c6b", "1144202")
+    assert kodik.parse_link(link) == ("serial", "50228", "7bbb4c6b", "1144202")
     assert kodik.KodikPlayer.owns(link) and not kodik.KodikPlayer.owns(PAGE) and not kodik.KodikPlayer.owns(PAGE + "#cvh=1")
 
 

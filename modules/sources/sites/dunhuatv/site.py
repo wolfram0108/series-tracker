@@ -12,18 +12,14 @@ import html
 import re
 from urllib.parse import urlparse
 
-from core.contracts import TableRow
 from core.reasons import reason
 
-from ...players.http import USER_AGENT, get_answer
 from ...players.registry import PlayerRegistry
-from ...policy import ask
-from .. import PHASE_PLAYERS, PHASE_RELEASE, ReadContext, SiteError, TableDraft
-from ..catalogs import AskCount, read_catalogs, rows_of_catalogs
+from .. import PHASE_RELEASE, ReadContext, SiteError, TableDraft
+from ..catalogs import read_page, table_rows
 
 SITE = "https://dunhuatv.ru"
 SITE_NAME = "dunhuatv.ru"
-PAGE_TIMEOUT = 20.0
 
 _TITLE_PATH = re.compile(r"^/(\d+)-[^/]+\.html$")
 _H1 = re.compile(r"<h1\b[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
@@ -68,18 +64,10 @@ class DunhuaTvSite:
 
     async def read(self, url: str, ctx: ReadContext) -> TableDraft:
         ctx.progress(PHASE_RELEASE, 0, 1)
-        answer = await ask(lambda: get_answer(ctx.http, url, "", headers={"User-Agent": USER_AGENT}, timeout=PAGE_TIMEOUT))
-        if answer.status is None:
-            raise SiteError(reason("site_unreachable", site=SITE_NAME, error=answer.error))
-        if answer.status != 200:
-            raise SiteError(reason("site_status", site=SITE_NAME, status=answer.status, url=url))
+        answer = await read_page(url, ctx, SITE_NAME)
         ctx.progress(PHASE_RELEASE, 1, 1)
 
         refs = {player.name: ref for player in self.players if (ref := player.find(answer.text, url)) is not None}
         if not refs:
             raise SiteError(reason("no_players_empty", site=SITE_NAME))
-        catalogs = await read_catalogs(self.players, [(url, refs)], ctx)
-        asked = AskCount(ctx, sum(len(catalog.entries) for catalog in catalogs))
-        ctx.progress(PHASE_PLAYERS, 0, asked.total)
-        rows: list[TableRow] = await rows_of_catalogs(catalogs, ctx, self.players.pacer, asked)
-        return TableDraft(names=title_names(answer.text), rows=rows)
+        return TableDraft(names=title_names(answer.text), rows=await table_rows(self.players, [(url, refs)], ctx))

@@ -49,8 +49,13 @@ _SIGNED = ("domain", "d_sign", "pd", "pd_sign", "ref", "ref_sign")
 # button that switches a page to it.
 _FRAME = re.compile(r"""<iframe\b[^>]*\b(?:data-)?src=["']([^"']*kodikplayer\.com[^"']*)["']""", re.IGNORECASE)
 _SWITCH = re.compile(r"""switchSource\(\s*["']([^"']*kodikplayer\.com[^"']*)["']""", re.IGNORECASE)
-_MEDIA = re.compile(r"/serial/([^/]+)/([^/?#]+)")
-_LINK = re.compile(r"^kodik=([^/]+)/([^/]+)/(\d+)$")
+# A list of the player is a whole serial of a voice-over, or one season of it (a site may embed either).
+_MEDIA = re.compile(r"/(serial|season)/([^/]+)/([^/?#]+)")
+_LINK = re.compile(r"^kodik=(?:(season)/)?([^/]+)/([^/]+)/(\d+)$")
+_TRANSLATION_ID = re.compile(r"var\s+translationId\s*=\s*(?:Number\()?(\d+)")
+_TRANSLATION_TITLE = re.compile(r"""var\s+translationTitle\s*=\s*["']([^"']*)["']""")
+SERIAL = "serial"
+SEASON = "season"
 
 
 class KodikError(RuntimeError):
@@ -62,13 +67,14 @@ class KodikError(RuntimeError):
 
 @dataclass(frozen=True)
 class KodikVoice:
-    """One voice-over (translation): its own serial id and hash."""
+    """One voice-over (translation): its own list (a serial, or a season when a site embeds one) by id and hash."""
 
     translation_id: str
     studio: str
     media_id: str
     media_hash: str
     kind: str
+    media_kind: str = SERIAL
 
 
 @dataclass(frozen=True)
@@ -79,6 +85,7 @@ class KodikSeason:
     media_id: str
     media_hash: str
     selected: bool
+    media_kind: str = SERIAL
 
 
 @dataclass(frozen=True)
@@ -101,10 +108,12 @@ class KodikSession:
     items: dict[str, KodikItem]
     voices: list[KodikVoice] = field(default_factory=list)
     seasons: list[KodikSeason] = field(default_factory=list)
+    # The voice-over the iframe plays, as the page names it (the one thing that words it when no list of voices is shown).
+    translation: tuple[str, str] = ("", "")
 
 
-def iframe_url(media_id: str, media_hash: str) -> str:
-    return f"{ORIGIN}/serial/{media_id}/{media_hash}/720p?translations=true"
+def iframe_url(media_id: str, media_hash: str, media_kind: str = SERIAL) -> str:
+    return f"{ORIGIN}/{media_kind}/{media_id}/{media_hash}/720p?translations=true"
 
 
 def normalize_iframe(url: str) -> str:
@@ -194,8 +203,11 @@ def read_session(url: str, answer: Answer) -> KodikSession:
     items = parse_items(answer.text)
     if not items:
         raise KodikError(reason("kodik_no_episode_list"))
+    found_id, found_title = _TRANSLATION_ID.search(answer.text), _TRANSLATION_TITLE.search(answer.text)
     return KodikSession(iframe_url=url, signed=parse_signatures(answer.text), items=items,
-                        voices=parse_voices(answer.text), seasons=parse_seasons(answer.text))
+                        voices=parse_voices(answer.text), seasons=parse_seasons(answer.text),
+                        translation=(found_id.group(1) if found_id else "",
+                                     html.unescape(found_title.group(1)).strip() if found_title else ""))
 
 
 def read_ftor(status: int, text: str) -> Reading:
@@ -223,14 +235,17 @@ def read_ftor(status: int, text: str) -> Reading:
     return Reading(Kind.PLAYABLE, status, tuple(sorted(files)), files=tuple(sorted(files.items())))
 
 
-def link_of(page_url: str, media_id: str, media_hash: str, item_id: str) -> str:
-    """The candidate link of one item of the list: a fragment of the page, so the identity of the item is stable."""
-    return f"{page_url}#kodik={media_id}/{media_hash}/{item_id}"
+def link_of(page_url: str, media_id: str, media_hash: str, item_id: str, media_kind: str = SERIAL) -> str:
+    """The candidate link of one item of the list: a fragment of the page, so the identity of the item is stable. An item
+    of a serial keeps the spelling it always had; an item of a season says so."""
+    kind = "" if media_kind == SERIAL else f"{media_kind}/"
+    return f"{page_url}#kodik={kind}{media_id}/{media_hash}/{item_id}"
 
 
-def parse_link(url: str) -> tuple[str, str, str] | None:
+def parse_link(url: str) -> tuple[str, str, str, str] | None:
+    """(the kind of the list, its id, its hash, the item) of a candidate link."""
     found = _LINK.match(urlsplit(url).fragment)
-    return (found.group(1), found.group(2), found.group(3)) if found else None
+    return (found.group(1) or SERIAL, found.group(2), found.group(3), found.group(4)) if found else None
 
 
 def is_kodik_url(url: str) -> bool:
@@ -238,7 +253,7 @@ def is_kodik_url(url: str) -> bool:
 
 
 def voice_iframe(voice: KodikVoice) -> str:
-    return iframe_url(voice.media_id, voice.media_hash)
+    return iframe_url(voice.media_id, voice.media_hash, voice.media_kind)
 
 
 class KodikPlayer:
@@ -255,16 +270,30 @@ class KodikPlayer:
     def find(self, text: str, page_url: str) -> PlayerRef | None:
         """The iframe a page embeds, or the button that switches the page to it; it opens a voice-over of the title."""
         match = _FRAME.search(text) or _SWITCH.search(text)
-        return PlayerRef(self.name, normalize_iframe(html.unescape(match.group(1)))) if match else None
+        return self.listing(match.group(1)) if match else None
 
     @staticmethod
-    def ref_of(page_url: str, media_id: str, media_hash: str, item_id: str) -> PlayerRef:
-        return PlayerRef("kodik", link_of(page_url, media_id, media_hash, item_id))
+    def listing(iframe: str) -> PlayerRef:
+        """The iframe of a list, wherever a site gives its address (a page, an answer of its API)."""
+        return PlayerRef("kodik", normalize_iframe(html.unescape(iframe)))
+
+    @staticmethod
+    def catalog_id(source: PlayerRef) -> str:
+        """The list an iframe opens and the voice-overs its address limits it to: the addresses of one list for each of its
+        episodes are one catalog."""
+        media = _media_of(source.url)
+        if media is None:
+            return source.url
+        return "/".join(media) + "?" + ",".join(sorted(_only_translations(source.url)))
+
+    @staticmethod
+    def ref_of(page_url: str, media_id: str, media_hash: str, item_id: str, media_kind: str = SERIAL) -> PlayerRef:
+        return PlayerRef("kodik", link_of(page_url, media_id, media_hash, item_id, media_kind))
 
     @staticmethod
     def video_of(url: str) -> str:
-        parts = parse_link(url)
-        return "/".join(parts) if parts else ""
+        """The item as the link names it: its list (with the kind of a season) and its id."""
+        return urlsplit(url).fragment.removeprefix("kodik=") if parse_link(url) else ""
 
     @staticmethod
     def owns(url: str) -> bool:
@@ -296,17 +325,19 @@ class KodikPlayer:
         referer = f"{parts.scheme}://{parts.netloc}/"
         first = await self._open(http, source.url, referer)
         wanted = _only_translations(source.url)
-        voices = [voice for voice in (first.voices or [_lone_voice(source.url)]) if not wanted or voice.translation_id in wanted]
+        voices = [voice for voice in (first.voices or [_lone_voice(source.url, first)])
+                  if not wanted or voice.translation_id in wanted]
         found: list[Entry] = []
         for voice in voices:
-            opened = first if (voice.media_id, voice.media_hash) == _media_of(source.url) else await self._open(
+            opened = first if (voice.media_kind, voice.media_id, voice.media_hash) == _media_of(source.url) else await self._open(
                 http, voice_iframe(voice), referer)
-            for season in opened.seasons or [KodikSeason("", voice.media_id, voice.media_hash, True)]:
-                session = opened if season.selected or not opened.seasons else await self._open(
-                    http, iframe_url(season.media_id, season.media_hash), referer)
-                self.remember(http, session, iframe_url(season.media_id, season.media_hash))
+            for season in opened.seasons or [KodikSeason("", voice.media_id, voice.media_hash, True, voice.media_kind)]:
+                listed = iframe_url(season.media_id, season.media_hash, season.media_kind)
+                session = opened if season.selected or not opened.seasons else await self._open(http, listed, referer)
+                self.remember(http, session, listed)
                 found += [Entry(
-                    key=f"{voice.translation_id}:{item.id}", ref=self.ref_of(page_url, season.media_id, season.media_hash, item.id),
+                    key=f"{voice.translation_id}:{item.id}",
+                    ref=self.ref_of(page_url, season.media_id, season.media_hash, item.id, season.media_kind),
                     text=item.text, group=season.title, voice=RowVoice(name=voice.studio, kind=voice.kind),
                     site_fields={"value": item.value, "translation_id": voice.translation_id}) for item in session.items.values()]
         return found
@@ -325,8 +356,8 @@ class KodikPlayer:
         target = parse_link(ref.url)
         if target is None:
             return Answer(200, reading=Reading(Kind.NOT_PLAYER, 200, message="not a Kodik link"))
-        media_id, media_hash, item_id = target
-        key = iframe_url(media_id, media_hash)
+        media_kind, media_id, media_hash, item_id = target
+        key = iframe_url(media_id, media_hash, media_kind)
         parts = urlsplit(page_url)
         referer = f"{parts.scheme}://{parts.netloc}/"
         session = self.recall(http, key)
@@ -353,9 +384,10 @@ class KodikPlayer:
         return read_answer(answer, read_ftor)
 
 
-def _media_of(url: str) -> tuple[str, str] | None:
+def _media_of(url: str) -> tuple[str, str, str] | None:
+    """(the kind of the list, its id, its hash) an iframe address opens."""
     found = _MEDIA.search(urlsplit(url).path)
-    return (found.group(1), found.group(2)) if found else None
+    return (found.group(1), found.group(2), found.group(3)) if found else None
 
 
 def _only_translations(url: str) -> frozenset[str]:
@@ -364,11 +396,13 @@ def _only_translations(url: str) -> frozenset[str]:
     return frozenset(part for value in values for part in value.split(",") if part)
 
 
-def _lone_voice(url: str) -> KodikVoice:
-    """An iframe that lists no voice-overs is the one voice-over its address names; the iframe does not word it."""
-    media = _media_of(url) or ("", "")
+def _lone_voice(url: str, session: KodikSession) -> KodikVoice:
+    """An iframe that lists no voice-overs is the one voice-over its address names, as the page names the one it plays."""
+    kind, media_id, media_hash = _media_of(url) or (SERIAL, "", "")
     only = sorted(_only_translations(url))
-    return KodikVoice(translation_id=only[0] if only else "", studio="", media_id=media[0], media_hash=media[1], kind="")
+    translation_id, studio = session.translation
+    return KodikVoice(translation_id=only[0] if only else translation_id, studio=studio, media_id=media_id,
+                      media_hash=media_hash, kind="", media_kind=kind)
 
 
 def _unopened(opened: Answer) -> Reading:

@@ -35,17 +35,28 @@ def _heights(value: str) -> set[int]:
     return found
 
 
-def read_playerjs(status: int, text: str) -> Reading:
-    if status == 404:
-        return Reading(Kind.NOT_FOUND, status)
-    if status != 200:
-        return Reading(Kind.HTTP_ERROR, status)
-    values = _FILE.findall(text)
+def reading_of_files(values: list[str], status: int = 200) -> Reading:
+    """What the file lists of the player say of a video, wherever they are given (its embed, a playlist of many)."""
     if any(ERROR_FILE in value for value in values):
         return Reading(Kind.NOT_FOUND, status, message=ERROR_FILE)
     heights = set().union(*(_heights(value) for value in values)) if values else set()
     if heights:
         return Reading(Kind.PLAYABLE, status, tuple(sorted(heights)), files=_files(values))
+    return Reading(Kind.NO_FILE, status)
+
+
+def embed_url(host: str, video_id: str) -> str:
+    return f"https://{host}/embed/{video_id}/"
+
+
+def read_playerjs(status: int, text: str) -> Reading:
+    if status == 404:
+        return Reading(Kind.NOT_FOUND, status)
+    if status != 200:
+        return Reading(Kind.HTTP_ERROR, status)
+    reading = reading_of_files(_FILE.findall(text), status)
+    if reading.kind is not Kind.NO_FILE:
+        return reading
     found = _TITLE.search(text)
     title = " ".join(found.group(1).split()) if found else ""
     if _PLAYERJS in text.lower():
@@ -71,9 +82,10 @@ class AllVideoPlayer:
     label = "AllVideo"
     series_scope = False
 
-    HOSTS = ("fsst.online", "incvideo1.online")
+    # The domains of the one player: the others send their embeds to incvideo1.online.
+    HOSTS = ("fsst.online", "incvideo1.online", "csst.online")
     _SOURCE = re.compile(
-        r"switchSource\(['\"](https?://(?:fsst\.online|incvideo1\.online)/"
+        r"switchSource\(['\"](https?://(?:fsst\.online|incvideo1\.online|csst\.online)/"
         r"embed/\d+/?)")
 
     @staticmethod
