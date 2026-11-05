@@ -198,7 +198,7 @@ class TableReader:
             if row.key in seen:
                 raise SiteError(reason("duplicate_key", key=row.key, player=row.player))
             seen.add(row.key)
-        return ReleaseTable(url=key, site=site.name, names=draft.names, site_voice=draft.site_voice,
+        return ReleaseTable(url=key, site=site.name, names=draft.names, site_voice=draft.site_voice, channel=draft.channel,
                             read_at=self._stamp(), complete=True, rows=draft.rows)
 
     async def _settle(self, site: Site, key: str, table: ReleaseTable | None, problem: str | None) -> str | None:

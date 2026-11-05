@@ -55,6 +55,8 @@ class TableDraft(BaseModel):
 
     names: list[str] = Field(default_factory=list)
     site_voice: str = ""
+    # The channel of the site the page belongs to (the community of a VK channel); a site of one publisher gives none.
+    channel: str = ""
     rows: list[TableRow] = Field(default_factory=list)
 
 

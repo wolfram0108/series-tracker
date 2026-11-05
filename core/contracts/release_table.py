@@ -65,6 +65,8 @@ class ReleaseTable(BaseModel):
     site: str
     names: list[str] = Field(default_factory=list)
     site_voice: str = ""
+    # The channel the page belongs to (the community of a VK channel), so that rules tell apart two channels of one site.
+    channel: str = ""
     read_at: str | None = None
     complete: bool = False
     rows: list[TableRow] = Field(default_factory=list)
@@ -89,6 +91,7 @@ def _resolution_of(table: ReleaseTable, row: TableRow) -> str:
 # left out together with its separator.
 LINE_FIELDS: tuple[tuple[str, Any], ...] = (
     ("PID", _source_of),
+    ("", lambda table, row: table.channel),
     ("P", lambda table, row: row.player_label or row.player),
     ("", lambda table, row: table.names[0].strip() if table.names else ""),
     ("", lambda table, row: row.text),

@@ -42,6 +42,16 @@ def test_the_text_of_a_cvh_row_is_given_by_the_player_and_taken_as_it_is():
     assert line == "PID:example.org | P:CVH | Практикуя ци сто тысяч лет | 5 серия | G:1 сезон | V:AniStar | VT:Многоголосый | R:1080p"
 
 
+def test_the_channel_of_the_page_follows_the_host_so_that_two_channels_of_one_site_are_told_apart():
+    pvashow = ReleaseTable(url="https://vkvideo.ru/@pvashow|Боевой мастер", site="vk_channel", channel="pvashow", complete=True)
+    mir = ReleaseTable(url="https://vkvideo.ru/@mir.donghua|За гранью времени", site="vk_channel", channel="mir.donghua",
+                       complete=True)
+    episode = row(player_label="VK", heights=[1080], text="Боевой мастер - 706 серия")
+
+    assert line_of(pvashow, episode) == "PID:vkvideo.ru | pvashow | P:VK | Боевой мастер - 706 серия | R:1080p"
+    assert line_of(mir, episode).startswith("PID:vkvideo.ru | mir.donghua | P:VK | ")
+
+
 @pytest.mark.parametrize("state", [RowState.ABSENT, RowState.NOT_OBTAINED])
 def test_a_row_that_does_not_play_has_no_resolution_in_its_line(state):
     assert line_of(table(), row(player_label="VK", state=state, heights=[720], text="Серия 3")) == "PID:example.org | P:VK | Серия 3"

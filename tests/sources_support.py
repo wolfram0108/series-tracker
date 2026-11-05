@@ -49,18 +49,20 @@ def json_of(relative: str):
     return json.loads(text_of(relative))
 
 
-MIGRATION = ROOT / "alembic" / "versions" / "0026_sources_release_tables.py"
+MIGRATIONS = [ROOT / "alembic" / "versions" / name
+              for name in ("0026_sources_release_tables.py", "0042_release_table_channel.py")]
 
 
 def migrate(path: Path, direction: str = "upgrade") -> None:
-    """The migration of the tables of pages alone, so that the migrations of other packages cannot break these tests."""
-    spec = importlib.util.spec_from_file_location("migration_0026", MIGRATION)
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
+    """The migrations of the tables of pages alone, so that the migrations of other packages cannot break these tests."""
     engine = create_engine(f"sqlite:///{path}")
     with engine.begin() as connection:
         with Operations.context(MigrationContext.configure(connection)):
-            getattr(migration, direction)()
+            for path_of in MIGRATIONS if direction == "upgrade" else reversed(MIGRATIONS):
+                spec = importlib.util.spec_from_file_location(f"migration_{path_of.stem}", path_of)
+                migration = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(migration)
+                getattr(migration, direction)()
     engine.dispose()
 
 

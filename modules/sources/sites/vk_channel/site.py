@@ -16,8 +16,9 @@ a channel holds thousands of videos and several series share one. Reads of one c
 listing, and each of them is told its progress. A read the user asked for (`ReadContext.fresh`) lists the channel anew.
 
 A video without files is asked of the VK player by the key in the `player` link of the video, as the player of a page does.
-The text of a row is the title of the video as it is; the voice-over of a row is empty, the constructor names it. Nothing here
-numbers an episode.
+The head of the table names the channel (`channel`), so that the line of the constructor tells apart two channels of VK in
+one series. The text of a row is the title of the video as it is; the voice-over of a row is empty, the constructor names it.
+Nothing here numbers an episode.
 """
 from __future__ import annotations
 
@@ -111,7 +112,7 @@ class VkChannelSite:
         if ctx.recent is not None:  # the newest videos of the channel, in the order of their dates
             videos = sorted(videos, key=lambda video: video.get("date") or 0)
             videos = videos[max(0, len(videos) - ctx.recent):]
-        return TableDraft(rows=await self._rows(videos, address.channel_url, ctx))
+        return TableDraft(channel=address.name, rows=await self._rows(videos, address.channel_url, ctx))
 
     async def _ask(self, method: str, params: dict) -> dict:
         if self._call is None:

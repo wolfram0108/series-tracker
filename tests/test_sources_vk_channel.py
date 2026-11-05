@@ -168,6 +168,7 @@ async def test_a_row_is_the_title_the_steps_of_the_files_and_the_date_of_the_vid
 
     assert (row.text, row.player, row.player_label) == (video["title"], "vk", "VK")
     assert row.voice.name == "" and row.group == "" and draft.names == [] and draft.site_voice == ""
+    assert draft.channel == "ruchime"  # the line of the constructor tells the channel apart from another of VK
     assert row.state is RowState.PLAYABLE and row.heights == [720, 1080]
     assert row.link == f"https://vk.com/video{OWNER}_{video['id']}" and row.duration_s == video["duration"]
     assert row.published.endswith("Z") and row.published[:4].isdigit()

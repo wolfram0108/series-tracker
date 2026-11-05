@@ -79,7 +79,7 @@ class FakeSite:
         await self.go.wait()
         if self.failure is not None:
             raise self.failure
-        return TableDraft(names=["Фейк"], site_voice="Ruchime", rows=self.rows(len(self.reads)))
+        return TableDraft(names=["Фейк"], site_voice="Ruchime", channel="fake-channel", rows=self.rows(len(self.reads)))
 
 
 async def entry(site: FakeSite) -> str:
@@ -413,6 +413,7 @@ async def test_a_row_comes_back_as_the_site_gave_it_in_the_order_of_the_site(sys
 
     assert table.rows == given
     assert table.names == ["Фейк"] and table.site_voice == "Ruchime" and table.url == PAGE
+    assert table.channel == "fake-channel"
     assert table.read_at == "2026-11-01T12:00:00+00:00"
 
 
@@ -695,7 +696,7 @@ def test_the_migration_creates_the_tables_of_pages_and_takes_them_away(tmp_path)
     engine = create_engine(f"sqlite:///{path}")
     tables = inspect(engine)
     assert {column["name"] for column in tables.get_columns("release_tables")} == {
-        "url", "site", "names", "site_voice", "read_at", "complete", "state", "reason", "reading_since"}
+        "url", "site", "names", "site_voice", "channel", "read_at", "complete", "state", "reason", "reading_since"}
     assert {column["name"] for column in tables.get_columns("release_rows")} == {
         "url", "seq", "key", "player", "player_label", "grp", "text", "voice_name", "voice_kind", "heights", "state",
         "reason", "duration_s", "published", "link", "site_fields"}
