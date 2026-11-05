@@ -262,7 +262,7 @@ class ScanModule(BaseModule):
         await self._announcing(item["series_id"], apply())
         self.publish_event("scan.plan.updated", {"series_id": item["series_id"]})
 
-    # --- the admission of a change by the user (И-60) ------------------------------------------------------------
+    # --- the admission of a change by the user (I-60) ------------------------------------------------------------
 
     async def on_edit_begin(self, env: Envelope) -> dict:
         """A change of the series by the user begins: refused while a sync of it runs or opens; admitted, it holds off

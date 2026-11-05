@@ -1533,7 +1533,7 @@ async def test_the_run_of_a_series_hears_whether_downloads_has_work_of_it(system
     assert await _wait(lambda: not any(task["status"] in ("pending", "downloading", "processing", "publishing")
                                        for task in _tasks(db_path)))
     assert (await probe.request("downloads.work.get", {"series_id": 2}, timeout=10))["active"] is False
-    # Every change of the state is told once, numbered in the order it was counted (И-60): the work, then its end.
+    # Every change of the state is told once, numbered in the order it was counted (I-60): the work, then its end.
     told = [(await asyncio.wait_for(states.queue.get(), 5)).payload]
     while not (told[-1]["active"] is False and any(each["active"] for each in told)):
         told.append((await asyncio.wait_for(states.queue.get(), 5)).payload)

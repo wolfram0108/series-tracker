@@ -3170,7 +3170,7 @@ async def test_a_reference_that_turns_none_while_a_voice_over_downloads_takes_it
 
 
 
-# --- a track is valid while it is aligned to a video of the same identity (ЭТАП_11, п. 5) ---------------------------------
+# --- a track is valid while it is aligned to a video of the same identity (stage 11, point 5) ---------------------------------
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("video", ["same_video_other_file", "other_video"])

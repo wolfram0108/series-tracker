@@ -357,7 +357,7 @@ async def test_the_run_of_a_series_hears_whether_voices_has_work_of_it(dubs):
     await settled(neighbours, 3)
     await quiet(voices)
     busy = await probe.request("voices.work.get", {"series_id": 7}, timeout=5)
-    # Every state counted is numbered after the one before: the run orders a reply and an event by it (И-60).
+    # Every state counted is numbered after the one before: the run orders a reply and an event by it (I-60).
     assert {key: busy[key] for key in ("owner", "series_id", "active")} == {"owner": "voices", "series_id": 7, "active": True}
     assert busy["seq"] > idle["seq"]
 

@@ -423,7 +423,7 @@ class DownloadsModule(BaseModule):
         dropped = retired = removed = 0
         if sync:  # what the plan alone decides reaches the disk in a sync only
             dropped = await self._drop_tasks_without_need(series["id"])
-            retired = 0  # a displaced file goes when the container of its winner is made (packing, ЭТАП_11)
+            retired = 0  # a displaced file goes when the container of its winner is made (packing, stage 11)
             removed = await self.library.remove_unwanted(series)
         swept = await self.library.sweep_work(series)
         return Reconciled(finished, released, adopted, dropped, retired, removed, swept, renamed)

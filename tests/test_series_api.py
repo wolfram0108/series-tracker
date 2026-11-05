@@ -400,7 +400,7 @@ async def test_update_with_path_change_plans_the_move_and_the_card_shows_it(syst
         "name": "Тайтл", "save_path": "/media/new"})
     assert resp.status_code == 200
     assert ("plan", {"series_id": 1, "new_path": "/media/new"}) in neighbours.calls
-    # save_path пишет library после перемещения в синхронизации — gateway его не трогает
+    # save_path is written by library after the move in a sync; the gateway does not touch it
     row = await db.fetch_one("SELECT save_path FROM series WHERE id=1")
     assert row["save_path"] == "/media/t"
     assert all(c[0] != "reprocess" for c in neighbours.calls)

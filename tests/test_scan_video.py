@@ -977,7 +977,7 @@ async def test_a_series_that_is_deleted_takes_its_references_and_plan_with_it(ri
     assert rig.query("SELECT * FROM scan_references") == [] and rig.query("SELECT * FROM media_items") == []
 
 
-# --- after a change: a row taken out by the configuration is withdrawn, a row not brought is held (И-58) ----------
+# --- after a change: a row taken out by the configuration is withdrawn, a row not brought is held (I-58) ----------
 
 from core.contracts import Exclusion  # noqa: E402
 
@@ -1040,7 +1040,7 @@ async def test_the_row_of_a_reference_follows_the_word_of_the_configuration_and_
 
 
 
-# --- a sync is one run: the series is busy until every work of it ends, and works by the snapshot (ЭТАП_11) ----------
+# --- a sync is one run: the series is busy until every work of it ends, and works by the snapshot (stage 11) ----------
 
 from core.contracts import RUN_CHANGED, WORK_STATE  # noqa: E402
 

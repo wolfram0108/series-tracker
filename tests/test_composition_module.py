@@ -1519,7 +1519,7 @@ async def test_the_count_a_sync_asks_for_reads_the_rules_and_the_groups_of_its_s
     assert [call.rules for call in s.rules.calls] == [None]
 
 
-# --- the order of the voice-overs of a season (ЭТАП_11) ----------------------------------------------------------------
+# --- the order of the voice-overs of a season (stage 11) ----------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_the_order_of_the_voices_of_a_season_is_shown_kept_and_set_by_the_user_only(system):

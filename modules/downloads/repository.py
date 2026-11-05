@@ -388,7 +388,7 @@ class DownloadsRepository:
             + [("UPDATE media_items SET status='completed', final_filename=?, rename_to=NULL WHERE unique_id=?",
                 (filename, winner))])
 
-    # --- the journal of the publications of containers (pack_publications, ЭТАП_11) ----------------------------------
+    # --- the journal of the publications of containers (pack_publications, stage 11) ----------------------------------
 
     _PUBLICATION_LISTS = ("signature", "losers", "leftovers", "dub_ids")
 
