@@ -61,6 +61,11 @@
   box-shadow: 0 0 8px rgba(0, 0, 0, 0.15); color: #2c3e50 !important; overflow: hidden;
 }
 .status-pill.ms-auto { margin-left: auto; }
+/* The hidden row the widths of the pills are measured on (priority+ of SeriesCard); it takes no room. */
+.status-pills-measure {
+  position: absolute; inset-block-start: 0; inset-inline-start: 0; display: flex; gap: inherit;
+  visibility: hidden; pointer-events: none;
+}
 
 .auto-scan-switch { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 500; }
 .switch { position: relative; display: inline-block; width: 44px; height: 24px; }

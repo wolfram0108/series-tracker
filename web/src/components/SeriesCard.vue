@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import type { Series } from "../stores/series"
 import { useSeriesReadsStore } from "../stores/seriesReads"
 import { progressText } from "../lib/sources"
@@ -64,17 +64,48 @@ const animationClass = computed(() => {
   return "stripes-normal"
 })
 
+// Priority+: every status that fits is shown; the least important ones (the end of the hierarchy) go into "+N" only when
+// the row has no room for them. The widths come from a hidden row of every pill, the room from the row itself.
+const pillsRow = ref<HTMLElement | null>(null)
+const measureRow = ref<HTMLElement | null>(null)
+const fitting = ref(Number.POSITIVE_INFINITY)
+
+function fit(): void {
+  const row = pillsRow.value
+  const measure = measureRow.value
+  if (!row || !measure) return
+  const gap = parseFloat(getComputedStyle(row).columnGap) || 0
+  const width = (key: string) => (measure.querySelector(`[data-key="${key}"]`) as HTMLElement | null)?.offsetWidth ?? 0
+  const others = [...row.children].filter((each) => each.classList.contains("status-pill-other"))
+  const room = row.clientWidth - others.reduce((sum, each) => sum + (each as HTMLElement).offsetWidth + gap, 0)
+  const widths = states.value.map(width)
+  const all = widths.reduce((sum, each) => sum + each + gap, 0) - gap
+  if (all <= room) {
+    fitting.value = widths.length
+    return
+  }
+  let used = width("overflow")
+  let count = 0
+  while (count < widths.length && used + gap + widths[count] <= room) used += gap + widths[count++]
+  fitting.value = count
+}
+
+let observer: ResizeObserver | null = null
+onMounted(() => {
+  fit()
+  if (typeof ResizeObserver !== "undefined" && pillsRow.value) {
+    observer = new ResizeObserver(() => fit())
+    observer.observe(pillsRow.value)
+  }
+})
+onBeforeUnmount(() => observer?.disconnect())
+
 const pills = computed(() => {
   const s = states.value
-  const maxVisible = 3
+  const shown = Math.min(s.length, fitting.value)
   const out: { key: string; title: string; icon: string }[] = []
-  let visible = s
-  if (s.length > maxVisible) {
-    visible = s.slice(0, maxVisible)
-    out.push({ key: "overflow", title: `+${s.length - maxVisible}`, icon: "pi-ellipsis-h" })
-  }
-  visible.forEach((k) =>
-    out.push({ key: k, title: stateTitle(k), icon: stateIcons[k] || "" }))
+  if (shown < s.length) out.push({ key: "overflow", title: `+${s.length - shown}`, icon: "pi-ellipsis-h" })
+  s.slice(0, shown).forEach((k) => out.push({ key: k, title: stateTitle(k), icon: stateIcons[k] || "" }))
   return out.reverse()
 })
 
@@ -87,6 +118,9 @@ const tmdb = computed(() => {
   }
   return null
 })
+
+// The room of the statuses changes with them and with the pills beside them.
+watch([states, reading, tmdb], () => nextTick(fit))
 
 const scanTime = computed(() => {
   const iso = props.series.last_scan_time
@@ -131,18 +165,24 @@ const scanTime = computed(() => {
     </div>
 
     <div class="card-body">
-      <div class="status-pills-container">
+      <div ref="pillsRow" class="status-pills-container">
+        <div ref="measureRow" class="status-pills-measure" aria-hidden="true">
+          <div v-for="k in states" :key="k" class="status-pill" :data-key="k">
+            <i class="pi" :class="stateIcons[k]"></i><span>{{ stateTitle(k) }}</span>
+          </div>
+          <div class="status-pill" data-key="overflow"><i class="pi pi-ellipsis-h"></i><span>+{{ states.length }}</span></div>
+        </div>
         <TransitionGroup name="badge-fade">
           <div v-for="p in pills" :key="p.key" class="status-pill">
             <i v-if="p.icon" class="pi" :class="p.icon"></i>
             <span v-if="p.title">{{ p.title }}</span>
           </div>
         </TransitionGroup>
-        <div v-if="reading" class="status-pill" :title="t('series.reading', { text: reading })">
+        <div v-if="reading" class="status-pill status-pill-other" :title="t('series.reading', { text: reading })">
           <i class="pi pi-spin pi-spinner"></i>
           <span>{{ reading }}</span>
         </div>
-        <div v-if="tmdb" class="status-pill ms-auto" title="Прогресс эпизодов">
+        <div v-if="tmdb" class="status-pill status-pill-other ms-auto" title="Прогресс эпизодов">
           <i class="pi pi-images"></i>
           <span>{{ tmdb.downloaded }} / {{ tmdb.total }}</span>
         </div>

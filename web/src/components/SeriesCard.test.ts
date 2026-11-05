@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import SeriesCard from "./SeriesCard.vue"
 import { useSeriesReadsStore } from "../stores/seriesReads"
 import type { Series } from "../stores/series"
+
+// The pills of the row the user sees (a hidden row measures their widths).
+const visible = (w: { findAll: (selector: string) => { element: Element; text: () => string }[] }) =>
+  w.findAll(".status-pill").filter((each) => !each.element.closest(".status-pills-measure")).map((each) => each.text())
 
 const series = { id: 40, name: "Владыка", site: "x", statuses: ["scanning"], auto_scan_enabled: false } as unknown as Series
 
@@ -27,16 +31,35 @@ describe("SeriesCard", () => {
     expect(pill()).toBeUndefined()
   })
 
+  it("shows every status that fits and puts into +N only those the row has no room for, the least important first", async () => {
+    // jsdom lays nothing out: the room of the row and the width of each pill are given.
+    let room = 500
+    const widths = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.key === "overflow" ? 40 : 100
+    })
+    const rooms = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => room)
+    const four = { ...series, statuses: ["scanning", "aligning", "downloading", "ready"] } as unknown as Series
+    const wide = mount(SeriesCard, { props: { series: four } })
+    await flushPromises()
+    expect(visible(wide)).toEqual(["Готов", "Загрузка", "Выравнивание", "Обработка"])
+    room = 300  // four pills of 100 do not fit: two and the counter of the other two do
+    const narrow = mount(SeriesCard, { props: { series: four } })
+    await flushPromises()
+    expect(visible(narrow)).toEqual(["Выравнивание", "Обработка", "+2"])
+    widths.mockRestore()
+    rooms.mockRestore()
+  })
+
   it("names an open run processing and gives slicing, alignment and packing a pill and a layer of their own", () => {
     const working = { ...series, statuses: ["slicing", "aligning", "packing"] } as unknown as Series
     const w = mount(SeriesCard, { props: { series: working } })
-    expect(w.findAll(".status-pill").map((each) => each.text()).sort()).toEqual(
+    expect(visible(w).sort()).toEqual(
       ["Выравнивание", "Нарезка", "Упаковка"])
     for (const layer of ["slicing", "aligning", "packing"]) {
       expect(w.find(`.layer-${layer}`).attributes("style")).not.toContain("width: 0%")
     }
     expect(w.find(".layer-downloading").attributes("style")).toContain("width: 0%")
     const processing = mount(SeriesCard, { props: { series } })
-    expect(processing.findAll(".status-pill").map((each) => each.text())).toContain("Обработка")
+    expect(visible(processing)).toContain("Обработка")
   })
 })
