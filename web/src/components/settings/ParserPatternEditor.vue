@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import draggable from "vuedraggable"
+import { t } from "../../i18n"
 import {
   attachmentBlockCount,
   canDrop,
   carriesAttachment,
   isAttachmentType,
-  isGlued,
+  isDanglingOr,
+  joinsNext,
+  joinsPrevious,
   normalizeAttachments,
   numberBlockCount,
   removeBlockAt,
@@ -30,6 +33,7 @@ const props = defineProps<{
 
 const BLOCK_PALETTE: PaletteItem[] = [
   { type: "text", label: "Текст", title: "Точный текст" },
+  { type: "or", label: t("rules.block.or.label"), title: t("rules.block.or.title") },
   { type: "number", label: "Число", title: "Любое число (1, 2, 10, 155...)" },
   { type: "range", label: "Диапазон", title: "Диапазон номеров (например, 1, 3-10 или 1-180)" },
   { type: "add", label: "+", title: "Сложение" },
@@ -81,9 +85,10 @@ function getBlockClasses(block: PatternBlock, index: number): string {
   if (["add", "subtract"].includes(block.type)) classes.push("block-type-operation")
   else if (block.type === "text") classes.push("block-type-text")
   else classes.push(`block-type-${block.type}`)
-  // Glued pair: the suffix touches the number it modifies.
-  if (isGlued(props.blocks, index)) classes.push("is-glued")
-  if (carriesAttachment(props.blocks, index)) classes.push("carries-attachment")
+  // Glued units: the suffix touches the number it modifies, «или» touches the texts it joins.
+  if (joinsPrevious(props.blocks, index)) classes.push("is-glued")
+  if (joinsNext(props.blocks, index)) classes.push("carries-attachment")
+  if (isDanglingOr(props.blocks, index)) classes.push("is-dangling")
   return classes.join(" ")
 }
 
@@ -144,7 +149,8 @@ function checkMove(evt: any): boolean {
       @change="normalizeAttachments(blocks)"
     >
       <template #item="{ element, index }">
-        <div :class="getBlockClasses(element, index)">
+        <div :class="getBlockClasses(element, index)"
+             :title="isDanglingOr(props.blocks, index) ? t('rules.block.or.dangling') : undefined">
           <span class="drag-handle">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
               <path d="M7 2a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM7 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-3 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z" />

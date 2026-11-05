@@ -36,6 +36,33 @@ export function carriesAttachment(blocks: PatternBlock[], index: number): boolea
   return isAttachmentType(next.type)
 }
 
+// «или» joins the texts on its two sides into one place of the title (any of them): it stands between two texts,
+// and a chain «A» «или» «B» «или» «C» is one group. The engine refuses it anywhere else.
+export function orInPlace(blocks: PatternBlock[], index: number): boolean {
+  return blocks[index]?.type === "or" && blocks[index - 1]?.type === "text" && blocks[index + 1]?.type === "text"
+}
+
+// An «или» that has no text on one of its sides yet: the template is not finished.
+export function isDanglingOr(blocks: PatternBlock[], index: number): boolean {
+  return blocks[index]?.type === "or" && !orInPlace(blocks, index)
+}
+
+// A block touches the one before it: an attachment on its number, or a member of a group of «или».
+export function joinsPrevious(blocks: PatternBlock[], index: number): boolean {
+  const type = blocks[index]?.type
+  if (type === "or") return orInPlace(blocks, index)
+  if (type === "text") return orInPlace(blocks, index - 1)
+  return isGlued(blocks, index)
+}
+
+// A block touches the one after it: a number that carries its attachment, or a member of a group of «или».
+export function joinsNext(blocks: PatternBlock[], index: number): boolean {
+  const type = blocks[index]?.type
+  if (type === "or") return orInPlace(blocks, index)
+  if (type === "text") return orInPlace(blocks, index + 1)
+  return carriesAttachment(blocks, index)
+}
+
 // A template holds either several numbers or a single number with an attachment.
 export function numberBlockCount(blocks: PatternBlock[]): number {
   return blocks.filter((b) => b.type === "number").length

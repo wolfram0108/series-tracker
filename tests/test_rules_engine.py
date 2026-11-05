@@ -799,3 +799,34 @@ def test_a_condition_that_is_not_from_a_source_leaves_that_source_out():
                                         [_cond(_blocks("PID:1.ruchime.org"), ctype="not_contains")], continue_after=True)])
     assert process_title(profile, "PID:vkvideo.ru | P:VK | Серия 1")["extracted"] == {"voiceover": "Чужая"}
     assert process_title(profile, "PID:1.ruchime.org | P:VK | Серия 1")["extracted"] == {}
+
+
+# --- блок «или»: один из соседних текстов -----------------------------------------
+
+OR = ("or", "")
+
+
+def test_or_joins_texts_into_one_place_of_the_title_in_a_condition_and_in_an_extraction():
+    """«вечная воля» «или» «воля вечная»: одно место названия, любой из текстов; цепочка из трёх так же."""
+    profile = compile_profile(1, [_rule(1, "тайтл", [_extract("extract_single", "серия", OR, "эпизод", "_", "N")],
+                                        [_cond(_blocks("вечная воля", OR, "воля вечная", OR, "Eternal Will"))])])
+    assert process_title(profile, "Вечная воля, серия 5")["extracted"] == {"episode": 5}
+    assert process_title(profile, "ВОЛЯ ВЕЧНАЯ эпизод 7")["extracted"] == {"episode": 7}
+    assert process_title(profile, "Eternal Will серия 3")["extracted"] == {"episode": 3}
+    assert process_title(profile, "Вечная жизнь серия 5")["extracted"] == {}
+
+
+def test_or_captures_nothing_so_the_number_after_it_is_the_one_extracted():
+    profile = compile_profile(1, [_rule(1, "сдвиг", [
+        _extract("extract_single", "серия", OR, "ep", "_", "N", ("add", "1"))])])
+    assert process_title(profile, "Тайтл ep 10")["extracted"] == {"episode": 11}
+    assert process_title(profile, "Тайтл серия 4")["extracted"] == {"episode": 5}
+
+
+@pytest.mark.parametrize("specs", [
+    (OR, "текст"), ("текст", OR), ("текст", OR, "N"), ("N", OR, "текст"), ("текст", OR, OR, "текст"),
+    ("", OR, "текст"),
+])
+def test_or_out_of_place_or_with_an_empty_text_is_refused_on_saving(specs):
+    with pytest.raises(ValueError, match="или"):
+        validate_rule({"conditions": [_cond(_blocks(*specs))]})

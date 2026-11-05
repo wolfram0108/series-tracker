@@ -32,7 +32,7 @@ ASSIGN_TYPES = ("assign_voiceover", "assign_episode", "assign_season",
                 "assign_range")
 ACTION_TYPES = ("exclude",) + EXTRACT_TYPES + ASSIGN_TYPES
 BLOCK_TYPES = ("text", "number", "range", "add", "subtract", "whitespace",
-               "any_text", "start_of_line", "end_of_line")
+               "any_text", "start_of_line", "end_of_line", "or")
 MODIFIER_TYPES = ("add", "subtract")
 
 
@@ -113,13 +113,46 @@ def parse_range_spec(raw: str | None) -> list[tuple[int, int]]:
 
 # --- блоки -> regex ------------------------------------------------------------
 
+def _or_groups(blocks: list[dict]) -> dict[int, list[int]]:
+    """The texts joined by «или», by the index of the first text of each group: «A» «или» «B» «или» «C» is one place
+    of the title that reads A, B or C. «или» stands between two texts, and a text of a group is not empty."""
+    for index, block in enumerate(blocks):
+        if block.get("type") != "or":
+            continue
+        around = blocks[index - 1:index] + blocks[index + 1:index + 2]
+        if index == 0 or len(around) < 2 or any(each.get("type") != "text" for each in around):
+            raise ValueError("блок «или» должен стоять между двумя блоками «Текст»")
+    groups: dict[int, list[int]] = {}
+    index = 0
+    while index < len(blocks):
+        if blocks[index].get("type") == "text" and index + 1 < len(blocks) and blocks[index + 1].get("type") == "or":
+            members = [index]
+            while members[-1] + 2 < len(blocks) and blocks[members[-1] + 1].get("type") == "or":
+                members.append(members[-1] + 2)
+            if any(not (blocks[member].get("value") or "") for member in members):
+                raise ValueError("у текста рядом с блоком «или» пустое значение")
+            groups[index] = members
+            index = members[-1] + 1
+        else:
+            index += 1
+    return groups
+
+
 def _blocks_to_regex(blocks: list[dict], *, capture_numbers: bool,
                      allow_range: bool = False) -> str:
     parts = []
-    for block in blocks:
+    groups = _or_groups(blocks)
+    joined = {member for members in groups.values() for member in members[1:]}
+    for index, block in enumerate(blocks):
         b_type = block.get("type")
         if b_type not in BLOCK_TYPES:
             raise ValueError(f"неизвестный тип блока: {b_type!r}")
+        if index in groups:
+            # One place of the title, any of the texts: a group that captures nothing, so the numbers keep their order.
+            parts.append("(?:" + "|".join(re.escape(blocks[member]["value"]) for member in groups[index]) + ")")
+            continue
+        if b_type == "or" or index in joined:
+            continue
         if b_type in ("add", "subtract"):
             continue  # Number modifiers are evaluated in actions, not part of regex pattern
         elif b_type == "range":
