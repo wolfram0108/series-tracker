@@ -64,7 +64,7 @@ def site_web(title: dict | tuple = TITLE) -> Web:
 
 
 async def read(web: Web, browser: Browser | None = None):
-    browser = browser or Browser(answer(track("1")))
+    browser = browser or Browser(answer(track("1")), episodes={"2": answer(track("1"))})
 
     async def getter():
         return browser
@@ -92,8 +92,8 @@ def test_a_voice_over_is_its_name_and_the_kind_the_site_puts_before_it():
 
 async def test_the_table_has_every_player_of_the_api_each_read_as_on_any_page_that_embeds_it(caplog):
     caplog.set_level(logging.INFO, "sources")
-    web = site_web()
-    table = await read(web)
+    web, browser = site_web(), Browser(answer(track("1")), episodes={"2": answer(track("1"))})
+    table = await read(web, browser)
     rows = {player: [row for row in table.rows if row.player == player] for player in ("kodik", "cvh", "vk", "alloha")}
 
     # Kodik: the list of the season once, however many elements and spellings of the voice-over point at it.
@@ -109,6 +109,8 @@ async def test_the_table_has_every_player_of_the_api_each_read_as_on_any_page_th
     assert [(row.key, row.text, row.voice.name, row.heights) for row in rows["alloha"]] == [
         ("alloha:8bf4/158/1/1", "1 серия", "AniStar", [360, 720, 1080]),
         ("alloha:8bf4/158/1/2", "2 серия", "AniStar", [360, 720, 1080])]
+    # The episodes of a season of Alloha are one open of the player, the second a switch inside it.
+    assert browser.opened == 1 and browser.switches == ["2"]
     assert table.names == ["Любовь под гипнозом", "Hypnosis love", "Кохання під гіпнозом"]
     assert len({row.key for row in table.rows}) == len(table.rows) == 6
     # A player no player here knows is not read, and the log says which.

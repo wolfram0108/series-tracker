@@ -2,11 +2,13 @@
 
 The iframe is loaded under a blank page at the address of the site; the player answers `POST /bnsi/movies/<id>` with the
 HLS of the episode by height; once it plays, its first request to the CDN carries the access headers (after a CORS
-preflight that carries none).
+preflight that carries none). A click on an item of its (hidden) list of episodes answers the same request for that
+episode, without loading the player again.
 """
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -53,10 +55,28 @@ class Response:
         return self._body
 
 
+class Frame:
+    """The iframe of the player: its list of episodes is the one of the season it shows."""
+
+    def __init__(self, page: "Page") -> None:
+        self.page = page
+
+    async def evaluate(self, _script: str, episode: str) -> bool:
+        browser = self.page.browser
+        if episode not in browser.episodes:
+            return False
+        browser.switches.append(episode)
+        if browser.episodes[episode] is not None:
+            await self.page.emit("response", Response("https://alloha.yani.tv/bnsi/movies/9" + episode,
+                                                      json.dumps(browser.episodes[episode])))
+        return True
+
+
 class Page:
     def __init__(self, browser: "Browser") -> None:
         self.browser, self.handlers = browser, {}
         self.mouse = self
+        self.main_frame = SimpleNamespace(child_frames=[Frame(self)])
 
     def on(self, event: str, handler) -> None:
         self.handlers[event] = handler
@@ -97,9 +117,10 @@ class Context:
 
 
 class Browser:
-    def __init__(self, player_answer: dict | None = None, plays: bool = True) -> None:
-        self.player_answer, self.plays = player_answer, plays
-        self.routed, self.parents, self.iframes = [], [], []
+    def __init__(self, player_answer: dict | None = None, plays: bool = True,
+                 episodes: dict[str, dict | None] | None = None) -> None:
+        self.player_answer, self.plays, self.episodes = player_answer, plays, episodes or {}
+        self.routed, self.parents, self.iframes, self.switches = [], [], [], []
         self.clicks = self.closed = self.opened = 0
 
     async def new_context(self, **_options) -> Context:
@@ -118,6 +139,7 @@ def quick(monkeypatch):
     """A player that never answers is told by the safeguard: short here, so that the test does not wait the real one."""
     monkeypatch.setattr(alloha, "ANSWER_TIMEOUT_S", 0.05)
     monkeypatch.setattr(alloha, "PLAY_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(alloha, "SWITCH_TIMEOUT_S", 0.05)
     monkeypatch.setattr(policy, "DEFAULT", Budget(attempts=2, pauses=(0.0,), limit_s=5.0))
 
 
@@ -191,6 +213,35 @@ async def test_a_player_that_does_not_start_is_asked_again_by_the_policy_and_the
         await within(player.stream(player.ref_of(PAGE, IFRAME).url, None, None, None), STEP_LIMIT_S, "the stream")
 
     assert refused.value.transient and browser.opened == browser.closed == 2 and browser.clicks == 2
+
+
+# --- many videos: one open for each season of each voice-over, every other episode a switch of the player -------------------------
+
+def episode_ref(episode: int, season: int = 1, translation: str = "158") -> PlayerRef:
+    iframe = IFRAME.replace("episode=5", f"episode={episode}").replace("season=1", f"season={season}")
+    return AllohaPlayer.ref_of(PAGE, iframe.replace("translation=158", f"translation={translation}"))
+
+
+async def test_the_episodes_of_a_season_are_read_in_one_open_and_another_season_or_voice_is_another_open():
+    # Each episode answers its own heights, so that a reading is seen to be the one of its episode.
+    browser = Browser(answer(track("1", (360,))), episodes={"2": answer(track("1", (480,))), "3": answer(track("1", (720,)))})
+    player = a_player(browser)
+    refs = [episode_ref(1), episode_ref(2), episode_ref(3), episode_ref(1, season=2), episode_ref(1, translation="200")]
+    settled = await within(player.read_batch(refs, None, PAGE), STEP_LIMIT_S, "the batch")
+
+    assert [settled[ref].resolutions for ref in refs] == [(360,), (480,), (720,), (360,), (360,)]
+    assert browser.opened == browser.closed == 3 and browser.switches == ["2", "3"]
+
+
+async def test_an_episode_the_switch_does_not_settle_is_left_to_its_own_ask_and_nothing_is_lost(quick):
+    missing = Browser(answer(track("1")), episodes={"3": answer(track("1"))})
+    silent = Browser(answer(track("1")), episodes={"2": None, "3": answer(track("1"))})
+    refs = [episode_ref(1), episode_ref(2), episode_ref(3)]
+
+    # Not in the list of the player: the next one is still switched to. No answer to a switch: the open is left there.
+    assert set(await within(a_player(missing).read_batch(refs, None, PAGE), STEP_LIMIT_S, "the batch")) == {refs[0], refs[2]}
+    assert set(await within(a_player(silent).read_batch(refs, None, PAGE), STEP_LIMIT_S, "the batch")) == {refs[0]}
+    assert silent.closed == silent.opened == 1
 
 
 def test_the_link_names_the_player_and_another_link_is_not_its_own():
