@@ -415,6 +415,11 @@ class DownloadsRepository:
         rows = await self._db.fetch_all("SELECT * FROM pack_publications WHERE series_id=? ORDER BY id", (series_id,))
         return [{**row, **{name: json.loads(row[name]) for name in self._PUBLICATION_LISTS}} for row in rows]
 
+    async def all_publications(self) -> list[dict]:
+        """Every publication a stop cut short, of every series: what the window shows of them at the start."""
+        rows = await self._db.fetch_all("SELECT * FROM pack_publications ORDER BY series_id, id")
+        return [{**row, **{name: json.loads(row[name]) for name in self._PUBLICATION_LISTS}} for row in rows]
+
     async def drop_publications(self, series_id: int) -> None:
         """A deleted series takes its journal with it; its files are not removed (deleting a series deletes no files)."""
         await self._db.execute("DELETE FROM pack_publications WHERE series_id=?", (series_id,))

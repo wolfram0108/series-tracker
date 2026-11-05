@@ -26,6 +26,11 @@ publication a stop or a failure cut short is finished before anything else acts 
 (`settle`, called by the module at the start of every look at the series), and only when the file under its name is the
 container it built: one that is not was never put there, so nothing is removed and no name changes. A record whose
 container was put there and is not there now is a conflict: it stays, nothing is done by it, and the packing fails.
+
+The work is seen as a queue (`queue`, published by the module as `downloads.pack.queue.changed` and shown in the window of
+agents): a series asked to be packed waits in it, then each slot of it is queued, built, and ends packed, left as it was,
+waiting for its video or failed; a publication a stop cut short is there until it is finished. What ended well leaves the
+queue with the packing of its series; a failed slot stays until the next packing of the series.
 """
 from __future__ import annotations
 
@@ -77,15 +82,63 @@ Ask = Callable[..., Awaitable[Any]]
 
 class Packing:
     def __init__(self, repo: DownloadsRepository, packer: Packer, ask: Ask, publish: Callable[[str, dict], None], log,
-                 library: Any) -> None:
+                 library: Any, on_queue: Callable[[], None] = lambda: None) -> None:
         self._repo, self._packer, self._request, self._publish, self._log = repo, packer, ask, publish, log
         self._library = library
+        self._on_queue = on_queue
+        # What the window of agents shows of the packing, by (series, season, episode, part, key); None is the series itself.
+        self._queue: dict[tuple, dict] = {}
+        # The names of the tracks of the container a slot is built of, in order, for the window.
+        self._built: dict[tuple, list[str]] = {}
+
+    # --- the queue ------------------------------------------------------------------------------------------------
+
+    def queue(self) -> list[dict]:
+        """The tasks of packing as the window shows them, in the order of the series and their episodes."""
+        return sorted(self._queue.values(), key=lambda each: (each["series_id"], each["season"] is not None,
+                                                              each["season"] or 0, each["episode"] or 0, each["part"] or 0))
+
+    def waits(self, series: dict) -> None:
+        """A packing of the series is asked for and waits for its turn."""
+        self._set(series, None, status="queued")
+
+    def load_interrupted(self, records: list[dict], names: dict[int, str]) -> None:
+        """The publications a stop cut short, as the journal keeps them: they are finished at the next look at the series."""
+        for record in records:
+            self._set({"id": record["series_id"], "name": names.get(record["series_id"], "")},
+                      (None, None, None), status="interrupted", name=record["name"], key=record["publication"] or record["id"])
+
+    def _set(self, series: dict, slot: tuple | None, *, status: str, name: str = "", tracks: list[str] | None = None,
+             key: Any = None) -> None:
+        season, episode, part = slot if slot is not None else (None, None, None)
+        self._queue[(series["id"], season, episode, part, key)] = {
+            "id": f"pack:{series['id']}:{season}:{episode}:{part}:{key or ''}", "series_id": series["id"],
+            "series_name": series.get("name", ""), "season": season, "episode": episode, "part": part, "name": name,
+            "status": status, "tracks": tracks or []}
+        self._on_queue()
+
+    def _drop(self, series_id: int, keep_failed: bool, only: str | None = None) -> None:
+        """The tasks of the series leave the queue: all of them, or all but the failed and cut short, or those of `only`."""
+        for key in [key for key, task in self._queue.items() if key[0] == series_id
+                    and (only is None or task["status"] == only)
+                    and not (keep_failed and task["status"] in ("failed", "interrupted"))]:
+            del self._queue[key]
+        self._on_queue()
 
     async def pack(self, series: dict) -> Packed:
         base = series.get("save_path") or ""
         done = Packed()
         if not os.path.isabs(base):
+            self._drop(series["id"], keep_failed=False)
             return done
+        try:
+            await self._pack(series, base, done)
+        finally:
+            self._drop(series["id"], keep_failed=True)
+        return done
+
+    async def _pack(self, series: dict, base: str, done: Packed) -> None:
+        self._drop(series["id"], keep_failed=False)  # the failures of the last packing are looked at again now
         done.failed += await self.settle(series)
         rows = await self._repo.slot_files(series["id"])
         references = {(each["season"], each["episode"], each.get("part")): each
@@ -96,19 +149,33 @@ class Packing:
         slots: dict[tuple, list[dict]] = {}
         for row in rows:
             slots.setdefault((row["season"], row["episode_start"], row["part"]), []).append(row)
-        for slot, here in sorted(slots.items(), key=lambda item: (item[0][0] or 0, item[0][1], item[0][2] or 0)):
+        work: list[tuple] = []
+        # Every slot of the plan is looked at, also one that has no file yet: its video is not downloaded, it waits.
+        for slot in sorted({*slots, *references}, key=lambda each: (each[0] or 0, each[1], each[2] or 0)):
+            here = slots.get(slot, [])
             winner = next((row for row in here if row["plan_status"] == "in_plan_single" and row["status"] == "completed"
                            and not row["is_ignored_by_user"]), None)
-            reference = references.get((slot[0], slot[1], slot[2]))
+            reference = references.get(slot)
             if winner is None or reference is None or reference.get("row_key") != winner["row_key"]:
                 if reference is not None and reference.get("row_key"):
                     done.waiting += 1
+                    self._set(series, slot, status="waiting")
                 continue
+            self._set(series, slot, status="queued", name=winner["final_filename"])
+            work.append((slot, here, winner, reference))
+        for slot, here, winner, reference in work:
             losers = [row for row in here if row is not winner and row["plan_status"] == "replaced"]
             mine = [each for each in tracks if (each["season"], each["episode"], each["part"] or 0) == (slot[0], slot[1], slot[2] or 0)]
-            outcome = await self._pack_slot(series, base, winner, losers, reference, orders.get(slot[0], []), mine)
+            self._set(series, slot, status="building", name=winner["final_filename"])
+            try:
+                outcome = await self._pack_slot(series, base, winner, losers, reference, orders.get(slot[0], []), mine)
+            except BaseException:
+                self._set(series, slot, status="interrupted", name=winner["final_filename"])  # its record finishes it
+                raise
+            name = os.path.splitext(winner["final_filename"])[0] + CONTAINER_EXT
+            self._set(series, slot, status=outcome, name=name if outcome != "failed" else winner["final_filename"],
+                      tracks=self._built.pop(slot, []))
             setattr(done, outcome, getattr(done, outcome) + 1)
-        return done
 
     async def _tracks(self, series_id: int) -> list[dict]:
         try:
@@ -160,6 +227,7 @@ class Packing:
                 dubs[key] = replace(claimed.pop(key), label=label, key=key)
         desired = self._ordered(AudioIn(own_label, video, held.own_track, identity, own=True), dubs, order,
                                 list(legacy.values()))
+        self._built[(winner["season"], winner["episode_start"], winner["part"])] = [each.label for each in desired]
         signature = container.signature_of(desired)
         inside = [row for row in synchronous if row["key"] in dubs]
         target_name = os.path.splitext(winner["final_filename"])[0] + CONTAINER_EXT
@@ -274,7 +342,11 @@ class Packing:
         if not os.path.isabs(base):
             return 0
         conflicts = 0
+        self._drop(series["id"], keep_failed=False, only="interrupted")  # finished now, or a conflict below
         for record in await self._repo.publications(series["id"]):
+            key = (series["id"], None, None, None, record["publication"] or record["id"])
+            if self._queue.pop(key, None) is not None:
+                self._on_queue()
             target = os.path.join(base, record["name"])
             async with self._library.guard(target):
                 made = await self._packer.contents(target)
@@ -289,6 +361,7 @@ class Packing:
                         continue
                 elif not ours:
                     conflicts += 1
+                    self._set(series, None, status="failed", name=record["name"], key=key[-1])
                     self._log.error("серия %s: публикация контейнера %s не доведена: под этим именем нет контейнера, который "
                                     "она поставила (номер %s) — запись журнала оставлена, файлы и имена не тронуты",
                                     series["id"], record["name"], record["publication"] or "не записан")

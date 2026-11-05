@@ -449,3 +449,66 @@ async def test_an_old_track_two_voice_overs_answer_to_is_not_decided_and_the_slo
 
     assert outcome(await pack(probe)) == {"failed": 1}
     assert (await packer.contents(path)).signature == [(OWN, "", True), (DUB, "", False)]  # left as it was
+
+
+# --- the queue of the packing in the window of agents ----------------------------------------------------------------------
+
+def pictures(sub) -> list[list[dict]]:
+    found = []
+    while not sub.queue.empty():
+        found.append(sub.queue.get_nowait().payload["tasks"])
+    return found
+
+
+@pytest.mark.asyncio
+async def test_the_packing_of_a_series_is_seen_in_the_queue_from_its_wait_to_its_end(rig):
+    fake, voices, packer, probe, db_path, media_dir = rig
+    sub = probe.bus.subscribe("downloads.pack.queue.changed")
+    put(media_dir, "e01.mp4", b"https://v/win")
+    winner(db_path, "e01.mp4")
+    voices.tracks = [dub(path=put(media_dir, f"e01.{DUB}.ru.flac", b"track"), ref_path=os.path.join(media_dir, "e01.mp4"))]
+    order(fake, [OWN, DUB])
+
+    assert outcome(await pack(probe)) == {"packed": 1}
+
+    seen = pictures(sub)
+    statuses = [[(task["episode"], task["status"]) for task in tasks] for tasks in seen]
+    assert statuses[0] == [(None, "queued")]  # the series waits for its turn
+    assert [(1, "building")] in statuses and [(1, "packed")] in statuses
+    built = next(task for tasks in seen for task in tasks if task["status"] == "packed")
+    assert built["name"] == "e01.mkv" and built["tracks"] == [OWN, DUB] and built["series_name"]
+    assert seen[-1] == []  # what ended well leaves the queue with the packing
+
+
+@pytest.mark.asyncio
+async def test_a_failed_slot_stays_in_the_queue_until_the_next_packing_and_a_slot_without_a_file_waits(rig):
+    fake, voices, packer, probe, db_path, media_dir = rig
+    sub = probe.bus.subscribe("downloads.pack.queue.changed")
+    put(media_dir, "e01.mp4", b"https://v/win")
+    winner(db_path, "e01.mp4")
+    # Episode 2 is in the plan and has no row with a file: its video is not downloaded, it waits (it is counted).
+    fake.references.append({**fake.references[0], "episode": 2, "row_key": "vk:two"})
+    order(fake, [OWN])
+
+    async def broken(*args, **kwargs):
+        return "ffmpeg_failed: test"
+    build = packer.build
+    packer.build = broken
+    assert outcome(await pack(probe)) == {"failed": 1, "waiting": 1}
+    assert [(task["episode"], task["status"]) for task in pictures(sub)[-1]] == [(1, "failed")]
+
+    packer.build = build
+    assert outcome(await pack(probe)) == {"packed": 1, "waiting": 1}
+    assert pictures(sub)[-1] == []
+
+
+@pytest.mark.asyncio
+async def test_a_slot_whose_packing_a_stop_cut_short_is_seen_until_its_record_is_finished(rig, monkeypatch):
+    fake, voices, packer, probe, db_path, media_dir = rig
+    sub = probe.bus.subscribe("downloads.pack.queue.changed")
+    await cut_short(rig, "in_finish", monkeypatch)
+    assert [(task["episode"], task["status"]) for task in pictures(sub)[-1]] == [(1, "interrupted")]
+
+    await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=5)  # a look at the series finishes the record first
+
+    assert pictures(sub)[-1] == []

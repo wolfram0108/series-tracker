@@ -1,5 +1,17 @@
 /** Russian catalog. Keys are semantic (`area.part.meaning`); screens ask for a key, never for text. */
 export const ru = {
+  "agents.pack.title": "Очередь Агента Упаковки (контейнеры серий)",
+  "agents.pack.empty": "Упаковка не идёт",
+  "agents.pack.series": "весь сериал",
+  "agents.pack.episode": "Сезон {season}, серия {episode}",
+  "agents.pack.part": "часть {part}",
+  "agents.pack.status.queued": "в очереди",
+  "agents.pack.status.building": "собирается",
+  "agents.pack.status.packed": "собран",
+  "agents.pack.status.unchanged": "без изменений",
+  "agents.pack.status.waiting": "ждёт загрузки видео",
+  "agents.pack.status.failed": "ошибка",
+  "agents.pack.status.interrupted": "прервана, будет доведена",
   "agents.conform.title": "Очередь выравнивания озвучек (conform)",
   "agents.conform.daemon.up": "Демон выравнивания работает",
   "agents.conform.daemon.version": "версия {version}",

@@ -1,7 +1,7 @@
 import { watch } from "vue"
 import { useSSE } from "./useSSE"
 import { useSeriesStore, type Series, type SeriesDelta } from "../stores/series"
-import { useQueuesStore, type ConformPicture, type QueueTask } from "../stores/queues"
+import { useQueuesStore, type ConformPicture, type PackTask, type QueueTask } from "../stores/queues"
 import { useScannerStore, type ScannerStatus } from "../stores/scanner"
 import { useSourceTablesStore } from "../stores/sourceTables"
 import { useSeriesReadsStore } from "../stores/seriesReads"
@@ -35,6 +35,7 @@ export function setupRealtime(): void {
   sse.on("download_queue_update", (d) => queues.setDownloads(d as QueueTask[]))
   sse.on("slicing_queue_update", (d) => queues.setSlicing(d as QueueTask[]))
   sse.on("conform_queue_update", (d) => queues.setConform(d as ConformPicture))
+  sse.on("pack_queue_update", (d) => queues.setPack(d as PackTask[]))
   sse.on("voice_dub_update", (d) => voices.apply(d as VoiceDubEvent))
   sse.on("voice_dubs_snapshot", (d) => voices.snapshot(d as VoiceDubsSnapshot))
   sse.on("voice_settings_update", (d) => voices.applySettings(d as VoiceSettingsView))

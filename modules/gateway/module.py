@@ -154,6 +154,7 @@ SSE_MAP: dict[str, tuple[str, object]] = {
     "torrents.preview.failed": ("preview_naming_failed", None),
     "downloads.queue.changed": ("download_queue_update", _bare_tasks),
     "slicing.queue.changed": ("slicing_queue_update", _bare_tasks),
+    "downloads.pack.queue.changed": ("pack_queue_update", _bare_tasks),
     "scan.status.changed": ("scanner_status_update", None),
     "series.source.added": ("series_sources_changed", lambda payload: {**payload, "what": "added"}),
     "series.source.updated": ("series_sources_changed", lambda payload: {**payload, "what": "updated"}),

@@ -11,6 +11,7 @@ export const SSE_EVENTS = [
   "download_queue_update",
   "slicing_queue_update",
   "conform_queue_update",
+  "pack_queue_update",
   "voice_dub_update",
   "voice_dubs_snapshot",
   "voice_settings_update",

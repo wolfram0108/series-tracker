@@ -53,6 +53,9 @@ Events out:
   downloads.item.renamed {series_id, unique_id, filename} - the file name of an episode changed, after the file lies under it
       (voices follow it).
   downloads.queue.changed {tasks, count} - the queue changed (throttled on progress): SSE download_queue_update.
+  downloads.pack.queue.changed {tasks, count} - the queue of the packing of containers changed, and when an interface
+      connects (gateway.sse.clients): SSE pack_queue_update. A task: {id, series_id, series_name, season, episode, part,
+      name, status: queued | building | packed | unchanged | waiting | failed | interrupted, tracks}.
   downloads.fetch.started {key, series_id, path}, downloads.fetch.finished {key, ok, error, transient, path, series_id}.
   series.status.contribution {source: downloads, ...} - the fold of statuses (Р-11).
   series.downloaded.changed {series_id, count}.
@@ -166,7 +169,10 @@ class DownloadsModule(BaseModule):
         self._work = WorkReport(self.name, self._has_work, self.publish_event)
         super().__init__(bus)
         self.library = Library(self.repo, self._naming, self.log, self._neighbours)
-        self._packing = Packing(self.repo, self._packer, self.request, self.publish_event, self.log, self.library)
+        self._packing = Packing(self.repo, self._packer, self.request, self.publish_event, self.log, self.library,
+                                on_queue=self._broadcast_pack_queue)
+        # Packings run one at a time, as they always did; the turn is taken after the series shows in the queue.
+        self._pack_turn = asyncio.Lock()
         self._publication = Publication(self.repo, self.library, self.log, running=lambda task_id: task_id in self._active,
                                         resume=self._look_again, end_task=self._end_task)
 
@@ -175,7 +181,8 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.dispatch", self.on_dispatch)
         self.handle("downloads.settle", self.on_settle)
         self.handle("downloads.work.get", self.on_work_get, concurrent=True)  # reads only: never behind a look
-        self.handle("downloads.pack", self.on_pack)
+        self.handle("downloads.pack", self.on_pack, concurrent=True)  # a packing that waits for its turn is seen waiting
+        self.handle("gateway.sse.clients", self.on_sse_clients)
         self.handle("settings.changed", self.on_settings_changed)
         self.handle("downloads.queue.get", self.on_queue_get)
         self.handle("downloads.queue.clear", self.on_queue_clear)
@@ -197,12 +204,15 @@ class DownloadsModule(BaseModule):
         requeued = await self.repo.requeue_interrupted()
         if requeued:
             self.log.info("оборванных загрузок возвращено в очередь: %d", requeued)
+        names: dict[int, str] = {}
         try:  # a supplier of the catalog's fold of statuses states its contribution at the start
             for series in await self.request("catalog.series.list", {}):
+                names[series["id"]] = series.get("name", "")
                 if series.get("kind") == SeriesKind.VIDEO:
                     await self._contribute(series["id"])
         except BusRequestError as exc:
             self.log.warning("каталог недоступен при старте: %s", exc)
+        self._packing.load_interrupted(await self.repo.all_publications(), names)
         await self._pump()
 
     async def on_stop(self) -> None:
@@ -365,7 +375,8 @@ class DownloadsModule(BaseModule):
         series = await self.request("catalog.series.get", {"series_id": series_id})
         if series.get("kind") != SeriesKind.VIDEO:
             return asdict(Packed())
-        async with self._lock(series_id):
+        self._packing.waits(series)
+        async with self._pack_turn, self._lock(series_id):
             done = await self._packing.pack(series)
         if done.packed:
             await self._contribute(series_id)
@@ -600,6 +611,15 @@ class DownloadsModule(BaseModule):
         return [*await self.repo.active_tasks(), *({
             "id": f"fetch:{job['key']}", "task_key": job["key"], "task_type": "fetch", "series_id": job["series_id"],
             "save_path": job["path"], "status": status, "progress": None} for job, status in fetches)]
+
+    def _broadcast_pack_queue(self) -> None:
+        tasks = self._packing.queue()
+        self.publish_event("downloads.pack.queue.changed", {"tasks": tasks, "count": len(tasks)})
+
+    async def on_sse_clients(self, env: Envelope) -> None:
+        """An interface connected: it gets the queue of the packing as it is, with no question of its own."""
+        if (env.payload or {}).get("count"):
+            self._broadcast_pack_queue()
 
     async def _broadcast_queue(self) -> None:
         tasks = await self._queue()
