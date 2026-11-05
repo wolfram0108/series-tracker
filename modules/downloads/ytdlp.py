@@ -70,6 +70,16 @@ _WARNING_LINE = re.compile(
     r"To suppress this warning)", re.IGNORECASE)
 
 
+# A child a signal ended was interrupted (the service stops: systemd signals every process of it at once, before the module
+# cancels its work); it says nothing of the source, and the download goes on when it is asked again.
+INTERRUPTED = "прервано сигналом"
+
+
+def _interrupted(returncode: int | None, tail: str) -> bool:
+    """Whether a signal ended the child: a negative code, or ffmpeg that caught one and says so."""
+    return (returncode is not None and returncode < 0) or "received signal" in tail.lower()
+
+
 def _ytdlp_error(tail: str, default: str) -> str:
     """The real failure is the ERROR line, not yt-dlp's version warning."""
     lines = [line.strip() for line in tail.splitlines() if line.strip()]
@@ -357,6 +367,8 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
         await on_progress({"phase": "download", "progress": 100, "eta": 0, "speed": 0.0})
         return True, ""
     last = tail.strip().splitlines()[-1] if tail.strip() else ""
+    if _interrupted(proc.returncode, tail):
+        return False, f"{INTERRUPTED}: ffmpeg direct download: {last or proc.returncode}"
     return False, f"ffmpeg direct download: {last or proc.returncode}"
 
 
@@ -542,6 +554,8 @@ async def _phase_download(video_url: str, full_output_path: str,
 
     if stopped:
         return False, stopped
+    if proc.returncode != 0 and _interrupted(proc.returncode, tail):
+        return False, f"{INTERRUPTED}: yt-dlp завершился с кодом {proc.returncode}"
     if proc.returncode != 0:
         error = _ytdlp_error(
             tail, f"yt-dlp завершился с кодом {proc.returncode}")
@@ -620,4 +634,6 @@ async def _phase_remux(raw: str, full_output_path: str,
                            "speed": 0.0})
         return True, ""
     last = tail.strip().splitlines()[-1] if tail.strip() else ""
+    if _interrupted(proc.returncode, tail):
+        return False, f"{INTERRUPTED}: ffmpeg remux: {last or proc.returncode}"
     return False, f"ffmpeg remux: {last or proc.returncode}"

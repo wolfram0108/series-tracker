@@ -107,7 +107,9 @@ FETCH_PROGRESS = ("progress", "dlspeed", "eta", "total_size_mb")
 MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
 FETCH_LIMIT_KEY = "max_parallel_dub_downloads"
-_TRANSIENT_MARKERS = ("timed out", "timeout", "connection", "network", "обрыв", "input/output error",
+# A download a signal interrupted (ytdlp.INTERRUPTED) is asked again: at a stop of the service the repeat is cancelled with
+# the module, and the work is taken up at the next start.
+_TRANSIENT_MARKERS = ("прервано сигналом", "timed out", "timeout", "connection", "network", "обрыв", "input/output error",
                       "temporarily", "server returned 5", "server returned 429",
                       "server returned 403", "http error 403", "http error 408",
                       "http error 429", "http error 5")

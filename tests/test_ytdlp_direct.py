@@ -15,6 +15,9 @@ echo "$@" > "$FAKE_DIR/ffmpeg_args"
 out="${@: -1}"
 # The stalled writer must be one process, as the real ffmpeg is: a child left by a killed shell keeps the pipe open.
 if [ -f "$FAKE_DIR/stall" ]; then exec sleep 30; fi
+# Stopped by a signal: as the real ffmpeg says it at a stop of the service, or killed outright.
+if [ -f "$FAKE_DIR/signalled" ]; then echo "Exiting normally, received signal 15." >&2; exit 255; fi
+if [ -f "$FAKE_DIR/killed" ]; then kill -TERM $$; fi
 # The line ffmpeg prints at a refusal of an HLS segment (also of one the next look took), followed by more warnings than the
 # tail of its output keeps.
 if [ -f "$FAKE_DIR/refuse" ]; then
@@ -104,6 +107,17 @@ async def test_a_broken_off_stream_is_not_taken_for_a_finished_episode(fake, tmp
     assert not ok and "обрыв" in error and "300" in error and "1200" in error
     assert not os.path.exists(target) and not os.path.exists(target + ".download.mp4")
     assert _transient_download_error(error)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("how", ["signalled", "killed"])
+async def test_a_download_a_signal_ends_is_interrupted_not_refused_and_is_asked_again(fake, tmp_path, how):
+    """A stop of the service signals every process of it at once: the death of ffmpeg says nothing of the source, so it is
+    not a verdict on the voice-over or the episode (the line is the one the real ffmpeg printed at the stop of 05.11)."""
+    state, _ = fake
+    (state / how).write_text("1")
+    ok, error = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"}, str(tmp_path / "e.mp4"), noop)
+    assert not ok and error.startswith(ytdlp.INTERRUPTED) and _transient_download_error(error)
 
 
 @pytest.mark.asyncio
