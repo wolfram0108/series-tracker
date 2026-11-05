@@ -44,7 +44,7 @@ _QUICK = (
     "auth.exists", "auth.login", "auth.password.set",
     "catalog.sources.add", "catalog.sources.list", "catalog.sources.remove", "catalog.sources.update",
     "metadata.map.get", "metadata.map.list", "metadata.map.set",
-    "rules.profiles.export", "scan.edit.begin", "scan.edit.end", "voices.settings.export",
+    "rules.profiles.export", "scan.edit.begin", "scan.edit.end", "scan.runs.get", "voices.settings.export",
     "rules.profiles.create", "rules.profiles.list", "rules.profiles.update",
     "rules.rules.add", "rules.rules.delete", "rules.rules.list", "rules.rules.reorder", "rules.rules.update",
     "settings.paths.add", "settings.paths.list", "settings.paths.remove",

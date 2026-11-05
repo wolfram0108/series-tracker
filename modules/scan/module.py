@@ -7,6 +7,8 @@ through `composition`; scan only waits for the tables, asks for the layout, choo
 `planner.py`) and the outcome of the choice in `scan_references`.
 
 Queries:
+  scan.runs.get → {runs: [{series_id, snapshot}]} — the open runs of syncs as their commands are written (an executor that
+      starts again takes them before its works: И-60).
   scan.series.run {series_id, force_replace?, download?} → {changed, ...}. changed tells whether anything was
       actually changed: torrent — tasks were created; video — the references or the rows of the plan differ from
       what they were before the run. A video series answers {kind: "video", changed, sources: [{source_id, url,
@@ -206,6 +208,7 @@ class ScanModule(BaseModule):
         self.handle("series.deleted", self.on_series_deleted)
         self.handle("settings.changed", self.on_settings_changed)
         self.handle("gateway.sse.clients", self.on_sse_clients)
+        self.handle("scan.runs.get", self.on_runs_get)
 
     async def on_start(self) -> None:
         # Носители прошлых ошибок — в свёртку (Р-11: поставщик публикует
@@ -214,6 +217,16 @@ class ScanModule(BaseModule):
             self._contribute(task["series_id"], scanning=False, error=True)
         if self._tick is not None:
             self._spawn(self._scheduler_loop())
+
+    async def on_runs_get(self, env: Envelope) -> dict:
+        """The runs of syncs that are open, as their commands are written: each with its snapshot. An executor that starts
+        again takes them before it takes up its works, so that a pass of a run works by the snapshot (И-60)."""
+        runs = []
+        for task in await self.repo.incomplete_tasks():
+            results = task["results_data"] or {}
+            if results.get("video_sync"):
+                runs.append({"series_id": task["series_id"], "snapshot": results.get("snapshot")})
+        return {"runs": runs}
 
     async def on_system_started(self, env: Envelope) -> None:
         """Every module is up: the scans that were under way are taken up again. The work needs the catalog, the
@@ -527,12 +540,13 @@ class ScanModule(BaseModule):
             if not video:  # a torrent scan writes the task of its own plan
                 await self.repo.delete_task(intent)
                 intent = None
-            else:
-                self._announce_run(series_id, True)
             if video:
                 if not any(each.parser_profile_id for each in _sources_of(series)):
+                    self._announce_run(series_id, True)
                     raise SyncFailed(reason("scan_no_profile"))
+                # The run is told once, with its snapshot: no step of it has begun before (И-60).
                 await self._take_snapshot(series, intent)
+                self._announce_run(series_id, True)
             elif not _torrent_source(series).parser_profile_id:
                 raise ScanError(
                     f"для сериала «{series.get('name')}» не назначен "
@@ -720,7 +734,9 @@ class ScanModule(BaseModule):
         """The modules hear the run (the snapshot, the refusals); the card of the series is busy for all of it."""
         if not active:
             self._snapshots.pop(series_id, None)
-        self.publish_event(RUN_CHANGED, RunChanged(series_id=series_id, active=active).model_dump())
+        self.publish_event(RUN_CHANGED, RunChanged(series_id=series_id, active=active,
+                                                   snapshot=self._snapshots.get(series_id) if active else None
+                                                   ).model_dump(mode="json"))
         self.publish_event("series.busy.contribution", {"source": "sync", "series_id": series_id, "busy": active})
 
     async def _hold_run(self, series_id: int, intent: int) -> None:

@@ -178,11 +178,11 @@ import shutil
 import uuid
 from collections import OrderedDict, defaultdict
 
-from core import BaseModule, BusRequestError
+from core import NO_HANDLER, BaseModule, BusRequestError
 from pydantic import ValidationError
 
 from core import container
-from core.contracts import (RUN_CHANGED, WORK_WITHDRAWN, RunChanged, WorkWithdrawn, AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
+from core.contracts import (RUN_CHANGED, WORK_WITHDRAWN, RunChanged, RunSnapshot, WorkWithdrawn, AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
                             DubRecord, DubsSnapshot, DubStatus as S, GroupsResolveReply, GroupsResolveRequest,
                             JobStatus, Reference, ReferenceChanged, SnapshotItem, SubmitOutcome, SubmitReply,
                             VoiceSettingsDraft, VoiceSettingsSaved)
@@ -302,6 +302,9 @@ class VoicesModule(BaseModule):
         # The series whose sync is under way: the plan of their voice-overs is the one the sync made (the snapshot);
         # a change of the layout or a reference that comes meanwhile is planned when the run ends.
         self._in_run: set[int] = set()
+        # The settings of the voice-overs each open run took (RunSnapshot.voices): every pass of a series in a run works
+        # by them, not by the settings as they are now (И-60).
+        self._run_values: dict[int, dict] = {}
         self._owed_plans: set[int] = set()
         self._work = WorkReport(self.name, self._has_work, self.publish_event)
         super().__init__(bus)
@@ -348,9 +351,11 @@ class VoicesModule(BaseModule):
 
     async def on_system_started(self, env: Envelope) -> None:
         """What the database says is unfinished is taken up once every module is up: the workspace is asked of conform and
-        the layout of composition, and both start after this module, so asking on its own start would fail the system's start."""
+        the layout of composition, and both start after this module, so asking on its own start would fail the system's start.
+        The open runs and their snapshots are taken first, so that what is taken up works by them."""
         if self.repo is None:
             return
+        await self._take_open_runs()
         await self._release_files()
         await self._admit()
         await self._cleanup.sweep()
@@ -467,6 +472,7 @@ class VoicesModule(BaseModule):
         series_id = int(env.payload["series_id"])
         async with self._locks.setdefault(series_id, asyncio.Lock()):
             try:
+                self._take_run_values(series_id, env.payload.get("settings"))
                 await self._dispatch(series_id, env.payload.get("settings"))
             except (BusRequestError, LookupError, ValueError, OSError, asyncio.TimeoutError) as exc:
                 self.log.warning("сериал %d: озвучки не подготовлены: %s", series_id, exc)
@@ -479,8 +485,27 @@ class VoicesModule(BaseModule):
         async with self._locks.setdefault(series_id, asyncio.Lock()):
             if series_id in self._deleted or not await self._is_video(series_id):
                 return
+            self._take_run_values(series_id, env.payload.get("settings"))
             await self._plan_series(series_id, offer=False, settle=True, values=env.payload.get("settings"))
         self._kick(series_id)
+
+    async def _take_open_runs(self) -> None:
+        """The runs a restart left open, as scan has their commands written: the series are in a run, by its snapshot."""
+        try:
+            runs = (await self.request("scan.runs.get", {}))["runs"]
+        except BusRequestError as exc:
+            if NO_HANDLER not in str(exc):
+                raise
+            return  # no runs in this process
+        for run in runs:
+            self._in_run.add(int(run["series_id"]))
+            if run.get("snapshot") is not None:
+                self._run_values[int(run["series_id"])] = dict(RunSnapshot.model_validate(run["snapshot"]).voices)
+
+    def _take_run_values(self, series_id: int, values: dict | None) -> None:
+        """The settings a run handed over with its step are the settings of the whole run of the series."""
+        if values is not None:
+            self._run_values[series_id] = dict(values)
 
     async def _dispatch(self, series_id: int, values: dict | None = None) -> None:
         """The explicit sync: the series may download from now on, and what failed is offered again."""
@@ -535,8 +560,11 @@ class VoicesModule(BaseModule):
         run = RunChanged.model_validate(env.payload)
         if run.active:
             self._in_run.add(run.series_id)
+            if run.snapshot is not None:
+                self._run_values[run.series_id] = dict(run.snapshot.voices)
             return
         self._in_run.discard(run.series_id)
+        self._run_values.pop(run.series_id, None)
         if run.series_id in self._owed_plans:
             self._owed_plans.discard(run.series_id)
             self._want_plan(run.series_id)
@@ -596,8 +624,9 @@ class VoicesModule(BaseModule):
             await self.request("composition.get", {"series_id": series_id, "include_excluded": True}))
         references = [Reference.model_validate(item) for item in
                       await self.request("scan.output.get", {"series_id": series_id})]
-        # A sync plans by the settings its run took (RunSnapshot.voices); a recount after the run by the current ones.
-        settings = await self._settings(values)
+        # A sync plans by the settings its run took (RunSnapshot.voices), and so does every pass while the run is open (a
+        # replan after a change of the reference, a recovery); a recount after the run by the current ones.
+        settings = await self._settings(values if values is not None else self._run_values.get(series_id))
         plan = planning.plan(layout.rows, references, layout.settings, settings.priority, settings.players)
         self.log.info("сериал %d: озвучки — раскладка %d, серий с референсом %d, озвучек к плану %d", series_id,
                       layout.rev, len(plan.with_reference), len(plan.dubs))

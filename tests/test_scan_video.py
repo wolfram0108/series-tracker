@@ -1227,3 +1227,26 @@ async def test_a_run_works_by_the_configuration_it_took_when_it_started(rig):
     await rig.run()
     again = json.loads(rig.query("SELECT results_data FROM scan_tasks")[0]["results_data"])["snapshot"]
     assert again["profiles"] == {"1": [{"id": 1, "name": "другое", "conditions": []}]} and again["voices"] == {}
+
+
+@pytest.mark.asyncio
+async def test_the_run_is_told_with_its_snapshot_and_the_open_runs_are_given_with_theirs(rig):
+    """Н-11: an executor works by the snapshot in every pass of the run, and one that starts again takes the open runs and
+    their snapshots from the commands, before its works."""
+    rig.world.rows = [rig.row("a", 1, 1)]
+    rig.world.voices_export = {"voices.source_priority": '["cvh", "kodik"]'}
+    rig.world.work = {"downloads": True}
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    await rig.run()
+    told = []
+    while not runs.queue.empty():
+        told.append(runs.queue.get_nowait().payload)
+    assert any(each["active"] and (each.get("snapshot") or {}).get("voices") == rig.world.voices_export for each in told)
+
+    open_runs = (await rig.probe.request("scan.runs.get", {}, timeout=5))["runs"]
+    assert open_runs == [{"series_id": rig.series_id,
+                          "snapshot": {"profiles": open_runs[0]["snapshot"]["profiles"],
+                                       "voices": rig.world.voices_export}}]
+    work_state(rig, "downloads", False)
+    await rig.bus.settled()
+    assert (await rig.probe.request("scan.runs.get", {}, timeout=5))["runs"] == []

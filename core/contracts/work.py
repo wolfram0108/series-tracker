@@ -19,10 +19,12 @@ WORK_STATE = "work.series.state"
 
 class RunChanged(BaseModel):
     """`active` true: a sync of the series runs, the series is busy and its layout and plan stay as the sync found them
-    (the snapshot); false: every work of it ended, edits are allowed and what was owed meanwhile is counted."""
+    (the snapshot); false: every work of it ended, edits are allowed and what was owed meanwhile is counted. An active
+    run is told with its snapshot: an executor works by it in every pass of the run."""
 
     series_id: int
     active: bool
+    snapshot: RunSnapshot | None = None
 
 
 class WorkState(BaseModel):
@@ -52,3 +54,6 @@ class RunSnapshot(BaseModel):
 
     profiles: dict[int, list[dict[str, Any]]] = Field(default_factory=dict)
     voices: dict[str, Any] = Field(default_factory=dict)
+
+
+RunChanged.model_rebuild()

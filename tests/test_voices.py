@@ -1,5 +1,6 @@
 """Tests of the voices module: the plan of voice-overs from the layout, their downloads, alignment and aftermath."""
 import asyncio
+import json
 import os
 import shutil
 import sqlite3
@@ -175,6 +176,7 @@ class Neighbours(BaseModule):
         self.references = {}  # episode -> file name of the reference video on disk
         self.uids = {}  # episode -> media item of its reference (default: u<episode>)
         self.file_revs = {}  # episode -> revision of the file of its reference (default: 0)
+        self.open_runs = []  # the runs scan has written down as open: [{series_id, snapshot}]
         self.extra_items = []  # more media items of the plan, as downloads.episodes.get shows them
         self.item_keys: dict[int, str] = {}  # episode -> the row of the reference video, when not the reference's own
         self.marks = {}  # (season, episode) -> mark of the reference when it is not the usual one
@@ -209,6 +211,7 @@ class Neighbours(BaseModule):
         self.handle("composition.get", self.on_layout)
         self.handle("scan.output.get", self.on_output)
         self.handle("downloads.episodes.get", self.on_episodes)
+        self.handle("scan.runs.get", self.on_runs)
         self.handle("settings.value.get", self.on_setting)
         self.handle("settings.values.by_prefix", self.on_settings_by_prefix)
         self.handle("downloads.fetch", self.on_fetch)
@@ -268,6 +271,9 @@ class Neighbours(BaseModule):
     async def on_output(self, env):
         self.output_asks += 1
         return [reference.model_dump(mode="json") for reference in self.references_list()]
+
+    async def on_runs(self, env):
+        return {"runs": self.open_runs}
 
     async def on_episodes(self, env):
         reference = next(s for s in self.sources if s["url"] == self.reference_url)
@@ -3254,3 +3260,42 @@ async def test_a_reference_that_is_the_same_file_keeps_its_verdicts(dubs):
     assert {row["status"] for row in await voices.repo.for_series(7)} == {"placed"}
     assert await voices._follow(7, 1, 1, 0, group, ref, "u1", "", 1)
     assert {parse(row["error"])["code"] for row in await voices.repo.for_series(7)} == {"reference_downloaded_again"}
+
+
+@pytest.mark.asyncio
+async def test_every_pass_of_an_open_run_works_by_the_settings_the_run_took(dubs):
+    """Н-11: a replan while the run is open (after a change of the reference, a recovery) keeps the snapshot; once the run
+    is over the settings as they are now count."""
+    probe, neighbours, voices, bus = dubs
+    taken = {"voices.source_priority": json.dumps(["cvh", "kodik"])}
+    neighbours.settings.update(taken)
+    await voices.on_run_changed(Envelope("scan.run.changed", "event", {"series_id": 7, "active": True}))
+    await probe.request("voices.settle", {"series_id": 7, "settings": taken}, timeout=5)
+    await idle()
+    before = next(row for row in await voices.repo.for_series(7) if row["episode"] == 1)["chain"]
+    neighbours.settings["voices.source_priority"] = json.dumps(["kodik", "cvh"])
+
+    assert await voices._plan_locked(7)
+    assert next(row for row in await voices.repo.for_series(7) if row["episode"] == 1)["chain"] == before
+
+    await voices.on_run_changed(Envelope("scan.run.changed", "event", {"series_id": 7, "active": False}))
+    assert await voices._plan_locked(7)
+    assert next(row for row in await voices.repo.for_series(7) if row["episode"] == 1)["chain"] != before
+
+
+@pytest.mark.asyncio
+async def test_a_run_told_with_its_snapshot_is_worked_by_it_and_a_restart_takes_the_open_runs_first(dubs, db_path):
+    probe, neighbours, voices, bus = dubs
+    taken = {"voices.source_priority": json.dumps(["cvh", "kodik"])}
+    await voices.on_run_changed(Envelope("scan.run.changed", "event", {
+        "series_id": 7, "active": True, "snapshot": {"profiles": {}, "voices": taken}}))
+    assert voices._run_values[7] == taken
+
+    neighbours.open_runs = [{"series_id": 7, "snapshot": {"profiles": {}, "voices": taken}}]
+    await voices.stop()
+    again = VoicesModule(bus, Database(db_path))
+    await restarted(again)
+    try:
+        assert 7 in again._in_run and again._run_values[7] == taken
+    finally:
+        await again.stop()

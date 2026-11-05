@@ -27,6 +27,8 @@ Handler = Callable[[Envelope], Awaitable[Any]]
 
 REPLY_PREFIX = "_reply"
 ERROR_KEY = "_bus_error"
+# The words a request to a topic nobody handles fails with: a caller tells "no such module in this process" by them.
+NO_HANDLER = "нет обработчика"
 
 # `request` takes the fuse from the table of `core.deadlines` unless the caller names one (a test, a one-off wrapper).
 _FROM_TABLE: Any = object()
@@ -120,7 +122,7 @@ class BaseModule:
         try:
             delivered = self.bus.publish(env)
             if delivered == 0:
-                raise BusRequestError(f"нет обработчика для query '{topic}'")
+                raise BusRequestError(f"{NO_HANDLER} для query '{topic}'")
             return await asyncio.wait_for(fut, timeout)
         finally:
             self._pending.pop(env.correlation_id, None)

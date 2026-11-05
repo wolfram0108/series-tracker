@@ -316,7 +316,7 @@ async def test_a_container_left_alone_brings_the_record_of_its_tracks_into_step_
     assert len(packer.builds) == 1  # only the build of the fixture: nothing was rebuilt
 
 
-# --- a publication cut short, and what acts on the series before the next packing (Н-9, Н-10) ----------------------------
+# --- a publication cut short, and what acts on the series before the next packing (N-9, N-10) ----------------------------
 
 STOPS = ("in_build", "after_replace", "in_finish")
 BETWEEN = ("nothing", "rename")
@@ -419,7 +419,7 @@ async def test_a_record_names_its_files_inside_the_folder_of_the_series(rig, mon
     assert all(not os.path.isabs(each) for each in json.loads(leftovers))
 
 
-# --- the old tracks without a key (Н-13) ----------------------------------------------------------------------------------
+# --- the old tracks without a key (N-13) ----------------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_an_old_track_is_known_by_the_key_of_its_voice_over_after_its_group_is_renamed_and_follows_the_order(rig):
