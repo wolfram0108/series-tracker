@@ -26,11 +26,14 @@ POLL = "опрос внешней системы без push"  # the other side 
 SAFEGUARD = "предохранитель на ожидание сигнала"  # a signal ends the wait; the time only stops waiting for ever
 PROCESS = "ожидание процесса"  # a child process is awaited with a safeguard
 PROTOCOL = "интервал протокола"  # the interval is a part of a wire protocol
+DETECTION = "обнаружение отказа"  # the time tells a wait that is a failure (law-arch); the wait itself goes on
 
-CATEGORIES = frozenset({SUBJECT, RETRY, BACKOFF, POLL, SAFEGUARD, PROCESS, PROTOCOL})
+CATEGORIES = frozenset({SUBJECT, RETRY, BACKOFF, POLL, SAFEGUARD, PROCESS, PROTOCOL, DETECTION})
 
 # (file, function qualname, category, ground). '*' as the function allows the whole file. Searched in modules/ and core/.
 ALLOWED_WAITS: list[tuple[str, str, str, str]] = [
+    ("modules/scan/module.py", "ScanModule._edits_finished", DETECTION,
+     "a sync waits for the changes admitted before it; past EDIT_STUCK_S the wait is told in the log, and goes on"),
     ("modules/scan/module.py", "ScanModule._scheduler_loop", SUBJECT,
      f"schedule of the auto scan ({SECTION_7}, 'Расписание автоскана')"),
     ("modules/sources/module.py", "SourcesModule._polite", SUBJECT,

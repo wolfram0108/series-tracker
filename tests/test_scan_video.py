@@ -1369,3 +1369,22 @@ async def test_a_card_written_by_the_real_catalog_after_the_fuse_is_written_befo
         assert rig.query("SELECT name FROM series WHERE id=?", (rig.series_id,))[0]["name"] == "LATE"
     finally:
         release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_change_that_does_not_end_is_told_in_the_log_and_the_sync_still_waits_for_it(rig, monkeypatch, caplog):
+    """K-10: the admission is not released (a late write would land in the sync), but the wait is not silent."""
+    import modules.scan.module as scan_module
+
+    monkeypatch.setattr(scan_module, "EDIT_STUCK_S", 0.05)
+    rig.world.rows = [rig.row("a", 1, 1)]
+    token = (await rig.probe.request("scan.edit.begin", {"series_id": rig.series_id}, timeout=STUCK_S))["token"]
+    with caplog.at_level("ERROR"):
+        running = rig.start_run(download=False)
+
+        def told():
+            return any("ждёт правку" in record.getMessage() for record in caplog.records)
+        assert await wait_until(told, rig.bus, *rig.runner.modules, every=0.05)
+    assert not running.done() and rig.series_id not in rig.scan._runs  # still waiting for the change
+    rig.probe.send_command("scan.edit.end", {"series_id": rig.series_id, "token": token})
+    await asyncio.wait_for(running, 10)

@@ -11,15 +11,18 @@ context) is other work — a sync started so would wait for the admission that w
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextvars import ContextVar
 from typing import Callable
 
 
 class Admission:
-    def __init__(self, token: str, release: Callable[[], None]) -> None:
+    def __init__(self, token: str, release: Callable[[], None], log: logging.Logger | None = None) -> None:
         self.token = token
         self._owner = asyncio.current_task()
         self._release = release
+        self._log = log
+        self._late = False
         self._pending: set[str] = set()
         self._closed = False
         self._released = False
@@ -38,11 +41,17 @@ class Admission:
     def close(self) -> None:
         """The block of the change is left; the admission ends once what it sent is answered."""
         self._closed = True
+        if self._pending and self._log is not None:
+            self._late = True
+            self._log.warning("допуск %s: ожидание правки окончено, а ответа ждут ещё %d запросов — допуск держится до "
+                              "них", self.token, len(self._pending))
         self._settle()
 
     def _settle(self) -> None:
         if self._closed and not self._pending and not self._released:
             self._released = True
+            if self._late and self._log is not None:
+                self._log.info("допуск %s: поздние ответы пришли — допуск снят", self.token)
             self._release()
 
 

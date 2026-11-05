@@ -53,7 +53,8 @@ async def admitted(gw: Any, series_id: int) -> AsyncIterator[None]:
         yield  # no runs in this process: nothing to hold off
         return
     token = (reply or {}).get("token") or ""
-    admission = Admission(token, lambda: gw.send_command("scan.edit.end", {"series_id": series_id, "token": token}))
+    admission = Admission(token, lambda: gw.send_command("scan.edit.end", {"series_id": series_id, "token": token}),
+                          log=getattr(gw, "log", None))
     current = current_admission.set(admission)
     try:
         yield

@@ -25,7 +25,7 @@ to remove, all names inside the folder of the series — and the number goes int
 publication a stop or a failure cut short is finished before anything else acts on the files or names of the series
 (`settle`, called by the module at the start of every look at the series), and only when the file under its name is the
 container it built: one that is not was never put there, so nothing is removed and no name changes. A record whose
-container was put there and is not there now is a conflict: it stays, nothing is done by it, and the packing fails.
+container was put there and is not there now is a conflict: it is closed with the reason in the log, nothing is done by it.
 
 The work is seen as a queue (`queue`, published by the module as `downloads.pack.queue.changed` and shown in the window of
 agents): a series asked to be packed waits in it, then each slot of it is queued, built, and ends packed, left as it was,
@@ -138,7 +138,7 @@ class Packing:
 
     async def _pack(self, series: dict, base: str, done: Packed) -> None:
         self._drop(series["id"], keep_failed=False)  # the failures of the last packing are looked at again now
-        done.failed += await self.settle(series)
+        await self.settle(series)
         rows = await self._repo.slot_files(series["id"])
         references = {(each["season"], each["episode"], each.get("part")): each
                       for each in await self._request("scan.output.get", {"series_id": series["id"]})}
@@ -331,16 +331,15 @@ class Packing:
             self._publish("downloads.item.renamed", {"series_id": series["id"], "unique_id": record["unique_id"],
                                                      "filename": record["name"]})
 
-    async def settle(self, series: dict) -> int:
+    async def settle(self, series: dict) -> None:
         """Finish the publications a stop or a failure cut short, before anything else acts on the files or the names of
-        the series; the number of conflicts (the packing fails by them). A publication is the one under its name only when
-        the container there carries its number: before its replace nothing of it was put there (its build goes, the old
-        files and names stand); after it, it is finished. A record whose container was put there and is not there now
-        (moved, renamed or replaced from outside) is not acted on: it stays, and the reason is in the log."""
+        the series. A publication is the one under its name only when the container there carries its number: before its
+        replace nothing of it was put there (its build goes, the old files and names stand); after it, it is finished. A
+        record whose container was put there and is not there now (moved, renamed or replaced from outside) is closed with
+        the reason in the log, and nothing is done by it."""
         base = series.get("save_path") or ""
         if not os.path.isabs(base):
-            return 0
-        conflicts = 0
+            return
         self._drop(series["id"], keep_failed=False, only="interrupted")  # finished now, or a conflict below
         for record in await self._repo.publications(series["id"]):
             key = (series["id"], None, None, None, record["publication"] or record["id"])
@@ -359,16 +358,17 @@ class Packing:
                         await self._repo.publication_end(record["id"])
                         continue
                 elif not ours:
-                    conflicts += 1
+                    # The record does not know the files any more: it is closed, and nothing is done by it. What it would
+                    # have removed stays (no row holds it, the check of the disk sees it); the names stand as the rows say.
                     self._set(series, None, status="failed", name=record["name"], key=key[-1])
                     self._log.error("серия %s: публикация контейнера %s не доведена: под этим именем нет контейнера, который "
-                                    "она поставила (номер %s) — запись журнала оставлена, файлы и имена не тронуты",
+                                    "она поставила (номер %s) — запись журнала закрыта, файлы и имена не тронуты",
                                     series["id"], record["name"], record["publication"] or "не записан")
+                    await self._repo.publication_end(record["id"])
                     continue
                 self._log.info("серия %s: публикация контейнера %s, прерванная остановкой, доведена до конца",
                                series["id"], record["name"])
                 await self._finish(series, record, renamed=True)
-        return conflicts
 
     async def _tell_packed(self, series: dict, target: str, identity: str, dub_ids: list[int]) -> None:
         """The tracks are in the container, aligned to its video: voices records both, so that a later change of the

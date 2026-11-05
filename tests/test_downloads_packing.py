@@ -384,9 +384,10 @@ async def test_a_publication_cut_short_anywhere_loses_no_video_and_leaves_no_nam
 
 
 @pytest.mark.asyncio
-async def test_a_placed_publication_whose_container_is_not_under_its_name_is_a_conflict_and_nothing_is_done_by_it(rig):
-    """Put there, and gone or replaced from outside: the record does not know the files any more, so it removes nothing and
-    names nothing; it stays, and the packing fails until the owner looks."""
+async def test_a_placed_publication_whose_container_is_not_under_its_name_is_closed_in_the_log_and_nothing_is_done_by_it(
+        rig, caplog):
+    """K-12. Put there, and gone or replaced from outside: the record does not know the files any more, so it removes
+    nothing and names nothing; it is closed with the reason in the log, and the packing of the series goes on."""
     fake, voices, packer, probe, db_path, media_dir = rig
     put(media_dir, "e01.mp4", b"https://v/win")
     winner(db_path, "e01.mp4")
@@ -399,13 +400,15 @@ async def test_a_placed_publication_whose_container_is_not_under_its_name_is_a_c
     os.replace(os.path.join(media_dir, "e01.mkv"), os.path.join(media_dir, "moved away.mkv"))
     put(media_dir, "e01.mkv", b"someone else's")
 
-    reply = await pack(probe)
+    with caplog.at_level("ERROR"):
+        reply = await pack(probe)
 
-    assert reply["failed"] >= 1
-    assert open(os.path.join(media_dir, "e01.mkv"), "rb").read() == b"someone else's"
-    assert os.path.exists(sidecar)  # nothing the record names is removed
+    assert any("не доведена" in record.getMessage() for record in caplog.records)
+    assert open(os.path.join(media_dir, "moved away.mkv"), "rb").read() == b"https://v/win"
+    assert os.path.exists(sidecar)  # nothing the record names is removed by it
     with sqlite3.connect(db_path) as conn:
-        assert conn.execute("SELECT state FROM pack_publications").fetchall() == [("placed",)]
+        assert conn.execute("SELECT COUNT(*) FROM pack_publications").fetchone()[0] == 0
+    assert "failed" in reply  # the packing of the series went on
 
 
 @pytest.mark.asyncio

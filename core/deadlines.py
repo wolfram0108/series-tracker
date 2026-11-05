@@ -33,6 +33,10 @@ RULES_S = 300.0
 BATCH_S = 600.0
 # A receiver of work answers once it has written the work down (a stuck receiver is all this number ends).
 HANDOVER_S = 900.0
+# The detection of a change that does not end: a sync waits for the changes admitted before it, and the longest of them
+# (a deep adoption renames a whole series) answers within BATCH_S. Past it the wait is told in the log as a failure; the
+# admission is not released (a write that still comes would land in the sync).
+EDIT_STUCK_S = BATCH_S
 
 # A read of one page of a site, measured on small releases (M-7, M-8: 0.42 s a row at ruchime, 0.14 s at dunhuatv); the
 # largest release known, about 1200 rows, is about 8 minutes, so twice that is under this value.

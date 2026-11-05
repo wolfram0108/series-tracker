@@ -86,7 +86,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from core import NO_HANDLER, BaseModule, BusRequestError, torrent_source
-from core.deadlines import TABLE_WAIT_S
+from core.deadlines import EDIT_STUCK_S, TABLE_WAIT_S
 from core.contracts import (RUN_CHANGED, WORK_STATE, RunSnapshot, availability, CompositionReply, OutputSwitch, Reference,
                             ReferenceChanged, RunChanged, SeriesReadProgress, SeriesSource, SourceStatus, TableProgress,
                             VoiceSettingsView, WorkState)
@@ -304,9 +304,17 @@ class ScanModule(BaseModule):
 
     async def _edits_finished(self, series_id: int) -> None:
         """A run opens after the changes admitted before it are written whole; none is admitted meanwhile (the series
-        is in `_running`). Each change is a request of the gateway with a fuse of its own, ended in `finally`."""
+        is in `_running`). A change ends when every request of it is answered (core/admission.py). One that does not end
+        within the longest answer a change may wait for is a failure, told in the log; the run goes on waiting for it."""
         over = self._edits_over.get(series_id)
-        if over is not None and self._edits.get(series_id):
+        if over is None or not self._edits.get(series_id):
+            return
+        try:
+            await asyncio.wait_for(over.wait(), EDIT_STUCK_S)
+        except asyncio.TimeoutError:
+            self.log.error("сериал %d: синхронизация ждёт правку, допущенную до неё, дольше %.0f с — запрос правки не "
+                           "ответил (открытых допусков: %d); синхронизация ждёт дальше", series_id, EDIT_STUCK_S,
+                           len(self._edits.get(series_id, ())))
             await over.wait()
 
     async def on_output_switch(self, env: Envelope) -> dict:

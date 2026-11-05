@@ -320,3 +320,18 @@ def test_a_burst_of_states_goes_as_the_last_of_each_and_other_events_all_in_orde
     assert kept == [("voices.dub.changed", {"n": 1}), ("sources.table.progress", {"url": "b", "current": 1}),
                     ("sources.table.progress", {"url": "a", "current": 2}), ("voices.dub.changed", {"n": 2}),
                     ("downloads.queue.changed", {"tasks": []})]
+
+
+@pytest.mark.asyncio
+async def test_a_change_whose_caller_stopped_waiting_is_told_and_its_late_end_too(caplog):
+    import logging
+    from core.admission import Admission
+
+    released = []
+    admission = Admission("t1", lambda: released.append(True), log=logging.getLogger("probe"))
+    admission.sent("r1")
+    with caplog.at_level("INFO"):
+        admission.close()
+        assert not released and any("ждут ещё 1" in r.getMessage() and r.levelname == "WARNING" for r in caplog.records)
+        admission.answered("r1")
+    assert released == [True] and any("поздние ответы пришли" in r.getMessage() for r in caplog.records)
