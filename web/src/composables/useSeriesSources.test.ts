@@ -14,7 +14,7 @@ vi.mock("./sourceCalls")
 const PAGE = "https://1.ruchime.org/release/test"
 const source = (over: Partial<SeriesSource> = {}): SeriesSource => ({
   id: 7, series_id: 1, position: 0, url: PAGE, source_type: "web_video", parser_profile_id: null,
-  vk_search_mode: "search", vibix_season: null, players_off: [], voice_name: "", ...over,
+  vibix_season: null, players_off: [], voice_name: "", ...over,
 })
 const summary: SourceSummary = {
   source_id: 7, url: PAGE, status: "no_profile",
@@ -82,14 +82,14 @@ describe("useSeriesSources", () => {
     expect(calls.fetchSources).toHaveBeenCalledTimes(before + 1)
   })
 
-  it("reads the page of a source now, with the options of its read, and says why when the core refuses", async () => {
+  it("reads the page of a source now and says why when the core refuses", async () => {
     vi.mocked(calls.readPageNow).mockReset().mockResolvedValue(ok({ success: true }))
-    const channel = source({ source_type: "vk_video", url: "https://vk.com/video/@c|Тайтл", vk_search_mode: "get_all" })
+    const channel = source({ source_type: "vk_video", url: "https://vk.com/video/@c|Тайтл" })
     vi.mocked(calls.fetchSources).mockResolvedValue(ok([channel]))
     const sources = setup("video", [channel])
     await flushPromises()
     await sources.reread(7)
-    expect(calls.readPageNow).toHaveBeenCalledWith("https://vk.com/video/@c|Тайтл", { vk_search_mode: "get_all" })
+    expect(calls.readPageNow).toHaveBeenCalledWith("https://vk.com/video/@c|Тайтл")
     vi.mocked(calls.readPageNow).mockResolvedValueOnce({ ok: false, text: "Нет связи с сервером" })
     await sources.reread(7)
     expect(sources.error.value).toBe("Нет связи с сервером")

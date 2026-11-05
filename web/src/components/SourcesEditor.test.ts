@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import ToastService from "primevue/toastservice"
 import SourcesEditor from "./SourcesEditor.vue"
+import * as address from "../composables/sourceAddress"
+import { t } from "../i18n"
 import { itemOfSource, type LayoutRow, type SeriesSource, type SourceSummary } from "../lib/sources"
+
+vi.mock("../composables/sourceAddress")
 
 const PAGE = "https://1.ruchime.org/release/test"
 const stored = (over: Partial<SeriesSource> = {}): SeriesSource => ({
   id: 7, series_id: 1, position: 0, url: PAGE, source_type: "web_video", parser_profile_id: null,
-  vk_search_mode: "search", vibix_season: null, players_off: [], voice_name: "", ...over,
+  vibix_season: null, players_off: [], voice_name: "", ...over,
 })
 const summary: SourceSummary = {
   source_id: 7, url: PAGE, status: "no_profile", read_at: "2026-11-01T10:00:00Z", players: [
@@ -22,6 +26,12 @@ const mountEditor = (items = [itemOfSource(stored(), summary, null)], props: Rec
     props: { items, profiles: [{ id: 4, name: "ruchime" }], adder: vi.fn().mockResolvedValue(true), ...props },
     global: { plugins: [ToastService] },
   })
+
+// What the core says of a typed address: a channel of VK for the addresses of vkvideo.ru, a page of a site for the rest.
+beforeEach(() => {
+  vi.mocked(address.kindOf).mockReset().mockImplementation(async (typed: string) =>
+    ({ kind: "site", sourceType: typed.includes("vkvideo.ru/@") ? "vk_video" : "web_video" }))
+})
 
 describe("SourcesEditor", () => {
   it("draws a group per source with its players and their counts, and no episode, season, resolution or voice-over of the table", () => {
@@ -142,6 +152,55 @@ describe("SourcesEditor", () => {
     expect(w.find(".group-maker").exists()).toBe(false)
     expect(w.text()).not.toContain("Завести группу")
     expect(w.text()).not.toContain("Название группы")
+  })
+
+  it("offers the field of the query as soon as the address is a channel of VK and adds the channel with it only", async () => {
+    const adder = vi.fn().mockResolvedValue(true)
+    const w = mountEditor([], { adder })
+    expect(w.find(".source-query").exists()).toBe(false)
+    await w.find(".source-add input").setValue("https://vkvideo.ru/@kino")
+    await flushPromises()
+    const query = w.find(".source-query input")
+    const button = w.find(".source-add button")
+    expect(query.exists()).toBe(true)
+    expect(w.text()).toContain(t("sources.vk.hint"))
+    expect(button.attributes("disabled")).toBeDefined()
+    await w.find(".source-add input").trigger("keyup.enter")
+    await flushPromises()
+    expect(adder).not.toHaveBeenCalled()
+    await query.setValue(" тайтл ")
+    expect(button.attributes("disabled")).toBeUndefined()
+    await button.trigger("click")
+    await flushPromises()
+    expect(adder).toHaveBeenCalledWith("https://vkvideo.ru/@kino|тайтл")
+    expect((w.find(".source-add input").element as HTMLInputElement).value).toBe("")
+    expect(w.find(".source-query").exists()).toBe(false)
+  })
+
+  it("parts a pasted channel with its query into the two fields", async () => {
+    const w = mountEditor([])
+    await w.find(".source-add input").setValue("https://vkvideo.ru/@kino|Боевой мастер")
+    await flushPromises()
+    expect((w.find(".source-add input").element as HTMLInputElement).value).toBe("https://vkvideo.ru/@kino")
+    expect((w.find(".source-query input").element as HTMLInputElement).value).toBe("Боевой мастер")
+  })
+
+  it("keeps the field of the query away from the pages of sites", async () => {
+    const w = mountEditor([])
+    await w.find(".source-add input").setValue(PAGE)
+    await flushPromises()
+    expect(w.find(".source-query").exists()).toBe(false)
+    expect(w.find(".source-add button").attributes("disabled")).toBeUndefined()
+  })
+
+  it("does not send a channel of VK whose query was emptied, and says that it needs one", async () => {
+    const channel = itemOfSource(stored({ source_type: "vk_video", url: "https://vkvideo.ru/@kino|тайтл" }), null, null)
+    const w = mountEditor([channel])
+    const fields = w.findAll(".grid-fit input")
+    await fields[1].setValue("  ")
+    await fields[1].trigger("focusout")
+    expect(w.emitted("change")).toBeUndefined()
+    expect(w.text()).toContain(t("sources.vk.queryMissing"))
   })
 
   it("edits the channel of VK and sends it when the field is left", async () => {

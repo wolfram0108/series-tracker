@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
   coverageOf, draftBody, itemOfSource, joinVkAddress, pageHost, phaseText, playerCaption, profileOptions, progressText,
-  readEnded, readOptions, seasonPositions, siteOf, sourceCaption, sourceTypeOf, splitVkAddress, summaryOf, togglePlayer,
-  viewOf, vkModeOf, voiceLinesOf, type LayoutRow, type PlayerSummary, type SeriesSource, type SourceSummary,
+  readEnded, seasonPositions, siteOf, sourceCaption, sourceTypeOf, splitVkAddress, summaryOf, togglePlayer,
+  viewOf, voiceLinesOf, type LayoutRow, type PlayerSummary, type SeriesSource, type SourceSummary,
 } from "./sources"
 import type { PageStatus } from "../stores/sourceTables"
 
@@ -187,21 +187,12 @@ describe("addresses", () => {
     expect(siteOf("not an address")).toBe("")
   })
 
-  it("falls back to the search mode that works when the mode is not one of the known", () => {
-    expect([vkModeOf("get_all"), vkModeOf("search"), vkModeOf("x"), vkModeOf(null)]).toEqual(["get_all", "search", "search", "search"])
-  })
-
-  it("asks the site with the mode of a channel and with nothing for other sources", () => {
-    expect(readOptions({ sourceType: "vk_video", vkSearchMode: "get_all" })).toEqual({ vk_search_mode: "get_all" })
-    expect(readOptions({ sourceType: "web_video", vkSearchMode: "search" })).toEqual({})
-  })
-
   it("sends a draft with exactly the fields of a source", () => {
     expect(draftBody({
-      url: "https://1.ruchime.org/release/test", sourceType: "web_video", profileId: 4, vkSearchMode: "search",
+      url: "https://1.ruchime.org/release/test", sourceType: "web_video", profileId: 4,
       vibixSeason: 2, playersOff: ["kodik"], voiceName: "AniStar",
     })).toEqual({
-      url: "https://1.ruchime.org/release/test", source_type: "web_video", parser_profile_id: 4, vk_search_mode: "search",
+      url: "https://1.ruchime.org/release/test", source_type: "web_video", parser_profile_id: 4,
       vibix_season: 2, players_off: ["kodik"], voice_name: "AniStar",
     })
   })
@@ -210,7 +201,7 @@ describe("addresses", () => {
 describe("the sources of a stored series", () => {
   const stored: SeriesSource = {
     id: 7, series_id: 1, position: 0, url: "https://1.ruchime.org/release/test", source_type: "web_video",
-    parser_profile_id: null, vk_search_mode: "search", vibix_season: 2, players_off: ["kodik"], voice_name: "",
+    parser_profile_id: null, vibix_season: 2, players_off: ["kodik"], voice_name: "",
   }
 
   it("finds the summary of a source by its id", () => {

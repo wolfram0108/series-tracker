@@ -35,9 +35,9 @@ describe("useRulesTest", () => {
     site()
     vi.mocked(calls.testProfile).mockResolvedValue(ok(reply({ lines: [line("a", "Серия 1", 1), line("b", "Трейлер")] })))
     const test = useRulesTest(() => 5)
-    await test.readPage(PAGE, "", "search")
+    await test.readPage(PAGE, "")
     expect(calls.testProfile).toHaveBeenCalledWith({
-      url: PAGE, options: {}, profile_id: 5, series_season: null, refresh: true,
+      url: PAGE, profile_id: 5, series_season: null, refresh: true,
     })
     expect(test.state.value).toBe("ready")
     expect(test.lines.value.map((each) => [each.key, each.result?.episode ?? null])).toEqual([["a", 1], ["b", null]])
@@ -50,7 +50,7 @@ describe("useRulesTest", () => {
     for (const state of ["reading", "failed"] as const) {
       vi.mocked(calls.testProfile).mockResolvedValue(ok(reply({ state, lines: stale })))
       const test = useRulesTest(() => 5)
-      await test.readPage(PAGE, "", "search")
+      await test.readPage(PAGE, "")
       expect(test.state.value).toBe(state)
       expect(test.lines.value).toHaveLength(2)
       expect(test.fetched.value).toEqual(["Серия 1", "Трейлер"])
@@ -61,18 +61,17 @@ describe("useRulesTest", () => {
     site()
     vi.mocked(calls.testProfile).mockResolvedValue(ok(reply({ state: "reading", lines: [] })))
     const test = useRulesTest(() => 5)
-    await test.readPage(PAGE, "", "search")
+    await test.readPage(PAGE, "")
     expect(test.lines.value).toEqual([])
     expect(test.fetched.value).toEqual([])
   })
 
-  it("joins the query to the channel of VK and sends the mode of the search as an option of the read", async () => {
-    site("https://vk.com/video/@chan|", "vk_video")
+  it("gives the query apart from the channel of VK and reads the address the two make", async () => {
+    site("https://vk.com/video/@chan|Тайтл 1 сезон", "vk_video")
     const test = useRulesTest(() => 5)
-    await test.readPage("https://vk.com/video/@chan", "Тайтл 1 сезон", "get_all")
-    expect(vi.mocked(calls.testProfile).mock.calls[0][0]).toMatchObject({
-      url: "https://vk.com/video/@chan|Тайтл 1 сезон", options: { vk_search_mode: "get_all" },
-    })
+    await test.readPage("https://vk.com/video/@chan", "Тайтл 1 сезон")
+    expect(vi.mocked(address.typeAddress)).toHaveBeenCalledWith("https://vk.com/video/@chan", "Тайтл 1 сезон")
+    expect(vi.mocked(calls.testProfile).mock.calls[0][0]).toMatchObject({ url: "https://vk.com/video/@chan|Тайтл 1 сезон" })
   })
 
   it("asks again, reading nothing, when the end of the read comes as an event, and not before or for another page", async () => {
@@ -81,7 +80,7 @@ describe("useRulesTest", () => {
       .mockResolvedValueOnce(ok(reply({ state: "reading" })))
       .mockResolvedValue(ok(reply({ lines: [line("a", "Серия 1", 1)] })))
     const test = useRulesTest(() => 5)
-    await test.readPage(PAGE, "", "search")
+    await test.readPage(PAGE, "")
     expect(test.state.value).toBe("reading")
     const tables = useSourceTablesStore()
     tables.applyProgress({ url: PAGE, phase: "episodes", current: 2, total: 9 })
@@ -103,7 +102,7 @@ describe("useRulesTest", () => {
       .mockResolvedValueOnce(ok(reply({ state: "reading" })))
       .mockResolvedValue(ok(reply({ state: "failed", reason: '{"code":"read_failed"}' })))
     const test = useRulesTest(() => 5)
-    await test.readPage(PAGE, "", "search")
+    await test.readPage(PAGE, "")
     useSSE().connected.value = true
     await flushPromises()
     expect(vi.mocked(calls.testProfile).mock.calls[1][0]).toMatchObject({ refresh: false })
@@ -114,7 +113,7 @@ describe("useRulesTest", () => {
   it("says in words that no site reads the address, and asks the core nothing", async () => {
     vi.mocked(address.typeAddress).mockResolvedValue({ kind: "other" })
     const test = useRulesTest(() => 5)
-    await test.readPage("https://kinozal.tv/details.php?id=1", "", "search")
+    await test.readPage("https://kinozal.tv/details.php?id=1", "")
     expect(test.state.value).toBe("failed")
     expect(test.error.value).toBe(ru["rulesTest.notSite"])
     expect(calls.testProfile).not.toHaveBeenCalled()
@@ -124,7 +123,7 @@ describe("useRulesTest", () => {
     site()
     vi.mocked(calls.testProfile).mockResolvedValue({ ok: false, text: "Профиль не найден" })
     const test = useRulesTest(() => 5)
-    await test.readPage(PAGE, "", "search")
+    await test.readPage(PAGE, "")
     expect([test.state.value, test.error.value]).toEqual(["failed", "Профиль не найден"])
   })
 
@@ -133,7 +132,7 @@ describe("useRulesTest", () => {
     const test = useRulesTest(() => 5)
     await test.runLines(["Серия 1"])
     expect(calls.testProfile).toHaveBeenCalledWith({
-      url: "", options: {}, profile_id: 5, series_season: null, refresh: true, lines: ["Серия 1"],
+      url: "", profile_id: 5, series_season: null, refresh: true, lines: ["Серия 1"],
     })
     expect(test.state.value).toBe("ready")
     expect(test.lines.value[0].result?.episode).toBe(1)

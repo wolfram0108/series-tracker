@@ -23,38 +23,6 @@
   color: var(--color-text);
 }
 
-/* --- режим поиска VK: btn-group + btn-check + btn-outline-primary --- */
-.vk-mode-group {
-  display: inline-flex;
-  width: 100%;
-  border-radius: 8px;
-  overflow: hidden;
-}
-.vk-mode-btn {
-  flex: 1 1 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 0.5rem 0.75rem;
-  font: inherit;
-  font-weight: 500;
-  cursor: pointer;
-  color: var(--color-blue);
-  background: #fff;
-  border: 1px solid var(--color-blue);
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.vk-mode-btn:first-child { border-radius: 8px 0 0 8px; }
-.vk-mode-btn:last-child { border-radius: 0 8px 8px 0; }
-.vk-mode-btn + .vk-mode-btn { border-left: none; }
-.vk-mode-btn:hover { background: rgba(13, 110, 253, 0.06); }
-.vk-mode-btn.active {
-  background: var(--color-blue);
-  border-color: var(--color-blue);
-  color: #fff;
-}
-
 /* --- переключатель «несколько сезонов»: modern-form-check + form-switch --- */
 .modern-form-check {
   display: flex;

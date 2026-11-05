@@ -7,7 +7,7 @@ only tells why an episode has no reference (`unfit`).
 A reference whose row has an unsure answer (`not_obtained`, which is not `absent`) is held, so that a probe that failed
 once does not swap the reference and the file for a worse one and back; a pick of the user is stronger than the hold.
 So is a reference whose file is on disk and whose row the layout does not have at all: a read that did not bring a row
-proves nothing (a page read short, a video a quick search did not find), and the file is not swapped on it; nor does a
+proves nothing (a page read short, a video VK hid from the listing of its channel), and the file is not swapped on it; nor does a
 row with no number. A row the layout numbers otherwise, or one the configuration took out (`CompositionRow.left_out`),
 is its word: the reference follows it.
 

@@ -266,7 +266,7 @@ def test_only_the_title_pages_are_the_pages_of_the_site_and_the_address_is_the_p
     site = DunhuaTvSite()
     registry = SiteRegistry([site])
 
-    assert site.canonical_url("https://www.dunhuatv.ru/28-x.html?player=cvh&voice=A#cvh=1", {"vibix_season": "2"}) == (
+    assert site.canonical_url("https://www.dunhuatv.ru/28-x.html?player=cvh&voice=A#cvh=1") == (
         "https://dunhuatv.ru/28-x.html")
     assert site.canonical_url(PAGE) == PAGE and site.canonical_url(site.canonical_url(PAGE)) == PAGE
     assert registry.find(PAGE + "#cvh=5") is site and registry.find("https://www.dunhuatv.ru/5-x.html") is site

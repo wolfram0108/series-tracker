@@ -30,7 +30,7 @@ def canonical(url: str) -> str:
 
 def source(url: str = PAGE, **fields) -> dict:
     """A source of a series as the catalog gives it; a web video source read by the profile 7 unless said otherwise."""
-    return {"url": url, "source_type": "web_video", "parser_profile_id": 7, "vk_search_mode": "search",
+    return {"url": url, "source_type": "web_video", "parser_profile_id": 7,
             "vibix_season": None, "players_off": [], **fields}
 
 

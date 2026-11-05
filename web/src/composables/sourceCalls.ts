@@ -35,14 +35,13 @@ export async function call<T>(
 }
 
 /** Which site reads an address and its canonical form; the core answers without the network. */
-export function resolveAddress(url: string, options: Record<string, string> = {}): Promise<Answer<ResolveReply>> {
-  return call(() => api.POST("/api/sources/resolve", { body: { url, options } }))
+export function resolveAddress(url: string): Promise<Answer<ResolveReply>> {
+  return call(() => api.POST("/api/sources/resolve", { body: { url } }))
 }
 
 /** What the window shows of an address: the state of its table, the summary and the lines. `refresh: false` reads nothing. */
 export function previewAddress(body: {
   url: string
-  options?: Record<string, string>
   profile_id?: number | null
   refresh?: boolean
   players_off?: string[]
@@ -53,8 +52,8 @@ export function previewAddress(body: {
 }
 
 /** Reads the page now, whatever the age of its table; how the read goes and where it ends come as events. */
-export function readPageNow(url: string, options: Record<string, string> = {}): Promise<Answer<unknown>> {
-  return call(() => api.POST("/api/sources/read", { body: { url, options } }))
+export function readPageNow(url: string): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/sources/read", { body: { url } }))
 }
 
 export async function fetchProfiles(): Promise<{ id: number; name: string }[]> {

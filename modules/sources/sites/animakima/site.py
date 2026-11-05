@@ -11,7 +11,6 @@ from __future__ import annotations
 import html
 import logging
 import re
-from typing import Mapping
 from urllib.parse import urlparse
 
 from core.contracts import RowVoice, TableRow
@@ -95,7 +94,7 @@ class AnimakimaSite:
         except ValueError:
             return False
 
-    def canonical_url(self, url: str, options: Mapping[str, str] = {}) -> str:
+    def canonical_url(self, url: str) -> str:
         """The title page alone: what a series takes from it is chosen on the table, not in the address."""
         found = _TITLE_PATH.match(urlparse(url).path)
         if not found:

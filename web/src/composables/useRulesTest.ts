@@ -1,6 +1,6 @@
 import { computed, ref, watch } from "vue"
 import { t } from "../i18n"
-import { joinVkAddress, readEnded, readOptions, splitVkAddress, type TableState } from "../lib/sources"
+import { readEnded, type TableState } from "../lib/sources"
 import { useSourceTablesStore } from "../stores/sourceTables"
 import { typeAddress } from "./sourceAddress"
 import { fetchFilenames, testProfile, type RulesTestReply } from "./rulesTestCalls"
@@ -11,7 +11,7 @@ export type TestState = "idle" | "asking" | "reading" | "ready" | "failed"
 
 interface Page {
   /** The test as it was asked; only `refresh` changes when the core is asked again. */
-  address: { url: string; options: Record<string, string> }
+  address: { url: string }
   /** The address the core names the page with in its events; known after the first answer. */
   canonical: string
   asked: { state: TableState } | null
@@ -48,7 +48,7 @@ export function useRulesTest(profileId: () => number) {
     const turn = ++asking
     const before = tables.forUrl(current.canonical)
     const answer = await testProfile({
-      url: current.address.url, options: current.address.options, profile_id: profileId(), series_season: null, refresh,
+      url: current.address.url, profile_id: profileId(), series_season: null, refresh,
     })
     if (turn !== asking) return
     if (!answer.ok) return failWith(answer.text)
@@ -80,17 +80,15 @@ export function useRulesTest(profileId: () => number) {
     if (up && page?.asked?.state === "reading") void ask(page, false)
   })
 
-  /** Reads the page the address names (a channel of VK with its query and mode, or a page of a site) and tries the profile on its rows. */
-  async function readPage(address: string, query: string, vkMode: string): Promise<void> {
+  /** Reads the page the address names (a channel of VK with its query, or a page of a site) and tries the profile on its rows.
+   *  A channel without a query is not read: the channel is read whole and only the query keeps its videos. */
+  async function readPage(address: string, query: string): Promise<void> {
     error.value = ""
     state.value = "asking"
-    const typed = await typeAddress(address)
+    const typed = await typeAddress(address, query)
     if (typed.kind === "refused") return failWith(typed.text)
     if (typed.kind === "other") return failWith(t("rulesTest.notSite"))
-    const url = typed.sourceType === "vk_video" && query.trim()
-      ? joinVkAddress(splitVkAddress(typed.url).channel, query)
-      : typed.url
-    page = { address: { url, options: readOptions({ sourceType: typed.sourceType, vkSearchMode: vkMode }) }, canonical: "", asked: null, handled: null }
+    page = { address: { url: typed.url }, canonical: "", asked: null, handled: null }
     await ask(page, true)
   }
 
@@ -100,7 +98,7 @@ export function useRulesTest(profileId: () => number) {
     page = null
     error.value = ""
     state.value = "asking"
-    const answer = await testProfile({ url: "", options: {}, profile_id: profileId(), series_season: null, refresh: true, lines: texts })
+    const answer = await testProfile({ url: "", profile_id: profileId(), series_season: null, refresh: true, lines: texts })
     if (turn !== asking) return
     if (!answer.ok) return failWith(answer.text)
     lines.value = answer.data.lines ?? []

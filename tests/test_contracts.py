@@ -188,5 +188,5 @@ def test_every_registered_site_declares_what_the_contract_asks():
         page = A_PAGE_OF[site.name]
         # The registry finds the site of its own page, and the canonical address reads back as itself.
         assert registry.find(page) is site and site.match_url(page)
-        canonical = site.canonical_url(page, {})
-        assert site.canonical_url(canonical, {}) == canonical and registry.find(canonical) is site
+        canonical = site.canonical_url(page)
+        assert site.canonical_url(canonical) == canonical and registry.find(canonical) is site

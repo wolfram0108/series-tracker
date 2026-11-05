@@ -9,10 +9,8 @@ Queries:
   sources.tracker.resolve {url}  → {tracker|null} (tracker_info деталей)
 
 Tables of site pages (the one way to read a site page; sites are registered in `sites`, the core is `table.py`):
-  sources.table.get {url, options?, refresh?} → TableGetReply {url, state: ready | reading | failed | absent,
-                                   table?, reason?}. `options` are the choices of a source that change what is
-                                   read (`vk_search_mode`); a site ignores those it does not know. A complete
-                                   table younger than an hour is `ready`. Otherwise the page is read — by one
+  sources.table.get {url, refresh?} → TableGetReply {url, state: ready | reading | failed | absent,
+                                   table?, reason?}. A complete table younger than an hour is `ready`. Otherwise the page is read — by one
                                    task however many ask — and the reply is `reading` at once, with the last
                                    complete table when there is one; the end comes as the events below.
                                    `failed` in the reply means no read began (`site_not_found`: no site for the
@@ -21,8 +19,9 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    says how the page stands: `reading` while a read goes, `failed` (with the
                                    reason) when the last read failed, `ready` for a complete table however old,
                                    `absent` when nothing was read; with the last complete table when there is one.
-  sources.table.read {url, options?} command: read the page now, term or not, unless a read of it is going
-  sources.site.resolve {url, options?} → {site, canonical_url}: which site reads the address and the canonical
+  sources.table.read {url} command: read the page now, term or not, unless a read of it is going; the read takes
+                                   no raw data that an earlier read left for sharing (the listing of a VK channel)
+  sources.site.resolve {url} → {site, canonical_url}: which site reads the address and the canonical
                                    form of it (no network); both null when no site does
   sources.video.stream {url, max_height?} → {handled, stream_url, headers, progressive} | {handled, error,
                                    transient}: the stream of a candidate link, asked for right before the download.
@@ -319,7 +318,7 @@ class SourcesModule(BaseModule):
     async def on_site_resolve(self, env: Envelope) -> dict:
         """payload: SiteResolveRequest; reply: SiteResolveReply. No network."""
         request = SiteResolveRequest.model_validate(env.payload)
-        return self.tables.resolve(request.url, request.options).model_dump(mode="json")
+        return self.tables.resolve(request.url).model_dump(mode="json")
 
     async def on_video_stream(self, env: Envelope) -> dict:
         """payload: {url, max_height?}

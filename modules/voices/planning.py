@@ -232,7 +232,7 @@ def moved(row: dict[str, Any], chain: Iterable[Candidate], videos: Videos) -> bo
     voice-over (this). The video is the row it was made from, by its key (a chain recorded before keys is told by its
     link). It is not valid when the layout has that video and the plan of this voice-over does not offer it: another
     episode or voice-over took it, or the configuration took it out (a rule, a switched-off player). A video the layout
-    does not have at all is no evidence of a change (a page read short, a video not found by a quick search): the work
+    does not have at all is no evidence of a change (a page read short, a video VK hid from the listing of its channel): the work
     stands, as it stood before. A row that has not begun has no work: the plan gives it its chain anew."""
     if row.get("status") not in STARTED:
         return False

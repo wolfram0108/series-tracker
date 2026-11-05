@@ -49,7 +49,7 @@ def db_path(tmp_path):
     with sqlite3.connect(path) as conn:
         insert_series(conn, id=1, url="http://x", source_type="torrent")
         insert_series(conn, id=2, name="ВК", name_en="Show", site="vk", save_path=str(media_s),
-                      url="u|q", source_type="vk_video", vk_search_mode="get_all")
+                      url="u|q", source_type="vk_video")
         # одиночный скачанный эпизод
         conn.execute(
             "INSERT INTO media_items (series_id, unique_id, episode_start, "

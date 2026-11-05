@@ -9,7 +9,7 @@ from sources_support import READ_LIMIT_S, Web, json_of, within
 from modules.sources.sites.vk_channel import VkChannelSite
 from test_sources_dunhuatv_site import PAGE, a_site, web_of as dunhuatv_web
 from test_sources_ruchime_site import RELEASE, SLUG, catalog_of, web_of
-from test_sources_vk_channel import CHANNEL, SEARCH, Api
+from test_sources_vk_channel import CHANNEL, Api
 
 
 @pytest.mark.parametrize("items,n,expected", [
@@ -54,10 +54,11 @@ async def test_a_read_of_a_title_with_hundreds_of_cvh_videos_asks_the_last_ten_o
 
 
 async def test_a_read_of_a_channel_takes_the_newest_videos_by_their_dates():
-    api, listed = Api(), json_of(SEARCH)["response"]["items"]
+    api = Api()
     async with Web().client() as http:
         draft = await within(VkChannelSite(PlayerRegistry.standard(), api).read(
-            f"{CHANNEL}|Непревзойденный на пути алхимии|search", ReadContext(http, lambda *step: None, recent=3)),
+            f"{CHANNEL}|противостояние", ReadContext(http, lambda *step: None, recent=3)),
             READ_LIMIT_S, "the read of the newest videos")
-    ours = sorted((video for video in listed if video["owner_id"] == -170515668), key=lambda video: video.get("date") or 0)
+    ours = sorted((video for video in api.videos if "противостояние" in video["title"].lower()),
+                  key=lambda video: video.get("date") or 0)
     assert [row.key for row in draft.rows] == [f"{video['owner_id']}_{video['id']}" for video in ours[-3:]]

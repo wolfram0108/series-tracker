@@ -1,7 +1,7 @@
 import { computed, ref, watch } from "vue"
 import { t } from "../i18n"
 import {
-  draftBody, readOptions, readEnded, viewOf, vkModeOf,
+  draftBody, readEnded, viewOf,
   type LayoutRow, type PreviewReply, type SourceDraft, type SourceItem, type SourceSummary, type SourceType,
 } from "../lib/sources"
 import { useSourceTablesStore, type PageStatus } from "../stores/sourceTables"
@@ -14,7 +14,6 @@ interface Draft {
   url: string
   sourceType: SourceType
   profileId: number | null
-  vkSearchMode: string
   vibixSeason: number | null
   playersOff: string[]
   voiceName: string
@@ -28,7 +27,7 @@ interface Draft {
   handled: PageStatus | null
 }
 
-export type DraftPatch = Partial<Pick<SourceItem, "url" | "profileId" | "vkSearchMode" | "vibixSeason" | "playersOff" | "voiceName">>
+export type DraftPatch = Partial<Pick<SourceItem, "url" | "profileId" | "vibixSeason" | "playersOff" | "voiceName">>
 /** `kind`: the address is no site's, so it is not a video source (the window goes on as with a torrent). */
 export type AddOutcome = { kind: "added" } | { kind: "other" } | { kind: "refused"; text: string }
 
@@ -50,7 +49,6 @@ export function useSourceDrafts() {
     url: draft.url,
     sourceType: draft.sourceType,
     profileId: draft.profileId,
-    vkSearchMode: draft.vkSearchMode,
     vibixSeason: draft.vibixSeason,
     playersOff: draft.playersOff,
     voiceName: draft.voiceName,
@@ -68,7 +66,7 @@ export function useSourceDrafts() {
   async function ask(draft: Draft, refresh: boolean): Promise<void> {
     const before = tables.forUrl(draft.canonical)
     const answer = await previewAddress({
-      url: draft.url, options: readOptions(draft), profile_id: draft.profileId, refresh,
+      url: draft.url, profile_id: draft.profileId, refresh,
       players_off: draft.playersOff, vibix_season: draft.vibixSeason, voice_name: draft.voiceName,
     })
     if (!drafts.value.includes(draft)) return
@@ -115,7 +113,7 @@ export function useSourceDrafts() {
         return { kind: "refused", text: t("sources.add.duplicate") }
       }
       const draft: Draft = {
-        key: `draft-${++counter}`, url, sourceType, profileId: null, vkSearchMode: vkModeOf(null), vibixSeason: null,
+        key: `draft-${++counter}`, url, sourceType, profileId: null, vibixSeason: null,
         playersOff: [], voiceName: "", canonical: "", summary: null, rows: [], asked: { state: "reading" }, handled: null,
       }
       drafts.value.push(draft)
@@ -130,12 +128,11 @@ export function useSourceDrafts() {
     drafts.value = drafts.value.filter((draft) => draft.key !== key)
   }
 
-  /** A choice of a draft. What changes the page asked for (address, mode) reads again; a profile or a choice of the source only recounts. */
+  /** A choice of a draft. What changes the page asked for (the address) reads again; a profile or a choice of the source only recounts. */
   async function change(key: string | number, patch: DraftPatch): Promise<void> {
     const draft = find(key)
     if (!draft) return
-    const rereads = (patch.url !== undefined && patch.url !== draft.url)
-      || (patch.vkSearchMode !== undefined && patch.vkSearchMode !== draft.vkSearchMode)
+    const rereads = patch.url !== undefined && patch.url !== draft.url
     // What a profile or a choice of the source changes is recounted from the table in hand, reading nothing.
     const recounts = (patch.profileId !== undefined && patch.profileId !== draft.profileId)
       || (patch.vibixSeason !== undefined && patch.vibixSeason !== draft.vibixSeason)
@@ -160,7 +157,7 @@ export function useSourceDrafts() {
     error.value = ""
     draft.asked = { state: "reading" }
     draft.handled = tables.forUrl(draft.canonical)
-    const answer = await readPageNow(draft.url, readOptions(draft))
+    const answer = await readPageNow(draft.url)
     if (!answer.ok) {
       error.value = answer.text
       draft.asked = { state: "failed", reason: null }

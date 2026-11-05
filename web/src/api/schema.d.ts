@@ -1639,10 +1639,6 @@ export interface components {
              * @default
              */
             url: string;
-            /** Options */
-            options?: {
-                [key: string]: string;
-            };
             /** Profile Id */
             profile_id?: number | null;
             /** Series Season */
@@ -2213,10 +2209,6 @@ export interface components {
              * @default
              */
             url: string;
-            /** Options */
-            options?: {
-                [key: string]: string;
-            };
             /** Profile Id */
             profile_id: number;
             /** Series Season */
@@ -2366,11 +2358,6 @@ export interface components {
             source_type: components["schemas"]["SourceType"];
             /** Parser Profile Id */
             parser_profile_id?: number | null;
-            /**
-             * Vk Search Mode
-             * @default search
-             */
-            vk_search_mode: string;
             /** Vibix Season */
             vibix_season?: number | null;
             /** Players Off */
@@ -2438,10 +2425,6 @@ export interface components {
         SiteResolveRequest: {
             /** Url */
             url: string;
-            /** Options */
-            options?: {
-                [key: string]: string;
-            };
         };
         /**
          * SourceAdd
@@ -2453,11 +2436,6 @@ export interface components {
             source_type: components["schemas"]["SourceType"];
             /** Parser Profile Id */
             parser_profile_id?: number | null;
-            /**
-             * Vk Search Mode
-             * @default search
-             */
-            vk_search_mode: string;
             /** Vibix Season */
             vibix_season?: number | null;
             /** Players Off */
@@ -2479,8 +2457,6 @@ export interface components {
             url?: string | null;
             /** Parser Profile Id */
             parser_profile_id?: number | null;
-            /** Vk Search Mode */
-            vk_search_mode?: string | null;
             /** Vibix Season */
             vibix_season?: number | null;
             /** Players Off */
@@ -2500,11 +2476,6 @@ export interface components {
             source_type: components["schemas"]["SourceType"];
             /** Parser Profile Id */
             parser_profile_id?: number | null;
-            /**
-             * Vk Search Mode
-             * @default search
-             */
-            vk_search_mode: string;
             /** Vibix Season */
             vibix_season?: number | null;
             /** Players Off */
@@ -2549,15 +2520,11 @@ export interface components {
         SourceType: "torrent" | "vk_video" | "web_video";
         /**
          * TableReadRequest
-         * @description Read the page of an address now; `options` are the choices of the source that change what is read.
+         * @description Read the page of an address now.
          */
         TableReadRequest: {
             /** Url */
             url: string;
-            /** Options */
-            options?: {
-                [key: string]: string;
-            };
         };
         /**
          * TableState

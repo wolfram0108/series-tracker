@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { flushPromises } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import { useSourceDrafts } from "./useSourceDrafts"
+import { t } from "../i18n"
 import { previewAddress, readPageNow, resolveAddress } from "./sourceCalls"
 import { useSourceTablesStore } from "../stores/sourceTables"
 import type { PreviewReply, ResolveReply } from "../lib/sources"
@@ -37,23 +38,33 @@ describe("useSourceDrafts", () => {
     preview.mockResolvedValueOnce(page())
     const drafts = useSourceDrafts()
     expect(await drafts.add(`${PAGE}?x=1`)).toEqual({ kind: "added" })
-    expect(preview).toHaveBeenCalledWith({ url: PAGE, options: {}, profile_id: null, refresh: true, ...NO_CHOICES })
+    expect(preview).toHaveBeenCalledWith({ url: PAGE, profile_id: null, refresh: true, ...NO_CHOICES })
     expect(drafts.items.value).toHaveLength(1)
     expect(drafts.items.value[0]).toMatchObject({ sourceType: "web_video", url: PAGE, profileId: null })
     expect(drafts.items.value[0].view.state).toBe("reading")
     expect(drafts.bodies.value).toEqual([{
-      url: PAGE, source_type: "web_video", parser_profile_id: null, vk_search_mode: "search", vibix_season: null, players_off: [],
+      url: PAGE, source_type: "web_video", parser_profile_id: null, vibix_season: null, players_off: [],
       voice_name: "",
     }])
   })
 
-  it("keeps a VK channel as channel and query and asks with its mode", async () => {
-    site({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino|тайтл|search" })
-    preview.mockResolvedValueOnce(page({ url: "https://vkvideo.ru/@kino|тайтл|search" }))
+  it("keeps a VK channel as channel and query and asks for that address", async () => {
+    site({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino|тайтл" })
+    preview.mockResolvedValueOnce(page({ url: "https://vkvideo.ru/@kino|тайтл" }))
     const drafts = useSourceDrafts()
     await drafts.add("https://vkvideo.ru/@kino?q=тайтл")
     expect(drafts.items.value[0]).toMatchObject({ sourceType: "vk_video", url: "https://vkvideo.ru/@kino|тайтл" })
-    expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ options: { vk_search_mode: "search" } }))
+    expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ url: "https://vkvideo.ru/@kino|тайтл" }))
+  })
+
+  it("makes no draft of a VK channel without a query and reads nothing for it", async () => {
+    const drafts = useSourceDrafts()
+    for (const typed of ["https://vkvideo.ru/@kino", "https://vkvideo.ru/@kino| / "]) {
+      site({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino|" })
+      expect(await drafts.add(typed)).toEqual({ kind: "refused", text: t("sources.vk.queryMissing") })
+    }
+    expect(drafts.items.value).toEqual([])
+    expect(preview).not.toHaveBeenCalled()
   })
 
   it("leaves an address that no site reads to the torrent path", async () => {
@@ -122,17 +133,17 @@ describe("useSourceDrafts", () => {
     expect(preview.mock.calls.length).toBeLessThanOrEqual(2)
   })
 
-  it("recounts on a profile and reads again on another mode of a channel", async () => {
-    site({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino||search" })
-    preview.mockResolvedValue(page({ url: "https://vkvideo.ru/@kino||search", state: "ready" }))
+  it("recounts on a profile and reads again on another query of a channel", async () => {
+    site({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino|тайтл" })
+    preview.mockResolvedValue(page({ url: "https://vkvideo.ru/@kino|тайтл", state: "ready" }))
     const drafts = useSourceDrafts()
-    await drafts.add("https://vkvideo.ru/@kino|")
+    await drafts.add("https://vkvideo.ru/@kino|тайтл")
     const id = drafts.items.value[0].id
     await drafts.change(id, { profileId: 4 })
     expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ profile_id: 4, refresh: false }))
-    await drafts.change(id, { vkSearchMode: "get_all" })
-    expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ options: { vk_search_mode: "get_all" }, refresh: true }))
-    expect(drafts.bodies.value[0]).toMatchObject({ parser_profile_id: 4, vk_search_mode: "get_all" })
+    await drafts.change(id, { url: "https://vkvideo.ru/@kino|другой" })
+    expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ url: "https://vkvideo.ru/@kino|другой", refresh: true }))
+    expect(drafts.bodies.value[0]).toMatchObject({ parser_profile_id: 4, url: "https://vkvideo.ru/@kino|другой" })
   })
 
   it("recounts a draft from the table in hand when a choice of the source changes, reading nothing", async () => {
@@ -181,12 +192,12 @@ describe("useSourceDrafts", () => {
     await drafts.add(PAGE)
     const key = drafts.items.value[0].id
     await drafts.reread(key)
-    expect(readPageNow).toHaveBeenCalledWith(PAGE, {})
+    expect(readPageNow).toHaveBeenCalledWith(PAGE)
     expect(drafts.items.value[0].view.state).toBe("reading")
     preview.mockResolvedValueOnce(page({ state: "ready", summary }))
     useSourceTablesStore().applyReady({ url: PAGE, read_at: "2026-11-01T10:00:00Z" })
     await flushPromises()
-    expect(preview).toHaveBeenLastCalledWith({ url: PAGE, options: {}, profile_id: null, refresh: false, ...NO_CHOICES })
+    expect(preview).toHaveBeenLastCalledWith({ url: PAGE, profile_id: null, refresh: false, ...NO_CHOICES })
     expect(drafts.items.value[0].view.state).toBe("noProfile")
   })
 

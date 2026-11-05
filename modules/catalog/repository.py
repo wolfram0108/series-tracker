@@ -30,12 +30,12 @@ _WRITABLE = {"name", "name_en", "site", "save_path", "season", "quality",
              "ignored_seasons", "ignored_episodes"}
 
 _SOURCE_COLUMNS = ("id, series_id, position, url, source_type, parser_profile_id, "
-                   "vk_search_mode, vibix_season, players_off, voice_name")
+                   "vibix_season, players_off, voice_name")
 
 _ADD_SOURCE = ("INSERT INTO series_sources (series_id, position, url, source_type, parser_profile_id, "
-               "vk_search_mode, vibix_season, players_off, voice_name) "
+               "vibix_season, players_off, voice_name) "
                "VALUES (?, COALESCE(?, (SELECT MAX(position) + 1 FROM series_sources WHERE series_id=?), 0), "
-               "?, ?, ?, ?, ?, ?, ?)")
+               "?, ?, ?, ?, ?, ?)")
 
 
 def _source(row: dict) -> dict:
@@ -51,7 +51,7 @@ def _stored(values: dict) -> dict:
 def _add_source_args(series_id: int, values: dict) -> tuple:
     stored = _stored(values)
     return (series_id, stored.get("position"), series_id, stored["url"], stored["source_type"],
-            stored["parser_profile_id"], stored["vk_search_mode"], stored["vibix_season"], stored["players_off"],
+            stored["parser_profile_id"], stored["vibix_season"], stored["players_off"],
             stored["voice_name"])
 
 

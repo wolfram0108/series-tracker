@@ -371,7 +371,7 @@ async def test_a_release_whose_pages_do_not_show_vibix_has_no_catalog_to_capture
 def test_the_address_of_the_page_is_the_release_alone_whatever_the_source_chose():
     site = RuchimeSite()
 
-    assert site.canonical_url(f"{RELEASE}/episode-5?vibix=2&off=vk#x", {"vibix_season": "2", "players_off": "vk"}) == RELEASE
+    assert site.canonical_url(f"{RELEASE}/episode-5?vibix=2&off=vk#x") == RELEASE
     assert site.canonical_url(RELEASE) == RELEASE and site.canonical_url(site.canonical_url(RELEASE)) == RELEASE
 
 

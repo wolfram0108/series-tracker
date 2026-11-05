@@ -129,7 +129,6 @@ class SourceDraft(RequestModel):
     url: str
     source_type: SourceType
     parser_profile_id: int | None = None
-    vk_search_mode: str = "search"
     vibix_season: int | None = None
     players_off: list[str] = Field(default_factory=list)
     voice_name: str = ""
@@ -144,7 +143,6 @@ class SourceChange(RequestModel):
     """The fields of a source a caller may change; a field that is not sent stays, `null` clears a profile or a choice."""
     url: str | None = None
     parser_profile_id: int | None = None
-    vk_search_mode: str | None = None
     vibix_season: int | None = None
     players_off: list[str] | None = None
     voice_name: str | None = None
@@ -153,7 +151,7 @@ class SourceChange(RequestModel):
     @model_validator(mode="after")
     def _only_a_choice_may_be_cleared(self):
         # The profile and the Vibix season are choices that can be taken back; the rest of the fields always has a value.
-        for name in ("url", "vk_search_mode", "players_off", "voice_name", "position"):
+        for name in ("url", "players_off", "voice_name", "position"):
             if name in self.model_fields_set and getattr(self, name) is None:
                 raise ValueError(f"{name} cannot be cleared")
         return self
@@ -263,17 +261,15 @@ class OutputSwitchBody(RequestModel):
 # --- the test of rules on a page (api_sources) -------------------------------
 
 class TableReadRequest(RequestModel):
-    """Read the page of an address now; `options` are the choices of the source that change what is read."""
+    """Read the page of an address now."""
 
     url: str
-    options: dict[str, str] = Field(default_factory=dict)
 
 
 class RulesTestRequest(RequestModel):
     """The test of a profile on a page: the rows of the page as the constructor gets them, each with its answer.
     With `lines` (typed, or the file names of a release) the profile is tried on those lines and no page is read."""
     url: str = ""
-    options: dict[str, str] = Field(default_factory=dict)
     profile_id: int
     series_season: str | int | None = None
     # False asks again after a read ended: the window reads nothing, it only takes the table that is there.

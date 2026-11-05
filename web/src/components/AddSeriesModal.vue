@@ -13,7 +13,7 @@ import SourcesEditor from "./SourcesEditor.vue"
 import { api } from "../api/client"
 import { t } from "../i18n"
 import { reasonText } from "../lib/reason"
-import { siteOf, sourceTypeOf } from "../lib/sources"
+import { joinVkAddress, siteOf, sourceTypeOf, splitVkAddress, vkQuery } from "../lib/sources"
 import { useApi } from "../composables/useApi"
 import { useSSE } from "../composables/useSSE"
 import { useSourceDrafts } from "../composables/useSourceDrafts"
@@ -63,6 +63,9 @@ const {
 } = useSourceDrafts()
 // The address of the field that a site reads: it becomes a source on the user's word, so a half-typed one makes none.
 const candidate = ref("")
+// A candidate that is a channel of VK needs its query: the channel is read whole and only the query keeps its videos.
+const candidateChannel = ref(false)
+const candidateQuery = ref("")
 const kind = computed<"video" | "torrent">(() => (sourceItems.value.length ? "video" : "torrent"))
 const trackerInfo = ref<TrackerInfo | null>(null)
 const profiles = ref<{ id: number; name: string }[]>([])
@@ -225,6 +228,7 @@ async function handleUrlInput() {
   urlError.value = ""
   parsed.value = false
   candidate.value = ""
+  candidateChannel.value = false
   newSeries.resolution_override = ""
   const typed = newSeries.url.trim()
   if (!typed) return
@@ -237,6 +241,10 @@ async function handleUrlInput() {
   }
   if (sourceTypeOf(answer.data) !== null) {
     candidate.value = typed
+    candidateChannel.value = sourceTypeOf(answer.data) === "vk_video"
+    // A pasted `channel|query` or a channel link with `?q=` gives its query to the field of the query.
+    const pasted = candidateChannel.value ? splitVkAddress(typed).query : ""
+    if (pasted && !candidateQuery.value.trim()) candidateQuery.value = pasted
     return
   }
   await parseTorrentUrl()
@@ -251,11 +259,16 @@ async function addSource(address: string): Promise<boolean> {
 }
 
 async function addCandidate() {
-  if (!(await addSource(candidate.value))) {
+  const address = candidateChannel.value
+    ? joinVkAddress(splitVkAddress(candidate.value).channel, candidateQuery.value)
+    : candidate.value
+  if (!(await addSource(address))) {
     urlError.value = sourcesError.value
     return
   }
   candidate.value = ""
+  candidateChannel.value = false
+  candidateQuery.value = ""
   newSeries.url = ""
 }
 
@@ -494,7 +507,17 @@ onBeforeUnmount(() => {
       </StGroup>
       <div v-if="urlError" class="add-error">{{ urlError }}</div>
       <div v-if="parsing" class="add-hint">Распознаём ссылку…</div>
-      <button v-if="candidate" type="button" class="source-action" @click="addCandidate">
+      <template v-if="candidate && candidateChannel">
+        <StGroup>
+          <StIcon icon="pi pi-search" />
+          <StInput v-model="candidateQuery" :label="t('sources.vk.query')" @keyup.enter="vkQuery(candidateQuery) && addCandidate()" />
+        </StGroup>
+        <div class="add-hint">{{ t("sources.vk.hint") }}</div>
+      </template>
+      <button
+        v-if="candidate" type="button" class="source-action" :disabled="candidateChannel && !vkQuery(candidateQuery)"
+        @click="addCandidate"
+      >
         <i class="pi pi-plus" />{{ t("sources.add.button") }}
       </button>
     </div>

@@ -2,7 +2,7 @@ import { computed, onMounted, ref, watch } from "vue"
 import { t } from "../i18n"
 import { reasonText } from "../lib/reason"
 import {
-  draftBody, itemOfSource, readOptions, summaryOf, vkModeOf,
+  draftBody, itemOfSource, summaryOf,
   type LayoutRow, type SeriesSource, type SourceItem, type SourceSummary,
 } from "../lib/sources"
 import { useCompositionStore } from "../stores/composition"
@@ -41,7 +41,7 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     source, summaryOf(summaries.value, source.id), tables.forUrl(canonical.value[source.id] ?? ""), layout.value)))
 
   async function nameThePage(source: SeriesSource): Promise<void> {
-    const answer = await resolveAddress(source.url, readOptions({ sourceType: source.source_type, vkSearchMode: source.vk_search_mode }))
+    const answer = await resolveAddress(source.url)
     if (answer.ok && answer.data.canonical_url) canonical.value = { ...canonical.value, [source.id]: answer.data.canonical_url }
   }
 
@@ -87,7 +87,7 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     if (typed.kind === "other") return refused(t("sources.add.notSite"))
     const { sourceType, url } = typed
     const done = await act(() => createSource(seriesId, draftBody({
-      url, sourceType, profileId: null, vkSearchMode: vkModeOf(null), vibixSeason: null, playersOff: [], voiceName: "",
+      url, sourceType, profileId: null, vibixSeason: null, playersOff: [], voiceName: "",
     })))
     if (done) await load()
     return done
@@ -101,7 +101,6 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
   const fieldsOf = (patch: DraftPatch): Record<string, unknown> => ({
     ...(patch.url !== undefined && { url: patch.url }),
     ...(patch.profileId !== undefined && { parser_profile_id: patch.profileId }),
-    ...(patch.vkSearchMode !== undefined && { vk_search_mode: patch.vkSearchMode }),
     ...(patch.vibixSeason !== undefined && { vibix_season: patch.vibixSeason }),
     ...(patch.playersOff !== undefined && { players_off: patch.playersOff }),
     ...(patch.voiceName !== undefined && { voice_name: patch.voiceName }),
@@ -113,7 +112,7 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     const done = await act(() => changeSource(seriesId, source.id, fieldsOf(patch)))
     if (!done) return
     Object.assign(source, fieldsOf(patch))
-    if (patch.url !== undefined || patch.vkSearchMode !== undefined) {
+    if (patch.url !== undefined) {
       const rest = { ...canonical.value }
       delete rest[source.id]
       canonical.value = rest
@@ -126,7 +125,7 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     const source = sources.value.find((each) => each.id === Number(id))
     if (!source) return
     error.value = ""
-    const answer = await readPageNow(source.url, readOptions({ sourceType: source.source_type, vkSearchMode: source.vk_search_mode }))
+    const answer = await readPageNow(source.url)
     if (!answer.ok) error.value = answer.text
   }
 

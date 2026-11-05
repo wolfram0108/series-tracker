@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import html
 import re
-from typing import Mapping
 from urllib.parse import urlparse
 
 from core.contracts import TableRow
@@ -60,7 +59,7 @@ class DunhuaTvSite:
         except ValueError:
             return False
 
-    def canonical_url(self, url: str, options: Mapping[str, str] = {}) -> str:
+    def canonical_url(self, url: str) -> str:
         """The title page alone: what a series takes from it is chosen on the table, not in the address."""
         path = urlparse(url).path
         if not _TITLE_PATH.match(path):

@@ -10,7 +10,7 @@ from core.reasons import parse, reason
 from gateway_fakes import published, serving
 
 SOURCE = {"id": 4, "series_id": 1, "position": 0, "url": "https://x.test/p", "source_type": "web_video",
-          "parser_profile_id": 2, "vk_search_mode": "search", "vibix_season": None, "players_off": []}
+          "parser_profile_id": 2, "vibix_season": None, "players_off": []}
 PREVIEW = {"url": "https://x.test/p", "state": "ready", "reason": None, "summary": None, "lines": [], "rows": []}
 # The choices of a source the preview carries beside the address; a window that sends none asks for the defaults.
 NO_CHOICES = {"players_off": [], "vibix_season": None, "voice_name": ""}
@@ -89,7 +89,7 @@ async def test_only_the_fields_sent_change_and_a_choice_can_be_taken_back(tmp_pa
 
 
 async def test_every_changeable_field_of_a_source_reaches_the_catalog(tmp_path):
-    fields = {"url": "https://x.test/q", "parser_profile_id": 3, "vk_search_mode": "get_all", "vibix_season": 2,
+    fields = {"url": "https://x.test/q", "parser_profile_id": 3, "vibix_season": 2,
               "players_off": ["vk", "kodik"], "position": 1}
     async with serving(tmp_path, {"catalog.sources.update": {"applied": fields}}) as (client, owners, _, _):
         assert (await client.put("/api/series/1/sources/4", json=fields)).status_code == 200
@@ -141,12 +141,11 @@ async def test_a_preview_carries_the_request_to_composition_whole_and_the_answer
     reply = {**PREVIEW, "state": "reading", "names": [], "lines": [{"key": "k1", "line": "Т | VK | Серия 1", "result": None, "heights": []}]}
     async with serving(tmp_path, {"composition.preview": reply}) as (client, owners, _, spy):
         response = await client.post("/api/sources/preview", json={
-            "url": "https://x.test/p", "options": {"vk_search_mode": "get_all"}, "profile_id": 2,
-            "series_season": "s02", "refresh": False})
+            "url": "https://x.test/p", "profile_id": 2, "series_season": "s02", "refresh": False})
     assert response.status_code == 200 and response.json() == reply
     assert owners.asked("composition.preview") == [{
-        "url": "https://x.test/p", "options": {"vk_search_mode": "get_all"}, "profile_id": 2,
-        "series_season": "s02", "refresh": False, "lines": None, **NO_CHOICES}]
+        "url": "https://x.test/p", "profile_id": 2, "series_season": "s02", "refresh": False, "lines": None,
+        **NO_CHOICES}]
     # The gateway reads no table and applies no rule itself.
     assert [t for t in topics(spy) if t != "composition.preview"] == []
 
@@ -155,7 +154,7 @@ async def test_a_preview_without_a_profile_asks_for_a_read_by_default(tmp_path):
     async with serving(tmp_path, {"composition.preview": PREVIEW}) as (client, owners, _, _):
         await client.post("/api/sources/preview", json={"url": "https://x.test/p"})
     assert owners.asked("composition.preview") == [{
-        "url": "https://x.test/p", "options": {}, "profile_id": None, "series_season": None, "refresh": True,
+        "url": "https://x.test/p", "profile_id": None, "series_season": None, "refresh": True,
         "lines": None, **NO_CHOICES}]
 
 
@@ -173,7 +172,7 @@ async def test_an_address_is_resolved_by_sources_and_the_answer_is_theirs(tmp_pa
     async with serving(tmp_path, answers) as (client, owners, _, spy):
         response = await client.post("/api/sources/resolve", json={"url": "https://x.test/p?a=1"})
     assert response.json() == {"site": "somesite", "canonical_url": "https://x.test/p", "source_type": "web_video"}
-    assert owners.asked("sources.site.resolve") == [{"url": "https://x.test/p?a=1", "options": {}}]
+    assert owners.asked("sources.site.resolve") == [{"url": "https://x.test/p?a=1"}]
     assert [t for t in topics(spy) if t != "sources.site.resolve"] == []
 
 
@@ -184,13 +183,13 @@ async def test_an_address_no_site_reads_is_resolved_to_nothing(tmp_path):
     assert response.json() == {"site": None, "canonical_url": None, "source_type": None}
 
 
-async def test_a_page_is_read_now_by_one_command_to_sources_with_the_options_given(tmp_path):
+async def test_a_page_is_read_now_by_one_command_to_sources(tmp_path):
     async with serving(tmp_path, {}) as (client, owners, _, spy):
-        response = await client.post("/api/sources/read", json={"url": "https://x.test/p", "options": {"a": "b"}})
+        response = await client.post("/api/sources/read", json={"url": "https://x.test/p"})
         await asyncio.sleep(0)
     assert response.status_code == 200 and response.json()["success"] is True
     sent = [env for env in published(spy) if env.topic == "sources.table.read"]
-    assert [env.payload for env in sent] == [{"url": "https://x.test/p", "options": {"a": "b"}}]
+    assert [env.payload for env in sent] == [{"url": "https://x.test/p"}]
 
 
 # --- the test of rules ---------------------------------------------------------------------------
@@ -202,12 +201,11 @@ async def test_the_test_of_rules_is_the_preview_of_the_page_with_the_profile_giv
     reply = {**PREVIEW, "lines": [line]}
     async with serving(tmp_path, {"composition.preview": reply}) as (client, owners, _, spy):
         response = await client.post("/api/parser-profiles/test", json={
-            "url": "https://x.test/p", "options": {"vk_search_mode": "search"}, "profile_id": 5,
-            "series_season": 2})
+            "url": "https://x.test/p", "profile_id": 5, "series_season": 2})
     assert response.status_code == 200
     assert response.json()["lines"][0]["key"] == "k1" and response.json()["lines"][0]["result"]["start"] == 1
     assert owners.asked("composition.preview") == [{
-        "url": "https://x.test/p", "options": {"vk_search_mode": "search"}, "profile_id": 5, "series_season": 2,
+        "url": "https://x.test/p", "profile_id": 5, "series_season": 2,
         "refresh": True, "lines": None, **NO_CHOICES}]
     assert "rules.test" not in topics(spy) and "rules.apply" not in topics(spy)
 
@@ -219,7 +217,7 @@ async def test_the_test_of_rules_takes_lines_the_user_holds_instead_of_a_page(tm
         response = await client.post("/api/parser-profiles/test", json={"profile_id": 5, "lines": ["Тайтл s01e02"]})
     assert response.status_code == 200 and response.json()["lines"][0]["result"]["episode"] == 2
     assert owners.asked("composition.preview") == [{
-        "url": "", "options": {}, "profile_id": 5, "series_season": None, "refresh": True, "lines": ["Тайтл s01e02"],
+        "url": "", "profile_id": 5, "series_season": None, "refresh": True, "lines": ["Тайтл s01e02"],
         **NO_CHOICES}]
 
 

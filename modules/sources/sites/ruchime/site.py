@@ -8,7 +8,6 @@ is; no number of an episode or a season is made here.
 from __future__ import annotations
 
 import asyncio
-from typing import Mapping
 from urllib.parse import urlparse
 
 import httpx
@@ -43,7 +42,7 @@ class RuchimeSite:
     def match_url(self, url: str) -> bool:
         return "/release/" in urlparse(url).path
 
-    def canonical_url(self, url: str, options: Mapping[str, str] = {}) -> str:
+    def canonical_url(self, url: str) -> str:
         """The page of the release alone: the choices of a source (the Vibix season, the players off) do not change it."""
         return f"https://1.ruchime.org/release/{extract_slug(url)}"
 

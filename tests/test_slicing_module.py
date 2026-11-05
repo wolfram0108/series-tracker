@@ -232,7 +232,7 @@ async def system(tmp_path):
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO parser_profiles (id, name) VALUES (1, 'p')")
         insert_series(conn, id=2, name="Т", name_en="Show", site="vk", save_path=str(media), state="waiting",
-                      url="u|q", source_type="vk_video", vk_search_mode="get_all", parser_profile_id=1)
+                      url="u|q", source_type="vk_video", parser_profile_id=1)
         conn.commit()
     series = {"id": 2, "name_en": "Show", "kind": "video", "save_path": str(media), "season": None}
     bus = Bus()
@@ -696,7 +696,7 @@ async def test_chapters_check_does_not_block_slicing(tmp_path):
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO parser_profiles (id, name) VALUES (1, 'p')")
         insert_series(conn, id=2, name="Т", name_en="Show", site="vk", save_path=str(media), state="waiting",
-                      url="u|q", source_type="vk_video", vk_search_mode="get_all", parser_profile_id=1)
+                      url="u|q", source_type="vk_video", parser_profile_id=1)
         conn.commit()
     _add_compilation(db_path, slicing_status="none")
     open(os.path.join(media, "компиляция.mp4"), "wb").close()

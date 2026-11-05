@@ -192,7 +192,6 @@ class CompositionPreviewRequest(BaseModel):
     those lines as they are, and the address is not needed."""
 
     url: str = ""
-    options: dict[str, str] = Field(default_factory=dict)
     profile_id: int | None = None
     series_season: str | int | None = None
     refresh: bool = True

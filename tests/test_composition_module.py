@@ -822,9 +822,9 @@ async def test_a_new_read_begun_for_a_source_forgets_the_verdict_of_the_one_befo
     series_id = await s.counted(lambda: s.catalog.add_series([source()]))
     await s.counted(lambda: s.sources.fail(PAGE, reason("read_failed")))
     assert (await s.get(series_id)).sources[0].status == SourceStatus.FAILED
-    await s.counted(lambda: s.catalog.update_source(only_source(s, series_id), vk_search_mode="get_all"))
+    await s.counted(lambda: s.catalog.update_source(only_source(s, series_id), url=PAGE + "?again"))
     assert (await s.get(series_id)).sources[0].status == SourceStatus.WAITING
-    assert s.sources.requests[-1].options == {"vk_search_mode": "get_all"} and s.sources.requests[-1].refresh
+    assert s.sources.requests[-1].url == PAGE + "?again" and s.sources.requests[-1].refresh
     await s.counted(lambda: s.voices.set_groups({}))
     assert (await s.get(series_id)).sources[0].status == SourceStatus.WAITING
 
@@ -1350,13 +1350,6 @@ async def test_an_address_no_site_reads_is_a_failed_state_with_the_reason_and_no
     assert (reply.state, reply.summary, reply.lines) == (TableState.FAILED, None, [])
     assert parse(reply.reason)["code"] == "site_not_found"
     nothing_was_written(s)
-
-
-@pytest.mark.asyncio
-async def test_the_options_of_the_request_go_to_the_sources_as_they_are(system):
-    s = system
-    await preview(s, options={"vk_search_mode": "get_all"}, refresh=False)
-    assert s.sources.requests[-1].options == {"vk_search_mode": "get_all"}
 
 
 @pytest.mark.asyncio

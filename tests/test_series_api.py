@@ -34,7 +34,7 @@ def db_path(tmp_path):
     with sqlite3.connect(path) as conn:
         insert_series(conn, id=1, url="http://kinozal.tv/details.php?id=7", source_type="torrent")
         insert_series(conn, id=2, name="ВК", name_en="Show", site="vk", save_path="/media/s",
-                      url="u|q", source_type="vk_video", vk_search_mode="get_all")
+                      url="u|q", source_type="vk_video")
         # данные для каскада удаления серии 2
         conn.execute(
             "INSERT INTO media_items (series_id, unique_id, episode_start, "
@@ -191,8 +191,7 @@ async def test_series_list_shape(system):
     assert torrent["kind"] == "torrent" and vk["kind"] == "video"
     assert [(each["url"], each["source_type"]) for each in torrent["sources"]] == [
         ("http://kinozal.tv/details.php?id=7", "torrent")]
-    assert [(each["url"], each["source_type"], each["vk_search_mode"]) for each in vk["sources"]] == [
-        ("u|q", "vk_video", "get_all")]
+    assert [(each["url"], each["source_type"]) for each in vk["sources"]] == [("u|q", "vk_video")]
     for card in (torrent, vk):
         assert not {"url", "source_type", "parser_profile_id", "vk_search_mode", "vk_quality_priority",
                     "availability"} & set(card)
@@ -270,14 +269,13 @@ async def test_add_series_of_several_sources_keeps_their_order_and_choices(syste
     resp = await client.post("/api/series", json={
         "name": "Видео", "name_en": "Video", "site": "somesite", "save_path": "/media/v",
         "sources": [{"url": "https://one.test/p", "source_type": "web_video", "vibix_season": 2},
-                    {"url": "chan|query", "source_type": "vk_video", "vk_search_mode": "get_all",
-                     "players_off": ["vk"]}]})
+                    {"url": "chan|query", "source_type": "vk_video", "players_off": ["vk"]}]})
     assert resp.status_code == 200
     details = (await client.get(f"/api/series/{resp.json()['series_id']}")).json()
     assert details["kind"] == "video"
-    assert [(each["url"], each["position"], each["vibix_season"], each["vk_search_mode"], each["players_off"])
-            for each in details["sources"]] == [("https://one.test/p", 0, 2, "search", []),
-                                                ("chan|query", 1, None, "get_all", ["vk"])]
+    assert [(each["url"], each["position"], each["vibix_season"], each["players_off"])
+            for each in details["sources"]] == [("https://one.test/p", 0, 2, []), ("chan|query", 1, None, ["vk"])]
+    assert all("vk_search_mode" not in each for each in details["sources"])
     # no torrents in the form: nothing for the torrent module to write
     assert not any(call[0] == "torrents.db.add" for call in neighbours.calls)
 

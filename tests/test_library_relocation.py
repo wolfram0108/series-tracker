@@ -73,7 +73,7 @@ async def started(tmp_path):
     new_dir.mkdir()
     with sqlite3.connect(db_path) as conn:
         insert_series(conn, id=2, name="Т", name_en="Show", site="vk", save_path=str(old_dir), state="waiting",
-                      url="u|q", source_type="vk_video", vk_search_mode="get_all")
+                      url="u|q", source_type="vk_video")
         conn.commit()
     db = Database(str(db_path))
     bus = Bus()

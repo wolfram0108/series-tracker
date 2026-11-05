@@ -82,7 +82,7 @@ async def test_a_series_is_given_with_its_kind_and_its_sources(system):
     torrent = await create_series(probe, name="Т", sources=[source()])
     video = await create_series(probe, name="В", sources=[
         source(url=RUCHIME, source_type="web_video", parser_profile_id=2, vibix_season=2, players_off=["vk"]),
-        source(url=VK, source_type="vk_video", parser_profile_id=1, vk_search_mode="get_all")])
+        source(url=VK, source_type="vk_video", parser_profile_id=1)])
 
     one = await probe.request("catalog.series.get", {"series_id": torrent.series_id}, timeout=5)
     two = await probe.request("catalog.series.get", {"series_id": video.series_id}, timeout=5)
@@ -93,8 +93,8 @@ async def test_a_series_is_given_with_its_kind_and_its_sources(system):
     assert [s["id"] for s in two["sources"]] == list(video.source_ids)
     assert two["sources"][0] == {"id": video.source_ids[0], "series_id": video.series_id, "position": 0,
                                  "url": RUCHIME, "source_type": "web_video", "parser_profile_id": 2,
-                                 "vk_search_mode": "search", "vibix_season": 2, "players_off": ["vk"], "voice_name": ""}
-    assert two["sources"][1]["vk_search_mode"] == "get_all"
+                                 "vibix_season": 2, "players_off": ["vk"], "voice_name": ""}
+    assert two["sources"][1]["url"] == VK
     for each in (*one["sources"], *two["sources"]):
         assert list(each) == list(SeriesSource.model_fields)
         SeriesSource.model_validate(each)
@@ -315,7 +315,7 @@ async def test_a_source_is_added_at_the_end_and_announced(system):
                                                               source_id=reply["id"]).model_dump())]
     added = (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[-1]
     assert added == {"id": reply["id"], "series_id": made.series_id, "position": 1, "url": RUCHIME,
-                     "source_type": "web_video", "parser_profile_id": 2, "vk_search_mode": "search",
+                     "source_type": "web_video", "parser_profile_id": 2,
                      "vibix_season": None, "players_off": ["vk"], "voice_name": ""}
 
 
@@ -362,9 +362,9 @@ async def test_update_applies_what_changed_and_announces_it_once(system):
     sub = bus.subscribe("series.source.*")
     reply = await probe.request("catalog.sources.update", {
         "source_id": made.source_id,
-        "fields": {"parser_profile_id": 2, "vibix_season": 3, "players_off": ["vibix"], "vk_search_mode": "search"}},
+        "fields": {"parser_profile_id": 2, "vibix_season": 3, "players_off": ["vibix"], "voice_name": ""}},
         timeout=5)
-    # the search mode was already "search": it is not an applied change
+    # the name of the voice-over was already empty: it is not an applied change
     assert reply == {"applied": {"parser_profile_id": 2, "vibix_season": 3, "players_off": ["vibix"]}}
     assert drain(sub) == [("series.source.updated", SourceEvent(series_id=made.series_id,
                                                                 source_id=made.source_id).model_dump())]

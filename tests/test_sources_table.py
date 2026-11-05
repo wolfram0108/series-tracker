@@ -55,6 +55,7 @@ class FakeSite:
         self.name, self.domains = name, (host,)
         self.source_type = "web_video"
         self.reads: list[str] = []
+        self.fresh: list[bool] = []  # whether each read was one the user asked for
         self.entered: asyncio.Queue[str] = asyncio.Queue()
         self.go = asyncio.Event()
         self.go.set()
@@ -65,14 +66,13 @@ class FakeSite:
     def match_url(self, url: str) -> bool:
         return urlparse(url).path.startswith("/p/")
 
-    def canonical_url(self, url: str, options: dict | None = None) -> str:
+    def canonical_url(self, url: str) -> str:
         parts = urlparse(url)
-        # The only choice this fake site knows changes the address: a mode is part of what is read.
-        mode = (options or {}).get("mode")
-        return f"https://{parts.hostname}{parts.path}" + (f"?mode={mode}" if mode else "")
+        return f"https://{parts.hostname}{parts.path}"
 
     async def read(self, url: str, ctx: ReadContext) -> TableDraft:
         self.reads.append(url)
+        self.fresh.append(ctx.fresh)
         self.entered.put_nowait(url)
         for step in self.steps:
             ctx.progress(*step)
@@ -253,7 +253,7 @@ async def test_reading_now_does_not_start_a_second_read_while_one_goes(system):
     assert len(system.site.reads) == 1
 
 
-async def test_the_command_to_read_reads_a_page_whose_table_is_still_good(system):
+async def test_the_command_to_read_reads_a_page_whose_table_is_still_good_and_takes_nothing_shared(system):
     await system.warm()
 
     system.probe.send_command("sources.table.read", {"url": PAGE})
@@ -261,6 +261,8 @@ async def test_the_command_to_read_reads_a_page_whose_table_is_still_good(system
     assert await entry(system.site) == PAGE
     await system.next(system.ready)
     assert len(system.site.reads) == 2
+    # The read the term began may take what an earlier read left for sharing; the one the user asked for may not.
+    assert system.site.fresh == [False, True]
 
 
 # --- a failed read keeps the previous table (M-4, S-10, I-13) ---------------------------------------------------------
@@ -530,18 +532,7 @@ def test_the_pace_of_a_read_is_the_steps_of_its_phase_per_second_since_the_phase
     assert pace.rate("players", 0) is None
 
 
-# --- the parameters of a request: choices of a source, a table as it is, the site of an address ------------------------------
-
-async def test_a_choice_of_the_source_that_changes_what_is_read_gives_its_own_table(system):
-    plain = await system.get()
-    await system.next(system.ready)
-    moded = await system.get(options={"mode": "all"})
-
-    assert plain["url"] == PAGE and moded["url"] == PAGE + "?mode=all"
-    assert moded["state"] == "reading" and moded["table"] is None
-    assert (await system.next(system.ready))["url"] == PAGE + "?mode=all"
-    assert system.site.reads == [PAGE, PAGE + "?mode=all"]
-
+# --- the parameters of a request: a table as it is, the site of an address ------------------------------
 
 async def test_a_table_asked_for_as_it_is_costs_no_read_whatever_its_age(system):
     assert await system.get(refresh=False) == {"url": PAGE, "state": "absent", "table": None, "reason": None}
@@ -626,11 +617,10 @@ async def test_the_verdict_of_a_forced_read_that_failed_is_seen_as_it_is_while_t
 
 
 async def test_the_site_of_an_address_and_its_canonical_form_are_told_with_no_read(system):
-    found = await system.probe.request("sources.site.resolve", {"url": PAGE + "?utm=1#top", "options": {"mode": "all"}},
-                                       timeout=STUCK_S)
+    found = await system.probe.request("sources.site.resolve", {"url": PAGE + "?utm=1#top"}, timeout=STUCK_S)
     nowhere = await system.probe.request("sources.site.resolve", {"url": "https://nowhere.test/p/1"}, timeout=STUCK_S)
 
-    assert found == {"site": "fake", "canonical_url": PAGE + "?mode=all", "source_type": "web_video"}
+    assert found == {"site": "fake", "canonical_url": PAGE, "source_type": "web_video"}
     assert nowhere == {"site": None, "canonical_url": None, "source_type": None}
     assert system.site.reads == []
 

@@ -8,7 +8,7 @@ import StSelect from "./StSelect.vue"
 import { t, type MessageKey } from "../i18n"
 import { reasonText } from "../lib/reason"
 import {
-  joinVkAddress, playerCaption, profileOptions, progressText, seasonPositions, sourceCaption, splitVkAddress,
+  joinVkAddress, vkQuery, playerCaption, profileOptions, progressText, seasonPositions, sourceCaption, splitVkAddress,
   togglePlayer, type SourceItem,
 } from "../lib/sources"
 import type { DraftPatch } from "../composables/useSourceDrafts"
@@ -53,7 +53,9 @@ function commitVoiceName(): void {
   if (name !== props.item.voiceName) emit("change", { voiceName: name })
 }
 
+// A channel is read whole and only the query keeps its videos: an address without one is not sent.
 function commitChannel(): void {
+  if (!vkQuery(query.value)) return
   const url = joinVkAddress(channel.value, query.value)
   if (url !== props.item.url) emit("change", { url })
 }
@@ -87,17 +89,7 @@ async function copyAddress(): Promise<void> {
     </header>
 
     <div v-if="isChannel" class="stack">
-      <div class="cluster">
-        <span class="muted">{{ t("sources.vk.mode") }}</span>
-        <div class="vk-mode-group">
-          <button
-            v-for="mode in ['search', 'get_all'] as const" :key="mode" type="button" class="vk-mode-btn"
-            :class="{ active: item.vkSearchMode === mode }" :disabled="busy"
-            @click="item.vkSearchMode !== mode && emit('change', { vkSearchMode: mode })"
-          >{{ t(`sources.vk.mode.${mode}` as MessageKey) }}</button>
-        </div>
-      </div>
-      <small class="muted">{{ t("sources.vk.mode.hint") }}</small>
+      <small class="muted">{{ t("sources.vk.hint") }}</small>
       <div class="grid-fit" @focusout="commitChannel" @keyup.enter="commitChannel">
         <StGroup>
           <StIcon icon="pi pi-youtube" />
@@ -108,6 +100,7 @@ async function copyAddress(): Promise<void> {
           <StInput v-model="query" :label="t('sources.vk.query')" />
         </StGroup>
       </div>
+      <small v-if="!vkQuery(query)" class="source-reason">{{ t("sources.vk.queryMissing") }}</small>
     </div>
     <StGroup v-else>
       <StIcon icon="pi pi-link" />

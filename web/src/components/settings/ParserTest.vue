@@ -21,7 +21,6 @@ const test = useRulesTest(() => props.profileId)
 
 const address = ref("")
 const query = ref("")
-const searchMode = ref<"search" | "get_all">("search")
 const titles = ref("")
 const loadedNames = ref<number | null>(null)
 
@@ -55,7 +54,7 @@ async function fetchRows(): Promise<void> {
     }
     return
   }
-  await test.readPage(address.value, query.value, searchMode.value)
+  await test.readPage(address.value, query.value)
 }
 
 function runTest(): Promise<void> {
@@ -69,29 +68,9 @@ function runTest(): Promise<void> {
 
     <div class="modern-fieldset">
       <div class="fieldset-content">
-        <label class="modern-label">{{ t("rulesTest.mode.label") }}</label>
-        <div class="vk-mode-group">
-          <button
-            type="button"
-            class="vk-mode-btn"
-            :class="{ active: searchMode === 'search' }"
-            @click="searchMode = 'search'"
-          >
-            <i class="pi pi-search" /> {{ t("rulesTest.mode.search") }}
-          </button>
-          <button
-            type="button"
-            class="vk-mode-btn"
-            :class="{ active: searchMode === 'get_all' }"
-            @click="searchMode = 'get_all'"
-          >
-            <i class="pi pi-list" /> {{ t("rulesTest.mode.all") }}
-          </button>
-        </div>
         <small class="fieldset-hint">
-          <b>{{ t("rulesTest.mode.search") }}:</b> {{ t("rulesTest.mode.searchHint") }}<br />
-          <b>{{ t("rulesTest.mode.all") }}:</b> {{ t("rulesTest.mode.allHint") }}<br />
-          <b>{{ t("rulesTest.mode.sites") }}:</b> {{ t("rulesTest.mode.sitesHint") }}
+          <b>{{ t("rulesTest.channel") }}:</b> {{ t("rulesTest.channelHint") }}<br />
+          <b>{{ t("rulesTest.sites") }}:</b> {{ t("rulesTest.sitesHint") }}
         </small>
         <div class="field-group mt-3">
           <StGroup>

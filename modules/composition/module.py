@@ -19,7 +19,7 @@ Queries:
       not the answer: the request sets the flag and waits for the next one. Refused with ValueError(reason) when a
       neighbour did not answer (the same reason goes out as composition.failed), with LookupError for a series the
       catalog no longer has.
-  composition.preview {url?, options?, profile_id?, series_season?, refresh?, lines?, players_off?, vibix_season?, voice_name?}
+  composition.preview {url?, profile_id?, series_season?, refresh?, lines?, players_off?, vibix_season?, voice_name?}
       → CompositionPreviewReply {url, state, reason?, summary?, lines, rows}: an address that is no source of a series yet, as the add window and the test of rules
       show it. The table is asked of `sources.table.get` (refresh true begins a read, false reads nothing); `state`
       and `reason` are the sources' own. From the last complete table, when there is one (also while it is being read
@@ -248,14 +248,13 @@ class CompositionModule(BaseModule):
             return await self._preview_lines(request, request.lines)
         try:
             got = await self._ask("sources.table.get", TableGetRequest(
-                url=request.url, options=request.options, refresh=request.refresh).model_dump(mode="json"),
+                url=request.url, refresh=request.refresh).model_dump(mode="json"),
                 model=TableGetReply)
             table = got.table if got.table is not None and got.table.complete else None
             summary, lines, rows = None, [], []
             if table is not None:
                 source = SeriesSource(id=0, series_id=0, url=request.url, source_type=SourceType.WEB_VIDEO,
                                       parser_profile_id=request.profile_id,
-                                      vk_search_mode=request.options.get("vk_search_mode", "search"),
                                       players_off=request.players_off, vibix_season=request.vibix_season,
                                       voice_name=request.voice_name)
                 answer = None
@@ -543,7 +542,7 @@ class CompositionModule(BaseModule):
         return table, reply.reason if reply.state == TableState.FAILED else None, reply.url
 
     async def _table_reply(self, source: SeriesSource, begin: bool) -> TableGetReply:
-        request = TableGetRequest(url=source.url, options=source.read_options(), refresh=begin)
+        request = TableGetRequest(url=source.url, refresh=begin)
         return await self._ask("sources.table.get", request.model_dump(mode="json"), model=TableGetReply)
 
     async def _answer(self, source: SeriesSource, table: ReleaseTable, season,

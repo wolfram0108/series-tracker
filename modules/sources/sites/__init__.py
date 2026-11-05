@@ -6,7 +6,7 @@ read per page, the storage, the events) belongs to the core in `table.py`; addin
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Protocol
+from typing import TYPE_CHECKING, Callable, Iterable, Protocol
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -44,6 +44,8 @@ class ReadContext:
     # Only the last this many episodes of each voice-over are read (a stand does not load a site with hundreds of requests);
     # None reads the whole page, as the product does.
     recent: int | None = None
+    # The user asked for this read now: raw data that an earlier read of another page left for sharing is not taken.
+    fresh: bool = False
 
 
 class TableDraft(BaseModel):
@@ -59,9 +61,8 @@ class TableDraft(BaseModel):
 class Site(Protocol):
     """A site in the registry. `canonical_url` is the key of the page's table; `read` accepts it.
 
-    `options` are the choices of a source that change what is read; a site takes those it knows and ignores the rest.
     The canonical address carries everything `read` needs, so the table is read the same way whoever asks. A site may
-    also have `configure(**options)` for the wiring of the module (browser pool, cache paths, players, the VK API);
+    also have `configure(**wiring)` for the wiring of the module (browser pool, cache paths, players, the VK API);
     it ignores the wiring it does not know."""
 
     name: str
@@ -73,9 +74,9 @@ class Site(Protocol):
         """Whether the address is a page this site reads (the domain is already known to be the site's)."""
         ...
 
-    def canonical_url(self, url: str, options: Mapping[str, str] = {}) -> str:
+    def canonical_url(self, url: str) -> str:
         """The one spelling of the page's address: two addresses of one page give one table. Idempotent: the canonical
-        address given back as `url`, with no options, is itself."""
+        address given back as `url` is itself."""
         ...
 
     async def read(self, url: str, ctx: ReadContext) -> TableDraft:
@@ -109,9 +110,9 @@ class SiteRegistry:
     def find(self, url: str) -> Site | None:
         return next((site for site in self._sites if on_domain(url, site.domains) and site.match_url(url)), None)
 
-    def configure(self, **options) -> None:
+    def configure(self, **wiring) -> None:
         """Late wiring (browser pool, cache paths) passed to the sites that ask for it."""
         for site in self._sites:
             configure = getattr(site, "configure", None)
             if callable(configure):
-                configure(**options)
+                configure(**wiring)

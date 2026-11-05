@@ -13,7 +13,7 @@ import pytest
 
 from core import BaseModule, Bus, BusRequestError, Runner, ids
 from core.contracts import (REFERENCE_CHOICE, VARIANT_ALLOW, Level, Reference, ReferenceChanged, ReferenceChoice,
-                            ReferenceMark, RowState, SeriesSource, TableState, variant_target)
+                            ReferenceMark, RowState, TableState, variant_target)
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import parse, reason
@@ -235,8 +235,7 @@ async def test_the_command_of_a_synchronization_is_written_before_its_table_is_w
     run = rig.start_run(download=False)
     await rig.world.asked.get()
     assert [(each["status"], json.loads(each["results_data"])) for each in tasks_of(rig)] == [
-        ("processing", {"video_sync": True, "download": False, "inventory": False,
-                        "snapshot": {"profiles": {}, "voices": {}}})]
+        ("processing", {"video_sync": True, "download": False, "snapshot": {"profiles": {}, "voices": {}}})]
     rig.world.finish(URL1)
     await asyncio.wait_for(run, STUCK_S)
     assert tasks_of(rig) == []
@@ -470,27 +469,7 @@ async def test_the_scheduled_pass_over_all_series_asks_for_voice_overs_too(rig):
     assert await next_event(voices) == {"series_id": rig.series_id, "settings": {}}
 
 
-async def test_a_scan_the_user_asks_for_reads_a_channel_in_the_mode_of_its_source(rig):
-    rig.world.rows = [rig.row("a", 1, 1)]
-
-    await rig.run()
-
-    assert rig.world.options == [{"vk_search_mode": "search"}]
-
-
-async def test_the_scheduled_pass_reads_a_channel_whole_because_the_quick_search_may_miss_a_new_upload(rig):
-    rig.sql("UPDATE series SET auto_scan_enabled=1 WHERE id=?", (rig.series_id,))
-    rig.world.rows = [rig.row("a", 1, 1)]
-    voices = rig.bus.subscribe("voices.dispatch")
-
-    await rig.probe.request("scan.all.start", {}, timeout=STUCK_S)
-    await next_event(voices)
-
-    assert rig.world.options == [{"vk_search_mode": "get_all"}]
-    assert [json.loads(each["results_data"]).get("inventory") for each in tasks_of(rig)] in ([], [True])
-
-
-async def test_a_restart_runs_a_scan_of_the_schedule_again_as_a_scan_of_the_schedule(rig):
+async def test_a_restart_runs_again_a_scan_whose_command_carries_a_choice_of_an_earlier_version(rig):
     rig.world.rows = [rig.row("a", 1, 1)]
     with sqlite3.connect(rig.db_path) as conn:
         conn.execute("INSERT INTO scan_tasks (series_id, status, task_data, results_data) VALUES (?, 'processing', '[]', ?)",
@@ -501,16 +480,9 @@ async def test_a_restart_runs_a_scan_of_the_schedule_again_as_a_scan_of_the_sche
         again.world.rows = [again.row("a", 1, 1)]
         again.bus.publish(Envelope(topic="system.started", kind="event"))
         assert await asyncio.wait_for(again.world.dispatched.get(), STUCK_S)
-        assert again.world.options == [{"vk_search_mode": "get_all"}]
         await no_task_left(again)
     finally:
         await again.runner.stop()
-
-
-def test_a_source_reads_a_channel_whole_only_when_the_scan_asks_for_the_inventory():
-    channel = SeriesSource(id=1, series_id=1, url="https://vkvideo.ru/@chan|x", source_type="vk_video")
-    assert channel.read_options() == {"vk_search_mode": "search"}
-    assert channel.read_options(inventory=True) == {"vk_search_mode": "get_all"}
 
 
 async def test_a_pass_over_all_series_that_the_stop_of_the_module_cancels_asks_nobody_on_its_way_out(rig):

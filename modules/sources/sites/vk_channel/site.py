@@ -1,24 +1,31 @@
-"""The site "channel of VK": the videos of a channel that a query finds, one row each, with the steps of their files.
+"""The site "channel of VK": the videos of a channel whose title has a term of the query, one row each, with the steps of
+their files.
 
-How the videos are found:
-- the mode `search` is the channel search of VK Video itself: `catalog.getOwnerVideosSearch` with `owner_id` and the term, then
-  `catalog.getBlockItems` with the opaque cursor of the block, one search for each term (`video.search` with `owner_id`
-  answers `count: 0` since 2026-10-18, without it the search runs over all of VK and finds a part of the channel, so
-  neither is used). The key of this API is a short-lived web token of the player page, which the module of the sessions
-  keeps inside; it also keeps the interval between the requests. A search that is empty, partial or refused is not
-  trusted: the channel is listed whole instead;
-- `video.get` of the channel lists every video of it but gives no `files`. This is the mode `get_all`: the videos whose title
-  has a term of the query are kept. A listing is read by the positions the API names (VK leaves out the videos that are not
-  available, even a whole page) and ends in an error, never in a part, when the answer is malformed, repeats or does not fit
-  the limit of pages.
+The channel is read whole and the query is looked for in the titles of the listing. The search of VK is a ranking, not a
+list: it loses videos even when its cursor reaches the end (measured 2026-11-05), so it is not used. A channel with no
+query is not read.
+
+The listing is `video.get` of the channel by the positions of the API, a page of `PAGE_SIZE` at a time; VK leaves out the
+videos that are not available, even a whole page. It is the whole channel when every page was read and the count VK
+states stayed the same from the first page to the last: an upload or a removal during the read shifts the positions, so a
+count that moved reads the listing again. A malformed or repeated answer, more videos than the count, or a listing past
+the limit of pages end the read with a reason: a part is never given as the whole.
+
+One listing of a channel serves the tables of every series that looks for something in it, for an hour (`LISTING_TERM_S`):
+a channel holds thousands of videos and several series share one. Reads of one channel at the same time share one
+listing, and each of them is told its progress. A read the user asked for (`ReadContext.fresh`) lists the channel anew.
+
 A video without files is asked of the VK player by the key in the `player` link of the video, as the player of a page does.
 The text of a row is the title of the video as it is; the voice-over of a row is empty, the constructor names it. Nothing here
 numbers an episode.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Mapping
+import time
+from dataclasses import dataclass, field
+from typing import Callable
 
 from core.contracts import RowState, TableRow
 from core.reasons import reason
@@ -28,21 +35,38 @@ from ...players.contract import PlayerRef
 from ...players.registry import PlayerRegistry
 from ...players.vk_files import embed_parts
 from ...policy import Pacer
-from .. import PHASE_PLAYERS, PHASE_VIDEOS, ReadContext, SiteError, TableDraft
-from .api import (PAGE_SIZE, SEARCH, dedupe, error_code_of, heights_of, is_external, keep_by_terms, key_of, link_of,
-                  owner_id_from_resolve, parse_address, published_of, search_block, search_page)
+from .. import PHASE_PLAYERS, PHASE_VIDEOS, Progress, ReadContext, SiteError, TableDraft
+from .api import (PAGE_SIZE, dedupe, error_code_of, heights_of, is_external, keep_by_terms, key_of, link_of,
+                  owner_id_from_resolve, parse_address, published_of)
 
 logger = logging.getLogger("sources")
 
-# The gap between the pages of the API is a limit of the host (rate limit), not a way to wait for it.
-VK_PAGE_INTERVAL_S = 1.0
-# The listing of a channel of 200 thousand videos fits; a listing that does not is an error, not a part.
+# The gap between the pages of the API is a limit of the host (rate limit), not a way to wait for it. Two requests a second
+# drew no refusal of VK over 700 requests (2026-11-05).
+VK_PAGE_INTERVAL_S = 0.5
+# The listing of a channel of 100 thousand videos fits; a listing that does not is an error, not a part.
 LISTING_PAGES = 1000
-# The pages of one search; a search that goes on is not trusted and the channel is listed.
-SEARCH_PAGES = 100
+# A channel whose count moves during each of this many listings is not given as a whole.
+LISTING_READS = 3
+# The term of the listing of a channel is a requirement of the owner: it is the subject of the task, not a wait.
+LISTING_TERM_S = 3600.0
 # VK answers codes that a repeat of the same page mends: no code, a flood (6) and a failure of its own (10).
 RETRY_CODES = (None, 6, 10)
-NOT_FOUND = 104
+
+
+@dataclass(frozen=True)
+class Listing:
+    """Every video of a channel the API gives, and when (by the monotonic clock) the listing was finished."""
+    owner: int
+    videos: list[dict]
+    at: float
+
+
+@dataclass
+class _Flight:
+    """One listing of a channel in progress and the reads that wait for it, each told the progress."""
+    task: asyncio.Task
+    watchers: list[Progress] = field(default_factory=list)
 
 
 class VkChannelSite:
@@ -50,10 +74,14 @@ class VkChannelSite:
     domains = ("vk.com", "vkvideo.ru", "vk.ru")
     source_type = "vk_video"
 
-    def __init__(self, players: PlayerRegistry | None = None, vk_call=None) -> None:
+    def __init__(self, players: PlayerRegistry | None = None, vk_call=None,
+                 clock: Callable[[], float] = time.monotonic) -> None:
         self.players = players or PlayerRegistry.standard()
         self._call = vk_call
         self._pacer = Pacer(lambda: VK_PAGE_INTERVAL_S)
+        self._clock = clock
+        self._listings: dict[str, Listing] = {}
+        self._flights: dict[str, _Flight] = {}
 
     def configure(self, *, players: PlayerRegistry | None = None, vk_call=None, **_wiring) -> None:
         """The players of the module and the way to the VK API (the token lives with the module that owns the sessions)."""
@@ -63,25 +91,23 @@ class VkChannelSite:
             self._call = vk_call
 
     def match_url(self, url: str) -> bool:
-        return parse_address(url, {}) is not None
+        return parse_address(url) is not None
 
-    def canonical_url(self, url: str, options: Mapping[str, str] = {}) -> str:
-        address = parse_address(url, options)
+    def canonical_url(self, url: str) -> str:
+        address = parse_address(url)
         if address is None:
             raise ValueError(f"not a channel address: {url!r}")
         return address.canonical
 
     async def read(self, url: str, ctx: ReadContext) -> TableDraft:
-        address = parse_address(url, {})
+        address = parse_address(url)
         if address is None:
             raise SiteError(reason("vk_bad_address"))
+        if not address.terms:
+            raise SiteError(reason("vk_query_missing"))
         ctx.progress(PHASE_VIDEOS, 0, 0)
-        owner = owner_id_from_resolve(await self._ask("utils.resolveScreenName", {"screen_name": address.name}),
-                                      address.name)
-        videos = await self._searched(owner, address.terms, ctx) if address.mode == SEARCH else None
-        if videos is None:
-            videos = keep_by_terms(await self._pages("video.get", {"owner_id": owner}, ctx), address.terms)
-        videos = [video for video in dedupe(videos) if not is_external(video)]
+        listing = await self._channel(address.name, ctx)
+        videos = [video for video in keep_by_terms(listing.videos, address.terms) if not is_external(video)]
         if ctx.recent is not None:  # the newest videos of the channel, in the order of their dates
             videos = sorted(videos, key=lambda video: video.get("date") or 0)
             videos = videos[max(0, len(videos) - ctx.recent):]
@@ -92,84 +118,79 @@ class VkChannelSite:
             raise RuntimeError("the VK API is not wired to the channel site")
         return await self._call(method, params)
 
-    async def _searched(self, owner: int, terms: tuple[str, ...], ctx: ReadContext) -> list[dict] | None:
-        """The videos the quick search found, or None when it cannot be trusted: it found nothing, a part, or was refused.
-        An empty answer is not believed because the search of VK has left out whole channels before."""
-        found: list[dict] = []
+    # --- the listing of a channel ---------------------------------------------------------------------------------------
+
+    async def _channel(self, name: str, ctx: ReadContext) -> Listing:
+        """The listing of the channel: the one kept, while it is in its term and the user did not ask for a new one, else
+        the one in progress, else a new one. A read that stops waiting does not stop the listing the others wait for."""
+        kept = self._listings.get(name)
+        if kept is not None and not ctx.fresh and self._clock() - kept.at < LISTING_TERM_S:
+            return kept
+        flight = self._flights.get(name)
+        if flight is None:
+            flight = _Flight(asyncio.create_task(self._list(name), name=f"sources.vk_channel:{name}"))
+            self._flights[name] = flight
+            flight.task.add_done_callback(lambda done: self._land(name, done))
+        flight.watchers.append(ctx.progress)
         try:
-            for term in terms:
-                part, whole = await self._search(owner, term, ctx)
-                if not whole:
-                    logger.warning("VK %s: быстрый поиск %r неполон — читаю список канала", owner, term)
-                    return None
-                found += part
-        except SiteError as exc:
-            logger.warning("VK %s: быстрый поиск не ответил (%s) — читаю список канала", owner, exc.reason)
-            return None
-        return dedupe(found) or None
+            return await asyncio.shield(flight.task)
+        finally:
+            if ctx.progress in flight.watchers:
+                flight.watchers.remove(ctx.progress)
 
-    async def _search(self, owner: int, term: str, ctx: ReadContext) -> tuple[list[dict], bool]:
-        """One term through the catalog search: its videos, and whether the cursors led to the end of them."""
-        response = (await self._ask("catalog.getOwnerVideosSearch", {"owner_id": owner, "q": term})).get("response") or {}
-        block = search_block(response, owner)
-        if block is None:
-            return [], True
-        items: list[dict] = []
-        cursors: set[tuple[str, str]] = set()
-        for page in range(SEARCH_PAGES):
-            items += search_page(response, block)
-            ctx.progress(PHASE_VIDEOS, len(items), len(items))
-            cursor = block.get("next_from")
-            if not cursor:
-                return dedupe(items), True
-            if not block.get("id") or (block["id"], cursor) in cursors:
-                raise SiteError(reason("vk_reply_unexpected", method="catalog.getBlockItems"))
-            cursors.add((block["id"], cursor))
-            if page + 1 == SEARCH_PAGES:
-                break
-            # The sessions module paces the requests of this API: a pause here would count the time of the request twice.
-            params = {"block_id": block["id"], "start_from": cursor}
-            try:
-                data = await self._ask("catalog.getBlockItems", params)
-            except SiteError as exc:
-                if error_code_of(exc) != NOT_FOUND:
-                    raise
-                # "Not found" is also what VK says of a continuation it has advertised and no longer has: ask once more,
-                # then keep what was found and say it is a part.
-                await self._pacer.wait()
-                try:
-                    data = await self._ask("catalog.getBlockItems", params)
-                except SiteError as again:
-                    if error_code_of(again) != NOT_FOUND or not items:
-                        raise
-                    return dedupe(items), False
-            response = data.get("response") or {}
-            block = response.get("block")
-            if not isinstance(block, dict) or block.get("data_type") != "videos":
-                raise SiteError(reason("vk_reply_unexpected", method="catalog.getBlockItems"))
-        raise SiteError(reason("vk_listing_limit", pages=SEARCH_PAGES))
+    def _land(self, name: str, done: asyncio.Task) -> None:
+        if self._flights.get(name) is not None and self._flights[name].task is done:
+            del self._flights[name]
+        if not done.cancelled() and done.exception() is None:
+            self._listings[name] = done.result()
 
-    async def _pages(self, method: str, params: dict, ctx: ReadContext) -> list[dict]:
-        """Every video of a listing, by the positions the API names. A page that cannot be had, a malformed or repeated
-        answer and a listing past the limit of pages end the read with a reason: a part is never given as the whole."""
+    def _told(self, name: str) -> Progress:
+        def progress(phase: str, current: int, total: int) -> None:
+            flight = self._flights.get(name)
+            for watcher in list(flight.watchers if flight else ()):
+                watcher(phase, current, total)
+        return progress
+
+    async def _list(self, name: str) -> Listing:
+        owner = owner_id_from_resolve(await self._ask("utils.resolveScreenName", {"screen_name": name}), name)
+        progress = self._told(name)
+        for _ in range(LISTING_READS):
+            videos, counts = await self._pages(owner, progress)
+            if len(set(counts)) > 1:
+                logger.warning("VK %s: число роликов менялось за чтение (%d → %d) — читаю список снова", name, counts[0],
+                               counts[-1])
+                continue
+            if len(videos) > counts[0]:
+                raise SiteError(reason("vk_reply_unexpected", method="video.get"))
+            logger.info("VK %s: список канала — %d роликов из %d (скрыто VK: %d)", name, len(videos), counts[0],
+                        counts[0] - len(videos))
+            return Listing(owner, videos, self._clock())
+        raise SiteError(reason("vk_listing_moving", reads=LISTING_READS))
+
+    async def _pages(self, owner: int, progress: Progress) -> tuple[list[dict], list[int]]:
+        """Every video of the listing by the positions the API names, and the count VK stated on each page."""
         items: list[dict] = []
-        offset, total, seen = 0, 0, set()
+        counts: list[int] = []
+        seen: set[tuple[str, ...]] = set()
+        offset = 0
         for _ in range(LISTING_PAGES):
-            response = await self._page(method, {**params, "offset": offset, "count": PAGE_SIZE})
+            response = await self._page("video.get", {"owner_id": owner, "offset": offset, "count": PAGE_SIZE})
             if (not isinstance(response, dict) or not isinstance(response.get("items"), list)
-                    or type(response.get("count")) is not int or response["count"] < 0):
-                raise SiteError(reason("vk_reply_unexpected", method=method))
-            total = max(total, response["count"])
+                    or type(response.get("count")) is not int or response["count"] < 0
+                    or len(response["items"]) > PAGE_SIZE):
+                raise SiteError(reason("vk_reply_unexpected", method="video.get"))
+            counts.append(response["count"])
             if response["items"]:
                 signature = tuple(key_of(video) for video in response["items"])
                 if signature in seen:
-                    raise SiteError(reason("vk_reply_unexpected", method=method))
+                    raise SiteError(reason("vk_reply_unexpected", method="video.get"))
                 seen.add(signature)
             items += response["items"]
             offset += PAGE_SIZE
-            ctx.progress(PHASE_VIDEOS, min(offset, total), total)
+            total = max(counts)
+            progress(PHASE_VIDEOS, min(offset, total), total)
             if offset >= total:
-                return dedupe(items)
+                return dedupe(items), counts
         raise SiteError(reason("vk_listing_limit", pages=LISTING_PAGES))
 
     async def _page(self, method: str, params: dict) -> dict | None:
@@ -183,6 +204,8 @@ class VkChannelSite:
                     raise
                 logger.warning("VK %s: ошибка страницы offset=%s, повтор %d/2: %s", method, params.get("offset"), attempt + 1, exc.reason)
         raise AssertionError("unreachable")
+
+    # --- the rows -------------------------------------------------------------------------------------------------------
 
     async def _rows(self, videos: list[dict], channel_url: str, ctx: ReadContext) -> list[TableRow]:
         """A row per video. The steps come from the files the listing gave; what it gave none for is asked of the VK player."""

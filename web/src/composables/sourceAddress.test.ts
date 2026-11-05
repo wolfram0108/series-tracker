@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { typeAddress } from "./sourceAddress"
+import { t } from "../i18n"
+import { kindOf, typeAddress } from "./sourceAddress"
 import * as calls from "./sourceCalls"
 
 vi.mock("./sourceCalls")
@@ -21,6 +22,21 @@ describe("typeAddress", () => {
     vi.mocked(calls.resolveAddress).mockResolvedValue(ok({ site: "vk_channel", canonical_url: null, source_type: "vk_video" }))
     const typed = await typeAddress("https://vk.com/video/@chan|Тайтл 1 сезон")
     expect(typed).toEqual({ kind: "site", sourceType: "vk_video", url: "https://vk.com/video/@chan|Тайтл 1 сезон" })
+  })
+
+  it("takes the query given apart from the channel, and refuses a channel that has none, the core asked nothing more", async () => {
+    vi.mocked(calls.resolveAddress).mockResolvedValue(ok({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@chan|", source_type: "vk_video" }))
+    expect(await typeAddress("https://vk.com/video/@chan", " Тайтл ")).toEqual({
+      kind: "site", sourceType: "vk_video", url: "https://vk.com/video/@chan|Тайтл",
+    })
+    for (const typed of ["https://vk.com/video/@chan", "https://vk.com/video/@chan|  "]) {
+      expect(await typeAddress(typed)).toEqual({ kind: "refused", text: t("sources.vk.queryMissing") })
+    }
+  })
+
+  it("tells the kind of an address with no rule of a source, for a window that asks while the user types", async () => {
+    vi.mocked(calls.resolveAddress).mockResolvedValue(ok({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@chan|", source_type: "vk_video" }))
+    expect(await kindOf("https://vk.com/video/@chan")).toMatchObject({ kind: "site", sourceType: "vk_video" })
   })
 
   it("says that an address no site reads is another kind, and words a refusal", async () => {

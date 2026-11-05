@@ -38,9 +38,6 @@ ALLOWED_WAITS: list[tuple[str, str, str, str]] = [
      f"schedule of the auto scan ({SECTION_7}, 'Расписание автоскана')"),
     ("modules/sources/module.py", "SourcesModule._polite", SUBJECT,
      f"pace of requests to a host, 0.6 s (R-33) ({SECTION_7})"),
-    ("modules/trackerauth/vk_catalog.py", "VkCatalogClient.fetch", SUBJECT,
-     f"pace of the requests to the catalog API of VK Video, at most two a second per session ({SECTION_7}); the time of the "
-     "previous request counts toward it"),
     ("modules/sources/policy.py", "*", RETRY,
      f"the retry policy and the pace of requests to sites and players ({SECTION_7}); it sleeps through core.retry"),
     ("modules/voices/recovery.py", "Recovery._rest", SAFEGUARD,

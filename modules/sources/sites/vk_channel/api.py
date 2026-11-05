@@ -11,18 +11,16 @@ from core.reasons import parse, reason
 from .. import SiteError
 
 CHANNEL_HOST = "https://vkvideo.ru"
-SEARCH, GET_ALL = "search", "get_all"
-MODES = (SEARCH, GET_ALL)
-PAGE_SIZE = 200
+# VK gives at most 100 videos a page whatever `count` asks (measured 2026-11-05 with both tokens): the step of the
+# offset is the page, or the positions past it are never read.
+PAGE_SIZE = 100
 
 
 @dataclass(frozen=True)
 class Address:
-    """A channel, what is looked for in it and how: `search` asks VK for each term, `get_all` lists the channel and keeps
-    the videos whose title has a term (no terms keep all)."""
+    """A channel and what is looked for in it: the videos whose title has one of the terms."""
     name: str
     terms: tuple[str, ...]
-    mode: str
 
     @property
     def channel_url(self) -> str:
@@ -30,8 +28,8 @@ class Address:
 
     @property
     def canonical(self) -> str:
-        """Channel, query and mode in one string, so that the table is read from the address alone."""
-        return f"{self.channel_url}|{'/'.join(self.terms)}|{self.mode}"
+        """Channel and query in one string, so that the table is read from the address alone."""
+        return f"{self.channel_url}|{'/'.join(self.terms)}"
 
 
 def channel_name(channel_url: str) -> str | None:
@@ -41,17 +39,15 @@ def channel_name(channel_url: str) -> str | None:
     return part[1:] if part else None
 
 
-def parse_address(url: str, options: Mapping[str, str]) -> Address | None:
-    """`channel`, `channel|query` or the canonical `channel|query|mode`. The mode is the source's choice when it is given
-    (`vk_search_mode`), else the one the address carries, else `search`."""
-    channel, _, rest = url.partition("|")
-    query, _, carried = rest.partition("|")
+def parse_address(url: str) -> Address | None:
+    """`channel` or `channel|query`, the terms of the query parted by `/`. A channel with no query is an address of the
+    site (a window knows it for a channel while the query is still to be typed), but it is not read."""
+    channel, _, query = url.partition("|")
     name = channel_name(channel)
-    if name is None:
+    if name is None or "|" in query:
         return None
-    mode = next((value for value in (options.get("vk_search_mode"), carried) if value in MODES), SEARCH)
     terms = tuple(term for term in (part.strip() for part in query.split("/")) if term)
-    return Address(name, terms, mode)
+    return Address(name, terms)
 
 
 def owner_id_from_resolve(response: Mapping[str, Any], name: str) -> int:
@@ -96,9 +92,7 @@ def key_of(video: Mapping[str, Any]) -> str:
 
 
 def keep_by_terms(videos: list[dict], terms: tuple[str, ...]) -> list[dict]:
-    """The local search of `get_all`: a term in the title, whatever the case; no terms keep every video."""
-    if not terms:
-        return videos
+    """The search of a channel, made over its whole listing: a term in the title, whatever the case."""
     lowered = [term.lower() for term in terms]
     return [video for video in videos if any(term in str(video.get("title", "")).lower() for term in lowered)]
 
@@ -107,33 +101,6 @@ def error_code_of(failure: SiteError) -> int | None:
     """The code VK gave in an error of the API, taken from the reason the call put in the `SiteError`."""
     code = ((parse(failure.reason) or {}).get("params") or {}).get("error_code")
     return code if isinstance(code, int) else None
-
-
-def search_block(response: Mapping[str, Any], owner_id: int) -> dict | None:
-    """The block of the videos of the channel in an answer of the catalog search; the recommendations hold other creators.
-    None when the channel has none that match. An answer that is not a catalog is not an empty result."""
-    catalog = response.get("catalog")
-    if not isinstance(catalog, dict) or not isinstance(catalog.get("sections"), list):
-        raise SiteError(reason("vk_reply_unexpected", method="catalog.getOwnerVideosSearch"))
-    for section in catalog["sections"]:
-        for block in section.get("blocks", []):
-            if block.get("data_type") == "videos" and block.get("layout", {}).get("owner_id") == owner_id:
-                return block
-    if response.get("videos"):
-        raise SiteError(reason("vk_reply_unexpected", method="catalog.getOwnerVideosSearch"))
-    return None
-
-
-def search_page(response: Mapping[str, Any], block: Mapping[str, Any]) -> list[dict]:
-    """The videos of one page of the block: the answer may carry recommendations too, the membership is `videos_ids`."""
-    video_ids, videos = block.get("videos_ids"), response.get("videos", [])
-    if not isinstance(video_ids, list) or not isinstance(videos, list):
-        raise SiteError(reason("vk_reply_unexpected", method="catalog.getBlockItems"))
-    wanted = set(video_ids)
-    items = [video for video in videos if key_of(video) in wanted]
-    if len({key_of(video) for video in items}) != len(wanted):
-        raise SiteError(reason("vk_reply_unexpected", method="catalog.getBlockItems"))
-    return items
 
 
 def dedupe(videos: list[dict]) -> list[dict]:

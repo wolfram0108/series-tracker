@@ -198,11 +198,11 @@ def env_paths(tmp_path):
                      "VALUES (1, 'профиль')")
         # 2: a VK series; 3: a web one; 4: one series with both kinds of source (position 0 is VK, 1 is web).
         insert_series(conn, id=2, name="Т2", name_en="T2", site="vk", save_path=str(media_dir), state="waiting",
-                      url="https://vkvideo.ru/@c|т", source_type="vk_video", vk_search_mode="get_all",
+                      url="https://vkvideo.ru/@c|т", source_type="vk_video",
                       parser_profile_id=1)
         insert_series(conn, id=3, name="Т3", name_en="T3", site="1.ruchime.org", save_path=str(media_dir),
                       state="waiting", url="https://1.ruchime.org/release/x", source_type="web_video",
-                      vk_search_mode="get_all", parser_profile_id=1)
+                      parser_profile_id=1)
         insert_series(conn, id=4, name="Т4", name_en="T4", site="mixed", save_path=str(media_dir), state="waiting",
                       sources=[source(url="https://vkvideo.ru/@c|т4", source_type="vk_video", parser_profile_id=1),
                                source(url="https://1.ruchime.org/release/y", source_type="web_video",

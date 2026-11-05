@@ -23,8 +23,6 @@ export type LayoutRow = Schemas["CompositionRow"]
 export const CATALOG_PLAYER = "vibix"
 /** The site of a VK channel is the only one whose source is of the type `vk_video`; any other site is `web_video`. */
 const CHANNEL_SITE = "vk_channel"
-const VK_MODES = ["search", "get_all"] as const
-export type VkMode = (typeof VK_MODES)[number]
 
 export type SourceState = "reading" | "failed" | "absent" | "waiting" | "noProfile" | "ready"
 
@@ -58,7 +56,6 @@ export interface SourceItem {
   url: string
   sourceType: SourceType
   profileId: number | null
-  vkSearchMode: string
   vibixSeason: number | null
   playersOff: string[]
   /** The name of the voice-over of the lines that have none; empty when the user gave none. */
@@ -261,10 +258,6 @@ export function readEnded(asked: { state: TableState } | null, news: PageStatus 
   return asked?.state === "reading" && news !== null && news !== handled && news.state !== "reading"
 }
 
-export function vkModeOf(value: string | null | undefined): VkMode {
-  return VK_MODES.find((mode) => mode === value) ?? "search"
-}
-
 /** The channel and the query of a VK source address (`channel|query`); a typed channel link with `?q=` is split too. */
 export function splitVkAddress(address: string): { channel: string; query: string } {
   const [channel, ...rest] = address.split("|")
@@ -278,8 +271,14 @@ export function splitVkAddress(address: string): { channel: string; query: strin
   }
 }
 
+/** The query of a channel as the core reads it: its terms parted by `/`, each trimmed, the empty ones left out. An empty
+ *  answer is a channel with no query, which is not read. */
+export function vkQuery(query: string): string {
+  return query.split("/").map((term) => term.trim()).filter(Boolean).join("/")
+}
+
 export function joinVkAddress(channel: string, query: string): string {
-  return `${channel.trim().replace(/\\/g, "/")}|${query.trim()}`
+  return `${channel.trim().replace(/\\/g, "/")}|${vkQuery(query)}`
 }
 
 /** The host of a source address (the channel part of a VK address), as the series keeps it in `site`. */
@@ -291,18 +290,12 @@ export function siteOf(address: string): string {
   }
 }
 
-/** The choices that change what the site is asked for; the same ones the core reads from the source. */
-export function readOptions(source: { sourceType: SourceType; vkSearchMode: string }): Record<string, string> {
-  return source.sourceType === "vk_video" ? { vk_search_mode: source.vkSearchMode } : {}
-}
-
 /** The body of a new source for `POST /api/series` and `POST /api/series/{id}/sources`. */
-export function draftBody(item: Pick<SourceItem, "url" | "sourceType" | "profileId" | "vkSearchMode" | "vibixSeason" | "playersOff" | "voiceName">): SourceDraft {
+export function draftBody(item: Pick<SourceItem, "url" | "sourceType" | "profileId" | "vibixSeason" | "playersOff" | "voiceName">): SourceDraft {
   return {
     url: item.url,
     source_type: item.sourceType,
     parser_profile_id: item.profileId,
-    vk_search_mode: item.vkSearchMode,
     vibix_season: item.vibixSeason,
     players_off: item.playersOff,
     voice_name: item.voiceName,
@@ -318,7 +311,6 @@ export function itemOfSource(
     url: source.url,
     sourceType: source.source_type,
     profileId: source.parser_profile_id ?? null,
-    vkSearchMode: source.vk_search_mode,
     vibixSeason: source.vibix_season ?? null,
     playersOff,
     voiceName: source.voice_name ?? "",

@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Mapping
+from typing import Callable
 
 import httpx
 
@@ -70,7 +70,7 @@ class TableReader:
     # --- requests -----------------------------------------------------------------------
 
     async def get(self, request: TableGetRequest) -> TableGetReply:
-        found = self._resolve(request.url, request.options)
+        found = self._resolve(request.url)
         if found is None:
             return TableGetReply(url=request.url, state=TableState.FAILED, reason=reason("site_not_found"))
         site, key = found
@@ -98,19 +98,20 @@ class TableReader:
         return TableGetReply(url=key, state=TableState.ABSENT)
 
     async def read(self, request: TableGetRequest) -> None:
-        """Read the page now, term or not, unless a read of it is already going."""
-        found = self._resolve(request.url, request.options)
+        """Read the page now, term or not, unless a read of it is already going. The user asked for it: the read takes
+        nothing that an earlier read left for sharing (`ReadContext.fresh`)."""
+        found = self._resolve(request.url)
         if found is None:
             self._publish(FAILED_TOPIC, TableFailed(url=request.url, reason=reason("site_not_found"))
                           .model_dump(mode="json"))
             return
         site, key = found
         if key not in self._reading:
-            self._launch(site, key)
+            self._launch(site, key, fresh=True)
 
-    def resolve(self, url: str, options: Mapping[str, str]) -> SiteResolveReply:
+    def resolve(self, url: str) -> SiteResolveReply:
         """Which site reads the address and its canonical form, with no network."""
-        found = self._resolve(url, options)
+        found = self._resolve(url)
         if not found:
             return SiteResolveReply()
         return SiteResolveReply(site=found[0].name, canonical_url=found[1], source_type=found[0].source_type)
@@ -119,7 +120,7 @@ class TableReader:
         """Begin again the reads that a stop interrupted; their consumers ask again by themselves when they start."""
         async with self._gate:
             for page in await self._repo.pages_being_read():
-                found = self._resolve(page["url"], {})
+                found = self._resolve(page["url"])
                 if found is None:
                     await self._conclude_unreadable(page["url"], page["site"])
                 elif found[1] not in self._reading:
@@ -134,9 +135,9 @@ class TableReader:
 
     # --- the read -----------------------------------------------------------------------
 
-    def _resolve(self, url: str, options: Mapping[str, str]) -> tuple[Site, str] | None:
+    def _resolve(self, url: str) -> tuple[Site, str] | None:
         site = self._sites.find(url)
-        return (site, site.canonical_url(url, options)) if site is not None else None
+        return (site, site.canonical_url(url)) if site is not None else None
 
     def _fresh(self, table: ReleaseTable) -> bool:
         try:
@@ -149,19 +150,19 @@ class TableReader:
     def _stamp(self) -> str:
         return self._clock().astimezone(timezone.utc).isoformat()
 
-    def _launch(self, site: Site, key: str) -> None:
+    def _launch(self, site: Site, key: str, *, fresh: bool = False) -> None:
         """Claim the page for one read; no await between the check of the caller and this, so the claim is exclusive."""
-        task = asyncio.create_task(self._run(site, key), name=f"sources.table:{key}")
+        task = asyncio.create_task(self._run(site, key, fresh), name=f"sources.table:{key}")
         self._reading[key] = task
         # A net for a task that ends without concluding (a stop): the page must not stay claimed.
         task.add_done_callback(lambda done: self._reading.pop(key, None) if self._reading.get(key) is done else None)
 
-    async def _run(self, site: Site, key: str) -> None:
+    async def _run(self, site: Site, key: str, fresh: bool) -> None:
         table: ReleaseTable | None = None
         problem: str | None = None
         try:
             await self._repo.mark_reading(key, site.name, self._stamp())
-            table = await self._read(site, key)
+            table = await self._read(site, key, fresh)
         except SiteError as exc:
             problem = exc.reason
         except Exception as exc:  # noqa: BLE001 — an unexpected failure is a failed read, not a silent task death
@@ -176,14 +177,14 @@ class TableReader:
             self._log.warning("table of %s not read: %s", key, describe(problem))
             self._publish(FAILED_TOPIC, TableFailed(url=key, reason=problem or "").model_dump(mode="json"))
 
-    async def _read(self, site: Site, key: str) -> ReleaseTable:
+    async def _read(self, site: Site, key: str, fresh: bool) -> ReleaseTable:
         pace = Pace()
 
         def progress(phase: str, current: int, total: int) -> None:
             self._publish(PROGRESS_TOPIC, TableProgress(url=key, phase=phase, current=current, total=total,
                                                         rate=pace.rate(phase, current)).model_dump(mode="json"))
 
-        context = ReadContext(http=self._http(), progress=progress, recent=self._recent)
+        context = ReadContext(http=self._http(), progress=progress, recent=self._recent, fresh=fresh)
         limit = asyncio.timeout(self._safeguard_s)
         try:
             async with limit:

@@ -42,7 +42,6 @@ SOURCE_DEFAULTS = {
     "url": "https://kinozal.tv/details.php?id=1",
     "source_type": "torrent",
     "parser_profile_id": None,
-    "vk_search_mode": "search",
     "vibix_season": None,
     "players_off": [],
 }
@@ -91,9 +90,9 @@ def insert_series(conn: sqlite3.Connection, *, id: int | None = None, sources: l
         players_off = json.dumps(draft["players_off"], ensure_ascii=False)
         source_ids.append(conn.execute(
             "INSERT INTO series_sources (series_id, position, url, source_type, parser_profile_id, "
-            "vk_search_mode, vibix_season, players_off) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "vibix_season, players_off) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (series_id, draft["position"], draft["url"], draft["source_type"], draft["parser_profile_id"],
-             draft["vk_search_mode"], draft["vibix_season"], players_off)).lastrowid)
+             draft["vibix_season"], players_off)).lastrowid)
     return Created(series_id, tuple(source_ids))
 
 

@@ -34,7 +34,7 @@ describe("the calls to the sources of the core", () => {
       ok: true, data: { site: "ruchime", canonical_url: "https://1.ruchime.org/release/test" },
     })
     expect(client.POST).toHaveBeenCalledWith("/api/sources/resolve", {
-      body: { url: "https://1.ruchime.org/release/test?x=1", options: {} },
+      body: { url: "https://1.ruchime.org/release/test?x=1" },
     })
   })
 })

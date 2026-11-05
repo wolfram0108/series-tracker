@@ -81,7 +81,6 @@ class World(BaseModule):
 
     def __init__(self, bus) -> None:
         self.order: list[str] = []
-        self.options: list[dict] = []  # the options of every request for a table, in the order asked
         self.pages: dict[str, Page] = {}
         self.rows: list[CompositionRow] = []
         self.settings: list[EpisodeSettings] = []
@@ -229,7 +228,6 @@ class World(BaseModule):
         request = TableGetRequest.model_validate(env.payload)
         page = self.pages.setdefault(request.url, Page())
         self.order.append(f"sources.table.get {request.url}")
-        self.options.append(dict(request.options))
         table = ReleaseTable(url=request.url, site="ruchime", complete=True, read_at=READ_AT) if page.held else None
         reply = TableGetReply(url=request.url, state=page.state, table=table, reason=page.why)
         if page.event_first:

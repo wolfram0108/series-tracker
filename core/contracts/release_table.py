@@ -115,12 +115,10 @@ class TableState(StrEnum):
 
 
 class TableGetRequest(BaseModel):
-    """`options` are the choices of a source that change what is read (the search mode of a VK channel); a site
-    ignores those it does not know. `refresh` False reads nothing: the last complete table is returned as it is,
-    old or not, so that recounting a layout never costs a read of the site."""
+    """`refresh` False reads nothing: the last complete table is returned as it is, old or not, so that recounting
+    a layout never costs a read of the site."""
 
     url: str
-    options: dict[str, str] = Field(default_factory=dict)
     refresh: bool = True
 
 
@@ -137,7 +135,6 @@ class TableGetReply(BaseModel):
 
 class SiteResolveRequest(BaseModel):
     url: str
-    options: dict[str, str] = Field(default_factory=dict)
 
 
 class SiteResolveReply(BaseModel):

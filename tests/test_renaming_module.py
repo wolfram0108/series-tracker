@@ -125,7 +125,7 @@ class Probe(BaseModule):
 def _source(source_type, profile_id=None, source_id=1):
     """A source as catalog.series.get answers it."""
     return {"id": source_id, "series_id": 2, "position": 0, "url": "u|q/2", "source_type": source_type,
-            "parser_profile_id": profile_id, "vk_search_mode": "search", "vibix_season": None, "players_off": []}
+            "parser_profile_id": profile_id, "vibix_season": None, "players_off": []}
 
 
 def _torrent(series, profile_id=1):

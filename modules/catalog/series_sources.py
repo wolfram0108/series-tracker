@@ -12,8 +12,7 @@ from core.reasons import reason
 REMOVED_FIELDS = ("url", "source_type", "parser_profile_id", "vk_search_mode", "vk_quality_priority")
 
 # What a caller may write to a source; `id` and `series_id` belong to the table.
-SOURCE_FIELDS = ("position", "url", "source_type", "parser_profile_id", "vk_search_mode", "vibix_season",
-                 "players_off", "voice_name")
+SOURCE_FIELDS = ("position", "url", "source_type", "parser_profile_id", "vibix_season", "players_off", "voice_name")
 
 
 def kind_of_type(source_type: str) -> str:
