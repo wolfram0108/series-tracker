@@ -67,7 +67,7 @@ const switchSeason = (season: number, off: boolean) => changed(output.switchTo(s
       </label>
       <Button
         :label="t('output.sync')" :icon="passing ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'"
-        size="small" :disabled="!canSync" @click="output.sync()"
+        size="small" severity="warn" :disabled="!canSync" @click="output.sync()"
       />
     </div>
 
