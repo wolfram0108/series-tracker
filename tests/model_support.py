@@ -91,7 +91,7 @@ class Harness:
         self.downloader = ScriptedDownloader()
         self.armed = False  # the failures of a scenario happen after its step is reached, not on the way to it
         self.refused = 0  # the changes refused while a run was open, made when it ended
-        self.packer = FakePacker()  # the containers of the run's end (ЭТАП_11); a test video is its address, not media
+        self.packer = FakePacker()  # the containers of the run's end (stage 11); a test video is its address, not media
 
     async def up(self) -> None:
         db = self.db = Database(self.db_path)
@@ -213,7 +213,7 @@ def video_of(item: dict) -> bytes:
 
 
 def name_of(item: dict) -> str:
-    return f"Серия {item['episode_start']:02d}.mkv"  # converged: the run's end packs it (ЭТАП_11)
+    return f"Серия {item['episode_start']:02d}.mkv"  # converged: the run's end packs it (stage 11)
 
 
 def check(h: Harness, *, converged: bool) -> list[str]:

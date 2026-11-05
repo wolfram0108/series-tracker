@@ -101,7 +101,7 @@ class FakeNeighbours(BaseModule):
         self.stream_raises: set[str] = set()
         self.stream_requests: list[str] = []
         self.stream_payloads: list[dict] = []
-        # What packing asks (ЭТАП_11): the reference of each episode and the order of the voice-overs of each season.
+        # What packing asks (stage 11): the reference of each episode and the order of the voice-overs of each season.
         self.references: list[dict] = []
         self.orders: list[dict] = []
         super().__init__(bus)
@@ -440,7 +440,7 @@ async def test_pending_outside_plan_dropped(system):
                      "WHERE unique_id='uid2'")
         conn.commit()
 
-    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (I-59)
     assert await _wait(lambda: not any(
         t["task_key"] == "uid2" for t in _tasks(db_path)))
     dl.gate.set()
@@ -955,8 +955,8 @@ async def test_a_displaced_file_goes_when_the_container_of_its_winner_is_made(sy
     _slot(db_path, fake, "win", "lose")
 
     await probe.request("downloads.settle", {"series_id": 2}, timeout=10)
-    assert os.path.exists(loser)  # the displaced file lives until the container of the winner is whole (ЭТАП_11, 3)
-    assert await _pack(probe) == {"packed": 1, "failed": 0, "unchanged": 0}
+    assert os.path.exists(loser)  # the displaced file lives until the container of the winner is whole (stage 11, 3)
+    assert await _pack(probe) == {"packed": 1, "failed": 0, "unchanged": 0, "waiting": 0}
 
     assert not os.path.exists(loser) and not os.path.exists(winner)
     assert os.path.isfile(os.path.join(media_dir, "e01 1080p.mkv"))
@@ -965,7 +965,7 @@ async def test_a_displaced_file_goes_when_the_container_of_its_winner_is_made(sy
     assert items["lose"]["status"] == "pending"     # holds no file, so it is not ready; the plan does not want it, so it is not fetched
     assert items["win"]["final_filename"] == "e01 1080p.mkv" and items["win"]["status"] == "completed"
     assert dl.started == []
-    assert await _pack(probe) == {"packed": 0, "failed": 0, "unchanged": 1}  # the container is what the plan asks
+    assert await _pack(probe) == {"packed": 0, "failed": 0, "unchanged": 1, "waiting": 0}  # the container is what the plan asks
 
 @pytest.mark.asyncio
 async def test_superseded_file_stays_while_winner_is_not_downloaded(system):
@@ -1104,7 +1104,7 @@ async def test_error_task_outside_plan_is_dropped(system):
                      "('gone', 2, 'u', '/tmp/x', 'error', 'vk_video')")
         conn.commit()
 
-    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (I-59)
 
     assert await _wait(lambda: _tasks(db_path) == [])
 
@@ -1125,7 +1125,7 @@ async def test_a_waiting_or_failed_task_without_a_row_goes_with_what_it_left(sys
     open(leftover, "wb").close()
     _add_task(db_path, "ghost", state, save_path)
 
-    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (I-59)
 
     assert await _wait(lambda: _tasks(db_path) == [] and not os.path.exists(leftover))
 
@@ -1147,7 +1147,7 @@ async def test_an_active_task_without_a_row_is_cancelled_and_leaves_nothing_behi
         conn.execute("DELETE FROM media_items WHERE unique_id='uid1'")
         conn.commit()
 
-    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (I-59)
 
     assert await _wait(lambda: _tasks(db_path) == [] and dl.concurrent == 0)
     assert not os.path.exists(partial)
@@ -1161,7 +1161,7 @@ async def test_a_finished_file_of_a_task_without_a_row_stays(system):
     open(finished, "wb").close()
     _add_task(db_path, "ghost", "error", finished)
 
-    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (I-59)
 
     assert await _wait(lambda: _tasks(db_path) == [])
     assert os.path.exists(finished)
@@ -1185,7 +1185,7 @@ async def test_an_active_task_whose_row_left_the_plan_is_stopped_with_what_it_wr
         conn.execute("UPDATE media_items SET plan_status='redundant' WHERE unique_id='uid1'")
         conn.commit()
 
-    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (I-59)
 
     assert await _wait(lambda: "uid1" not in [t["task_key"] for t in _tasks(db_path)])
     assert await _wait(lambda: not os.path.exists(work))
@@ -1409,7 +1409,7 @@ async def test_the_file_of_a_row_the_configuration_took_out_of_the_plan_goes_and
     path = os.path.join(media_dir, "e1.mp4")
     open(path, "wb").close()
     _add_item(db_path, "uid1", 1, status="completed", filename="e1.mp4", **({"plan": "candidate"} | how))
-    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (И-59)
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)  # a sync brings the disk to the plan (I-59)
     assert await _wait(lambda: not os.path.exists(path))
     assert _items(db_path)["uid1"]["status"] == "pending" and not _items(db_path)["uid1"]["final_filename"]
 
@@ -1466,7 +1466,7 @@ async def test_the_download_of_a_reference_asks_for_a_whole_video_and_the_fetch_
     assert "whole_video" not in dl.kwargs["https://cdn.test/dub.m3u8"]
 
 
-# --- И-59: the disk changes in a sync alone ------------------------------------------------------------------------------
+# --- I-59: the disk changes in a sync alone ------------------------------------------------------------------------------
 
 SITUATIONS = ("displaced", "taken_out", "switched_off", "task_outside_plan")
 
@@ -1506,7 +1506,7 @@ async def test_what_the_plan_alone_decides_reaches_the_disk_in_a_sync_and_never_
         await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=10)
     else:
         await probe.request(f"downloads.{trigger}", {"series_id": 2}, timeout=10)
-    # A displaced file goes when the container of its winner is made (packing, ЭТАП_11), not at settle or dispatch.
+    # A displaced file goes when the container of its winner is made (packing, stage 11), not at settle or dispatch.
     synced = trigger in ("settle", "dispatch") and name != "displaced"
     if synced:
         assert await _wait(lambda: not any(os.path.exists(path) for path in files))
@@ -1525,14 +1525,17 @@ async def test_the_run_of_a_series_hears_whether_downloads_has_work_of_it(system
     _add_item(db_path, "uid1", 1)
     await probe.request("downloads.dispatch", {"series_id": 2}, timeout=10)
     assert await _wait(lambda: len(_tasks(db_path)) == 1)
-    assert (await probe.request("downloads.work.get", {"series_id": 2}, timeout=10)) == {
+    busy = await probe.request("downloads.work.get", {"series_id": 2}, timeout=10)
+    assert {key: busy[key] for key in ("owner", "series_id", "active")} == {
         "owner": "downloads", "series_id": 2, "active": True}
     dl.gate.set()
     assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "completed")
     assert await _wait(lambda: not any(task["status"] in ("pending", "downloading", "processing", "publishing")
                                        for task in _tasks(db_path)))
     assert (await probe.request("downloads.work.get", {"series_id": 2}, timeout=10))["active"] is False
-    told = [(await asyncio.wait_for(states.queue.get(), 5)).payload["active"]]
-    while told[-1] is not False:  # the run hears the end of the work by its event
-        told.append((await asyncio.wait_for(states.queue.get(), 5)).payload["active"])
-    assert told == [True, False]
+    # Every change of the state is told once, numbered in the order it was counted (И-60): the work, then its end.
+    told = [(await asyncio.wait_for(states.queue.get(), 5)).payload]
+    while not (told[-1]["active"] is False and any(each["active"] for each in told)):
+        told.append((await asyncio.wait_for(states.queue.get(), 5)).payload)
+    assert [each["active"] for each in told][-2:] == [True, False]
+    assert [each["seq"] for each in told] == sorted({each["seq"] for each in told})

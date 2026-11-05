@@ -12,7 +12,7 @@ from core import BusRequestError
 from core.contracts import (CompositionPreviewReply, CompositionPreviewRequest, SeriesSource, SiteResolveReply,
                             SiteResolveRequest)
 
-from .routing import refusal
+from .routing import admitted, refusal
 from .schemas import (ChangedSource, CreatedSource, ErrorOnly, ErrorResponse, OkResponse, RulesTestRequest,
                       SourceAdd, SourceChange, TableReadRequest)
 
@@ -35,8 +35,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/series/{series_id}/sources", response_model=CreatedSource, responses=_ERR)
     async def add_source(series_id: int, body: SourceAdd):
         try:
-            return await gw.request("catalog.sources.add", {
-                "series_id": series_id, "source": body.model_dump(mode="json", exclude_unset=True)})
+            async with admitted(gw, series_id):
+                return await gw.request("catalog.sources.add", {
+                    "series_id": series_id, "source": body.model_dump(mode="json", exclude_unset=True)})
         except BusRequestError as exc:
             return refusal(exc)
 
@@ -44,9 +45,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def change_source(series_id: int, source_id: int, body: SourceChange):
         # The catalog refuses a source of another series than the one the path names.
         try:
-            reply = await gw.request("catalog.sources.update", {
-                "series_id": series_id, "source_id": source_id,
-                "fields": body.model_dump(mode="json", exclude_unset=True)})
+            async with admitted(gw, series_id):
+                reply = await gw.request("catalog.sources.update", {
+                    "series_id": series_id, "source_id": source_id,
+                    "fields": body.model_dump(mode="json", exclude_unset=True)})
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True, "applied": reply["applied"]}
@@ -55,7 +57,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
               response_model_exclude_none=True, responses=_ERR)
     async def remove_source(series_id: int, source_id: int):
         try:
-            await gw.request("catalog.sources.remove", {"series_id": series_id, "source_id": source_id})
+            async with admitted(gw, series_id):
+                await gw.request("catalog.sources.remove", {"series_id": series_id, "source_id": source_id})
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}

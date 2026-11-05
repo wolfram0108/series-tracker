@@ -71,7 +71,9 @@ async def serving(tmp_path, answers: dict, modules=(), watch: bool = True, **gat
     bus = Bus()
     gateway = GatewayModule(bus, static_dir=str(tmp_path), templates_dir=str(tmp_path), auth_required=False,
                             **gateway_options)
-    owners = Owners(bus, answers)
+    # A change of a series by the user is admitted by the owner of its runs (scan.edit.begin/end); a test that is not
+    # about the admission finds every change admitted, one that is names its own answers.
+    owners = Owners(bus, {"scan.edit.begin": {"ok": True}, "scan.edit.end": None, **answers})
     runner = Runner(bus, [gateway, *(make(bus) for make in modules), owners])
     await runner.start()
     spy = tap(bus) if watch else None

@@ -246,7 +246,7 @@ def _players_of(table: ReleaseTable) -> list[PlayerSummary]:
         for player, rows in by_player.items()]
 
 
-# --- the order of the voice-overs of a season (ЭТАП_11) --------------------------------------------------------------
+# --- the order of the voice-overs of a season (stage 11) --------------------------------------------------------------
 
 def season_orders(previous: Mapping[int, Sequence[str]], rows: Sequence[CompositionRow],
                   renames: Mapping[str, str]) -> dict[int, list[str]]:

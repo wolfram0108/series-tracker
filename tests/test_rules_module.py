@@ -193,6 +193,22 @@ async def test_every_line_is_answered_under_its_own_key(system):
 
 
 @pytest.mark.asyncio
+async def test_a_profile_exported_for_a_run_answers_as_it_was_when_exported(system):
+    """Н-5: the rules a run took (rules.profiles.export) are applied as they were, whatever was saved since; without them
+    the stored ones are."""
+    probe = system.probe
+    profile = await new_profile(probe)
+    rule = await new_rule(probe, profile, "серия", [extract("extract_single", "серия ", "N")])
+    taken = (await probe.request("rules.profiles.export", {"profile_ids": [profile]}, timeout=5))["profiles"]
+    await probe.request("rules.rules.update", {"rule_id": rule, "data": rule_data(
+        "серия", [extract("extract_single", "эпизод ", "N")], (), False)}, timeout=5)
+    by_run = await apply(probe, profile, {"a": "серия 4"}, rules=taken[str(profile)] if str(profile) in taken
+                         else taken[profile])
+    by_store = await apply(probe, profile, {"a": "серия 4"})
+    assert by_run["results"]["a"]["episode"] == 4
+    assert by_store["results"]["a"]["episode"] != 4
+
+@pytest.mark.asyncio
 async def test_an_excluded_line_has_no_numbers_even_with_a_card_season(system):
     probe = system.probe
     profile = await new_profile(probe)

@@ -355,6 +355,7 @@ export const ru = {
   "reason.composition_error": "Раскладка не обновлена: внутренняя ошибка, подробности в журнале",
   "reason.scan_step_failed": "Синхронизация остановлена на шаге «{step}», подробности в журнале",
   "reason.scan_no_profile": "Ни одному источнику сериала не назначен профиль правил",
+  "reason.sync_pack_failed": "Синхронизация завершена с ошибкой: не собрано контейнеров — {failed}, подробности в журнале",
   "reason.table_wait_timeout": "Страница {url} не прочитана за отведённое время",
   "reason.reference_other_player": "Взят плеер «{taken}»: у выбранного плеера «{missing}» нет одиночной строки этой серии",
   "reason.reference_voice_missing": "У озвучки «{voice}» нет одиночной серии {episode} сезона {season} ни в одном источнике",

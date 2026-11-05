@@ -1,7 +1,8 @@
 """Route registration and answer helpers shared by the gateway API blocks."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import APIRouter
@@ -34,3 +35,21 @@ def refusal(exc: BusRequestError, status: int | None = None, *, with_success: bo
     text = message.split(": ", 1)[-1]
     body = {"success": False, "error": text} if with_success else {"error": text}
     return JSONResponse(body, status_code=status)
+
+
+@asynccontextmanager
+async def admitted(gw: Any, series_id: int) -> AsyncIterator[None]:
+    """A change of a series by the user, admitted by the owner of its runs (scan.edit.begin): refused while a sync of the
+    series runs, and a sync does not open until the change is written whole, however many modules it writes to (И-60).
+    The refusal is a BusRequestError like any other, answered by `refusal`."""
+    try:
+        await gw.request("scan.edit.begin", {"series_id": series_id})
+    except BusRequestError as exc:
+        if _NOT_THERE not in str(exc):
+            raise
+        yield  # no runs in this process: nothing to hold off
+        return
+    try:
+        yield
+    finally:
+        gw.send_command("scan.edit.end", {"series_id": series_id})

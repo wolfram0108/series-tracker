@@ -351,12 +351,15 @@ async def test_a_change_without_a_sync_takes_nothing_away_and_the_sync_does(dubs
 async def test_the_run_of_a_series_hears_whether_voices_has_work_of_it(dubs):
     """A voice-over a sync admitted and not at its end is work of the run of the series (ЭТАП_11); placed ones are not."""
     probe, neighbours, voices, bus = dubs
-    assert (await probe.request("voices.work.get", {"series_id": 7}, timeout=5))["active"] is False
+    idle = await probe.request("voices.work.get", {"series_id": 7}, timeout=5)
+    assert idle["active"] is False
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
     await quiet(voices)
-    assert (await probe.request("voices.work.get", {"series_id": 7}, timeout=5)) == {
-        "owner": "voices", "series_id": 7, "active": True}
+    busy = await probe.request("voices.work.get", {"series_id": 7}, timeout=5)
+    # Every state counted is numbered after the one before: the run orders a reply and an event by it (И-60).
+    assert {key: busy[key] for key in ("owner", "series_id", "active")} == {"owner": "voices", "series_id": 7, "active": True}
+    assert busy["seq"] > idle["seq"]
 
 
 @pytest.mark.asyncio

@@ -44,7 +44,7 @@ _QUICK = (
     "auth.exists", "auth.login", "auth.password.set",
     "catalog.sources.add", "catalog.sources.list", "catalog.sources.remove", "catalog.sources.update",
     "metadata.map.get", "metadata.map.list", "metadata.map.set",
-    "renaming.tasks.active",
+    "rules.profiles.export", "scan.edit.begin", "scan.edit.end", "voices.settings.export",
     "rules.profiles.create", "rules.profiles.list", "rules.profiles.update",
     "rules.rules.add", "rules.rules.delete", "rules.rules.list", "rules.rules.reorder", "rules.rules.update",
     "settings.paths.add", "settings.paths.list", "settings.paths.remove",
@@ -65,7 +65,7 @@ _FUSES: dict[str, float] = {
     "sources.torrent_file.get": FETCH_S,
     **dict.fromkeys(("renaming.preview", "renaming.process_torrent", "rules.apply", "slicing.chapters.filtered",
                      "slicing.chapters.get", "sources.parse"), RULES_S),
-    **dict.fromkeys(("renaming.reprocess", "torrents.register"), BATCH_S),
+    **dict.fromkeys(("renaming.reprocess", "torrents.register", "slicing.deep_adoption"), BATCH_S),
     "torrents.composition": 900.0,
     # The fetch of a page of a service with credentials; it covers an anti-bot challenge solved by a browser (up to 45 s).
     "trackerauth.fetch": 150.0,

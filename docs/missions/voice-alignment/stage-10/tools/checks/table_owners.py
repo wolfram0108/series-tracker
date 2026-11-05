@@ -42,6 +42,7 @@ OWNERS: dict[str, tuple[str, str]] = {
     "torrent_progress": ("torrents", "migration 0031: 'owned by torrents alone'; docstring of modules/torrents/repository.py"),
     "media_items": ("scan", "ARCHITECTURE.md section 3 and docstring of modules/scan/repository.py: the rows belong to scan"),
     "download_tasks": ("downloads", "docstring of modules/downloads/module.py: 'Владение: download_tasks'"),
+    "pack_publications": ("downloads", "migration 0038: 'The table belongs to downloads'; docstring of modules/downloads/packing.py"),
     "slicing_tasks": ("slicing", "docstring of modules/slicing/module.py: 'Владение: slicing_tasks, sliced_files'"),
     "sliced_files": ("slicing", "docstring of modules/slicing/module.py"),
     "renaming_tasks": ("renaming", "docstring of modules/renaming/repository.py"),
@@ -67,6 +68,7 @@ OWNERS: dict[str, tuple[str, str]] = {
     "composition_state": ("composition", "migration 0027 (composition); docstring of modules/composition/repository.py"),
     "composition_sources": ("composition", "migration 0027 (composition)"),
     "composition_rows": ("composition", "migration 0027 (composition)"),
+    "voice_orders": ("composition", "migration 0036 (composition): the order of the voice-overs of a season"),
     "unknown_voices": ("composition", "migration 0027 (composition)"),
     "output_settings": ("composition", "migration 0027 (composition)"),
 }

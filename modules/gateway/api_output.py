@@ -16,7 +16,7 @@ from core.contracts import (CompositionGetRequest, CompositionReply, OutputSwitc
                             VoiceOrderSet,
                             SettingsSet)
 
-from .routing import refusal
+from .routing import admitted, refusal
 from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, OkResponse, OutputSettingsReset, OutputSettingsSet,
                       VoiceOrderBody,
                       OutputSwitchBody)
@@ -85,7 +85,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         as references: the episode gets the mark `off`, or its reference back."""
         command = _contract(OutputSwitch, series_id=series_id, **body.model_dump())
         try:
-            await gw.request("scan.output.switch", command.model_dump(mode="json"))
+            async with admitted(gw, series_id):
+                await gw.request("scan.output.switch", command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -97,7 +98,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         that the registry does not know is refused with its code (`unknown_lever`, `bad_target`, `bad_value`)."""
         command = _contract(SettingsSet, series_id=series_id, **body.model_dump())
         try:
-            await gw.request("composition.settings.set", command.model_dump(mode="json"))
+            async with admitted(gw, series_id):
+                await gw.request("composition.settings.set", command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -109,7 +111,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         containers follow it at the next sync; refused while a sync of the series is under way."""
         command = _contract(VoiceOrderSet, series_id=series_id, **body.model_dump())
         try:
-            await gw.request("composition.voice_order.set", command.model_dump(mode="json"))
+            async with admitted(gw, series_id):
+                await gw.request("composition.voice_order.set", command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
@@ -120,7 +123,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """Takes the levers of a level (or the one named) back to the level above."""
         command = _contract(SettingsReset, series_id=series_id, **body.model_dump())
         try:
-            await gw.request("composition.settings.reset", command.model_dump(mode="json"))
+            async with admitted(gw, series_id):
+                await gw.request("composition.settings.reset", command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}

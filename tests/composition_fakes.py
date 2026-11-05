@@ -265,6 +265,7 @@ class FakeVoices(BaseModule):
     def __init__(self, bus) -> None:
         self.groups: dict[str, list[str]] = {}
         self.asked: list[list[str]] = []
+        self.values: list[dict | None] = []  # the stored settings a request named (a run's snapshot), or None
         self.garbage = False
         super().__init__(bus)
 
@@ -272,8 +273,10 @@ class FakeVoices(BaseModule):
         self.handle("voices.groups.resolve", self.on_resolve)
 
     async def on_resolve(self, env) -> dict:
-        names = GroupsResolveRequest.model_validate(env.payload).names
+        request = GroupsResolveRequest.model_validate(env.payload)
+        names = request.names
         self.asked.append(names)
+        self.values.append(request.values)
         if self.garbage:
             return {"groups": "not a mapping"}
         owner = {fold_name(trigger): group for group, triggers in self.groups.items() for trigger in triggers}

@@ -87,9 +87,9 @@ def test_a_build_that_is_not_what_was_asked_says_why(media, case, expected):
     asyncio.run(container.build(out, video, "1:a", [AudioIn("ПВА ШОУ", video, 0, "1:a")]))
     made = None if case == "unreadable" else asyncio.run(container.contents(out))
     identity = "2:b" if case == "video" else "1:a"
-    labels = ["ruchime"] if case == "tracks" else ["ПВА ШОУ"]
+    signature = [("ruchime", "", False)] if case == "tracks" else [("ПВА ШОУ", "", False)]
     duration = 5.0 if case == "length" else 3.0
-    assert container.problem_of(made, identity, labels, duration) == expected
+    assert container.problem_of(made, identity, signature, duration) == expected
 
 
 def test_a_file_not_built_here_reads_with_no_identity_and_its_tracks_by_title(media):

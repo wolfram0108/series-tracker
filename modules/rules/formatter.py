@@ -98,7 +98,7 @@ def format_name(series: dict, metadata: dict,
 
     extension = ".mkv"
     if series.get("kind") == SeriesKind.VIDEO:
-        # A download is an .mp4 until the end of its sync packs it into the container of the episode (ЭТАП_11): a packed
+        # A download is an .mp4 until the end of its sync packs it into the container of the episode (stage 11): a packed
         # file keeps its .mkv through every renaming.
         packed = bool(original_filename) and os.path.splitext(original_filename)[1].lower() == ".mkv"
         extension = ".mkv" if packed else ".mp4"

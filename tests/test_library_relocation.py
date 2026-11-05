@@ -196,7 +196,7 @@ async def test_a_failed_move_fails_the_sync_keeps_its_plan_and_releases_busy(sys
     # busy снят несмотря на ошибку (находка 36) — карточка доступна
     series = await probe.request("catalog.series.get", {"series_id": 2}, timeout=5)
     assert series["is_busy"] is False
-    assert _save_path(db_path) == old_dir  # путь не переключён
+    assert _save_path(db_path) == old_dir  # the path is not switched
     fake.fail_set_location = False  # the next sync makes the move
     assert await apply(probe) == {"moved": True} and _save_path(db_path) == new_dir
 

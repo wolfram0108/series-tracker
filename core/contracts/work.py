@@ -6,7 +6,9 @@ know who works for the object, and the executor does not ask the owner what to d
 """
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 WORK_WITHDRAWN = "work.withdrawn"
 # A sync of a series is one run: it opens with the sync and closes when every work it gave out has ended (scan owns it).
@@ -25,11 +27,13 @@ class RunChanged(BaseModel):
 
 class WorkState(BaseModel):
     """Whether `owner` has live work of the series: a download that waits or runs, a voice-over admitted and not at
-    its end. Sent when it changes, and asked as `<owner>.work.get {series_id}` -> WorkState."""
+    its end. Sent when it changes, and asked as `<owner>.work.get {series_id}` -> WorkState. `seq` grows with every
+    state the owner counts (core.work_report): of two records of one owner the one with the greater `seq` is in force."""
 
     owner: str
     series_id: int
     active: bool
+    seq: int = 0
 
 
 class WorkWithdrawn(BaseModel):
@@ -38,3 +42,13 @@ class WorkWithdrawn(BaseModel):
 
     series_id: int
     keys: list[str] | None = None
+
+
+class RunSnapshot(BaseModel):
+    """The configuration a run works by (И-60): taken when the sync starts, kept with its command (it outlives a restart),
+    and given to every step of the run that would read it. `profiles` are the rules of each profile the sources of the
+    series are read by, as stored by `rules`; `voices` are the stored settings of the voice-overs (groups of names, the
+    order of the sources, groups of players). What the user changes in them meanwhile counts from the next run."""
+
+    profiles: dict[int, list[dict[str, Any]]] = Field(default_factory=dict)
+    voices: dict[str, Any] = Field(default_factory=dict)

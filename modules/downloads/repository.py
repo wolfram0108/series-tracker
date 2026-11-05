@@ -16,6 +16,7 @@ file takes its name the plan is read again (`begin_publish`).
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Iterable
 
@@ -386,6 +387,33 @@ class DownloadsRepository:
              for uid in losers]
             + [("UPDATE media_items SET status='completed', final_filename=?, rename_to=NULL WHERE unique_id=?",
                 (filename, winner))])
+
+    # --- the journal of the publications of containers (pack_publications, ЭТАП_11) ----------------------------------
+
+    _PUBLICATION_LISTS = ("signature", "losers", "leftovers", "dub_ids")
+
+    async def publication_begin(self, record: dict) -> int:
+        """What a publication of a container must do, written before its build: kept until the publication is whole."""
+        values = {**record, **{name: json.dumps(record[name], ensure_ascii=False) for name in self._PUBLICATION_LISTS},
+                  "state": "building", "created_at": datetime.now(timezone.utc).isoformat()}
+        names = ("series_id", "unique_id", "name", "staging", "identity", *self._PUBLICATION_LISTS, "state", "created_at")
+        return await self._db.insert(
+            f"INSERT INTO pack_publications ({', '.join(names)}) VALUES ({', '.join('?' * len(names))})",
+            tuple(values[name] for name in names))
+
+    async def publication_placed(self, publication_id: int) -> None:
+        await self._db.execute("UPDATE pack_publications SET state='placed' WHERE id=?", (publication_id,))
+
+    async def publication_end(self, publication_id: int) -> None:
+        await self._db.execute("DELETE FROM pack_publications WHERE id=?", (publication_id,))
+
+    async def publications(self, series_id: int) -> list[dict]:
+        rows = await self._db.fetch_all("SELECT * FROM pack_publications WHERE series_id=? ORDER BY id", (series_id,))
+        return [{**row, **{name: json.loads(row[name]) for name in self._PUBLICATION_LISTS}} for row in rows]
+
+    async def drop_publications(self, series_id: int) -> None:
+        """A deleted series takes its journal with it; its files are not removed (deleting a series deletes no files)."""
+        await self._db.execute("DELETE FROM pack_publications WHERE series_id=?", (series_id,))
 
     async def completed_items(self, series_id: int) -> list[dict]:
         return await self._db.fetch_all(

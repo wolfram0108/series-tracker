@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from core import BaseModule, Bus, Runner
+from core.contracts.availability import Action, NotAllowed, refusal
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.gateway import GatewayModule
@@ -75,7 +76,7 @@ class Neighbours(BaseModule):
 
     def __init__(self, bus):
         self.calls: list[tuple[str, dict]] = []
-        self.active_renaming: list[dict] = []
+        self.sync_running = False
         super().__init__(bus)
 
     def register(self):
@@ -100,8 +101,12 @@ class Neighbours(BaseModule):
             self.calls.append(("reprocess", env.payload))
             return {"renamed": 0}
 
-        async def tasks_active(env):
-            return self.active_renaming
+
+        async def series_run(env):
+            self.calls.append(("scan.series.run", env.payload))
+            if self.sync_running:
+                raise NotAllowed(refusal(Action.SYNC, "scanning"))
+            return {"changed": False}
 
         async def torrents_composition(env):
             self.calls.append(("torrents.composition", env.payload))
@@ -116,7 +121,7 @@ class Neighbours(BaseModule):
         self.handle("rules.format_filename", format_filename)
         self.handle("torrents.db.files.for_series", files_for_series)
         self.handle("renaming.reprocess", reprocess)
-        self.handle("renaming.tasks.active", tasks_active)
+        self.handle("scan.series.run", series_run)
         self.handle("torrents.composition", torrents_composition)
 
 
@@ -252,16 +257,18 @@ async def test_rename_preview_shape(db_path, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_reprocess_409_and_command(system):
+async def test_reprocess_is_a_sync_without_download_and_is_refused_while_one_runs(system):
+    """The files take the names of the rules in a sync alone (И-59): the route starts one that fetches nothing and never
+    renames by itself; while a sync of the series runs it is refused with the reason of the table of what is allowed."""
     bus, _, client, neighbours = system
     resp = await client.post("/api/series/2/reprocess")
     assert resp.status_code == 200
-    await settle(bus, neighbours)  # the command is background work of the gateway: it is done when the bus is quiet
-    assert ("reprocess", {"series_id": 2}) in neighbours.calls
-
-    neighbours.active_renaming = [{"id": 9, "status": "in_progress"}]
+    assert ("scan.series.run", {"series_id": 2, "download": False}) in neighbours.calls
+    neighbours.sync_running = True
     resp = await client.post("/api/series/2/reprocess")
-    assert resp.status_code == 409
+    assert resp.status_code == 409 and "not_allowed" in resp.json()["error"]
+    await settle(bus, neighbours)
+    assert not any(call[0] == "reprocess" for call in neighbours.calls)
 
 
 @pytest.mark.asyncio

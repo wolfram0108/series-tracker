@@ -236,7 +236,7 @@ async def test_the_mechanism_holds_its_invariants(phase, operation, failure, tem
                 await h.scan()
                 break
             except BusRequestError as exc:
-                # The disk changes in a sync alone (И-59), so a write the world fails once fails that sync; the user
+                # The disk changes in a sync alone (I-59), so a write the world fails once fails that sync; the user
                 # runs it again, and the next one finishes what the failed one left.
                 if attempt or "OSError" not in str(exc):
                     raise

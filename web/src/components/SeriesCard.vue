@@ -36,7 +36,7 @@ const stateConfig: Record<string, { title: string; icon: string }> = {
 
 const states = computed(() => props.series.statuses ?? [])
 const busy = computed(() => Boolean(props.series.is_busy) || Boolean(props.saving))
-// The read of a site page the scan of the series waits for (Р-36): pushed by the core, gone when the wait ends.
+// The read of a site page the scan of the series waits for (R-36): pushed by the core, gone when the wait ends.
 const reads = useSeriesReadsStore()
 const reading = computed(() => {
   const lead = reads.lead(props.series.id)

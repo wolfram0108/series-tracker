@@ -37,7 +37,7 @@ class Stored:
     sources: list[StoredSource] = field(default_factory=list)
     numbering: dict[str, int] = field(default_factory=dict)
     records: list[SettingRecord] = field(default_factory=list)
-    # season -> the voice-over groups in the order of the tracks of the container (ЭТАП_11)
+    # season -> the voice-over groups in the order of the tracks of the container (stage 11)
     orders: dict[int, list[str]] = field(default_factory=dict)
 
 

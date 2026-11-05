@@ -37,7 +37,7 @@ export interface PlayerView {
   groups: number
   /** The episodes the constructor took from the player, with the gaps left in, one line to a season: `1-50 (480p-2160p), 61-120`. */
   coverage: string[]
-  /** One line to a voice-over: its episodes, its name and its group (or `Нет`); both lists come from the rows of the constructor. */
+  /** One line to a voice-over: its episodes, its name and its group (or the word for none); both lists come from the rows of the constructor. */
   voiceLines: string[]
   off: boolean
   /** The player shows a catalog of several seasons, so the source may name the one it takes. */
@@ -214,7 +214,7 @@ export function pageHost(url: string): string {
   }
 }
 
-/** The phase, how far it is and how fast (Р-36); a read that does not know its total yet says only the phase. */
+/** The phase, how far it is and how fast (R-36); a read that does not know its total yet says only the phase. */
 export function progressText(progress: PageProgress): string {
   const phase = phaseText(progress.phase)
   if (progress.total <= 0) return phase

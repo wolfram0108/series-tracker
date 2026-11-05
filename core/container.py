@@ -3,9 +3,10 @@
 Nothing is encoded again: the video and every audio track are copied as they are (`-c copy`), the way track-muxer
 builds its containers (`mux/build.py`): the first track is the default one, the others are not; the tracks interleave
 evenly (`-max_interleave_delta 0`). The container says what it holds by its own tags, so that the file is its own
-ledger: `ST_VIDEO` (the identity of the video), and for every audio track `ST_VOICE` (the voice-over group) and
-`ST_ALIGNED_TO` (the identity of the video the track was aligned to) and `ST_OWN` (1 for the video's own sound). Whether a build is done is told by reading the
-result back (`contents`), never by the code ffmpeg returned.
+ledger: `ST_VIDEO` (the identity of the video), and for every audio track `ST_VOICE` (the name of the voice-over group, also
+its title), `ST_DUB` (the key of the voice-over, which a rename of its group does not change: the track is known by it),
+`ST_ALIGNED_TO` (the identity of the video the track was aligned to) and `ST_OWN` (1 for the video's own sound). Whether a
+build is done is told by reading the result back (`contents`), never by the code ffmpeg returned.
 """
 from __future__ import annotations
 
@@ -42,6 +43,8 @@ class AudioIn:
     aligned_to: str
     # The video's own sound (not a voice-over aligned to it): what an alignment of a new voice-over listens to.
     own: bool = False
+    # The key of the voice-over (voices' voice_key): what the track is known by; the label is only its name.
+    key: str = ""
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,7 @@ class AudioOut:
     default: bool
     language: str = ""
     own: bool = False
+    key: str = ""
 
 
 @dataclass(frozen=True)
@@ -66,6 +70,11 @@ class Contents:
     @property
     def labels(self) -> list[str]:
         return [track.label for track in self.audio]
+
+    @property
+    def signature(self) -> list[tuple[str, str, bool]]:
+        """What the tracks are, in order: name, key, own sound."""
+        return [(track.label, track.key, track.own) for track in self.audio]
 
     @property
     def own_track(self) -> int:
@@ -93,6 +102,7 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     for number, track in enumerate(tracks):
         cmd += [f"-metadata:s:a:{number}", f"title={track.label}", f"-metadata:s:a:{number}", f"language={LANGUAGE}",
                 f"-metadata:s:a:{number}", f"ST_VOICE={track.label}",
+                f"-metadata:s:a:{number}", f"ST_DUB={track.key}",
                 f"-metadata:s:a:{number}", f"ST_ALIGNED_TO={track.aligned_to}",
                 f"-metadata:s:a:{number}", f"ST_OWN={1 if track.own else 0}",
                 f"-disposition:a:{number}", "default" if number == 0 else "0"]
@@ -105,18 +115,23 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
         return f"ffmpeg_failed: {err.decode(errors='replace').strip()[-300:]}"
     made = await contents(output)
     expected = await contents(video)
-    return problem_of(made, video_identity, [track.label for track in tracks],
-                      expected.duration if expected is not None else None)
+    return problem_of(made, video_identity, signature_of(tracks), expected.duration if expected is not None else None)
 
 
-def problem_of(made: Contents | None, video_identity: str, labels: Sequence[str], duration: float | None) -> str | None:
-    """Why a built container is not the one asked for; None when it is: its video, its tracks in order, the first the
-    default one, and the length of the video it was built from."""
+def signature_of(tracks: Sequence[AudioIn]) -> list[tuple[str, str, bool]]:
+    """What a container built of `tracks` holds, in the terms of `Contents.signature`."""
+    return [(track.label, track.key, track.own) for track in tracks]
+
+
+def problem_of(made: Contents | None, video_identity: str, signature: Sequence[tuple[str, str, bool]],
+               duration: float | None) -> str | None:
+    """Why a built container is not the one asked for; None when it is: its video, its tracks in order (name, key, own
+    sound), the first the default one, and the length of the video it was built from."""
     if made is None:
         return "container_unreadable"
     if not made.has_video or made.video != video_identity:
         return "container_video_wrong"
-    if made.labels != list(labels):
+    if made.signature != [tuple(each) for each in signature]:
         return "container_tracks_wrong"
     if made.audio and not (made.audio[0].default and not any(track.default for track in made.audio[1:])):
         return "container_default_wrong"
@@ -147,7 +162,8 @@ async def contents(path: str, *, timeout: float = READ_TIMEOUT_S) -> Contents | 
         audio.append(AudioOut(index=number, label=own.get("st_voice") or own.get("title", ""),
                               aligned_to=own.get("st_aligned_to", ""),
                               default=bool((stream.get("disposition") or {}).get("default")),
-                              language=own.get("language", ""), own=own.get("st_own") == "1"))
+                              language=own.get("language", ""), own=own.get("st_own") == "1",
+                              key=own.get("st_dub", "")))
     try:
         duration = float(info.get("format", {}).get("duration") or 0.0)
     except ValueError:

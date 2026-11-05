@@ -26,7 +26,7 @@ const canSync = computed(() => {
   const table = output.composition.value?.availability
   return table ? allowedIn(table, "sync", passing.value ? "scanning" : "idle") : !passing.value
 })
-// The reads of site pages a pass of this series waits for (Р-36), as the core pushes them.
+// The reads of site pages a pass of this series waits for (R-36), as the core pushes them.
 const reads = useSeriesReadsStore()
 const reading = computed(() => reads.forSeries(props.seriesId)
   .map((read) => ({ key: read.sourceId, text: t("output.reading", { site: pageHost(read.url), text: progressText(read) }) })))

@@ -181,7 +181,7 @@ from core import BaseModule, BusRequestError
 from pydantic import ValidationError
 
 from core import container
-from core.contracts import (RUN_CHANGED, WORK_STATE, WORK_WITHDRAWN, RunChanged, WorkState, WorkWithdrawn, AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
+from core.contracts import (RUN_CHANGED, WORK_WITHDRAWN, RunChanged, WorkWithdrawn, AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
                             DubRecord, DubsSnapshot, DubStatus as S, GroupsResolveReply, GroupsResolveRequest,
                             JobStatus, Reference, ReferenceChanged, SnapshotItem, SubmitOutcome, SubmitReply,
                             VoiceSettingsDraft, VoiceSettingsSaved)
@@ -189,6 +189,7 @@ from core import storage
 from core.storage import DEFAULT_TIMEOUT_S as IO_TIMEOUT_S, MOVE_TIMEOUT_S
 from core.db import Database
 from core.envelope import Envelope
+from core.work_report import WorkReport
 from core.reasons import describe, parse as parse_reason, reason
 
 from . import editor, planning
@@ -296,7 +297,7 @@ class VoicesModule(BaseModule):
         # a change of the layout or a reference that comes meanwhile is planned when the run ends.
         self._in_run: set[int] = set()
         self._owed_plans: set[int] = set()
-        self._work_told: dict[int, bool] = {}
+        self._work = WorkReport(self.name, self._has_work, self.publish_event)
         super().__init__(bus)
         self._recovery = Recovery(self.log, pause=_pause, report_after=lambda: SUBMIT_RETRIES)
         self._cleanup = Cleanup(self.repo, self._output, self.log, io=self._io, request=self.request,
@@ -306,6 +307,7 @@ class VoicesModule(BaseModule):
         self.handle("voices.groups.resolve", self.on_groups_resolve)
         self.handle("voices.dubs.get", self.on_dubs_get)
         self.handle("voices.settings.get", self.on_settings_get)
+        self.handle("voices.settings.export", self.on_settings_export)
         self.handle("voices.settings.set", self.on_settings_set)
         self.handle("voices.dispatch", self.on_dispatch, concurrent=True)
         self.handle("voices.settle", self.on_settle, concurrent=True)
@@ -401,10 +403,12 @@ class VoicesModule(BaseModule):
 
             storage.when_free(path, free)
 
-    async def _settings(self) -> VoiceSettings:
-        """Every setting of the module in one read; a problem with a value is logged once, then the default is used."""
-        reply = await self.request("settings.values.by_prefix", {"prefix": PREFIX})
-        settings = parse(reply.get("values") or {})
+    async def _settings(self, values: dict | None = None) -> VoiceSettings:
+        """Every setting of the module in one read, or the values a run took (RunSnapshot.voices); a problem with a value
+        is logged once, then the default is used."""
+        if values is None:
+            values = (await self.request("settings.values.by_prefix", {"prefix": PREFIX})).get("values") or {}
+        settings = parse(values)
         for problem in sorted(set(settings.problems) - self._reported):
             self.log.warning("озвучки: настройка: %s", problem)
         self._reported = set(settings.problems)
@@ -424,16 +428,22 @@ class VoicesModule(BaseModule):
 
 
     async def on_groups_resolve(self, env: Envelope) -> dict:
-        names = GroupsResolveRequest.model_validate(env.payload).names
-        groups = (await self._settings()).voices
-        return GroupsResolveReply(groups={name: groups.group_of(name) for name in names}).model_dump(mode="json")
+        request = GroupsResolveRequest.model_validate(env.payload)
+        groups = (await self._settings(request.values)).voices
+        return GroupsResolveReply(groups={name: groups.group_of(name) for name in request.names}).model_dump(mode="json")
 
     async def on_dubs_get(self, env: Envelope) -> dict:
         rows = await self.repo.for_series(int(env.payload["series_id"]))
         return {"items": [self._record(row).model_dump(mode="json") for row in rows]}
 
     async def on_settings_get(self, env: Envelope) -> dict:
-        return editor.view(await self._settings()).model_dump(mode="json")
+        """What applies now; with `values` (RunSnapshot.voices), what applied when a run took them."""
+        return editor.view(await self._settings((env.payload or {}).get("values"))).model_dump(mode="json")
+
+    async def on_settings_export(self, env: Envelope) -> dict:
+        """The stored settings as they are, for the snapshot of a run (RunSnapshot.voices)."""
+        reply = await self.request("settings.values.by_prefix", {"prefix": PREFIX})
+        return {"values": reply.get("values") or {}}
 
     async def on_settings_set(self, env: Envelope) -> dict:
         draft = VoiceSettingsDraft.model_validate(env.payload)
@@ -451,7 +461,7 @@ class VoicesModule(BaseModule):
         series_id = int(env.payload["series_id"])
         async with self._locks.setdefault(series_id, asyncio.Lock()):
             try:
-                await self._dispatch(series_id)
+                await self._dispatch(series_id, env.payload.get("settings"))
             except (BusRequestError, LookupError, ValueError, OSError, asyncio.TimeoutError) as exc:
                 self.log.warning("сериал %d: озвучки не подготовлены: %s", series_id, exc)
                 raise  # the sender keeps its command: the reply is the word that the work is written down
@@ -463,17 +473,17 @@ class VoicesModule(BaseModule):
         async with self._locks.setdefault(series_id, asyncio.Lock()):
             if series_id in self._deleted or not await self._is_video(series_id):
                 return
-            await self._plan_series(series_id, offer=False, settle=True)
+            await self._plan_series(series_id, offer=False, settle=True, values=env.payload.get("settings"))
         self._kick(series_id)
 
-    async def _dispatch(self, series_id: int) -> None:
+    async def _dispatch(self, series_id: int, values: dict | None = None) -> None:
         """The explicit sync: the series may download from now on, and what failed is offered again."""
         if series_id in self._deleted or not await self._is_video(series_id):
             return
         if not await self._downloads_root():
             self.log.warning("сериал %d: озвучки записаны, но не скачиваются: рабочая папка не задана в настройках "
                              "сервера выравнивания", series_id)
-        await self._plan_series(series_id, offer=True)
+        await self._plan_series(series_id, offer=True, values=values)
         for row in await self.repo.for_series(series_id):
             if row["status"] == S.FAILED:
                 self.log.warning("сериал %d, s%02de%02d: озвучка %s недоступна: %s", series_id,
@@ -495,12 +505,16 @@ class VoicesModule(BaseModule):
         self._want_plan(series_id)
 
     async def on_tracks_get(self, env: Envelope) -> dict:
-        """The tracks that are at their end (placed) of a series, for the packing of its containers (ЭТАП_11): where the
-        file of each lies (none once it is packed) and the identity of the video it is aligned to."""
+        """The voice-overs of a series, for the packing of its containers (ЭТАП_11): each by its key (the track of it in a
+        container carries the same key), with its name, its step (`placed` — at its end), where its own file lies (none
+        once it is packed) and the identity of the video it is aligned to. A voice-over the plan holds at any step keeps
+        its track in the container; one that left the plan has no row here."""
         rows = await self.repo.for_series(int(env.payload["series_id"]))
         return {"tracks": [{"dub_id": row["id"], "season": row["season"], "episode": row["episode"], "part": row["part"],
-                            "label": row["voice_label"], "path": row["output_path"], "aligned_to": row.get("aligned_to"),
-                            "ref_uid": row["ref_uid"], "ref_path": row["ref_path"]} for row in rows if row["status"] == S.PLACED]}
+                            "key": row["voice_key"], "label": row["voice_label"], "status": row["status"],
+                            "path": row["output_path"] if row["status"] == S.PLACED else None,
+                            "aligned_to": row.get("aligned_to"), "ref_uid": row["ref_uid"], "ref_path": row["ref_path"]}
+                           for row in rows]}
 
     async def on_tracks_packed(self, env: Envelope) -> None:
         """The tracks went into the container of their episode: their own files are gone, the container holds them."""
@@ -563,7 +577,8 @@ class VoicesModule(BaseModule):
             raise
         return series.get("kind") == "video"
 
-    async def _plan_series(self, series_id: int, *, offer: bool, settle: bool | None = None) -> None:
+    async def _plan_series(self, series_id: int, *, offer: bool, settle: bool | None = None,
+                           values: dict | None = None) -> None:
         """Read the layout and the references, plan the voice-overs, bring the rows in line, and begin what is allowed.
 
         What the plan alone takes away — a work withdrawn, a track removed, a job cancelled, a track renamed after its
@@ -575,7 +590,8 @@ class VoicesModule(BaseModule):
             await self.request("composition.get", {"series_id": series_id, "include_excluded": True}))
         references = [Reference.model_validate(item) for item in
                       await self.request("scan.output.get", {"series_id": series_id})]
-        settings = await self._settings()
+        # A sync plans by the settings its run took (RunSnapshot.voices); a recount after the run by the current ones.
+        settings = await self._settings(values)
         plan = planning.plan(layout.rows, references, layout.settings, settings.priority, settings.players)
         self.log.info("сериал %d: озвучки — раскладка %d, серий с референсом %d, озвучек к плану %d", series_id,
                       layout.rev, len(plan.with_reference), len(plan.dubs))
@@ -919,15 +935,11 @@ class VoicesModule(BaseModule):
         return any(row["admitted"] and row["status"] not in FINAL for row in await self.repo.for_series(series_id))
 
     async def on_work_get(self, env: Envelope) -> dict:
-        series_id = int(env.payload["series_id"])
-        return WorkState(owner=self.name, series_id=series_id, active=await self._has_work(series_id)).model_dump()
+        return (await self._work.tell(int(env.payload["series_id"]))).model_dump()
 
     async def _tell_work(self, series_id: int) -> None:
         """The run of the series hears when this module's work of it begins or ends (the run owner is scan)."""
-        active = await self._has_work(series_id)
-        if self._work_told.get(series_id) != active:
-            self._work_told[series_id] = active
-            self.publish_event(WORK_STATE, WorkState(owner=self.name, series_id=series_id, active=active).model_dump())
+        await self._work.tell(series_id)
 
     def _is_fetching(self, row: dict) -> bool:
         """Whether the download behind a voice-over has begun: its own, or the one of the file it reads."""

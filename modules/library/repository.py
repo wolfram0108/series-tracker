@@ -10,7 +10,7 @@ class LibraryRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    # planned — written by a save, made by the next sync (И-59); in_progress — being made; pending — a move written
+    # planned — written by a save, made by the next sync (I-59); in_progress — being made; pending — a move written
     # before the plans, made when found.
     async def plan(self, series_id: int, new_path: str) -> None:
         """One plan per series: a later save replaces the path of the earlier one."""

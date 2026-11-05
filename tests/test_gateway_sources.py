@@ -81,10 +81,11 @@ async def test_only_the_fields_sent_change_and_a_choice_can_be_taken_back(tmp_pa
     async with serving(tmp_path, answers) as (client, owners, _, spy):
         response = await client.put("/api/series/1/sources/4", json={"parser_profile_id": None})
     assert response.status_code == 200 and response.json() == {"success": True, "applied": {"parser_profile_id": None}}
-    # The series of the path goes to the catalog, which refuses a source of another series; the gateway asks nothing else.
+    # The series of the path goes to the catalog, which refuses a source of another series; the gateway asks nothing else
+    # than that, inside the admission of the change by the owner of the runs of the series.
     assert owners.asked("catalog.sources.update") == [{
         "series_id": 1, "source_id": 4, "fields": {"parser_profile_id": None}}]
-    assert topics(spy) == ["catalog.sources.update"]
+    assert topics(spy) == ["scan.edit.begin", "catalog.sources.update", "scan.edit.end"]
 
 
 async def test_every_changeable_field_of_a_source_reaches_the_catalog(tmp_path):
@@ -307,3 +308,12 @@ async def test_the_points_of_the_old_reading_are_gone(tmp_path, method, path):
     async with serving(tmp_path, {}) as (client, _, _, _):
         response = await getattr(client, method)(path, json={})
     assert response.status_code in (404, 405)
+
+
+async def test_a_change_of_a_source_while_a_sync_of_the_series_runs_is_refused_before_anything_is_written(tmp_path):
+    """Н-8: the owner of the runs refuses to admit the change; the catalog is not asked."""
+    from core.contracts.availability import Action, NotAllowed, refusal
+    answers = {"scan.edit.begin": NotAllowed(refusal(Action.EDIT, "scanning")), "catalog.sources.update": {"applied": {}}}
+    async with serving(tmp_path, answers) as (client, owners, _, spy):
+        response = await client.put("/api/series/1/sources/4", json={"parser_profile_id": None})
+    assert response.status_code == 409 and owners.asked("catalog.sources.update") == []

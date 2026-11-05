@@ -1466,7 +1466,7 @@ async def test_a_variant_is_judged_by_the_lines_of_the_level_it_is_set_for_as_th
         await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=2)
 
 
-# --- a sync of the series is one run: its layout is the snapshot, its levers are not changed (ЭТАП_11) ---------------
+# --- a sync of the series is one run: its layout is the snapshot, its levers are not changed (stage 11) ---------------
 
 @pytest.mark.asyncio
 async def test_a_series_whose_sync_is_under_way_keeps_its_layout_and_refuses_its_levers_until_the_run_ends(system):
@@ -1494,6 +1494,29 @@ async def test_a_series_whose_sync_is_under_way_keeps_its_layout_and_refuses_its
     await s.bus.settled()
     assert {r.season for r in (await s.get(series_id)).rows} == {2}  # what was owed is counted once the run is over
 
+
+
+@pytest.mark.asyncio
+async def test_the_count_a_sync_asks_for_reads_the_rules_and_the_groups_of_its_snapshot(system):
+    """Н-5: the rules of a profile and the settings of the voice-overs a run took when it started are what its count
+    applies; a count after the run applies the stored ones again."""
+    from core.contracts import RUN_CHANGED
+    s = system
+    series_id = await laid_out(s, page(*season_rows(1, range(1, 3))))
+    snapshot = {"profiles": {"7": [{"id": 1, "name": "как в начале прогона", "conditions": []}]},
+                "voices": {"voices.groups": "{}"}}
+    s.probe.publish_event(RUN_CHANGED, {"series_id": series_id, "active": True})
+    await s.bus.settled()
+    s.rules.calls.clear()
+    s.voices.values.clear()
+    await s.probe.request("composition.recompute", {"series_id": series_id, "snapshot": snapshot}, timeout=STUCK_S)
+    assert [call.rules for call in s.rules.calls] == [snapshot["profiles"]["7"]]
+    assert s.voices.values == [snapshot["voices"]]
+    s.probe.publish_event(RUN_CHANGED, {"series_id": series_id, "active": False})  # nothing was owed: no count
+    await s.bus.settled()
+    s.rules.calls.clear()
+    await recompute(s, series_id)
+    assert [call.rules for call in s.rules.calls] == [None]
 
 
 # --- the order of the voice-overs of a season (ЭТАП_11) ----------------------------------------------------------------

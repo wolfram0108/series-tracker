@@ -51,7 +51,7 @@ function drop(target: number): void {
   align-items: center; padding: 0.4em 0.6em; border: 1px solid var(--border-color, currentColor);
   border-radius: 0.4em; cursor: grab; background: var(--surface-card, transparent);
 }
-.voice-order-item.is-over { outline: 2px dashed var(--primary-color, currentColor); }
+.voice-order-item.is-over { outline: 0.125rem dashed var(--primary-color, currentColor); }
 .voice-order-item.is-busy { cursor: not-allowed; opacity: 0.6; }
 .voice-order-handle, .voice-order-position { color: var(--text-muted); }
 </style>

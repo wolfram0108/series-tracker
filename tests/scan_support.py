@@ -96,6 +96,18 @@ class World(BaseModule):
         self.settings_values = {"scan_interval_minutes": "60"}
         # Whether each executor has work of the series when a run asks (`<owner>.work.get`); none by default.
         self.work: dict[str, bool] = {}
+        # The number of the latest state an executor counted (core.work_report): events and replies carry it.
+        self.seq = 0
+        # An executor whose reply to `<owner>.work.get` waits for this gate (the answer is counted when it was asked).
+        self.work_gates: dict[str, asyncio.Event] = {}
+        # What the packing at the end of a run answers, or its failure; every request is noted.
+        self.pack_reply: dict = {"packed": 0, "failed": 0, "unchanged": 0, "waiting": 0}
+        self.pack_error: str | None = None
+        self.packs = 0
+        # The stored configuration the owners give a run (RunSnapshot), and what every step of the run was given.
+        self.profiles_export: dict = {}
+        self.voices_export: dict = {}
+        self.payloads: dict[str, list[dict]] = {}
         # The folder a save planned for the series (library), made by the first step of a sync, and its failure.
         self.planned_path: str | None = None
         self.move_error: str | None = None
@@ -120,6 +132,9 @@ class World(BaseModule):
         h("voices.settings.get", self.on_voice_settings)
         h("composition.get", self.on_layout)
         h("composition.recompute", self.on_recompute)
+        h("downloads.pack", self.on_pack)
+        h("rules.profiles.export", self.on_profiles_export)
+        h("voices.settings.export", self.on_voices_export)
         h("sources.table.get", self.on_table)
         h("torrents.queue.get", self.on_torrent_queue)
         h("settings.value.get", self.on_setting_get)
@@ -155,14 +170,41 @@ class World(BaseModule):
 
     async def on_dispatch(self, env) -> None:
         self.order.append(f"{env.topic} {env.payload['series_id']}")
+        self.payloads.setdefault(env.topic, []).append(dict(env.payload))
         self.dispatched.put_nowait(env.topic)
 
     async def on_work_get(self, env) -> dict:
         owner = env.topic.split(".")[0]
         self.order.append(f"{env.topic} {env.payload['series_id']}")
-        return {"owner": owner, "series_id": env.payload["series_id"], "active": self.work.get(owner, False)}
+        counted = {"owner": owner, "series_id": env.payload["series_id"], "active": self.work.get(owner, False),
+                   "seq": self.seq}
+        gate = self.work_gates.get(owner)
+        if gate is not None:
+            await gate.wait()
+        return counted
+
+    def tell_work(self, series_id: int, owner: str, active: bool) -> None:
+        """An executor's state changed: a later count than any reply given before."""
+        self.seq += 1
+        self.work[owner] = active
+        self.publish_event("work.series.state", {"owner": owner, "series_id": series_id, "active": active,
+                                                 "seq": self.seq})
+
+    async def on_pack(self, env) -> dict:
+        self.packs += 1
+        if self.pack_error is not None:
+            raise RuntimeError(self.pack_error)
+        return dict(self.pack_reply)
+
+    async def on_profiles_export(self, env) -> dict:
+        return {"profiles": {key: value for key, value in self.profiles_export.items()
+                             if key in env.payload["profile_ids"]}}
+
+    async def on_voices_export(self, env) -> dict:
+        return {"values": dict(self.voices_export)}
 
     async def on_voice_settings(self, env) -> dict:
+        self.payloads.setdefault(env.topic, []).append(dict(env.payload))
         self.order.append("voices.settings.get")
         return VoiceSettingsView(priority=self.priority, voice_groups={}, default_priority=PRIORITY,
                                  rejected=[]).model_dump()
@@ -178,6 +220,7 @@ class World(BaseModule):
 
     async def on_recompute(self, env) -> dict:
         self.order.append("composition.recompute")
+        self.payloads.setdefault(env.topic, []).append(dict(env.payload))
         if self.recompute_error is not None:
             raise ValueError(self.recompute_error)
         return {"rev": self.rev, "changed": False}

@@ -14,6 +14,8 @@ from fastapi.responses import JSONResponse
 
 from core import BusRequestError
 
+from .routing import admitted, refusal
+
 from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, NamingPreviewAccepted, NamingPreviewRequest,
                       OkResponse)
 
@@ -189,10 +191,15 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/series/{series_id}/deep-adoption", response_model=OkResponse,
             response_model_exclude_none=True)
     async def deep_adoption(series_id: int):
-        gw.send_command("slicing.deep_adoption", {"series_id": series_id})
+        """The compilations whose children all lie on the disk are adopted into the plan: a change of the series,
+        admitted like any other and answered when it is written."""
+        try:
+            async with admitted(gw, series_id):
+                reply = await gw.request("slicing.deep_adoption", {"series_id": series_id})
+        except BusRequestError as exc:
+            return refusal(exc)
         return {"success": True,
-                "message": "Процесс глубокого усыновления запущен "
-                           "в фоновом режиме."}
+                "message": f"Усыновлено компиляций: {reply.get('adopted', 0)}."}
 
     # --- rename preview ---------------------------------------------------------------
 
@@ -210,17 +217,14 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/series/{series_id}/reprocess", response_model=OkResponse,
             response_model_exclude_none=True, responses=_ERR)
     async def reprocess(series_id: int):
-        active = await gw.request("renaming.tasks.active",
-                                  {"series_id": series_id})
-        if active:
-            return JSONResponse(
-                {"success": False,
-                 "error": "Задача на переобработку уже выполняется."},
-                status_code=409)
-        gw.send_command("renaming.reprocess", {"series_id": series_id})
+        """The files take the names of the rules: the disk changes in a sync alone (И-59), so this is a sync of the
+        series that fetches nothing; refused while one runs."""
+        try:
+            await gw.request("scan.series.run", {"series_id": series_id, "download": False})
+        except BusRequestError as exc:
+            return refusal(exc)
         return {"success": True,
-                "message": "Задача на переобработку файлов создана и "
-                           "запущена в фоновом режиме."}
+                "message": "Файлы приведены к правилам синхронизацией."}
 
     # --- имена для теста парсера ----------------------------------------------------
 

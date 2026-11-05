@@ -231,7 +231,7 @@ async def test_a_part_that_leaves_the_plan_loses_its_work_and_its_track_and_the_
     # Part 2 is no longer a part of the episode: its row is gone from the layout and its video from the library.
     route.world.parts = [1]
     os.remove(route.reference_of(2))
-    route.probe.send_command("voices.settle", {"series_id": 7})  # the user's sync (И-59)
+    route.probe.send_command("voices.settle", {"series_id": 7})  # the user's sync (I-59)
 
     async def only_first():
         return [(row["part"], row["status"]) for row in await route.rows()] == [(1, "placed")]

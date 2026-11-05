@@ -661,7 +661,7 @@ def test_a_player_switched_off_or_on_renames_no_group():
 
 
 
-# ---- the order of the voice-overs of a season (ЭТАП_11) ------------------------------------------------------------
+# ---- the order of the voice-overs of a season (stage 11) ------------------------------------------------------------
 
 
 def voiced(*pairs, season=1) -> list[CompositionRow]:

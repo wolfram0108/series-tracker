@@ -54,7 +54,7 @@ class Neighbours(World):
         if self.format_gate is not None:
             await self.format_gate.wait()
         item = env.payload["media_item"]
-        packed = (env.payload.get("original_filename") or "").endswith(".mkv")  # as the real formatter (ЭТАП_11)
+        packed = (env.payload.get("original_filename") or "").endswith(".mkv")  # as the real formatter (stage 11)
         return {"filename": f"Серия {item['episode_start']:02d}.{'mkv' if packed else 'mp4'}"}
 
     async def on_stream(self, env) -> dict:
@@ -165,12 +165,12 @@ async def test_an_episode_the_user_switches_off_during_a_sync_is_refused_and_aft
     waiting = next(key for key, status in rig.tasks().items() if status == "pending")
     episode = rig.query("SELECT episode_start FROM media_items WHERE unique_id=?", (waiting,))[0]["episode_start"]
 
-    await rig.refused(lambda: rig.switch(episode, True))  # the sync is under way: the series is busy (ЭТАП_11)
+    await rig.refused(lambda: rig.switch(episode, True))  # the sync is under way: the series is busy (stage 11)
     assert sorted(rig.tasks().values()) == ["downloading", "pending"]  # the run goes on as it was given
     await rig.free()
     assert sorted(each.name for each in rig.media.iterdir()) == ["Серия 01.mkv", "Серия 02.mkv"]
 
-    await rig.switch(episode, True)  # a plan: the file stays until the next sync (И-59)
+    await rig.switch(episode, True)  # a plan: the file stays until the next sync (I-59)
     assert len(list(rig.media.iterdir())) == 2
     await rig.run(download=False)
     await rig.until(lambda: sorted(each.name for each in rig.media.iterdir()) == [f"Серия {3 - episode:02d}.mkv"],
@@ -251,7 +251,7 @@ async def test_a_replacement_that_cannot_be_fetched_leaves_the_file_of_the_video
     rig.world.rows = [rig.row("a", 1, link="https://v/old")]
     await rig.run()
     await rig.until(lambda: rig.query("SELECT status FROM media_items")[0]["status"] == "completed", "the first video fetched")
-    await rig.free()  # the run's end packs the episode into its container (ЭТАП_11)
+    await rig.free()  # the run's end packs the episode into its container (stage 11)
     [old] = rig.query("SELECT unique_id, final_filename FROM media_items")
 
     rig.downloader.fail_urls.add("https://v/new")
@@ -268,7 +268,7 @@ async def test_a_replacement_that_is_fetched_takes_the_place_of_the_old_file_and
     rig.world.rows = [rig.row("a", 1, link="https://v/old")]
     await rig.run()
     await rig.until(lambda: rig.query("SELECT status FROM media_items")[0]["status"] == "completed", "the first video fetched")
-    await rig.free()  # the run's end packs the episode into its container (ЭТАП_11)
+    await rig.free()  # the run's end packs the episode into its container (stage 11)
     [old] = rig.query("SELECT unique_id, final_filename FROM media_items")
 
     rig.world.rows = [rig.row("a", 1, link="https://v/new")]
@@ -296,7 +296,7 @@ async def test_the_command_to_synchronize_is_kept_until_downloads_has_written_th
     rig.world.format_gate.set()
     await asyncio.wait_for(run, STUCK_S * 2)
     assert list(rig.tasks())
-    await rig.free()  # the command is the run's until every work of it has ended (ЭТАП_11)
+    await rig.free()  # the command is the run's until every work of it has ended (stage 11)
     assert rig.query("SELECT id FROM scan_tasks") == []
 
 

@@ -95,7 +95,6 @@ class RenamingModule(BaseModule):
         self.handle("renaming.reprocess", self.on_reprocess, concurrent=True)
         self.handle("renaming.process_torrent", self.on_process_torrent,
                     concurrent=True)
-        self.handle("renaming.tasks.active", self.on_tasks_active)
         self.handle("renaming.preview", self.on_preview, concurrent=True)
         self.handle("series.deleted", self.on_series_deleted)
         self.handle("system.started", self.on_system_started)
@@ -109,10 +108,6 @@ class RenamingModule(BaseModule):
                           task["series_id"])
             self._tasks.append(asyncio.create_task(
                 self._safe_reprocess(task["series_id"], resume_of=task["id"])))
-
-    async def on_tasks_active(self, env: Envelope) -> list[dict]:
-        """Для is_busy (этап 5 / library)."""
-        return await self.repo.active_for_series(env.payload["series_id"])
 
     async def on_preview(self, env: Envelope) -> dict:
         """Контракт GET rename_preview (Р-21): тот же обход, что

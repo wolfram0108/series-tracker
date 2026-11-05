@@ -77,9 +77,10 @@ import time
 from dataclasses import asdict, dataclass
 
 from core import BaseModule, BusRequestError, storage
-from core.contracts import WORK_STATE, WORK_WITHDRAWN, SeriesKind, SourceType, WorkState, WorkWithdrawn, availability
+from core.contracts import WORK_WITHDRAWN, SeriesKind, SourceType, WorkWithdrawn, availability
 from core.db import Database
 from core.envelope import Envelope
+from core.work_report import WorkReport
 from core.retry import UNTIMED, Budget, retrying
 
 from . import ytdlp
@@ -161,10 +162,10 @@ class DownloadsModule(BaseModule):
         self._last_event = 0.0
         self._stopping = False        # a module that is stopping starts no work
         self._locks: dict[int, asyncio.Lock] = {}  # one look at a series at a time
-        self._work_told: dict[int, bool] = {}  # what the run of each series was last told about the work of it
+        self._work = WorkReport(self.name, self._has_work, self.publish_event)
         super().__init__(bus)
         self.library = Library(self.repo, self._naming, self.log, self._neighbours)
-        self._packing = Packing(self.repo, self._packer, self.request, self.publish_event, self.log, self.library.guard)
+        self._packing = Packing(self.repo, self._packer, self.request, self.publish_event, self.log, self.library)
         self._publication = Publication(self.repo, self.library, self.log, running=lambda task_id: task_id in self._active,
                                         resume=self._look_again, end_task=self._end_task)
 
@@ -357,7 +358,9 @@ class DownloadsModule(BaseModule):
             done = await self._packing.pack(series)
         if done.packed:
             await self._contribute(series_id)
-            self.log.info("серия %d: контейнеров собрано %d, не собрано %d", series_id, done.packed, done.failed)
+        if done.packed or done.failed or done.waiting:
+            self.log.info("серия %d: контейнеров собрано %d, не собрано %d, ждут загрузки %d", series_id, done.packed,
+                          done.failed, done.waiting)
         return asdict(done)
 
     async def on_settle(self, env: Envelope) -> dict:
@@ -505,6 +508,7 @@ class DownloadsModule(BaseModule):
         for task in await self.repo.tasks_for_series(series_id):
             await self._cancel_runner(task["id"])
             await self._end_task(task)
+        await self.repo.drop_publications(series_id)
         await self._broadcast_queue()
         self.publish_event("series.purged", {"series_id": series_id, "owner": self.name})
 
@@ -590,7 +594,7 @@ class DownloadsModule(BaseModule):
         tasks = await self._queue()
         self.publish_event("downloads.queue.changed", {"tasks": tasks, "count": len(tasks)})
         # The queue changed: the run of every series that has, or had, work here hears where it stands now.
-        for series_id in {task["series_id"] for task in tasks if task.get("series_id")} | set(self._work_told):
+        for series_id in {task["series_id"] for task in tasks if task.get("series_id")} | self._work.series:
             await self._tell_work(series_id)
 
     def _announce_queue(self) -> None:
@@ -836,15 +840,11 @@ class DownloadsModule(BaseModule):
         return any(task["status"] in LIVE_STATES for task in await self.repo.tasks_for_series(series_id))
 
     async def on_work_get(self, env: Envelope) -> dict:
-        series_id = env.payload["series_id"]
-        return WorkState(owner=self.name, series_id=series_id, active=await self._has_work(series_id)).model_dump()
+        return (await self._work.tell(int(env.payload["series_id"]))).model_dump()
 
     async def _tell_work(self, series_id: int) -> None:
         """The run of the series hears when this module's work of it begins or ends (the run owner is scan)."""
-        active = await self._has_work(series_id)
-        if self._work_told.get(series_id) != active:
-            self._work_told[series_id] = active
-            self.publish_event(WORK_STATE, WorkState(owner=self.name, series_id=series_id, active=active).model_dump())
+        await self._work.tell(series_id)
 
     async def _contribute(self, series_id: int) -> None:
         await self._tell_work(series_id)

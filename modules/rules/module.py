@@ -104,6 +104,7 @@ class RulesModule(BaseModule):
 
     def register(self) -> None:
         self.handle("rules.apply", self.on_apply)
+        self.handle("rules.profiles.export", self.on_profiles_export)
         self.handle("rules.profiles.list", self.on_profiles_list)
         self.handle("rules.format_filename", self.on_format_filename)
         self.handle("rules.format_torrent_file", self.on_format_torrent_file)
@@ -152,12 +153,23 @@ class RulesModule(BaseModule):
             line.key for line in request.lines).items() if n > 1)
         if repeated:
             raise ValueError(f"Ключи строк повторяются в одном запросе: {repeated}")
-        profile = await self._profile(request.profile_id)
+        if request.rules is None:
+            profile = await self._profile(request.profile_id)
+        else:  # the profile as a run took it: what was saved since does not count for that run
+            profile = compile_profile(request.profile_id, request.rules)
         results = settle_parts(request.lines, {line.key: result_of(process_title(profile, line.text),
                                                                      request.series_season)
                                                for line in request.lines})
         return RulesApplyReply(
             results=results, invalid_rules=profile.invalid_rules).model_dump()
+
+    async def on_profiles_export(self, env: Envelope) -> dict:
+        """The stored rules of the profiles named, as `rules.apply` takes them back (RunSnapshot.profiles)."""
+        profiles = {}
+        for profile_id in sorted({int(each) for each in env.payload.get("profile_ids", [])}):
+            await self._require_profile(profile_id)
+            profiles[profile_id] = await self.repo.get_rules(profile_id)
+        return {"profiles": profiles}
 
     async def on_profiles_list(self, env: Envelope) -> list[dict]:
         return await self.repo.list_profiles()

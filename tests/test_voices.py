@@ -100,6 +100,19 @@ async def test_a_name_resolves_to_the_group_whose_name_or_trigger_it_equals_with
 
 
 @pytest.mark.asyncio
+async def test_the_settings_a_run_took_answer_as_they_were_taken_whatever_is_saved_since(system):
+    """Н-5: voices.settings.export gives the stored values for the snapshot of a run; with them, the groups and the view of
+    the settings are those of the start of the run."""
+    await set_groups(system, {"Группа": ["x"]})
+    taken = (await system.request("voices.settings.export", {}, timeout=5))["values"]
+    await set_groups(system, {"Другая": ["x"]})
+    by_run = (await system.request("voices.groups.resolve", {"names": ["x"], "values": taken}, timeout=5))["groups"]
+    assert by_run == {"x": "Группа"} and await resolve(system, "x") == {"x": "Другая"}
+    view = await system.request("voices.settings.get", {"values": taken}, timeout=5)
+    assert view["voice_groups"] == {"Группа": ["x"]}
+    assert (await system.request("voices.settings.get", {}, timeout=5))["voice_groups"] == {"Другая": ["x"]}
+
+@pytest.mark.asyncio
 async def test_without_groups_no_name_belongs_to_one_not_even_a_name_written_twice(system):
     assert await resolve(system, "BlackCat", "BlackCat", "Black Cat") == {"BlackCat": None, "Black Cat": None}
 

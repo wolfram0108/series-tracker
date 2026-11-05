@@ -78,7 +78,7 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from core import BaseModule
-from core.contracts import (REFERENCE_CHOICE, RUN_CHANGED, VOICE_PLAYER, RunChanged, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
+from core.contracts import (REFERENCE_CHOICE, RUN_CHANGED, VOICE_PLAYER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
                             RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
@@ -135,6 +135,9 @@ class CompositionModule(BaseModule):
         self._deleted: set[int] = set()
         # The series whose sync is under way (`scan.run.changed`), and the counts events asked for meanwhile.
         self._frozen: set[int] = set()
+        # The configuration each open run works by (RunSnapshot): the counts of the series during the run read the rules
+        # and the groups from it, not from their owners.
+        self._snapshots: dict[int, RunSnapshot] = {}
         self._owed: set[int] = set()
         self._owed_refresh: dict[int, set[int]] = {}
         # The pages of our sources by canonical address, so that an event of `sources` finds them without a query.
@@ -297,6 +300,8 @@ class CompositionModule(BaseModule):
         series_id = env.payload["series_id"]
         if series_id in self._deleted:
             raise LookupError(f"сериал {series_id} не найден")
+        if env.payload.get("snapshot") is not None:
+            self._snapshots[series_id] = RunSnapshot.model_validate(env.payload["snapshot"])
         self._schedule(series_id, ordered=True)
         flight = self._flights[series_id]
         answer: asyncio.Future = asyncio.get_running_loop().create_future()
@@ -427,6 +432,7 @@ class CompositionModule(BaseModule):
             self._frozen.add(run.series_id)
             return
         self._frozen.discard(run.series_id)
+        self._snapshots.pop(run.series_id, None)
         if run.series_id in self._owed:
             self._owed.discard(run.series_id)
             self._schedule(run.series_id, self._owed_refresh.pop(run.series_id, set()))
@@ -509,15 +515,16 @@ class CompositionModule(BaseModule):
         card = await self._ask("catalog.series.get", {"series_id": series_id})
         sources = [SeriesSource.model_validate(each) for each in card.get("sources", [])
                    if each.get("source_type") != SourceType.TORRENT]
+        snapshot = self._snapshots.get(series_id)
         inputs = []
         for source in sources:
             table, failure, url = await self._table(series_id, flight, source, source.id in refresh)
             answer = None
             if table is not None and source.parser_profile_id is not None:
-                answer = await self._answer(source, table, card.get("season"))
+                answer = await self._answer(source, table, card.get("season"), snapshot)
             inputs.append(SourceInput(source, table, answer, failure, url))
         names = project.voice_names(inputs)
-        return inputs, await self._groups(names) if names else {}
+        return inputs, await self._groups(names, snapshot) if names else {}
 
     async def _table(self, series_id: int, flight: _Flight, source: SeriesSource, begin: bool
                      ) -> tuple[ReleaseTable | None, str | None, str]:
@@ -539,15 +546,18 @@ class CompositionModule(BaseModule):
         request = TableGetRequest(url=source.url, options=source.read_options(), refresh=begin)
         return await self._ask("sources.table.get", request.model_dump(mode="json"), model=TableGetReply)
 
-    async def _answer(self, source: SeriesSource, table: ReleaseTable, season) -> RulesApplyReply:
+    async def _answer(self, source: SeriesSource, table: ReleaseTable, season,
+                      snapshot: RunSnapshot | None = None) -> RulesApplyReply:
         lines = project.lines_for(source, table)
         if not lines:
             return RulesApplyReply(results={})
-        request = RulesApplyRequest(profile_id=source.parser_profile_id, lines=lines, series_season=season)
+        rules = snapshot.profiles.get(source.parser_profile_id) if snapshot is not None else None
+        request = RulesApplyRequest(profile_id=source.parser_profile_id, lines=lines, series_season=season, rules=rules)
         return await self._ask("rules.apply", request.model_dump(mode="json"), model=RulesApplyReply)
 
-    async def _groups(self, names: list[str]) -> dict[str, str | None]:
-        reply = await self._ask("voices.groups.resolve", GroupsResolveRequest(names=names).model_dump(),
+    async def _groups(self, names: list[str], snapshot: RunSnapshot | None = None) -> dict[str, str | None]:
+        values = snapshot.voices if snapshot is not None else None
+        reply = await self._ask("voices.groups.resolve", GroupsResolveRequest(names=names, values=values).model_dump(),
                                 model=GroupsResolveReply)
         return reply.groups
 

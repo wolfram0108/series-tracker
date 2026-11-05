@@ -150,7 +150,7 @@ class CompositionReply(BaseModel):
     # What may be done with an object in each of its states (core/contracts/availability.py): a window draws a control only
     # where this allows it.
     availability: dict[str, list[str]] = Field(default_factory=dict)
-    # The order of the voice-overs of each season (ЭТАП_11): the order of the tracks in the container.
+    # The order of the voice-overs of each season (stage 11): the order of the tracks in the container.
     voice_orders: list[SeasonVoiceOrder] = Field(default_factory=list)
 
 

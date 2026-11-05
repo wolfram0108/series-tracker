@@ -898,7 +898,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Deep Adoption */
+        /**
+         * Deep Adoption
+         * @description The compilations whose children all lie on the disk are adopted into the plan: a change of the series,
+         *     admitted like any other and answered when it is written.
+         */
         post: operations["deep_adoption_api_series__series_id__deep_adoption_post"];
         delete?: never;
         options?: never;
@@ -932,7 +936,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Reprocess */
+        /**
+         * Reprocess
+         * @description The files take the names of the rules: the disk changes in a sync alone (И-59), so this is a sync of the
+         *     series that fetches nothing; refused while one runs.
+         */
         post: operations["reprocess_api_series__series_id__reprocess_post"];
         delete?: never;
         options?: never;

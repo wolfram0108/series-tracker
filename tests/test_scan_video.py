@@ -235,7 +235,8 @@ async def test_the_command_of_a_synchronization_is_written_before_its_table_is_w
     run = rig.start_run(download=False)
     await rig.world.asked.get()
     assert [(each["status"], json.loads(each["results_data"])) for each in tasks_of(rig)] == [
-        ("processing", {"video_sync": True, "download": False, "inventory": False})]
+        ("processing", {"video_sync": True, "download": False, "inventory": False,
+                        "snapshot": {"profiles": {}, "voices": {}}})]
     rig.world.finish(URL1)
     await asyncio.wait_for(run, STUCK_S)
     assert tasks_of(rig) == []
@@ -458,7 +459,7 @@ async def test_without_a_download_nothing_is_dispatched(rig):
     assert downloads.queue.empty() and voices.queue.empty()
     await rig.run()
     assert (await next_event(downloads)) == {"series_id": rig.series_id}
-    assert (await next_event(voices)) == {"series_id": rig.series_id}
+    assert (await next_event(voices)) == {"series_id": rig.series_id, "settings": {}}  # the settings the run took
 
 
 async def test_the_scheduled_pass_over_all_series_asks_for_voice_overs_too(rig):
@@ -466,7 +467,7 @@ async def test_the_scheduled_pass_over_all_series_asks_for_voice_overs_too(rig):
     rig.world.rows = [rig.row("a", 1, 1)]
     voices = rig.bus.subscribe("voices.dispatch")
     await rig.probe.request("scan.all.start", {}, timeout=STUCK_S)
-    assert await next_event(voices) == {"series_id": rig.series_id}
+    assert await next_event(voices) == {"series_id": rig.series_id, "settings": {}}
 
 
 async def test_a_scan_the_user_asks_for_reads_a_channel_in_the_mode_of_its_source(rig):
@@ -1049,7 +1050,7 @@ def runs_of(events: list[dict]) -> list[bool]:
 
 
 def work_state(rig: "Rig", owner: str, active: bool) -> None:
-    rig.probe.publish_event(WORK_STATE, {"owner": owner, "series_id": rig.series_id, "active": active})
+    rig.world.tell_work(rig.series_id, owner, active)
 
 
 async def test_a_sync_is_one_run_and_the_series_is_busy_until_every_work_it_gave_out_has_ended(rig):
@@ -1120,3 +1121,109 @@ async def test_a_run_found_open_after_a_restart_waits_for_its_works_again(db_pat
         assert again.query("SELECT id FROM scan_tasks") == []
     finally:
         await again.runner.stop()
+
+
+async def test_a_run_is_not_closed_while_an_executor_has_not_answered_however_the_events_of_another_come(rig):
+    """Н-4: downloads answers «working», voices' answer is on its way; downloads ends meanwhile. The run stays open until
+    voices has answered, and its «working» keeps it open."""
+    rig.world.rows = [rig.row("a", 1, 1)]
+    rig.world.work = {"downloads": True, "voices": True}
+    gate = rig.world.work_gates["voices"] = asyncio.Event()
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    running = rig.start_run()
+    await wait_until(lambda: f"voices.work.get {rig.series_id}" in rig.world.order, rig.bus, *rig.runner.modules)
+    work_state(rig, "downloads", False)
+    # The event is taken in (the bus cannot go quiet: voices' answer is held), and still nothing closes.
+    assert await wait_until(lambda: rig.scan._working[rig.series_id].seen.get("downloads") == rig.world.seq,
+                            rig.bus, *rig.runner.modules)
+    assert runs_of(drain(runs)) == [True] and rig.world.packs == 0  # voices has not answered: nothing closes
+    gate.set()
+    await running
+    await rig.bus.settled()
+    assert drain(runs) == [] and rig.world.packs == 0  # voices works
+    work_state(rig, "voices", False)
+    assert runs_of([await next_event(runs)]) == [False] and rig.world.packs == 1
+
+
+async def test_an_answer_counted_before_an_event_does_not_undo_it(rig):
+    """A reply and an event of one executor that cross: the state counted later is in force, so «working» counted before
+    «done» does not leave the run open for ever."""
+    rig.world.rows = [rig.row("a", 1, 1)]
+    rig.world.work = {"voices": True}
+    gate = rig.world.work_gates["voices"] = asyncio.Event()
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    running = rig.start_run()
+    await wait_until(lambda: f"voices.work.get {rig.series_id}" in rig.world.order, rig.bus, *rig.runner.modules)
+    work_state(rig, "voices", False)  # counted after the reply that is on its way
+    gate.set()
+    await running
+    await rig.bus.settled()
+    assert runs_of(drain(runs)) == [True, False]
+    assert rig.query("SELECT id FROM scan_tasks") == [] and rig.world.packs == 1
+
+
+@pytest.mark.parametrize("failure", ["failed", "error"])
+async def test_a_packing_that_fails_ends_the_run_as_failed_with_its_reason(rig, failure):
+    """Н-6: the last step of the run failing is no success: the series is free, and the error of the series says why
+    until the next sync."""
+    rig.world.rows = [rig.row("a", 1, 1)]
+    if failure == "failed":
+        rig.world.pack_reply = {"packed": 2, "failed": 1, "unchanged": 0, "waiting": 0}
+    else:
+        rig.world.pack_error = "диск недоступен"
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    flags = rig.bus.subscribe("series.status.contribution")
+    await rig.run(download=False)
+    assert runs_of(drain(runs)) == [True, False]
+    carrier = rig.query("SELECT status, results_data FROM scan_tasks WHERE series_id=?", (rig.series_id,))
+    assert [each["status"] for each in carrier] == ["error"]
+    code = "sync_pack_failed" if failure == "failed" else "scan_step_failed"
+    assert parse(json.loads(carrier[0]["results_data"])["error"])["code"] == code
+    assert [each["flags"]["error"] for each in drain(flags) if each["source"] == "scan"][-1] is True
+    rig.world.pack_reply, rig.world.pack_error = {"packed": 0, "failed": 0, "unchanged": 0, "waiting": 0}, None
+    await rig.run(download=False)
+    assert rig.query("SELECT * FROM scan_tasks WHERE series_id=?", (rig.series_id,)) == []
+
+
+async def test_a_change_admitted_before_a_sync_holds_its_opening_and_none_is_admitted_after(rig):
+    """Н-8: the check of a change and its write are not apart from the opening of a run: a sync waits for a change admitted
+    before it, and a change asked once the sync is starting is refused."""
+    rig.world.rows = [rig.row("a", 1, 1)]
+    await rig.probe.request("scan.edit.begin", {"series_id": rig.series_id}, timeout=STUCK_S)
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    running = rig.start_run(download=False)
+    # The sync is started and holds at its opening (the bus does not go quiet: its request is still being answered).
+    assert await wait_until(lambda: rig.series_id in rig.scan._running, rig.bus, *rig.runner.modules)
+    assert rig.world.order == [] and drain(runs) == []  # the sync waits for the change
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await rig.probe.request("scan.edit.begin", {"series_id": rig.series_id}, timeout=STUCK_S)
+    rig.probe.send_command("scan.edit.end", {"series_id": rig.series_id})
+    await running
+    assert runs_of(drain(runs)) == [True, False]
+    assert await rig.probe.request("scan.edit.begin", {"series_id": rig.series_id}, timeout=STUCK_S) == {"ok": True}
+    rig.probe.send_command("scan.edit.end", {"series_id": rig.series_id})
+
+
+async def test_a_run_works_by_the_configuration_it_took_when_it_started(rig):
+    """Н-5: the rules of the profiles and the settings of the voice-overs are taken once, when the sync starts, kept with
+    its command and given to every step that would read them; a change saved meanwhile counts from the next run."""
+    rig.world.rows = [rig.row("a", 1, 1)]
+    rig.world.profiles_export = {1: [{"id": 1, "name": "серия", "conditions": []}]}
+    rig.world.voices_export = {"voices.groups": '{"ПВА": ["ПВА ШОУ"]}'}
+    rig.world.work = {"downloads": True}
+    await rig.run()
+    stored = json.loads(rig.query("SELECT results_data FROM scan_tasks")[0]["results_data"])["snapshot"]
+    assert stored == {"profiles": {"1": [{"id": 1, "name": "серия", "conditions": []}]},
+                      "voices": {"voices.groups": '{"ПВА": ["ПВА ШОУ"]}'}}
+    rig.world.profiles_export = {1: [{"id": 1, "name": "другое", "conditions": []}]}  # saved during the run
+    rig.world.voices_export = {}
+    [recount] = rig.world.payloads["composition.recompute"]
+    assert recount["snapshot"] == stored
+    assert rig.world.payloads["voices.settings.get"][-1] == {"values": stored["voices"]}
+    assert rig.world.payloads["voices.dispatch"][-1]["settings"] == stored["voices"]
+    work_state(rig, "downloads", False)
+    await rig.bus.settled()
+    rig.world.work["downloads"] = True
+    await rig.run()
+    again = json.loads(rig.query("SELECT results_data FROM scan_tasks")[0]["results_data"])["snapshot"]
+    assert again["profiles"] == {"1": [{"id": 1, "name": "другое", "conditions": []}]} and again["voices"] == {}

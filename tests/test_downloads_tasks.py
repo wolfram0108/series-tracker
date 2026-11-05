@@ -212,7 +212,7 @@ async def test_a_task_that_waited_after_a_stop_goes_with_its_work_file_when_its_
     _task(db_path, "uid1", "pending", os.path.join(media_dir, "Серия 01.mp4"))
 
     probe.publish_event("scan.plan.updated", {"series_id": 2})
-    await probe.request("downloads.queue.get", {}, timeout=5)  # the plan was heard: it is a plan, the task stays (И-59)
+    await probe.request("downloads.queue.get", {}, timeout=5)  # the plan was heard: it is a plan, the task stays (I-59)
     assert len(_tasks(db_path)) == 1 and os.path.exists(work)
     await probe.request("downloads.settle", {"series_id": 2}, timeout=5)
 

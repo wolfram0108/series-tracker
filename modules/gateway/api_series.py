@@ -14,6 +14,8 @@ from fastapi.responses import JSONResponse
 from core import BusRequestError
 from core.contracts import DubItem
 
+from .routing import admitted
+
 from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, OkResponse,
                       QueueTask, SeriesCreate, SeriesObject, SeriesUpdate,
                       VoiceDubs)
@@ -151,24 +153,21 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         The sources are not changed here; the layout of a video series is counted again on
         series.updated. The files take the new names and folder at the next sync (И-59)."""
         sent = body.model_dump(mode="json", exclude_unset=True)
+        fields = {k: v for k, v in sent.items()
+                  if k not in ("save_path", "tmdb_data")}
+        # One save is one change: a sync does not open between its parts.
         try:
-            series = await gw.request("catalog.series.get",
-                                      {"series_id": series_id})
-            fields = {k: v for k, v in sent.items()
-                      if k not in ("save_path", "tmdb_data")}
-            await gw.request("catalog.series.update", {
-                "series_id": series_id, "fields": fields})
+            async with admitted(gw, series_id):
+                await gw.request("catalog.series.update", {
+                    "series_id": series_id, "fields": fields})
+                if tmdb_data := sent.get("tmdb_data"):
+                    await gw.request("metadata.map.set", {
+                        "series_id": series_id, "tmdb_data": tmdb_data})
+                if new_path := sent.get("save_path"):
+                    await gw.request("library.relocation.plan", {
+                        "series_id": series_id, "new_path": new_path})
         except BusRequestError as exc:
             return _error_response(exc)
-        if tmdb_data := sent.get("tmdb_data"):
-            await gw.request("metadata.map.set", {
-                "series_id": series_id, "tmdb_data": tmdb_data})
-        if new_path := sent.get("save_path"):
-            try:
-                await gw.request("library.relocation.plan", {
-                    "series_id": series_id, "new_path": new_path})
-            except BusRequestError as exc:
-                return _error_response(exc)
         return {"success": True,
                 "message": "Задача на обновление принята в обработку."}
 
@@ -213,9 +212,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 {"success": False, "error": "Параметр 'enabled' не указан"},
                 status_code=400)
         try:
-            await gw.request("catalog.series.update", {
-                "series_id": series_id,
-                "fields": {"auto_scan_enabled": bool(enabled)}})
+            async with admitted(gw, series_id):
+                await gw.request("catalog.series.update", {
+                    "series_id": series_id,
+                    "fields": {"auto_scan_enabled": bool(enabled)}})
         except BusRequestError as exc:
             return _error_response(exc)
         return {"success": True}
@@ -231,9 +231,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 {"success": False, "error": "Параметр 'seasons' не указан"},
                 status_code=400)
         try:
-            await gw.request("catalog.series.update", {
-                "series_id": series_id,
-                "fields": {"ignored_seasons": json.dumps(seasons)}})
+            async with admitted(gw, series_id):
+                await gw.request("catalog.series.update", {
+                    "series_id": series_id,
+                    "fields": {"ignored_seasons": json.dumps(seasons)}})
         except BusRequestError as exc:
             return _error_response(exc)
         return {"success": True}
@@ -253,9 +254,10 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
                 {"success": False, "error": "Параметр 'episodes' не указан"},
                 status_code=400)
         try:
-            await gw.request("catalog.series.update", {
-                "series_id": series_id,
-                "fields": {"ignored_episodes": json.dumps(episodes)}})
+            async with admitted(gw, series_id):
+                await gw.request("catalog.series.update", {
+                    "series_id": series_id,
+                    "fields": {"ignored_episodes": json.dumps(episodes)}})
         except BusRequestError as exc:
             return _error_response(exc)
         return {"success": True}

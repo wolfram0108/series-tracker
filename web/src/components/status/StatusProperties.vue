@@ -38,7 +38,7 @@ const isVideo = s.kind === "video"
 const form = reactive({
   name: String(s.name ?? ""),
   name_en: String((s as Record<string, unknown>).name_en ?? ""),
-  // A folder a save asked for and the next sync moves to is what the card holds (И-59).
+  // A folder a save asked for and the next sync moves to is what the card holds (I-59).
   save_path: String(s.planned_save_path ?? (s as Record<string, unknown>).save_path ?? ""),
   season: String(s.season ?? ""),
   quality: String((s as Record<string, unknown>).quality ?? ""),

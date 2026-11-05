@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from core import BaseModule, Bus, Runner
+from core.contracts.availability import Action, NotAllowed, refusal
 from core.db import Database
 from core.reasons import parse
 from modules.catalog import CatalogModule
@@ -64,6 +65,7 @@ class Neighbours(BaseModule):
     def __init__(self, bus):
         self.calls: list[tuple[str, dict]] = []
         self.planned: dict[int, str] = {}
+        self.syncing: set[int] = set()  # the series whose sync the owner of runs says is under way
         super().__init__(bus)
 
     def register(self):
@@ -109,6 +111,15 @@ class Neighbours(BaseModule):
         async def planned_move(env):
             return {"new_path": self.planned.get(env.payload["series_id"])}
 
+        async def edit_begin(env):
+            self.calls.append(("edit.begin", env.payload))
+            if env.payload["series_id"] in self.syncing:
+                raise NotAllowed(refusal(Action.EDIT, "scanning"))
+            return {"ok": True}
+
+        async def edit_end(env):
+            self.calls.append(("edit.end", env.payload))
+
         async def db_add(env):
             self.calls.append(("torrents.db.add", env.payload))
             return {"added": len(env.payload["torrents"])}
@@ -123,6 +134,8 @@ class Neighbours(BaseModule):
         self.handle("torrents.fs.verify", fs_verify)
         self.handle("renaming.reprocess", reprocess)
         self.handle("library.relocation.plan", plan_move)
+        self.handle("scan.edit.begin", edit_begin)
+        self.handle("scan.edit.end", edit_end)
         self.handle("library.relocation.get", planned_move)
         self.handle("torrents.db.add", db_add)
 
@@ -524,3 +537,21 @@ async def test_voices_of_a_series_show_state_and_reason_only(system):
          "source_id": None, "player": None},
         {"season": 1, "episode": 2, "part": None, "voice_key": "red", "voice_label": "RedHeadSound",
          "status": "placed", "state": "done", "hint": "done", "detail": None, "source_id": None, "player": None}]}
+
+
+@pytest.mark.asyncio
+async def test_a_save_of_the_card_is_one_admitted_change_and_is_refused_whole_while_a_sync_runs(system):
+    """The owner of the runs admits the save before its first write and hears its end after its last: a sync does not open
+    between the card and the plan of its folder (И-60). Refused, nothing of the save is written."""
+    bus, db, client, neighbours = system
+    resp = await client.post("/api/series/1", json={"name": "Тайтл", "save_path": "/media/new"})
+    assert resp.status_code == 200
+    await settle(bus, neighbours)  # the end of the change is a command
+    names = [call[0] for call in neighbours.calls if call[0] in ("edit.begin", "plan", "edit.end")]
+    assert names == ["edit.begin", "plan", "edit.end"]
+    neighbours.calls.clear()
+    neighbours.syncing.add(1)
+    resp = await client.post("/api/series/1", json={"name": "Другое", "save_path": "/media/other"})
+    assert resp.status_code == 409
+    assert (await db.fetch_one("SELECT name FROM series WHERE id=1"))["name"] == "Тайтл"
+    assert [call[0] for call in neighbours.calls] == ["edit.begin"]

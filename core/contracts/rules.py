@@ -22,6 +22,8 @@ class RulesApplyRequest(BaseModel):
     profile_id: int
     lines: list[RuleLine]
     series_season: str | int | None = None
+    # The rules of the profile as a run took them (RunSnapshot.profiles): applied instead of the stored ones.
+    rules: list[dict[str, Any]] | None = None
 
 
 class RuleResult(BaseModel):
