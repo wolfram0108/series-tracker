@@ -30,7 +30,8 @@ Queries / commands:
       plan wants and that have no file, keep the paths of the live ones current, start the pool. The only place where a
       download starts.
   downloads.queue.get {} -> {tasks, count} - the live tasks (the window; the snapshot of scan): the tasks of the plan
-      and the fetches of the voice-overs (`task_type` fetch: waiting `pending`, under way `downloading`, no progress).
+      and the fetches of the voice-overs (`task_type` fetch: waiting `pending`, under way `downloading` with its progress,
+      speed, time left and size, kept with the job as a task keeps them in its row).
   downloads.queue.clear {} -> {deleted} - waiting and failed tasks with their work files; a download under way stays.
   downloads.cancel {task_id} - one task that waits or runs (the table of what is allowed); a task whose files could not be
       removed stays as a failed one, the record of what is left.
@@ -96,6 +97,8 @@ from .repository import LIVE_STATES, DownloadsRepository
 
 PROGRESS_DB_THROTTLE = 2.0     # seconds between writes of progress to the database: the window needs a picture, not every tick
 PROGRESS_EVENT_THROTTLE = 1.0  # seconds between queue events on progress
+# What the queue tells of a fetch of a voice-over as it goes: the fields a task of the plan keeps in its row.
+FETCH_PROGRESS = ("progress", "dlspeed", "eta", "total_size_mb")
 MAX_DOWNLOAD_ATTEMPTS = 3
 RETRY_DELAY_S = 5.0
 FETCH_LIMIT_KEY = "max_parallel_dub_downloads"
@@ -611,7 +614,8 @@ class DownloadsModule(BaseModule):
         fetches += [(job, "pending") for job in self._fetch_queue]
         return [*await self.repo.active_tasks(), *({
             "id": f"fetch:{job['key']}", "task_key": job["key"], "task_type": "fetch", "series_id": job["series_id"],
-            "save_path": job["path"], "status": status, "progress": None} for job, status in fetches)]
+            "save_path": job["path"], "status": status,
+            **{name: (job.get("progress") or {}).get(name) for name in FETCH_PROGRESS}} for job, status in fetches)]
 
     def _broadcast_pack_queue(self) -> None:
         tasks = self._packing.queue()
@@ -813,8 +817,13 @@ class DownloadsModule(BaseModule):
         key, path = job["key"], job["path"]
         ok, error, transient = False, "", False
 
-        async def ignore_progress(_data: dict) -> None:
-            return None
+        async def on_progress(data: dict) -> None:
+            # A fetch has no record of its own: what the window shows of it is kept with the job, as a task keeps it in its row.
+            job["progress"] = {name: data.get(name) for name in FETCH_PROGRESS if data.get(name) is not None}
+            now = time.monotonic()
+            if now - self._last_event > PROGRESS_EVENT_THROTTLE:
+                self._last_event = now
+                await self._broadcast_queue()
 
         async def attempt_once() -> tuple[bool, str, bool]:
             stream_url, headers, stream_error, progressive = await self._resolve_stream(
@@ -826,7 +835,7 @@ class DownloadsModule(BaseModule):
                 kw["headers"] = headers
             if progressive:
                 kw["progressive"] = True
-            done, failure = await self._download(stream_url, path, ignore_progress, **kw)
+            done, failure = await self._download(stream_url, path, on_progress, **kw)
             return done, failure, not done and _transient_download_error(failure)
 
         budget = _download_budget()

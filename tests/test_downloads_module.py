@@ -140,8 +140,8 @@ class FakeNeighbours(BaseModule):
 class FakeDownloader:
     """Управляемый «yt-dlp»: пишет файл или возвращает ошибку."""
 
-    # When set, entering the downloader is a step of the bus: a general fetch reports no progress, so without it nothing
-    # tells a waiter that the downloader was called.
+    # When set, entering the downloader is a step of the bus: a waiter is told that the downloader was called before any
+    # progress of it.
     bus: Bus | None = None
 
     def __init__(self):
@@ -1327,6 +1327,10 @@ async def test_the_fetches_of_voice_overs_are_in_the_queue_of_the_window_while_t
     assert sorted((each["task_key"], each["status"], each["task_type"]) for each in queue["tasks"]) == [
         ("dub:0", "downloading", "fetch"), ("dub:1", "downloading", "fetch"), ("dub:2", "pending", "fetch")]
     assert {each["save_path"] for each in queue["tasks"]} == {str(tmp_path / f"{i}.mp4") for i in range(3)}
+    # A running fetch shows how far it is, as a task of the plan does; one that waits has no progress yet.
+    progress = {each["task_key"]: (each["progress"], each["dlspeed"], each["eta"], each["total_size_mb"])
+                for each in queue["tasks"]}
+    assert progress == {"dub:0": (50, 1024, 5, 10.0), "dub:1": (50, 1024, 5, 10.0), "dub:2": (None, None, None, None)}
     assert not changed.queue.empty()  # the window is told, not asked
     dl.gate.set()
     assert await _wait(lambda: os.path.isfile(tmp_path / "2.mp4"))
