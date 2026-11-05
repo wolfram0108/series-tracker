@@ -90,7 +90,8 @@ The key of a voice-over is its label in the layout: the name of its user group, 
 the key it was recorded under for good. When the layout calls a recorded voice-over by another name (a group was made
 or renamed) the plan finds it by a link: a planned voice-over that has a candidate with the link of a row of the same
 episode under another key is that row (planning.adopt); the row keeps its key and its work, and takes the new label
-(a placed track follows it).
+(a placed track follows it). The key is the identity, not what the user reads: the file of a voice-over is named by the
+label it has when its download begins (dub_name; the key when it has none), and the row keeps that path.
 
 A row of the layout that covers several episodes (a compilation: one video) is a candidate like a single one. Its video
 is one file, a row of voice_files, downloaded once (downloads.fetch with the key `file:<id>`) and read by the voice-overs
@@ -181,6 +182,7 @@ import re
 import shutil
 import uuid
 from collections import OrderedDict, defaultdict
+from collections.abc import Iterable
 
 from core import NO_HANDLER, BaseModule, BusRequestError
 from pydantic import ValidationError
@@ -243,9 +245,21 @@ def _another_file(row: dict, rev: int | None) -> bool:
     return rev is not None and row.get("ref_rev") is not None and row["ref_rev"] != rev
 
 
-def dub_file(series_id: int, season: int, episode: int, part: int, voice_key: str) -> str:
-    """The name a voice-over is downloaded and sent to the service under: unique by series, episode, part and voice."""
-    return f"{series_id}_{slot_tag(season, episode, part)}_{_safe(voice_key)}.mp4"
+def dub_file(series_id: int, season: int, episode: int, part: int, name: str) -> str:
+    """The name a voice-over is downloaded and sent to the service under: series, episode, part and the name of the voice."""
+    return f"{series_id}_{slot_tag(season, episode, part)}_{_safe(name)}.mp4"
+
+
+def dub_name(row: dict, slot_rows: Iterable[dict]) -> str:
+    """The name of the voice in the name of its file: the name the voice-over has now, so that the user sees the one they
+    gave; its key when it has none, or when another row of the episode holds a file of that name (two files never share
+    one). Chosen once, when its download begins: the row keeps the path, and everything after reads the path."""
+    held = {os.path.basename(each["temp_path"]) for each in slot_rows
+            if each.get("temp_path") and each.get("id") != row.get("id")}
+    for name in (row.get("voice_label") or "", row["voice_key"]):
+        if name and dub_file(row["series_id"], row["season"], row["episode"], row["part"], name) not in held:
+            return name
+    return row["voice_key"]
 
 
 def file_path(root: str, series_id: int, file_id: int, studio: str) -> str:
@@ -255,10 +269,11 @@ def file_path(root: str, series_id: int, file_id: int, studio: str) -> str:
 
 
 def sent_as(row: dict) -> str:
-    """The name a voice-over is sent to the service under: the name of the file it reads."""
-    if row.get("file_id") is not None and row.get("temp_path"):
+    """The name a voice-over is sent to the service under: the name of the file it reads; before its download begins,
+    the name it would take now."""
+    if row.get("temp_path"):
         return os.path.basename(row["temp_path"])
-    return dub_file(row["series_id"], row["season"], row["episode"], row["part"], row["voice_key"])
+    return dub_file(row["series_id"], row["season"], row["episode"], row["part"], row.get("voice_label") or row["voice_key"])
 
 
 def reference_file(series_id: int, season: int, episode: int, part: int, reference: str) -> str:
@@ -270,9 +285,9 @@ def episode_dir(root: str, series_id: int, season: int, episode: int, part: int)
     return os.path.join(root, str(series_id), slot_tag(season, episode, part))
 
 
-def temp_path(root: str, series_id: int, season: int, episode: int, part: int, voice_key: str) -> str:
+def temp_path(root: str, series_id: int, season: int, episode: int, part: int, name: str) -> str:
     return os.path.join(episode_dir(root, series_id, season, episode, part),
-                        dub_file(series_id, season, episode, part, voice_key))
+                        dub_file(series_id, season, episode, part, name))
 
 
 class VoicesModule(BaseModule):
@@ -792,7 +807,9 @@ class VoicesModule(BaseModule):
         if chain[row["attempt"]].get("file"):
             await self._start_on_file(row, chain[row["attempt"]], root)
             return
-        path = temp_path(root, row["series_id"], row["season"], row["episode"], row["part"], row["voice_key"])
+        slot_rows = [each for each in await self.repo.for_series(row["series_id"])
+                     if (each["season"], each["episode"], each["part"]) == (row["season"], row["episode"], row["part"])]
+        path = temp_path(root, row["series_id"], row["season"], row["episode"], row["part"], dub_name(row, slot_rows))
         if storage.busy(path):  # an earlier removal of this name has not ended: a file written now could be lost
             self._when_free(path, row["series_id"])
             return

@@ -21,7 +21,7 @@ from modules.conform import ConformModule
 from modules.conform.paths import roots, workspace
 from modules.settings import SettingsModule
 from modules.voices import VoicesModule
-from modules.voices.module import dub_file, temp_path
+from modules.voices.module import dub_file, dub_name, sent_as, temp_path
 from modules.voices.settings import DEFAULT_PRIORITY
 from modules.voices.states import public_state
 from series_factory import insert_series
@@ -2828,6 +2828,23 @@ def test_the_file_a_voice_over_is_sent_as_is_named_in_one_place():
     assert os.path.basename(temp_path("/w", 7, 1, 1, 0, "BlackCat")) == dub_file(7, 1, 1, 0, "BlackCat") == "7_s01e01_BlackCat.mp4"
     assert dub_file(7, 1, 2, 0, "BlackCat") != dub_file(8, 1, 1, 0, "BlackCat") != dub_file(7, 1, 1, 0, "BlackCat")
     assert dub_file(7, 1, 1, 2, "BlackCat") == "7_s01e01p2_BlackCat.mp4" != dub_file(7, 1, 1, 1, "BlackCat")
+
+
+def test_the_file_of_a_voice_over_is_named_by_the_name_it_has_now_and_by_its_key_only_when_that_name_cannot_be_taken():
+    """A voice-over first planned unnamed keeps its key ("Неизвестная озвучка 2") when a group names it; its file is named
+    by the name the user gave (the downloads of "Вечная воля" on 05.11 showed the key). The name is chosen once, at the
+    start of the download: everything after reads the path the row keeps."""
+    row = {"id": 1, "series_id": 49, "season": 4, "episode": 9, "part": 0, "voice_key": "Неизвестная озвучка 2",
+           "voice_label": "ChinaTown"}
+    assert dub_name(row, [row]) == "ChinaTown"
+    assert dub_name({**row, "voice_label": ""}, []) == "Неизвестная озвучка 2"
+    # Another row of the episode holds a file of that name: two files never share one.
+    other = {"id": 2, "temp_path": "/w/49/s04e09/" + dub_file(49, 4, 9, 0, "ChinaTown")}
+    assert dub_name(row, [row, other]) == "Неизвестная озвучка 2"
+    # Once downloaded, the name sent is the name of the file, whatever the voice-over is called later.
+    downloaded = {**row, "voice_label": "Другое имя", "temp_path": "/w/49/s04e09/49_s04e09_ChinaTown.mp4"}
+    assert sent_as(downloaded) == "49_s04e09_ChinaTown.mp4"
+    assert sent_as(row) == "49_s04e09_ChinaTown.mp4"
 
 
 async def settled_with_a_record(dubs, **per_dub):
