@@ -61,7 +61,9 @@ async def test_a_scan_of_a_series_downloads_unless_the_window_asks_for_the_statu
     async with serving(tmp_path, answers) as (client, owners, _, _):
         assert (await client.post("/api/series/1/scan")).status_code == 200
         assert (await client.post("/api/series/1/scan?download=false")).status_code == 200
-    assert owners.asked("scan.series.run") == [{"series_id": 1}, {"series_id": 1, "download": False}]
+        assert (await client.post("/api/series/1/scan?retry_failed=true")).status_code == 200
+    assert owners.asked("scan.series.run") == [{"series_id": 1}, {"series_id": 1, "download": False},
+                                               {"series_id": 1, "retry_failed": True}]
 
 
 async def test_the_composition_of_a_torrent_series_is_the_torrent_plan_with_iso_dates(tmp_path):

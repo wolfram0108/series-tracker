@@ -242,6 +242,9 @@ describe("useSeriesOutput", () => {
     expect(output.syncing.value).toBe(false)
     expect(output.failure.value).toBe("Проход уже идёт")
     expect(calls.syncSeries).toHaveBeenCalledWith(1)
+
+    expect(await output.retryFailed()).toBeNull()
+    expect(calls.syncSeries).toHaveBeenLastCalledWith(1, true)
   })
 
   it("switches an episode or a season off and on with the body the core reads, and returns a refusal in words", async () => {

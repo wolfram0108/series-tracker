@@ -162,6 +162,7 @@ export const ru = {
   "sources.title": "Источники",
   "output.tab": "Выход",
   "output.sync": "Синхронизировать",
+  "output.retryFailed": "Сбросить неудачные попытки",
   "output.filter.deviations": "Только отклонения",
   "output.names": "Имена файлов",
   "output.file": "Имя файла: {name}",

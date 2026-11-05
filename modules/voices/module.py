@@ -22,7 +22,9 @@ Command:
   voices.settings.set VoiceSettingsDraft -> VoiceSettingsSaved: groups and order are checked (editor.check) and written
       in one step through settings.values.set_many, or refused with coded problems and nothing written; the next
       read of the settings uses the new values, no restart. Rows keep the key they were recorded under.
-  voices.dispatch {series_id} — the explicit sync of a series, sent by scan once the references are loaded: plans the
+  voices.dispatch {series_id, retry_failed?} — the explicit sync of a series, sent by scan once the references are
+      loaded (with retry_failed the rejected and failed voice-overs of the series start over first, the user's reset
+      of failed attempts): plans the
       voice-overs of the series (composition.get for the rows and the levers, scan.output.get for the reference of
       every episode), records a voice_dubs row per planned voice-over, ADMITS every planned row to download (a row that
       a change of the layout recorded is not admitted until a sync), offers the rows that failed again and downloads
@@ -508,10 +510,23 @@ class VoicesModule(BaseModule):
         async with self._locks.setdefault(series_id, asyncio.Lock()):
             try:
                 self._take_run_values(series_id, env.payload.get("settings"))
+                if env.payload.get("retry_failed"):
+                    await self._forget_failures(series_id)
                 await self._dispatch(series_id, env.payload.get("settings"))
             except (BusRequestError, LookupError, ValueError, OSError, asyncio.TimeoutError) as exc:
                 self.log.warning("сериал %d: озвучки не подготовлены: %s", series_id, exc)
                 raise  # the sender keeps its command: the reply is the word that the work is written down
+
+    async def _forget_failures(self, series_id: int) -> None:
+        """The user asked to try again what failed: a rejected or failed voice-over starts over from the first source of
+        its chain, read anew by the plan; what it owned goes to the cleanup journal (the same step as a replaced
+        reference)."""
+        failed = [row for row in await self.repo.for_series(series_id) if row["status"] in (S.REJECTED, S.FAILED)]
+        for row in failed:
+            if await self.repo.reset(row["id"], None):
+                await self._announce(await self.repo.get(row["id"]))
+        if failed:
+            self.log.info("сериал %d: неудачные озвучки начаты заново по команде пользователя: %d", series_id, len(failed))
 
     async def on_settle(self, env: Envelope) -> None:
         """A sync without download: the voice-overs follow the plan (works the plan does not want are withdrawn, tracks

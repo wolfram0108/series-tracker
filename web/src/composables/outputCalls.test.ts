@@ -55,6 +55,13 @@ describe("the calls to the output of the core", () => {
     expect(client.POST).toHaveBeenCalledWith("/api/series/{series_id}/scan", { params: { path: { series_id: 1 } } })
   })
 
+  it("asks for the same sync with the failed attempts forgotten when the reset of failures is pressed", async () => {
+    client.POST.mockResolvedValueOnce({ data: { success: true } })
+    expect(await syncSeries(1, true)).toEqual({ ok: true, data: { success: true } })
+    expect(client.POST).toHaveBeenCalledWith("/api/series/{series_id}/scan",
+      { params: { path: { series_id: 1 }, query: { retry_failed: true } } })
+  })
+
   it("says only that the action was refused when the refusal has no words", async () => {
     client.PUT.mockResolvedValueOnce({ error: { detail: [{ loc: ["body"], msg: "bad", type: "x" }] } })
     expect(await setLever(1, { lever: "voice.take" })).toEqual({ ok: false, text: "Не удалось выполнить действие" })

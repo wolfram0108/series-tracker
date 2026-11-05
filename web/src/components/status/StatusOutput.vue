@@ -69,6 +69,10 @@ const switchSeason = (season: number, off: boolean) => changed(output.switchTo(s
         :label="t('output.sync')" :icon="passing ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'"
         size="small" severity="warn" :disabled="!canSync" @click="output.sync()"
       />
+      <Button
+        class="output-retry-failed" :label="t('output.retryFailed')" icon="pi pi-replay"
+        size="small" severity="secondary" :disabled="!canSync" @click="output.retryFailed()"
+      />
     </div>
 
     <p v-for="read in reading" :key="read.key" class="cluster output-reading">

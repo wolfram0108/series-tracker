@@ -1250,6 +1250,19 @@ async def test_a_change_admitted_before_a_sync_holds_its_opening_and_none_is_adm
     rig.probe.send_command("scan.edit.end", {"series_id": rig.series_id, "token": again["token"]})
 
 
+async def test_a_sync_that_retries_the_failed_tells_the_voice_overs_and_keeps_the_word_with_its_command(rig):
+    """The button «Сбросить неудачные попытки» is a sync whose voices.dispatch forgets the failed attempts; the word is kept
+    with the command, so that a run resumed after a restart still retries. A plain sync says nothing of it."""
+    rig.world.rows = [rig.row("a", 1, 1)]
+    await rig.run()
+    assert "retry_failed" not in rig.world.payloads["voices.dispatch"][-1]
+    rig.world.work = {"downloads": True}  # the run stays open while its work goes on: its command is in the database
+    await rig.run(retry_failed=True)
+    assert rig.world.payloads["voices.dispatch"][-1]["retry_failed"] is True
+    stored = json.loads(rig.query("SELECT results_data FROM scan_tasks")[0]["results_data"])
+    assert stored["retry_failed"] is True
+
+
 async def test_a_run_works_by_the_configuration_it_took_when_it_started(rig):
     """Н-5: the rules of the profiles and the settings of the voice-overs are taken once, when the sync starts, kept with
     its command and given to every step that would read them; a change saved meanwhile counts from the next run."""

@@ -840,6 +840,26 @@ async def test_a_pair_the_service_turned_down_with_no_source_left_is_rejected_an
 
 
 @pytest.mark.asyncio
+async def test_a_sync_that_retries_the_failed_starts_a_rejected_voice_over_over_and_a_plain_sync_does_not(dubs):
+    """The button «Сбросить неудачные попытки»: a sync with retry_failed begins the rejected voice-over again from the
+    first source of its chain; a plain sync leaves a rejection as it is, and the placed track of the other voice stays."""
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", RedHeadSound={"ok": False, "refused": True}))
+    await statuses_until(sub, ["aligned", "placed", "rejected"])
+    probe.send_command("voices.dispatch", {"series_id": 7})
+    await quiet(voices)
+    assert len(neighbours.fetches) == 2 and {r["voice_key"]: r["status"] for r in await rows(probe)} == {
+        "BlackCat": "placed", "RedHeadSound": "rejected"}
+    probe.send_command("voices.dispatch", {"series_id": 7, "retry_failed": True})
+    await settled(neighbours, 3)
+    by_voice = {r["voice_key"]: r for r in await rows(probe)}
+    assert by_voice["RedHeadSound"]["status"] == "downloading" and by_voice["RedHeadSound"]["attempt"] == 0
+    assert neighbours.fetches[-1]["url"] == "https://site/title.html#kodik-RedHeadSound-1"
+    assert by_voice["BlackCat"]["status"] == "placed"
+
+
+@pytest.mark.asyncio
 async def test_a_success_without_a_file_fails_that_voice_and_leaves_the_others_alone(dubs):
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])

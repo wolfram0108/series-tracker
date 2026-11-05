@@ -400,9 +400,10 @@ class VoicesRepository:
         for dub_id in dub_ids:
             await self._move(lifecycle.UNSEND, "job_id=NULL", (), "id=?", (dub_id,))
 
-    async def reset(self, dub_id: int, reason: str) -> bool:
-        """The track belongs to a reference that is gone: back to the start, from the main source. What the row
-        owned goes to the cleanup journal in the same transaction."""
+    async def reset(self, dub_id: int, reason: str | None) -> bool:
+        """Back to the start, from the main source: the track belongs to a reference that is gone (`reason`), or the user
+        asked to try again what failed (no reason). What the row owned goes to the cleanup journal in the same
+        transaction."""
         marks, steps = _in(lifecycle.RESTART.sources)
         return await self._move(
             lifecycle.RESTART, "attempt=0, job_id=NULL, submit_key=NULL, out_dir=NULL, ref_uid=NULL, ref_path=NULL, aligned_to=NULL, "

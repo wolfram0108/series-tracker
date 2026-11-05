@@ -275,13 +275,15 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             response_model_exclude_none=True,
             responses={409: {"model": ErrorResponse},
                        500: {"model": ErrorResponse}})
-    async def scan_series(series_id: int, download: bool = True):
+    async def scan_series(series_id: int, download: bool = True, retry_failed: bool = False):
         """Синхронный скан одной серии, как в оригинале: HTTP ждёт
         результата; force_replace scan берёт из настройки отладки.
-        download=false — скан без загрузки: сверка файлов, таблицы, раскладка и план, но ничего не качается."""
+        download=false — скан без загрузки: сверка файлов, таблицы, раскладка и план, но ничего не качается.
+        retry_failed=true — та же синхронизация, в которой неудачные попытки забываются и делаются заново."""
         try:
-            result = await gw.request("scan.series.run",
-                                      {"series_id": series_id, **({} if download else {"download": False})})
+            result = await gw.request("scan.series.run", {
+                "series_id": series_id, **({} if download else {"download": False}),
+                **({"retry_failed": True} if retry_failed else {})})
         except BusRequestError as exc:
             msg = str(exc).split(": ", 1)[-1]
             code = 409 if "not_allowed" in msg else 500

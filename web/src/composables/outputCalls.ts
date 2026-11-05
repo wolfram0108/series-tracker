@@ -44,9 +44,12 @@ export function fetchOutput(seriesId: number): Promise<Answer<Reference[]>> {
 }
 
 /** The sync of the series, the same run the series card starts: tables, plan, download, voice-overs, containers. The core
- * answers when its pass is over; the run goes on with the works it gave out, and what it changes comes as events. */
-export function syncSeries(seriesId: number): Promise<Answer<unknown>> {
-  return call(() => api.POST("/api/series/{series_id}/scan", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
+ * answers when its pass is over; the run goes on with the works it gave out, and what it changes comes as events.
+ * `retryFailed`: the same sync, in which the failed attempts are forgotten and made again. */
+export function syncSeries(seriesId: number, retryFailed = false): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/series/{series_id}/scan", {
+    params: { path: { series_id: seriesId }, ...(retryFailed ? { query: { retry_failed: true } } : {}) },
+  }), OUTPUT_WORDS)
 }
 
 /** The names the files of the series get by the rules as they are now, each with the slot it belongs to. */

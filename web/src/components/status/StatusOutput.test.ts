@@ -138,19 +138,27 @@ describe("StatusOutput", () => {
     expect(w.find(".episode-file").exists()).toBe(false)
   })
 
-  it("has one button, the sync of the series, which waits for its answer", async () => {
+  it("has the sync of the series and the reset of failed attempts, each waits for its answer", async () => {
     let finish!: (value: Answer<unknown>) => void
     vi.mocked(calls.syncSeries).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
     const w = mountOutput()
     await flushPromises()
     const buttons = w.findAll(".output-bar button")
-    expect(buttons.map((each) => each.text())).toEqual([t("output.sync")])
+    expect(buttons.map((each) => each.text())).toEqual([t("output.sync"), t("output.retryFailed")])
     await buttons[0].trigger("click")
-    expect(buttons[0].attributes("disabled")).toBeDefined()
+    expect(buttons.every((each) => each.attributes("disabled") !== undefined)).toBe(true) // one pass at a time
     finish(ok({ success: true }))
     await flushPromises()
-    expect(buttons[0].attributes("disabled")).toBeUndefined()
+    expect(buttons.every((each) => each.attributes("disabled") === undefined)).toBe(true)
     expect(calls.syncSeries).toHaveBeenCalledWith(1)
+  })
+
+  it("resets the failed attempts by the same sync, told to forget them", async () => {
+    const w = mountOutput()
+    await flushPromises()
+    await w.find(".output-bar .output-retry-failed").trigger("click")
+    await flushPromises()
+    expect(calls.syncSeries).toHaveBeenCalledWith(1, true)
   })
 
   it("draws the button of the pass by the table of the core and the state the core reports, not only by its own call", async () => {

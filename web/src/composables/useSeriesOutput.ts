@@ -154,6 +154,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     act(() => switchOutput(seriesId, { season, ...(episode === null ? {} : { episode }), off }), busy)
 
   const sync = (): Promise<string | null> => act(() => syncSeries(seriesId), syncing)
+  const retryFailed = (): Promise<string | null> => act(() => syncSeries(seriesId, true), syncing)
 
   // The order of the voice-overs of a season (the tracks of its containers); the new order comes back as an event.
   const voiceOrders = computed(() => composition.value?.voice_orders ?? [])
@@ -182,5 +183,5 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   }
 
   return { composition, references, loading, failure, busy, syncing, names, namesWanted, naming, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
-    sync, showNames, voiceOrders, order }
+    sync, retryFailed, showNames, voiceOrders, order }
 }

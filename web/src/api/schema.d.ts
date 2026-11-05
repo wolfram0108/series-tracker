@@ -339,6 +339,7 @@ export interface paths {
          * @description Синхронный скан одной серии, как в оригинале: HTTP ждёт
          *     результата; force_replace scan берёт из настройки отладки.
          *     download=false — скан без загрузки: сверка файлов, таблицы, раскладка и план, но ничего не качается.
+         *     retry_failed=true — та же синхронизация, в которой неудачные попытки забываются и делаются заново.
          */
         post: operations["scan_series_api_series__series_id__scan_post"];
         delete?: never;
@@ -3675,6 +3676,7 @@ export interface operations {
         parameters: {
             query?: {
                 download?: boolean;
+                retry_failed?: boolean;
             };
             header?: never;
             path: {
