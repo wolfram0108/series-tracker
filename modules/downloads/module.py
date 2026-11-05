@@ -32,6 +32,9 @@ Queries / commands:
   downloads.queue.get {} -> {tasks, count} - the live tasks (the window; the snapshot of scan): the tasks of the plan
       and the fetches of the voice-overs (`task_type` fetch: waiting `pending`, under way `downloading` with its progress,
       speed, time left and size, kept with the job as a task keeps them in its row).
+  downloads.pack {series_id, only?, skip?} -> {packed, failed, unchanged, waiting} - a step of a run of a sync (scan): the
+      container of each episode asked becomes what the plan asks (packing.py). `only` names the episodes whose work ended,
+      `skip` those whose work goes on (slots [season, episode, part]); with neither every episode is looked at.
   downloads.queue.clear {} -> {deleted} - waiting and failed tasks with their work files; a download under way stays.
   downloads.cancel {task_id} - one task that waits or runs (the table of what is allowed); a task whose files could not be
       removed stays as a failed one, the record of what is left.
@@ -83,7 +86,7 @@ import time
 from dataclasses import asdict, dataclass
 
 from core import BaseModule, BusRequestError, storage
-from core.contracts import WORK_WITHDRAWN, SeriesKind, SourceType, WorkWithdrawn, availability
+from core.contracts import WORK_WITHDRAWN, SeriesKind, Slot, SourceType, WorkWithdrawn, availability, slot_of
 from core.db import Database
 from core.envelope import Envelope
 from core.work_report import WorkReport
@@ -93,7 +96,7 @@ from . import ytdlp
 from .library import Library
 from .publication import PUBLISHED, REFUSED, WAITING, Publication, PublicationUnfinished
 from .packing import FfmpegPacker, Packed, Packer, Packing
-from .repository import LIVE_STATES, DownloadsRepository
+from .repository import DownloadsRepository
 
 PROGRESS_DB_THROTTLE = 2.0     # seconds between writes of progress to the database: the window needs a picture, not every tick
 PROGRESS_EVENT_THROTTLE = 1.0  # seconds between queue events on progress
@@ -374,14 +377,17 @@ class DownloadsModule(BaseModule):
         await self._pump()
 
     async def on_pack(self, env: Envelope) -> dict:
-        """The last step of a run of a sync: the container of every episode becomes what the plan asks (ЭТАП_11)."""
+        """A step of a run of a sync: the container of each episode asked becomes what the plan asks (ЭТАП_11). `only`
+        names the episodes whose work ended, `skip` those whose work goes on; with neither every episode is looked at."""
         series_id = env.payload["series_id"]
         series = await self.request("catalog.series.get", {"series_id": series_id})
         if series.get("kind") != SeriesKind.VIDEO:
             return asdict(Packed())
+        only, skip = ({slot_of(*slot) for slot in env.payload[name]} if env.payload.get(name) is not None else None
+                      for name in ("only", "skip"))
         self._packing.waits(series)
         async with self._pack_turn, self._lock(series_id):
-            done = await self._packing.pack(series)
+            done = await self._packing.pack(series, only=only, skip=skip or set())
         if done.packed:
             await self._contribute(series_id)
         if done.packed or done.failed or done.waiting:
@@ -879,9 +885,13 @@ class DownloadsModule(BaseModule):
 
     # --- свёртка статусов (Р-11) -----------------------------------------------------
 
-    async def _has_work(self, series_id: int) -> bool:
-        """A download of the series waits, runs or is being put under its name: work of the run of the series."""
-        return any(task["status"] in LIVE_STATES for task in await self.repo.tasks_for_series(series_id))
+    async def _has_work(self, series_id: int) -> tuple[bool, set[Slot]]:
+        """A download of the series waits, runs or is being put under its name: work of the run of the series, and of the
+        episode of its row (a task whose row is gone is work still, of no episode)."""
+        live = await self.repo.live_task_slots(series_id)
+        busy = {slot_of(task["season"], task["episode_start"], task["part"]) for task in live
+                if task["episode_start"] is not None}
+        return bool(live), busy
 
     async def on_work_get(self, env: Envelope) -> dict:
         return (await self._work.tell(int(env.payload["series_id"]))).model_dump()

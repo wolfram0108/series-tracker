@@ -55,7 +55,9 @@ Events (outgoing):
       every executor (downloads, voices) has no work of the series left (events work.series.state, queries
       <owner>.work.get). While it is open the series is busy (Action.EDIT and SYNC are refused, series.busy.contribution
       {source: sync}) and its plan stays as the sync found it: a recount an event asks for is done when the run closes.
-      An open run is kept in scan_tasks (phase=working) and taken up again after a restart.
+      An open run is kept in scan_tasks (phase=working) and taken up again after a restart. Each episode is a process of its
+      own: the run asks downloads.pack for the episodes no work is about once it has heard every executor, then for each
+      episode as soon as no executor holds work of it (WorkState.busy), and for the whole series when it closes.
   scan.series.progress (SeriesReadProgress) — how far the read of a page is that a scan of the series waits for, per
       source, with the rate; `active` false ends it (read, failed or given up). The card of the series shows it.
 
@@ -82,14 +84,14 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from core import NO_HANDLER, BaseModule, BusRequestError, torrent_source
 from core.deadlines import EDIT_STUCK_S, TABLE_WAIT_S
 from core.contracts import (RUN_CHANGED, WORK_STATE, RunSnapshot, availability, CompositionReply, OutputSwitch, Reference,
                             ReferenceChanged, RunChanged, SeriesReadProgress, SeriesSource, SourceStatus, TableProgress,
-                            VoiceSettingsView, WorkState)
+                            Slot, VoiceSettingsView, WorkState)
 from core.db import Database
 from core.envelope import Envelope
 from core.voice_names import Groups
@@ -110,24 +112,49 @@ class _RunWork:
     """What the run of a series knows of the work of its executors. An executor is working until a state of it says it
     is not (one not heard yet is working); of two states of one executor the later counted (`seq`) is in force, so a
     reply and an event that cross on the bus cannot undo each other. `polling` is set while the run asks every
-    executor: the run is not closed from an event before every answer is in."""
+    executor: the run is not closed from an event before every answer is in. `busy` holds the episodes each executor
+    works on: an episode no executor holds any more is ready for its container."""
 
     working: set[str]
     seen: dict[str, int]
     polling: bool = True
+    busy: dict[str, set[Slot]] = field(default_factory=dict)
 
-    def apply(self, state: WorkState) -> None:
+    def apply(self, state: WorkState) -> set[Slot]:
+        """Takes the state in; the episodes it leaves with no work of any executor."""
         if state.seq <= self.seen.get(state.owner, -1):
-            return
+            return set()
+        before = self.slots
         self.seen[state.owner] = state.seq
+        self.busy[state.owner] = {tuple(slot) for slot in state.busy}
         if state.active:
             self.working.add(state.owner)
         else:
             self.working.discard(state.owner)
+        return before - self.slots
+
+    @property
+    def slots(self) -> set[Slot]:
+        return set().union(*self.busy.values())
 
     @property
     def done(self) -> bool:
         return not self.polling and not self.working
+
+
+def _listed(slots: set[Slot]) -> list[list]:
+    """Episodes in the order of the series, as a message carries them."""
+    return [list(slot) for slot in sorted(slots, key=lambda slot: (slot[0] or 0, slot[1], slot[2]))]
+
+
+@dataclass
+class _Packs:
+    """The packings a run of a series owes while it goes: the episodes whose work ended (`pending`), and `others`, every
+    episode no work is about, asked once when the run has heard every executor. One task does them one after another."""
+
+    pending: set[Slot] = field(default_factory=set)
+    others: bool = False
+    task: asyncio.Task | None = None
 
 
 @dataclass(frozen=True)
@@ -166,6 +193,8 @@ class ScanModule(BaseModule):
         # series whose recount an event asked for while its run was open (counted when the run ends).
         self._runs: dict[int, int] = {}
         self._working: dict[int, _RunWork] = {}
+        # The containers a run makes as its episodes get ready, before the run ends (each episode is a process of its own).
+        self._packs: dict[int, _Packs] = {}
         self._owed: set[int] = set()
         self._closing: set[int] = set()
         self._owned: set[int] = set()  # the tasks of scan_tasks that the scans running here keep
@@ -417,6 +446,9 @@ class ScanModule(BaseModule):
         self._locks.pop(series_id, None)
         if self._runs.pop(series_id, None) is not None:  # its works go with the series: the run is over
             self._working.pop(series_id, None)
+            packs = self._packs.pop(series_id, None)
+            if packs is not None and packs.task is not None:
+                packs.task.cancel()
             self._owed.discard(series_id)
             self._announce_run(series_id, False)
         self.publish_event("series.purged",
@@ -802,32 +834,68 @@ class ScanModule(BaseModule):
             run.polling = False
         if run.done:
             await self._close_run(series_id)
+        else:
+            self._owe_pack(series_id, others=True)
 
     async def on_work_state(self, env: Envelope) -> None:
         state = WorkState.model_validate(env.payload)
         run = self._working.get(state.series_id)
         if state.series_id not in self._runs or run is None:
             return
-        run.apply(state)
+        freed = run.apply(state)
         if run.done:
             await self._close_run(state.series_id)
+        elif freed and not run.polling:
+            self._owe_pack(state.series_id, slots=freed)
+
+    def _owe_pack(self, series_id: int, *, slots: set[Slot] = frozenset(), others: bool = False) -> None:
+        """The run owes the containers of these episodes (or of every episode no work is about) now, not at its end."""
+        packs = self._packs.setdefault(series_id, _Packs())
+        packs.pending |= set(slots)
+        packs.others = packs.others or others
+        if packs.task is None or packs.task.done():
+            packs.task = asyncio.create_task(self._pack_owed(series_id, packs), name=f"scan.pack:{series_id}")
+            self._tasks.append(packs.task)
+
+    async def _pack_owed(self, series_id: int, packs: _Packs) -> None:
+        """One packing of the series at a time: an episode that got work again meanwhile waits for its end once more."""
+        while packs.others or packs.pending:
+            run = self._working.get(series_id)
+            if series_id not in self._runs or run is None or series_id in self._closing:
+                return  # the run ended: its last packing looks at every episode
+            busy = run.slots
+            if packs.others:
+                packs.others, packs.pending = False, set()
+                await self._pack(series_id, {"skip": _listed(busy)})
+            else:
+                ready, packs.pending = packs.pending - busy, set()
+                if ready:
+                    await self._pack(series_id, {"only": _listed(ready)})
+
+    async def _pack(self, series_id: int, scope: dict) -> str | None:
+        """Asks downloads to pack the episodes of `scope` (all with none); the reason of a failure, None when all went well."""
+        try:
+            packed = await self.request("downloads.pack", {"series_id": series_id, **scope})
+        except BusRequestError as exc:
+            if NO_HANDLER in str(exc):
+                return None
+            self.log.error("сериал %d: упаковка не выполнена: %s", series_id, exc)
+            return reason("scan_step_failed", step="downloads.pack")
+        return reason("sync_pack_failed", failed=packed["failed"]) if packed.get("failed") else None
 
     async def _close_run(self, series_id: int) -> None:
-        """Every work of the run has ended: the containers of the series are made (the last step of the run, ЭТАП_11),
-        then the command goes, the series is free, and a recount an event asked for while the run was open is done now
-        (a plan; the disk follows it at the next sync)."""
+        """Every work of the run has ended: the last packing looks at every episode of the series (those packed as they got
+        ready are left as they are, ЭТАП_11), then the command goes, the series is free, and a recount an event asked for
+        while the run was open is done now (a plan; the disk follows it at the next sync)."""
         if series_id not in self._runs or series_id in self._closing:
             return  # the run is closing already: one packing, one end
         self._closing.add(series_id)
-        failure = None
         try:
-            packed = await self.request("downloads.pack", {"series_id": series_id})
-            if packed.get("failed"):
-                failure = reason("sync_pack_failed", failed=packed["failed"])
-        except BusRequestError as exc:
-            if NO_HANDLER not in str(exc):
-                self.log.error("сериал %d: упаковка не выполнена: %s", series_id, exc)
-                failure = reason("scan_step_failed", step="downloads.pack")
+            # A packing of ready episodes that goes ends first; the last one looks at every episode, those packed are left.
+            packs = self._packs.pop(series_id, None)
+            if packs is not None and packs.task is not None and not packs.task.done():
+                await asyncio.gather(packs.task, return_exceptions=True)
+            failure = await self._pack(series_id, {})
         finally:
             self._closing.discard(series_id)
         intent = self._runs.pop(series_id, None)

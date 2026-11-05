@@ -165,6 +165,13 @@ class DownloadsRepository:
         return await self._db.fetch_one(
             f"SELECT {_TASK}, video_url FROM download_tasks WHERE task_key=? AND task_type='vk_video' AND status='error'", (unique_id,))
 
+    async def live_task_slots(self, series_id: int) -> list[dict]:
+        """The live tasks of the series with the episode of their row; a task whose row is gone has no episode."""
+        return await self._db.fetch_all(
+            "SELECT dt.id, mi.season, mi.episode_start, mi.part FROM download_tasks dt "
+            "LEFT JOIN media_items mi ON mi.unique_id = dt.task_key "
+            f"WHERE dt.series_id=? AND dt.task_type='vk_video' AND dt.status IN {_LIVE}", (series_id,))
+
     async def tasks_for_series(self, series_id: int) -> list[dict]:
         return await self._db.fetch_all(
             f"SELECT {_TASK} FROM download_tasks WHERE series_id=? AND task_type='vk_video'", (series_id,))

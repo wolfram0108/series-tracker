@@ -182,7 +182,7 @@ from core import NO_HANDLER, BaseModule, BusRequestError
 from pydantic import ValidationError
 
 from core import container
-from core.contracts import (RUN_CHANGED, WORK_WITHDRAWN, RunChanged, RunSnapshot, WorkWithdrawn, AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
+from core.contracts import (RUN_CHANGED, WORK_WITHDRAWN, RunChanged, RunSnapshot, Slot, WorkWithdrawn, slot_of, AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
                             DubRecord, DubsSnapshot, DubStatus as S, GroupsResolveReply, GroupsResolveRequest,
                             JobStatus, Reference, ReferenceChanged, SnapshotItem, SubmitOutcome, SubmitReply,
                             VoiceSettingsDraft, VoiceSettingsSaved)
@@ -964,10 +964,12 @@ class VoicesModule(BaseModule):
         self._publish_event(current, status, current["outcome"] or current["error"], epoch, rev)
         await self._tell_work(current["series_id"])
 
-    async def _has_work(self, series_id: int) -> bool:
-        """A voice-over a sync admitted and that is not at its end: work of the run of the series. A row a recount
-        planned outside a sync is not admitted and is no work yet."""
-        return any(row["admitted"] and row["status"] not in FINAL for row in await self.repo.for_series(series_id))
+    async def _has_work(self, series_id: int) -> tuple[bool, set[Slot]]:
+        """A voice-over a sync admitted and that is not at its end: work of the run of the series, and of its episode. A row
+        a recount planned outside a sync is not admitted and is no work yet."""
+        busy = {slot_of(row["season"], row["episode"], row["part"]) for row in await self.repo.for_series(series_id)
+                if row["admitted"] and row["status"] not in FINAL}
+        return bool(busy), busy
 
     async def on_work_get(self, env: Envelope) -> dict:
         return (await self._work.tell(int(env.payload["series_id"]))).model_dump()

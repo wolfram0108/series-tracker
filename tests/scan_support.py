@@ -95,14 +95,18 @@ class World(BaseModule):
         self.settings_values = {"scan_interval_minutes": "60"}
         # Whether each executor has work of the series when a run asks (`<owner>.work.get`); none by default.
         self.work: dict[str, bool] = {}
+        # The episodes each executor works on, as its states name them (WorkState.busy).
+        self.busy: dict[str, list[list]] = {}
         # The number of the latest state an executor counted (core.work_report): events and replies carry it.
         self.seq = 0
         # An executor whose reply to `<owner>.work.get` waits for this gate (the answer is counted when it was asked).
         self.work_gates: dict[str, asyncio.Event] = {}
-        # What the packing at the end of a run answers, or its failure; every request is noted.
+        # What a packing of a run answers, or its failure; every request is noted with its scope (`payloads`).
         self.pack_reply: dict = {"packed": 0, "failed": 0, "unchanged": 0, "waiting": 0}
         self.pack_error: str | None = None
         self.packs = 0
+        # A packing that waits for this gate after it is noted (a test holds one while states come).
+        self.pack_gate: asyncio.Event | None = None
         # The stored configuration the owners give a run (RunSnapshot), and what every step of the run was given.
         self.profiles_export: dict = {}
         self.voices_export: dict = {}
@@ -176,21 +180,25 @@ class World(BaseModule):
         owner = env.topic.split(".")[0]
         self.order.append(f"{env.topic} {env.payload['series_id']}")
         counted = {"owner": owner, "series_id": env.payload["series_id"], "active": self.work.get(owner, False),
-                   "seq": self.seq}
+                   "busy": self.busy.get(owner, []), "seq": self.seq}
         gate = self.work_gates.get(owner)
         if gate is not None:
             await gate.wait()
         return counted
 
-    def tell_work(self, series_id: int, owner: str, active: bool) -> None:
+    def tell_work(self, series_id: int, owner: str, active: bool, busy: list[list] | None = None) -> None:
         """An executor's state changed: a later count than any reply given before."""
         self.seq += 1
         self.work[owner] = active
+        self.busy[owner] = busy if busy is not None else []
         self.publish_event("work.series.state", {"owner": owner, "series_id": series_id, "active": active,
-                                                 "seq": self.seq})
+                                                 "busy": self.busy[owner], "seq": self.seq})
 
     async def on_pack(self, env) -> dict:
         self.packs += 1
+        self.payloads.setdefault(env.topic, []).append({key: value for key, value in env.payload.items() if key != "series_id"})
+        if self.pack_gate is not None:
+            await self.pack_gate.wait()
         if self.pack_error is not None:
             raise RuntimeError(self.pack_error)
         return dict(self.pack_reply)

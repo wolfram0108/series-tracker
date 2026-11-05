@@ -1541,6 +1541,9 @@ async def test_the_run_of_a_series_hears_whether_downloads_has_work_of_it(system
     busy = await probe.request("downloads.work.get", {"series_id": 2}, timeout=10)
     assert {key: busy[key] for key in ("owner", "series_id", "active")} == {
         "owner": "downloads", "series_id": 2, "active": True}
+    # The work names its episode: the run packs an episode when no executor holds work of it.
+    item = _items(db_path)["uid1"]
+    assert [list(slot) for slot in busy["busy"]] == [[item["season"], item["episode_start"], item["part"] or 0]]
     dl.gate.set()
     assert await _wait(lambda: _items(db_path)["uid1"]["status"] == "completed")
     assert await _wait(lambda: not any(task["status"] in ("pending", "downloading", "processing", "publishing")

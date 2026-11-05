@@ -484,6 +484,31 @@ async def test_the_packing_of_a_series_is_seen_in_the_queue_from_its_wait_to_its
 
 
 @pytest.mark.asyncio
+async def test_a_packing_takes_the_episodes_it_is_asked_for_and_leaves_the_others_and_their_failures_alone(rig):
+    """Each episode is a process of its own: the run asks for the episodes whose work ended (`only`) or for every one but
+    those whose work goes on (`skip`), and a packing of one episode neither builds another nor hides its failure."""
+    fake, voices, packer, probe, db_path, media_dir = rig
+    sub = probe.bus.subscribe("downloads.pack.queue.changed")
+    put(media_dir, "e01.mp4", b"https://v/win")
+    winner(db_path, "e01.mp4")
+    fake.references.append({**fake.references[0], "episode": 2, "row_key": "vk:two"})  # its video is not downloaded yet
+    order(fake, [OWN])
+
+    async def broken(*args, **kwargs):
+        return "ffmpeg_failed: test"
+    build = packer.build
+    packer.build = broken
+    assert outcome(await probe.request("downloads.pack", {"series_id": 2, "only": [[1, 1, 0]]}, timeout=10)) == {"failed": 1}
+    packer.build = build
+
+    assert outcome(await probe.request("downloads.pack", {"series_id": 2, "only": [[1, 2, 0]]}, timeout=10)) == {"waiting": 1}
+    assert [(task["episode"], task["status"]) for task in pictures(sub)[-1]] == [(1, "failed")]  # the failure of 1 stays
+    assert outcome(await probe.request("downloads.pack", {"series_id": 2, "skip": [[1, 2, 0]]}, timeout=10)) == {"packed": 1}
+    assert pictures(sub)[-1] == []
+    assert outcome(await probe.request("downloads.pack", {"series_id": 2, "skip": [[1, 1, 0], [1, 2, 0]]}, timeout=10)) == {}
+
+
+@pytest.mark.asyncio
 async def test_a_failed_slot_stays_in_the_queue_until_the_next_packing_and_a_slot_without_a_file_waits(rig):
     fake, voices, packer, probe, db_path, media_dir = rig
     sub = probe.bus.subscribe("downloads.pack.queue.changed")

@@ -1021,8 +1021,8 @@ def runs_of(events: list[dict]) -> list[bool]:
     return [each["active"] for each in events]
 
 
-def work_state(rig: "Rig", owner: str, active: bool) -> None:
-    rig.world.tell_work(rig.series_id, owner, active)
+def work_state(rig: "Rig", owner: str, active: bool, busy: list[list] | None = None) -> None:
+    rig.world.tell_work(rig.series_id, owner, active, busy)
 
 
 async def test_a_sync_is_one_run_and_the_series_is_busy_until_every_work_it_gave_out_has_ended(rig):
@@ -1112,9 +1112,59 @@ async def test_a_run_is_not_closed_while_an_executor_has_not_answered_however_th
     gate.set()
     await running
     await rig.bus.settled()
-    assert drain(runs) == [] and rig.world.packs == 0  # voices works
+    # Voices works: the run stays open; the episodes no work is about are packed at once, not at its end.
+    assert drain(runs) == [] and rig.world.payloads["downloads.pack"] == [{"skip": []}]
     work_state(rig, "voices", False)
-    assert runs_of([await next_event(runs)]) == [False] and rig.world.packs == 1
+    assert runs_of([await next_event(runs)]) == [False] and rig.world.payloads["downloads.pack"] == [{"skip": []}, {}]
+
+
+async def test_each_episode_is_packed_as_soon_as_no_executor_holds_work_of_it_and_the_whole_series_at_the_end(rig):
+    """Each episode is a process of its own: its container is made when its last work ends, not when the last work of
+    the series does. The episodes with no work are packed once the run has heard every executor."""
+    rig.world.rows = [rig.row("a", 1, 1)]
+    rig.world.work = {"downloads": True, "voices": True}
+    rig.world.busy = {"downloads": [[1, 2, 0], [1, 3, 0]], "voices": [[1, 1, 0], [1, 2, 0]]}
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    packs = lambda: rig.world.payloads.get("downloads.pack", [])  # noqa: E731
+    await rig.run()
+    assert await wait_until(lambda: len(packs()) == 1, rig.bus, *rig.runner.modules)
+    assert packs() == [{"skip": [[1, 1, 0], [1, 2, 0], [1, 3, 0]]}]
+
+    work_state(rig, "voices", True, [[1, 2, 0]])  # the voice-over of episode 1 is placed: no work of it is left
+    assert await wait_until(lambda: len(packs()) == 2, rig.bus, *rig.runner.modules)
+    assert packs()[1] == {"only": [[1, 1, 0]]}
+
+    work_state(rig, "downloads", True, [[1, 3, 0]])  # episode 2 is downloaded, its voice-over still goes: no packing
+    await rig.bus.settled()
+    assert len(packs()) == 2
+
+    work_state(rig, "voices", False)  # the voice-over of episode 2 ends: the episode is ready
+    assert await wait_until(lambda: len(packs()) == 3, rig.bus, *rig.runner.modules)
+    assert packs()[2] == {"only": [[1, 2, 0]]} and runs_of(drain(runs)) == [True]
+
+    work_state(rig, "downloads", False)  # the last work of the run ends: one packing of the whole series closes it
+    assert runs_of([await next_event(runs)]) == [False] and packs()[3:] == [{}]
+
+
+async def test_an_episode_that_got_work_again_before_its_packing_waits_for_the_end_of_it(rig):
+    rig.world.rows = [rig.row("a", 1, 1)]
+    rig.world.work = {"voices": True}
+    rig.world.busy = {"voices": [[1, 1, 0]]}
+    gate = rig.world.pack_gate = asyncio.Event()  # the first packing goes on while the states below come
+    packs = lambda: rig.world.payloads.get("downloads.pack", [])  # noqa: E731
+    await rig.run()
+    assert await wait_until(lambda: len(packs()) == 1, rig.bus, *rig.runner.modules)
+    work_state(rig, "voices", True, [[1, 2, 0]])        # episode 1 freed while a packing goes: owed
+    work_state(rig, "voices", True, [[1, 1, 0], [1, 2, 0]])  # and taken again before its turn
+    # The held packing keeps the bus from going quiet: the run is waited for until it took the last state in.
+    assert await wait_until(lambda: rig.scan._working[rig.series_id].seen.get("voices") == rig.world.seq,
+                            rig.bus, *rig.runner.modules)
+    gate.set()
+    await rig.bus.settled()
+    assert packs() == [{"skip": [[1, 1, 0]]}]  # nothing of a busy episode is packed
+    work_state(rig, "voices", False)
+    assert await wait_until(lambda: len(packs()) == 2, rig.bus, *rig.runner.modules)
+    assert packs()[1] == {}  # the run closed: its last packing looks at every episode
 
 
 async def test_an_answer_counted_before_an_event_does_not_undo_it(rig):

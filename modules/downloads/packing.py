@@ -1,8 +1,10 @@
-"""The container of every episode of a video series, made at the end of a sync (ЭТАП_11, И-61).
+"""The container of every episode of a video series, made in a sync as soon as the episode is ready (ЭТАП_11, И-61).
 
 The file of an episode is one MKV: the video of the reference, its own sound, and the voice-overs in the order of the
-season. Packing is the last step of a run of a sync (scan asks `downloads.pack` when every other work of the run has
-ended), so the disk changes in a sync alone (И-59) and the old container lives until the new one is whole (ЭТАП_11,
+season. Packing is a step of a run of a sync, and each episode is a process of its own: scan asks `downloads.pack` for the
+episodes no work of the run is about, at once, then for each episode as soon as the last work of it ends, and once more for
+the whole series when the run closes (a slot that is what the plan asks is left alone). So the disk changes in a sync alone
+(И-59) and the old container lives until the new one is whole (ЭТАП_11,
 answer 3): the new one is built aside in the folder of the series, read back, and put under the name in one replace.
 
 What goes in is told by one rule, not by cases: the container is a function of the plan. A track is known by the key of
@@ -116,28 +118,36 @@ class Packing:
             "status": status, "tracks": tracks or []}
         self._on_queue()
 
-    def _drop(self, series_id: int, keep_failed: bool, only: str | None = None) -> None:
-        """The tasks of the series leave the queue: all of them, or all but the failed and cut short, or those of `only`."""
+    def _drop(self, series_id: int, keep_failed: bool, only: str | None = None,
+              slots: Callable[[tuple], bool] | None = None) -> None:
+        """The tasks of the series leave the queue: all of them, or all but the failed and cut short, or those of `only`;
+        of the slots `slots` accepts, when given (a task of the whole series, with no episode, is of every packing)."""
         for key in [key for key, task in self._queue.items() if key[0] == series_id
                     and (only is None or task["status"] == only)
+                    and (slots is None or key[2] is None or slots(key[1:4]))
                     and not (keep_failed and task["status"] in ("failed", "interrupted"))]:
             del self._queue[key]
         self._on_queue()
 
-    async def pack(self, series: dict) -> Packed:
+    async def pack(self, series: dict, *, only: set[tuple] | None = None, skip: set[tuple] = frozenset()) -> Packed:
+        """The episodes of `only` (all when None) but those of `skip` (slots (season, episode, part or 0))."""
+        def asked(slot: tuple) -> bool:
+            key = (slot[0], slot[1], slot[2] or 0)
+            return (only is None or key in only) and key not in skip
+
         base = series.get("save_path") or ""
         done = Packed()
         if not os.path.isabs(base):
-            self._drop(series["id"], keep_failed=False)
+            self._drop(series["id"], keep_failed=False, slots=asked)
             return done
         try:
-            await self._pack(series, base, done)
+            await self._pack(series, base, done, asked)
         finally:
-            self._drop(series["id"], keep_failed=True)
+            self._drop(series["id"], keep_failed=True, slots=asked)
         return done
 
-    async def _pack(self, series: dict, base: str, done: Packed) -> None:
-        self._drop(series["id"], keep_failed=False)  # the failures of the last packing are looked at again now
+    async def _pack(self, series: dict, base: str, done: Packed, asked: Callable[[tuple], bool]) -> None:
+        self._drop(series["id"], keep_failed=False, slots=asked)  # the failures of these slots are looked at again now
         await self.settle(series)
         rows = await self._repo.slot_files(series["id"])
         references = {(each["season"], each["episode"], each.get("part")): each
@@ -151,6 +161,8 @@ class Packing:
         work: list[tuple] = []
         # Every slot of the plan is looked at, also one that has no file yet: its video is not downloaded, it waits.
         for slot in sorted({*slots, *references}, key=lambda each: (each[0] or 0, each[1], each[2] or 0)):
+            if not asked(slot):
+                continue
             here = slots.get(slot, [])
             winner = next((row for row in here if row["plan_status"] == "in_plan_single" and row["status"] == "completed"
                            and not row["is_ignored_by_user"]), None)

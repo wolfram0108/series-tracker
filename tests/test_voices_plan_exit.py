@@ -360,6 +360,11 @@ async def test_the_run_of_a_series_hears_whether_voices_has_work_of_it(dubs):
     # Every state counted is numbered after the one before: the run orders a reply and an event by it (I-60).
     assert {key: busy[key] for key in ("owner", "series_id", "active")} == {"owner": "voices", "series_id": 7, "active": True}
     assert busy["seq"] > idle["seq"]
+    # The work names its episodes: the run packs an episode when no executor holds work of it.
+    rows = await voices.repo.for_series(7)
+    assert sorted(map(tuple, busy["busy"])) == sorted({(row["season"], row["episode"], row["part"] or 0) for row in rows
+                                                       if row["admitted"] and row["status"] not in ("placed", "rejected", "failed")})
+    assert busy["busy"]
 
 
 @pytest.mark.asyncio
