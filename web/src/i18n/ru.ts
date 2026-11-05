@@ -86,6 +86,7 @@ export const ru = {
   "reason.no_player": "нет доступного плеера",
   "reason.site_unreachable": "{site} недоступен: {error}",
   "reason.site_status": "{site}: страница вернула {status}: {url}",
+  "reason.site_refused": "{site} отказал: {message}",
   "reason.page_no_player": "на странице нет плеера {player}",
   "reason.season_clash": "в плеере {player} несколько сезонов с одинаковыми номерами серий ({episodes}): сезоны не различаются",
   "reason.title_no_videos": "у тайтла нет видео {player}",

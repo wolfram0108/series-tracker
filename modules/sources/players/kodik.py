@@ -45,8 +45,9 @@ _OPTION = re.compile(r"<option\b([^>]*)>(.*?)</option>", re.DOTALL)
 _TEXT = re.compile(r"<[^>]+>")
 _ATTR = re.compile(r"""([\w-]+)\s*=\s*["']([^"']*)["']""")
 _SIGNED = ("domain", "d_sign", "pd", "pd_sign", "ref", "ref_sign")
-# The iframe of a page that embeds the player in place, or the button that switches a page to it.
-_FRAME = re.compile(r"""<iframe\b[^>]*\bdata-src=["']([^"']*kodikplayer\.com[^"']*)["']""", re.IGNORECASE)
+# The iframe of a page that embeds the player in place (its address in `src`, or in `data-src` for a lazy one), or the
+# button that switches a page to it.
+_FRAME = re.compile(r"""<iframe\b[^>]*\b(?:data-)?src=["']([^"']*kodikplayer\.com[^"']*)["']""", re.IGNORECASE)
 _SWITCH = re.compile(r"""switchSource\(\s*["']([^"']*kodikplayer\.com[^"']*)["']""", re.IGNORECASE)
 _MEDIA = re.compile(r"/serial/([^/]+)/([^/?#]+)")
 _LINK = re.compile(r"^kodik=([^/]+)/([^/]+)/(\d+)$")

@@ -135,6 +135,15 @@ def test_a_page_embeds_kodik_by_an_iframe_or_by_a_button_that_switches_to_it():
     assert player.find("<p>nothing</p>", PAGE) is None
 
 
+def test_an_iframe_is_found_by_whichever_attribute_holds_its_address():
+    player = kodik.KodikPlayer()
+    plain = "<iframe src='//kodikplayer.com/serial/77336/e23d/720p' frameborder='0' allowfullscreen></iframe>"
+    lazy = '<iframe src="about:blank" data-src="https://kodikplayer.com/serial/2/cd/720p"></iframe>'
+
+    assert player.find(plain, PAGE).url == "https://kodikplayer.com/serial/77336/e23d/720p"
+    assert player.find(lazy, PAGE).url == "https://kodikplayer.com/serial/2/cd/720p"
+
+
 async def test_every_item_of_every_season_of_every_voice_is_an_entry_with_the_text_of_the_list():
     found, web = await entries_of("https://kodikplayer.com/serial/50228/7bbb4c6b/720p")
 
@@ -225,9 +234,23 @@ async def cvh_entries(playlist: dict | int):
 def test_the_widget_of_a_page_is_the_title_and_the_publisher_the_player_is_embedded_with():
     player = CdnVideoHubPlayer()
 
-    assert player.find(WIDGET, PAGE) == PlayerRef("cvh", PAGE, "54437/1110")
+    assert player.find(WIDGET, PAGE) == PlayerRef("cvh", PAGE, "54437/1110/mali")
     assert player.find("<p>no player</p>", PAGE) is None
-    assert cdnvideohub.widget_of('<video-player data-title-id="7"></video-player>') == (7, cdnvideohub.DEFAULT_PUBLISHER)
+    other = '<video-player data-title-id="62248" data-publisher-id="1126" data-aggregator="kima"></video-player>'
+    assert player.find(other, PAGE) == PlayerRef("cvh", PAGE, "62248/1126/kima")
+
+
+async def test_the_playlist_is_asked_as_the_widget_names_it():
+    web = playlist_web({"items": []})
+    player = CdnVideoHubPlayer()
+    ref = player.find('<video-player data-title-id="62248" data-publisher-id="1126" data-aggregator="kima">', PAGE)
+    async with web.client() as http:
+        await within(read_catalog(player, ref, http, PAGE), STEP_LIMIT_S, "the playlist")
+
+    asked = [request.url.params for request in web.requests if "/playlist" in str(request.url)]
+    assert [(params["id"], params["pub"], params["aggr"]) for params in asked] == [("62248", "1126", "kima")]
+    assert cdnvideohub.widget_of('<video-player data-title-id="7"></video-player>') == (
+        7, cdnvideohub.DEFAULT_PUBLISHER, cdnvideohub.DEFAULT_AGGREGATOR)
 
 
 async def test_every_item_with_a_video_is_an_entry_none_is_dropped_for_an_upload_before_it_or_a_number_it_lacks():
@@ -298,6 +321,22 @@ async def test_a_cap_met_by_a_labelled_rung_measures_nothing():
     rungs = cdnvideohub.read_rungs(json.dumps({"sources": SWAPPED}))
 
     assert (await cdnvideohub.rung_within(rungs, 1080, counting)).key == "mpegFullHdUrl" and calls == []
+
+
+async def test_a_measure_that_failed_is_tried_at_the_next_ask():
+    answers = iter([None, 2160, 1440])
+
+    async def flaky(rung: Rung) -> int | None:
+        return next(answers)
+
+    player = CdnVideoHubPlayer(flaky)
+    web = playlist_web({"items": []})
+    web.route("/video/sw", json.dumps({"sources": {k: SWAPPED[k] for k in ("mpeg2kUrl", "mpeg4kUrl")}}), first=True)
+    async with web.client() as http:
+        first = await ask(player, player.ref_of(PAGE, "sw"), http)
+        second = await ask(player, player.ref_of(PAGE, "sw"), http)
+
+    assert first.resolutions == (2160,) and second.resolutions == (1440, 2160)
 
 
 async def test_a_video_reads_every_frame_it_has_whatever_the_labels_say():

@@ -112,7 +112,8 @@ class Web:
 PAGE = "https://1.ruchime.org/release/test/episode-1"
 DUNHUA = "https://dunhuatv.ru/28-x-smotret-onlajn.html"
 OWNED = {"vk": "https://vkvideo.ru/video_ext.php?oid=-1&id=100&hash=abc", "allvideo": "https://fsst.online/embed/77/",
-         "vibix": f"{PAGE}#vibix=1/1", "cvh": f"{DUNHUA}#cvh=missing", "kodik": f"{DUNHUA}#kodik=50228/7bbb4c6b/101"}
+         "vibix": f"{PAGE}#vibix=1/1", "cvh": f"{DUNHUA}#cvh=missing", "kodik": f"{DUNHUA}#kodik=50228/7bbb4c6b/101",
+         "animakima": "https://animakima.ru/pages/x/#animakima=1/2"}
 # Whether asking again may help, by what the host did: a video it says is gone is gone, a host that is busy or silent may
 # recover, a page that is no player is not confirmed (the manifests of Vibix that do not decode are a final refusal).
 TRANSIENT = {mode: {name: expected for name in OWNED}

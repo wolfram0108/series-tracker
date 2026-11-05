@@ -173,6 +173,7 @@ def test_only_the_judgement_of_the_service_writes_a_voice_over_off(result, turne
 
 A_PAGE_OF = {"ruchime": "https://1.ruchime.org/release/x/episode-3?off=vk#top",
              "dunhuatv": "https://www.dunhuatv.ru/28-x-smotret-onlajn.html?a=1#cvh=2",
+             "animakima": "https://animakima.ru/pages/vechnaya-volya-4-tv-4?a=1#animakima=1/2",
              "vk_channel": "https://vk.com/@chan/videos|запрос"}
 
 

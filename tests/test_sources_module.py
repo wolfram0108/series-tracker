@@ -39,7 +39,7 @@ def test_a_module_given_no_sites_reads_the_builtin_ones_and_each_module_has_its_
     path = tmp_path / "sources.db"
     first, second = (SourcesModule(Bus(), Database(str(path))) for _ in range(2))
 
-    assert [site.name for site in builtin_sites()] == ["ruchime", "dunhuatv", "vk_channel"]
+    assert [site.name for site in builtin_sites()] == ["ruchime", "dunhuatv", "animakima", "vk_channel"]
     assert first.sites.find("https://1.ruchime.org/release/x").name == "ruchime"
     assert first.sites.find("https://vkvideo.ru/@chan|q").name == "vk_channel"
     assert first.sites.find(DOLLS).name == "dunhuatv" and first.sites.find("https://example.org/x") is None
