@@ -399,7 +399,8 @@ class DownloadsRepository:
         """What a publication of a container must do, written before its build: kept until the publication is whole."""
         values = {**record, **{name: json.dumps(record[name], ensure_ascii=False) for name in self._PUBLICATION_LISTS},
                   "state": "building", "created_at": datetime.now(timezone.utc).isoformat()}
-        names = ("series_id", "unique_id", "name", "staging", "identity", *self._PUBLICATION_LISTS, "state", "created_at")
+        names = ("series_id", "unique_id", "publication", "name", "staging", "identity", *self._PUBLICATION_LISTS, "state",
+                 "created_at")
         return await self._db.insert(
             f"INSERT INTO pack_publications ({', '.join(names)}) VALUES ({', '.join('?' * len(names))})",
             tuple(values[name] for name in names))

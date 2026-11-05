@@ -12,20 +12,25 @@ same identity (`core.container.identity`: the same source and row, any resolutio
 the container of the winner, or from a container the winner displaced; nothing is downloaded or aligned again for a
 track that is there. A track whose voice-over the plan still holds at another step keeps its place; only a voice-over
 that left the plan leaves the container. A track of a container built before the keys (no `ST_DUB`) is known by its name
-once and gets its key; one that no voice-over claims is kept as it is. The video's own sound is the track of the
-voice-over of the reference. A slot whose container already is what the plan asks is left alone. Nothing is encoded
+once — the key of a voice-over (its first name) or its name now — and gets its key; one that no voice-over claims is kept as
+it is, and a name that answers to two voice-overs (or two names to one) leaves the slot unbuilt, said in the log. The
+video's own sound is the track of the voice-over of the reference. A slot whose container already is what the plan asks is left alone. Nothing is encoded
 again (core/container.py).
 
 A container is put only where the series may put it: a file under its name that is not the winner's or a file it
 displaced (another series' in a shared folder, a row of this series, a file nobody holds) is not replaced, and the slot
 fails with the reason in the log. Every publication is written to `pack_publications` (owned by this module) before its
-build — the name the winner takes, the rows it displaces, the voice-overs to be recorded as packed, the files to remove —
-and is finished from that record at the next packing of the series if a stop cuts it short: no file is left without an
-owner and no name is held by two rows.
+build — its number, the name the winner takes, the rows it displaces, the voice-overs to be recorded as packed, the files
+to remove, all names inside the folder of the series — and the number goes into the container (`ST_PUBLICATION`). A
+publication a stop or a failure cut short is finished before anything else acts on the files or names of the series
+(`settle`, called by the module at the start of every look at the series), and only when the file under its name is the
+container it built: one that is not was never put there, so nothing is removed and no name changes. A record whose
+container was put there and is not there now is a conflict: it stays, nothing is done by it, and the packing fails.
 """
 from __future__ import annotations
 
 import os
+import uuid
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, Protocol, Sequence
 
@@ -41,7 +46,8 @@ PLACED = "placed"
 
 
 class Packer(Protocol):
-    async def build(self, output: str, video: str, video_identity: str, tracks: Sequence[AudioIn]) -> str | None: ...
+    async def build(self, output: str, video: str, video_identity: str, tracks: Sequence[AudioIn], *,
+                    publication: str = "") -> str | None: ...
 
     async def contents(self, path: str) -> Contents | None: ...
 
@@ -49,8 +55,9 @@ class Packer(Protocol):
 class FfmpegPacker:
     """The containers made by ffmpeg (core/container.py)."""
 
-    async def build(self, output: str, video: str, video_identity: str, tracks: Sequence[AudioIn]) -> str | None:
-        return await container.build(output, video, video_identity, tracks)
+    async def build(self, output: str, video: str, video_identity: str, tracks: Sequence[AudioIn], *,
+                    publication: str = "") -> str | None:
+        return await container.build(output, video, video_identity, tracks, publication=publication)
 
     async def contents(self, path: str) -> Contents | None:
         return await container.contents(path)
@@ -79,7 +86,7 @@ class Packing:
         done = Packed()
         if not os.path.isabs(base):
             return done
-        await self._finish_interrupted(series)
+        done.failed += await self.settle(series)
         rows = await self._repo.slot_files(series["id"])
         references = {(each["season"], each["episode"], each.get("part")): each
                       for each in await self._request("scan.output.get", {"series_id": series["id"]})}
@@ -122,13 +129,18 @@ class Packing:
             return "failed"
         loser_files = [row for row in losers if row["final_filename"]]
         keyed, legacy = await self._held_tracks(base, video, held, loser_files, identity)
+        claimed, legacy, ambiguous = _claim_legacy(tracks, legacy)
+        if ambiguous:
+            self._log.warning("серия %s: контейнер %s не собран: старые дорожки без ключа не сопоставлены однозначно — %s",
+                              series["id"], winner["final_filename"], "; ".join(ambiguous))
+            return "failed"
         synchronous = [row for row in tracks if row["status"] == PLACED and (
             row["aligned_to"] == identity or (not row["aligned_to"] and row["ref_uid"] == winner["unique_id"]))]
         dubs: dict[str, AudioIn] = {}
         placed: list[dict] = []
         for row in synchronous:
             key, label = row["key"], row["label"]
-            unkeyed = legacy.pop(label, None)  # an old track of the voice-over is its own, whichever copy is taken
+            unkeyed = claimed.pop(key, None)  # an old track of the voice-over is its own, whichever copy is taken
             if row["path"] and await storage.call(os.path.isfile, row["path"]):
                 dubs[key] = AudioIn(label, row["path"], 0, identity, key=key)
                 placed.append(row)
@@ -144,8 +156,8 @@ class Packing:
                 continue
             if key in keyed:
                 dubs[key] = replace(keyed[key], label=label)
-            elif label in legacy:
-                dubs[key] = replace(legacy.pop(label), label=label, key=key)
+            elif key in claimed:
+                dubs[key] = replace(claimed.pop(key), label=label, key=key)
         desired = self._ordered(AudioIn(own_label, video, held.own_track, identity, own=True), dubs, order,
                                 list(legacy.values()))
         signature = container.signature_of(desired)
@@ -158,13 +170,17 @@ class Packing:
             await self._tell_packed(series, target, identity, [
                 row["dub_id"] for row in inside if row["aligned_to"] != identity or row["ref_path"] != target])
             return "unchanged"
-        record = {"series_id": series["id"], "unique_id": winner["unique_id"], "name": target_name,
-                  "staging": os.path.join(os.path.dirname(target), f"{PACK_PREFIX}{winner['unique_id']}{CONTAINER_EXT}"),
+        publication = uuid.uuid4().hex
+        leftovers = {video, *[os.path.join(base, row["final_filename"]) for row in loser_files],
+                     *[row["path"] for row in placed]} - {target}
+        record = {"series_id": series["id"], "unique_id": winner["unique_id"], "publication": publication,
+                  "name": target_name,
+                  "staging": os.path.join(os.path.dirname(target_name), f"{PACK_PREFIX}{publication}{CONTAINER_EXT}"),
                   "identity": identity, "signature": [list(each) for each in signature],
                   "losers": [row["unique_id"] for row in losers],
-                  "leftovers": sorted({video, *[os.path.join(base, row["final_filename"]) for row in loser_files],
-                                       *[row["path"] for row in placed]} - {target}),
+                  "leftovers": sorted(_inside(base, path) for path in leftovers),
                   "dub_ids": [row["dub_id"] for row in inside]}
+        staging = os.path.join(base, record["staging"])
         async with self._library.guard(target):
             own = {video, *[os.path.join(base, row["final_filename"]) for row in loser_files]}
             if target not in own and await storage.call(os.path.exists, target):
@@ -173,13 +189,13 @@ class Packing:
                                   series["id"], target_name, holder or "файл, которым не владеет ни одна строка")
                 return "failed"
             record["id"] = await self._repo.publication_begin(record)
-            problem = await self._packer.build(record["staging"], video, identity, desired)
+            problem = await self._packer.build(staging, video, identity, desired, publication=publication)
             if problem is not None:
-                await storage.call(_remove_quietly, record["staging"], owns=record["staging"])
+                await storage.call(_remove_quietly, staging, owns=staging)
                 await self._repo.publication_end(record["id"])
                 self._log.warning("серия %s: контейнер %s не собран: %s", series["id"], target_name, problem)
                 return "failed"
-            await storage.call(os.replace, record["staging"], target, owns=target)
+            await storage.call(os.replace, staging, target, owns=target)
             await self._repo.publication_placed(record["id"])
             await self._finish(series, record, renamed=winner["final_filename"] != target_name)
         self._log.info("серия %s: контейнер %s собран — %s", series["id"], target_name,
@@ -238,31 +254,49 @@ class Packing:
         await self._repo.take_over_name(record["unique_id"], record["name"], record["losers"])
         await self._tell_packed(series, target, record["identity"], record["dub_ids"])
         for leftover in record["leftovers"]:
-            name = os.path.relpath(leftover, base).replace(os.sep, "/")
+            path = os.path.join(base, leftover)
+            name = os.path.relpath(path, base).replace(os.sep, "/")
             if not name.startswith("..") and await self._holder(series, name, except_uids=set()):
                 continue  # someone holds the file under that name now: it is not this publication's to remove
-            await storage.call(_remove_quietly, leftover, owns=leftover)
+            await storage.call(_remove_quietly, path, owns=path)
         await self._repo.publication_end(record["id"])
         if renamed:
             self._publish("downloads.item.renamed", {"series_id": series["id"], "unique_id": record["unique_id"],
                                                      "filename": record["name"]})
 
-    async def _finish_interrupted(self, series: dict) -> None:
-        """A publication a stop cut short. Before its replace nothing was changed: its build goes and the old files and
-        names stand. After it (the container under the name is the one the record describes) it is finished."""
+    async def settle(self, series: dict) -> int:
+        """Finish the publications a stop or a failure cut short, before anything else acts on the files or the names of
+        the series; the number of conflicts (the packing fails by them). A publication is the one under its name only when
+        the container there carries its number: before its replace nothing of it was put there (its build goes, the old
+        files and names stand); after it, it is finished. A record whose container was put there and is not there now
+        (moved, renamed or replaced from outside) is not acted on: it stays, and the reason is in the log."""
+        base = series.get("save_path") or ""
+        if not os.path.isabs(base):
+            return 0
+        conflicts = 0
         for record in await self._repo.publications(series["id"]):
-            target = os.path.join(series["save_path"], record["name"])
+            target = os.path.join(base, record["name"])
             async with self._library.guard(target):
+                made = await self._packer.contents(target)
+                ours = bool(record["publication"]) and made is not None and made.publication == record["publication"]
                 if record["state"] != PLACED:
-                    await storage.call(_remove_quietly, record["staging"], owns=record["staging"])
-                    made = await self._packer.contents(target)
-                    if made is None or made.video != record["identity"] or made.signature != [
-                            tuple(each) for each in record["signature"]]:
+                    staging = os.path.join(base, record["staging"])
+                    await storage.call(_remove_quietly, staging, owns=staging)
+                    if not ours:
+                        self._log.info("серия %s: публикация контейнера %s прервана до замены — отменена, файлы и имена "
+                                       "прежние", series["id"], record["name"])
                         await self._repo.publication_end(record["id"])
                         continue
+                elif not ours:
+                    conflicts += 1
+                    self._log.error("серия %s: публикация контейнера %s не доведена: под этим именем нет контейнера, который "
+                                    "она поставила (номер %s) — запись журнала оставлена, файлы и имена не тронуты",
+                                    series["id"], record["name"], record["publication"] or "не записан")
+                    continue
                 self._log.info("серия %s: публикация контейнера %s, прерванная остановкой, доведена до конца",
                                series["id"], record["name"])
                 await self._finish(series, record, renamed=True)
+        return conflicts
 
     async def _tell_packed(self, series: dict, target: str, identity: str, dub_ids: list[int]) -> None:
         """The tracks are in the container, aligned to its video: voices records both, so that a later change of the
@@ -275,6 +309,36 @@ class Packing:
         except BusRequestError as exc:
             if NO_HANDLER not in str(exc):
                 raise
+
+
+def _claim_legacy(tracks: list[dict], legacy: dict[str, AudioIn]
+                  ) -> tuple[dict[str, AudioIn], dict[str, AudioIn], list[str]]:
+    """The old tracks without a key (a container built before the keys), each given to the voice-over it is: the name of
+    such a track is the name its group had then, which is the key of the voice-over (a key is the first name of a group
+    and a rename does not change it) or its name now. (claimed by key, unclaimed by name, problems): a name two
+    voice-overs answer to, or a voice-over two names answer to, is not decided here — the slot is not built."""
+    answers: dict[str, set[str]] = {}
+    for row in tracks:
+        for name in {row["key"], row["label"]}:
+            if name in legacy:
+                answers.setdefault(name, set()).add(row["key"])
+    problems = [f"дорожке «{name}» отвечают озвучки {', '.join(sorted(keys))}" for name, keys in answers.items() if len(keys) > 1]
+    names_of: dict[str, list[str]] = {}
+    for name, keys in answers.items():
+        if len(keys) == 1:
+            names_of.setdefault(next(iter(keys)), []).append(name)
+    problems += [f"озвучке {key} отвечают дорожки {', '.join(sorted(names))}" for key, names in names_of.items()
+                 if len(names) > 1]
+    if problems:
+        return {}, legacy, problems
+    claimed = {key: legacy[names[0]] for key, names in names_of.items()}
+    return claimed, {name: track for name, track in legacy.items() if name not in answers}, []
+
+
+def _inside(base: str, path: str) -> str:
+    """A path of the series as a name inside its folder (moving the folder keeps it true); a path outside it as it is."""
+    name = os.path.relpath(path, base)
+    return path if name.startswith("..") else name
 
 
 def _remove_quietly(path: str) -> None:

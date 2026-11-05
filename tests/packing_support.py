@@ -14,13 +14,14 @@ class FakePacker:
         self.builds: list[tuple[str, str, list[str]]] = []
         self.keys: list[list[str]] = []  # the keys of the tracks of every build, in order
 
-    async def build(self, output: str, video: str, video_identity: str, tracks: Sequence[AudioIn]) -> str | None:
+    async def build(self, output: str, video: str, video_identity: str, tracks: Sequence[AudioIn], *,
+                    publication: str = "") -> str | None:
         with open(video, "rb") as source, open(output, "wb") as out:
             out.write(source.read())
         self.made[os.stat(output).st_ino] = Contents(
             video=video_identity, duration=1.0, has_video=True,
             audio=[AudioOut(index, track.label, track.aligned_to, index == 0, "rus", track.own, track.key)
-                   for index, track in enumerate(tracks)])
+                   for index, track in enumerate(tracks)], publication=publication)
         self.builds.append((os.path.basename(output), video_identity,
                             [(track.label, os.path.basename(track.path), track.own) for track in tracks]))
         self.keys.append([track.key for track in tracks])

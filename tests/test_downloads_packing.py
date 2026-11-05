@@ -3,6 +3,7 @@ goes in while it is aligned to a video of the identity of the winner of the slot
 the container of the winner, a container the winner displaced), known by the key of its voice-over and named by its group
 now, in the order of the season; the old container lives until the new one is in place, a file the series does not own is
 never replaced, and a publication a stop cut short is finished from its record."""
+import json
 import os
 import sqlite3
 
@@ -313,3 +314,138 @@ async def test_a_container_left_alone_brings_the_record_of_its_tracks_into_step_
         assert outcome(await pack(probe)) == {"unchanged": 1}
     assert [(each["dub_ids"], each["aligned_to"]) for each in voices.packed] == [([5], SAME)]
     assert len(packer.builds) == 1  # only the build of the fixture: nothing was rebuilt
+
+
+# --- a publication cut short, and what acts on the series before the next packing (Н-9, Н-10) ----------------------------
+
+STOPS = ("in_build", "after_replace", "in_finish")
+BETWEEN = ("nothing", "rename")
+
+
+async def cut_short(rig, stop: str, monkeypatch) -> None:
+    """A packing that a stop cuts at the point named, with an old container of the same video in another resolution
+    under the name the winner is to take (it reads like the new one but for its number)."""
+    from modules.downloads.repository import DownloadsRepository
+
+    fake, voices, packer, probe, db_path, media_dir = rig
+    old = put(media_dir, "e01.mkv", b"OLD 1080p")
+    await made(packer, old, SAME, [AudioIn(OWN, old, 0, SAME, own=True)])
+    _add_item(db_path, "old", 1, plan="replaced", status="completed", filename="e01.mkv", superseded_by="win")
+    place(db_path, "old", season=1, source_id=7, row_key="vk:win", resolution=1080)
+    put(media_dir, "e01.mp4", b"NEW 2160p")
+    winner(db_path, "e01.mp4")
+    place(db_path, "win", resolution=2160)
+    sidecar = put(media_dir, f"e01.{DUB}.ru.flac", b"track")
+    voices.tracks = [dub(path=sidecar, ref_path=os.path.join(media_dir, "e01.mp4"))]
+    order(fake, [OWN, DUB])
+    if stop == "in_build":
+        build = packer.build
+
+        async def stopped(*args, **kwargs):
+            raise RuntimeError("остановка во время сборки")
+        packer.build = stopped
+    elif stop == "after_replace":
+        placed = DownloadsRepository.publication_placed
+
+        async def stopped(self, publication_id):
+            monkeypatch.setattr(DownloadsRepository, "publication_placed", placed)
+            raise RuntimeError("остановка между заменой и отметкой")
+        monkeypatch.setattr(DownloadsRepository, "publication_placed", stopped)
+    else:
+        voices.lose_answer = 1
+    with pytest.raises(Exception):
+        await pack(probe)
+    if stop == "in_build":
+        packer.build = build
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("between", BETWEEN)
+@pytest.mark.parametrize("stop", STOPS)
+async def test_a_publication_cut_short_anywhere_loses_no_video_and_leaves_no_name_without_its_file(rig, stop, between,
+                                                                                                  monkeypatch):
+    fake, voices, packer, probe, db_path, media_dir = rig
+    await cut_short(rig, stop, monkeypatch)
+    if between == "rename":
+        current = _items(db_path)["win"]["final_filename"]
+        names = {"win": "renamed" + os.path.splitext(current)[1]}
+        assert (await probe.request("downloads.items.rename", {"series_id": 2, "names": names}, timeout=5))["renamed"] == 1
+
+    reply = await pack(probe)
+
+    assert reply["failed"] == 0
+    name = _items(db_path)["win"]["final_filename"]
+    assert os.path.isfile(os.path.join(media_dir, name)), (name, os.listdir(media_dir))
+    assert open(os.path.join(media_dir, name), "rb").read() == b"NEW 2160p"  # the new video is the one kept
+    assert not [each for each in os.listdir(media_dir) if each.startswith(".st-pack.")]
+    assert not os.path.exists(os.path.join(media_dir, "e01.mp4")) or name == "e01.mp4"
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM pack_publications").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_placed_publication_whose_container_is_not_under_its_name_is_a_conflict_and_nothing_is_done_by_it(rig):
+    """Put there, and gone or replaced from outside: the record does not know the files any more, so it removes nothing and
+    names nothing; it stays, and the packing fails until the owner looks."""
+    fake, voices, packer, probe, db_path, media_dir = rig
+    put(media_dir, "e01.mp4", b"https://v/win")
+    winner(db_path, "e01.mp4")
+    sidecar = put(media_dir, f"e01.{DUB}.ru.flac", b"track")
+    voices.tracks = [dub(path=sidecar, ref_path=os.path.join(media_dir, "e01.mp4"))]
+    order(fake, [OWN, DUB])
+    voices.lose_answer = 1
+    with pytest.raises(Exception):
+        await pack(probe)
+    os.replace(os.path.join(media_dir, "e01.mkv"), os.path.join(media_dir, "moved away.mkv"))
+    put(media_dir, "e01.mkv", b"someone else's")
+
+    reply = await pack(probe)
+
+    assert reply["failed"] >= 1
+    assert open(os.path.join(media_dir, "e01.mkv"), "rb").read() == b"someone else's"
+    assert os.path.exists(sidecar)  # nothing the record names is removed
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT state FROM pack_publications").fetchall() == [("placed",)]
+
+
+@pytest.mark.asyncio
+async def test_a_record_names_its_files_inside_the_folder_of_the_series(rig, monkeypatch):
+    """Moving the folder of the series does not make a record stale: its staging name and leftovers are relative."""
+    fake, voices, packer, probe, db_path, media_dir = rig
+    await cut_short(rig, "in_finish", monkeypatch)
+    with sqlite3.connect(db_path) as conn:
+        staging, leftovers, number = conn.execute("SELECT staging, leftovers, publication FROM pack_publications").fetchone()
+    assert not os.path.isabs(staging) and staging.startswith(".st-pack.") and number in staging
+    assert all(not os.path.isabs(each) for each in json.loads(leftovers))
+
+
+# --- the old tracks without a key (Н-13) ----------------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_an_old_track_is_known_by_the_key_of_its_voice_over_after_its_group_is_renamed_and_follows_the_order(rig):
+    """The name an old track carries is the name its group had: the key of the voice-over. Renamed and put first, it takes
+    the new name, its key and its place."""
+    fake, voices, packer, probe, db_path, media_dir = rig
+    path = put(media_dir, "e01.mkv")
+    await made(packer, path, SAME, [AudioIn(OWN, path, 0, SAME, own=True), AudioIn(DUB, path, 1, SAME)])
+    winner(db_path, "e01.mkv")
+    voices.tracks = [dub(label="New group", key=DUB, ref_path=path)]
+    order(fake, ["New group", OWN])
+
+    assert outcome(await pack(probe)) == {"packed": 1}
+    assert (await packer.contents(path)).signature == [("New group", DUB, False), (OWN, "", True)]
+
+
+@pytest.mark.asyncio
+async def test_an_old_track_two_voice_overs_answer_to_is_not_decided_and_the_slot_is_not_built(rig):
+    fake, voices, packer, probe, db_path, media_dir = rig
+    path = put(media_dir, "e01.mkv")
+    await made(packer, path, SAME, [AudioIn(OWN, path, 0, SAME, own=True), AudioIn(DUB, path, 1, SAME)])
+    winner(db_path, "e01.mkv")
+    # One voice-over was named so first (its key), another is named so now.
+    voices.tracks = [dub(label="Renamed", key=DUB, ref_path=path, dub_id=5),
+                     dub(label=DUB, key="other", ref_path=path, dub_id=6)]
+    order(fake, [OWN, DUB, "Renamed"])
+
+    assert outcome(await pack(probe)) == {"failed": 1}
+    assert (await packer.contents(path)).signature == [(OWN, "", True), (DUB, "", False)]  # left as it was

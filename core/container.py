@@ -5,7 +5,9 @@ builds its containers (`mux/build.py`): the first track is the default one, the 
 evenly (`-max_interleave_delta 0`). The container says what it holds by its own tags, so that the file is its own
 ledger: `ST_VIDEO` (the identity of the video), and for every audio track `ST_VOICE` (the name of the voice-over group, also
 its title), `ST_DUB` (the key of the voice-over, which a rename of its group does not change: the track is known by it),
-`ST_ALIGNED_TO` (the identity of the video the track was aligned to) and `ST_OWN` (1 for the video's own sound). Whether a
+`ST_ALIGNED_TO` (the identity of the video the track was aligned to) and `ST_OWN` (1 for the video's own sound), and
+`ST_PUBLICATION`, the number of the publication that built it: two containers of the same video and tracks (another
+resolution) are told apart by it, so a publication cut short knows whether its file is the one under the name. Whether a
 build is done is told by reading the result back (`contents`), never by the code ffmpeg returned.
 """
 from __future__ import annotations
@@ -66,6 +68,7 @@ class Contents:
     duration: float
     has_video: bool
     audio: list[AudioOut] = field(default_factory=list)
+    publication: str = ""
 
     @property
     def labels(self) -> list[str]:
@@ -82,7 +85,7 @@ class Contents:
         return next((track.index for track in self.audio if track.own), 0)
 
 
-async def build(output: str, video: str, video_identity: str, tracks: Sequence[AudioIn], *,
+async def build(output: str, video: str, video_identity: str, tracks: Sequence[AudioIn], *, publication: str = "",
                 timeout: float = BUILD_TIMEOUT_S) -> str | None:
     """Write the container at `output` (an .mkv the caller puts in place); None when it was built and reads back as asked,
     else the reason. The video is the first video stream of `video`; a track of the same file is taken from it."""
@@ -98,7 +101,7 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     for track in tracks:
         cmd += ["-map", f"{index_of[track.path]}:a:{track.stream}"]
     cmd += ["-map_metadata", "-1", "-map_chapters", "-1", "-c", "copy", "-max_interleave_delta", "0",
-            "-metadata", f"ST_VIDEO={video_identity}"]
+            "-metadata", f"ST_VIDEO={video_identity}", "-metadata", f"ST_PUBLICATION={publication}"]
     for number, track in enumerate(tracks):
         cmd += [f"-metadata:s:a:{number}", f"title={track.label}", f"-metadata:s:a:{number}", f"language={LANGUAGE}",
                 f"-metadata:s:a:{number}", f"ST_VOICE={track.label}",
@@ -115,6 +118,8 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
         return f"ffmpeg_failed: {err.decode(errors='replace').strip()[-300:]}"
     made = await contents(output)
     expected = await contents(video)
+    if made is not None and made.publication != publication:
+        return "container_publication_wrong"
     return problem_of(made, video_identity, signature_of(tracks), expected.duration if expected is not None else None)
 
 
@@ -169,7 +174,8 @@ async def contents(path: str, *, timeout: float = READ_TIMEOUT_S) -> Contents | 
     except ValueError:
         duration = 0.0
     return Contents(video=tags.get("st_video", ""), duration=duration,
-                    has_video=any(each.get("codec_type") == "video" for each in streams), audio=audio)
+                    has_video=any(each.get("codec_type") == "video" for each in streams), audio=audio,
+                    publication=tags.get("st_publication", ""))
 
 
 def _tags(holder: dict) -> dict[str, str]:
