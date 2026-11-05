@@ -142,11 +142,19 @@ async def test_two_voice_overs_the_user_makes_one_leave_one_track_under_the_name
 
 
 async def merged_into_blackcat(dubs):
-    """BlackCat has no track (the service refused it), RedHeadSound has one; then the source of RedHeadSound is named BlackCat."""
-    from test_voices import job_done, statuses_until, two_voices_ready
+    """BlackCat has no track (the service refused both its sources), RedHeadSound has one; then the source of RedHeadSound
+    is named BlackCat."""
+    from test_voices import finish, job_done, statuses_until, touch, two_voices_ready
     probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={"ok": False, "refused": True}))
+    await statuses_until(sub, ["aligned", "placed", "downloading"])
+    await until_true(lambda: len(neighbours.fetches) == 3, neighbours.fetches)
+    touch(neighbours.fetches[-1]["path"], b"video")
+    finish(probe, neighbours.fetches[-1]["key"])
+    await until_true(lambda: len(neighbours.submits) == 2, neighbours.submits)
+    probe.publish_event("conform.job.finished", job_done(neighbours, neighbours.sent_keys[neighbours.submits[-1]["key"]],
+                                                         BlackCat={"ok": False, "refused": True}))
 
     async def one_placed_one_refused():
         return {r["voice_key"]: r["status"] for r in await voices.repo.for_series(7)} == {

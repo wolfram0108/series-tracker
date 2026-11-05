@@ -116,8 +116,10 @@ is on disk and none of its voice-overs is still being downloaded or aligned: the
 sent (conform.submit). A voice-over that was not downloaded does not hold the episode back, and one
 that arrives later makes a job of its own. When a job ends, a voice-over that the service
 calls `ok` becomes `aligned` (what it adds, `suspect` or `warnings`, is what it found and put right: it goes to the
-journal); a pair the service turned down itself (`refused`: its trace holds a decision that aborted) is `rejected` with the
-reason; any other that is not `ok` (a crash in the service, no result for the file, a success naming no file), a job
+journal); a pair the service turned down itself (`refused`: its trace holds a decision that aborted, e.g. a foreign video)
+is a verdict on the file of that source, not on the voice-over: the next source of its chain is downloaded and sent (CVH
+gave another video under the number where Kodik gave the episode), and it is `rejected` with the reason when no source is
+left; any other that is not `ok` (a crash in the service, no result for the file, a success naming no file), a job
 that failed (for the pairs it did not reach: those it had finished keep their results) and a job the service refused to take
 make the voice-over `failed` with the reason (the next sync offers it again). An `aligned`
 track is moved next to the reference video as `<video name>.<voice title>.<lang>.<ext>` and the row
@@ -1534,6 +1536,16 @@ class VoicesModule(BaseModule):
             if told(result):
                 self.log.info("сериал %d, s%02de%02d: озвучка %s выровнена, сервис сообщил: %s", row["series_id"],
                               row["season"], row["episode"], row["voice_label"], told(result))
+        elif turned_down(result) and row["attempt"] + 1 < len(row["chain"]):
+            # The verdict is on the file of this source, not on the voice-over: another player may give the right video.
+            await self.repo.turn_to_next(row["id"], verdict)
+            self.log.warning("сериал %d, s%02de%02d: озвучка %s из %s отклонена: %s — беру следующий источник %s",
+                             row["series_id"], row["season"], row["episode"], row["voice_label"],
+                             row["chain"][row["attempt"]]["player"], describe(verdict),
+                             row["chain"][row["attempt"] + 1]["player"])
+            await self._announce(row)
+            await self._start(await self.repo.get(row["id"]))
+            return
         elif turned_down(result):
             await self.repo.mark_rejected(row["id"], verdict)
             self.log.warning("сериал %d, s%02de%02d: озвучка %s отклонена: %s", row["series_id"],

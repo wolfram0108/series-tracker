@@ -25,7 +25,7 @@ from modules.voices.module import dub_file, dub_name, sent_as, temp_path
 from modules.voices.settings import DEFAULT_PRIORITY
 from modules.voices.states import public_state
 from series_factory import insert_series
-from settle import settle, wait_until
+from settle import path_free, settle, wait_until
 
 
 def code_of(stored):
@@ -556,6 +556,8 @@ async def test_deleting_the_series_cancels_downloads_and_removes_its_files(dubs)
     probe.publish_event("series.deleted", {"series_id": 7})
     report = (await asyncio.wait_for(sub.queue.get(), 3)).payload
     assert report == {"series_id": 7, "owner": "voices"}
+    # Two passes of the journal may clear the folder at once: the one that owns the name removes it, the other leaves it.
+    await path_free(folder)
     assert neighbours.cancels == [7] and await rows(probe) == [] and not os.path.exists(folder)
 
 
@@ -805,17 +807,39 @@ async def test_a_result_that_is_not_ok_without_the_judgement_of_the_service_fail
 
 
 @pytest.mark.asyncio
-async def test_a_pair_the_service_turned_down_itself_is_rejected_and_never_placed(dubs, caplog):
+async def test_a_pair_the_service_turned_down_goes_on_to_the_next_source_of_its_voice_over(dubs, caplog):
+    """The verdict is on the file of a source, not on the voice-over: CVH gave another video under the number where Kodik
+    gave the episode ("Вечная воля", 05.11). The file of the source turned down goes; the next one is downloaded."""
+    probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    first = next(f for f in neighbours.fetches if "BlackCat" in f["url"])
+    caplog.set_level("WARNING")
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={
+        "ok": False, "refused": True, "error": "чужое видео: сопоставлено 1% (< 60%) — выравнивание прервано"}))
+    await statuses_until(sub, ["aligned", "placed", "downloading"])
+    by_voice = {r["voice_key"]: r for r in await rows(probe)}
+    assert by_voice["BlackCat"]["status"] == "downloading" and by_voice["BlackCat"]["attempt"] == 1
+    # The next source downloads under the same name: the cleanup sees the name owned again and leaves it to the download.
+    assert by_voice["BlackCat"]["job_id"] is None and by_voice["BlackCat"]["temp_path"] == first["path"]
+    assert neighbours.fetches[-1]["url"] == "https://site/title.html#kodik-BlackCat-1" != first["url"]
+    assert by_voice["RedHeadSound"]["status"] == "placed"
+    # The verdict on the file the source gave stays in the journal: the next download clears it from the row.
+    assert any("беру следующий источник" in record.getMessage() and "чужое видео" in record.getMessage()
+               for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_a_pair_the_service_turned_down_with_no_source_left_is_rejected_and_never_placed(dubs, caplog):
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     caplog.set_level("WARNING")
-    # Two videos that share no frame: the service looked at the pair and turned it down.
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={
+    # RedHeadSound has only the Kodik source for episode 1: the verdict on its file ends the voice-over.
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", RedHeadSound={
         "ok": False, "refused": True, "error": "чужое видео: сопоставлено 1% (< 60%) — выравнивание прервано"}))
     await statuses_until(sub, ["aligned", "placed", "rejected"])
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["BlackCat"]["status"] == "rejected" and by_voice["BlackCat"]["outcome"].startswith("чужое видео")
-    assert by_voice["RedHeadSound"]["status"] == "placed"
+    assert by_voice["RedHeadSound"]["status"] == "rejected" and by_voice["RedHeadSound"]["outcome"].startswith("чужое видео")
+    assert by_voice["BlackCat"]["status"] == "placed"
     assert any("отклонена" in record.getMessage() for record in caplog.records)
 
 
@@ -1034,16 +1058,17 @@ async def test_the_folders_of_the_series_go_when_every_episode_of_the_series_is_
         touch(fetch["path"], b"video")
         finish(probe, fetch["key"])
     await statuses_until(sub, ["ready"] * 4 + ["aligning"] * 4)
-    first, second = neighbours.submits
+    # The two episodes go to the service in no fixed order: the first is told by its folder, not by its place in the list.
+    first, second = sorted(neighbours.submits, key=lambda submit: f"{os.sep}s01e01{os.sep}" not in submit["out_dir"])
     neighbours.submits[:] = [first]
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
+    probe.publish_event("conform.job.finished", job_done(neighbours, neighbours.sent_keys[first["key"]]))
     await asyncio.wait_for(settled_sub.queue.get(), 5)
     await idle()
     folders = [os.path.join(base, "7") for base in (downloads(neighbours), conform_dir(neighbours))]
     assert all(os.path.isdir(folder) for folder in folders)  # the second episode's files are still in them
     assert not os.path.exists(os.path.join(conform_dir(neighbours), "7", "s01e01"))
     neighbours.submits[:] = [second]
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-2"))
+    probe.publish_event("conform.job.finished", job_done(neighbours, neighbours.sent_keys[second["key"]]))
     await asyncio.wait_for(settled_sub.queue.get(), 5)
     await idle()
     assert not any(os.path.exists(folder) for folder in folders)  # nothing of the series is left in the work folder
@@ -1225,17 +1250,18 @@ async def test_an_event_carries_the_voice_and_the_reason_so_the_interface_asks_n
     probe, neighbours, _, bus, sub, ref = await two_voices_ready(dubs)
     changes = bus.subscribe("voices.dub.changed")
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
-    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", BlackCat={"ok": False, "refused": True}))
+    # RedHeadSound has one source: turned down, it has no other to go on to and is rejected.
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", RedHeadSound={"ok": False, "refused": True}))
     await statuses_until(sub, ["aligned", "placed", "rejected"])
     seen = {}
     while not changes.queue.empty():
         event = changes.queue.get_nowait().payload
         seen[(event["voice_key"], event["status"])] = event
-    rejected = seen[("BlackCat", "rejected")]
-    assert rejected["voice_label"] == "BlackCat" and rejected["detail"]["code"] == "align_failed"
-    assert seen[("RedHeadSound", "aligned")]["detail"] is None
+    rejected = seen[("RedHeadSound", "rejected")]
+    assert rejected["voice_label"] == "RedHeadSound" and rejected["detail"]["code"] == "align_failed"
+    assert seen[("BlackCat", "aligned")]["detail"] is None
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["BlackCat"]["detail"]["code"] == "align_failed" and by_voice["RedHeadSound"]["detail"] is None
+    assert by_voice["RedHeadSound"]["detail"]["code"] == "align_failed" and by_voice["BlackCat"]["detail"] is None
 
 
 def test_every_step_of_a_voice_over_shows_as_one_of_seven_states():

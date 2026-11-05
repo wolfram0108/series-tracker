@@ -33,8 +33,9 @@ async def files(voices):
     return await voices.repo.files_of(7)
 
 
-async def finish_job(probe, voices, settled_sub, submit, number):
-    probe.publish_event("conform.job.finished", job_result(submit, f"job-{number}"))
+async def finish_job(probe, voices, settled_sub, neighbours, submit):
+    """The job of this submit ends: its id is the one the service gave it, whatever order the episodes were sent in."""
+    probe.publish_event("conform.job.finished", job_result(submit, neighbours.sent_keys[submit["key"]]))
     await asyncio.wait_for(settled_sub.queue.get(), 5)
     await quiet(voices)
 
@@ -61,7 +62,7 @@ async def test_a_compilation_is_downloaded_once_and_each_episode_it_covers_is_al
         f"7_s01e0{number}_ref.mp4" for number in (1, 2, 3)]
     assert all(submit["dubs"] == [fetch["path"]] for submit in neighbours.submits)
     for number, submit in enumerate(neighbours.submits, start=1):
-        await finish_job(probe, voices, settled_sub, submit, number)
+        await finish_job(probe, voices, settled_sub, neighbours, submit)
         if number < 3:  # the file stays while a later episode reads it
             assert os.path.isfile(fetch["path"]) and [file["id"] for file in await files(voices)] == [1]
     assert not os.path.exists(os.path.dirname(fetch["path"])) and await files(voices) == []
@@ -103,7 +104,7 @@ async def test_a_changed_row_is_a_file_of_its_own_and_the_old_file_stays_while_a
     touch(first["path"], b"video")
     finish(probe, "file:1")
     await statuses_until(sub, ["ready"] * 3 + ["aligning"])
-    await finish_job(probe, voices, settled_sub, neighbours.submits[0], 1)
+    await finish_job(probe, voices, settled_sub, neighbours, neighbours.submits[0])
     assert os.path.isfile(first["path"]) and [file["id"] for file in await files(voices)] == [1]
     # The table is read again: the row has another video and a fourth episode.
     reference = neighbours.sources[0]
@@ -127,9 +128,9 @@ async def test_a_changed_row_is_a_file_of_its_own_and_the_old_file_stays_while_a
         return len(neighbours.submits) == 3
 
     await until_true(sent, len(neighbours.submits))
-    await finish_job(probe, voices, settled_sub, neighbours.submits[1], 2)
+    await finish_job(probe, voices, settled_sub, neighbours, neighbours.submits[1])
     assert os.path.isfile(first["path"])
-    await finish_job(probe, voices, settled_sub, neighbours.submits[2], 3)
+    await finish_job(probe, voices, settled_sub, neighbours, neighbours.submits[2])
     assert not os.path.exists(os.path.dirname(first["path"]))
     assert [file["id"] for file in await files(voices)] == [2]
 
@@ -302,7 +303,7 @@ async def test_with_a_limit_the_file_stays_for_the_episodes_that_wait_for_their_
             return len(neighbours.submits) >= number
 
         await until_true(sent, (number, len(neighbours.submits)))
-        await finish_job(probe, voices, settled_sub, neighbours.submits[number - 1], number)
+        await finish_job(probe, voices, settled_sub, neighbours, neighbours.submits[number - 1])
         if number < 3:  # the episodes that wait still read the file
             assert os.path.isfile(fetch["path"])
     assert len(neighbours.fetches) == 1 and await files(voices) == []

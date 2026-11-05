@@ -32,11 +32,13 @@ UNSEND = _t("unsend", {S.ALIGNING}, S.READY, contested=True)
 ALIGNED = _t("aligned", {S.ALIGNING}, S.ALIGNED)
 PLACE = _t("place", {S.ALIGNED}, S.PLACED)
 REFUSE = _t("refuse", {S.ALIGNING, S.PLACED}, S.REJECTED)
+# The service turned the pair down: the file of this source is not the episode, the next source of the chain is tried.
+NEXT_SOURCE = _t("next_source", {S.ALIGNING}, S.PENDING)
 FAIL = _t("fail", {S.PENDING, S.DOWNLOADING, S.ALIGNING, S.ALIGNED, S.PLACED}, S.FAILED)
 RESTART = _t("restart", {S.READY, S.ALIGNING, S.ALIGNED, S.PLACED, S.REJECTED, S.FAILED}, S.PENDING)
 OFFER = _t("offer", {S.PENDING, S.FAILED}, S.PENDING)
 
-TRANSITIONS = (CLAIM, DOWNLOADED, RETRY, FILE_LOST, SEND, UNSEND, ALIGNED, PLACE, REFUSE, FAIL, RESTART, OFFER)
+TRANSITIONS = (CLAIM, DOWNLOADED, RETRY, FILE_LOST, SEND, UNSEND, ALIGNED, PLACE, REFUSE, NEXT_SOURCE, FAIL, RESTART, OFFER)
 
 # Steps in which a voice-over has not reached its end.
 WORKING = frozenset({S.PENDING, S.DOWNLOADING, S.ALIGNING})
