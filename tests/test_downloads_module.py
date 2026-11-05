@@ -1327,7 +1327,8 @@ async def test_the_fetches_of_voice_overs_are_in_the_queue_of_the_window_while_t
     progress = {each["task_key"]: (each["progress"], each["dlspeed"], each["eta"], each["total_size_mb"])
                 for each in queue["tasks"]}
     assert progress == {"dub:0": (50, 1024, 5, 10.0), "dub:1": (50, 1024, 5, 10.0), "dub:2": (None, None, None, None)}
-    assert not changed.queue.empty()  # the window is told, not asked
+    # The window is told, not asked: the event is published by a task of the module after it reads the queue.
+    assert (await asyncio.wait_for(changed.queue.get(), 5)).payload["count"] >= 1
     dl.gate.set()
     assert await _wait(lambda: os.path.isfile(tmp_path / "2.mp4"))
     await _quiet()

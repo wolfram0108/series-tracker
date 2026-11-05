@@ -275,8 +275,10 @@ async def test_a_replacement_that_is_fetched_takes_the_place_of_the_old_file_and
     await rig.run()
     await rig.until(lambda: any(each["source_url"] == "https://v/new" and each["status"] == "completed"
                                 for each in rig.query("SELECT source_url, status FROM media_items")), "the new video fetched")
-    assert (rig.media / old["final_filename"]).read_bytes() == b"https://v/old"  # the old container lives until the new one
-    await rig.free()  # the run's end: the new video and its tracks replace the old container under its name
+    # The name is never empty: the old container stands until the new one takes its place, which the episode does as
+    # soon as its work is done (packing goes by episode, not at the end of the run).
+    assert (rig.media / old["final_filename"]).read_bytes() in (b"https://v/old", b"https://v/new")
+    await rig.free()
     assert (rig.media / old["final_filename"]).read_bytes() == b"https://v/new"
     assert rig.query("SELECT final_filename FROM media_items WHERE unique_id=?", (old["unique_id"],))[0]["final_filename"] is None
     assert sorted(each.name for each in rig.media.iterdir()) == [old["final_filename"]]
