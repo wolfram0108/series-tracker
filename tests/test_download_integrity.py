@@ -1,13 +1,14 @@
 """A download that says it is done is a finished one only when the video has no hole: ffmpeg skips a segment it cannot open
 and still exits 0, and the audio and the length of the file stay whole, so only the pauses between the frames tell.
 A look that could not be made is not a file without holes."""
+import asyncio
 import os
 import shutil
 import subprocess
 
 import pytest
 
-from core import ffprobe
+from core import ffprobe, storage
 from core.ffprobe import video_gaps
 from modules.downloads import ytdlp
 from modules.downloads.module import _transient_download_error
@@ -17,6 +18,21 @@ pytestmark = pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ff
 
 def make(path, *args):
     subprocess.run(["ffmpeg", "-v", "error", "-y", *args, str(path)], check=True)
+
+
+async def freed(path: str) -> None:
+    """A download holds its name until the programs it started have ended; the next one on the name waits for that."""
+    free = asyncio.get_running_loop().create_future()
+    storage.when_free(path, lambda: free.done() or free.set_result(None))
+    await asyncio.wait_for(free, 10)
+
+
+@pytest.fixture(autouse=True)
+def announced(monkeypatch):
+    """The sources of these tests announce the length of the clips, ten seconds."""
+    async def ten(*_args, **_kwargs):
+        return 10.0
+    monkeypatch.setattr(ytdlp, "_announced_length", ten)
 
 
 @pytest.fixture
@@ -104,6 +120,7 @@ async def test_a_download_with_a_hole_is_discarded_and_is_a_failure_the_queue_tr
     os.remove(target)
 
     monkeypatch.setattr(ytdlp, "_download_owned", await writes(whole))
+    await freed(target)
     ok, error = await ytdlp.download("https://cdn.test/v.m3u8", target, lambda _data: None, whole_video=True)
     assert ok and error == "" and os.path.exists(target)
 
@@ -175,3 +192,59 @@ async def test_a_file_whose_packets_carry_side_data_is_looked_at_and_a_file_with
     monkeypatch.setattr(ffprobe, "run_capture", answer("N/A\nN/A,\n0.04\n"))
     seen = await video_gaps(str(target), longer_than=1.0)
     assert not seen.checked and "меток времени" in seen.reason
+
+
+@pytest.mark.asyncio
+async def test_a_download_shorter_than_its_source_announced_is_discarded_whichever_way_it_was_read(clips, tmp_path,
+                                                                                                    monkeypatch):
+    """A program that stopped early (a killed run continued, a playlist cut short) still says it is done."""
+    whole, _, _, _ = clips
+    target = str(tmp_path / "out" / "episode.mp4")
+
+    async def writes(*_args, **_kwargs):
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copy(whole, target)
+        return True, ""
+
+    async def thirty(*_args, **_kwargs):
+        return 30.0
+
+    monkeypatch.setattr(ytdlp, "_download_owned", writes)
+    monkeypatch.setattr(ytdlp, "_announced_length", thirty)
+    for whole_video in (True, False):  # a voice-over is not looked at for holes, but it is as long as its source too
+        await freed(target)
+        ok, error = await ytdlp.download("https://vk.com/video-1_2", target, lambda _data: None, whole_video=whole_video)
+        assert not ok and "скачано 10 с из ожидаемых ~30 с" in error and _transient_download_error(error)
+        assert not os.path.exists(target)
+
+
+@pytest.mark.asyncio
+async def test_a_work_file_a_stop_left_is_taken_only_at_the_announced_length(clips, tmp_path, monkeypatch):
+    whole, _, _, _ = clips
+    target = str(tmp_path / "out" / "episode.mp4")
+    os.makedirs(os.path.dirname(target))
+    shutil.copy(whole, target)
+
+    async def thirty(*_args, **_kwargs):
+        return 30.0
+
+    monkeypatch.setattr(ytdlp, "_announced_length", thirty)
+    ok, error = await ytdlp.download("https://vk.com/video-1_2", target, lambda _data: None, whole_video=True)
+    assert not ok and "неполная" in error and not os.path.exists(target)
+
+
+@pytest.mark.asyncio
+async def test_a_source_that_states_no_length_leaves_the_download_unfinished_and_keeps_the_file(clips, tmp_path,
+                                                                                               monkeypatch):
+    whole, _, _, _ = clips
+    target = str(tmp_path / "out" / "episode.mp4")
+    os.makedirs(os.path.dirname(target))
+    shutil.copy(whole, target)
+
+    async def unknown(*_args, **_kwargs):
+        return 0.0
+
+    monkeypatch.setattr(ytdlp, "_announced_length", unknown)
+    ok, error = await ytdlp.download("https://vk.com/video-1_2", target, lambda _data: None)
+    assert not ok and "не сообщил длину" in error and _transient_download_error(error)
+    assert os.path.exists(target)  # nothing was proved against it: the next try looks again

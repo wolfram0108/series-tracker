@@ -166,11 +166,11 @@ async def _fetch_all(client: httpx.AsyncClient, url: str, headers: dict, tmp_pat
     tasks = [asyncio.ensure_future(work()) for _ in range(max(1, min(threads, MAX_WORKERS)))]
     try:
         done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+        # Every part is written once its worker ended without an error: the file was allocated at its whole size, so
+        # its size tells nothing, and the length of the video is checked by the caller (ytdlp.download).
         for finished in done:
             if finished.exception() is not None:
                 raise finished.exception()
-        if await storage.call(os.path.getsize, tmp_path) != total:
-            raise _Failed("обрыв: файл записан не полностью")
         return True, ""
     finally:
         for task in tasks:

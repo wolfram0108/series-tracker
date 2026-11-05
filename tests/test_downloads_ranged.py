@@ -184,6 +184,7 @@ async def test_a_progressive_file_is_downloaded_in_parts_and_published_under_its
         return True, ""
 
     with patch.object(ranged, "download_ranged", parts), patch.object(ytdlp, "_local_duration", AsyncMock(return_value=60.0)), \
+            patch.object(ytdlp, "_announced_length", AsyncMock(return_value=60.0)), \
             patch.object(ytdlp, "_download_direct_ffmpeg") as ffmpeg:
         result = await ytdlp.download(URL, out, noop, threads=4, progressive=True)
 
@@ -200,7 +201,8 @@ async def test_a_file_that_cannot_be_read_after_the_parts_is_not_published(tmp_p
         open(tmp, "wb").write(b"data")
         return True, ""
 
-    with patch.object(ranged, "download_ranged", parts), patch.object(ytdlp, "_local_duration", AsyncMock(return_value=0.0)):
+    with patch.object(ranged, "download_ranged", parts), patch.object(ytdlp, "_local_duration", AsyncMock(return_value=0.0)), \
+            patch.object(ytdlp, "_announced_length", AsyncMock(return_value=60.0)):
         ok, error = await ytdlp.download(URL, out, noop, progressive=True)
 
     assert not ok and "не читается" in error
@@ -211,12 +213,19 @@ async def test_a_file_that_cannot_be_read_after_the_parts_is_not_published(tmp_p
 async def test_a_server_without_ranges_falls_back_to_one_stream_with_the_same_headers(tmp_path):
     out = str(tmp_path / "ep.mp4")
 
+    async def published(url, headers, path, on_progress, announced=None):
+        open(path, "wb").write(b"data")
+        return True, ""
+
     with patch.object(ranged, "download_ranged", AsyncMock(side_effect=ranged.RangeUnsupported("no"))), \
-            patch.object(ytdlp, "_download_direct_ffmpeg", AsyncMock(return_value=(True, ""))) as ffmpeg:
+            patch.object(ytdlp, "_announced_length", AsyncMock(return_value=60.0)), \
+            patch.object(ytdlp, "_local_duration", AsyncMock(return_value=60.0)), \
+            patch.object(ytdlp, "_download_direct_ffmpeg", AsyncMock(side_effect=published)) as ffmpeg:
         result = await ytdlp.download(URL, out, noop, headers={"Referer": "https://r/"}, progressive=True)
 
     assert result == (True, "")
-    ffmpeg.assert_awaited_once_with(URL, {"Referer": "https://r/"}, out, noop)
+    # The length the source announced is asked once and given to the way the file is read.
+    ffmpeg.assert_awaited_once_with(URL, {"Referer": "https://r/"}, out, noop, 60.0)
 
 
 @pytest.mark.asyncio

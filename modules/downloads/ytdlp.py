@@ -288,11 +288,11 @@ async def _local_duration(path: str) -> float:
 
 async def _download_direct_ffmpeg(stream_url: str, headers: dict,
                                   full_output_path: str,
-                                  on_progress: ProgressCb) -> tuple[bool, str]:
+                                  on_progress: ProgressCb, announced: float | None = None) -> tuple[bool, str]:
     executable = shutil.which("ffmpeg")
     if not executable:
         return False, "ffmpeg не найден в PATH"
-    duration = await _probe_duration_ffprobe(stream_url, headers)
+    duration = announced if announced is not None else await _probe_duration_ffprobe(stream_url, headers)
     tmp_out = full_output_path + ".download.mp4"
     await on_progress({"phase": "download", "progress": 0, "eta": 0, "speed": 0.0})
 
@@ -348,7 +348,7 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
         return False, stopped
     if proc.returncode == 0:
         got = await _local_duration(tmp_out)
-        if got <= 0 or (duration > 0 and got < duration - HOLE_S):
+        if got <= 0 or short_of(got, duration):
             await storage.discard(tmp_out)
             cause = f", отказов CDN на сегментах: {len(set(refused))}, первый №{refused[0]}" if refused else ""
             return False, (f"обрыв: скачано {got:.0f} с из ожидаемых ~{duration:.0f} с{cause} — "
@@ -384,10 +384,49 @@ async def download(video_url: str, full_output_path: str,
         return False, "путь сохранения должен быть абсолютным"
     try:
         with storage.hold(full_output_path):
-            done = await _download_owned(video_url, full_output_path, on_progress, headers, threads, progressive)
+            announced = await _announced_length(video_url, headers, progressive)
+            done = await _download_owned(video_url, full_output_path, on_progress, headers, threads, progressive,
+                                         announced=announced)
+            done = await _as_long_as_announced(done, full_output_path, announced)
             return await _whole_or_discarded(done, full_output_path) if whole_video else done
     except storage.StorageBusy:  # an operation on this name has not ended: a file written now could be lost
         return False, "путь занят незавершённой файловой операцией (timeout)"
+
+
+def short_of(got: float, announced: float) -> bool:
+    """Whether a file is shorter than the length its source announced, beyond what a cut of a frame explains."""
+    return announced > 0 and got < announced - HOLE_S
+
+
+def _is_stream(video_url: str, headers: dict | None, progressive: bool) -> bool:
+    """A link a player resolved (it carries its headers), a ready file, or a bare mp4: read by ffmpeg, not by yt-dlp."""
+    return bool(progressive or headers or (video_url.startswith("http") and ".mp4" in video_url
+                                           and "vk.com" not in video_url and "vkvideo.ru" not in video_url))
+
+
+async def _announced_length(video_url: str, headers: dict | None, progressive: bool) -> float:
+    """The length the source states, asked the way its file is downloaded; 0 when it states none."""
+    if _is_stream(video_url, headers, progressive):
+        return await _probe_duration_ffprobe(video_url, headers or {})
+    return await _probe_duration(video_url)
+
+
+async def _as_long_as_announced(done: tuple[bool, str], path: str, announced: float) -> tuple[bool, str]:
+    """A download that says it is done is taken only at the length its source announced: a program that stopped early
+    (a killed run continued, a playlist cut short) still says it is done. A file shorter than that is not kept; a length
+    the source does not state proves nothing, so the file is kept and the download is not finished."""
+    if not done[0]:
+        return done
+    got = await _local_duration(path)
+    if got <= 0:
+        await storage.discard(path)
+        return False, "обрыв: скачанный файл не читается — неполная загрузка"
+    if announced <= 0:
+        return False, "обрыв: источник не сообщил длину видео, полнота не проверена — загрузка повторится"
+    if short_of(got, announced):
+        await storage.discard(path)
+        return False, f"обрыв: скачано {got:.0f} с из ожидаемых ~{announced:.0f} с — неполная загрузка"
+    return done
 
 
 async def _whole_or_discarded(done: tuple[bool, str], path: str) -> tuple[bool, str]:
@@ -425,7 +464,8 @@ async def _download_ranged_file(video_url: str, headers: dict, full_output_path:
 
 
 async def _download_owned(video_url: str, full_output_path: str, on_progress: ProgressCb,
-                          headers: dict | None, threads: int, progressive: bool = False) -> tuple[bool, str]:
+                          headers: dict | None, threads: int, progressive: bool = False, *,
+                          announced: float | None = None) -> tuple[bool, str]:
     await storage.call(os.makedirs, os.path.dirname(full_output_path), exist_ok=True)
     if await storage.call(os.path.exists, full_output_path):
         return True, "файл уже существует"
@@ -433,15 +473,15 @@ async def _download_owned(video_url: str, full_output_path: str, on_progress: Pr
     if progressive:
         done = await _download_ranged_file(video_url, headers or {}, full_output_path, on_progress, threads)
         return done if done is not None else await _download_direct_ffmpeg(video_url, headers or {}, full_output_path,
-                                                                           on_progress)
+                                                                           on_progress, announced)
 
     # A resolved stream carries the headers its player asked for; a bare mp4 link is read as it is.
-    if headers or (video_url.startswith("http") and ".mp4" in video_url and "vk.com" not in video_url and "vkvideo.ru" not in video_url):
-        return await _download_direct_ffmpeg(video_url, headers or {}, full_output_path, on_progress)
+    if _is_stream(video_url, headers, progressive):
+        return await _download_direct_ffmpeg(video_url, headers or {}, full_output_path, on_progress, announced)
 
     # длительность для процента remux — из yt-dlp (метаданные источника),
     # НЕ из промежуточного TS (находка 52)
-    duration = await _probe_duration(video_url)
+    duration = announced if announced is not None else await _probe_duration(video_url)
     raw = await _phase_download(video_url, full_output_path, on_progress,
                                 threads, HLS_FORMAT)
     if not isinstance(raw, str) and not _unavailable_error(raw[1]):

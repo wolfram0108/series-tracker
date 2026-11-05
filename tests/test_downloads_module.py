@@ -621,6 +621,13 @@ async def test_cancel_unknown_task_errors(system):
         await probe.request("downloads.cancel", {"task_id": 999}, timeout=5)
 
 
+def made_as_announced(seconds: float = 60.0):
+    """The source announces a length and the file the faked way of reading made measures it: the routes are tested, not
+    the length (tests/test_download_integrity.py)."""
+    return patch.multiple(ytdlp, _announced_length=AsyncMock(return_value=seconds),
+                          _local_duration=AsyncMock(return_value=seconds))
+
+
 @pytest.mark.asyncio
 async def test_download_direct_stream_with_headers(tmp_path):
     out_file = str(tmp_path / "direct.mp4")
@@ -629,7 +636,7 @@ async def test_download_direct_stream_with_headers(tmp_path):
     async def on_progress(p):
         progress.append(p)
 
-    with patch.object(ytdlp, "_download_direct_ffmpeg") as mock_ffmpeg:
+    with patch.object(ytdlp, "_download_direct_ffmpeg") as mock_ffmpeg, made_as_announced():
         mock_ffmpeg.return_value = (True, "")
         ok, err = await ytdlp.download(
             "https://cdn.example.com/video_2160p.mp4",
@@ -643,7 +650,8 @@ async def test_download_direct_stream_with_headers(tmp_path):
             "https://cdn.example.com/video_2160p.mp4",
             {"Referer": "https://fsst.online/"},
             out_file,
-            on_progress
+            on_progress,
+            60.0
         )
 
 
@@ -655,12 +663,12 @@ async def test_a_bare_mp4_link_is_read_without_headers_of_any_site(tmp_path):
     async def on_progress(_data):
         pass
 
-    with patch.object(ytdlp, "_download_direct_ffmpeg") as mock_ffmpeg:
+    with patch.object(ytdlp, "_download_direct_ffmpeg") as mock_ffmpeg, made_as_announced():
         mock_ffmpeg.return_value = (True, "")
         ok, _ = await ytdlp.download("https://cdn.example.com/video_1080p.mp4", out_file, on_progress)
 
     assert ok is True
-    mock_ffmpeg.assert_called_once_with("https://cdn.example.com/video_1080p.mp4", {}, out_file, on_progress)
+    mock_ffmpeg.assert_called_once_with("https://cdn.example.com/video_1080p.mp4", {}, out_file, on_progress, 60.0)
 
 
 @pytest.mark.asyncio
@@ -733,7 +741,8 @@ async def test_download_falls_back_to_dash_on_hls_error(tmp_path):
          patch.object(ytdlp, "_phase_download", side_effect=[
              (False, "unable to download video data: HTTP Error 403"),
              "/tmp/raw"]) as phase, \
-         patch.object(ytdlp, "_phase_remux", AsyncMock(return_value=(True, ""))):
+         patch.object(ytdlp, "_phase_remux", AsyncMock(return_value=(True, ""))), \
+         patch.object(ytdlp, "_local_duration", AsyncMock(return_value=1.0)):
         ok, err = await ytdlp.download("https://vk.com/video-1_2", out, on_progress)
 
     assert ok is True
