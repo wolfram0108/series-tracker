@@ -696,7 +696,15 @@ class ScanModule(BaseModule):
 
     async def _relocate(self, series: dict) -> dict:
         """The first step of a sync: the move of the folder a save planned (И-59); everything after it works in the new
-        folder. A failed move fails the sync, and its plan waits for the next one."""
+        folder. A failed move fails the sync, and its plan waits for the next one. Before it the publications of
+        containers a stop cut short are finished in their folder: a move takes only the files the rows hold, so a journal
+        left for later would look for its leftovers in the wrong one (Н-15)."""
+        if series.get("kind") == "video":
+            try:
+                await self.request("downloads.publications.finish", {"series_id": series["id"]})
+            except BusRequestError as exc:
+                if NO_HANDLER not in str(exc):
+                    raise
         try:
             reply = await self.request("library.relocation.apply", {"series_id": series["id"]})
         except BusRequestError as exc:

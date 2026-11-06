@@ -257,12 +257,14 @@ class Packing:
         publication = uuid.uuid4().hex
         leftovers = {video, *[os.path.join(base, row["final_filename"]) for row in loser_files],
                      *[row["path"] for row in placed]} - {target}
+        # A leftover is the file that is there now, not whatever comes to lie under its name: its identity is written down.
+        files = {path: await storage.call(file_identity, path, owns=path) for path in sorted(leftovers)}
         record = {"series_id": series["id"], "unique_id": winner["unique_id"], "publication": publication,
                   "name": target_name,
                   "staging": os.path.join(os.path.dirname(target_name), f"{PACK_PREFIX}{publication}{CONTAINER_EXT}"),
                   "identity": identity, "signature": [list(each) for each in signature],
                   "losers": [row["unique_id"] for row in losers],
-                  "leftovers": sorted(_inside(base, path) for path in leftovers),
+                  "leftovers": [{"name": _inside(base, path), "file": files[path]} for path in sorted(leftovers)],
                   "dub_ids": [row["dub_id"] for row in inside]}
         staging = os.path.join(base, record["staging"])
         async with self._library.guard(target):
@@ -338,10 +340,19 @@ class Packing:
         await self._repo.take_over_name(record["unique_id"], record["name"], record["losers"])
         await self._tell_packed(series, target, record["identity"], record["dub_ids"])
         for leftover in record["leftovers"]:
-            path = os.path.join(base, leftover)
+            # A record written before the identities were (a name alone) does not prove the file: nothing is removed by it.
+            given, known = (leftover.get("name", ""), leftover.get("file")) if isinstance(leftover, dict) else (leftover, None)
+            path = os.path.join(base, given)
             name = os.path.relpath(path, base).replace(os.sep, "/")
             if not name.startswith("..") and await self._holder(series, name, except_uids=set()):
                 continue  # someone holds the file under that name now: it is not this publication's to remove
+            found = await storage.call(file_identity, path, owns=path)
+            if found is None:
+                continue
+            if known is None or list(found) != list(known):
+                self._log.warning("серия %s: остаток публикации %s не удалён: под этим именем не тот файл, что записан в "
+                                  "журнале", series["id"], path)
+                continue
             await storage.call(_remove_quietly, path, owns=path)
         await self._repo.publication_end(record["id"])
         if renamed:
@@ -432,6 +443,16 @@ def _inside(base: str, path: str) -> str:
     """A path of the series as a name inside its folder (moving the folder keeps it true); a path outside it as it is."""
     name = os.path.relpath(path, base)
     return path if name.startswith("..") else name
+
+
+def file_identity(path: str) -> list[int] | None:
+    """Which file lies at the path: its device, inode, size and time of change; None when nothing does. A move within one
+    disk (the move of a folder) keeps it, a file put there instead does not."""
+    try:
+        found = os.stat(path)
+    except FileNotFoundError:
+        return None
+    return [found.st_dev, found.st_ino, found.st_size, found.st_mtime_ns]
 
 
 def _remove_quietly(path: str) -> None:

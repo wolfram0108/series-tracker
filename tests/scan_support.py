@@ -121,6 +121,7 @@ class World(BaseModule):
         h = self.handle
         h("renaming.reprocess", self.on_reprocess)
         h("library.relocation.apply", self.on_relocation_apply)
+        h("downloads.publications.finish", self.on_publications_finish)
         h("downloads.fs.sync", self.on_fs_sync)
         h("downloads.queue.get", self.on_queue)
         h("downloads.dispatch", self.on_dispatch)
@@ -146,6 +147,10 @@ class World(BaseModule):
         self.reprocess_calls += 1
         self.order.append("renaming.reprocess")
         return {"ok": True}
+
+    async def on_publications_finish(self, env) -> dict:
+        self.order.append(f"downloads.publications.finish {env.payload['series_id']}")
+        return {"owed": False}
 
     async def on_relocation_apply(self, env) -> dict:
         self.order.append(f"library.relocation.apply {env.payload['series_id']}")

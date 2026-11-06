@@ -14,6 +14,7 @@ from core.container import AudioIn
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.downloads import DownloadsModule
+from modules.downloads.packing import file_identity
 from packing_support import FakePacker
 from test_downloads_module import FakeDownloader, FakeNeighbours, Probe, _add_item, _items, env_paths  # noqa: F401
 
@@ -419,13 +420,16 @@ async def test_a_placed_publication_whose_container_is_not_under_its_name_is_clo
 
 @pytest.mark.asyncio
 async def test_a_record_names_its_files_inside_the_folder_of_the_series(rig, monkeypatch):
-    """Moving the folder of the series does not make a record stale: its staging name and leftovers are relative."""
+    """Its staging name and leftovers are names inside the folder; each leftover with the identity of the file it is, so that
+    a name alone never removes a file (Н-15)."""
     fake, voices, packer, probe, db_path, media_dir = rig
     await cut_short(rig, "in_finish", monkeypatch)
     with sqlite3.connect(db_path) as conn:
         staging, leftovers, number = conn.execute("SELECT staging, leftovers, publication FROM pack_publications").fetchone()
     assert not os.path.isabs(staging) and staging.startswith(".st-pack.") and number in staging
-    assert all(not os.path.isabs(each) for each in json.loads(leftovers))
+    written = json.loads(leftovers)
+    assert written and all(not os.path.isabs(each["name"]) for each in written)
+    assert all(each["file"] == list(file_identity(os.path.join(media_dir, each["name"]))) for each in written)
 
 
 # --- the old tracks without a key (N-13) ----------------------------------------------------------------------------------
@@ -553,3 +557,79 @@ async def test_a_slot_whose_packing_a_stop_cut_short_is_seen_until_its_record_is
 
     await pack(probe)  # a step of a run finishes it
     assert pictures(sub)[-1] == [] and open_publications(db_path) == 0
+
+
+# --- the folder of a series moves while a publication is owed (Н-15) ----------------------------------------------------------
+
+async def _owed_publication(rig):
+    """A publication cut short after its replace: the container is in place, the source video and the track are owed."""
+    fake, voices, packer, probe, db_path, media_dir = rig
+    put(media_dir, "e01.mp4", b"new video")
+    winner(db_path, "e01.mp4")
+    voices.tracks = [dub(path=put(media_dir, "dub.flac", b"audio"))]
+    order(fake, [OWN, DUB])
+    voices.lose_answer = 1
+    with pytest.raises(Exception):
+        await pack(probe)
+    assert open_publications(db_path) == 1 and os.path.isfile(os.path.join(media_dir, "e01.mp4"))
+
+
+async def _library(probe, db_path):
+    from modules.library import LibraryModule
+    from test_downloads_module import _items as items_of
+
+    class Media(BaseModule):
+        name = "review_media"
+
+        def register(self):
+            self.handle("scan.media.list", self.items)
+
+        async def items(self, env):
+            return list(items_of(db_path).values())
+
+    media, library = Media(probe.bus), LibraryModule(probe.bus, Database(db_path))
+    await media.start()
+    await library.start()
+    return media, library
+
+
+@pytest.mark.asyncio
+async def test_a_leftover_is_removed_only_when_the_file_under_its_name_is_the_one_the_journal_wrote_down(rig, tmp_path):
+    """The folder moved with the journal still owed: under the name of a leftover in the new folder lies another file. It is
+    not the publication's, so it stays; the journal says so in the log."""
+    fake, voices, packer, probe, db_path, media_dir = rig
+    await _owed_publication(rig)
+    media, library = await _library(probe, db_path)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    stranger = destination / "e01.mp4"
+    stranger.write_bytes(b"A FILE NO ROW HOLDS")
+    try:
+        await probe.request("library.relocation.plan", {"series_id": 2, "new_path": str(destination)}, timeout=5)
+        assert (await probe.request("library.relocation.apply", {"series_id": 2}, timeout=5))["moved"]
+        await pack(probe)
+        assert stranger.read_bytes() == b"A FILE NO ROW HOLDS"
+    finally:
+        await library.stop()
+        await media.stop()
+
+
+@pytest.mark.asyncio
+async def test_the_first_step_of_a_sync_finishes_an_owed_publication_in_its_folder_before_the_folder_moves(rig, tmp_path):
+    fake, voices, packer, probe, db_path, media_dir = rig
+    await _owed_publication(rig)
+    media, library = await _library(probe, db_path)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    stranger = destination / "e01.mp4"
+    stranger.write_bytes(b"A FILE NO ROW HOLDS")
+    try:
+        assert (await probe.request("downloads.publications.finish", {"series_id": 2}, timeout=5)) == {"owed": False}
+        # The leftovers went in the folder they were written down in: nothing of the publication is left to move.
+        assert sorted(os.listdir(media_dir)) == ["e01.mkv"] and open_publications(db_path) == 0
+        await probe.request("library.relocation.plan", {"series_id": 2, "new_path": str(destination)}, timeout=5)
+        assert (await probe.request("library.relocation.apply", {"series_id": 2}, timeout=5))["moved"]
+        assert sorted(os.listdir(destination)) == ["e01.mkv", "e01.mp4"] and stranger.read_bytes() == b"A FILE NO ROW HOLDS"
+    finally:
+        await library.stop()
+        await media.stop()

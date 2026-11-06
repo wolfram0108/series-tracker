@@ -47,6 +47,8 @@ Queries / commands:
       record in media_items or download_tasks (the voice-overs of a series go to a temporary directory). The executor keeps no
       state: the owner of the queue (voices) sends the command again after a restart. It has a limit of its own, the setting
       max_parallel_dub_downloads (2 by default).
+  downloads.publications.finish {series_id} -> {owed} - the first step of a sync, before the move of the folder: the
+      publications of containers a stop or a failure cut short are finished (or closed) in the folder they began in.
   downloads.items.rename {series_id, names: {key: name}} -> {renamed} - the names the plan gives the ready files of the series now
       (all of them: a key whose name is the one it has owes nothing). The obligation is recorded first (`media_items.rename_to`),
       then the files move to their names, a ring of files that swap names included, and each name is recorded when its file lies
@@ -204,6 +206,7 @@ class DownloadsModule(BaseModule):
         self.handle(WORK_WITHDRAWN, self.on_work_withdrawn)
         self.handle("downloads.fs.sync", self.on_fs_sync)
         self.handle("downloads.items.rename", self.on_items_rename)
+        self.handle("downloads.publications.finish", self.on_publications_finish)
         self.handle("downloads.item.set_filename", self.on_set_filename)
         self.handle("downloads.item.set_status", self.on_set_status)
         self.handle("series.deleted", self.on_series_deleted)
@@ -574,6 +577,14 @@ class DownloadsModule(BaseModule):
             self.log.warning("каталог недоступен: задачи удалённых сериалов не проверены: %s", exc)
             return
         await self._discard_tasks(await self.repo.tasks_without_series(ids))
+
+    async def on_publications_finish(self, env: Envelope) -> dict:
+        """The first step of a sync: the publications of containers a stop or a failure cut short are finished (or closed)
+        before anything moves the folder of the series or acts on its files (Н-15, И-61)."""
+        series = await self.request("catalog.series.get", {"series_id": env.payload["series_id"]})
+        async with self._turn(series, in_run=True):
+            pass
+        return {"owed": await self._packing.owes(series)}
 
     async def on_items_rename(self, env: Envelope) -> dict:
         """The names the plan gives the ready files of a series now: the obligation is written down, then the files move."""
