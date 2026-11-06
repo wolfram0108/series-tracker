@@ -7,6 +7,17 @@ from schema_db import migrated
 # The slowest test takes about half a minute: a test that stands longer than this is stuck, and a
 # stuck suite must say where instead of waiting for ever.
 STUCK_AFTER_S = 180
+# The suite runs on the box of the service: when memory runs out, the kernel takes a test process first, never the service.
+# Raising one's own score needs no privilege; the workers of a parallel run inherit it.
+FIRST_TO_GO = 1000
+
+
+def pytest_configure(config):
+    try:
+        with open("/proc/self/oom_score_adj", "w") as score:
+            score.write(str(FIRST_TO_GO))
+    except OSError:
+        pass  # not Linux, or no /proc: nothing to protect here
 
 
 @pytest.fixture(autouse=True)
