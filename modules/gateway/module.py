@@ -152,8 +152,8 @@ def _whole(payload: Any) -> None:
     return None
 
 
-# Топик шины -> его событие в потоке интерфейса; единственная таблица: по ней шлюз и подписывается на шину, и строит
-# пакеты, и схлопывает картины. Контракт и решения по каждому событию — contracts/sse_contract.md (Р-18, Р-69).
+# The one table of the stream of the interface: the stream subscribes to the bus by its topics, makes the packets by it and
+# keeps the last of each picture by it. The contract of every event — contracts/sse_contract.md.
 # agent_heartbeat удалён по согласованию (Р-18).
 # The events of the sources, the layout and the references go as they are: a packet is whole for its part of
 # the screen, so the interface asks nothing more.

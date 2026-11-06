@@ -62,7 +62,7 @@ ALLOWED_WAITS: list[tuple[str, str, str, str]] = [
      "reconnect to the alignment daemon, an external system, with a growing pause up to BACKOFF_MAX_S"),
     ("modules/downloads/module.py", "DownloadsModule._run_download", RETRY,
      "pause before a repeated download; the length comes from the Budget of core.retry"),
-    ("modules/gateway/module.py", "GatewayModule._sse_stream", PROTOCOL,
+    ("modules/gateway/module.py", "GatewayModule._sse_batches", PROTOCOL,
      "the keepalive interval of the SSE stream: a comment line keeps the connection alive through proxies"),
     ("modules/torrents/module.py", "TorrentsModule._pipeline_loop", POLL,
      "qBittorrent, an external system, has no push: the state of the torrents is asked on a timer"),
