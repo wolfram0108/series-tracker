@@ -216,7 +216,7 @@ function step(by: number): void {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 .episode-tile::after { content: ""; position: absolute; inset-inline: 0; inset-block-end: 0; block-size: 0.25rem; background: var(--source); }
-.episode-tile:focus-visible, .episode-tile.is-open { outline: 2px solid var(--color-blue); outline-offset: 1px; }
+.episode-tile:focus-visible, .episode-tile.is-open { outline: 0.125rem solid var(--color-blue); outline-offset: 0.0625rem; }
 .episode-tile.is-ready { background: linear-gradient(135deg, #4CAF50, #409444); color: #fff; }
 .episode-tile.is-down { background: linear-gradient(135deg, #009688, #00796D); color: #fff; }
 .episode-tile.is-align { background: var(--color-blue); color: #fff; }

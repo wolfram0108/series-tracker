@@ -111,7 +111,7 @@ const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" 
 .queue-row.is-over td { box-shadow: inset 0 2px 0 var(--color-blue); }
 .queue-take, .queue-handle { inline-size: 1%; }
 .queue-drag { border: none; background: none; color: #adb5bd; cursor: grab; padding: 0.2rem; }
-.queue-drag:focus-visible { outline: 2px solid var(--color-blue); border-radius: 4px; }
+.queue-drag:focus-visible { outline: 0.125rem solid var(--color-blue); border-radius: 4px; }
 .queue-player { font-weight: 600; }
 .queue-source { display: inline-flex; align-items: center; gap: 0.4rem; }
 .queue-place { color: var(--text-muted); }

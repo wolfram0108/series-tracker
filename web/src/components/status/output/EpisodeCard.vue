@@ -66,7 +66,7 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
   background-size: 2.5rem 2.5rem;
 }
 .episode-card:hover { box-shadow: var(--card-hover-shadow); }
-.episode-card:focus-visible, .episode-card.is-open { outline: 3px solid var(--color-blue); outline-offset: 2px; }
+.episode-card:focus-visible, .episode-card.is-open { outline: 0.1875rem solid var(--color-blue); outline-offset: 0.125rem; }
 .is-ready { background: linear-gradient(135deg, #4CAF50, #409444); }
 .is-down { background: linear-gradient(135deg, #009688, #00796D); }
 .is-align { background: linear-gradient(135deg, var(--color-blue-1), color-mix(in srgb, var(--color-blue-1) 85%, black)); }

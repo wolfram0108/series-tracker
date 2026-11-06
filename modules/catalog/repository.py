@@ -36,9 +36,9 @@ _SOURCE_COLUMNS = ("id, series_id, position, url, source_type, parser_profile_id
 COLORS = 16
 
 # A new source takes the first colour no source of its series has; when every one is taken, the colours go round.
-_FREE_COLOR = (f"(WITH RECURSIVE palette(color) AS (SELECT 0 UNION ALL SELECT color + 1 FROM palette WHERE color < {COLORS - 1}) "
-               "SELECT COALESCE(MIN(color), (SELECT COUNT(*) FROM series_sources WHERE series_id=?) % "
-               f"{COLORS}) FROM palette WHERE color NOT IN (SELECT color FROM series_sources WHERE series_id=?))")
+_EVERY_COLOR = " UNION ALL ".join(f"SELECT {color} AS color" for color in range(COLORS))
+_FREE_COLOR = ("(SELECT COALESCE(MIN(color), (SELECT COUNT(*) FROM series_sources WHERE series_id=?) % "
+               f"{COLORS}) FROM ({_EVERY_COLOR}) WHERE color NOT IN (SELECT color FROM series_sources WHERE series_id=?))")
 
 _ADD_SOURCE = ("INSERT INTO series_sources (series_id, position, url, source_type, parser_profile_id, "
                "vibix_season, players_off, color) "

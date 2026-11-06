@@ -53,7 +53,7 @@ function drop(target: number): void {
   background: var(--bg-light); border: 1px solid var(--border-color); border-radius: 20px; font-size: 0.85rem; font-weight: 500;
   color: var(--color-gray-600);
 }
-.voice-order-item.is-over { outline: 2px dashed var(--color-blue); }
+.voice-order-item.is-over { outline: 0.125rem dashed var(--color-blue); }
 .voice-order-item.is-busy { cursor: not-allowed; opacity: 0.6; }
 .voice-order-position {
   display: inline-grid; place-items: center; inline-size: 1.25rem; block-size: 1.25rem; border-radius: 6px;
