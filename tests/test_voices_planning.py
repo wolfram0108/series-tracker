@@ -2,7 +2,8 @@
 from core.contracts import (CompositionRow, EffectiveLever, EpisodeSettings, Exclusion, Level, Reference, ReferenceMark,
                             RowState, group_target, variant_target)
 from core.voice_names import NO_GROUPS, Groups
-from modules.voices.planning import STARTED, Candidate, PlannedDub, Videos, adopt, moved, plan, rank
+from core.voice_names import rank
+from modules.voices.planning import STARTED, Candidate, PlannedDub, Videos, adopt, moved, plan
 from modules.voices.settings import DEFAULT_PRIORITY
 
 PRIORITY = ("cvh", "kodik")

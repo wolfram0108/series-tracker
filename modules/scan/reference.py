@@ -12,72 +12,30 @@ row with no number. A row the layout numbers otherwise, or one the configuration
 is its word: the reference follows it.
 
 A slot is (season, episode, part): the pieces of one episode that are different videos. Of the playable single rows
-of a slot, whose player takes part in the choice, the best by `RANKING` is the reference. A voice-over picked by the
+of a slot, whose player takes part in the choice, the best by the rule of `core.variant_queue` is the reference. A voice-over picked by the
 user narrows the candidates to that voice-over and is never replaced by the best of another one.
 
-A video whose download failed for good (`failed`: its source, row and link) is passed over: the next by `RANKING` is the
+A video whose download failed for good (`failed`: its source, row and link) is passed over: the next by that rule is the
 reference, with the mark of another player and the reason (ЭТАП_10: «если скачивание не удаётся, то выбирается плеер по
 следующему приоритету»). When every video of the episode failed there is no next one: the best stays, with the reason,
 and is tried again. The failure is of that video: the same row showing another video is a candidate again.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Callable, Collection, Iterable, Sequence
+from dataclasses import dataclass
+from typing import Collection, Iterable, Sequence
 
 from pydantic import ValidationError
 
 from core.contracts import (REFERENCE_CHOICE, VARIANT_ALLOW, CompositionRow, EffectiveLever, EpisodeSettings, Level,
                             Reference, ReferenceChoice, ReferenceMark, RowState, parse_variant_target)
 from core.reasons import reason
-from core.voice_names import NO_GROUPS, Groups, rank
+from core.variant_queue import REFERENCE_RANKING, Candidate, Order, RankKey, best as _best
+from core.voice_names import NO_GROUPS, Groups
 
 Slot = tuple[int, int, int | None]
 # A video whose download failed: (source id, row key, link of the row).
 Failed = tuple[int, str, str]
-
-
-@dataclass(frozen=True)
-class Candidate:
-    """A row of the layout that may become the reference. `position` is its place in the layout, the last tie-break."""
-
-    row: CompositionRow
-    position: int
-
-
-@dataclass(frozen=True)
-class Order:
-    """What the keys of the ranking compare against: the order of players and the order of the sources of the series."""
-
-    players: tuple[str, ...] = ()
-    sources: dict[int, int] = field(default_factory=dict)
-    player_groups: Groups = NO_GROUPS
-
-    def player_place(self, player: str) -> int:
-        """Place in the order of the settings (the one order the voice-overs follow too, `core.voice_names.rank`)."""
-        return rank(player, self.players, self.player_groups)
-
-    def source_place(self, source_id: int) -> int:
-        return self.sources.get(source_id, len(self.sources))
-
-
-RankKey = Callable[[Candidate, Order], int]
-
-
-def by_resolution(candidate: Candidate, order: Order) -> int:
-    return -(candidate.row.height or 0)
-
-
-def by_player(candidate: Candidate, order: Order) -> int:
-    return order.player_place(candidate.row.player)
-
-
-def by_source(candidate: Candidate, order: Order) -> int:
-    return order.source_place(candidate.row.source_id)
-
-
-# The one list of the criteria of the choice, the strongest first; a new criterion is one more entry here.
-RANKING: tuple[RankKey, ...] = (by_resolution, by_player, by_source)
 
 
 @dataclass(frozen=True)
@@ -109,7 +67,7 @@ class _Levers:
 
 
 def choose(rows: Sequence[CompositionRow], settings: Iterable[EpisodeSettings], players: Sequence[str],
-           sources: Sequence[int], ranking: Sequence[RankKey] = RANKING,
+           sources: Sequence[int], ranking: Sequence[RankKey] = REFERENCE_RANKING,
            previous: Iterable[Reference] = (), player_groups: Groups = NO_GROUPS,
            on_disk: Collection[tuple[int, str]] = (), failed: Collection[Failed] = ()) -> list[Chosen]:
     """One outcome per slot of every episode that has a row in the layout, in the order of season, episode, part.
@@ -236,10 +194,6 @@ def _taken(season: int, episode: int, part: int | None, row: CompositionRow, mar
                           row_key=row.row_key, player=row.player, voice_group=row.voice_label,
                           height=height if height is not None else row.height, reason=why)
     return Chosen(reference, row)
-
-
-def _best(pool: list[Candidate], order: Order, ranking: Sequence[RankKey]) -> Candidate:
-    return min(pool, key=lambda candidate: (*(key(candidate, order) for key in ranking), candidate.position))
 
 
 def _levers_of(levers: Iterable[EffectiveLever]) -> _Levers:

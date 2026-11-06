@@ -13,7 +13,7 @@ from core.contracts import (REFERENCE_CHOICE, VARIANT_ALLOW, Exclusion, Level, R
 from core.reasons import parse
 from core.voice_names import Groups
 from modules.scan import reference
-from modules.scan.reference import Candidate, Order
+from core.variant_queue import Candidate, Order, by_player, by_resolution
 from scan_support import episode_settings, lever, row
 
 S = 1  # the series
@@ -197,7 +197,7 @@ def test_a_criterion_is_one_more_entry_of_the_list_of_keys():
 
     rows = [row(S, 1, "loud", 1, 1, height=1080, voice="Other"), row(S, 1, "wanted", 1, 1, height=1080, voice="Wanted")]
     assert only(choose(rows)).row.row_key == "loud"
-    assert only(choose(rows, ranking=(reference.by_resolution, by_voice, reference.by_player))).row.row_key == "wanted"
+    assert only(choose(rows, ranking=(by_resolution, by_voice, by_player))).row.row_key == "wanted"
 
 
 # --- determinism ------------------------------------------------------------------------------------

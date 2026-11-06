@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, NamedTuple, Sequence
 
-from core.voice_names import rank
+from core.variant_queue import VOICE_RANKING, Candidate as QueueItem, Order, ranked
 from core.contracts import (DubStatus as S, VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, CompositionRow, EffectiveLever, EpisodeSettings,
                             Reference, ReferenceMark, RowState, group_target, parse_variant_target)
 
@@ -153,12 +153,12 @@ def _covers(row: CompositionRow, episode: int, part: int | None) -> bool:
 
 def _chain(rows: Sequence[CompositionRow], pick: tuple[int, str] | None, priority: Sequence[str],
            players, places: Mapping[int, Sequence[str]]) -> tuple[Candidate, ...]:
-    """The playing rows, the picked player first, then by the order of players, then as the sources are ordered."""
-    playing = [row for row in rows if row.state == RowState.PLAYABLE and row.link]
-    ordered = sorted(enumerate(playing), key=lambda item: (
-        0 if pick == (item[1].source_id, item[1].player) else 1, rank(item[1].player, priority, players), item[0]))
+    """The playing rows in the order of `core.variant_queue`: the picked variant first, then by the rule of voice-overs."""
+    playing = [QueueItem(row, place) for place, row in enumerate(rows) if row.state == RowState.PLAYABLE and row.link]
+    ordered = ranked(playing, Order(tuple(priority), player_groups=players), VOICE_RANKING,
+                     preferred=[pick] if pick is not None else (), identity=lambda item: (item.row.source_id, item.row.player))
     chain: dict[str, Candidate] = {}
-    for _, row in ordered:
+    for row in (item.row for item in ordered):
         chain.setdefault(row.link, Candidate(row.player, row.voice_label, row.link,
                                              (row.source_id, row.row_key) if row.is_compilation else None, row.source_id,
                                              row.row_key, tuple(places.get(row.source_id, ())), row.video))
