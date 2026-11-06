@@ -1,39 +1,10 @@
 import { ref } from "vue"
+import type { components } from "../api/schema"
 
-/** SSE events of the contract (from the gateway SSE_MAP). The stream is read in frames of a turn
- *  (`frames=batch`): `event: batch\ndata: [{event, data}, ...]`, the events in their order; EventSource ignores the
- *  keepalive comments itself. */
-export const SSE_EVENTS = [
-  "series_updated",
-  "series_added",
-  "series_deleted",
-  "agent_queue_update",
-  "torrent_progress_update",
-  "download_queue_update",
-  "slicing_queue_update",
-  "conform_queue_update",
-  "pack_queue_update",
-  "voice_dub_update",
-  "voice_dubs_snapshot",
-  "voice_settings_update",
-  "conform_settings_update",
-  "scanner_status_update",
-  "sources_table_progress",
-  "series_scan_progress",
-  "sources_table_ready",
-  "sources_table_failed",
-  "composition_changed",
-  "composition_failed",
-  "reference_changed",
-  "series_sources_changed",
-  "renaming_complete",
-  "relocation_started",
-  "relocation_finished",
-  "preview_naming_ready",
-  "preview_naming_failed",
-] as const
-
-export type SSEEvent = (typeof SSE_EVENTS)[number]
+/** The events of the stream are named by the one table of the gateway (SSE_MAP) and reach this type through the schema
+ *  of the API. The stream is read in frames of a turn (`frames=batch`): `event: batch\ndata: [{event, data}, ...]`, the
+ *  events in their order; EventSource ignores the keepalive comments itself. */
+export type SSEEvent = components["schemas"]["StreamEvent"]["event"]
 type Handler = (data: unknown) => void
 
 // Модуль-синглтон: одно соединение и общий реестр на всё приложение
@@ -42,8 +13,6 @@ type Handler = (data: unknown) => void
 const handlers = new Map<SSEEvent, Set<Handler>>()
 let source: EventSource | null = null
 const connected = ref(false)
-
-const known = new Set<string>(SSE_EVENTS)
 
 // A handler that throws loses its own event only, not the rest of the turn.
 function deliver(event: SSEEvent, data: unknown) {
@@ -66,7 +35,7 @@ function dispatchTurn(raw: string) {
   }
   if (!Array.isArray(turn)) return
   for (const each of turn as { event?: unknown; data?: unknown }[]) {
-    if (typeof each?.event === "string" && known.has(each.event)) deliver(each.event as SSEEvent, each.data ?? null)
+    if (typeof each?.event === "string") deliver(each.event as SSEEvent, each.data ?? null)
   }
 }
 

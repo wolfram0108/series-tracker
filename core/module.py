@@ -1,7 +1,7 @@
 """BaseModule — обвязка модуля над шиной.
 
 Даёт модулю:
-- декларативные подписки (handle("topic.pattern")) с потребителями;
+- декларативные подписки (handle("точный.топик")) с потребителями: модуль подписан ровно на то, что разбирает;
 - publish_event / send_command — отправка без ожидания;
 - request() — query→reply с correlation_id и таймаутом (поверх pub/sub);
 - автоматический ответ на query: значение, возвращённое обработчиком,
@@ -20,7 +20,7 @@ from typing import Any, Awaitable, Callable
 
 from .admission import Admission
 from .admission import current as current_admission
-from .bus import Bus, Subscription
+from .bus import Bus, Subscription, is_exact
 from .contracts.availability import NotAllowed
 from .deadlines import deadline_of
 from .envelope import Envelope
@@ -33,6 +33,9 @@ REPLY_PREFIX = "_reply"
 ERROR_KEY = "_bus_error"
 # The words a request to a topic nobody handles fails with: a caller tells "no such module in this process" by them.
 NO_HANDLER = "нет обработчика"
+
+# The kinds of an answer that refuses rather than fails: a missing entity, a state that does not allow, a refused value.
+_REFUSALS = ("LookupError", "NotAllowed", "ValueError")
 
 # `request` takes the fuse from the table of `core.deadlines` unless the caller names one (a test, a one-off wrapper).
 _FROM_TABLE: Any = object()
@@ -70,6 +73,9 @@ class BaseModule:
         очередь топика для следующих запросов. По умолчанию —
         последовательно: порядок обработки сохраняется (важно, например,
         для свёрток статусов)."""
+        # A family of topics would bring the module envelopes it does not handle, and an answer to a query of any of them.
+        if not is_exact(pattern):
+            raise ValueError(f"модуль {self.name}: подписка '{pattern}' — не точный топик")
         self._handlers.append((pattern, handler, concurrent))
 
     # --- жизненный цикл ----------------------------------------------------
@@ -185,6 +191,13 @@ class BaseModule:
                 # A refusal by the table of what is allowed is the module's answer, not its failure: no trace is due.
                 self.log.info("отказ на топике '%s': %s", env.topic, describe(str(exc)))
                 payload = {ERROR_KEY: f"{type(exc).__name__}: {exc}"}
+            except BusRequestError as exc:
+                # The answer of another module goes on as it came, its kind first: a "not found" relayed is still a
+                # "not found" to the caller. Its trace, if any, is in the journal of the module that failed.
+                refused = str(exc).startswith(_REFUSALS)
+                (self.log.info if refused else self.log.error)("топик '%s': ответ другого модуля передан дальше: %s",
+                                                             env.topic, describe(str(exc)))
+                payload = {ERROR_KEY: str(exc)}
             except Exception as exc:  # noqa: BLE001 - a module does not die of one handler
                 self.log.exception("ошибка обработчика '%s' на топике '%s'",
                                    getattr(handler, "__name__", "?"), env.topic)

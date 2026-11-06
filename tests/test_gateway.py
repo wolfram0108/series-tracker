@@ -64,7 +64,7 @@ async def test_bus_event_reaches_sse_with_mapped_name(system, monkeypatch):
     # транспортный уровень проверяется смоук-тестом под живым uvicorn.
     bus, _, gateway = system
     monkeypatch.setitem(gateway_module.SSE_MAP,
-                        "demo.things.changed", ("things_changed", None))
+                        "demo.things.changed", gateway_module.Outgoing("things_changed"))
 
     stream = gateway._sse_stream()
     received: list[str] = []
@@ -97,8 +97,8 @@ async def test_bus_event_reaches_sse_with_mapped_name(system, monkeypatch):
 async def test_a_burst_goes_as_one_frame_of_its_events_in_order_when_the_stream_is_read_by_turns(system, monkeypatch):
     # A burst published at once is one turn: the interface takes it in one task and counts its screen once.
     bus, _, gateway = system
-    monkeypatch.setitem(gateway_module.SSE_MAP, "demo.things.changed", ("things_changed", None))
-    monkeypatch.setitem(gateway_module.SSE_MAP, "demo.other.changed", ("other_changed", None))
+    monkeypatch.setitem(gateway_module.SSE_MAP, "demo.things.changed", gateway_module.Outgoing("things_changed"))
+    monkeypatch.setitem(gateway_module.SSE_MAP, "demo.other.changed", gateway_module.Outgoing("other_changed"))
 
     stream = gateway._sse_stream("batch")
     announced = bus.subscribe("gateway.sse.clients")
@@ -120,10 +120,28 @@ async def test_a_burst_goes_as_one_frame_of_its_events_in_order_when_the_stream_
 
 
 @pytest.mark.asyncio
+async def test_the_stream_is_subscribed_to_the_topics_of_its_table_and_to_nothing_else(system):
+    """What is not for the interface does not reach the stream: its subscription is the table, so its queue holds only
+    what goes out, and the requests and answers of the modules never pass through it."""
+    bus, _, gateway = system
+    stream = gateway._sse_stream("batch")
+    announced = bus.subscribe("gateway.sse.clients")
+    first = asyncio.ensure_future(stream.__anext__())
+    await asyncio.wait_for(announced.queue.get(), 5)
+    bus.unsubscribe(announced)
+    (sub,) = gateway._sse_subs.values()
+    assert sub.topics == frozenset(gateway_module.SSE_MAP) and sub.wild == ()
+    assert bus.publish(Envelope(topic="catalog.series.get", kind="query", payload={})) == 0
+    first.cancel()
+    await asyncio.gather(first, return_exceptions=True)
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
 async def test_a_stream_read_by_turns_ends_its_subscription_when_closed(system, monkeypatch):
     # Starlette closes the stream at a frame when the client goes: the turns under it must let the bus go too.
     bus, _, gateway = system
-    monkeypatch.setitem(gateway_module.SSE_MAP, "demo.things.changed", ("things_changed", None))
+    monkeypatch.setitem(gateway_module.SSE_MAP, "demo.things.changed", gateway_module.Outgoing("things_changed"))
     stream = gateway._sse_stream("batch")
     announced = bus.subscribe("gateway.sse.clients")
     first = asyncio.ensure_future(stream.__anext__())
@@ -265,7 +283,7 @@ async def test_the_events_of_the_tables_the_layout_and_the_references_reach_the_
 def test_the_progress_events_of_the_old_reading_are_not_in_the_map():
     assert "sources.video.progress" not in gateway_module.SSE_MAP
     assert "sources.coverage.progress" not in gateway_module.SSE_MAP
-    names = {name for name, _ in gateway_module.SSE_MAP.values()}
+    names = {out.name for out in gateway_module.SSE_MAP.values()}
     assert not {"video_scan_progress", "coverage_progress"} & names
 
 

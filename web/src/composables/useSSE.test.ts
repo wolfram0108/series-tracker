@@ -41,7 +41,7 @@ describe("useSSE", () => {
     sse.on("composition_changed", (data) => got.push(["composition", data]))
     source.frame("batch", JSON.stringify([
       { event: "reference_changed", data: { episode: 1 } },
-      { event: "not_an_event_of_the_contract", data: {} },
+      { event: "an_event_nobody_listens_to", data: {} },
       { event: "composition_changed", data: { rev: 2 } },
       { event: "reference_changed", data: { episode: 2 } },
     ]))

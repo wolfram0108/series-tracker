@@ -9,6 +9,10 @@ persistence, приоритеты, знание о модулях. Request/reply
 о каждом обработанном конверте, и шина знает, сколько конвертов ещё в пути или в работе. Так ожидание тишины — это
 сигнал, а не пауза; подписка без учёта (тест, поток SSE) в него не входит.
 
+Подписка — один или несколько шаблонов с одной очередью: конверты всех её топиков приходят в порядке публикации.
+Рабочий подписчик (модуль, поток интерфейса) подписан ровно на те точные топики, которые разбирает; шаблоны с `*` и `#`
+— для наблюдателей (тесты, приборы), которым нужен весь поток.
+
 Очереди подписчиков неограниченные: потеря сообщения недопустима как
 тихий режим работы, а backpressure в однопользовательском процессе —
 несуществующая проблема. Если очередь растёт — это баг подписчика,
@@ -29,11 +33,18 @@ _log = logging.getLogger("bus")
 _QUEUE_WARN_SIZE = 1000
 
 
+def is_exact(pattern: str) -> bool:
+    """A pattern that names one topic, not a family of them."""
+    return "*" not in pattern.split(".") and "#" not in pattern.split(".")
+
+
 @dataclass(slots=True)
 class Subscription:
-    """Подписка: шаблон топика + личная очередь конвертов."""
+    """Подписка: шаблоны топиков + личная очередь конвертов."""
     sub_id: int
-    pattern: str
+    patterns: tuple[str, ...]
+    topics: frozenset[str] = frozenset()  # the exact ones: a topic is found among them without matching
+    wild: tuple[str, ...] = ()  # the patterns of an observer
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     tracked: bool = False  # the consumer reports each envelope it is done with (`Bus.processed`)
     warned: bool = False  # the growth of its queue has been told and has not gone down since
@@ -48,8 +59,12 @@ class Bus:
         self._quiet.set()
         self._step = asyncio.Event()  # set with every envelope published and every envelope taken apart
 
-    def subscribe(self, pattern: str, *, tracked: bool = False) -> Subscription:
-        sub = Subscription(sub_id=next(self._ids), pattern=pattern, tracked=tracked)
+    def subscribe(self, *patterns: str, tracked: bool = False) -> Subscription:
+        if not patterns:
+            raise ValueError("подписка без топиков")
+        sub = Subscription(sub_id=next(self._ids), patterns=patterns, tracked=tracked,
+                           topics=frozenset(each for each in patterns if is_exact(each)),
+                           wild=tuple(each for each in patterns if not is_exact(each)))
         self._subs[sub.sub_id] = sub
         return sub
 
@@ -86,7 +101,7 @@ class Bus:
         self._tick()
         delivered = 0
         for sub in self._subs.values():
-            if topic_matches(sub.pattern, env.topic):
+            if env.topic in sub.topics or any(topic_matches(each, env.topic) for each in sub.wild):
                 sub.queue.put_nowait(env)
                 delivered += 1
                 if sub.tracked:
@@ -98,7 +113,7 @@ class Bus:
                     _log.warning(
                         "Очередь подписки '%s' разрослась до %d — "
                         "подписчик не успевает разбирать сообщения",
-                        sub.pattern, sub.queue.qsize(),
+                        ", ".join(sub.patterns), sub.queue.qsize(),
                     )
                 elif sub.warned and sub.queue.qsize() <= _QUEUE_WARN_SIZE // 2:
                     sub.warned = False

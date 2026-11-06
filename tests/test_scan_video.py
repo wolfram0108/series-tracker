@@ -918,8 +918,17 @@ async def test_a_row_the_user_switches_off_leaves_the_plan_at_once(rig):
 
 
 async def test_a_series_the_catalog_does_not_have_cannot_be_switched(rig):
-    with pytest.raises(BusRequestError):
+    # The refusal is the catalog's own, relayed by the scan with its kind: the caller sees "not found", not a failure.
+    with pytest.raises(BusRequestError, match=r"^LookupError: "):
         await rig.probe.request("scan.output.switch", {"series_id": 999, "season": 1, "off": True}, timeout=STUCK_S)
+
+
+async def test_no_change_of_a_series_the_catalog_does_not_have_is_admitted(rig):
+    """Every change of a series by the user goes through its admission: a series that is not there is refused there, with
+    the catalog's "not found", and nothing is held for it."""
+    with pytest.raises(BusRequestError, match=r"^LookupError: "):
+        await rig.probe.request("scan.edit.begin", {"series_id": 999, "token": "t"}, timeout=STUCK_S)
+    assert 999 not in rig.scan._edits
 
 
 # --- the state is the database's -------------------------------------------------------------------------------------------

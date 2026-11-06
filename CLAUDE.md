@@ -51,7 +51,9 @@
 ## Архитектура (кратко; подробно — [README.md](README.md) и докстринги модулей)
 
 Один asyncio-процесс: «тупая» шина (`core/bus.py`, только
-publish/subscribe + wildcards) и модули (`modules/*`), общающиеся
+publish/subscribe; подписка — один или несколько топиков с одной очередью;
+рабочий подписчик подписан ровно на разбираемые точные топики, шаблоны `*`/`#` —
+только наблюдателям в тестах) и модули (`modules/*`), общающиеся
 конвертами (`core/envelope.py`: event / command / query / reply).
 Request/reply реализован в обвязке `core/module.py` ПОВЕРХ pub/sub —
 шина о нём не знает. Gateway (`modules/gateway`) — FastAPI, единственная

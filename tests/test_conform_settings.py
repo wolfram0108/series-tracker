@@ -179,8 +179,7 @@ def test_a_draft_is_cleaned_before_it_is_checked_and_written():
 
 def test_a_saved_address_reaches_every_open_screen_by_the_stream_and_the_screen_listens_for_it():
     root = Path(__file__).resolve().parent.parent
-    name, _ = SSE_MAP["conform.settings.changed"]
+    name = SSE_MAP["conform.settings.changed"].name
     assert name == "conform_settings_update"
     assert f"`{name}`" in (root / "contracts" / "sse_contract.md").read_text(encoding="utf-8")
-    for front in ("useRealtime.ts", "useSSE.ts"):
-        assert f'"{name}"' in (root / "web" / "src" / "composables" / front).read_text(encoding="utf-8")
+    assert f'"{name}"' in (root / "web" / "src" / "composables" / "useRealtime.ts").read_text(encoding="utf-8")

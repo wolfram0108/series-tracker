@@ -2932,6 +2932,12 @@ export interface components {
              */
             active: boolean;
         };
+        /** StreamEvent */
+        StreamEvent: {
+            /** @enum {string} */
+            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "pack_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "reference_changed" | "series_scan_progress" | "conform_queue_update" | "voice_dub_update" | "voice_dubs_snapshot" | "voice_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
+            data: unknown;
+        };
     };
     responses: never;
     parameters: never;

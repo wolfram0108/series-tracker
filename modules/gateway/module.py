@@ -4,16 +4,16 @@
 в SSE. Сам не содержит бизнес-логики (она в модулях); его логика —
 только адаптация протоколов и таблица соответствия топиков SSE-именам.
 
-SSE_MAP: ключ — топик шины, значение — (имя SSE-события, трансформация
-payload). Контракт — contracts/sse_contract.md (Р-18); series_added и
-series_deleted добавятся при ревизии CRUD сериалов.
+SSE_MAP: ключ — топик шины, значение — Outgoing (имя SSE-события,
+форма пакета, ключ картины). Поток интерфейса подписан ровно на топики
+таблицы. Контракт — contracts/sse_contract.md (Р-18, Р-69).
 """
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import json
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, NamedTuple
 import os
 import secrets
 import signal
@@ -138,68 +138,72 @@ def _series_added(p: dict) -> dict:
     return out
 
 
-# Топик шины -> (имя SSE-события, трансформация payload | None=как есть).
-# Контракт и решения по каждому событию — contracts/sse_contract.md (Р-18).
+class Outgoing(NamedTuple):
+    """What an event of the bus is in the stream of the interface."""
+    name: str  # the SSE event
+    form: Callable[[Any], Any] | None = None  # the packet made of the payload; None — the payload as it is
+    # A picture of the whole state of its part of the screen, by the key of that part: of several queued at once only
+    # the last one goes, since each replaces the one before. None — every event goes, in order.
+    latest: Callable[[Any], Any] | None = None
+
+
+def _whole(payload: Any) -> None:
+    """The key of a picture of a whole queue: there is one."""
+    return None
+
+
+# Топик шины -> его событие в потоке интерфейса; единственная таблица: по ней шлюз и подписывается на шину, и строит
+# пакеты, и схлопывает картины. Контракт и решения по каждому событию — contracts/sse_contract.md (Р-18, Р-69).
 # agent_heartbeat удалён по согласованию (Р-18).
 # The events of the sources, the layout and the references go as they are: a packet is whole for its part of
 # the screen, so the interface asks nothing more.
-SSE_MAP: dict[str, tuple[str, object]] = {
-    "series.status.changed": ("series_updated", _series_delta),
-    "series.busy.changed": ("series_updated", _series_delta),
-    "series.downloaded.changed": ("series_updated", _series_downloaded),
-    "series.updated": ("series_updated", _series_update_fields),
-    "series.added": ("series_added", _series_added),
-    "series.deleted": ("series_deleted", _deleted_id),
-    "torrents.queue.changed": ("agent_queue_update", _agent_tasks),
-    "torrents.progress.changed": ("torrent_progress_update", _bare_tasks),
-    "torrents.preview.ready": ("preview_naming_ready", None),
-    "torrents.preview.failed": ("preview_naming_failed", None),
-    "downloads.queue.changed": ("download_queue_update", _bare_tasks),
-    "slicing.queue.changed": ("slicing_queue_update", _bare_tasks),
-    "downloads.pack.queue.changed": ("pack_queue_update", _bare_tasks),
-    "scan.status.changed": ("scanner_status_update", None),
-    "series.source.added": ("series_sources_changed", lambda payload: {**payload, "what": "added"}),
-    "series.source.updated": ("series_sources_changed", lambda payload: {**payload, "what": "updated"}),
-    "series.source.removed": ("series_sources_changed", lambda payload: {**payload, "what": "removed"}),
-    "sources.table.progress": ("sources_table_progress", None),
-    "sources.table.ready": ("sources_table_ready", None),
-    "sources.table.failed": ("sources_table_failed", None),
-    "composition.changed": ("composition_changed", None),
-    "composition.failed": ("composition_failed", None),
-    "scan.reference.changed": ("reference_changed", None),
-    "scan.series.progress": ("series_scan_progress", None),
-    "conform.queue.changed": ("conform_queue_update", None),
-    "voices.dub.changed": ("voice_dub_update", None),
-    "voices.dubs.snapshot": ("voice_dubs_snapshot", None),
-    "voices.settings.changed": ("voice_settings_update", None),
-    "conform.settings.changed": ("conform_settings_update", None),
-    "renaming.finished": ("renaming_complete", None),
-    "library.relocation.started": ("relocation_started", None),
-    "library.relocation.finished": ("relocation_finished", None),
+SSE_MAP: dict[str, Outgoing] = {
+    "series.status.changed": Outgoing("series_updated", _series_delta),
+    "series.busy.changed": Outgoing("series_updated", _series_delta),
+    "series.downloaded.changed": Outgoing("series_updated", _series_downloaded),
+    "series.updated": Outgoing("series_updated", _series_update_fields),
+    "series.added": Outgoing("series_added", _series_added),
+    "series.deleted": Outgoing("series_deleted", _deleted_id),
+    "torrents.queue.changed": Outgoing("agent_queue_update", _agent_tasks, latest=_whole),
+    "torrents.progress.changed": Outgoing("torrent_progress_update", _bare_tasks, latest=_whole),
+    "torrents.preview.ready": Outgoing("preview_naming_ready"),
+    "torrents.preview.failed": Outgoing("preview_naming_failed"),
+    "downloads.queue.changed": Outgoing("download_queue_update", _bare_tasks, latest=_whole),
+    "slicing.queue.changed": Outgoing("slicing_queue_update", _bare_tasks, latest=_whole),
+    "downloads.pack.queue.changed": Outgoing("pack_queue_update", _bare_tasks, latest=_whole),
+    "scan.status.changed": Outgoing("scanner_status_update"),
+    "series.source.added": Outgoing("series_sources_changed", lambda payload: {**payload, "what": "added"}),
+    "series.source.updated": Outgoing("series_sources_changed", lambda payload: {**payload, "what": "updated"}),
+    "series.source.removed": Outgoing("series_sources_changed", lambda payload: {**payload, "what": "removed"}),
+    "sources.table.progress": Outgoing("sources_table_progress", latest=lambda payload: payload.get("url")),
+    "sources.table.ready": Outgoing("sources_table_ready"),
+    "sources.table.failed": Outgoing("sources_table_failed"),
+    "composition.changed": Outgoing("composition_changed"),
+    "composition.failed": Outgoing("composition_failed"),
+    "scan.reference.changed": Outgoing("reference_changed"),
+    "scan.series.progress": Outgoing("series_scan_progress"),
+    "conform.queue.changed": Outgoing("conform_queue_update", latest=_whole),
+    "voices.dub.changed": Outgoing("voice_dub_update"),
+    "voices.dubs.snapshot": Outgoing("voice_dubs_snapshot"),
+    "voices.settings.changed": Outgoing("voice_settings_update"),
+    "conform.settings.changed": Outgoing("conform_settings_update"),
+    "renaming.finished": Outgoing("renaming_complete"),
+    "library.relocation.started": Outgoing("relocation_started"),
+    "library.relocation.finished": Outgoing("relocation_finished"),
 }
 
-# Events that are the whole state of their part of the screen, by the key of that part: of several queued at once only
-# the last one is sent, since each replaces the one before (a burst of the progress of a table is one packet). Every
-# other event goes, in order.
-SSE_LATEST: dict[str, Callable[[Any], Any]] = {
-    "sources.table.progress": lambda payload: payload.get("url"),
-    "torrents.queue.changed": lambda payload: None,
-    "torrents.progress.changed": lambda payload: None,
-    "downloads.queue.changed": lambda payload: None,
-    "slicing.queue.changed": lambda payload: None,
-    "downloads.pack.queue.changed": lambda payload: None,
-    "conform.queue.changed": lambda payload: None,
-}
+# The names of the events of the stream, as the interface types them (from the one table).
+SSE_EVENTS: tuple[str, ...] = tuple(dict.fromkeys(out.name for out in SSE_MAP.values()))
 
 
 def latest_only(batch: list) -> list:
-    """The envelopes of a batch in order, with each event of SSE_LATEST kept only as the last of its key."""
+    """The envelopes of a batch in order, with each picture of SSE_MAP kept only as the last of its key."""
     seen: set = set()
     kept = []
     for env in reversed(batch):
-        latest = SSE_LATEST.get(getattr(env, "topic", None)) if getattr(env, "kind", None) == "event" else None
-        if latest is not None:
-            key = (env.topic, latest(env.payload or {}))
+        out = SSE_MAP.get(getattr(env, "topic", None))
+        if out is not None and out.latest is not None:
+            key = (env.topic, out.latest(env.payload or {}))
             if key in seen:
                 continue
             seen.add(key)
@@ -324,6 +328,10 @@ class GatewayModule(BaseModule):
                     described = model.model_json_schema(ref_template="#/components/schemas/{model}")
                     schema["components"]["schemas"].update(described.pop("$defs", {}))
                     schema["components"]["schemas"][model.__name__] = described
+                # An event of a frame of a turn: its names are those of SSE_MAP, so the interface keeps no list of its own.
+                schema["components"]["schemas"]["StreamEvent"] = {
+                    "title": "StreamEvent", "type": "object", "required": ["event", "data"],
+                    "properties": {"event": {"type": "string", "enum": list(SSE_EVENTS)}, "data": {}}}
                 app.openapi_schema = schema
             return app.openapi_schema
 
@@ -442,7 +450,9 @@ class GatewayModule(BaseModule):
         state once. An empty list is a quiet interval, for the keepalive."""
         # Разрыв соединения обнаруживает Starlette: он закрывает генератор
         # (GeneratorExit), и finally снимает подписку.
-        sub = self.bus.subscribe("#")
+        # The stream is subscribed to the topics of its table and to nothing else: what is not for the interface does not
+        # reach it, so nothing is sifted here.
+        sub = self.bus.subscribe(*SSE_MAP)
         self._sse_subs[sub.sub_id] = sub
         self._sse_clients += 1
         # Счётчик подключений — страховка эфемерных состояний (Р-11):
@@ -466,13 +476,8 @@ class GatewayModule(BaseModule):
                         if events:
                             yield events
                         return
-                    if env.kind != "event":
-                        continue
-                    mapping = SSE_MAP.get(env.topic)
-                    if mapping is None:
-                        continue
-                    sse_name, transform = mapping
-                    events.append((sse_name, transform(env.payload) if transform else env.payload))
+                    out = SSE_MAP[env.topic]
+                    events.append((out.name, out.form(env.payload) if out.form else env.payload))
                 if events:
                     yield events
         finally:

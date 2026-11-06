@@ -24,6 +24,72 @@ def test_topic_matches(pattern, topic, expected):
 # --- pub/sub -----------------------------------------------------------------
 
 @pytest.mark.asyncio
+async def test_one_subscription_takes_several_exact_topics_in_the_order_they_were_published():
+    bus = Bus()
+    sub = bus.subscribe("a.one", "b.two")
+    for topic in ("a.one", "c.three", "b.two", "a.one", "a.one.more"):
+        bus.publish(Envelope(topic=topic, kind="event", payload=topic))
+    got = [sub.queue.get_nowait().payload for _ in range(sub.queue.qsize())]
+    assert got == ["a.one", "b.two", "a.one"]
+
+
+def test_a_subscription_names_its_topics():
+    with pytest.raises(ValueError):
+        Bus().subscribe()
+
+
+@pytest.mark.parametrize("pattern", ["a.*", "a.#", "#", "*.b"])
+def test_a_module_handles_exact_topics_only(pattern):
+    """A family of topics would bring a module envelopes it does not handle (and make it answer queries of any of them):
+    a module is subscribed to what it handles and to nothing else."""
+    class Wide(BaseModule):
+        name = "wide"
+
+        def register(self):
+            self.handle(pattern, lambda env: None)
+
+    with pytest.raises(ValueError, match="не точный топик"):
+        Wide(Bus())
+
+
+@pytest.mark.asyncio
+async def test_a_module_relays_the_refusal_of_another_with_its_kind():
+    """A "not found" that a module got from another goes on as a "not found": the caller tells a refusal from a failure
+    by the kind, however many modules it went through."""
+    bus = Bus()
+
+    class Owner(BaseModule):
+        name = "owner"
+
+        def register(self):
+            self.handle("owner.get", self.get)
+
+        async def get(self, env):
+            raise LookupError("нет такого")
+
+    class Middle(BaseModule):
+        name = "middle"
+
+        def register(self):
+            self.handle("middle.get", self.get)
+
+        async def get(self, env):
+            return await self.request("owner.get", {}, timeout=5)
+
+    caller = BaseModule(bus)
+    modules = [Owner(bus), Middle(bus), caller]
+    for module in modules:
+        await module.start()
+    try:
+        with pytest.raises(BusRequestError) as refused:
+            await caller.request("middle.get", {}, timeout=5)
+        assert str(refused.value) == "LookupError: нет такого"
+    finally:
+        for module in modules:
+            await module.stop()
+
+
+@pytest.mark.asyncio
 async def test_publish_delivers_to_matching_subscribers():
     bus = Bus()
     sub_exact = bus.subscribe("downloads.task.finished")

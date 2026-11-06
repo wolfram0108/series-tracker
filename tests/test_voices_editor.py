@@ -94,7 +94,7 @@ def test_the_view_gives_the_order_to_return_to_and_the_refused_fields():
 
 def test_the_settings_reach_every_open_screen_by_the_stream_and_the_screen_listens_for_it():
     root = Path(__file__).resolve().parent.parent
-    name, _ = SSE_MAP["voices.settings.changed"]
+    name = SSE_MAP["voices.settings.changed"].name
     assert name == "voice_settings_update"
     assert f"`{name}`" in (root / "contracts" / "sse_contract.md").read_text(encoding="utf-8")
     assert f'"{name}"' in (root / "web" / "src" / "composables" / "useRealtime.ts").read_text(encoding="utf-8")

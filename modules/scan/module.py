@@ -320,13 +320,21 @@ class ScanModule(BaseModule):
     # --- the admission of a change by the user (I-60) ------------------------------------------------------------
 
     async def on_edit_begin(self, env: Envelope) -> dict:
-        """A change of the series by the user begins: refused while a sync of it runs or opens; admitted under its
+        """A change of the series by the user begins: refused for a series the catalog does not have and while a sync of it
+        runs or opens; admitted under its
         number, it holds off the opening of a sync until scan.edit.end with that number, which its admission sends once
         every request of the change is answered (core/admission.py). The number is the caller's, known before the grant:
         a caller that stops waiting for the grant gives it back by that number, and an end that came first is kept, so
         the grant that follows it opens nothing."""
         series_id = int(env.payload["series_id"])
         token = env.payload.get("token") or uuid.uuid4().hex
+        # A series the catalog does not have is refused with the catalog's answer, for every change at once. It is
+        # asked first: what follows runs without a pause, so an end that comes meanwhile is not missed.
+        try:
+            await self.request("catalog.series.get", {"series_id": series_id})
+        except BusRequestError as exc:
+            if NO_HANDLER not in str(exc):
+                raise
         early = self._ended_early.get(series_id, set())
         if token in early:
             early.discard(token)
