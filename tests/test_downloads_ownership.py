@@ -1,6 +1,7 @@
 """Who owns a path in the library, and what a file does on its way to another name: series that share a folder never hold one
 file between them, what a task could not remove stays recorded until it is removed, and the files of a ring of names (a swap
 of two episode numbers) reach the names their numbers give, without losing a file or taking one that is not theirs."""
+import asyncio
 import itertools
 import os
 import sqlite3
@@ -110,9 +111,13 @@ async def test_a_series_deleted_while_its_work_file_cannot_be_removed_leaves_the
     _add_item(db_path, "mine", 1, series_id=2, plan="candidate")
     _task(db_path, "mine", "error", os.path.join(media_dir, "Серия 01.mp4"), work_path=work)
     stubborn.add(work)
+    purged = probe.bus.subscribe("series.purged")
 
     probe.publish_event("series.deleted", {"series_id": 2})
-    await probe.request("downloads.queue.get", {}, timeout=10)
+    # The deletion is over when the owner says so; a query of another topic is no signal of it (its order is its own).
+    while (await asyncio.wait_for(purged.queue.get(), 10)).payload.get("owner") != "downloads":
+        pass
+    probe.bus.unsubscribe(purged)
 
     assert [each["status"] for each in _tasks(db_path)] == ["error"] and os.path.isfile(work)  # the record of what is left
     stubborn.clear()

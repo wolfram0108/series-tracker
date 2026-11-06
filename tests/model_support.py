@@ -200,10 +200,12 @@ class Harness:
             return not [task for task in self.tasks() if task["status"] in LIVE and not self.waits_for_name(task, items)] \
                 and not self.downloader.concurrent
 
+        # The safeguards are the suite's own: past one the harness did not come to rest, which is a failure to tell, not a
+        # state to check the invariants on.
         while True:
-            await path_free(str(self.media), seconds=STUCK_S * 2)  # a replacement that did not answer in time has ended
-            await wait_until(calm, self.bus, *self.runner.modules, seconds=STUCK_S * 2)
-            await settle(self.bus, *self.runner.modules, seconds=STUCK_S * 2)
+            await path_free(str(self.media))  # a replacement that did not answer in time has ended
+            assert await wait_until(calm, self.bus, *self.runner.modules), "the harness did not come to rest: work is live"
+            await settle(self.bus, *self.runner.modules)
             if not storage.busy(str(self.media)):
                 return
 

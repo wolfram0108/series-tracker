@@ -142,7 +142,7 @@ async def test_a_save_plans_the_move_and_the_sync_makes_it(started):
             busy_seq.append(sub_busy.queue.get_nowait().payload["is_busy"])
         return busy_seq == [True, False]
 
-    await wait_until(busy_ended, bus, *runner.modules)
+    assert await wait_until(busy_ended, bus, *runner.modules)
     assert await apply(probe) == {"moved": False}  # nothing planned: the sync goes on in place
 
 
