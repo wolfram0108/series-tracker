@@ -108,9 +108,9 @@ async def test_the_composition_of_an_unknown_series_is_not_found(tmp_path):
 async def test_the_output_is_the_references_of_scan_as_they_are(tmp_path):
     references = [
         {"season": 1, "episode": 1, "part": None, "mark": "by_level", "source_id": 4, "row_key": "r1",
-         "player": "kodik", "voice_group": "Group", "height": 720, "reason": None},
+         "player": "kodik", "voice_group": "Group", "height": 720, "reason": None, "compilation": None},
         {"season": 1, "episode": 2, "part": None, "mark": "none", "source_id": None, "row_key": None,
-         "player": None, "voice_group": None, "height": None, "reason": reason("reference_none")}]
+         "player": None, "voice_group": None, "height": None, "reason": reason("reference_none"), "compilation": None}]
     async with serving(tmp_path, {"scan.output.get": references}) as (client, owners, _, spy):
         response = await client.get("/api/series/1/output")
     assert response.status_code == 200 and response.json() == references
@@ -135,14 +135,16 @@ async def test_a_lever_is_set_with_the_series_of_the_path_and_the_body_as_it_cam
             "season": 1, "episode": 2, "lever": "voice.take", "target": "group:Group", "value": False})
     assert response.status_code == 200 and response.json() == {"success": True}
     assert owners.asked("composition.settings.set") == [{
-        "series_id": 1, "season": 1, "episode": 2, "lever": "voice.take", "target": "group:Group", "value": False}]
+        "series_id": 1, "season": 1, "episode": 2, "compilation": None, "lever": "voice.take", "target": "group:Group",
+        "value": False}]
 
 
 async def test_a_lever_of_the_series_level_needs_no_season(tmp_path):
     async with serving(tmp_path, {"composition.settings.set": {"ok": True}}) as (client, owners, _, _):
         await client.put("/api/series/1/output/settings", json={"lever": "reference.order", "value": []})
     assert owners.asked("composition.settings.set") == [{
-        "series_id": 1, "season": None, "episode": None, "lever": "reference.order", "target": None, "value": []}]
+        "series_id": 1, "season": None, "episode": None, "compilation": None, "lever": "reference.order", "target": None,
+        "value": []}]
 
 
 @pytest.mark.parametrize("code", ["unknown_lever", "bad_target", "bad_value"])
@@ -175,9 +177,9 @@ async def test_a_level_is_reset_with_the_series_of_the_path(tmp_path):
             "season": 2, "episode": 3, "lever": "voice.order", "target": "group:Group"})
     assert response.status_code == 200 and response.json() == {"success": True}
     assert owners.asked("composition.settings.reset") == [
-        {"series_id": 1, "season": 2, "episode": None, "lever": None, "target": None},
-        {"series_id": 1, "season": None, "episode": None, "lever": None, "target": None},
-        {"series_id": 1, "season": 2, "episode": 3, "lever": "voice.order", "target": "group:Group"}]
+        {"series_id": 1, "season": 2, "episode": None, "compilation": None, "lever": None, "target": None},
+        {"series_id": 1, "season": None, "episode": None, "compilation": None, "lever": None, "target": None},
+        {"series_id": 1, "season": 2, "episode": 3, "compilation": None, "lever": "voice.order", "target": "group:Group"}]
 
 
 async def test_a_reset_the_registry_refuses_is_a_400_with_the_code(tmp_path):
@@ -238,12 +240,13 @@ async def test_a_request_for_the_sources_only_reaches_composition_as_it_is(tmp_p
 
 
 async def test_the_queues_of_a_level_are_the_answer_of_composition(tmp_path):
-    queues = {"series_id": 1, "season": 4, "episode": 11, "reference": {"rows": [], "order_level": "default"}, "groups": []}
+    queues = {"series_id": 1, "season": 4, "episode": 11, "compilation": None, "reference": {"rows": [], "order_level": "default"},
+              "groups": []}
     async with serving(tmp_path, {"composition.queues.get": queues}) as (client, owners, _, spy):
         response = await client.get("/api/series/1/output/queues", params={"season": 4, "episode": 11})
         alone = await client.get("/api/series/1/output/queues", params={"episode": 11})
     assert response.status_code == 200 and response.json() == queues
-    assert owners.asked("composition.queues.get") == [{"series_id": 1, "season": 4, "episode": 11}]
+    assert owners.asked("composition.queues.get") == [{"series_id": 1, "season": 4, "episode": 11, "compilation": None}]
     assert alone.status_code == 422  # an episode is told within its season
 
 

@@ -37,6 +37,7 @@ queue with the packing of its series; a failed slot stays until the next packing
 """
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from dataclasses import dataclass, field, replace
@@ -208,12 +209,25 @@ class Packing:
     async def _pack_slot(self, series: dict, base: str, winner: dict, losers: list[dict], reference: dict,
                          order: list[str], tracks: list[dict]) -> str:
         identity = container.identity(winner["source_id"], winner["row_key"])
-        own_label = reference.get("voice_group") or ""
         video = os.path.join(base, winner["final_filename"])
         held = await self._packer.contents(video)
         if held is None or not held.has_video:
             self._log.warning("серия %s: видео %s не читается — контейнер не собран", series["id"], winner["final_filename"])
             return "failed"
+        # Stage 12: the video the row holds for this build (a cut out of a compilation, or the single video again) takes
+        # the place of the video; the tracks stay, they are on the same timeline (the identity is the same).
+        pending, cut = None, json.loads(winner["cut"]) if winner.get("cut") else None
+        if winner.get("pending_video"):
+            path = os.path.join(base, winner["pending_video"])
+            given = await self._packer.contents(path) if await storage.call(os.path.isfile, path) else None
+            if given is not None and given.has_video:
+                pending, cut = (path, given), json.loads(winner["pending_cut"]) if winner.get("pending_cut") else None
+            else:
+                self._log.warning("серия %s: видео для сборки %s не читается — остаётся прежнее видео", series["id"],
+                                  winner["pending_video"])
+                await self._repo.clear_pending(winner["unique_id"], winner["pending_video"])
+        source, source_held = pending if pending is not None else (video, held)
+        own_label = (cut or {}).get("voice_group") or reference.get("voice_group") or ""
         loser_files = [row for row in losers if row["final_filename"]]
         keyed, legacy = await self._held_tracks(base, video, held, loser_files, identity)
         claimed, legacy, ambiguous = _claim_legacy(tracks, legacy)
@@ -245,22 +259,23 @@ class Packing:
                 dubs[key] = replace(keyed[key], label=label)
             elif key in claimed:
                 dubs[key] = replace(claimed.pop(key), label=label, key=key)
-        desired = self._ordered(AudioIn(own_label, video, held.own_track, identity, own=True), dubs, order,
+        desired = self._ordered(AudioIn(own_label, source, source_held.own_track, identity, own=True), dubs, order,
                                 list(legacy.values()))
         self._built[(winner["season"], winner["episode_start"], winner["part"])] = [each.label for each in desired]
         signature = container.signature_of(desired)
         inside = [row for row in synchronous if row["key"] in dubs]
         target_name = os.path.splitext(winner["final_filename"])[0] + CONTAINER_EXT
         target = os.path.join(base, target_name)
-        if (winner["final_filename"] == target_name and held.video == identity and held.signature == signature
-                and not placed and not loser_files and all(each.path == video for each in desired)):
+        if (pending is None and winner["final_filename"] == target_name and held.video == identity
+                and held.signature == signature and not placed and not loser_files
+                and all(each.path == video for each in desired)):
             # The record of voices follows the container, which is the truth of what it holds.
             await self._tell_packed(series, target, identity, [
                 row["dub_id"] for row in inside if row["aligned_to"] != identity or row["ref_path"] != target])
             return "unchanged"
         publication = uuid.uuid4().hex
         leftovers = {video, *[os.path.join(base, row["final_filename"]) for row in loser_files],
-                     *[row["path"] for row in placed]} - {target}
+                     *[row["path"] for row in placed], *([source] if pending is not None else [])} - {target}
         # A leftover is the file that is there now, not whatever comes to lie under its name: its identity is written down.
         files = {path: await storage.call(file_identity, path, owns=path) for path in sorted(leftovers)}
         record = {"series_id": series["id"], "unique_id": winner["unique_id"], "publication": publication,
@@ -269,7 +284,8 @@ class Packing:
                   "identity": identity, "signature": [list(each) for each in signature],
                   "losers": [row["unique_id"] for row in losers],
                   "leftovers": [{"name": _inside(base, path), "file": files[path]} for path in sorted(leftovers)],
-                  "dub_ids": [row["dub_id"] for row in inside]}
+                  "dub_ids": [row["dub_id"] for row in inside],
+                  "video": {"pending": winner["pending_video"], "cut": cut} if pending is not None else None}
         staging = os.path.join(base, record["staging"])
         async with self._library.guard(target):
             own = {video, *[os.path.join(base, row["final_filename"]) for row in loser_files]}
@@ -279,7 +295,7 @@ class Packing:
                                   series["id"], target_name, holder or "файл, которым не владеет ни одна строка")
                 return "failed"
             record["id"] = await self._repo.publication_begin(record)
-            problem = await self._packer.build(staging, video, identity, desired, publication=publication)
+            problem = await self._packer.build(staging, source, identity, desired, publication=publication)
             if problem is not None:
                 await storage.call(_remove_quietly, staging, owns=staging)
                 await self._repo.publication_end(record["id"])
@@ -341,7 +357,7 @@ class Packing:
         """The publication after its replace, from its record: every step may be done again."""
         base = series["save_path"]
         target = os.path.join(base, record["name"])
-        await self._repo.take_over_name(record["unique_id"], record["name"], record["losers"])
+        await self._repo.take_over_name(record["unique_id"], record["name"], record["losers"], record.get("video"))
         await self._tell_packed(series, target, record["identity"], record["dub_ids"])
         for leftover in record["leftovers"]:
             # A record written before the identities were (a name alone) does not prove the file: nothing is removed by it.

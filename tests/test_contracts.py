@@ -1,5 +1,6 @@
 """The contracts between modules, checked from both sides: the producer's model, the consumer's reading,
 the interface's types, and the one place each policy lives in."""
+import importlib
 import inspect
 import re
 from pathlib import Path
@@ -89,6 +90,16 @@ def test_the_repository_changes_a_step_only_by_a_declared_transition_and_names_n
     assert named <= declared | groups, "the repository names a transition that the lifecycle does not declare"
     assert declared <= named, "a transition is declared that no write uses"
     assert not re.search(r"status\s*=\s*'", source) and not re.search(r"status\s+IN\s*\(\s*'", source)
+
+
+def test_the_repository_changes_the_step_of_a_cut_only_by_a_declared_transition():
+    """Stage 12: the same law for the cuts out of compilations (modules/voices/cut_lifecycle.py)."""
+    from modules.voices import cut_lifecycle
+    source = inspect.getsource(repository) + inspect.getsource(importlib.import_module("modules.voices.cuts"))
+    named = set(re.findall(r"\b(?:cut_steps|T)\.([A-Z_]+)\b", source))
+    declared = {name for name in dir(cut_lifecycle) if isinstance(getattr(cut_lifecycle, name), cut_lifecycle.CutTransition)}
+    groups = {name for name in dir(cut_lifecycle) if name.isupper() and isinstance(getattr(cut_lifecycle, name), frozenset)}
+    assert named <= declared | groups and declared <= named
 
 
 def test_a_reply_to_a_submission_is_one_of_four_outcomes_and_anything_else_is_not_a_reply():

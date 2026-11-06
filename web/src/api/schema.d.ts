@@ -538,8 +538,9 @@ export interface paths {
         };
         /**
          * Output Queues
-         * @description The queue of the reference and of the voice-over of each group of a level (the series, a season, or an episode
-         *     of a season), in the order the core tries their variants, with what the levers of the level say of each.
+         * @description The queue of the reference and of the voice-over of each group of a level (the series, a season, a compilation
+         *     of a season, or an episode of a season), in the order the core tries their variants, with what the levers of the
+         *     level say of each.
          */
         get: operations["output_queues_api_series__series_id__output_queues_get"];
         put?: never;
@@ -585,6 +586,46 @@ export interface paths {
          *     episode takes the new tracks at the next sync.
          */
         post: operations["redo_dubs_api_series__series_id__output_dubs_redo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/series/{series_id}/output/cuts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Output Cuts
+         * @description The cuts of the episodes of the series out of their compilations (stage 12) and where each is.
+         */
+        get: operations["output_cuts_api_series__series_id__output_cuts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/series/{series_id}/output/cuts/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Cuts
+         * @description The retry of the window: the episodes of the scope whose cut failed are cut again, now.
+         */
+        post: operations["retry_cuts_api_series__series_id__output_cuts_retry_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1701,6 +1742,14 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * Absence
+         * @description Why an episode a compilation covers does not stand in it: it stands in another one (`elsewhere`), the compilation
+         *     is no better than the episode's own single video (`not_better`), the episode has no single video to cut it by
+         *     (`no_single`), the user took it out of every compilation (`own`), or the whole compilation is switched off (`off`).
+         * @enum {string}
+         */
+        Absence: "elsewhere" | "not_better" | "no_single" | "own" | "off";
+        /**
          * ChangedSource
          * @description `applied` holds the fields that differed from the stored ones; nothing applied is no change and no event.
          */
@@ -1713,6 +1762,75 @@ export interface components {
             };
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * CompilationEpisode
+         * @description An episode a compilation covers: whether it stands in it, else why not (and where it stands instead).
+         */
+        CompilationEpisode: {
+            /** Episode */
+            episode: number;
+            /**
+             * Member
+             * @default false
+             */
+            member: boolean;
+            absence?: components["schemas"]["Absence"] | null;
+            /** Elsewhere */
+            elsewhere?: string | null;
+            /**
+             * Own
+             * @default false
+             */
+            own: boolean;
+        };
+        /**
+         * CompilationRef
+         * @description The compilation an episode stands in, whole, so that the reference and the plan need no second request: its key,
+         *     the row of the layout whose video it is (the best of the rows with that key), and what the file name takes from it.
+         */
+        CompilationRef: {
+            /** Key */
+            key: string;
+            /** Source Id */
+            source_id: number;
+            /** Row Key */
+            row_key: string;
+            /** Player */
+            player: string;
+            /**
+             * Voice Group
+             * @default
+             */
+            voice_group: string;
+            /**
+             * Height
+             * @default null
+             */
+            height: number | null;
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+        };
+        /**
+         * CompilationView
+         * @description A compilation of a season as the window of the output draws it: the block of its episodes. `index` is its place
+         *     among the compilations of the season (the colour and the letter of the window), `take` whether it is switched on.
+         */
+        CompilationView: {
+            /** Season */
+            season: number;
+            /** Index */
+            index: number;
+            ref: components["schemas"]["CompilationRef"];
+            /**
+             * Take
+             * @default true
+             */
+            take: boolean;
+            /** Episodes */
+            episodes?: components["schemas"]["CompilationEpisode"][];
         };
         /**
          * CompositionPreviewReply
@@ -1782,6 +1900,8 @@ export interface components {
             };
             /** Voice Orders */
             voice_orders?: components["schemas"]["SeasonVoiceOrder"][];
+            /** Compilations */
+            compilations?: components["schemas"]["CompilationView"][];
         };
         /**
          * CompositionRow
@@ -1924,6 +2044,59 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * CutItem
+         * @description A cut of an episode out of its compilation (stage 12), as voices tells it.
+         */
+        CutItem: {
+            /** Series Id */
+            series_id: number;
+            /** Season */
+            season: number;
+            /** Episode */
+            episode: number;
+            /**
+             * Part
+             * @default 0
+             */
+            part: number;
+            /** Cut Key */
+            cut_key: string;
+            /** Status */
+            status: string;
+            /** From Ref S */
+            from_ref_s?: number | null;
+            /** From Dub S */
+            from_dub_s?: number | null;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            } | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * CutsActionBody
+         * @description The cuts out of compilations an action of the user is about, without the series: a season, an episode of it.
+         */
+        CutsActionBody: {
+            /** Season */
+            season: number;
+            /** Episode */
+            episode?: number | null;
+            /** Part */
+            part?: number | null;
+        };
+        /** CutsReply */
+        CutsReply: {
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["CutItem"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * DubHint
          * @description Which sentence explains a state when there is no reason to show (several steps share a state).
          * @enum {string}
@@ -2016,7 +2189,10 @@ export interface components {
             value?: unknown;
             level: components["schemas"]["Level"];
         };
-        /** EpisodeSettings */
+        /**
+         * EpisodeSettings
+         * @description The levers of an episode, and the compilation it stands in (stage 12): the level between its season and itself.
+         */
         EpisodeSettings: {
             /** Season */
             season: number;
@@ -2024,6 +2200,7 @@ export interface components {
             episode: number;
             /** Levers */
             levers?: components["schemas"]["EffectiveLever"][];
+            compilation?: components["schemas"]["CompilationRef"] | null;
         };
         /**
          * ErrorOnly
@@ -2101,7 +2278,7 @@ export interface components {
          * Level
          * @enum {string}
          */
-        Level: "default" | "series" | "season" | "episode";
+        Level: "default" | "series" | "season" | "compilation" | "episode";
         /**
          * LevelSettings
          * @description The levers as they stand on the series (season None) or on one season: what the header of the level shows
@@ -2110,6 +2287,8 @@ export interface components {
         LevelSettings: {
             /** Season */
             season?: number | null;
+            /** Compilation */
+            compilation?: string | null;
             /** Levers */
             levers?: components["schemas"]["EffectiveLever"][];
         };
@@ -2174,6 +2353,8 @@ export interface components {
             season?: number | null;
             /** Episode */
             episode?: number | null;
+            /** Compilation */
+            compilation?: string | null;
             /** Lever */
             lever?: string | null;
             /** Target */
@@ -2189,6 +2370,8 @@ export interface components {
             season?: number | null;
             /** Episode */
             episode?: number | null;
+            /** Compilation */
+            compilation?: string | null;
             /** Lever */
             lever: string;
             /** Target */
@@ -2284,7 +2467,7 @@ export interface components {
          *     levers of a queue on its tab.
          * @enum {string}
          */
-        Queue: "reference" | "voice";
+        Queue: "reference" | "voice" | "compilation";
         /**
          * QueueRow
          * @description A variant of a queue in its place: a voice-over group at a player of a source, the best height it has on the level,
@@ -2344,6 +2527,8 @@ export interface components {
             season?: number | null;
             /** Episode */
             episode?: number | null;
+            /** Compilation */
+            compilation?: string | null;
             reference?: components["schemas"]["QueueView"];
             /** Groups */
             groups?: components["schemas"]["GroupQueue"][];
@@ -2363,6 +2548,9 @@ export interface components {
         /**
          * Reference
          * @description `reason` is a code of core/reasons: for `other_player` it names the player taken and the one missing.
+         *
+         *     `compilation` is the compilation the episode stands in (stage 12): its video is cut out of it on the timeline of the
+         *     single video this reference names (REF 2).
          */
         Reference: {
             /** Season */
@@ -2384,6 +2572,7 @@ export interface components {
             height?: number | null;
             /** Reason */
             reason?: string | null;
+            compilation?: components["schemas"]["CompilationRef"] | null;
         };
         /**
          * ReferenceMark
@@ -2809,7 +2998,7 @@ export interface components {
          *     empty for the order of the rule). A window draws a lever by its target and its shape.
          * @enum {string}
          */
-        ValueShape: "flag" | "variant_order";
+        ValueShape: "flag" | "variant_order" | "compilation";
         /**
          * VoiceDubs
          * @description The voice-overs of a series; the shape of a record is the contract model core.contracts.DubItem.
@@ -3105,6 +3294,8 @@ export interface components {
              * @default null
              */
             reason: string | null;
+            /** @default null */
+            compilation: components["schemas"]["CompilationRef"] | null;
             /** Series Id */
             series_id: number;
         };
@@ -3161,7 +3352,7 @@ export interface components {
         /** StreamEvent */
         StreamEvent: {
             /** @enum {string} */
-            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "pack_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "reference_changed" | "series_scan_progress" | "conform_queue_update" | "voice_dub_update" | "voice_dubs_snapshot" | "voice_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
+            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "pack_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "reference_changed" | "series_scan_progress" | "conform_queue_update" | "voice_dub_update" | "voice_dubs_snapshot" | "voice_cut_update" | "voice_cuts_snapshot" | "voice_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
             data: unknown;
         };
     };
@@ -4677,6 +4868,7 @@ export interface operations {
             query?: {
                 season?: number | null;
                 episode?: number | null;
+                compilation?: string | null;
             };
             header?: never;
             path: {
@@ -4807,6 +4999,126 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["DubsActionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DubsRestarted"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    output_cuts_api_series__series_id__output_cuts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CutsReply"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    retry_cuts_api_series__series_id__output_cuts_retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CutsActionBody"];
             };
         };
         responses: {

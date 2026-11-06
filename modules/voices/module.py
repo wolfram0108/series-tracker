@@ -201,6 +201,8 @@ from core import NO_HANDLER, BaseModule, BusRequestError
 from pydantic import ValidationError
 
 from core import container
+from .cut_lifecycle import CutStep
+from .cuts import LIVE as CUT_LIVE, SINGLE_KEY, Cuts
 from core.contracts import (RUN_CHANGED, WORK_WITHDRAWN, RunChanged, RunSnapshot, Slot, WorkWithdrawn, slot_of, AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
                             DubRecord, DubsScope, DubsSnapshot, DubStatus as S, GroupsResolveReply, GroupsResolveRequest,
                             JobStatus, Reference, ReferenceChanged, SnapshotItem, SubmitOutcome, SubmitReply,
@@ -356,6 +358,7 @@ class VoicesModule(BaseModule):
         self._recovery = Recovery(self.log, pause=_pause, report_after=lambda: SUBMIT_RETRIES)
         self._cleanup = Cleanup(self.repo, self._output, self.log, io=self._io, request=self.request,
                                 retry=self._await_cleanup, sending=self._sending, poke=self._recovery.poke)
+        self._cuts = Cuts(self)
 
     def register(self) -> None:
         self.handle("voices.groups.resolve", self.on_groups_resolve)
@@ -371,6 +374,8 @@ class VoicesModule(BaseModule):
         self.handle("voices.work.get", self.on_work_get, concurrent=True)
         self.handle("voices.tracks.get", self.on_tracks_get, concurrent=True)
         self.handle("voices.tracks.packed", self.on_tracks_packed)
+        self.handle("voices.cuts.get", self.on_cuts_get, concurrent=True)
+        self.handle("voices.cuts.retry", self.on_cuts_retry)
         self.handle(RUN_CHANGED, self.on_run_changed)
         self.handle("system.started", self.on_system_started)
         self.handle("composition.changed", self.on_composition_changed)
@@ -429,6 +434,7 @@ class VoicesModule(BaseModule):
             self._await_job(job_id, now=True)
         for entry in await self.repo.cleanup_list():
             self._await_cleanup(entry["path"], now=True)
+        await self._cuts.resume()
 
     def _await_submission(self, key: str, *, now: bool = False) -> None:
         self._recovery.want(f"submission:{key}", lambda: self._recover_one(key), now=now)
@@ -672,6 +678,20 @@ class VoicesModule(BaseModule):
             self._replan_deferred(series_id)
         await self._admit()
 
+    def _replan_after_cut(self, series_id: int) -> None:
+        """A cut ended in a way that changes the voice the video carries (it failed): within a run the sync brings the
+        voice-overs in line at once (what the plan takes away goes, what it adds is admitted); outside one, a recount."""
+        if series_id not in self._in_run:
+            self._want_plan(series_id)
+            return
+
+        async def settled() -> None:
+            async with self._locks.setdefault(series_id, asyncio.Lock()):
+                await self._plan_series(series_id, offer=True, settle=True, values=self._run_values.get(series_id))
+            self._kick(series_id)
+
+        self._spawn(settled(), f"voices:cut-replan:{series_id}")
+
     def _want_plan(self, series_id: int) -> None:
         """Bring the rows of the series in line with the plan once more; asks that come while one is waiting merge."""
         if series_id in self._planning or series_id in self._deleted:
@@ -725,7 +745,9 @@ class VoicesModule(BaseModule):
         # replan after a change of the reference, a recovery); a recount after the run by the current ones.
         settings = await self._settings(values if values is not None else self._run_values.get(series_id))
         plan = planning.plan(layout.rows, references, layout.settings, settings.priority, settings.players,
-                             {source.source_id: source.place for source in layout.sources})
+                             {source.source_id: source.place for source in layout.sources},
+                             own=await self._cuts.own_voices(series_id, references))
+        await self._cuts.plan(series_id, references, layout.rows, admit=offer, settle=settle)
         self.log.info("сериал %d: озвучки — раскладка %d, серий с референсом %d, озвучек к плану %d", series_id,
                       layout.rev, len(plan.with_reference), len(plan.dubs))
         before = await self.repo.for_series(series_id)
@@ -857,12 +879,17 @@ class VoicesModule(BaseModule):
         until an episode settles and frees its place."""
         async with self._admit_lock:
             waiting = await self.repo.pending()
-            if not waiting:
+            cuts = [each for each in await self.repo.cuts_of() if each["status"] == CutStep.PLANNED and each["admitted"]]
+            if not waiting and not cuts:
                 return
-            cap = await self._temp_cap()
             root = await self._downloads_root()
             if not root:
                 return
+            if cuts:
+                await self._cuts.start(root)
+            if not waiting:
+                return
+            cap = await self._temp_cap()
             active = await self.repo.active_episodes() if cap else set()
             for row in sorted(waiting, key=lambda r: (r["series_id"], r["season"], r["episode"], r["part"], r["id"])):
                 episode = (row["series_id"], row["season"], row["episode"], row["part"])
@@ -945,6 +972,9 @@ class VoicesModule(BaseModule):
         if key.startswith(FILE_KEY):
             await self._on_file_finished(int(key[len(FILE_KEY):]), payload)
             return
+        if key.startswith(SINGLE_KEY):
+            await self._cuts.single_fetched(int(key[len(SINGLE_KEY):]), payload)
+            return
         if not key.startswith(DUB_KEY):
             return
         self._fetching.discard(int(key[4:]))
@@ -983,6 +1013,7 @@ class VoicesModule(BaseModule):
                 await self._cleanup.discard(os.path.dirname(payload["path"]), kind=TREE)
             return
         file = await self.repo.file(file_id)
+        await self._cuts.file_finished(file_id)
         if ok:
             self.log.info("сериал %d: файл склейки %d скачан, озвучек, ждавших его: %d", file["series_id"], file_id,
                           len(dependents))
@@ -1070,7 +1101,23 @@ class VoicesModule(BaseModule):
         a recount planned outside a sync is not admitted and is no work yet."""
         busy = {slot_of(row["season"], row["episode"], row["part"]) for row in await self.repo.for_series(series_id)
                 if row["admitted"] and row["status"] not in FINAL}
+        # A cut out of a compilation is work of its episode too: the container waits for its video (stage 12).
+        busy |= {slot_of(cut["season"], cut["episode"], cut["part"]) for cut in await self.repo.cuts_of(series_id)
+                 if cut["admitted"] and cut["status"] in CUT_LIVE}
         return bool(busy), busy
+
+    async def on_cuts_get(self, env: Envelope) -> dict:
+        """The cuts of a series out of its compilations, as the window shows them (stage 12)."""
+        return {"items": [self._cuts.record(each) for each in await self.repo.cuts_of(int(env.payload["series_id"]))]}
+
+    async def on_cuts_retry(self, env: Envelope) -> dict:
+        """The user's word to cut again the episodes of the scope whose cut failed; they are admitted now."""
+        payload = env.payload
+        restarted = await self._cuts.retry(int(payload["series_id"]), int(payload["season"]), payload.get("episode"),
+                                           payload.get("part"))
+        if restarted:
+            await self._admit()
+        return {"restarted": restarted}
 
     async def on_work_get(self, env: Envelope) -> dict:
         return (await self._work.tell(int(env.payload["series_id"]))).model_dump()
@@ -1126,6 +1173,7 @@ class VoicesModule(BaseModule):
                               **self._record(row).model_dump(include=set(DubItem.model_fields)))
                  for row in await self.repo.all_rows()]
         self.publish_event("voices.dubs.snapshot", DubsSnapshot(epoch=epoch, rev=rev, items=items).model_dump(mode="json"))
+        self.publish_event("voices.cuts.snapshot", {"epoch": epoch, "rev": rev, "items": await self._cuts.snapshot()})
 
     async def on_conform_picture(self, env: Envelope) -> None:
         """A job of the service went from waiting to running (or vanished): its voice-overs follow."""
@@ -1182,7 +1230,8 @@ class VoicesModule(BaseModule):
 
     async def _advance(self, series_id: int) -> bool:
         rows = await self.repo.for_series(series_id)
-        if not rows:
+        cuts = await self.repo.cuts_of(series_id)
+        if not rows and not cuts:
             return False
         series = await self.request("catalog.series.get", {"series_id": series_id})
         in_plan, references = await self._reference_state(series)
@@ -1191,7 +1240,9 @@ class VoicesModule(BaseModule):
             return False
         episodes = sorted({(row["season"], row["episode"], row["part"]) for row in rows})
         restart = False
-        owed = False
+        owed = await self._cuts.advance(series, references, cuts)
+        # The voice-overs of an episode being cut out of its compilation are aligned to the video of the cut (stage 12).
+        waiting_cut = self._cuts.blocks(await self.repo.cuts_of(series_id))
         for season, episode, part in episodes:
             group = await self.repo.for_episode(series_id, season, episode, part)
             for row in group:
@@ -1212,7 +1263,7 @@ class VoicesModule(BaseModule):
                     await self._place(row, reference)
             group = await self.repo.for_episode(series_id, season, episode, part)
             ready = [row for row in group if row["status"] == S.READY]
-            if ready and not any(row["status"] in WORKING for row in group):
+            if ready and not any(row["status"] in WORKING for row in group) and (season, episode, part) not in waiting_cut:
                 owed = await self._submit(series, season, episode, part, reference, uid, ready, identity, rev) or owed
             await self._tidy(series_id, season, episode, part, root)
         await self._admit()
@@ -1239,6 +1290,11 @@ class VoicesModule(BaseModule):
             if not item.get("final_filename"):
                 continue
             path = os.path.join(series["save_path"], item["final_filename"])
+            if item.get("pending_video"):
+                # The video the next container takes (a cut out of a compilation): the voice-overs are aligned to it.
+                pending = os.path.join(series["save_path"], item["pending_video"])
+                if await self._io(os.path.isfile, pending):
+                    path = pending
             if not await self._io(os.path.isfile, path):
                 continue
             if slot not in found or not item.get("superseded_by"):
@@ -1352,6 +1408,7 @@ class VoicesModule(BaseModule):
         if self.repo is None:
             return
         await self._release_outputs(await self.repo.by_job(env.payload["job_id"]))
+        await self._cuts.job_removed(env.payload["job_id"])
 
     async def _release_outputs(self, rows: list[dict]) -> None:
         """Remove the folders the jobs of these rows wrote in, once nothing depends on them: a voice-over that still
@@ -1548,7 +1605,7 @@ class VoicesModule(BaseModule):
     async def on_job_finished(self, env: Envelope) -> None:
         job = AlignmentJob.model_validate(env.payload)
         async with self._claim_lock:
-            if not await self._apply_job(job):
+            if not await self._apply_job(job) and not await self._cuts.apply(job):
                 # The service can end a job before its number is written to the voice-overs: keep the
                 # ending until they claim it.
                 self._unclaimed[job.job_id] = job

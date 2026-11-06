@@ -236,6 +236,7 @@ class OutputSettingsSet(RequestModel):
     are those of core.contracts.SettingsSet (a test keeps them equal)."""
     season: int | None = None
     episode: int | None = None
+    compilation: str | None = None
     lever: str
     target: str | None = None
     value: Any = None
@@ -245,6 +246,7 @@ class OutputSettingsReset(RequestModel):
     """The body of the command `composition.settings.reset` without the series."""
     season: int | None = None
     episode: int | None = None
+    compilation: str | None = None
     lever: str | None = None
     target: str | None = None
 
@@ -261,6 +263,30 @@ class DubsActionBody(RequestModel):
     episode: int | None = None
     part: int | None = None
     voice_label: str | None = None
+
+
+class CutsActionBody(RequestModel):
+    """The cuts out of compilations an action of the user is about, without the series: a season, an episode of it."""
+    season: int
+    episode: int | None = None
+    part: int | None = None
+
+
+class CutItem(ApiModel):
+    """A cut of an episode out of its compilation (stage 12), as voices tells it."""
+    series_id: int
+    season: int
+    episode: int
+    part: int = 0
+    cut_key: str
+    status: str
+    from_ref_s: float | None = None
+    from_dub_s: float | None = None
+    detail: dict | None = None
+
+
+class CutsReply(ApiModel):
+    items: list[CutItem] = []
 
 
 class DubsRestarted(ApiModel):

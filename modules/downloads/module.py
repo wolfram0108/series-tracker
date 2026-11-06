@@ -53,6 +53,11 @@ Queries / commands:
       of an episode again: a task that replaces the file of its ready row goes to the queue now (`replace_file`); the row keeps
       its file and stays ready until the new one takes its name. Refused with ValueError(reason): `refetch_no_file` (the episode
       has no downloaded reference), `refetch_publication_owed` (a publication of the series is not finished; a sync finishes it).
+  downloads.video.offer {series_id, unique_id, path, cut} -> {accepted, reason?} - stage 12: the video of a slot cut out of
+      its compilation (`cut`: its key, height, source), or the single video again (`cut` null), offered by voices. The row
+      holds it (`media_items.pending_video`, a hidden file of the folder of the series) for the next build of its container,
+      which puts it in as the video and keeps the tracks; refused (`offer_not_wanted`) when the plan does not want that video
+      in the slot (`want_cut`). `downloads.episodes.get` tells `want_cut`, `cut`, `pending_video`, `pending_cut` of each row.
   downloads.publications.finish {series_id} -> {owed} - the first step of a sync, before the move of the folder: the
       publications of containers a stop or a failure cut short are finished (or closed) in the folder they began in.
   downloads.items.rename {series_id, names: {key: name}} -> {renamed} - the names the plan gives the ready files of the series now
@@ -91,7 +96,9 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import json
 import os
+import shutil
 import time
 from dataclasses import asdict, dataclass
 
@@ -108,6 +115,9 @@ from .library import Library
 from .publication import PUBLISHED, REFUSED, WAITING, Publication, PublicationUnfinished
 from .packing import FfmpegPacker, Packed, Packer, Packing
 from .repository import DownloadsRepository
+
+# A copy of a whole episode in 2160p over the network share: a safeguard, not the time it takes.
+OFFER_COPY_TIMEOUT_S = 1800.0
 
 PROGRESS_DB_THROTTLE = 2.0     # seconds between writes of progress to the database: the window needs a picture, not every tick
 PROGRESS_EVENT_THROTTLE = 1.0  # seconds between queue events on progress
@@ -216,6 +226,7 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.publications.finish", self.on_publications_finish)
         self.handle("downloads.failures.forget", self.on_failures_forget)
         self.handle("downloads.reference.refetch", self.on_reference_refetch)
+        self.handle("downloads.video.offer", self.on_video_offer)
         self.handle("downloads.item.set_filename", self.on_set_filename)
         self.handle("downloads.item.set_status", self.on_set_status)
         self.handle("series.deleted", self.on_series_deleted)
@@ -624,6 +635,38 @@ class DownloadsModule(BaseModule):
             await self._broadcast_queue()
             await self._pump()
         return {"queued": queued}
+
+    async def on_video_offer(self, env: Envelope) -> dict:
+        """Stage 12: voices offers the video of a slot cut out of its compilation (`cut`), or the single video downloaded
+        again (`cut` null). The row of the slot takes it as the video of its next container when the plan still wants that
+        video there: the name is written down first (the row owns it), then the file is copied in under a temporary name and
+        put under it, and the offered file goes. An offer of the video the row already holds is taken again (its answer was
+        lost). The answer: {accepted, reason?}; a file not taken stays the offerer's."""
+        payload = env.payload
+        series = await self.request("catalog.series.get", {"series_id": int(payload["series_id"])})
+        cut = payload.get("cut") or None
+        key = cut["key"] if cut else None
+        source = payload["path"]
+        async with self._turn(series, in_run=True):
+            item = await self.repo.item(payload["unique_id"])
+            if (item is None or item["series_id"] != series["id"] or item["plan_status"] != "in_plan_single"
+                    or item["status"] != "completed" or not item["final_filename"] or (item.get("want_cut") or None) != key):
+                return {"accepted": False, "reason": reason("offer_not_wanted")}
+            relative = os.path.join(os.path.dirname(item["final_filename"]), Library.pending_name(item["unique_id"]))
+            target = os.path.join(series["save_path"], relative)
+            held = json.loads(item["pending_cut"]) if item.get("pending_cut") else None
+            if item.get("pending_video") == relative and (held or {}).get("key") == key \
+                    and not await storage.call(os.path.exists, source):
+                return {"accepted": True}
+            async with self.library.guard(target):
+                await self.repo.set_pending(item["unique_id"], relative, json.dumps(cut, ensure_ascii=False) if cut else None)
+                part = target + ".part"
+                await storage.call(shutil.copyfile, source, part, timeout=OFFER_COPY_TIMEOUT_S, owns=(part,))
+                await storage.call(os.replace, part, target, owns=(part, target))
+            await storage.discard(source)
+        self.log.info("серия %d, s%02de%02d: видео %s принято к сборке контейнера", series["id"], item["season"],
+                      item["episode_start"], "из компиляции" if cut else "отдельной серии")
+        return {"accepted": True}
 
     async def on_publications_finish(self, env: Envelope) -> dict:
         """The first step of a sync: the publications of containers a stop or a failure cut short are finished (or closed)

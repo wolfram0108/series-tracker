@@ -653,3 +653,55 @@ async def test_a_deleted_series_leaves_the_queue_of_the_packing_its_failed_slots
     await probe.bus.settled()
 
     assert pictures(sub)[-1] == []
+
+
+# --- stage 12: the video of a slot cut out of its compilation takes the place of the video, the tracks stay ---------------
+
+CUT = {"key": "compilation:[\"ПВА ШОУ\",8,\"vk\",1,1,20]", "voice_group": DUB, "height": 2160}
+
+
+@pytest.mark.asyncio
+async def test_a_cut_offered_by_voices_is_held_by_the_row_and_one_the_plan_does_not_want_is_refused(rig, tmp_path):
+    fake, voices, packer, probe, db_path, media_dir = rig
+    put(media_dir, "e01.mkv", b"https://v/win")
+    winner(db_path, "e01.mkv")
+    offered = tmp_path / "cut.mkv"
+    offered.write_bytes(b"cut")
+    refused = await probe.request("downloads.video.offer", {"series_id": 2, "unique_id": "win", "path": str(offered),
+                                                            "cut": CUT}, timeout=10)
+    assert refused["accepted"] is False and offered.exists()
+    place(db_path, "win", want_cut=CUT["key"])
+    taken = await probe.request("downloads.video.offer", {"series_id": 2, "unique_id": "win", "path": str(offered),
+                                                          "cut": CUT}, timeout=10)
+    assert taken == {"accepted": True} and not offered.exists()
+    held = _items(db_path)["win"]
+    assert held["pending_video"] == ".win.video.mkv" and json.loads(held["pending_cut"])["key"] == CUT["key"]
+    with open(os.path.join(media_dir, ".win.video.mkv"), "rb") as video:
+        assert video.read() == b"cut"
+    again = await probe.request("downloads.video.offer", {"series_id": 2, "unique_id": "win", "path": str(offered),
+                                                          "cut": CUT}, timeout=10)
+    assert again == {"accepted": True}  # an answer that was lost: the same video is held already
+
+
+@pytest.mark.asyncio
+async def test_the_next_container_takes_the_held_video_and_keeps_the_tracks(rig):
+    """К-5: the video of the cut and its own sound (the compilation's voice) go in; the voice of the single video comes as
+    a track voices aligned and placed; the old container and the held file go; the row says what its video is cut of."""
+    fake, voices, packer, probe, db_path, media_dir = rig
+    path = put(media_dir, "e01.mkv", b"https://v/win")
+    await made(packer, path, SAME, [AudioIn(OWN, path, 0, SAME, own=True), AudioIn(DUB, path, 1, SAME, key=KEY)])
+    winner(db_path, "e01.mkv")
+    put(media_dir, ".win.video.mkv", b"the cut")
+    place(db_path, "win", want_cut=CUT["key"], pending_video=".win.video.mkv", pending_cut=json.dumps(CUT))
+    track = put(media_dir, "e01.Ruchime.ru.flac", b"flac")
+    voices.tracks = [dub(path=track, label=OWN, key="ruchime", dub_id=6)]
+    order(fake, [OWN, DUB])
+    assert outcome(await pack(probe)) == {"packed": 1}
+    built = packer.builds[-1][2]
+    assert (DUB, ".win.video.mkv", True) in built and (OWN, "e01.Ruchime.ru.flac", False) in built
+    with open(path, "rb") as video:
+        assert video.read() == b"the cut"
+    assert sorted(os.listdir(media_dir)) == ["e01.mkv"]
+    row = _items(db_path)["win"]
+    assert json.loads(row["cut"])["key"] == CUT["key"] and row["pending_video"] is None and row["pending_cut"] is None
+    assert outcome(await pack(probe)) == {"unchanged": 1}

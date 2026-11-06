@@ -220,6 +220,21 @@ class DownloadsRepository:
         return await self._db.fetch_all(
             f"SELECT {_TASK} FROM download_tasks WHERE task_type='vk_video' AND series_id NOT IN ({marks})", tuple(ids))
 
+    async def set_pending(self, unique_id: str, relative: str, cut: str | None) -> None:
+        """The row holds a video for the next build of its container (stage 12): written before the file is moved in, so
+        that the name always has an owner."""
+        await self._db.execute("UPDATE media_items SET pending_video=?, pending_cut=? WHERE unique_id=?",
+                               (relative, cut, unique_id))
+
+    async def clear_pending(self, unique_id: str, relative: str) -> bool:
+        return bool(await self._db.execute("UPDATE media_items SET pending_video=NULL, pending_cut=NULL "
+                                           "WHERE unique_id=? AND pending_video=?", (unique_id, relative)))
+
+    async def pending_paths(self, series_id: int) -> set[str]:
+        rows = await self._db.fetch_all("SELECT pending_video FROM media_items WHERE series_id=? AND pending_video IS NOT NULL",
+                                        (series_id,))
+        return {each["pending_video"] for each in rows}
+
     async def work_owners(self, series_id: int) -> tuple[set[str], set[str]]:
         """(keys of the rows of the series, keys of its tasks): a work file of a row that has no task has no owner."""
         rows = await self._db.fetch_all("SELECT unique_id FROM media_items WHERE series_id=?", (series_id,))
@@ -401,24 +416,32 @@ class DownloadsRepository:
         """Single-episode rows of the plan in any download state: the reference episodes."""
         return await self._db.fetch_all(
             "SELECT unique_id, season, episode_start, part, source_url, status, final_filename, superseded_by, source_id, "
-            "row_key, file_rev FROM media_items WHERE series_id=? AND plan_status='in_plan_single' "
+            "row_key, file_rev, want_cut, cut, pending_video, pending_cut FROM media_items "
+            "WHERE series_id=? AND plan_status='in_plan_single' "
             "AND is_ignored_by_user=0 ORDER BY season, episode_start", (series_id,))
 
     async def slot_files(self, series_id: int) -> list[dict]:
         """The single-episode rows of the series that hold a file, with their place in the plan: what packing reads."""
         return await self._db.fetch_all(
             "SELECT unique_id, season, episode_start, part, plan_status, status, final_filename, superseded_by, source_id, "
-            f"row_key, is_ignored_by_user FROM media_items WHERE series_id=? AND final_filename IS NOT NULL AND {_SINGLE}",
+            "row_key, is_ignored_by_user, pending_video, pending_cut, cut "
+            f"FROM media_items WHERE series_id=? AND final_filename IS NOT NULL AND {_SINGLE}",
             (series_id,))
 
-    async def take_over_name(self, winner: str, filename: str, losers: list[str]) -> None:
+    async def take_over_name(self, winner: str, filename: str, losers: list[str], video: dict | None = None) -> None:
         """The winner holds the container under `filename`; the rows it displaced hold nothing any more: one transaction, so
-        a name is never held by two rows nor by none in between (L2, L5)."""
-        await self._db.execute_many(
-            [("UPDATE media_items SET status='pending', final_filename=NULL, rename_to=NULL WHERE unique_id=?", (uid,))
-             for uid in losers]
-            + [("UPDATE media_items SET status='completed', final_filename=?, rename_to=NULL WHERE unique_id=?",
-                (filename, winner))])
+        a name is never held by two rows nor by none in between (L2, L5). `video`: the container took the video the row
+        held for it ({pending, cut}): the row says what its video is cut of now and holds no other."""
+        statements = [("UPDATE media_items SET status='pending', final_filename=NULL, rename_to=NULL WHERE unique_id=?",
+                       (uid,)) for uid in losers]
+        statements.append(("UPDATE media_items SET status='completed', final_filename=?, rename_to=NULL WHERE unique_id=?",
+                           (filename, winner)))
+        if video is not None:
+            statements.append(("UPDATE media_items SET cut=?, pending_video=NULL, pending_cut=NULL "
+                               "WHERE unique_id=? AND pending_video=?",
+                               (json.dumps(video["cut"], ensure_ascii=False) if video.get("cut") else None, winner,
+                                video["pending"])))
+        await self._db.execute_many(statements)
 
     # --- the journal of the publications of containers (pack_publications, stage 11) ----------------------------------
 
@@ -428,8 +451,9 @@ class DownloadsRepository:
         """What a publication of a container must do, written before its build: kept until the publication is whole."""
         values = {**record, **{name: json.dumps(record[name], ensure_ascii=False) for name in self._PUBLICATION_LISTS},
                   "state": "building", "created_at": datetime.now(timezone.utc).isoformat()}
+        values["video"] = json.dumps(record["video"], ensure_ascii=False) if record.get("video") else None
         names = ("series_id", "unique_id", "publication", "name", "staging", "identity", *self._PUBLICATION_LISTS, "state",
-                 "created_at")
+                 "created_at", "video")
         return await self._db.insert(
             f"INSERT INTO pack_publications ({', '.join(names)}) VALUES ({', '.join('?' * len(names))})",
             tuple(values[name] for name in names))
@@ -442,7 +466,8 @@ class DownloadsRepository:
 
     async def publications(self, series_id: int) -> list[dict]:
         rows = await self._db.fetch_all("SELECT * FROM pack_publications WHERE series_id=? ORDER BY id", (series_id,))
-        return [{**row, **{name: json.loads(row[name]) for name in self._PUBLICATION_LISTS}} for row in rows]
+        return [{**row, **{name: json.loads(row[name]) for name in self._PUBLICATION_LISTS},
+                 "video": json.loads(row["video"]) if row.get("video") else None} for row in rows]
 
     async def all_publications(self) -> list[dict]:
         """Every publication a stop cut short, of every series: what the window shows of them at the start."""

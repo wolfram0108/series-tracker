@@ -272,3 +272,24 @@ async def test_a_work_file_no_task_owns_is_removed_when_the_process_starts_and_n
     assert await _wait(lambda: not os.path.exists(orphan))
     assert os.path.exists(owned) and os.path.exists(os.path.join(media_dir, "Серия 01.mp4"))
     assert all(os.path.exists(path) for path in strangers)  # a file that is not a work file of a row of the series is not touched
+
+
+@pytest.mark.asyncio
+async def test_the_video_a_row_holds_for_its_next_container_and_the_tracks_beside_it_are_not_swept(boot):
+    """Stage 12: `.<row>.video.mkv` is held by its row (`pending_video`), and so are the tracks voices placed beside it."""
+    started, db_path, media_dir = boot
+    _add_item(db_path, "uid1", 1, status="completed", filename="Серия 01.mp4")
+    _write(os.path.join(media_dir, "Серия 01.mp4"))
+    held = os.path.join(media_dir, ".uid1.video.mkv")
+    track = os.path.join(media_dir, ".uid1.video.ПВА.ru.flac")
+    orphan = _work(media_dir, "uid1")
+    for path in (held, track, orphan):
+        _write(path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE media_items SET pending_video='.uid1.video.mkv' WHERE unique_id='uid1'")
+        conn.commit()
+
+    await started.up()
+
+    assert await _wait(lambda: not os.path.exists(orphan))
+    assert os.path.exists(held) and os.path.exists(track)

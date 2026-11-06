@@ -86,9 +86,12 @@ class Plan:
 
 
 def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settings: Iterable[EpisodeSettings],
-         priority: Sequence[str], players, places: Mapping[int, Sequence[str]] | None = None) -> Plan:
+         priority: Sequence[str], players, places: Mapping[int, Sequence[str]] | None = None,
+         own: Mapping[Slot, str] | None = None) -> Plan:
     """The voice-overs to plan; `players` is the user's groups of players (`core.voice_names.Groups`), `places` where
-    each source (by its id) has its rows."""
+    each source (by its id) has its rows. The voice-over the video of an episode carries itself is that of its reference
+    row, or the one `own` names for the episode (stage 12: the voice-over of the compilation its video is cut out of, while
+    the cut has not failed): it is not planned, and the voice-over of the reference row is planned like any other."""
     by_key: dict[tuple[int, str], CompositionRow] = {}
     by_voice: dict[tuple[int, str], list[CompositionRow]] = {}
     voices: dict[str, None] = {}
@@ -112,8 +115,9 @@ def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settin
             continue
         with_reference.add(slot)
         take_off, orders, denied = _levers(levers.get((ref.season, ref.episode), ()))
+        carried = (own or {}).get(slot, ref_row.voice_label)
         for label in voices:
-            if label == ref_row.voice_label or group_target(label) in take_off:
+            if label == carried or group_target(label) in take_off:
                 continue
             fitting = [row for row in by_voice.get((ref.season, label), ()) if _covers(row, ref.episode, ref_row.part)]
             covering = [row for row in fitting if (label, row.source_id, row.player) not in denied]

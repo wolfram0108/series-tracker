@@ -1,5 +1,6 @@
-"""SQL of the voices module: voice_dubs (additional voice-overs of an episode) and voice_files (the video of a source
-row that covers several episodes, downloaded once and shared by the voice-overs of its episodes).
+"""SQL of the voices module: voice_dubs (additional voice-overs of an episode), voice_files (the video of a source
+row that covers several episodes, downloaded once and shared by the voice-overs of its episodes, or by the cuts of the
+episodes it holds) and voice_cuts (stage 12: an episode cut out of its compilation by the alignment service).
 
 A file is owned by its row in voice_files: its path is in no voice-over's own `temp_path`, a voice-over that reads it
 carries `file_id` and the rows are returned with the path of the file as their `temp_path`. A file goes to the cleanup
@@ -17,7 +18,9 @@ from typing import Any, Callable, Collection, Iterable
 from core.contracts import DubStatus as S
 from core.db import Database
 
+from . import cut_lifecycle as cut_steps
 from . import lifecycle
+from .cut_lifecycle import CutStep as C, CutTransition
 from .lifecycle import Transition
 
 log = logging.getLogger("voices")
@@ -96,18 +99,51 @@ def _journal_file(conn: sqlite3.Connection, temp_path: str | None) -> None:
 
 
 def _release_idle(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Journal and delete the files that no voice-over reads, and cut the links of the voice-overs that still point
-    at them (they are done with the file). Runs inside the caller's transaction; a file that was downloading is
+    """Journal and delete the files that no voice-over and no cut reads, and cut the links of the voice-overs that still
+    point at them (they are done with the file). Runs inside the caller's transaction; a file that was downloading is
     returned with that status for the caller to cancel its transfer."""
     marks, steps = _in(_READING)
+    cut_marks, reading = _in(cut_steps.READING)
     idle = [dict(row) for row in conn.execute(
         f"SELECT * FROM voice_files WHERE NOT EXISTS (SELECT 1 FROM voice_dubs WHERE file_id = voice_files.id "
-        f"AND status {marks})", steps)]
+        f"AND status {marks}) AND NOT EXISTS (SELECT 1 FROM voice_cuts WHERE file_id = voice_files.id "
+        f"AND status {cut_marks})", (*steps, *reading))]
     for file in idle:
         _journal_file(conn, file["temp_path"])
+        if file.get("work_dir"):
+            conn.execute("INSERT INTO voice_cleanup (path, kind, error, updated_at) VALUES (?,?,?,?) " + _UPSERT,
+                         (file["work_dir"], "tree", HANDED_OVER, _now()))
         conn.execute("UPDATE voice_dubs SET file_id=NULL WHERE file_id=?", (file["id"],))
+        conn.execute("UPDATE voice_cuts SET file_id=NULL WHERE file_id=?", (file["id"],))
         conn.execute("DELETE FROM voice_files WHERE id=?", (file["id"],))
     return idle
+
+
+def _cut_hand_over(conn: sqlite3.Connection, where: str, args: tuple, *, copy: bool = True, job: bool = True) -> None:
+    """Journal what the cuts matching `where` own: with `copy` the folder of the copy of REF 2 (and an unanswered
+    submission); with `job` the job, with the folder the service wrote its video in (`<folder of the file>/_out/<the same
+    name>`) as its scope, or that folder alone when there is no job. Runs in the transaction that lets them go."""
+    now = _now()
+    for cut in conn.execute(f"SELECT * FROM voice_cuts WHERE {where}", args).fetchall():
+        output = os.path.join(os.path.dirname(cut["work_dir"]), OUT_DIR, os.path.basename(cut["work_dir"])) \
+            if cut["work_dir"] else None
+        entries = []
+        if copy and cut["work_dir"]:
+            entries.append((cut["work_dir"], "tree", None))
+            if cut["status"] == C.SUBMITTING and not cut["job_id"] and cut["submit_key"]:
+                entries.append((cut["submit_key"], "submission", output))
+        if job and cut["job_id"]:
+            entries.append((cut["job_id"], "job", output))
+        elif job and output:
+            entries.append((output, "tree", None))
+        for path, kind, scope in entries:
+            conn.execute("INSERT INTO voice_cleanup (path, kind, error, scope, updated_at) VALUES (?,?,?,?,?) " + _UPSERT,
+                         (path, kind, HANDED_OVER, scope, now))
+
+
+# The folder, beside the copies of REF 2, the service writes the videos of a batch of cuts in (and keeps its cache of the
+# compilation in).
+OUT_DIR = "_out"
 
 
 class VoicesRepository:
@@ -303,7 +339,13 @@ class VoicesRepository:
                 conn.execute(query, tuple(params))
             for file in conn.execute("SELECT id, temp_path FROM voice_files WHERE series_id=?", (series_id,)).fetchall():
                 _journal_file(conn, file["temp_path"])
+            _cut_hand_over(conn, "series_id=?", (series_id,))
+            for file in conn.execute("SELECT work_dir FROM voice_files WHERE series_id=? AND work_dir IS NOT NULL",
+                                     (series_id,)).fetchall():
+                conn.execute("INSERT INTO voice_cleanup (path, kind, error, updated_at) VALUES (?,?,?,?) " + _UPSERT,
+                             (file["work_dir"], "tree", HANDED_OVER, _now()))
             conn.execute("DELETE FROM voice_dubs WHERE series_id=?", (series_id,))
+            conn.execute("DELETE FROM voice_cuts WHERE series_id=?", (series_id,))
             conn.execute("DELETE FROM voice_files WHERE series_id=?", (series_id,))
         await self._db.transaction(work)
 
@@ -484,8 +526,9 @@ class VoicesRepository:
     async def file(self, file_id: int) -> dict[str, Any] | None:
         return await self._db.fetch_one("SELECT * FROM voice_files WHERE id=?", (file_id,))
 
-    async def files_of(self, series_id: int) -> list[dict[str, Any]]:
-        return await self._db.fetch_all("SELECT * FROM voice_files WHERE series_id=? ORDER BY id", (series_id,))
+    async def files_of(self, series_id: int, quality: str = "dub") -> list[dict[str, Any]]:
+        return await self._db.fetch_all("SELECT * FROM voice_files WHERE series_id=? AND quality=? ORDER BY id",
+                                        (series_id, quality))
 
     async def join_file(self, dub_id: int, series_id: int, source_id: int, row_key: str, url: str,
                         path_of: Callable[[int], str]) -> dict[str, Any] | None:
@@ -498,7 +541,7 @@ class VoicesRepository:
             conn.execute("BEGIN IMMEDIATE")
             if conn.execute("SELECT 1 FROM voice_dubs WHERE id=? AND status=?", (dub_id, S.PENDING.value)).fetchone() is None:
                 return None  # the voice-over is gone or taken: no file is made for nobody
-            where = "WHERE series_id=? AND source_id=? AND row_key=? AND url=?"
+            where = "WHERE series_id=? AND source_id=? AND row_key=? AND url=? AND quality='dub'"
             found = conn.execute(f"SELECT * FROM voice_files {where}", (series_id, source_id, row_key, url)).fetchone()
             if found is None:
                 conn.execute("INSERT INTO voice_files (series_id, source_id, row_key, url, status, updated_at) "
@@ -538,6 +581,10 @@ class VoicesRepository:
             if ok:
                 conn.execute("UPDATE voice_dubs SET status=?, error=NULL, updated_at=? WHERE file_id=? AND status=?",
                              (S.READY.value, _now(), file_id, S.DOWNLOADING.value))
+            # A cut has one compilation to be cut out of: no file, no cut (the user's retry plans it again).
+            moved = cut_steps.FILE_READY if ok else cut_steps.FAIL
+            conn.execute("UPDATE voice_cuts SET status=?, error=?, updated_at=? WHERE file_id=? AND status=?",
+                         (moved.target.value, None if ok else error, _now(), file_id, C.DOWNLOADING.value))
             ids = [row["id"] for row in conn.execute("SELECT id FROM voice_dubs WHERE file_id=? AND status=?", (
                 file_id, S.READY.value if ok else S.DOWNLOADING.value))]
             return ids
@@ -556,3 +603,145 @@ class VoicesRepository:
             conn.execute("BEGIN IMMEDIATE")
             return _release_idle(conn)
         return self._cancel_transfers(await self._db.transaction(work))
+
+    # --- cuts out of compilations (stage 12) ------------------------------------------------------------------------
+
+    @staticmethod
+    def _cut(row: dict | None) -> dict | None:
+        if row is None:
+            return None
+        found = dict(row)
+        found["cut"] = json.loads(found["cut"]) if found.get("cut") else None
+        return found
+
+    async def cuts_of(self, series_id: int | None = None) -> list[dict[str, Any]]:
+        query, args = ("SELECT * FROM voice_cuts WHERE series_id=? ORDER BY season, episode, part", (series_id,)) \
+            if series_id is not None else ("SELECT * FROM voice_cuts ORDER BY series_id, season, episode, part", ())
+        return [self._cut(row) for row in await self._db.fetch_all(query, args)]
+
+    async def cut(self, cut_id: int) -> dict[str, Any] | None:
+        return self._cut(await self._db.fetch_one("SELECT * FROM voice_cuts WHERE id=?", (cut_id,)))
+
+    async def cuts_by(self, column: str, value: Any) -> list[dict[str, Any]]:
+        assert column in ("job_id", "submit_key", "file_id")
+        return [self._cut(row) for row in await self._db.fetch_all(f"SELECT * FROM voice_cuts WHERE {column}=? ORDER BY id",
+                                                                  (value,))]
+
+    async def plan_cut(self, series_id: int, season: int, episode: int, part: int, cut: dict[str, Any], ref_uid: str,
+                       admitted: bool) -> bool:
+        """The slot is to be cut out of `cut` by the single video of `ref_uid`. A cut of the slot for another compilation or
+        another REF 2 lets go of what it owned (to the journal) and the new one waits; the same one stays as it is (and is
+        admitted when `admitted`). True when a new cut was recorded."""
+        def work(conn: sqlite3.Connection) -> bool:
+            conn.execute("BEGIN IMMEDIATE")
+            where, args = "series_id=? AND season=? AND episode=? AND part=?", (series_id, season, episode, part)
+            found = conn.execute(f"SELECT * FROM voice_cuts WHERE {where}", args).fetchone()
+            if found is not None and found["cut_key"] == cut["key"] and found["ref_uid"] == ref_uid \
+                    and found["status"] != C.OFFERED:
+                if admitted and not found["admitted"]:
+                    conn.execute("UPDATE voice_cuts SET admitted=1, updated_at=? WHERE id=?", (_now(), found["id"]))
+                return False
+            if found is not None:
+                _cut_hand_over(conn, where, args)
+                conn.execute(f"DELETE FROM voice_cuts WHERE {where}", args)
+            conn.execute("INSERT INTO voice_cuts (series_id, season, episode, part, cut_key, cut, ref_uid, status, admitted,"
+                         " updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                         (series_id, season, episode, part, cut["key"], json.dumps(cut, ensure_ascii=False), ref_uid,
+                          C.PLANNED.value, int(admitted), _now()))
+            return True
+        recorded = await self._db.transaction(work)
+        await self.release_idle_files()
+        return recorded
+
+    async def drop_cuts(self, series_id: int, keep: Collection[tuple[int, int, int]]) -> list[dict[str, Any]]:
+        """The cuts of the series whose slot is not in `keep` go, with what they own; returns those that went."""
+        def work(conn: sqlite3.Connection) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+            conn.execute("BEGIN IMMEDIATE")
+            gone = [dict(row) for row in conn.execute("SELECT * FROM voice_cuts WHERE series_id=?", (series_id,))
+                    if (row["season"], row["episode"], row["part"]) not in keep]
+            for each in gone:
+                _cut_hand_over(conn, "id=?", (each["id"],))
+                conn.execute("DELETE FROM voice_cuts WHERE id=?", (each["id"],))
+            return gone, _release_idle(conn)
+        gone, released = await self._db.transaction(work)
+        self._cancel_transfers(released)
+        return gone
+
+    async def admit_cuts(self, series_id: int) -> None:
+        marks, ends = _in(cut_steps.FINAL)
+        await self._db.execute(f"UPDATE voice_cuts SET admitted=1, updated_at=? WHERE series_id=? AND admitted=0 "
+                               f"AND status NOT {marks}", (_now(), series_id, *ends))
+
+    async def cut_join_file(self, cut_id: int, series_id: int, source_id: int, row_key: str, url: str,
+                            path_of: Callable[[int], str]) -> dict[str, Any] | None:
+        """The planned cut takes the file of its compilation (best quality): the file is made if there is none and claimed
+        for download when nobody has it; the cut is downloading, or ready when the file is on disk already."""
+        def work(conn: sqlite3.Connection) -> dict[str, Any] | None:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("SELECT 1 FROM voice_cuts WHERE id=? AND status=? AND admitted=1",
+                            (cut_id, C.PLANNED.value)).fetchone() is None:
+                return None
+            where = "WHERE series_id=? AND source_id=? AND row_key=? AND url=? AND quality='best'"
+            found = conn.execute(f"SELECT * FROM voice_files {where}", (series_id, source_id, row_key, url)).fetchone()
+            if found is None:
+                conn.execute("INSERT INTO voice_files (series_id, source_id, row_key, url, quality, status, updated_at) "
+                             "VALUES (?,?,?,?,'best',?,?)", (series_id, source_id, row_key, url, S.PENDING.value, _now()))
+                found = conn.execute(f"SELECT * FROM voice_files {where}", (series_id, source_id, row_key, url)).fetchone()
+            file = dict(found)
+            ready = file["status"] == S.READY.value
+            moved = cut_steps.FILE_READY if ready else cut_steps.FETCH
+            conn.execute("UPDATE voice_cuts SET status=?, file_id=?, error=NULL, updated_at=? WHERE id=?",
+                         (moved.target.value, file["id"], _now(), cut_id))
+            file["claimed"] = file["status"] in (S.PENDING.value, S.FAILED.value)
+            if file["claimed"]:
+                file["temp_path"] = file["temp_path"] or path_of(file["id"])
+                conn.execute("UPDATE voice_files SET status=?, attempt=attempt+1, error=NULL, temp_path=?, "
+                             "updated_at=? WHERE id=?", (S.DOWNLOADING.value, file["temp_path"], _now(), file["id"]))
+                file["status"] = S.DOWNLOADING.value
+            return file
+        return await self._db.transaction(work)
+
+    async def cut_step(self, cut_id: int, transition: CutTransition, **fields: Any) -> bool:
+        """Move a cut by a declared transition, writing `fields`; False when it was not in one of its sources."""
+        names = sorted(fields)
+        marks, sources = _in(transition.sources)
+        sets = ", ".join([*(f"{name}=?" for name in names), "status=?", "updated_at=?"])
+        return bool(await self._db.execute(
+            f"UPDATE voice_cuts SET {sets} WHERE id=? AND status {marks}",
+            (*(fields[name] for name in names), transition.target.value, _now(), cut_id, *sources)))
+
+    async def attach_cut_job(self, key: str, job_id: str) -> bool:
+        attach = cut_steps.ATTACH
+        marks, sources = _in(attach.sources)
+        return bool(await self._db.execute(f"UPDATE voice_cuts SET job_id=?, status=?, updated_at=? "
+                                           f"WHERE submit_key=? AND job_id IS NULL AND status {marks}",
+                                           (job_id, attach.target.value, _now(), key, *sources)))
+
+    async def release_cuts(self) -> list[dict[str, Any]]:
+        """Files no voice-over and no cut reads go to the journal (see `release_idle_files`)."""
+        return await self.release_idle_files()
+
+    async def cut_jobs_open(self) -> list[str]:
+        rows = await self._db.fetch_all("SELECT job_id FROM voice_cuts WHERE status=? AND job_id IS NOT NULL",
+                                        (C.ALIGNING.value,))
+        return [row["job_id"] for row in rows]
+
+    async def cut_submissions_open(self) -> list[str]:
+        rows = await self._db.fetch_all("SELECT submit_key FROM voice_cuts WHERE status=? AND job_id IS NULL "
+                                        "AND submit_key IS NOT NULL", (C.SUBMITTING.value,))
+        return [row["submit_key"] for row in rows]
+
+    async def hand_over_cut(self, cut_id: int, *, copy: bool, job: bool) -> None:
+        """A cut lets go of the copy of its REF 2 (`copy`) and of its job with the folder of its video (`job`)."""
+        def work(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+            conn.execute("BEGIN IMMEDIATE")
+            _cut_hand_over(conn, "id=?", (cut_id,), copy=copy, job=job)
+            if job:
+                conn.execute("UPDATE voice_cuts SET job_id=NULL, out_path=NULL WHERE id=?", (cut_id,))
+            if copy and job:
+                conn.execute("UPDATE voice_cuts SET work_dir=NULL WHERE id=?", (cut_id,))
+            return _release_idle(conn)
+        self._cancel_transfers(await self._db.transaction(work))
+
+    async def set_file_work_dir(self, file_id: int, work_dir: str) -> None:
+        await self._db.execute("UPDATE voice_files SET work_dir=? WHERE id=? AND work_dir IS NULL", (work_dir, file_id))

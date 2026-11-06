@@ -238,7 +238,8 @@ async def test_the_mechanism_holds_its_invariants(phase, operation, failure, tem
             except BusRequestError as exc:
                 # The disk changes in a sync alone (I-59), so a write the world fails once fails that sync; the user
                 # runs it again, and the next one finishes what the failed one left.
-                if attempt or "OSError" not in str(exc):
+                # A write that does not answer in time (the replacement of a container) fails the sync the same way.
+                if attempt or not any(word in str(exc) for word in ("OSError", "StorageTimeout")):
                     raise
                 await h.quiesce()
         await h.quiesce()

@@ -68,6 +68,10 @@ def video(name: str) -> dict:
     (video("The God of War Dominates"), {"season": 1, "episode_start": 683, "episode_end": None, "resolution": 2160,
                                          "voiceover_tag": "ПВА ШОУ"}, "x.mkv",
      "The God of War Dominates s01e683 [ПВА ШОУ] 2160p.mkv"),
+    # Stage 12: a video cut out of a compilation is named by the compilation's voice-over and resolution.
+    (video("Show"), {"season": 1, "episode_start": 12, "episode_end": 12, "resolution": 1080, "voiceover_tag": "AniStar",
+                     "cut": '{"key": "compilation:x", "height": 2160, "voice_group": "ПВА"}'}, "x.mkv",
+     "Show s01e12 [ПВА] 2160p.mkv"),
     (video("Show"), {"season": 1, "episode_start": 12, "episode_end": None, "part": 2, "resolution": 1080,
                      "voiceover_tag": "AniLibria"}, "x.mp4", "Show s01e12 Part 2 [AniLibria] 1080p.mp4"),
     ({"name_en": "Show", "kind": "torrent", "season": "s02"}, {"season": None, "episode_start": 5, "episode_end": None,

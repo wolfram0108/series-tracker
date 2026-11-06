@@ -6,9 +6,11 @@
 - `media_items.want_cut` (scan): the key of the compilation whose video the plan wants in the slot of the row;
   `media_items.pending_video`, `pending_cut` and `cut` (downloads): the video the next build of the container puts in the
   slot (a file of the series held by the row), what it is cut of (JSON, NULL for the single video itself), and what the
-  video of the container in place is cut of.
+  video of the container in place is cut of; `pack_publications.video`: the video a publication puts in (its pending
+  name and what it is cut of), so that a publication a stop cut short records it too.
 - `voice_files.quality`: `dub` (the video of a voice-over, capped) or `best` (a compilation to cut episodes of, uncapped);
-  a file is one row per (series, source, row key, address, quality).
+  a file is one row per (series, source, row key, address, quality). `voice_files.work_dir`: the folder the service cuts
+  the episodes of a compilation in (its cache of the compilation with it); it goes with the file.
 - `voice_cuts` (voices): the cut of one slot out of its compilation by the alignment service.
 
 downgrade drops all of it; the records set on a compilation and the cuts go with it.
@@ -29,6 +31,7 @@ def upgrade() -> None:
     op.execute("ALTER TABLE scan_references ADD COLUMN compilation TEXT")
     for column in ("want_cut TEXT", "pending_video TEXT", "pending_cut TEXT", "cut TEXT"):
         op.execute(f"ALTER TABLE media_items ADD COLUMN {column}")
+    op.execute("ALTER TABLE pack_publications ADD COLUMN video TEXT")
     op.execute(
         "CREATE TABLE voice_files_new ("
         " id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -37,6 +40,7 @@ def upgrade() -> None:
         " row_key TEXT NOT NULL,"
         " url TEXT NOT NULL,"
         " quality TEXT NOT NULL DEFAULT 'dub' CHECK (quality IN ('dub', 'best')),"
+        " work_dir TEXT,"
         " status TEXT NOT NULL DEFAULT 'pending',"
         " attempt INTEGER NOT NULL DEFAULT 0,"
         " temp_path TEXT,"
@@ -98,6 +102,7 @@ def downgrade() -> None:
     op.execute("DROP TABLE voice_files")
     op.execute("ALTER TABLE voice_files_old RENAME TO voice_files")
     op.execute("CREATE INDEX ix_voice_files_series ON voice_files (series_id)")
+    op.execute("ALTER TABLE pack_publications DROP COLUMN video")
     for column in ("cut", "pending_cut", "pending_video", "want_cut"):
         op.execute(f"ALTER TABLE media_items DROP COLUMN {column}")
     op.execute("ALTER TABLE scan_references DROP COLUMN compilation")

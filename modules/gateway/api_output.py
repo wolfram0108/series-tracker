@@ -16,7 +16,7 @@ from core.contracts import (CompositionGetRequest, CompositionReply, DubsScope, 
                             SeriesKind, SettingsReset, SettingsSet, VoiceOrderSet)
 
 from .routing import admitted, refusal
-from .schemas import (DubsActionBody, DubsRestarted, DynamicObject, ErrorOnly, ErrorResponse, OkResponse,
+from .schemas import (CutsActionBody, CutsReply, DubsActionBody, DubsRestarted, DynamicObject, ErrorOnly, ErrorResponse, OkResponse,
                       OutputSettingsReset, OutputSettingsSet, OutputSwitchBody, RefetchBody, RefetchQueued, VoiceOrderBody)
 
 _ERR = {code: {"model": ErrorResponse} for code in (400, 404, 500, 503)}
@@ -77,10 +77,12 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return refusal(exc, with_success=False)
 
     @r.get("/api/series/{series_id}/output/queues", response_model=QueuesReply, responses=_ERR1)
-    async def output_queues(series_id: int, season: int | None = None, episode: int | None = None):
-        """The queue of the reference and of the voice-over of each group of a level (the series, a season, or an episode
-        of a season), in the order the core tries their variants, with what the levers of the level say of each."""
-        query = _contract(QueuesGet, series_id=series_id, season=season, episode=episode)
+    async def output_queues(series_id: int, season: int | None = None, episode: int | None = None,
+                            compilation: str | None = None):
+        """The queue of the reference and of the voice-over of each group of a level (the series, a season, a compilation
+        of a season, or an episode of a season), in the order the core tries their variants, with what the levers of the
+        level say of each."""
+        query = _contract(QueuesGet, series_id=series_id, season=season, episode=episode, compilation=compilation)
         try:
             return await gw.request("composition.queues.get", query.model_dump(mode="json"))
         except BusRequestError as exc:
@@ -105,6 +107,24 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The redo of the window: the voice-overs of the scope whose track is placed are made anew, now; the container of the
         episode takes the new tracks at the next sync."""
         return await restart_dubs(series_id, body, "voices.dubs.redo")
+
+    @r.get("/api/series/{series_id}/output/cuts", response_model=CutsReply, responses=_ERR1)
+    async def output_cuts(series_id: int):
+        """The cuts of the episodes of the series out of their compilations (stage 12) and where each is."""
+        try:
+            return await gw.request("voices.cuts.get", {"series_id": series_id})
+        except BusRequestError as exc:
+            return refusal(exc, with_success=False)
+
+    @r.post("/api/series/{series_id}/output/cuts/retry", response_model=DubsRestarted, responses=_ERR)
+    async def retry_cuts(series_id: int, body: CutsActionBody):
+        """The retry of the window: the episodes of the scope whose cut failed are cut again, now."""
+        try:
+            async with admitted(gw, series_id):
+                done = await gw.request("voices.cuts.retry", {"series_id": series_id, **body.model_dump()})
+        except BusRequestError as exc:
+            return refusal(exc)
+        return {"success": True, "restarted": int((done or {}).get("restarted") or 0)}
 
     @r.post("/api/series/{series_id}/output/reference/refetch", response_model=RefetchQueued, responses=_ERR)
     async def refetch_reference(series_id: int, body: RefetchBody):

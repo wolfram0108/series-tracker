@@ -102,6 +102,11 @@ class Library:
         return info.st_size == size and (not ino or not info.st_ino or info.st_ino == ino)
 
     @staticmethod
+    def pending_name(unique_id: str) -> str:
+        """The hidden name of the video a row holds for the next build of its container, in the folder of the series."""
+        return f".{unique_id}.video.mkv"
+
+    @staticmethod
     def work_path_for(series: dict, unique_id: str) -> str:
         """The hidden file a task writes into, in the folder of the series: it does not depend on the name of the video."""
         return os.path.join(series["save_path"], f".{unique_id}.mp4")
@@ -366,6 +371,10 @@ class Library:
         free = rows - owned
         if not free:
             return 0
+        # The video a row holds for the next build of its container (stage 12) is that row's, task or not, and so are the
+        # tracks voices aligned to it and placed beside it (named after it).
+        held = tuple(os.path.splitext(os.path.normpath(os.path.join(series["save_path"], each)))[0]
+                     for each in await self._repo.pending_paths(series["id"]))
         try:
             found = await storage.call(self._hidden_of, series["save_path"], free)
         except (OSError, storage.StorageTimeout) as exc:
@@ -373,6 +382,8 @@ class Library:
             return 0
         removed = 0
         for path in found:
+            if os.path.normpath(path).startswith(held):
+                continue
             if await storage.discard(path):
                 removed += 1
                 self._log.info("убран рабочий файл без задачи: %s", path)

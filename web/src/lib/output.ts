@@ -18,6 +18,8 @@ export type LeverSpec = Schemas["LeverSpec"]
  *  window says it cannot draw it. */
 export const RENDERED_FORMS = [
   "none/variant_order", "group/variant_order", "group/flag", "variant/flag",
+  // Stage 12: the switch of a compilation (its block) and the compilation an episode stands in (its card and its tab).
+  "none/flag", "none/compilation",
 ] as const
 
 const RENDERED = new Set<string>(RENDERED_FORMS)

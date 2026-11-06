@@ -7,6 +7,7 @@ the name never applies the rules a second time.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 
@@ -47,6 +48,16 @@ def build_metadata(series: dict, media_item: dict) -> dict:
         "resolution": media_item.get("resolution"),
         "voiceover": media_item.get("voiceover_tag"),
     }
+    # A video cut out of a compilation (stage 12) is named by the compilation: its voice-over and its resolution.
+    cut = media_item.get("cut")
+    if isinstance(cut, str) and cut:
+        try:
+            cut = json.loads(cut)
+        except ValueError:
+            cut = None
+    if isinstance(cut, dict):
+        metadata["resolution"] = cut.get("height") or metadata["resolution"]
+        metadata["voiceover"] = cut.get("voice_group") or metadata["voiceover"]
     return merge_series_defaults(series, metadata)
 
 

@@ -185,6 +185,8 @@ SSE_MAP: dict[str, Outgoing] = {
     "conform.queue.changed": Outgoing("conform_queue_update", latest=_whole),
     "voices.dub.changed": Outgoing("voice_dub_update"),
     "voices.dubs.snapshot": Outgoing("voice_dubs_snapshot"),
+    "voices.cut.changed": Outgoing("voice_cut_update"),
+    "voices.cuts.snapshot": Outgoing("voice_cuts_snapshot"),
     "voices.settings.changed": Outgoing("voice_settings_update"),
     "conform.settings.changed": Outgoing("conform_settings_update"),
     "renaming.finished": Outgoing("renaming_complete"),
