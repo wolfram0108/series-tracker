@@ -57,14 +57,16 @@ async def readable_length(path: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> f
         return 0.0
     try:
         code, out, _ = await run_capture([executable, "-v", "error", "-show_entries",
-                                          "format=duration,start_time:stream=index,codec_type,start_time,duration"
+                                          "format=format_name,duration,start_time:stream=index,codec_type,start_time,"
+                                          "duration"
                                           ":stream_tags=DURATION", "-of", "json", path], timeout=timeout)
         stated = json.loads(out.decode() or "{}") if code == 0 else {}
         declared = _number((stated.get("format") or {}).get("duration"))
         start = _number((stated.get("format") or {}).get("start_time")) or 0.0
         if not declared:
             return 0.0
-        ends = {str(each.get("index")): _stream_end(each) for each in stated.get("streams") or []
+        matroska = "matroska" in str((stated.get("format") or {}).get("format_name") or "")
+        ends = {str(each.get("index")): _stream_end(each, matroska=matroska) for each in stated.get("streams") or []
                 if each.get("codec_type") in MEDIA_KINDS}
         known = [end for end in ends.values() if end is not None]
         from_s = max(0.0, min(known or [start + declared]) - TAIL_S)
@@ -90,11 +92,14 @@ async def readable_length(path: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> f
     return max(0.0, min(cuts) - start) if cuts else declared
 
 
-def _stream_end(stream: dict) -> float | None:
-    """Where a stream ends by its header: its start and its length (Matroska states the length as a tag of the stream)."""
+def _stream_end(stream: dict, *, matroska: bool) -> float | None:
+    """Where a stream ends by its header, each field read for what it means in its format. Matroska states the end of a
+    stream in its tag DURATION, as a time from the zero of the file (an audio track that starts at 2 s and lasts 45 ends
+    at 47): nothing is added to it, and the `duration` ffprobe gives such a stream is the length of the file, not of the
+    stream. Elsewhere (MP4, MPEG-TS) the stream has a start and a length of its own: it ends at their sum."""
+    if matroska:
+        return _clock((stream.get("tags") or {}).get("DURATION"))
     length = _number(stream.get("duration"))
-    if length is None:
-        length = _clock((stream.get("tags") or {}).get("DURATION"))
     return None if length is None else (_number(stream.get("start_time")) or 0.0) + length
 
 

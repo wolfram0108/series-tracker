@@ -337,3 +337,39 @@ async def test_a_whole_download_with_an_audio_track_shorter_than_its_picture_is_
     assert await ytdlp.download("https://cdn.test/episode.mp4", str(whole), progress, whole_video=True) == (True,
                                                                                                          "файл уже существует")
     assert whole.exists()
+
+
+@pytest.fixture
+def delayed(tmp_path):
+    """Whole files whose audio starts after the picture (by 2 and by 10 seconds) and ends before it, in MP4 and Matroska;
+    and the same files with their last quarter lost (the MP4 with its index in front, so that it still reads)."""
+    made = {}
+    for delay in (2, 10):
+        for suffix, extra in (("mp4", ["-movflags", "+faststart"]), ("mkv", [])):
+            whole, cut = tmp_path / f"delayed{delay}.{suffix}", tmp_path / f"cut_delayed{delay}.{suffix}"
+            make(whole, "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10:duration=60", "-itsoffset", str(delay), "-f",
+                 "lavfi", "-i", "sine=frequency=300:duration=45", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                 *extra)
+            shutil.copyfile(whole, cut)
+            with open(cut, "r+b") as out:
+                out.truncate(os.path.getsize(cut) * 3 // 4)
+            made[f"{delay}.{suffix}"] = (whole, cut)
+    return made
+
+
+@pytest.mark.asyncio
+async def test_a_stream_that_starts_late_is_held_to_its_own_end_as_its_format_states_it(delayed, monkeypatch):
+    """Matroska states where a stream ends, from the zero of the file; MP4 states where it starts and how long it lasts.
+    Read each for what it means, a whole file with late, short audio is whole and a cut one is cut."""
+    async def sixty(*_args, **_kwargs):
+        return 60.0
+
+    async def progress(_data):
+        pass
+
+    monkeypatch.setattr(ytdlp, "_announced_length", sixty)
+    for name, (whole, cut) in delayed.items():
+        assert await ffprobe.readable_length(str(whole)) == pytest.approx(60, abs=0.2), name
+        assert await ffprobe.readable_length(str(cut)) < 50, name
+        assert (await ytdlp.download("https://cdn.test/e." + name, str(whole), progress, whole_video=True))[0], name
+        assert whole.exists(), name
