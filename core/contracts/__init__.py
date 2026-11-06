@@ -20,13 +20,13 @@ from .series_sources import SeriesKind, SeriesSource, SourceChanged, SourceEvent
 from .voice_groups import GroupsResolveReply, GroupsResolveRequest
 from .availability import Action, NotAllowed, allowed, refusal, require, variant_state
 from .work import RUN_CHANGED, WORK_STATE, WORK_WITHDRAWN, RunChanged, RunSnapshot, Slot, WorkState, WorkWithdrawn, slot_of
-from .voices import (DubEvent, DubEventStatus, DubHint, DubItem, DubRecord, DubsSnapshot, DubState, DubStatus,
+from .voices import (DubEvent, DubEventStatus, DubHint, DubItem, DubRecord, DubsScope, DubsSnapshot, DubState, DubStatus,
                      Reason, SettingProblem, SnapshotItem,
                      VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView)
 
 __all__ = ["Action", "NotAllowed", "allowed", "refusal", "require", "variant_state", "LEVER_FORMS", "WORK_WITHDRAWN", "WorkWithdrawn", "RUN_CHANGED", "WORK_STATE", "RunChanged", "RunSnapshot", "Slot", "WorkState", "slot_of", "AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitReply", "DubEvent",
            "DubEventStatus", "DubHint", "DubItem", "DubRecord", "DubsSnapshot", "DubState", "DubStatus", "Reason", "SnapshotItem", "SettingProblem", "VoiceSettingsDraft",
-           "VoiceSettingsSaved", "VoiceSettingsView", "ConformSettingsDraft", "ConformSettingsSaved",
+           "VoiceSettingsSaved", "VoiceSettingsView", "DubsScope", "ConformSettingsDraft", "ConformSettingsSaved",
            "ConformSettingsView",
            "LINE_SEPARATOR", "ReleaseTable", "RowState", "RowVoice", "SiteResolveReply", "SiteResolveRequest", "TableFailed", "TableGetReply", "TableGetRequest",
            "SeriesReadProgress", "TableProgress", "TableReady", "TableRow", "TableState", "line_of", "place_of", "LINE_FIELDS",

@@ -113,7 +113,8 @@ class DownloadsRepository:
                 "UPDATE download_tasks SET status='downloading', attempts=attempts+1, updated_at=?, video_url=COALESCE("
                 "(SELECT COALESCE(NULLIF(mi.download_url, ''), mi.source_url) FROM media_items mi "
                 "WHERE mi.unique_id = download_tasks.task_key), video_url) WHERE id=?", (_now(), task_id))
-            conn.execute("UPDATE media_items SET status='downloading' WHERE unique_id="
+            # The status of a row is of the file it holds: a row whose file is being downloaded again stays ready.
+            conn.execute("UPDATE media_items SET status='downloading' WHERE final_filename IS NULL AND unique_id="
                          "(SELECT task_key FROM download_tasks WHERE id=?)", (task_id,))
             claimed = dict(conn.execute("SELECT * FROM download_tasks WHERE id=?", (task_id,)).fetchone())
             claimed["previous_url"] = before["video_url"]
@@ -184,12 +185,12 @@ class DownloadsRepository:
 
     async def unneeded_waiting_tasks(self, series_id: int) -> list[dict]:
         """Waiting and failed tasks whose row needs no file: it is out of the plan or gone (nobody retries them), or it is
-        ready already (its file was adopted)."""
+        ready already (its file was adopted) and the task was not asked to replace that file."""
         return await self._db.fetch_all(
             f"SELECT {_TASK} FROM download_tasks WHERE series_id=? AND "
             "task_type='vk_video' AND status IN ('pending', 'error') AND NOT EXISTS "
             "(SELECT 1 FROM media_items mi WHERE mi.unique_id = download_tasks.task_key "
-            f"AND mi.plan_status IN {_IN_PLAN} AND mi.status != 'completed')", (series_id,))
+            f"AND mi.plan_status IN {_IN_PLAN} AND (mi.status != 'completed' OR download_tasks.replace_file=1))", (series_id,))
 
     async def active_tasks_outside_plan(self, series_id: int) -> list[dict]:
         """Downloads under way whose row is no longer in the plan: the plan does not want that video any more."""
@@ -285,7 +286,7 @@ class DownloadsRepository:
     async def fail_publish(self, task_id: int, unique_id: str, message: str) -> None:
         """The file could not be put under its name and certainly was not: the task fails, its work file stays."""
         await self.keep_failed(task_id, unique_id, message)
-        await self._db.execute("UPDATE media_items SET status='error' WHERE unique_id=?", (unique_id,))
+        await self.fail_item(unique_id)
 
     async def publishing_tasks(self, series_id: int | None = None) -> list[dict]:
         """Tasks whose file was taking its name when the process stopped, or whose outcome is not known."""
@@ -367,6 +368,22 @@ class DownloadsRepository:
     async def drop_rename(self, unique_id: str) -> None:
         """The file cannot go to the name (it is held by what is not this row's): the row keeps its name."""
         await self._db.execute("UPDATE media_items SET rename_to=NULL WHERE unique_id=?", (unique_id,))
+
+    async def fail_item(self, unique_id: str) -> None:
+        """The download of the video of a row failed: a row with no file waits as failed (the choice of the reference
+        passes it over); a row that holds its file keeps it and stays ready, the failed task being the record."""
+        await self._db.execute("UPDATE media_items SET status='error' WHERE unique_id=? AND final_filename IS NULL",
+                               (unique_id,))
+
+    async def create_replacing_task(self, unique_id: str, series_id: int, video_url: str, save_path: str,
+                                    work_path: str) -> bool:
+        """A task that downloads the video of a ready row again; its file takes the name of the row when it is whole
+        (publication.py). False when the row has a live task already."""
+        if not await self.replace_or_create_task(unique_id, series_id, video_url, save_path, work_path):
+            return False
+        await self._db.execute("UPDATE download_tasks SET replace_file=1 WHERE task_key=? AND task_type='vk_video' "
+                               "AND status='pending'", (unique_id,))
+        return True
 
     async def set_item_status(self, unique_id: str, status: str) -> None:
         await self._db.execute(

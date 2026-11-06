@@ -74,6 +74,8 @@ _FUSES: dict[str, float] = {
     # The fetch of a page of a service with credentials; it covers an anti-bot challenge solved by a browser (up to 45 s).
     "trackerauth.fetch": 150.0,
     **dict.fromkeys(("downloads.dispatch", "voices.dispatch", "downloads.settle", "voices.settle"), HANDOVER_S),
+    # The user's word to do voice-overs again: records reset, and their downloads admitted.
+    **dict.fromkeys(("voices.dubs.retry", "voices.dubs.redo"), STANDARD_S),
     # What an executor has of a series, and the tracks of a series and their packing: reads and writes of records.
     **dict.fromkeys(("downloads.work.get", "voices.work.get", "voices.tracks.get", "voices.tracks.packed"), QUICK_S),
     # A recount asks the rules once for each source of the series: the fuse of the table is for one source.
@@ -89,6 +91,7 @@ _NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
     "conform.settings.get": (QUICK_S, ("settings.value.get",) * 3),
     "conform.settings.set": (QUICK_S, ("settings.value.get",) * 3 + ("settings.values.set_many",)),
     "composition.queues.get": (QUICK_S, ("voices.settings.get",)),
+    "downloads.reference.refetch": (QUICK_S, ("catalog.series.get",)),
     "conform.workspace": (QUICK_S, ("settings.value.get",)),
     "rules.profiles.delete": (QUICK_S, ("catalog.sources.by_profile",) * 2),
     "scan.edit.begin": (QUICK_S, ("catalog.series.get",)),

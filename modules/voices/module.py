@@ -22,6 +22,10 @@ Command:
   voices.settings.set VoiceSettingsDraft -> VoiceSettingsSaved: groups and order are checked (editor.check) and written
       in one step through settings.values.set_many, or refused with coded problems and nothing written; the next
       read of the settings uses the new values, no restart. Rows keep the key they were recorded under.
+  voices.dubs.retry / voices.dubs.redo DubsScope {series_id, season, episode?, part?, voice_label?} -> {restarted} — the
+      user's word to do the voice-overs of the scope again: those that failed or were rejected (retry), those whose track is
+      placed (redo). They start over from the first source of their chain, what they owned goes to the cleanup journal, and
+      they are admitted to download now — these and no others; no sync begins.
   voices.failures.forget {series_id} -> {reset} — the user's reset of failed attempts, a change of the series (under its
       admission) and not a sync: the rejected and failed voice-overs start over from the first source of their chain and
       wait for the next sync.
@@ -197,7 +201,7 @@ from pydantic import ValidationError
 
 from core import container
 from core.contracts import (RUN_CHANGED, WORK_WITHDRAWN, RunChanged, RunSnapshot, Slot, WorkWithdrawn, slot_of, AlignmentJob, CompositionChanged, CompositionReply, DubEvent, DubEventStatus as E, DubItem,
-                            DubRecord, DubsSnapshot, DubStatus as S, GroupsResolveReply, GroupsResolveRequest,
+                            DubRecord, DubsScope, DubsSnapshot, DubStatus as S, GroupsResolveReply, GroupsResolveRequest,
                             JobStatus, Reference, ReferenceChanged, SnapshotItem, SubmitOutcome, SubmitReply,
                             VoiceSettingsDraft, VoiceSettingsSaved)
 from core import storage
@@ -360,6 +364,8 @@ class VoicesModule(BaseModule):
         self.handle("voices.settings.set", self.on_settings_set)
         self.handle("voices.dispatch", self.on_dispatch, concurrent=True)
         self.handle("voices.failures.forget", self.on_failures_forget)
+        self.handle("voices.dubs.retry", self.on_dubs_retry)
+        self.handle("voices.dubs.redo", self.on_dubs_redo)
         self.handle("voices.settle", self.on_settle, concurrent=True)
         self.handle("voices.work.get", self.on_work_get, concurrent=True)
         self.handle("voices.tracks.get", self.on_tracks_get, concurrent=True)
@@ -536,6 +542,32 @@ class VoicesModule(BaseModule):
         if reset:
             self.log.info("сериал %d: неудачные озвучки сброшены по команде пользователя: %d", series_id, reset)
         return {"reset": reset}
+
+    async def on_dubs_retry(self, env: Envelope) -> dict:
+        """The user's «retry»: the voice-overs of the scope that failed or were rejected are done again, now."""
+        return await self._restart(DubsScope.model_validate(env.payload), (S.REJECTED, S.FAILED), "повторены")
+
+    async def on_dubs_redo(self, env: Envelope) -> dict:
+        """The user's «redo»: the voice-overs of the scope whose track is placed are made anew, now."""
+        return await self._restart(DubsScope.model_validate(env.payload), (S.PLACED,), "пересоздаются")
+
+    async def _restart(self, scope: DubsScope, steps: tuple[S, ...], said: str) -> dict:
+        """The rows of the scope at one of `steps` start over from the first source of their chain; what they owned (the
+        file, the job, the track) goes to the cleanup journal in the same step, and they are admitted to download at once.
+        Only these rows: no sync of the series begins, and the other voice-overs keep waiting for one."""
+        async with self._locks.setdefault(scope.series_id, asyncio.Lock()):
+            found = [row for row in await self.repo.for_series(scope.series_id) if row["status"] in steps
+                     and scope.covers(row["season"], row["episode"], row["part"], row["voice_label"])]
+            restarted = [row for row in found if await self.repo.reset(row["id"], None)]
+            await self.repo.admit(scope.series_id, [(row["season"], row["episode"], row["part"], row["voice_key"])
+                                                    for row in restarted])
+            await self._cleanup.work_off()
+            for row in restarted:
+                await self._announce(await self.repo.get(row["id"]))
+        if restarted:
+            self.log.info("сериал %d: озвучки %s по команде пользователя: %d", scope.series_id, said, len(restarted))
+            await self._admit()
+        return {"restarted": len(restarted)}
 
     async def on_settle(self, env: Envelope) -> None:
         """A sync without download: the voice-overs follow the plan (works the plan does not want are withdrawn, tracks

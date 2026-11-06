@@ -255,6 +255,33 @@ class VoiceOrderBody(RequestModel):
     labels: list[str]
 
 
+class DubsActionBody(RequestModel):
+    """The voice-overs an action of the user is about, without the series: a season, an episode of it (and a part), a group."""
+    season: int
+    episode: int | None = None
+    part: int | None = None
+    voice_label: str | None = None
+
+
+class DubsRestarted(ApiModel):
+    """How many voice-overs of the scope were started over and admitted to download now."""
+    success: bool
+    restarted: int = 0
+
+
+class RefetchBody(RequestModel):
+    """The episode whose reference video is downloaded again, without the series."""
+    season: int
+    episode: int
+    part: int | None = None
+
+
+class RefetchQueued(ApiModel):
+    """Whether a download that replaces the file went to the queue (false: one is in the queue already)."""
+    success: bool
+    queued: bool = False
+
+
 class OutputSwitchBody(RequestModel):
     """The body of the command `scan.output.switch` without the series: an episode, or a whole season, off or on."""
     season: int

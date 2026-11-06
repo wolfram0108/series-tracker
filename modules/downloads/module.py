@@ -28,7 +28,7 @@ Queries / commands:
       files another video displaced and those the configuration took out go, the tasks nobody needs end); nothing is fetched.
   downloads.dispatch {series_id} - the command of scan to fetch what is missing: reconcile, make the tasks of the rows the
       plan wants and that have no file, keep the paths of the live ones current, start the pool. The only place where a
-      download starts.
+      download of a row without a file starts (the user's refetch replaces the file of a ready row).
   downloads.queue.get {} -> {tasks, count} - the live tasks (the window; the snapshot of scan): the tasks of the plan
       and the fetches of the voice-overs (`task_type` fetch: waiting `pending`, under way `downloading` with its progress,
       speed, time left and size, kept with the job as a task keeps them in its row).
@@ -49,6 +49,10 @@ Queries / commands:
       max_parallel_dub_downloads (2 by default).
   downloads.failures.forget {series_id} -> {reset} - the user's reset of failed attempts (a change under the admission
       of the series): the rows whose download failed take part in the choice of the reference again.
+  downloads.reference.refetch {series_id, season, episode, part?} -> {queued} - the user's word to download the reference video
+      of an episode again: a task that replaces the file of its ready row goes to the queue now (`replace_file`); the row keeps
+      its file and stays ready until the new one takes its name. Refused with ValueError(reason): `refetch_no_file` (the episode
+      has no downloaded reference), `refetch_publication_owed` (a publication of the series is not finished; a sync finishes it).
   downloads.publications.finish {series_id} -> {owed} - the first step of a sync, before the move of the folder: the
       publications of containers a stop or a failure cut short are finished (or closed) in the folder they began in.
   downloads.items.rename {series_id, names: {key: name}} -> {renamed} - the names the plan gives the ready files of the series now
@@ -95,6 +99,7 @@ from core import BaseModule, BusRequestError, storage
 from core.contracts import WORK_WITHDRAWN, SeriesKind, Slot, SourceType, WorkWithdrawn, availability, slot_of
 from core.db import Database
 from core.envelope import Envelope
+from core.reasons import reason
 from core.work_report import WorkReport
 from core.retry import UNTIMED, Budget, retrying
 
@@ -210,6 +215,7 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.items.rename", self.on_items_rename)
         self.handle("downloads.publications.finish", self.on_publications_finish)
         self.handle("downloads.failures.forget", self.on_failures_forget)
+        self.handle("downloads.reference.refetch", self.on_reference_refetch)
         self.handle("downloads.item.set_filename", self.on_set_filename)
         self.handle("downloads.item.set_status", self.on_set_status)
         self.handle("series.deleted", self.on_series_deleted)
@@ -593,6 +599,32 @@ class DownloadsModule(BaseModule):
             await self._contribute(series_id)
         return {"reset": reset}
 
+    async def on_reference_refetch(self, env: Envelope) -> dict:
+        """The user asked for the reference video of an episode to be downloaded again: a task that replaces the file of its
+        row goes to the queue now. The row keeps its file and stays ready until the new one takes its name; the new file is
+        a new revision of the row, and the voice-overs aligned to the old one are aligned again (voices)."""
+        series_id, season, episode = int(env.payload["series_id"]), int(env.payload["season"]), int(env.payload["episode"])
+        part = env.payload.get("part")
+        series = await self.request("catalog.series.get", {"series_id": series_id})
+        async with self._turn(series, in_run=False) as free:
+            if not free:
+                raise ValueError(reason("refetch_publication_owed"))
+            item = next((each for each in await self.repo.reference_items(series_id)
+                         if (each["season"], each["episode_start"], each["part"]) == (season, episode, part)
+                         and not each["superseded_by"] and each["status"] == "completed"), None)
+            if item is None:
+                raise ValueError(reason("refetch_no_file", season=season, episode=episode))
+            full = await self.repo.item(item["unique_id"])
+            queued = await self.repo.create_replacing_task(
+                item["unique_id"], series_id, full.get("download_url") or full["source_url"],
+                await self.library.target(series, full), self.library.work_path_for(series, item["unique_id"]))
+        if queued:
+            self.log.info("серия %d, s%02de%02d: референс поставлен на повторную загрузку по команде пользователя",
+                          series_id, season, episode)
+            await self._broadcast_queue()
+            await self._pump()
+        return {"queued": queued}
+
     async def on_publications_finish(self, env: Envelope) -> dict:
         """The first step of a sync: the publications of containers a stop or a failure cut short are finished (or closed)
         before anything moves the folder of the series or acts on its files (И-61)."""
@@ -750,7 +782,7 @@ class DownloadsModule(BaseModule):
             if task["previous_url"] != task["video_url"] and not await self.library.clear_task_files(task):
                 # A work file made from another address would be taken for this video: nothing is fetched over it.
                 await self.repo.mark_error(task_id, "рабочий файл прежнего адреса не удалён")
-                await self.repo.set_item_status(uid, "error")
+                await self.repo.fail_item(uid)
                 return
 
             stream_url, stream_headers, stream_error, progressive = await self._resolve_stream(
@@ -778,7 +810,7 @@ class DownloadsModule(BaseModule):
                     await self.repo.requeue_task(task_id)
                 else:
                     await self.repo.mark_error(task_id, error)
-                    await self.repo.set_item_status(uid, "error")
+                    await self.repo.fail_item(uid)
                     self.log.error("загрузка %s не удалась: %s", uid, error)
         except asyncio.CancelledError:
             stopped = True
@@ -788,7 +820,7 @@ class DownloadsModule(BaseModule):
         except Exception as exc:  # noqa: BLE001 - an error does not take the module down
             self.log.exception("сбой воркера загрузки %d", task_id)
             await self.repo.mark_error(task_id, f"внутренняя ошибка: {exc}")
-            await self.repo.set_item_status(uid, "error")
+            await self.repo.fail_item(uid)
         finally:
             self._active.pop(task_id, None)
             self._last_db_write.pop(task_id, None)

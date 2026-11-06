@@ -165,3 +165,19 @@ class VoiceSettingsSaved(BaseModel):
     saved: bool
     problems: list[SettingProblem]
     settings: VoiceSettingsView
+
+
+class DubsScope(BaseModel):
+    """The voice-overs a command of the user is about: of a season, an episode of it (and one part of the episode), and of
+    one group or of all of them."""
+
+    series_id: int
+    season: int
+    episode: int | None = None
+    part: int | None = None
+    voice_label: str | None = None
+
+    def covers(self, season: int, episode: int, part: int, voice_label: str) -> bool:
+        return (season == self.season and (self.episode is None or episode == self.episode)
+                and (self.part is None or part == self.part)
+                and (self.voice_label is None or voice_label == self.voice_label))

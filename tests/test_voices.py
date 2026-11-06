@@ -3448,3 +3448,45 @@ async def test_a_reading_of_the_open_runs_older_than_the_end_of_a_run_does_not_o
     neighbours.before_runs, neighbours.runs_as_of = None, 6
     await voices._take_open_runs()
     assert 7 in voices._in_run and voices._run_values[7] == taken
+
+
+# --- the user's word to do voice-overs again, now (Р-70) ---------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_retry_of_a_rejected_voice_over_fetches_it_again_now_and_leaves_the_others_as_they_are(dubs):
+    """«Повторить» does what it says: the rejected voice-over of the scope starts over from the first source of its chain
+    and goes to download at once, with no sync; the placed track of the other voice stays."""
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", RedHeadSound={"ok": False, "refused": True}))
+    await statuses_until(sub, ["aligned", "placed", "rejected"])
+    fetched = len(neighbours.fetches)
+
+    assert await probe.request("voices.dubs.retry", {"series_id": 7, "season": 1, "episode": 1,
+                                                     "voice_label": "BlackCat"}, timeout=5) == {"restarted": 0}
+    assert await probe.request("voices.dubs.retry", {"series_id": 7, "season": 1, "episode": 1}, timeout=5) == {
+        "restarted": 1}
+    await settled(neighbours, fetched + 1)
+    by_voice = {r["voice_key"]: r for r in await rows(probe)}
+    assert (by_voice["RedHeadSound"]["status"], by_voice["RedHeadSound"]["attempt"]) == ("downloading", 0)
+    assert neighbours.fetches[-1]["url"] == "https://site/title.html#kodik-RedHeadSound-1"
+    assert by_voice["BlackCat"]["status"] == "placed"
+
+
+@pytest.mark.asyncio
+async def test_a_redo_of_a_placed_voice_over_makes_its_track_anew_now_and_its_old_track_goes_to_the_journal(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", RedHeadSound={"ok": False, "refused": True}))
+    await statuses_until(sub, ["aligned", "placed", "rejected"])
+    placed = {r["voice_key"]: r for r in await rows(probe)}["BlackCat"]
+    fetched = len(neighbours.fetches)
+
+    assert await probe.request("voices.dubs.redo", {"series_id": 7, "season": 1}, timeout=5) == {"restarted": 1}
+    await settled(neighbours, fetched + 1)
+    by_voice = {r["voice_key"]: r for r in await rows(probe)}
+    assert by_voice["BlackCat"]["status"] == "downloading" and by_voice["BlackCat"]["output_path"] is None
+    assert by_voice["RedHeadSound"]["status"] == "rejected"  # a redo is of the placed tracks only
+    # The old track is removed, or waits in the cleanup journal until its removal is done.
+    assert not os.path.exists(placed["output_path"]) or placed["output_path"] in {
+        each["path"] for each in await voices.repo.cleanup_list()}

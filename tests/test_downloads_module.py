@@ -1592,3 +1592,82 @@ async def test_the_reset_of_failed_attempts_makes_the_failed_videos_of_the_serie
     assert await probe.request("downloads.failures.forget", {"series_id": 2}, timeout=5) == {"reset": 1}
     items = _items(db_path)
     assert (items["failed"]["status"], items["other"]["status"], items["fine"]["status"]) == ("pending", "error", "completed")
+
+
+# --- the user's refetch of a reference: a task that replaces the file of a ready row (Р-70) ---------------------------------
+
+def _in_season_one(db_path, uid):
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE media_items SET season=1 WHERE unique_id=?", (uid,))
+
+
+def _ready(db_path, media_dir, uid="ref", episode=1):
+    _add_item(db_path, uid, episode, status="completed", filename=f"Серия {episode:02d}.mp4")
+    _in_season_one(db_path, uid)
+    with open(os.path.join(media_dir, f"Серия {episode:02d}.mp4"), "wb") as f:
+        f.write(b"old video")
+
+
+@pytest.mark.asyncio
+async def test_a_refetch_downloads_the_reference_again_and_the_row_keeps_its_file_until_the_new_one_takes_its_name(system):
+    bus, _, dl, probe, db_path, media_dir = system
+    _ready(db_path, media_dir)
+    dl.gate = asyncio.Event()
+    rev = _items(db_path)["ref"]["file_rev"]
+
+    reply = await probe.request("downloads.reference.refetch", {"series_id": 2, "season": 1, "episode": 1}, timeout=5)
+
+    assert reply == {"queued": True}
+    assert await _wait(lambda: bool(dl.started))
+    row = _items(db_path)["ref"]
+    assert (row["status"], row["final_filename"]) == ("completed", "Серия 01.mp4")  # still ready while the new one comes
+    assert [(task["status"], task["replace_file"]) for task in _tasks(db_path)] == [("downloading", 1)]
+    assert await probe.request("downloads.reference.refetch", {"series_id": 2, "season": 1, "episode": 1},
+                               timeout=5) == {"queued": False}  # one replacement at a time
+    dl.gate.set()
+    assert await _wait(lambda: _items(db_path)["ref"]["file_rev"] == rev + 1)
+    assert open(os.path.join(media_dir, "Серия 01.mp4"), "rb").read() == b"video"
+    assert await _wait(lambda: _tasks(db_path) == [])
+
+
+@pytest.mark.asyncio
+async def test_a_refetch_that_fails_leaves_the_row_ready_with_its_file_and_the_failed_task_as_the_record(system):
+    _, _, dl, probe, db_path, media_dir = system
+    _ready(db_path, media_dir)
+    dl.fail_urls.add("https://vk.com/video-1_1")
+
+    await probe.request("downloads.reference.refetch", {"series_id": 2, "season": 1, "episode": 1}, timeout=5)
+
+    assert await _wait(lambda: [task["status"] for task in _tasks(db_path)] == ["error"])
+    row = _items(db_path)["ref"]
+    assert (row["status"], row["final_filename"]) == ("completed", "Серия 01.mp4")
+    assert open(os.path.join(media_dir, "Серия 01.mp4"), "rb").read() == b"old video"
+
+
+@pytest.mark.asyncio
+async def test_a_waiting_refetch_is_not_ended_by_a_sync_as_a_task_nobody_needs(system):
+    _, fake, dl, probe, db_path, media_dir = system
+    _ready(db_path, media_dir)
+    dl.gate = asyncio.Event()
+    _add_item(db_path, "busy", 2)  # takes the only place of the pool first
+    fake.settings["max_parallel_downloads"] = "1"
+    probe.publish_event("settings.changed", {"key": "max_parallel_downloads", "value": "1"})
+    probe.publish_event("downloads.dispatch", {"series_id": 2})
+    assert await _wait(lambda: dl.started == ["https://vk.com/video-1_2"])
+
+    await probe.request("downloads.reference.refetch", {"series_id": 2, "season": 1, "episode": 1}, timeout=5)
+    await probe.request("downloads.settle", {"series_id": 2}, timeout=10)
+
+    assert [(task["task_key"], task["status"]) for task in _tasks(db_path) if task["task_key"] == "ref"] == [("ref", "pending")]
+    dl.gate.set()
+    assert await _wait(lambda: _items(db_path)["ref"]["file_rev"] >= 1 and _tasks(db_path) == [])
+
+
+@pytest.mark.asyncio
+async def test_a_refetch_of_an_episode_without_a_downloaded_reference_is_refused(system):
+    _, _, _, probe, db_path, _ = system
+    _add_item(db_path, "waits", 1)
+    _in_season_one(db_path, "waits")
+    with pytest.raises(BusRequestError, match="refetch_no_file"):
+        await probe.request("downloads.reference.refetch", {"series_id": 2, "season": 1, "episode": 1}, timeout=5)
+    assert _tasks(db_path) == []

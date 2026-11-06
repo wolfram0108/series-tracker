@@ -205,6 +205,9 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 | GET | `/api/series/{series_id}/output` | Референс каждой серии и отметка (`scan.output.get`) | — |
 | GET | `/api/series/{series_id}/output/queues?season=&episode=` | Очередь референса и очереди озвучек групп уровня в порядке ядра, со значениями рычагов (`composition.queues.get`); серия без сезона — 422 | — |
 | PUT | `/api/series/{series_id}/output/settings` | Значение рычага на уровне сериала, сезона или серии (`composition.settings.set`); вариант в очереди референса без одиночной играющей строки и вариант в очереди озвучки без играющей строки — отказ `not_allowed` | — |
+| POST | `/api/series/{series_id}/output/dubs/retry` | «Повторить»: неудачные и отклонённые озвучки охвата (`season`, `episode?`, `part?`, `voice_label?`) начинаются заново и идут в загрузку сразу (`voices.dubs.retry`) | — |
+| POST | `/api/series/{series_id}/output/dubs/redo` | «Пересоздать»: озвучки охвата с уложенной дорожкой делаются заново сразу (`voices.dubs.redo`); контейнер берёт новые дорожки в синхронизации | — |
+| POST | `/api/series/{series_id}/output/reference/refetch` | «Скачать заново»: референс серии (`season`, `episode`, `part?`) скачивается заново сразу; файл заменяется, когда новый целый (`downloads.reference.refetch`) | — |
 | PUT | `/api/series/{series_id}/output/switch` | Отключить или включить серию, а сезон целиком — без `episode` (`scan.output.switch`) | — |
 | POST | `/api/series/{series_id}/output/settings/reset` | Вернуть рычаги уровня в наследование (`composition.settings.reset`) | — |
 

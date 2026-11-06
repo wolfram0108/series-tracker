@@ -245,3 +245,32 @@ async def test_the_queues_of_a_level_are_the_answer_of_composition(tmp_path):
     assert response.status_code == 200 and response.json() == queues
     assert owners.asked("composition.queues.get") == [{"series_id": 1, "season": 4, "episode": 11}]
     assert alone.status_code == 422  # an episode is told within its season
+
+
+async def test_the_actions_on_a_track_go_to_their_owners_inside_the_admission_and_start_no_sync(tmp_path):
+    """«Повторить», «Пересоздать», «Скачать заново»: each is one command of the owner of the work, under the admission
+    of a change of the series."""
+    answers = {"voices.dubs.retry": {"restarted": 1}, "voices.dubs.redo": {"restarted": 2},
+               "downloads.reference.refetch": {"queued": True}}
+    async with serving(tmp_path, answers) as (client, owners, _, spy):
+        retry = await client.post("/api/series/1/output/dubs/retry", json={"season": 4, "episode": 11, "voice_label": "A"})
+        redo = await client.post("/api/series/1/output/dubs/redo", json={"season": 4})
+        refetch = await client.post("/api/series/1/output/reference/refetch", json={"season": 4, "episode": 11})
+    assert [each.json() for each in (retry, redo, refetch)] == [
+        {"success": True, "restarted": 1}, {"success": True, "restarted": 2}, {"success": True, "queued": True}]
+    assert owners.asked("voices.dubs.retry") == [
+        {"series_id": 1, "season": 4, "episode": 11, "part": None, "voice_label": "A"}]
+    assert owners.asked("voices.dubs.redo") == [
+        {"series_id": 1, "season": 4, "episode": None, "part": None, "voice_label": None}]
+    assert owners.asked("downloads.reference.refetch") == [{"series_id": 1, "season": 4, "episode": 11, "part": None}]
+    assert owners.asked("scan.series.run") == []
+    assert topics(spy) == ["scan.edit.begin", "voices.dubs.retry", "scan.edit.end", "scan.edit.begin", "voices.dubs.redo",
+                           "scan.edit.end", "scan.edit.begin", "downloads.reference.refetch", "scan.edit.end"]
+
+
+async def test_a_refusal_of_a_refetch_is_the_owners_answer(tmp_path):
+    def refuse(payload):
+        raise ValueError(reason("refetch_no_file", season=4, episode=11))
+    async with serving(tmp_path, {"downloads.reference.refetch": refuse}) as (client, owners, _, spy):
+        response = await client.post("/api/series/1/output/reference/refetch", json={"season": 4, "episode": 11})
+    assert response.status_code == 400 and parse(response.json()["error"])["code"] == "refetch_no_file"
