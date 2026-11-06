@@ -61,7 +61,7 @@ const off = computed(() => allOff(props.episodes))
 // The state of the videos (the files of the references) and of the voice-overs of the season, counted as the cards are.
 const meters = computed(() => {
   const video = { loaded: 0, pending: 0, error: 0 }
-  const voices = { done: 0, down: 0, align: 0, wait: 0, error: 0 }
+  const voices = { done: 0, down: 0, align: 0, wait: 0, absent: 0, error: 0 }
   for (const item of items.value) {
     for (const cell of item.cells) {
       if (cell.isReference) {
@@ -197,6 +197,7 @@ function step(by: number): void {
 .meter-bar .is-align { background: var(--color-blue); }
 .meter-bar .is-wait { background: #ced4da; }
 .meter-bar .is-error { background: var(--color-red-1); }
+.meter-bar .is-absent { background: var(--color-yellow-1); }
 .meter-text { font-size: 0.75rem; color: var(--color-gray-600); white-space: nowrap; }
 .season-settings { min-block-size: 2rem; padding-block: 0.25rem; font-size: 0.85rem; }
 .season-switch {
@@ -220,6 +221,9 @@ function step(by: number): void {
 .episode-tile.is-down { background: linear-gradient(135deg, #009688, #00796D); color: #fff; }
 .episode-tile.is-align { background: var(--color-blue); color: #fff; }
 .episode-tile.is-wait { background: linear-gradient(135deg, #f0f2f5, #e9ecef); color: var(--color-gray-600); }
+.episode-tile.is-partial {
+  background: repeating-linear-gradient(45deg, #4CAF50 0 0.4rem, #e0b52a 0.4rem 0.8rem); color: #fff;
+}
 .episode-tile.is-error { background: linear-gradient(135deg, #dc3545, #c82333); color: #fff; }
 .episode-tile.is-off { background: linear-gradient(135deg, #6c757d, #5a6268); color: #fff; }
 </style>

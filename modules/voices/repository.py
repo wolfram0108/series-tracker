@@ -16,7 +16,6 @@ from typing import Any, Callable, Collection, Iterable
 
 from core.contracts import DubStatus as S
 from core.db import Database
-from core.reasons import reason
 
 from . import lifecycle
 from .lifecycle import Transition
@@ -42,8 +41,6 @@ def _in(steps: Iterable[S]) -> tuple[str, tuple[str, ...]]:
 # What a row points at and how each kind of pointer is removed.
 POINTERS = (("output_path", "artifact"), ("move_from", "artifact"), ("aligned_path", "path"), ("temp_path", "path"))
 HANDED_OVER = "handed over"
-# Stored as it is written, so that a failure for want of any source can be told from the others by equality.
-NOT_IN_ANY_SOURCE = reason("not_in_any_source")
 _UPSERT = ("ON CONFLICT (path) DO UPDATE SET kind=excluded.kind, error=excluded.error, "
            "scope=COALESCE(excluded.scope, voice_cleanup.scope), version=voice_cleanup.version + 1, "
            "updated_at=excluded.updated_at")
@@ -168,14 +165,15 @@ class VoicesRepository:
     async def upsert(self, series_id: int, season: int, episode: int, part: int, voice_key: str, label: str,
                      chain: list[dict[str, Any]], *, offer: bool) -> bool:
         """Plan a voice-over: a new row is created; an existing one takes the fresh chain only where nothing was done
-        yet. A row that is downloading, ready or further is left alone. An empty chain is a failure.
+        yet. A row that is downloading, ready or further is left alone. An empty chain is no failure: no source has the
+        voice-over for the episode, and the row is `absent` until one does.
 
         A new row is not admitted to download: a sync of the series admits it (`admit`). With `offer` (that sync) a row
         that failed or waits is offered again from its main candidate. Without it a failed row is left alone, except one
-        that failed for want of any source and now has one: nothing was tried, so nothing is retried. A waiting row
+        that was absent and now has a source: nothing was tried, so nothing is retried. A waiting row
         keeps the file it was linked to only while its chain is the same. True when the row was created or taken over."""
-        status = S.PENDING.value if chain else S.FAILED.value
-        error = None if chain else NOT_IN_ANY_SOURCE
+        status = S.PENDING.value if chain else lifecycle.ABSENT.target.value
+        error = None
         marks, steps = _in(lifecycle.OFFER.sources)
         if offer:
             where, extra = f"voice_dubs.status {marks}", steps
@@ -183,8 +181,8 @@ class VoicesRepository:
             where = ("((voice_dubs.status = ? AND voice_dubs.attempt = 0 AND (voice_dubs.chain IS NOT excluded.chain "
                      "OR voice_dubs.voice_label IS NOT excluded.voice_label OR voice_dubs.status IS NOT excluded.status "
                      "OR voice_dubs.error IS NOT excluded.error)) "
-                     "OR (voice_dubs.status = ? AND voice_dubs.error = ? AND excluded.status = ?))")
-            extra = (S.PENDING.value, S.FAILED.value, NOT_IN_ANY_SOURCE, S.PENDING.value)
+                     "OR (voice_dubs.status = ? AND excluded.status IS NOT voice_dubs.status))")
+            extra = (S.PENDING.value, lifecycle.ABSENT.target.value)
         return bool(await self._db.execute(
             "INSERT INTO voice_dubs (series_id, season, episode, part, voice_key, "
             "voice_label, chain, status, error, updated_at, admitted) VALUES (?,?,?,?,?,?,?,?,?,?,0) "

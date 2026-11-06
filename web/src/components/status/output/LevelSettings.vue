@@ -45,7 +45,8 @@ const tracks = computed(() => props.order.map((group, index) => {
   return { group, pos: index + 1, counts }
 }))
 const PILL: Partial<Record<TrackState | "reference", string>> = {
-  reference: "pill-primary", done: "pill-success", down: "pill-primary", align: "pill-primary", wait: "pill-secondary", error: "pill-danger",
+  reference: "pill-primary", done: "pill-success", down: "pill-primary", align: "pill-primary", wait: "pill-secondary",
+  absent: "pill-warning", error: "pill-danger",
 }
 const countText = (state: TrackState | "reference", count: number): string => state === "reference"
   ? `${t("output.queue.reference")} ${count}` : t(`output.meter.${state === "none" ? "wait" : state}`, { n: count })

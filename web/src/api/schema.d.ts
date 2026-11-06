@@ -561,7 +561,7 @@ export interface paths {
         put?: never;
         /**
          * Retry Dubs
-         * @description «Повторить»: the voice-overs of the scope that failed or were rejected start over and go to download now.
+         * @description The retry of the window: the voice-overs of the scope that failed or were rejected start over and go to download now.
          */
         post: operations["retry_dubs_api_series__series_id__output_dubs_retry_post"];
         delete?: never;
@@ -581,7 +581,7 @@ export interface paths {
         put?: never;
         /**
          * Redo Dubs
-         * @description «Пересоздать»: the voice-overs of the scope whose track is placed are made anew, now; the container of the
+         * @description The redo of the window: the voice-overs of the scope whose track is placed are made anew, now; the container of the
          *     episode takes the new tracks at the next sync.
          */
         post: operations["redo_dubs_api_series__series_id__output_dubs_redo_post"];
@@ -602,7 +602,7 @@ export interface paths {
         put?: never;
         /**
          * Refetch Reference
-         * @description «Скачать заново»: the reference video of the episode is downloaded again now; its file is replaced when the new
+         * @description The refetch of the window: the reference video of the episode is downloaded again now; its file is replaced when the new
          *     one is whole, and the voice-overs of the episode are aligned to it again.
          */
         post: operations["refetch_reference_api_series__series_id__output_reference_refetch_post"];
@@ -1928,7 +1928,7 @@ export interface components {
          * @description Which sentence explains a state when there is no reason to show (several steps share a state).
          * @enum {string}
          */
-        DubHint: "planned" | "download_queued" | "downloading" | "ready" | "awaiting_answer" | "aligning_wait" | "aligning_run" | "aligned" | "done" | "packed";
+        DubHint: "planned" | "download_queued" | "downloading" | "ready" | "awaiting_answer" | "aligning_wait" | "aligning_run" | "aligned" | "done" | "packed" | "absent";
         /**
          * DubItem
          * @description `part` is None for an episode without parts: a voice-over belongs to one part of an episode.
@@ -1958,13 +1958,13 @@ export interface components {
          * @description What the user sees of a voice-over.
          * @enum {string}
          */
-        DubState: "planned" | "download_queued" | "downloading" | "align_queued" | "running" | "done" | "error";
+        DubState: "planned" | "download_queued" | "downloading" | "align_queued" | "running" | "done" | "error" | "absent";
         /**
          * DubStatus
          * @description The step a voice-over of an episode is at; the row in the database holds exactly one of these.
          * @enum {string}
          */
-        DubStatus: "pending" | "downloading" | "ready" | "aligning" | "aligned" | "placed" | "rejected" | "failed";
+        DubStatus: "pending" | "downloading" | "ready" | "aligning" | "aligned" | "placed" | "rejected" | "failed" | "absent";
         /**
          * DubsActionBody
          * @description The voice-overs an action of the user is about, without the series: a season, an episode of it (and a part), a group.
@@ -2890,7 +2890,7 @@ export interface components {
          * @description The status an event carries: a step, or a change that is not a step of its own.
          * @enum {string}
          */
-        DubEventStatus: "pending" | "downloading" | "ready" | "aligning" | "aligned" | "placed" | "rejected" | "failed" | "moved" | "stale" | "removed";
+        DubEventStatus: "pending" | "downloading" | "ready" | "aligning" | "aligned" | "placed" | "rejected" | "failed" | "absent" | "moved" | "stale" | "removed";
         /**
          * DubEvent
          * @description One voice-over, whole, so the interface asks nothing back; the newest (`epoch`, `rev`) wins.

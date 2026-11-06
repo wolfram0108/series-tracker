@@ -341,6 +341,9 @@ describe("the strip and the state of an episode", () => {
     expect(status(view("completed", dubOf("B", "align_queued")), ["A", "B"])).toBe("align")
     expect(status(view("pending", dubOf("B", "planned")), ["A", "B"])).toBe("wait")
     expect(status(view("completed", dubOf("B", "error")), ["A", "B"])).toBe("error")
+    // A voice-over no source has is no error: the episode is put together in part.
+    expect(status(view("completed", dubOf("B", "absent"), dubOf("C", "done")), ["A", "B", "C"])).toBe("partial")
+    expect(status(view("completed", dubOf("B", "absent"), dubOf("C", "planned")), ["A", "B", "C"])).toBe("wait")
     expect(status(episodeOf({ references: [ref(1, 1, { mark: "none" })] }), [])).toBe("error")
     expect(status(episodeOf({ references: [ref(1, 1, { mark: "off" })] }), [])).toBe("off")
   })

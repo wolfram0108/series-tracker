@@ -36,7 +36,8 @@ const groups = computed(() => props.cells.map((cell) => cell.group))
 const referenceGroup = computed(() => props.cells.find((cell) => cell.isReference)?.group ?? null)
 const groupQueue = (group: string) => (props.queues?.groups ?? []).find((each) => each.group === group)
 const PILL: Record<EpisodeStatus, string> = {
-  ready: "pill-success", down: "pill-primary", align: "pill-primary", wait: "pill-secondary", error: "pill-danger", off: "pill-secondary",
+  ready: "pill-success", partial: "pill-warning", down: "pill-primary", align: "pill-primary", wait: "pill-secondary",
+  error: "pill-danger", off: "pill-secondary",
 }
 </script>
 

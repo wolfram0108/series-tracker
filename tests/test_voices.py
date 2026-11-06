@@ -478,7 +478,7 @@ async def test_a_new_dispatch_offers_failed_voices_again_from_the_main_source(du
 
 
 @pytest.mark.asyncio
-async def test_an_episode_nobody_offers_is_a_failure_not_silence(dubs):
+async def test_an_episode_nobody_offers_is_absent_and_shown_not_a_failure_and_not_silence(dubs):
     probe, neighbours, _, _ = dubs
     neighbours.plan.append((1, 4))
     reference = neighbours.sources[0]
@@ -488,9 +488,10 @@ async def test_an_episode_nobody_offers_is_a_failure_not_silence(dubs):
     neighbours.sources[1]["episodes"].remove(3)
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 2)
-    missing = [r for r in await rows(probe) if r["status"] == "failed"]
+    missing = [r for r in await rows(probe) if r["status"] == "absent"]
     assert [r["episode"] for r in missing] == [3, 4]
-    assert {code_of(r["error"]) for r in missing} == {"not_in_any_source"}
+    assert [r["error"] for r in missing] == [None, None]
+    assert not [r for r in await rows(probe) if r["status"] == "failed"]
     assert len(neighbours.fetches) == 2
 
 
@@ -3198,7 +3199,7 @@ async def test_a_failed_download_is_offered_again_by_a_sync_and_not_by_a_change_
 
 
 @pytest.mark.asyncio
-async def test_a_voice_over_that_failed_for_want_of_a_source_is_planned_again_when_the_layout_has_one(dubs):
+async def test_a_voice_over_absent_from_every_source_is_planned_when_the_layout_has_one(dubs):
     probe, neighbours, voices, bus = dubs
     kodik = neighbours.sources[1]
     kodik["episodes"].remove(3)
@@ -3206,7 +3207,7 @@ async def test_a_voice_over_that_failed_for_want_of_a_source_is_planned_again_wh
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 2)
     await quiet(voices)
-    assert next(r for r in await rows(probe) if r["episode"] == 3)["status"] == "failed"
+    assert next(r for r in await rows(probe) if r["episode"] == 3)["status"] == "absent"
     kodik["episodes"].append(3)
     kodik["links"]["3"] = link
     layout_changed(probe)

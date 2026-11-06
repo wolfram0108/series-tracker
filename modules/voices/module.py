@@ -791,7 +791,7 @@ class VoicesModule(BaseModule):
         """The user left variants out. Work that runs from one of them, or a track made from it, is not wanted at any
         step: it stops, what it made goes to the journal, and the voice-over is planned again from the others. Work
         that runs from another candidate goes on, without the variants left out among its next ones."""
-        if row["status"] in (S.PENDING, S.FAILED) or not row["chain"]:  # nothing was begun: the plan offers it again
+        if row["status"] in (S.PENDING, S.FAILED, S.ABSENT) or not row["chain"]:  # nothing was begun: the plan offers it again
             return
 
         offered = {each.url for each in dub.chain}

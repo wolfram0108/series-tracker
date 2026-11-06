@@ -16,6 +16,9 @@ class DubStatus(StrEnum):
     PLACED = "placed"
     REJECTED = "rejected"
     FAILED = "failed"
+    # No source has a row of the voice-over for the episode: the normal case of an episode put together in part, not a
+    # failure. The row waits for a source to bring the voice-over and is planned then.
+    ABSENT = "absent"
 
 
 class DubEventStatus(StrEnum):
@@ -29,6 +32,7 @@ class DubEventStatus(StrEnum):
     PLACED = "placed"
     REJECTED = "rejected"
     FAILED = "failed"
+    ABSENT = "absent"
     MOVED = "moved"
     STALE = "stale"
     REMOVED = "removed"
@@ -44,6 +48,8 @@ class DubState(StrEnum):
     RUNNING = "running"
     DONE = "done"
     ERROR = "error"
+    # No source has the voice-over for the episode: the episode is put together in part.
+    ABSENT = "absent"
 
 
 class DubHint(StrEnum):
@@ -59,6 +65,7 @@ class DubHint(StrEnum):
     ALIGNED = "aligned"
     DONE = "done"
     PACKED = "packed"
+    ABSENT = "absent"
 
 
 class Reason(BaseModel):

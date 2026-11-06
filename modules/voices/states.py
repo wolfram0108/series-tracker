@@ -24,6 +24,7 @@ _STATE_OF = {
     DubEventStatus.READY: DubState.ALIGN_QUEUED,
     DubEventStatus.PLACED: DubState.DONE, DubEventStatus.MOVED: DubState.DONE,
     DubEventStatus.REJECTED: DubState.ERROR, DubEventStatus.FAILED: DubState.ERROR,
+    DubEventStatus.ABSENT: DubState.ABSENT,
 }
 
 

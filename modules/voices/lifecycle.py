@@ -36,14 +36,17 @@ REFUSE = _t("refuse", {S.ALIGNING, S.PLACED}, S.REJECTED)
 NEXT_SOURCE = _t("next_source", {S.ALIGNING}, S.PENDING)
 FAIL = _t("fail", {S.PENDING, S.DOWNLOADING, S.ALIGNING, S.ALIGNED, S.PLACED}, S.FAILED)
 RESTART = _t("restart", {S.READY, S.ALIGNING, S.ALIGNED, S.PLACED, S.REJECTED, S.FAILED}, S.PENDING)
-OFFER = _t("offer", {S.PENDING, S.FAILED}, S.PENDING)
+OFFER = _t("offer", {S.PENDING, S.FAILED, S.ABSENT}, S.PENDING)
+# The plan has no source of the voice-over for the episode: nothing was begun, or what failed is not offered again.
+ABSENT = _t("absent", {S.PENDING, S.FAILED}, S.ABSENT)
 
-TRANSITIONS = (CLAIM, DOWNLOADED, RETRY, FILE_LOST, SEND, UNSEND, ALIGNED, PLACE, REFUSE, NEXT_SOURCE, FAIL, RESTART, OFFER)
+TRANSITIONS = (CLAIM, DOWNLOADED, RETRY, FILE_LOST, SEND, UNSEND, ALIGNED, PLACE, REFUSE, NEXT_SOURCE, FAIL, RESTART, OFFER,
+               ABSENT)
 
 # Steps in which a voice-over has not reached its end.
 WORKING = frozenset({S.PENDING, S.DOWNLOADING, S.ALIGNING})
 # Steps in which the work on a voice-over is over (until its reference is replaced or it is offered again).
-FINAL = frozenset({S.PLACED, S.REJECTED, S.FAILED})
+FINAL = frozenset({S.PLACED, S.REJECTED, S.FAILED, S.ABSENT})
 # Steps in which a voice-over holds files in the temporary directory or is on its way to them.
 HOLDS_FILES = frozenset({S.DOWNLOADING, S.READY, S.ALIGNING, S.ALIGNED})
 # Steps that wait for the reference video and the other voice-overs of the episode.

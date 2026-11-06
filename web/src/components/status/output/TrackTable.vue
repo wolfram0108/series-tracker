@@ -15,16 +15,16 @@ const emit = defineEmits<{
   (e: "redo", group: string): void
 }>()
 
-// A voice-over no source has a line of is not helped by trying again.
-const NO_SOURCE = new Set(["no_source", "not_in_any_source"])
 // The track of the reference is the file of the video: it is worded as the files of the plan are.
 const FILE_WORDS: Record<TrackState, MessageKey> = {
   done: "output.file.status.completed", down: "output.file.status.downloading", align: "output.file.status.processing",
-  wait: "output.file.status.pending", error: "output.file.status.error", none: "output.file.status.none",
+  wait: "output.file.status.pending", error: "output.file.status.error", absent: "output.file.status.none",
+  none: "output.file.status.none",
 }
 const stateText = (cell: TrackCell): string => t(cell.isReference ? FILE_WORDS[cell.state] : `output.track.state.${cell.state}`)
 const PILL: Record<TrackState, string> = {
-  done: "pill-success", down: "pill-primary", align: "pill-primary", wait: "pill-secondary", error: "pill-danger", none: "pill-secondary",
+  done: "pill-success", down: "pill-primary", align: "pill-primary", wait: "pill-secondary", error: "pill-danger",
+  absent: "pill-warning", none: "pill-secondary",
 }
 
 type Action = "refetch" | "retry" | "redo" | null
@@ -40,7 +40,7 @@ const rows = computed(() => {
     const detail = line?.dub?.detail ?? null
     const action: Action = cell.isReference ? (cell.state === "done" ? "refetch" : null)
       : cell.state === "done" ? "redo"
-      : cell.state === "error" && !(detail && NO_SOURCE.has(detail.code)) ? "retry" : null
+      : cell.state === "error" ? "retry" : null
     return {
       cell, sourceId, part: line?.part ?? null,
       where: line && (line.playerLabel ?? line.player) ? `${line.playerLabel ?? line.player}${height}` : "",

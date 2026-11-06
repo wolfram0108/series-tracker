@@ -393,14 +393,15 @@ export function perRowOf(places: number, tracks: number, episodes: number): numb
 }
 
 /** The state of one track of an episode, as a cell of its strip shows it. */
-export type TrackState = "done" | "down" | "align" | "wait" | "error" | "none"
+/** `absent`: no source has the voice-over for the episode, the normal case of an episode put together in part. */
+export type TrackState = "done" | "down" | "align" | "wait" | "error" | "absent" | "none"
 
 const FILE_STATE: Record<string, TrackState> = {
   completed: "done", downloading: "down", processing: "down", publishing: "down", pending: "wait", error: "error",
 }
 const DUB_STATE: Record<Schemas["DubState"], TrackState> = {
   done: "done", downloading: "down", download_queued: "down", align_queued: "align", running: "align", planned: "wait",
-  error: "error",
+  error: "error", absent: "absent",
 }
 
 /** One cell of the strip of an episode: the track at its place in the container. The track of the reference is the
@@ -423,9 +424,10 @@ export function trackCells(view: EpisodeView, order: readonly string[]): TrackCe
   })
 }
 
-/** The state of an episode as its card is coloured: switched off; an error anywhere (no reference, a track that failed);
- *  work under way (a download, then an alignment); everything done; else waiting. */
-export type EpisodeStatus = "off" | "error" | "down" | "align" | "ready" | "wait"
+/** The state of an episode as its card is coloured: switched off; an error anywhere (no reference, a track whose work
+ *  failed); work under way (a download, then an alignment); everything done; done but for the voice-overs no source has
+ *  (put together in part, which is no error); else waiting. */
+export type EpisodeStatus = "off" | "error" | "down" | "align" | "ready" | "partial" | "wait"
 
 export function episodeStatus(view: EpisodeView, cells: readonly TrackCell[]): EpisodeStatus {
   if (isOff(view)) return "off"
@@ -434,7 +436,8 @@ export function episodeStatus(view: EpisodeView, cells: readonly TrackCell[]): E
   if (cells.some((cell) => cell.state === "down")) return "down"
   if (cells.some((cell) => cell.state === "align")) return "align"
   const present = cells.filter((cell) => cell.state !== "none")
-  return present.length > 0 && present.every((cell) => cell.state === "done") ? "ready" : "wait"
+  if (present.length === 0 || !present.every((cell) => cell.state === "done" || cell.state === "absent")) return "wait"
+  return present.some((cell) => cell.state === "absent") ? "partial" : "ready"
 }
 
 /** The mark of a source in its series: its place in the list of the series (from 1), its colour (0–15 of the palette)

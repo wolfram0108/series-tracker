@@ -59,15 +59,20 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
   all: unset; box-sizing: border-box; position: relative; overflow: hidden; min-inline-size: 0; cursor: pointer;
   border-radius: calc(var(--card-row) * var(--round) + var(--card-pad)); box-shadow: var(--card-shadow); font: inherit;
 }
+.episode-card {
+  --stripe: rgba(255, 255, 255, var(--stripe-intensity));
+}
 .episode-card::before {
   content: ""; position: absolute; inset: 0;
-  background-image: linear-gradient(45deg, rgba(255, 255, 255, var(--stripe-intensity)) 25%, transparent 25%, transparent 50%,
-    rgba(255, 255, 255, var(--stripe-intensity)) 50%, rgba(255, 255, 255, var(--stripe-intensity)) 75%, transparent 75%, transparent 100%);
+  background-image: linear-gradient(45deg, var(--stripe) 25%, transparent 25%, transparent 50%,
+    var(--stripe) 50%, var(--stripe) 75%, transparent 75%, transparent 100%);
   background-size: 2.5rem 2.5rem;
 }
 .episode-card:hover { box-shadow: var(--card-hover-shadow); }
 .episode-card:focus-visible, .episode-card.is-open { outline: 0.1875rem solid var(--color-blue); outline-offset: 0.125rem; }
 .is-ready { background: linear-gradient(135deg, #4CAF50, #409444); }
+/* Put together in part: the green of done with the yellow stripes of what no source has. */
+.is-partial { background: linear-gradient(135deg, #4CAF50, #409444); --stripe: rgba(255, 193, 7, 0.6); }
 .is-down { background: linear-gradient(135deg, #009688, #00796D); }
 .is-align { background: linear-gradient(135deg, var(--color-blue-1), color-mix(in srgb, var(--color-blue-1) 85%, black)); }
 .is-wait { background: linear-gradient(135deg, #f0f2f5, #e9ecef); }
