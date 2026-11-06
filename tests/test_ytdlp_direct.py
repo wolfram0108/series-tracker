@@ -38,7 +38,7 @@ case "$last" in
 esac
 local=$(cat "$FAKE_DIR/local_duration")
 case "$*" in
-  *format=duration,start_time*) printf '{"format": {"duration": "%s", "start_time": "0.000000"}, "streams": [{"index": 0, "codec_type": "video", "start_time": "0.000000", "duration": "%s"}]}\\n' "$local" "$local" ;;
+  *format=format_name,duration,start_time*) printf '{"format": {"duration": "%s", "start_time": "0.000000"}, "streams": [{"index": 0, "codec_type": "video", "start_time": "0.000000", "duration": "%s"}]}\\n' "$local" "$local" ;;
   *-read_intervals*) [ "$local" != "0" ] && printf '0,%s,0.000000\\n' "$local" ;;
   *) echo "$local" ;;
 esac
@@ -267,6 +267,10 @@ async def test_a_download_owns_its_name_from_its_first_step_to_the_publication(f
         await storage.call(lambda: None, owns=os.path.dirname(target))
     proceed.set()
     assert await asyncio.wait_for(download, 10) == (True, "")
+    # The hold is let go by a callback of its own once the programs have ended: the test waits for that signal.
+    free = asyncio.get_running_loop().create_future()
+    storage.when_free(target, lambda: free.done() or free.set_result(None))
+    await asyncio.wait_for(free, 10)
     assert os.path.isfile(target) and not storage.busy(target)
 
 
