@@ -4,7 +4,7 @@ import type { Queues } from "../../../composables/outputCalls"
 import { useCardGrid } from "../../../composables/useCardGrid"
 import { t } from "../../../i18n"
 import {
-  badgeOf, cardStatus, cutOf, cutState, shareOf, type CompilationView, type CutItem, type CutState,
+  badgeOf, cardStatus, cutOf, cutState, shareOf, takes, type CompilationView, type CutItem, type CutState,
 } from "../../../lib/compilations"
 import { trackCells, type EpisodeView, type QueueName, type QueueRow, type SourceMark as Mark } from "../../../lib/output"
 import type { CompilationRow } from "./CompilationTable.vue"
@@ -48,18 +48,23 @@ const head = computed(() => props.view.ref)
 const range = (view: CompilationView) => `${view.ref.start}–${view.ref.end}`
 const playerOf = (view: CompilationView) => props.labels[`${view.ref.source_id}:${view.ref.player}`] ?? view.ref.player
 const byEpisode = computed(() => new Map(props.episodes.map((view) => [view.episode, view] as const)))
+// The height of the reference an episode has now (a video held on disk may be higher than the layout shows).
+const height = (_season: number, episode: number) =>
+  byEpisode.value.get(episode)?.references.find((each) => each.source_id != null)?.height ?? null
 
 const items = computed(() => (props.view.episodes ?? []).flatMap((each) => {
   const view = byEpisode.value.get(each.episode)
   if (!view) return []
-  const cut = each.member ? cutOf(props.cuts, props.view.season, each.episode) : undefined
-  const status = cardStatus(each.member, cut)
+  const member = takes(props.view, each.episode, height)
+  const cut = member ? cutOf(props.cuts, props.view.season, each.episode) : undefined
+  const status = cardStatus(member, cut)
   const elsewhere = each.elsewhere ? props.season.find((other) => other.ref.key === each.elsewhere) : undefined
-  const note = each.member ? undefined : elsewhere
+  const absence = each.member && !member ? "not_better" : each.absence ?? "own"
+  const note = member ? undefined : elsewhere
     ? t("output.compilation.absence.elsewhere", { letter: badgeOf(elsewhere).letter, range: range(elsewhere) })
-    : t(`output.compilation.absence.${each.absence ?? "own"}`)
-  const fits = props.view.take && (each.member || each.absence === "elsewhere" || each.absence === "own")
-  return [{ view, each, cut, status, note, fits, cells: trackCells(view, []) }]
+    : t(`output.compilation.absence.${absence}`)
+  const fits = props.view.take && absence !== "not_better" && (member || each.absence === "elsewhere" || each.absence === "own")
+  return [{ view, each: { ...each, member }, cut, status, note, fits, cells: trackCells(view, []) }]
 }))
 
 const cutCounts = computed(() => {
@@ -88,11 +93,12 @@ const rows = computed<CompilationRow[]>(() => {
   if (episode === null) return []
   return props.season.filter((view) => view.ref.start <= episode && episode <= view.ref.end).map((view) => {
     const each = (view.episodes ?? []).find((one) => one.episode === episode)
-    const member = !!each?.member
+    const member = takes(view, episode, height)
     const cut = member ? cutOf(props.cuts, view.season, episode) : undefined
     return {
       view, badge: badgeOf(view), member, player: playerOf(view), cut: cutState(cut), share: shareOf(cut),
-      fits: view.take && (member || each?.absence === "elsewhere" || each?.absence === "own"),
+      fits: view.take && (member || ((each?.absence === "elsewhere" || each?.absence === "own")
+        && (height(view.season, episode) ?? 0) < (view.ref.height ?? 0))),
     }
   })
 })

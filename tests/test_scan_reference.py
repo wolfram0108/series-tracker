@@ -595,3 +595,12 @@ def test_an_episode_in_parts_is_not_cut_out_of_a_compilation():
 
 def _slot(chosen, episode):
     return next(each for each in chosen if each.reference.episode == episode)
+
+
+def test_a_compilation_no_higher_than_the_reference_held_on_disk_is_not_carried():
+    """The reference held on disk (its row is not in the layout) is 2160p: a compilation of 2160p is not cut by it."""
+    from core.contracts import Reference as Ref
+    held = Ref(season=1, episode=2, mark=ReferenceMark.BY_LEVEL, source_id=5, row_key="gone", player="vk", height=2160)
+    rows = [row(S, 2, "comp", 1, 1, 3, height=2160)]
+    chosen = _slot(choose(rows, [_member(1, 2)], previous=[held], on_disk=[(5, "gone")], sources=(1, 2, 5)), 2)
+    assert chosen.reference.row_key == "gone" and chosen.reference.compilation is None

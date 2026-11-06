@@ -136,6 +136,10 @@ def _with_compilation(chosen: Chosen, members: dict) -> Chosen:
     member = members.get((chosen.reference.season, chosen.reference.episode))
     if member is None or chosen.reference.part is not None or chosen.reference.source_id is None:
         return chosen
+    # A compilation is cut only by a lower single video: the reference may be one the layout does not show (held on disk),
+    # which the rule of membership could not weigh.
+    if chosen.reference.height is not None and (member.height or 0) <= chosen.reference.height:
+        return chosen
     return Chosen(chosen.reference.model_copy(update={"compilation": member}), chosen.row)
 
 

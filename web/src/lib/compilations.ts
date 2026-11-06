@@ -35,12 +35,25 @@ export const badgeOf = (view: CompilationView): Badge =>
 
 const slot = (season: number, episode: number): string => `${season}:${episode}`
 
-/** The compilation every episode stands in, by "season:episode". */
-export function membersOf(views: readonly CompilationView[]): Map<string, Badge> {
+/** The height of the reference an episode has now (its single video), null when not known. */
+export type ReferenceHeight = (season: number, episode: number) => number | null
+
+/** Whether the episode is cut out of the compilation: it stands in it and the compilation is higher than the reference
+ *  the episode has now — which may be a video held on disk that the layout does not show (the same rule as the choice of
+ *  the reference, scan/reference.py). */
+export function takes(view: CompilationView, episode: number, height: ReferenceHeight): boolean {
+  const each = (view.episodes ?? []).find((one) => one.episode === episode)
+  if (!each?.member) return false
+  const own = height(view.season, episode)
+  return own === null || (view.ref.height ?? 0) > own
+}
+
+/** The compilation every episode is cut out of, by "season:episode". */
+export function membersOf(views: readonly CompilationView[], height: ReferenceHeight = () => null): Map<string, Badge> {
   const found = new Map<string, Badge>()
   for (const view of views) {
     for (const each of view.episodes ?? []) {
-      if (each.member) found.set(slot(view.season, each.episode), badgeOf(view))
+      if (takes(view, each.episode, height)) found.set(slot(view.season, each.episode), badgeOf(view))
     }
   }
   return found

@@ -9,7 +9,7 @@ import {
 } from "../../../lib/output"
 import { useCardGrid } from "../../../composables/useCardGrid"
 import VoiceOrder from "../VoiceOrder.vue"
-import { badgeOf, membersOf, memberOf, type CompilationView } from "../../../lib/compilations"
+import { badgeOf, membersOf, memberOf, takes, type CompilationView } from "../../../lib/compilations"
 import CompilationOutline from "./CompilationOutline.vue"
 import EpisodeCard from "./EpisodeCard.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
@@ -92,10 +92,14 @@ const voicesText = computed(() => (Object.entries(meters.value.voices) as [keyof
 
 const { grid, ruler, wide, columns, layout } = useCardGrid(() => props.mode, () => order.value.length, () => props.total)
 
-const members = computed(() => membersOf(props.compilations))
+// The height of the reference each episode has now: a compilation no higher than it is not cut, whatever the layout says.
+const heights = computed(() => new Map(props.episodes.map((view) => [view.episode,
+  view.references.find((each) => each.source_id != null)?.height ?? null] as const)))
+const height = (_season: number, episode: number) => heights.value.get(episode) ?? null
+const members = computed(() => membersOf(props.compilations, height))
 const outline = computed(() => props.compilations.map((view) => ({
   color: badgeOf(view).color,
-  episodes: (view.episodes ?? []).filter((each) => each.member).map((each) => each.episode),
+  episodes: (view.episodes ?? []).filter((each) => takes(view, each.episode, height)).map((each) => each.episode),
 })).filter((each) => each.episodes.length > 0))
 
 const opened = computed(() => items.value.find((item) => item.view.episode === props.opened) ?? null)

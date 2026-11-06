@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { badgeOf, cardStatus, letterOf, membersOf, outlinePieces, shareOf, type CompilationView, type Geometry } from "./compilations"
+import { badgeOf, cardStatus, letterOf, membersOf, outlinePieces, shareOf, takes, type CompilationView, type Geometry } from "./compilations"
 
 const GEOMETRY: Geometry = { x0: 0, y0: 0, pitchX: 110, pitchY: 60, w: 100, h: 50, radius: 8, rows: 3, cols: 3 }
 
@@ -23,6 +23,13 @@ describe("compilations", () => {
     expect(badgeOf(view(17, 1, 2, [])).color).toBe(2)
     const members = membersOf([view(0, 1, 3, [1, 2]), view(1, 3, 4, [3])])
     expect([members.get("1:1")?.letter, members.get("1:3")?.letter, members.get("1:4")]).toEqual(["A", "B", undefined])
+  })
+
+  it("does not take an episode whose reference now is as high as the compilation, though the layout puts it in", () => {
+    const compilation = view(0, 1, 3, [1, 2, 3])
+    const height = (_season: number, episode: number) => (episode === 3 ? 2160 : episode === 2 ? 720 : null)
+    expect([1, 2, 3].map((episode) => takes(compilation, episode, height))).toEqual([true, true, false])
+    expect([...membersOf([compilation], height).keys()]).toEqual(["1:1", "1:2"])
   })
 
   it("colours a card by its cut and turns off an episode that is not in the compilation", () => {
