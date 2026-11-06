@@ -27,6 +27,11 @@ Query:
       daemon's history on its own, unless it ended in an error; off, the history keeps it until the owner deletes it.
   conform.settings.set {url, work_dir, work_dir_remote} -> ConformSettingsSaved {saved, problems, settings}: checked as a whole, written
       through settings.values.set_many and taken at once, or refused with coded problems and nothing written.
+  conform.reverse ReverseSubmit {compilation, episodes: [{path, atrack}], out_dir, label?} -> ReverseReply {outcome, jobs,
+      reason?, retry} (stage 12): episodes cut out of one compilation, one job of kind `reverse` each, on the timeline
+      of the single video of the episode (the edges the compilation lacks are taken from it). The folder of each episode
+      is the label of its job and carries the key that finds it again (`… #key`); `jobs` maps the keys to the jobs the
+      service named. The outcome reads as for conform.submit; a key the answer does not name is asked by its key.
   conform.workspace {} -> {downloads, conform}: the two folders inside the work folder, where voice-overs wait for
       alignment and where the service works; both empty while no work folder is named.
   conform.workspace {dub_folder} -> {out_dir, cache_dir}: the folders the daemon is asked to write the aligned
@@ -44,8 +49,8 @@ Query:
 Event:
   conform.queue.changed {daemon, tasks}   the whole picture on every change and whenever an
                                           interface connects (gateway.sse.clients)
-  conform.job.finished {job_id, status, error, results: [{dub, ok, refused, skipped, out_path, suspect,
-      critical, warnings, resid_ms, error}]}   once per job that ended (done, failed, cancelled);
+  conform.job.finished {job_id, kind, status, error, results: [{dub, ok, refused, skipped, out_path, suspect,
+      critical, warnings, resid_ms, error, from_ref_s, from_dub_s}]}   once per job that ended (done, failed, cancelled);
       out_path is a local path. A pair that is not `ok` is `refused` only when the service itself turned it down (its trace
       holds a decision that went `abort`); otherwise it crashed in the service and no judgement of the voice-over was made.
       The results of a failed or stopped job are those of the pairs it had finished.
@@ -70,7 +75,8 @@ from typing import Any
 import httpx
 
 from core import BaseModule, BusRequestError
-from core.contracts import (AlignmentJob, ConformSettingsDraft, ConformSettingsSaved, DubResult, JobStatus,
+from core.contracts import (AlignmentJob, ConformSettingsDraft, ConformSettingsSaved, DubResult, JobKind, JobStatus,
+                            ReverseReply, ReverseSubmit, SubmitOutcome,
                             SubmitReply)
 from core.envelope import Envelope
 from core.reasons import describe, reason
@@ -86,7 +92,7 @@ ENDED = ("done", "failed", "cancelled")
 # The word of the service's trace for a gate that turns a pair down (the one gate there is: a foreign video).
 ABORT = "abort"
 
-_JOB_FIELDS = ("id", "label", "status", "progress", "stage", "stage_pct", "detail", "dub_index",
+_JOB_FIELDS = ("id", "kind", "label", "status", "progress", "stage", "stage_pct", "detail", "dub_index",
                "dub_total", "cur_dub", "elapsed_s", "error", "created_at", "updated_at")
 
 
@@ -101,7 +107,7 @@ def compact_job(job: dict[str, Any]) -> dict[str, Any]:
         "resid_ms": result.get("audio_resid_ms"), "coverage": result.get("audio_coverage"),
         "cuts": result.get("audio_cuts"), "suspect": bool(result.get("suspect")),
         "warnings": list(result.get("warnings") or []), "critical": list(result.get("critical") or []),
-        "error": result.get("error"),
+        "error": result.get("error"), "from_ref_s": result.get("from_ref_s"), "from_dub_s": result.get("from_dub_s"),
     } for result in job.get("results") or []]
     return view
 
@@ -147,13 +153,14 @@ def finished_view(job: dict[str, Any], to_local: dict[str, str]) -> dict[str, An
             return path
 
     return AlignmentJob(
-        job_id=job.get("id"), status=job.get("status"), error=job.get("error"),
+        job_id=job.get("id"), kind=job.get("kind") or JobKind.EPISODE, status=job.get("status"), error=job.get("error"),
         results=[DubResult(
             dub=result.get("dub"), ok=bool(result.get("ok")), refused=refused_by_service(result),
             skipped=bool(result.get("skipped")),
             out_path=local(result.get("out_path")), suspect=bool(result.get("suspect")),
             critical=list(result.get("critical") or []), warnings=list(result.get("warnings") or []),
             resid_ms=result.get("audio_resid_ms"), error=result.get("error"),
+            from_ref_s=result.get("from_ref_s"), from_dub_s=result.get("from_dub_s"),
         ) for result in job.get("results") or []]).model_dump(mode="json")
 
 
@@ -176,6 +183,7 @@ class ConformModule(BaseModule):
 
     def register(self) -> None:
         self.handle("conform.submit", self.on_submit)
+        self.handle("conform.reverse", self.on_reverse)
         self.handle("conform.job.get", self.on_job_get)
         self.handle("conform.workspace", self.on_workspace)
         self.handle("conform.cancel", self.on_cancel)
@@ -262,6 +270,46 @@ class ConformModule(BaseModule):
             return SubmitReply.uncertain(reason("conform_no_answer", error=str(exc))).model_dump()
         self.log.info("conform: поставлена задача %s (%s), озвучек %d", job["id"], label, len(body["dubs"]))
         return SubmitReply.accepted(str(job["id"])).model_dump()
+
+    async def on_reverse(self, env: Envelope) -> dict:
+        """A batch of cuts out of one compilation (stage 12): one job per episode, each labelled by the folder of its
+        episode, which carries the key that finds the job again. The outcome is told as for `conform.submit`."""
+        request = ReverseSubmit.model_validate(env.payload)
+        label = request.label or os.path.basename(request.compilation)
+        if self._client is None:
+            return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE, reason=reason("conform_not_configured")).model_dump()
+        if not self._daemon.get("up"):
+            return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE,
+                                reason=reason("conform_down", error=self._daemon.get("error") or "")).model_dump()
+        mapping = await self._path_map()
+        if not mapping:
+            return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE, reason=reason("conform_no_work_dir")).model_dump()
+        keys = [split_label(os.path.basename(os.path.dirname(each.path)))[1] for each in request.episodes]
+        try:  # before anything is sent: a problem here is a certain refusal
+            if not all(keys):
+                raise ValueError(reason("conform_reverse_no_key"))
+            body = {"compilation": translate(request.compilation, mapping),
+                    "episodes": [translate(each.path, mapping) for each in request.episodes],
+                    "out_dir": translate(request.out_dir, mapping), "extend_edges": True, "keep_tmp": False,
+                    "label": label, "dub_atracks": [each.atrack for each in request.episodes]}
+        except ValueError as exc:
+            self.log.warning("conform: разбор %s отклонён: %s", label, describe(str(exc)))
+            return ReverseReply(outcome=SubmitOutcome.REJECTED, reason=str(exc)).model_dump()
+        try:
+            jobs = await self._client.reverse(body)
+        except DaemonRefused as exc:
+            self.log.warning("conform: разбор %s отклонён: %s", label, describe(str(exc)))
+            return ReverseReply(outcome=SubmitOutcome.REJECTED, reason=str(exc)).model_dump()
+        except NotDelivered as exc:
+            self.log.warning("conform: разбор %s не поставлен: %s", label, exc)
+            return ReverseReply(outcome=SubmitOutcome.UNAVAILABLE, reason=reason("conform_unreachable", error=str(exc)),
+                                retry=True).model_dump()
+        except Unconfirmed as exc:
+            self.log.warning("conform: ответа на разбор %s нет: %s", label, exc)
+            return ReverseReply(outcome=SubmitOutcome.UNCERTAIN, reason=reason("conform_no_answer", error=str(exc))).model_dump()
+        named = {key: str(job["id"]) for job in jobs if (key := split_label(job.get("label"))[1]) in keys}
+        self.log.info("conform: поставлен разбор %s — задач %d из %d", label, len(named), len(keys))
+        return ReverseReply(outcome=SubmitOutcome.ACCEPTED, jobs=named).model_dump()
 
     @staticmethod
     def _request_body(payload: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any]:

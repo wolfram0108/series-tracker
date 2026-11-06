@@ -34,12 +34,23 @@ class DubResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     resid_ms: float | None = None
     error: str | None = None
+    # A cut out of a compilation (stage 12): seconds of the video taken from the compilation and from the episode itself.
+    from_ref_s: float | None = None
+    from_dub_s: float | None = None
+
+
+class JobKind(StrEnum):
+    """`episode`: voice-overs laid on a reference; `reverse`: an episode cut out of a compilation on its own timeline."""
+
+    EPISODE = "episode"
+    REVERSE = "reverse"
 
 
 class AlignmentJob(BaseModel):
     """The end of a job: `conform.job.finished` and the reply of `conform.job.get`."""
 
     job_id: str | None = None
+    kind: JobKind = JobKind.EPISODE
     status: JobStatus
     error: str | None = None
     results: list[DubResult] = Field(default_factory=list)
@@ -85,3 +96,31 @@ class SubmitReply(BaseModel):
     @classmethod
     def uncertain(cls, reason: str) -> "SubmitReply":
         return cls(outcome=SubmitOutcome.UNCERTAIN, reason=reason)
+
+
+class ReverseEpisode(BaseModel):
+    """An episode of a batch of cuts: its single video, in a folder whose name is the label of its job (it carries the
+    key that finds the job again), and the audio track of it that is the video's own sound."""
+
+    path: str
+    atrack: int = 0
+
+
+class ReverseSubmit(BaseModel):
+    """The query `conform.reverse`: the episodes to cut out of one compilation, one job each, all writing in `out_dir`
+    (the compilation is prepared once for the folder)."""
+
+    compilation: str
+    episodes: list[ReverseEpisode]
+    out_dir: str
+    label: str | None = None
+
+
+class ReverseReply(BaseModel):
+    """The reply of `conform.reverse`: the outcome of the batch as for one job (`SubmitReply`), and, when it was taken,
+    the job of each key the service named. A key the answer does not name is not known to be taken: it is asked by its key."""
+
+    outcome: SubmitOutcome
+    jobs: dict[str, str] = Field(default_factory=dict)
+    reason: str | None = None
+    retry: bool = False

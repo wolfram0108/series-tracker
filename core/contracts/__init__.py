@@ -3,7 +3,8 @@
 A producer builds its payload with one of these models and a consumer reads it with the same one,
 so the two cannot drift apart unnoticed. Modules import their contracts from here, never from each other.
 """
-from .alignment import AlignmentJob, DubResult, JobStatus, SubmitOutcome, SubmitReply
+from .alignment import (AlignmentJob, DubResult, JobKind, JobStatus, ReverseEpisode, ReverseReply, ReverseSubmit, SubmitOutcome,
+                        SubmitReply)
 from .composition import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                           CompositionPreviewRequest, CompositionReply, PreviewLine, SeasonVoiceOrder, VoiceOrderSet, VoiceSpan,
                           CompositionRow, EpisodeRef, Exclusion, PlayerSummary, SourceStatus, SourceSummary)
@@ -27,7 +28,7 @@ from .voices import (DubEvent, DubEventStatus, DubHint, DubItem, DubRecord, Dubs
                      VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView)
 
 __all__ = ["Absence", "CompilationEpisode", "CompilationRef", "CompilationView", "compilation_key", "parse_compilation_key",
-           "COMPILATION_MEMBER", "COMPILATION_TAKE", "Action", "NotAllowed", "allowed", "refusal", "require", "variant_state", "LEVER_FORMS", "WORK_WITHDRAWN", "WorkWithdrawn", "RUN_CHANGED", "WORK_STATE", "RunChanged", "RunSnapshot", "Slot", "WorkState", "slot_of", "AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitReply", "DubEvent",
+           "COMPILATION_MEMBER", "COMPILATION_TAKE", "Action", "NotAllowed", "allowed", "refusal", "require", "variant_state", "LEVER_FORMS", "WORK_WITHDRAWN", "WorkWithdrawn", "RUN_CHANGED", "WORK_STATE", "RunChanged", "RunSnapshot", "Slot", "WorkState", "slot_of", "AlignmentJob", "DubResult", "JobKind", "JobStatus", "ReverseEpisode", "ReverseReply", "ReverseSubmit", "SubmitOutcome", "SubmitReply", "DubEvent",
            "DubEventStatus", "DubHint", "DubItem", "DubRecord", "DubsSnapshot", "DubState", "DubStatus", "Reason", "SnapshotItem", "SettingProblem", "VoiceSettingsDraft",
            "VoiceSettingsSaved", "VoiceSettingsView", "DubsScope", "ConformSettingsDraft", "ConformSettingsSaved",
            "ConformSettingsView",

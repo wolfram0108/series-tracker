@@ -16,6 +16,7 @@ class FakeClient:
         self.scripts = list(scripts)
         self.connections = 0
         self.enqueued = []
+        self.reversed = []
         self.cancelled = []
         self.refuse = False
         self.lose_answers = 0
@@ -51,6 +52,23 @@ class FakeClient:
             self.known[job_id] = {"id": job_id, "label": body.get("label"), "status": "queued"}
             raise Unconfirmed("ReadTimeout: no answer")
         return {"id": "j-new", "status": "queued"}
+
+    async def reverse(self, body):
+        """A batch of cuts: one job per episode, labelled by the folder of the episode, as the daemon does."""
+        self.reversed.append(body)
+        if isinstance(self.refuse, Exception):
+            raise self.refuse
+        if self.refuse:
+            raise DaemonRefused(reason("daemon_refused", status=422, text="bad path"))
+        jobs = []
+        for path in body["episodes"]:
+            job_id = f"r-{len(self.known) + 1}"
+            self.known[job_id] = {"id": job_id, "kind": "reverse", "label": path.rsplit("/", 2)[-2], "status": "queued"}
+            jobs.append(self.known[job_id])
+        if self.lose_answers:
+            self.lose_answers -= 1
+            raise Unconfirmed("ReadTimeout: no answer")
+        return jobs
 
     async def job(self, job_id):
         return self.known.get(job_id)

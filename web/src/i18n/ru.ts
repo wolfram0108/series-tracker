@@ -139,6 +139,8 @@ export const ru = {
   "reason.conform_plot_missing": "график не найден",
   "reason.conform_no_answer": "нет ответа сервиса выравнивания: {error}",
   "reason.daemon_busy": "демон просит повторить позже ({status})",
+  "reason.daemon_no_job": "демон ответил без номера задачи",
+  "reason.conform_reverse_no_key": "у серии для разбора нет ключа задачи в имени папки",
   "reason.daemon_refused": "демон отклонил задачу ({status}): {text}",
   "reason.path_outside_share": "путь {path} вне общего хранилища демона",
   "reason.stream_closed": "поток событий закрыт демоном",

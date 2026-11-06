@@ -83,7 +83,7 @@ def test_compact_job_keeps_what_the_interface_shows():
     assert view["results"] == [{
         "dub": "kodik__rus__A__720p.mp4", "plot": None, "ok": True, "refused": False, "skipped": False, "resid_ms": 12.5,
         "coverage": 0.97, "cuts": 2, "suspect": False, "warnings": ["drift"], "critical": [],
-        "error": None}]
+        "error": None, "from_ref_s": None, "from_dub_s": None}]
     assert view["stage"] == "" and view["dub_total"] == 2
 
 
@@ -389,7 +389,7 @@ async def test_job_get_answers_from_the_mirror_then_the_daemon_then_says_gone():
         assert got["status"] == "done" and got["results"][0]["out_path"].startswith("/nas/")
         assert (await probe.request("conform.job.get", {"job_id": "j7"}, timeout=5))["status"] == "running"
         assert await probe.request("conform.job.get", {"job_id": "nope"}, timeout=5) == {
-            "job_id": "nope", "status": "gone", "error": None, "results": []}
+            "job_id": "nope", "kind": "episode", "status": "gone", "error": None, "results": []}
     finally:
         await runner.stop()
 
@@ -715,3 +715,55 @@ async def test_client_plot_returns_the_picture_or_none_for_a_plot_the_daemon_doe
     assert await client.plot("j1", "a__track.png") == b"png"
     assert await client.plot("j1", "b__track.png") is None
     assert seen == ["/conform/plot/j1/a__track.png", "/conform/plot/j1/b__track.png"]
+
+
+REVERSE = {"compilation": "/nas/torrents/series-tracker/_cuts/7/c1/comp.mp4",
+           "episodes": [{"path": "/nas/torrents/series-tracker/_cuts/7/c1/S s01e02 #k2/ep2.mkv", "atrack": 1},
+                        {"path": "/nas/torrents/series-tracker/_cuts/7/c1/S s01e03 #k3/ep3.mkv"}],
+           "out_dir": "/nas/torrents/series-tracker/_cuts/7/c1/_out", "label": "S 1–13"}
+
+
+@pytest.mark.asyncio
+async def test_a_batch_of_cuts_goes_with_daemon_paths_and_the_keys_find_their_jobs():
+    """Stage 12: one job per episode, labelled by the folder of the episode, which carries its key."""
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: s["daemon"]["up"])
+        reply = await probe.request("conform.reverse", REVERSE, timeout=5)
+        assert reply["outcome"] == "accepted" and set(reply["jobs"]) == {"k2", "k3"}
+        sent = client.reversed[0]
+        assert sent["compilation"] == "/mnt/meganas/media/torrents/series-tracker/_cuts/7/c1/comp.mp4"
+        assert sent["episodes"][0].endswith("/S s01e02 #k2/ep2.mkv") and sent["episodes"][0].startswith("/mnt/meganas/")
+        assert sent["extend_edges"] is True and sent["dub_atracks"] == [1, 0] and sent["keep_tmp"] is False
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_an_episode_folder_without_a_key_is_refused_before_anything_is_sent():
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: s["daemon"]["up"])
+        bad = {**REVERSE, "episodes": [{"path": "/nas/torrents/series-tracker/_cuts/7/c1/plain/ep2.mkv"}]}
+        reply = await probe.request("conform.reverse", bad, timeout=5)
+        assert reply["outcome"] == "rejected" and parse(reply["reason"])["code"] == "conform_reverse_no_key"
+        assert client.reversed == []
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_batch_whose_answer_is_lost_is_uncertain_and_its_jobs_are_known_to_the_daemon():
+    client = FakeClient([("conform.snapshot", {"items": []})])
+    client.lose_answers = 1
+    _, probe, runner = await started(client)
+    try:
+        await until(probe, lambda s: s["daemon"]["up"])
+        reply = await probe.request("conform.reverse", REVERSE, timeout=5)
+        assert reply["outcome"] == "uncertain"
+        found = await probe.request("conform.job.find", {"key": "k3"}, timeout=5)
+        assert found["reachable"] and found["job_id"]
+    finally:
+        await runner.stop()

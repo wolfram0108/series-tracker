@@ -65,38 +65,52 @@ class DaemonClient:
     def __init__(self, base_url: str, http: httpx.AsyncClient | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self._http = http or httpx.AsyncClient()
-        self._fields: frozenset[str] | None = None
-        self._fields_read = False
+        self._fields: dict[str, frozenset[str] | None] = {}
+        self._document: Any = None
 
     async def info(self) -> dict[str, Any]:
         """Version and compute device of the daemon."""
-        self._fields_read = False  # a daemon that came back may speak a newer contract
+        self._fields, self._document = {}, None  # a daemon that came back may speak a newer contract
         health = (await self._http.get(f"{self.base_url}/health", timeout=REQUEST_TIMEOUT_S)).json()
         device = (await self._http.get(f"{self.base_url}/conform/device",
                                        timeout=REQUEST_TIMEOUT_S)).json()
         return {"version": health.get("version"), "device": device.get("device"),
                 "gpu": bool(device.get("gpu")), "gpu_name": device.get("name")}
 
-    async def _body_fields(self) -> frozenset[str] | None:
-        """What a job body may carry, read once from the daemon's schema; an unreadable schema is asked again later."""
-        if not self._fields_read:
-            try:
-                document = _json(await self._http.get(f"{self.base_url}/openapi.json", timeout=REQUEST_TIMEOUT_S))
-            except httpx.HTTPError:
-                return None
-            self._fields, self._fields_read = accepted_fields(document), True
-        return self._fields
+    async def _body_fields(self, route: str = "/conform/enqueue") -> frozenset[str] | None:
+        """What a body of the route may carry, read once from the daemon's schema; an unreadable schema is asked again later."""
+        if route not in self._fields:
+            if self._document is None:
+                try:
+                    self._document = _json(await self._http.get(f"{self.base_url}/openapi.json", timeout=REQUEST_TIMEOUT_S))
+                except httpx.HTTPError:
+                    return None
+            self._fields[route] = accepted_fields(self._document, route)
+        return self._fields[route]
 
     async def enqueue(self, body: dict[str, Any]) -> dict[str, Any]:
         """Queue one episode job; the daemon answers with the job. The outcome is told by what was proved:
         a refusal and a failure before sending are certain, and everything after the sending that is not a
         well-formed acceptance is unconfirmed. The body carries only the fields the daemon's schema accepts."""
-        fields = await self._body_fields()
+        answer = await self._post("/conform/enqueue", body)
+        if not isinstance(answer, dict) or not answer.get("id"):
+            raise Unconfirmed(reason("daemon_no_job"))
+        return answer
+
+    async def reverse(self, body: dict[str, Any]) -> list[dict[str, Any]]:
+        """Queue a batch of cuts out of one compilation; the daemon answers with one job per episode. The outcome is told
+        as for `enqueue`."""
+        answer = await self._post("/conform/reverse", body)
+        if not isinstance(answer, list) or not all(isinstance(each, dict) and each.get("id") for each in answer):
+            raise Unconfirmed(reason("daemon_no_job"))
+        return answer
+
+    async def _post(self, route: str, body: dict[str, Any]) -> Any:
+        fields = await self._body_fields(route)
         if fields is not None:
             body = {key: value for key, value in body.items() if key in fields}
         try:
-            response = await self._http.post(f"{self.base_url}/conform/enqueue", json=body,
-                                             timeout=REQUEST_TIMEOUT_S)
+            response = await self._http.post(f"{self.base_url}{route}", json=body, timeout=REQUEST_TIMEOUT_S)
         except NOT_SENT as exc:
             raise NotDelivered(_problem(exc)) from exc
         except httpx.HTTPError as exc:
@@ -107,12 +121,9 @@ class DaemonClient:
             raise DaemonRefused(reason("daemon_refused", status=response.status_code, text=response.text[:300]))
         try:
             response.raise_for_status()
-            job = response.json()
-            if not isinstance(job, dict) or not job.get("id"):
-                raise ValueError("the answer names no job")
+            return response.json()
         except (httpx.HTTPError, ValueError) as exc:
             raise Unconfirmed(_problem(exc)) from exc
-        return job
 
     async def cancel(self, job_id: str) -> bool:
         """Stop a job and let the daemon drop its temporary files; False when it knows no such job."""
