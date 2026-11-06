@@ -454,6 +454,8 @@ export const ru = {
   "reason.unknown_lever": "Рычага «{lever}» нет в реестре",
   "reason.bad_target": "Цель не подходит рычагу «{lever}»",
   "reason.bad_value": "Значение не подходит рычагу «{lever}»",
+  "reason.bad_level": "Рычаг «{lever}» задаётся на другом уровне",
+  "reason.compilation_not_better": "Компиляция не выше отдельной серии — из неё эту серию не берут",
   "reason.composition_request_failed": "Раскладка не обновлена: запрос «{topic}» не выполнен",
   "reason.composition_error": "Раскладка не обновлена: внутренняя ошибка, подробности в журнале",
   "reason.scan_step_failed": "Синхронизация остановлена на шаге «{step}», подробности в журнале",

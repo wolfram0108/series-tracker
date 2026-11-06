@@ -15,7 +15,8 @@ from core.reasons import reason
 
 Slot = tuple[int, int, int | None]
 
-_KEYS = ("season", "episode", "part", "mark", "source_id", "row_key", "player", "voice_group", "height", "reason")
+_KEYS = ("season", "episode", "part", "mark", "source_id", "row_key", "player", "voice_group", "height", "reason",
+         "compilation")
 
 
 def slot_key(record: Mapping[str, Any]) -> Slot:
@@ -44,7 +45,7 @@ def shown(records: Iterable[Mapping[str, Any]], items: Mapping[str, Mapping[str,
     for record in records:
         if switched_off(record, items, memory, seasons):
             found.append({**record, "mark": ReferenceMark.OFF.value, "source_id": None, "row_key": None, "player": None,
-                          "voice_group": None, "height": None, "reason": reason("reference_off")})
+                          "voice_group": None, "height": None, "reason": reason("reference_off"), "compilation": None})
         else:
             found.append(dict(record))
     return sorted(found, key=lambda each: (each["season"], each["episode"], each["part"] is not None, each["part"] or 0))

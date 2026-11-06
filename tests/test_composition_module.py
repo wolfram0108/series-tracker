@@ -479,7 +479,8 @@ def rich_standard(url: str = PAGE) -> ReleaseTable:
 
 
 def levers_by_episode(reply: CompositionReply) -> dict:
-    return {(e.season, e.episode): {x.lever: x for x in e.levers} for e in reply.settings}
+    return {(e.season, e.episode): {x.lever: x for x in e.levers if not x.lever.startswith("compilation.")}
+            for e in reply.settings}
 
 
 @pytest.mark.asyncio

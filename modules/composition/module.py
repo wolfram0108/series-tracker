@@ -82,7 +82,7 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from core import BaseModule
-from core.contracts import (REFERENCE_ORDER, RUN_CHANGED, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
+from core.contracts import (COMPILATION_MEMBER, REFERENCE_ORDER, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
                             RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
@@ -94,7 +94,7 @@ from core.reasons import reason
 from core.variant_queue import Order
 from core.voice_names import Groups
 
-from . import levers, project, queues, settings
+from . import compilations, levers, project, queues, settings
 from .project import SourceInput
 from .repository import CompositionRepository, StoredSource
 
@@ -210,14 +210,15 @@ class CompositionModule(BaseModule):
                                     sources=[each.summary for each in stored.sources]).model_dump(mode="json")
         records = settings.canonical(stored.records)
         episodes = project.layout_episodes(stored.rows)
+        outcome = compilations.resolve(stored.rows, records, _source_order(stored))
         reply = CompositionReply(
             series_id=request.series_id, rev=stored.rev,
             rows=[row for row in stored.rows if request.include_excluded or not row.excluded],
             sources=[each.summary for each in stored.sources],
-            levels=settings.levels(records, {season for season, _ in episodes}),
-            settings=[EpisodeSettings(season=season, episode=episode,
-                                      levers=settings.effective(records, season, episode))
-                      for season, episode in sorted(episodes)],
+            levels=settings.levels(records, {season for season, _ in episodes},
+                                   [(view.season, view.ref.key) for view in outcome.views]),
+            settings=settings.episode_settings(records, episodes, outcome.members),
+            compilations=outcome.views,
             levers=levers.specs(), availability=availability.table(),
             # A series counted before the orders were kept shows its default order until its next count writes it.
             voice_orders=project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows))
@@ -234,12 +235,25 @@ class CompositionModule(BaseModule):
         orders = project.season_orders(stored.orders, stored.rows, {})
         groups = (orders.get(request.season, []) if request.season is not None
                   else [label for season in sorted(orders) for label in orders[season]])
+        records = settings.canonical(stored.records)
+        lines = availability.lines_of_level(stored.rows, request.season, request.episode)
+        compilation = request.compilation
+        if request.episode is not None and compilation is None:
+            # An episode inherits from the compilation it stands in: its queues read the levers of that level.
+            member = compilations.resolve(stored.rows, records, _source_order(stored)).members.get(
+                (request.season, request.episode))
+            compilation = member.key if member is not None else None
+        elif compilation is not None:
+            found = parse_compilation_key(compilation)
+            if found is None or found[3] != request.season:
+                raise ValueError(reason("bad_target", lever=""))
+            lines = [row for row in lines if row.episode_start is not None and found[4] <= row.episode_start <= found[5]
+                     and not row.is_compilation]
         reference, by_group = queues.build(
-            availability.lines_of_level(stored.rows, request.season, request.episode),
-            settings.effective(settings.canonical(stored.records), request.season, request.episode),
+            lines, settings.effective(records, request.season, request.episode, compilation),
             order, list(dict.fromkeys(groups)), request.episode)
         return QueuesReply(series_id=request.series_id, season=request.season, episode=request.episode,
-                           reference=reference, groups=by_group).model_dump(mode="json")
+                           compilation=request.compilation, reference=reference, groups=by_group).model_dump(mode="json")
 
     async def on_voice_order_set(self, env: Envelope) -> dict:
         """The user's order of the voice-overs of a season: the order of the tracks in its containers (ЭТАП_11). It is a
@@ -345,6 +359,11 @@ class CompositionModule(BaseModule):
             raise ValueError(problem)
         self._require_editable(record.series_id)
         await self._require_pickable(record)
+        if record.lever == COMPILATION_MEMBER and record.value:
+            stored = await self.repo.stored(record.series_id)
+            if not compilations.fits(stored.rows, settings.canonical(stored.records), record.season, record.episode,
+                                     record.value, _source_order(stored)):
+                raise ValueError(reason("compilation_not_better"))
         return await self._edit(record.series_id, lambda records: settings.apply_set(records, record))
 
     def _require_editable(self, series_id: int) -> None:
@@ -388,10 +407,12 @@ class CompositionModule(BaseModule):
             if after == before:
                 return {"ok": True}
             episodes = project.layout_episodes(stored.rows)
-            touched = settings.affected(before, after, episodes)
+            order = _source_order(stored)
+            touched = settings.affected(_settings_of(stored.rows, before, episodes, order),
+                                        _settings_of(stored.rows, after, episodes, order))
             # A header that no episode follows still changes on the screen: that is told to windows, not to consumers.
-            seasons = {season for season, _ in episodes}
-            shown = bool(touched) or settings.levels(before, seasons) != settings.levels(after, seasons)
+            shown = bool(touched) or _headers(stored.rows, before, episodes, order) != _headers(stored.rows, after,
+                                                                                               episodes, order)
             rev = stored.rev + 1 if shown else None
             await self.repo.write(series_id, records=after, rev=rev)
             if shown:
@@ -611,9 +632,11 @@ class CompositionModule(BaseModule):
                 # Without an answered source the layout says nothing of which episodes exist, so nothing is taken away.
                 records = settings.within_episodes(records, layout)
             records_changed = records != before
-            moved = settings.affected(before, records, layout) if records_changed else set()
-            seasons = {season for season, _ in layout}
-            headers_changed = records_changed and settings.levels(before, seasons) != settings.levels(records, seasons)
+            order = {item.source.id: item.source.position for item in inputs}
+            # The membership of an episode follows the rows as well as the levers: what it changes is a change of the episode.
+            moved = settings.affected(_settings_of(stored.rows, before, layout, order),
+                                      _settings_of(result.rows, records, layout, order))
+            headers_changed = _headers(stored.rows, before, layout, order) != _headers(result.rows, records, layout, order)
 
             sources = [StoredSource(item.source.id, item.source.position, self._page_of.get(item.source.id), summary)
                        for item, summary in zip(sorted(inputs, key=lambda i: (i.source.position, i.source.id)),
@@ -685,3 +708,20 @@ class CompositionModule(BaseModule):
         except Exception as exc:  # noqa: BLE001 — any failure of a neighbour is one signal: the recount did not happen
             self.log.error("запрос %s не выполнен: %s: %s", topic, type(exc).__name__, exc)
             raise _Unavailable(topic) from exc
+
+
+def _source_order(stored) -> dict[int, int]:
+    """The place of every source of the series, for the rule of compilations."""
+    return {each.source_id: place for place, each in enumerate(stored.sources)}
+
+
+def _settings_of(rows, records, episodes, order) -> list[EpisodeSettings]:
+    """The levers and the compilation of every episode of the layout."""
+    return settings.episode_settings(records, episodes, compilations.resolve(rows, records, order).members)
+
+
+def _headers(rows, records, episodes, order) -> tuple:
+    """What the headers of the levels and the blocks of compilations show: told to windows when it changes."""
+    outcome = compilations.resolve(rows, records, order)
+    return (settings.levels(records, {season for season, _ in episodes}, [(view.season, view.ref.key) for view in outcome.views]),
+            outcome.views)

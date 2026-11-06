@@ -1,7 +1,8 @@
 """Output settings of one series: the value of every lever for an episode, and the edits of the records behind it.
 
 Pure functions over the records of one series. A record exists only where the user set a value of its own; the
-value of an episode is its own, else its season's, else the series', else the lever's default. "As the level above"
+value of an episode is its own, else that of the compilation it stands in (stage 12), else its season's, else the series',
+else the lever's default. "As the level above"
 is the absence of a record, so it is asked for by a reset of the lever, never by a value.
 """
 from __future__ import annotations
@@ -9,13 +10,18 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Callable, Collection, Iterable, Mapping, Sequence
 
-from core.contracts import (EffectiveLever, Level, LevelSettings, SettingRecord, SettingsReset, ValueShape, group_target,
-                            parse_group_target, parse_variant_target, variant_target)
+from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, CompilationRef, EffectiveLever, EpisodeSettings, Level,
+                            LevelSettings, SettingRecord, SettingsReset, ValueShape, compilation_key, group_target,
+                            parse_compilation_key, parse_group_target, parse_variant_target, variant_target)
 from core.reasons import reason
 
 from . import levers
 
-_Index = dict[str, dict[str | None, dict[tuple[int | None, int | None], Any]]]
+# The scope of a record: (season, episode, compilation key).
+_Scope = tuple[int | None, int | None, str | None]
+_Index = dict[str, dict[str | None, dict[_Scope, Any]]]
+# The level a lever may be set on, where it is not every level.
+_ONLY_ON = {COMPILATION_MEMBER: Level.EPISODE, COMPILATION_TAKE: Level.COMPILATION}
 
 
 def validate(record: SettingRecord) -> str | None:
@@ -27,6 +33,13 @@ def validate(record: SettingRecord) -> str | None:
         return reason("bad_target", lever=record.lever)
     if not lever.accepts(record.value):
         return reason("bad_value", lever=record.lever)
+    if record.compilation is not None and parse_compilation_key(record.compilation) is None:
+        return reason("bad_target", lever=record.lever)
+    if record.compilation is not None and parse_compilation_key(record.compilation)[3] != record.season:
+        return reason("bad_target", lever=record.lever)
+    only = _ONLY_ON.get(record.lever)
+    if only is not None and record.level != only:
+        return reason("bad_level", lever=record.lever)
     return None
 
 
@@ -40,12 +53,26 @@ def validate_reset(scope: SettingsReset) -> str | None:
     return None if lever.accepts_target(scope.target) else reason("bad_target", lever=scope.lever)
 
 
-def effective(records: Sequence[SettingRecord], season: int | None, episode: int | None) -> list[EffectiveLever]:
-    """Every lever's value for an episode (or, without `episode`, for a season; without `season`, for the series).
+def effective(records: Sequence[SettingRecord], season: int | None, episode: int | None,
+              compilation: str | None = None) -> list[EffectiveLever]:
+    """Every lever's value for an episode (or, without `episode`, for a compilation or a season; without `season`, for
+    the series). `compilation` is the key of the compilation the episode stands in, or of the level itself.
 
     A lever without a target gives one entry; a lever with targets gives one per target that has a record on the
     episode's own chain of levels, so a record of another season never adds an entry here."""
-    return _resolve(_index(records), season, episode)
+    return _resolve(_index(records), season, episode, compilation)
+
+
+def episode_settings(records: Sequence[SettingRecord], episodes: Iterable[tuple[int, int]],
+                     members: Mapping[tuple[int, int], CompilationRef | None]) -> list[EpisodeSettings]:
+    """The levers of each episode with the compilation it stands in, in the order of season and episode."""
+    index = _index(records)
+    result = []
+    for season, episode in sorted(set(episodes)):
+        member = members.get((season, episode))
+        result.append(EpisodeSettings(season=season, episode=episode, compilation=member,
+                                      levers=_resolve(index, season, episode, member.key if member else None)))
+    return result
 
 
 def apply_set(records: Sequence[SettingRecord], record: SettingRecord) -> list[SettingRecord]:
@@ -66,10 +93,10 @@ def apply_reset(records: Sequence[SettingRecord], scope: SettingsReset) -> list[
     problem = validate_reset(scope)
     if problem is not None:
         raise ValueError(problem)
-    level = (scope.series_id, scope.season, scope.episode)
+    level = (scope.series_id, scope.season, scope.episode, scope.compilation)
 
     def gone(each: SettingRecord) -> bool:
-        return (each.series_id, each.season, each.episode) == level and (
+        return (each.series_id, each.season, each.episode, each.compilation) == level and (
             scope.lever is None or (each.lever, each.target) == (scope.lever, scope.target))
 
     return canonical([each for each in records if not gone(each)])
@@ -81,6 +108,9 @@ def without_source(records: Sequence[SettingRecord], source_id: int) -> list[Set
     kept: list[SettingRecord] = []
     for each in records:
         lever = levers.get(each.lever)
+        scope = parse_compilation_key(each.compilation)
+        if scope is not None and scope[1] == source_id:
+            continue  # the level of a compilation of that source is gone with it
         if lever is None or source_id not in lever.sources_of(each.target, each.value):
             kept.append(each)
         elif lever.shape == ValueShape.VARIANT_ORDER and source_id not in lever.sources_of(each.target, None):
@@ -100,9 +130,18 @@ def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
     if not renames:
         return list(records)
 
+    def renamed_key(key: Any) -> Any:
+        found = parse_compilation_key(key)
+        if found is None or found[0] not in renames:
+            return key
+        return compilation_key(renames[found[0]], *found[1:])
+
     def moved(record: SettingRecord) -> SettingRecord:
         lever = levers.get(record.lever)
         target, value = record.target, record.value
+        compilation = renamed_key(record.compilation)
+        if lever is not None and lever.shape == ValueShape.COMPILATION:
+            value = renamed_key(value)
         if isinstance(target, str) and (found := parse_group_target(target)) is not None and found in renames:
             target = group_target(renames[found])
         elif isinstance(target, str) and (variant := parse_variant_target(target)) is not None and variant[0] in renames:
@@ -111,8 +150,8 @@ def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
                 and any(isinstance(each, dict) and each.get("group") in renames for each in value)):
             value = _deduplicated([{**each, "group": renames.get(each.get("group"), each.get("group"))}
                                    if isinstance(each, dict) and "group" in each else each for each in value])
-        return record if (target, value) == (record.target, record.value) else record.model_copy(
-            update={"target": target, "value": value})
+        return record if (target, value, compilation) == (record.target, record.value, record.compilation) else \
+            record.model_copy(update={"target": target, "value": value, "compilation": compilation})
 
     kept: list[SettingRecord] = []
     arrived: dict[tuple, list[SettingRecord]] = {}
@@ -164,53 +203,59 @@ def within_episodes(records: Sequence[SettingRecord], episodes: Collection[tuple
                        if each.episode is None or (each.season, each.episode) in episodes])
 
 
-def levels(records: Sequence[SettingRecord], seasons: Iterable[int]) -> list[LevelSettings]:
-    """The levers of the series, then of each of the seasons given: what the headers of the levels show.
+def levels(records: Sequence[SettingRecord], seasons: Iterable[int],
+           compilations: Iterable[tuple[int, str]] = ()) -> list[LevelSettings]:
+    """The levers of the series, then of each of the seasons given, then of each compilation (season, key) given: what
+    the headers of the levels show.
 
     A header is the value of the level itself, so an episode with a value of its own leaves it as it is."""
     index = _index(records)
     return [LevelSettings(season=None, levers=_resolve(index, None, None)),
-            *(LevelSettings(season=season, levers=_resolve(index, season, None)) for season in sorted(set(seasons)))]
+            *(LevelSettings(season=season, levers=_resolve(index, season, None)) for season in sorted(set(seasons))),
+            *(LevelSettings(season=season, compilation=key, levers=_resolve(index, season, None, key))
+              for season, key in sorted(set(compilations)))]
 
 
-def affected(before: Sequence[SettingRecord], after: Sequence[SettingRecord],
-             episodes: Iterable[tuple[int, int]]) -> set[tuple[int, int]]:
-    """The (season, episode) pairs whose levers come out differently; there is no rule per kind of change.
+def affected(before: Sequence[EpisodeSettings], after: Sequence[EpisodeSettings]) -> set[tuple[int, int]]:
+    """The (season, episode) pairs whose levers or compilation come out differently; there is no rule per kind of change.
 
     An episode that keeps its own value of the lever that moved compares equal, so it is not touched."""
-    old, new = _index(before), _index(after)
-    return {(season, episode) for season, episode in set(episodes)
-            if _resolve(old, season, episode) != _resolve(new, season, episode)}
+    old = {(each.season, each.episode): each for each in before}
+    new = {(each.season, each.episode): each for each in after}
+    return {slot for slot in set(old) | set(new) if old.get(slot) != new.get(slot)}
 
 
 def _slot(record: SettingRecord) -> tuple:
-    return record.series_id, record.season, record.episode, record.lever, record.target
+    return record.series_id, record.season, record.episode, record.compilation, record.lever, record.target
 
 
 def canonical(records: Sequence[SettingRecord]) -> list[SettingRecord]:
     """One order for equal sets of records, so that independent edits commute."""
     return sorted(records, key=lambda each: (each.series_id, -1 if each.season is None else each.season,
-                                              -1 if each.episode is None else each.episode, each.lever,
-                                              each.target or ""))
+                                              -1 if each.episode is None else each.episode, each.compilation or "",
+                                              each.lever, each.target or ""))
 
 
 def _index(records: Sequence[SettingRecord]) -> _Index:
-    """lever -> target -> (season, episode) -> value, over the records the registry still accepts."""
+    """lever -> target -> (season, episode, compilation) -> value, over the records the registry still accepts."""
     index: _Index = {}
     for record in records:
         if validate(record) is None:
-            index.setdefault(record.lever, {}).setdefault(record.target, {})[(record.season, record.episode)] = record.value
+            index.setdefault(record.lever, {}).setdefault(record.target, {})[
+                (record.season, record.episode, record.compilation)] = record.value
     return index
 
 
-def _resolve(index: _Index, season: int | None, episode: int | None) -> list[EffectiveLever]:
+def _resolve(index: _Index, season: int | None, episode: int | None, compilation: str | None = None) -> list[EffectiveLever]:
     if episode is not None and season is None:
         raise ValueError("an episode is set within a season")
-    chain = [(Level.SERIES, (None, None))]
+    chain: list[tuple[Level, _Scope]] = [(Level.SERIES, (None, None, None))]
     if season is not None:
-        chain.insert(0, (Level.SEASON, (season, None)))
+        chain.insert(0, (Level.SEASON, (season, None, None)))
+    if compilation is not None:
+        chain.insert(0, (Level.COMPILATION, (season, None, compilation)))
     if episode is not None:
-        chain.insert(0, (Level.EPISODE, (season, episode)))
+        chain.insert(0, (Level.EPISODE, (season, episode, None)))
     scopes = {scope for _, scope in chain}
     result = []
     for lever in levers.all():

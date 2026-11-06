@@ -7,8 +7,10 @@ from .alignment import AlignmentJob, DubResult, JobStatus, SubmitOutcome, Submit
 from .composition import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                           CompositionPreviewRequest, CompositionReply, PreviewLine, SeasonVoiceOrder, VoiceOrderSet, VoiceSpan,
                           CompositionRow, EpisodeRef, Exclusion, PlayerSummary, SourceStatus, SourceSummary)
+from .compilation import (Absence, CompilationEpisode, CompilationRef, CompilationView, compilation_key,
+                          parse_compilation_key)
 from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
-from .output_settings import (LEVER_FORMS, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, GroupQueue, GroupVariant, PlayerVariant, Queue, QueueRow, QueueView, QueuesGet, QueuesReply, EffectiveLever, EpisodeSettings, LeverSpec,
+from .output_settings import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, GroupQueue, GroupVariant, PlayerVariant, Queue, QueueRow, QueueView, QueuesGet, QueuesReply, EffectiveLever, EpisodeSettings, LeverSpec,
                               Level, LevelSettings, SettingRecord, SettingsReset, SettingsSet,
                               TargetKind, ValueShape, group_target, parse_group_target, parse_variant_target, variant_target)
 from .reference import OutputSwitch, Reference, ReferenceChanged, ReferenceMark
@@ -24,7 +26,8 @@ from .voices import (DubEvent, DubEventStatus, DubHint, DubItem, DubRecord, Dubs
                      Reason, SettingProblem, SnapshotItem,
                      VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView)
 
-__all__ = ["Action", "NotAllowed", "allowed", "refusal", "require", "variant_state", "LEVER_FORMS", "WORK_WITHDRAWN", "WorkWithdrawn", "RUN_CHANGED", "WORK_STATE", "RunChanged", "RunSnapshot", "Slot", "WorkState", "slot_of", "AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitReply", "DubEvent",
+__all__ = ["Absence", "CompilationEpisode", "CompilationRef", "CompilationView", "compilation_key", "parse_compilation_key",
+           "COMPILATION_MEMBER", "COMPILATION_TAKE", "Action", "NotAllowed", "allowed", "refusal", "require", "variant_state", "LEVER_FORMS", "WORK_WITHDRAWN", "WorkWithdrawn", "RUN_CHANGED", "WORK_STATE", "RunChanged", "RunSnapshot", "Slot", "WorkState", "slot_of", "AlignmentJob", "DubResult", "JobStatus", "SubmitOutcome", "SubmitReply", "DubEvent",
            "DubEventStatus", "DubHint", "DubItem", "DubRecord", "DubsSnapshot", "DubState", "DubStatus", "Reason", "SnapshotItem", "SettingProblem", "VoiceSettingsDraft",
            "VoiceSettingsSaved", "VoiceSettingsView", "DubsScope", "ConformSettingsDraft", "ConformSettingsSaved",
            "ConformSettingsView",

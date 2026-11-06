@@ -5,6 +5,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel
 
+from .compilation import CompilationRef
+
 
 class ReferenceMark(StrEnum):
     """`off`: the user switched the episode off (its season, its number, or its line of the plan); it has no
@@ -19,7 +21,10 @@ class ReferenceMark(StrEnum):
 
 
 class Reference(BaseModel):
-    """`reason` is a code of core/reasons: for `other_player` it names the player taken and the one missing."""
+    """`reason` is a code of core/reasons: for `other_player` it names the player taken and the one missing.
+
+    `compilation` is the compilation the episode stands in (stage 12): its video is cut out of it on the timeline of the
+    single video this reference names (REF 2)."""
 
     season: int
     episode: int
@@ -31,6 +36,7 @@ class Reference(BaseModel):
     voice_group: str | None = None
     height: int | None = None
     reason: str | None = None
+    compilation: CompilationRef | None = None
 
 
 class OutputSwitch(BaseModel):

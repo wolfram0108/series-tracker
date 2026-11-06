@@ -94,7 +94,8 @@ def _read(conn: sqlite3.Connection, series_id: int) -> Stored:
                               SourceSummary.model_validate_json(row["summary"])) for row in sources],
         numbering={row["name_key"]: row["number"] for row in numbering},
         records=[SettingRecord(series_id=row["series_id"], season=row["season"], episode=row["episode"],
-                               lever=row["lever"], target=row["target"], value=json.loads(row["value"]))
+                               compilation=row["compilation"], lever=row["lever"], target=row["target"],
+                               value=json.loads(row["value"]))
                  for row in records])
 
 
@@ -128,8 +129,9 @@ def _write(conn: sqlite3.Connection, series_id: int, rows, sources, numbering, r
     if records is not None:
         conn.execute("DELETE FROM output_settings WHERE series_id = ?", (series_id,))
         conn.executemany(
-            "INSERT INTO output_settings (series_id, season, episode, lever, target, value) VALUES (?, ?, ?, ?, ?, ?)",
-            [(series_id, each.season, each.episode, each.lever, each.target,
+            "INSERT INTO output_settings (series_id, season, episode, compilation, lever, target, value)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [(series_id, each.season, each.episode, each.compilation, each.lever, each.target,
               json.dumps(each.value, ensure_ascii=False)) for each in records])
     if rev is not None:
         conn.execute("INSERT INTO composition_state (series_id, rev) VALUES (?, ?)"

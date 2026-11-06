@@ -2,7 +2,8 @@
 
 A pure function of the rows of the layout, the levers of every episode and the order of players: no bus, no database,
 no clock, so equal inputs give equal answers. The reference is a single episode, never a compilation: a compilation
-only tells why an episode has no reference (`unfit`).
+only tells why an episode has no reference (`unfit`), or, when the episode stands in it (stage 12), is carried with the
+reference as the video the episode is cut out of, on the timeline of that single episode.
 
 A reference whose row has an unsure answer (`not_obtained`, which is not `absent`) is held, so that a probe that failed
 once does not swap the reference and the file for a worse one and back; an order of the user is stronger than the hold.
@@ -86,7 +87,12 @@ def choose(rows: Sequence[CompositionRow], settings: Iterable[EpisodeSettings], 
     their order; `previous` the references chosen last time, of which a slot may hold on to its own. `on_disk` are the
     rows (source id, row key) whose video is downloaded; a previous reference of one of them that the layout does not
     have is held, with no row (`Chosen.row` is None). An episode with no row in the layout and none held has no outcome.
-    `rows` may hold the excluded rows: they are never candidates, but they tell a row taken out from a row not brought."""
+    `rows` may hold the excluded rows: they are never candidates, but they tell a row taken out from a row not brought.
+
+    An episode that stands in a compilation (stage 12, `EpisodeSettings.compilation`) keeps its single video as the
+    reference (REF 2, the timeline the compilation is cut on) and carries the compilation with it; an episode in parts, or
+    one without a single video, cannot be cut and carries none."""
+    settings = list(settings)
     order = Order(tuple(players), {source_id: place for place, source_id in enumerate(sources)}, player_groups)
     singles: dict[tuple[int, int], list[Candidate]] = {}
     compilations: dict[tuple[int, int], list[Candidate]] = {}
@@ -122,7 +128,15 @@ def choose(rows: Sequence[CompositionRow], settings: Iterable[EpisodeSettings], 
                 continue
             chosen.append(_decide(season, episode, part, slot, compilations.get((season, episode), []),
                                   episode_levers, order, ranking, held.get((season, episode, part)), set(failed)))
-    return chosen
+    members = {(each.season, each.episode): each.compilation for each in settings if each.compilation is not None}
+    return [_with_compilation(each, members) for each in chosen]
+
+
+def _with_compilation(chosen: Chosen, members: dict) -> Chosen:
+    member = members.get((chosen.reference.season, chosen.reference.episode))
+    if member is None or chosen.reference.part is not None or chosen.reference.source_id is None:
+        return chosen
+    return Chosen(chosen.reference.model_copy(update={"compilation": member}), chosen.row)
 
 
 def _held(previous: Reference, levers: _Levers) -> Chosen:

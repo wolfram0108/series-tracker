@@ -10,8 +10,8 @@ from core.contracts import (EffectiveLever, Level, Queue, SettingRecord, Setting
 from core.reasons import parse
 from modules.composition import levers
 from modules.composition.levers import Lever, _order_sources
-from modules.composition.settings import (affected, apply_reset, apply_set, effective, levels, retarget, validate,
-                                          validate_reset, without_source, within_episodes)
+from modules.composition.settings import (affected, apply_reset, apply_set, effective, episode_settings, levels, retarget,
+                                          validate, validate_reset, without_source, within_episodes)
 
 VK = variant_target("Ruchime", 1, "vk")
 KODIK = variant_target("Ruchime", 2, "kodik")
@@ -31,8 +31,19 @@ def rec(lever, value, season=None, episode=None, target=None, series_id=1) -> Se
     return SettingRecord(series_id=series_id, season=season, episode=episode, lever=lever, target=target, value=value)
 
 
+# The levers of compilations (stage 12) have no target: every episode lists them with their defaults.
+COMPILATION_DEFAULTS = [EffectiveLever(lever="compilation.member", target=None, value=None, level=Level.DEFAULT),
+                        EffectiveLever(lever="compilation.take", target=None, value=True, level=Level.DEFAULT)]
+
+
+def touched_by(before, after, episodes):
+    """The episodes a change of records touches, none of them in a compilation."""
+    return affected(episode_settings(before, episodes, {}), episode_settings(after, episodes, {}))
+
+
 def levers_of(records, season, episode):
-    return {(each.lever, each.target): (each.value, each.level) for each in effective(records, season, episode)}
+    return {(each.lever, each.target): (each.value, each.level) for each in effective(records, season, episode)
+            if not each.lever.startswith("compilation.")}
 
 
 @pytest.fixture
@@ -48,7 +59,8 @@ def volume():
 
 
 def test_with_no_record_a_lever_without_a_target_has_its_default_and_targets_have_no_entries():
-    assert effective([], 1, 5) == [EffectiveLever(lever=CHOICE, target=None, value=[], level=Level.DEFAULT)]
+    assert effective([], 1, 5) == [EffectiveLever(lever=CHOICE, target=None, value=[], level=Level.DEFAULT),
+                                   *COMPILATION_DEFAULTS]
 
 
 def test_an_episode_takes_its_own_value_else_the_season_then_the_series_then_the_default():
@@ -113,7 +125,8 @@ def test_an_episode_without_a_season_is_refused():
 def test_a_record_the_registry_no_longer_accepts_is_ignored():
     records = [rec(CHOICE, "garbage"), rec("gone.lever", 1), rec(ALLOW, False, target="not-a-target"),
                rec(ALLOW, "no", target=VK), rec(TAKE, False, target=None)]
-    assert effective(records, 1, 1) == [EffectiveLever(lever=CHOICE, target=None, value=[], level=Level.DEFAULT)]
+    assert effective(records, 1, 1) == [EffectiveLever(lever=CHOICE, target=None, value=[], level=Level.DEFAULT),
+                                        *COMPILATION_DEFAULTS]
 
 
 # ---- the episodes a change touches (I-23) ------------------------------------------------------------------------
@@ -126,13 +139,13 @@ def test_a_season_value_changes_only_the_episodes_of_the_season_that_follow_it()
     after = apply_set(before, rec(CHOICE, [{"group": "Ruchime", "source_id": 2, "player": "kodik"}], season=1))
     assert levers_of(after, 1, 34) == levers_of(before, 1, 34)
     assert levers_of(after, 1, 33)[(CHOICE, None)] == (CHOICE_KODIK, Level.SEASON) != levers_of(before, 1, 33)[(CHOICE, None)]
-    assert affected(before, after, EPISODES) == {(1, episode) for episode in range(1, 41)} - {(1, 34)}
+    assert touched_by(before, after, EPISODES) == {(1, episode) for episode in range(1, 41)} - {(1, 34)}
 
 
 def test_a_season_pick_that_changes_leaves_the_own_value_of_episode_34_for_other_levers_to_follow():
     before = [rec(ALLOW, False, season=1, episode=34, target=VK)]
     after = apply_set(before, rec(ALLOW, False, season=1, target=VK))
-    assert affected(before, after, EPISODES) == {(1, episode) for episode in range(1, 41)} - {(1, 34)}
+    assert touched_by(before, after, EPISODES) == {(1, episode) for episode in range(1, 41)} - {(1, 34)}
 
 
 def test_resetting_an_episode_back_to_its_season_touches_that_episode_alone():
@@ -142,7 +155,7 @@ def test_resetting_an_episode_back_to_its_season_touches_that_episode_alone():
     after = apply_reset(before, SettingsReset(series_id=1, season=1, episode=34))
     assert levers_of(after, 1, 34)[(CHOICE, None)] == (CHOICE_VK, Level.SEASON)
     assert (ALLOW, VK) not in levers_of(after, 1, 34)
-    assert affected(before, after, EPISODES) == {(1, 34)}
+    assert touched_by(before, after, EPISODES) == {(1, 34)}
     one_by_one = apply_reset(before, SettingsReset(series_id=1, season=1, episode=34, lever=CHOICE))
     one_by_one = apply_reset(one_by_one, SettingsReset(series_id=1, season=1, episode=34, lever=ALLOW, target=VK))
     assert after == one_by_one
@@ -154,15 +167,15 @@ def test_a_voice_off_on_the_season_and_on_for_one_episode_is_taken_for_that_epis
     assert levers_of(records, 1, 5)[(TAKE, GROUP)] == (True, Level.EPISODE)
     assert levers_of(records, 1, 6)[(TAKE, GROUP)] == (False, Level.SEASON)
     assert (TAKE, GROUP) not in levers_of(records, 2, 5)
-    assert affected([], records[:1], EPISODES) == {(1, episode) for episode in range(1, 41)}
-    assert affected(records[:1], records, EPISODES) == {(1, 5)}
+    assert touched_by([], records[:1], EPISODES) == {(1, episode) for episode in range(1, 41)}
+    assert touched_by(records[:1], records, EPISODES) == {(1, 5)}
 
 
 def test_numbers_that_came_from_a_new_reading_keep_their_records_and_leave_the_rest_alone():
     """C-17: the layout changes, the records stand by the numbers; what the numbers touch is only the changed records."""
     records = [rec(CHOICE, CHOICE_VK, season=1, episode=34), rec(TAKE, False, season=1, target=GROUP)]
     shrunk = [(season, episode) for season, episode in EPISODES if (season, episode) != (1, 34)]
-    assert affected(records, records, shrunk) == set()
+    assert touched_by(records, records, shrunk) == set()
     assert levers_of(records, 1, 34)[(CHOICE, None)] == (CHOICE_VK, Level.EPISODE)
     assert levers_of(records, 1, 35)[(TAKE, GROUP)] == (False, Level.SEASON)
 
@@ -171,16 +184,16 @@ def test_a_series_value_touches_every_episode_that_does_not_have_its_own_and_not
     before = [rec(CHOICE, CHOICE_VK, season=2), rec(CHOICE, CHOICE_KODIK, season=1, episode=3)]
     after = apply_set(before, rec(CHOICE, CHOICE_KODIK))
     expected = {pair for pair in EPISODES if pair[0] == 1} - {(1, 3)}
-    assert affected(before, after, EPISODES) == expected
+    assert touched_by(before, after, EPISODES) == expected
 
 
 def test_a_change_that_changes_nothing_touches_nothing():
     records = [rec(CHOICE, CHOICE_VK, season=1)]
-    assert affected(records, apply_set(records, rec(CHOICE, CHOICE_VK, season=1)), EPISODES) == set()
-    assert affected(records, apply_reset(records, SettingsReset(series_id=1, season=2, lever=CHOICE)),
+    assert touched_by(records, apply_set(records, rec(CHOICE, CHOICE_VK, season=1)), EPISODES) == set()
+    assert touched_by(records, apply_reset(records, SettingsReset(series_id=1, season=2, lever=CHOICE)),
                     EPISODES) == set()
-    assert affected(records, apply_reset(records, SettingsReset(series_id=1, season=2)), EPISODES) == set()
-    assert affected(records, apply_set(records, rec(TAKE, True, season=3, target=GROUP)), []) == set()
+    assert touched_by(records, apply_reset(records, SettingsReset(series_id=1, season=2)), EPISODES) == set()
+    assert touched_by(records, apply_set(records, rec(TAKE, True, season=3, target=GROUP)), []) == set()
 
 
 SEASON_1 = {(1, episode) for episode in range(1, 41)}
@@ -200,14 +213,14 @@ SEASON_2 = {(2, episode) for episode in range(1, 41)}
 def test_every_kind_of_change_touches_the_episodes_that_follow_the_level_it_moved(change, touched):
     base = [rec(CHOICE, CHOICE_VK), rec(ALLOW, False, season=1, target=VK),
             rec(TAKE, False, season=1, episode=2, target=GROUP)]
-    assert affected(base, change(base), EPISODES) == touched
+    assert touched_by(base, change(base), EPISODES) == touched
 
 
 def test_resetting_the_series_leaves_the_seasons_and_episodes_their_own_values():
     before = [rec(CHOICE, CHOICE_VK), rec(CHOICE, CHOICE_KODIK, season=1), rec(CHOICE, [], season=2, episode=1)]
     after = apply_reset(before, SettingsReset(series_id=1))
     assert after == before[1:]
-    assert affected(before, after, EPISODES) == {(2, episode) for episode in range(2, 41)}
+    assert touched_by(before, after, EPISODES) == {(2, episode) for episode in range(2, 41)}
 
 
 # ---- validate ----------------------------------------------------------------------------------------------------
@@ -398,10 +411,10 @@ def test_a_lever_added_by_registration_is_inherited_validated_set_reset_and_coun
 
     after = apply_set(before, rec("fake.volume", False, season=1, episode=2, target=GROUP))
     assert levers_of(after, 1, 2)[("fake.volume", GROUP)] == (False, Level.EPISODE)
-    assert affected(before, after, EPISODES) == {(1, 2)}
+    assert touched_by(before, after, EPISODES) == {(1, 2)}
 
     reset = apply_reset(after, SettingsReset(series_id=1, season=1, episode=2))
-    assert reset == before and affected(after, reset, EPISODES) == {(1, 2)}
+    assert reset == before and touched_by(after, reset, EPISODES) == {(1, 2)}
 
 
 def test_a_lever_without_a_target_registered_later_has_its_default_in_every_episode():
@@ -411,7 +424,7 @@ def test_a_lever_without_a_target_registered_later_has_its_default_in_every_epis
         assert levers_of([], 1, 1)[("fake.mode", None)] == ([], Level.DEFAULT)
         records = apply_set([], rec("fake.mode", first, season=2))
         assert levers_of(records, 2, 9)[("fake.mode", None)] == (first, Level.SEASON)
-        assert affected([], records, EPISODES) == {pair for pair in EPISODES if pair[0] == 2}
+        assert touched_by([], records, EPISODES) == {pair for pair in EPISODES if pair[0] == 2}
     finally:
         levers.unregister("fake.mode")
 
@@ -433,7 +446,8 @@ def test_the_headers_show_the_series_and_each_season_by_the_value_of_the_level_i
                rec(CHOICE, CHOICE_VK, season=1, episode=3), rec(CHOICE, CHOICE_KODIK, season=2)]
     shown = levels(records, [2, 1, 1])
     assert [each.season for each in shown] == [None, 1, 2]
-    by_level = {each.season: {(x.lever, x.target): (x.value, x.level) for x in each.levers} for each in shown}
+    by_level = {each.season: {(x.lever, x.target): (x.value, x.level) for x in each.levers
+                              if not x.lever.startswith("compilation.")} for each in shown}
     assert by_level[None] == {(CHOICE, None): ([], Level.DEFAULT), (TAKE, GROUP): (False, Level.SERIES)}
     assert by_level[1] == {(CHOICE, None): ([], Level.DEFAULT), (TAKE, GROUP): (True, Level.SEASON)}
     assert by_level[2] == {(CHOICE, None): (CHOICE_KODIK, Level.SEASON), (TAKE, GROUP): (False, Level.SERIES)}

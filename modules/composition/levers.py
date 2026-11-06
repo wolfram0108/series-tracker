@@ -8,8 +8,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from core.contracts import (LEVER_FORMS, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, LeverSpec, Queue,
-                            TargetKind, ValueShape, parse_group_target, parse_variant_target)
+from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW,
+                            VOICE_ORDER, VOICE_TAKE, LeverSpec, Queue, TargetKind, ValueShape, parse_compilation_key,
+                            parse_group_target, parse_variant_target)
 
 
 def _no_sources(value: Any) -> frozenset[int]:
@@ -56,10 +57,17 @@ def _order_sources(value: Any) -> frozenset[int]:
         if isinstance(value, list) else frozenset()
 
 
+def _compilation_sources(value: Any) -> frozenset[int]:
+    found = parse_compilation_key(value)
+    return frozenset({found[1]}) if found is not None else frozenset()
+
+
 # What a value is, by its shape (and the target, for the form of an item): the one place that says which values a lever takes.
 _ACCEPTS: dict[ValueShape, Callable[[Any, TargetKind], bool]] = {
     ValueShape.FLAG: lambda value, target: _is_flag(value),
     ValueShape.VARIANT_ORDER: _is_order,
+    # The key of a compilation, or "" for none: the episode stands in no compilation by the user's word.
+    ValueShape.COMPILATION: lambda value, target: value == "" or parse_compilation_key(value) is not None,
 }
 
 
@@ -139,3 +147,7 @@ register(Lever(REFERENCE_ALLOW, TargetKind.VARIANT, ValueShape.FLAG, True, "scan
 register(Lever(VOICE_TAKE, TargetKind.GROUP, ValueShape.FLAG, True, "voices", Queue.VOICE))
 register(Lever(VOICE_ORDER, TargetKind.GROUP, ValueShape.VARIANT_ORDER, [], "voices", Queue.VOICE, _order_sources))
 register(Lever(VOICE_ALLOW, TargetKind.VARIANT, ValueShape.FLAG, True, "voices", Queue.VOICE))
+# Stage 12: no record of the membership of an episode is the rule (None), a record is the user's word.
+register(Lever(COMPILATION_MEMBER, TargetKind.NONE, ValueShape.COMPILATION, None, "composition", Queue.COMPILATION,
+               _compilation_sources))
+register(Lever(COMPILATION_TAKE, TargetKind.NONE, ValueShape.FLAG, True, "composition", Queue.COMPILATION))

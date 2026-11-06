@@ -17,6 +17,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from .compilation import CompilationRef
+
 
 # The levers every consumer reads by name; the registry that gives them meaning is the composition module's.
 REFERENCE_ORDER = "reference.order"
@@ -24,12 +26,16 @@ REFERENCE_ALLOW = "reference.allow"
 VOICE_ORDER = "voice.order"
 VOICE_ALLOW = "voice.allow"
 VOICE_TAKE = "voice.take"
+# Stage 12: the compilation an episode stands in (its key, or "" for none), and whether a compilation takes episodes at all.
+COMPILATION_MEMBER = "compilation.member"
+COMPILATION_TAKE = "compilation.take"
 
 
 class Level(StrEnum):
     DEFAULT = "default"
     SERIES = "series"
     SEASON = "season"
+    COMPILATION = "compilation"
     EPISODE = "episode"
 
 
@@ -47,6 +53,7 @@ class ValueShape(StrEnum):
 
     FLAG = "flag"
     VARIANT_ORDER = "variant_order"
+    COMPILATION = "compilation"
 
 
 class Queue(StrEnum):
@@ -55,6 +62,7 @@ class Queue(StrEnum):
 
     REFERENCE = "reference"
     VOICE = "voice"
+    COMPILATION = "compilation"
 
 
 # The forms a window knows how to draw. A lever of another form is refused when it is registered, so that no registered
@@ -62,7 +70,8 @@ class Queue(StrEnum):
 # and a line here.
 LEVER_FORMS: frozenset[tuple[TargetKind, ValueShape]] = frozenset({
     (TargetKind.NONE, ValueShape.VARIANT_ORDER), (TargetKind.GROUP, ValueShape.VARIANT_ORDER),
-    (TargetKind.GROUP, ValueShape.FLAG), (TargetKind.VARIANT, ValueShape.FLAG)})
+    (TargetKind.GROUP, ValueShape.FLAG), (TargetKind.VARIANT, ValueShape.FLAG),
+    (TargetKind.NONE, ValueShape.FLAG), (TargetKind.NONE, ValueShape.COMPILATION)})
 
 _GROUP_TARGET = re.compile(r"group:(.+)", re.DOTALL)
 
@@ -99,22 +108,27 @@ def parse_group_target(target: str) -> str | None:
 
 
 class _Scope(BaseModel):
-    """A level: the series alone, one season of it, or one episode of a season."""
+    """A level: the series alone, one season of it, one compilation of a season (its key), or one episode of a season."""
 
     series_id: int
     season: int | None = None
     episode: int | None = None
+    compilation: str | None = None
 
     @model_validator(mode="after")
     def _episode_has_a_season(self):
         if self.episode is not None and self.season is None:
             raise ValueError("an episode is set within a season")
+        if self.compilation is not None and (self.season is None or self.episode is not None):
+            raise ValueError("a compilation is set within a season, not on an episode")
         return self
 
     @property
     def level(self) -> Level:
         if self.episode is not None:
             return Level.EPISODE
+        if self.compilation is not None:
+            return Level.COMPILATION
         return Level.SEASON if self.season is not None else Level.SERIES
 
 
@@ -173,9 +187,12 @@ class EffectiveLever(BaseModel):
 
 
 class EpisodeSettings(BaseModel):
+    """The levers of an episode, and the compilation it stands in (stage 12): the level between its season and itself."""
+
     season: int
     episode: int
     levers: list[EffectiveLever] = Field(default_factory=list)
+    compilation: CompilationRef | None = None
 
 
 class LevelSettings(BaseModel):
@@ -183,6 +200,7 @@ class LevelSettings(BaseModel):
     and what its episodes inherit."""
 
     season: int | None = None
+    compilation: str | None = None
     levers: list[EffectiveLever] = Field(default_factory=list)
 
 
@@ -226,5 +244,6 @@ class QueuesReply(BaseModel):
     series_id: int
     season: int | None = None
     episode: int | None = None
+    compilation: str | None = None
     reference: QueueView = Field(default_factory=QueueView)
     groups: list[GroupQueue] = Field(default_factory=list)

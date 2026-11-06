@@ -136,10 +136,11 @@ class ScanRepository:
 
     async def references(self, series_id: int) -> list[dict]:
         """Stored outcome of the choice, one record per slot; the slot with no part sorts first."""
-        return await self._db.fetch_all(
-            "SELECT season, episode, part, mark, source_id, row_key, unique_id, player, voice_group, height, reason "
-            "FROM scan_references WHERE series_id=? "
+        found = await self._db.fetch_all(
+            "SELECT season, episode, part, mark, source_id, row_key, unique_id, player, voice_group, height, reason, "
+            "compilation FROM scan_references WHERE series_id=? "
             "ORDER BY season, episode, part IS NOT NULL, part", (series_id,))
+        return [{**each, "compilation": json.loads(each["compilation"]) if each["compilation"] else None} for each in found]
 
     async def save_outcome(self, series_id: int, *, inserts: list[dict], updates: list[tuple[str, dict]],
                            deletes: list[str], statuses: dict[str, str], superseded: dict[str, str],
@@ -171,11 +172,17 @@ class ScanRepository:
         statements.extend((
             "UPDATE media_items SET plan_status=?, superseded_by=? WHERE unique_id=?",
             (plan_status, superseded.get(unique_id), unique_id)) for unique_id, plan_status in statuses.items())
+        # The video the plan wants in the slot of each winner: cut out of the compilation its episode stands in (stage 12).
+        statements.append(("UPDATE media_items SET want_cut=NULL WHERE series_id=?", (series_id,)))
+        statements.extend((
+            "UPDATE media_items SET want_cut=? WHERE unique_id=?", (each["compilation"]["key"], each["unique_id"]))
+            for each in references if each.get("compilation") and each.get("unique_id"))
         statements.append(("DELETE FROM scan_references WHERE series_id=?", (series_id,)))
         statements.extend((
             "INSERT INTO scan_references (series_id, season, episode, part, mark, source_id, row_key, unique_id, "
-            "player, voice_group, height, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "player, voice_group, height, reason, compilation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (series_id, each["season"], each["episode"], each["part"], each["mark"], each["source_id"],
              each["row_key"], each["unique_id"], each["player"], each["voice_group"], each["height"],
-             each["reason"])) for each in references)
+             each["reason"], json.dumps(each["compilation"], ensure_ascii=False) if each.get("compilation") else None))
+            for each in references)
         await self._db.execute_many(statements)

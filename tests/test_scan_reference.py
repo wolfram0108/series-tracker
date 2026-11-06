@@ -565,3 +565,33 @@ def test_a_held_reference_whose_answer_is_unsure_is_not_held_once_its_download_f
 
     assert only(choose([held, second], previous=[previous])).row.row_key == "a"  # held while unsure
     assert only(choose([held, second], previous=[previous], failed={failed_of(held)})).row.row_key == "b"
+
+
+# --- stage 12: an episode that stands in a compilation keeps its single video as REF 2 and carries the compilation ----
+
+def _member(season, episode, comp_key="compilation:x"):
+    from core.contracts import CompilationRef, EpisodeSettings
+    return EpisodeSettings(season=season, episode=episode, compilation=CompilationRef(
+        key=comp_key, source_id=2, row_key="comp", player="vk", voice_group="ПВА", height=2160, start=1, end=3))
+
+
+def test_an_episode_in_a_compilation_takes_its_single_video_and_carries_the_compilation():
+    rows = [row(S, 1, "a", 1, 2, height=1080), row(S, 2, "comp", 1, 1, 3, height=2160)]
+    chosen = _slot(choose(rows, [_member(1, 2)]), 2)
+    assert chosen.row.row_key == "a" and chosen.reference.mark == ReferenceMark.BY_LEVEL
+    assert chosen.reference.compilation.key == "compilation:x"
+
+
+def test_an_episode_in_a_compilation_without_a_single_video_carries_nothing():
+    chosen = _slot(choose([row(S, 2, "comp", 1, 1, 3, height=2160)], [_member(1, 2)]), 2)
+    assert chosen.reference.mark == ReferenceMark.UNFIT and chosen.reference.compilation is None
+
+
+def test_an_episode_in_parts_is_not_cut_out_of_a_compilation():
+    rows = [row(S, 1, "a", 1, 2, part=1), row(S, 1, "b", 1, 2, part=2), row(S, 2, "comp", 1, 1, 3, height=2160)]
+    chosen = [each for each in choose(rows, [_member(1, 2)]) if each.reference.episode == 2]
+    assert [each.reference.part for each in chosen] == [1, 2] and [each.reference.compilation for each in chosen] == [None, None]
+
+
+def _slot(chosen, episode):
+    return next(each for each in chosen if each.reference.episode == episode)

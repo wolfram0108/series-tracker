@@ -5,6 +5,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field, model_validator
 
+from .compilation import CompilationView
 from .output_settings import EpisodeSettings, LeverSpec, LevelSettings
 from .release_table import RowState, TableState
 from .rules import RuleResult
@@ -157,6 +158,8 @@ class CompositionReply(BaseModel):
     availability: dict[str, list[str]] = Field(default_factory=dict)
     # The order of the voice-overs of each season (stage 11): the order of the tracks in the container.
     voice_orders: list[SeasonVoiceOrder] = Field(default_factory=list)
+    # The compilations of every season and the episodes each holds (stage 12): the blocks of the view «Компиляции».
+    compilations: list[CompilationView] = Field(default_factory=list)
 
 
 class EpisodeRef(BaseModel):
