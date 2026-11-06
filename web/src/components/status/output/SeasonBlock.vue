@@ -222,7 +222,7 @@ function step(by: number): void {
 .episode-tile.is-align { background: var(--color-blue); color: #fff; }
 .episode-tile.is-wait { background: linear-gradient(135deg, #f0f2f5, #e9ecef); color: var(--color-gray-600); }
 .episode-tile.is-partial {
-  background: repeating-linear-gradient(45deg, #4CAF50 0 0.4rem, #e0b52a 0.4rem 0.8rem); color: #fff;
+  background: repeating-linear-gradient(45deg, #4CAF50 0 0.4rem, #6c757d 0.4rem 0.8rem); color: #fff;
 }
 .episode-tile.is-error { background: linear-gradient(135deg, #dc3545, #c82333); color: #fff; }
 .episode-tile.is-off { background: linear-gradient(135deg, #6c757d, #5a6268); color: #fff; }
