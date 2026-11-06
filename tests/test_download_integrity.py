@@ -373,3 +373,45 @@ async def test_a_stream_that_starts_late_is_held_to_its_own_end_as_its_format_st
         assert await ffprobe.readable_length(str(cut)) < 50, name
         assert (await ytdlp.download("https://cdn.test/e." + name, str(whole), progress, whole_video=True))[0], name
         assert whole.exists(), name
+
+
+@pytest.fixture
+def covered(tmp_path):
+    """A whole MP4 with a cover carried along as a video stream (attached_pic), the same file with its last quarter lost,
+    and a file whose only video is the cover."""
+    cover = tmp_path / "cover.jpg"
+    make(cover, "-f", "lavfi", "-i", "color=c=red:s=64x64", "-frames:v", "1")
+    whole, cut, only = tmp_path / "covered.mp4", tmp_path / "cut_covered.mp4", tmp_path / "only_cover.m4a"
+    make(whole, "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10:duration=40", "-f", "lavfi", "-i",
+         "sine=frequency=300:duration=40", "-i", str(cover), "-map", "0:v", "-map", "1:a", "-map", "2:v", "-c:v:0", "libx264",
+         "-pix_fmt", "yuv420p", "-c:a", "aac", "-c:v:1", "copy", "-disposition:v:1", "attached_pic", "-movflags", "+faststart")
+    shutil.copyfile(whole, cut)
+    with open(cut, "r+b") as out:
+        out.truncate(os.path.getsize(cut) * 3 // 4)
+    make(only, "-f", "lavfi", "-i", "sine=frequency=300:duration=5", "-i", str(cover), "-map", "0:a", "-map", "1:v",
+         "-c:a", "aac", "-c:v", "copy", "-disposition:v:0", "attached_pic")
+    return whole, cut, only
+
+
+@pytest.mark.asyncio
+async def test_a_cover_the_file_carries_is_no_video_of_the_film(covered, monkeypatch):
+    """A cover is a video stream of one picture with the length of the file: it has no end to reach and no pace of frames,
+    and it is not the picture a container is built of."""
+    from core import container
+    whole, cut, only = covered
+
+    assert await ffprobe.readable_length(str(whole)) == pytest.approx(40, abs=0.2)
+    assert await ffprobe.readable_length(str(cut)) < 35  # the film is cut, whatever the cover says
+    seen = await video_gaps(str(whole), longer_than=1.0)
+    assert seen.checked and seen.holes == ()
+    assert (await container.contents(str(whole))).has_video and not (await container.contents(str(only))).has_video
+
+    async def forty(*_args, **_kwargs):
+        return 40.0
+
+    async def progress(_data):
+        pass
+
+    monkeypatch.setattr(ytdlp, "_announced_length", forty)
+    assert (await ytdlp.download("https://cdn.test/e.mp4", str(whole), progress, whole_video=True, progressive=True))[0]
+    assert whole.exists()

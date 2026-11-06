@@ -17,6 +17,7 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Sequence
 
+from .ffprobe import MOVING_VIDEO, is_still_picture
 from .proc import run_capture
 
 LANGUAGE = "rus"
@@ -97,7 +98,7 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     cmd = [executable, "-y", "-hide_banner", "-loglevel", "error"]
     for path in sources:
         cmd += ["-i", path]
-    cmd += ["-map", "0:v:0"]
+    cmd += ["-map", f"0:{MOVING_VIDEO}:0"]  # the film, not a cover the file carries
     for track in tracks:
         cmd += ["-map", f"{index_of[track.path]}:a:{track.stream}"]
     cmd += ["-map_metadata", "-1", "-map_chapters", "-1", "-c", "copy", "-max_interleave_delta", "0",
@@ -174,7 +175,8 @@ async def contents(path: str, *, timeout: float = READ_TIMEOUT_S) -> Contents | 
     except ValueError:
         duration = 0.0
     return Contents(video=tags.get("st_video", ""), duration=duration,
-                    has_video=any(each.get("codec_type") == "video" for each in streams), audio=audio,
+                    has_video=any(each.get("codec_type") == "video" and not is_still_picture(each) for each in streams),
+                    audio=audio,
                     publication=tags.get("st_publication", ""))
 
 

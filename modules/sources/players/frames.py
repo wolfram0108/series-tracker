@@ -9,6 +9,7 @@ import asyncio
 import shutil
 from typing import Mapping
 
+from core.ffprobe import MOVING_VIDEO
 from core.proc import run_capture
 
 MEASURE_TIMEOUT_S = 40.0
@@ -22,7 +23,7 @@ async def frame_height(url: str, headers: Mapping[str, str]) -> int | None:
     agent = headers.get("User-Agent")
     blob = "".join(f"{key}: {value}\r\n" for key, value in headers.items() if key != "User-Agent")
     cmd = [executable, "-v", "error", *(["-user_agent", agent] if agent else []), *(["-headers", blob] if blob else []),
-           "-select_streams", "v:0", "-show_entries", "stream=height", "-of", "csv=p=0", url]
+           "-select_streams", f"{MOVING_VIDEO}:0", "-show_entries", "stream=height", "-of", "csv=p=0", url]
     try:
         _, out, _ = await run_capture(cmd, timeout=MEASURE_TIMEOUT_S)
     except (OSError, asyncio.TimeoutError):

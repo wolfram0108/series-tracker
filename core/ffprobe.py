@@ -26,6 +26,16 @@ TAIL_S = 30.0
 END_SLACK_S = 1.0
 # The streams a file of a series is checked by; subtitles and attachments have no end to reach.
 MEDIA_KINDS = frozenset({"video", "audio"})
+# A picture a file carries as a video stream (a cover, a thumbnail track, a still image) is no picture of the film: it
+# has one frame, or a few, and no end to reach. The stream specifier of ffmpeg for the video that moves leaves them out.
+STILL_PICTURE = ("attached_pic", "timed_thumbnails", "still_image")
+MOVING_VIDEO = "V"
+
+
+def is_still_picture(stream: dict) -> bool:
+    """Whether a stream ffprobe describes (with its disposition) is a picture carried along, not the video of the file."""
+    disposition = stream.get("disposition") or {}
+    return any(disposition.get(flag) for flag in STILL_PICTURE)
 
 
 async def duration_of(target: str, *, input_args: list[str] | None = None,
@@ -56,10 +66,10 @@ async def readable_length(path: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> f
     if not executable:
         return 0.0
     try:
-        code, out, _ = await run_capture([executable, "-v", "error", "-show_entries",
-                                          "format=format_name,duration,start_time:stream=index,codec_type,start_time,"
-                                          "duration"
-                                          ":stream_tags=DURATION", "-of", "json", path], timeout=timeout)
+        entries = ("format=format_name,duration,start_time:stream=index,codec_type,start_time,duration"
+                   f":stream_disposition={','.join(STILL_PICTURE)}:stream_tags=DURATION")
+        code, out, _ = await run_capture([executable, "-v", "error", "-show_entries", entries, "-of", "json", path],
+                                         timeout=timeout)
         stated = json.loads(out.decode() or "{}") if code == 0 else {}
         declared = _number((stated.get("format") or {}).get("duration"))
         start = _number((stated.get("format") or {}).get("start_time")) or 0.0
@@ -67,7 +77,7 @@ async def readable_length(path: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> f
             return 0.0
         matroska = "matroska" in str((stated.get("format") or {}).get("format_name") or "")
         ends = {str(each.get("index")): _stream_end(each, matroska=matroska) for each in stated.get("streams") or []
-                if each.get("codec_type") in MEDIA_KINDS}
+                if each.get("codec_type") in MEDIA_KINDS and not is_still_picture(each)}
         known = [end for end in ends.values() if end is not None]
         from_s = max(0.0, min(known or [start + declared]) - TAIL_S)
         code, out, _ = await run_capture([executable, "-v", "error", "-read_intervals", f"{from_s}%", "-show_entries",
@@ -137,7 +147,8 @@ async def video_gaps(path: str, *, longer_than: float, timeout: float = 120.0) -
     executable = shutil.which("ffprobe")
     if not executable:
         return Gaps(False, reason="ffprobe не найден")
-    cmd = [executable, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time", "-of", "csv=p=0", path]
+    cmd = [executable, "-v", "error", "-select_streams", f"{MOVING_VIDEO}:0", "-show_entries", "packet=pts_time", "-of",
+           "csv=p=0", path]
     try:
         code, out, _ = await run_capture(cmd, timeout=timeout)
     except (OSError, TimeoutError) as exc:
