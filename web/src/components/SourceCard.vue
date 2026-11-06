@@ -5,18 +5,19 @@ import StGroup from "./StGroup.vue"
 import StIcon from "./StIcon.vue"
 import StInput from "./StInput.vue"
 import StSelect from "./StSelect.vue"
+import PowerSwitch from "./status/output/PowerSwitch.vue"
 import SourceMark from "./status/output/SourceMark.vue"
 import { t, type MessageKey } from "../i18n"
 import { reasonText } from "../lib/reason"
 import {
-  joinVkAddress, vkQuery, playerCaption, profileOptions, progressText, seasonPositions, sourceCaption, splitVkAddress,
-  togglePlayer, type SourceItem,
+  joinVkAddress, vkQuery, placeOf, profileOptions, progressText, seasonPositions, sourceCaption, spanText, splitVkAddress,
+  stepsLines, togglePlayer, type SourceItem,
 } from "../lib/sources"
 import type { DraftPatch } from "../composables/useSourceDrafts"
 
-// One source of a series: its address, its constructor profile, and what its table holds — players with the episodes
-// and the voice-overs that the rules of the profile made of its rows, and the group of each voice-over. The numbers of
-// episodes exist only as the constructor's answer; a group is made in the settings, nowhere else.
+// One source of a series: a head with its mark, its place, its state and its actions; its address and its constructor
+// profile; and its players as tabs, each with the table of the voice-overs the rules of the profile made of its rows.
+// The numbers of episodes exist only as the constructor's answer; a group is made in the settings, nowhere else.
 // `place` is the place of the source in the list of its series: with its colour, the mark the output tab shows it by.
 const props = defineProps<{ item: SourceItem; profiles: { id: number; name: string }[]; busy?: boolean; place?: number }>()
 const emit = defineEmits<{ (e: "change", patch: DraftPatch): void; (e: "remove"): void; (e: "reread"): void }>()
@@ -36,6 +37,10 @@ const stateText = computed(() => {
   if (state === "reading" && view.value.progress) return progressText(view.value.progress)
   return t(`sources.state.${state}` as MessageKey)
 })
+
+// The player whose tab is open; the first one until the user picks another, and again when the picked one is gone.
+const picked = ref<string | null>(null)
+const player = computed(() => view.value.players.find((each) => each.player === picked.value) ?? view.value.players[0] ?? null)
 
 // The channel and its query are edited as text and sent when the field is left, so that typing starts no read.
 const channel = ref("")
@@ -65,83 +70,93 @@ async function copyAddress(): Promise<void> {
 </script>
 
 <template>
-  <article class="source-card stack">
-    <header class="cluster source-head">
-      <b class="source-type">
+  <article class="source-card">
+    <header class="source-head">
+      <span class="source-title">
         <SourceMark v-if="place !== undefined && item.color !== null" :mark="{ n: place, color: item.color, place: '' }" />
-        {{ t(`sources.type.${item.sourceType}` as MessageKey) }}
-      </b>
+        <span class="source-place">{{ placeOf(item.url) }}</span>
+      </span>
       <template v-if="!isTorrent">
         <span class="source-state" :class="`is-${view.state}`">
           <i v-if="view.state === 'reading'" class="pi pi-spin pi-spinner" />{{ stateText }}
         </span>
         <span v-if="view.players.length" class="muted">{{ sourceCaption(view.players) }}</span>
-        <button type="button" class="source-reread" :disabled="busy || view.state === 'reading'" @click="emit('reread')">
-          <i class="pi pi-refresh" />{{ t("sources.reread") }}
-        </button>
-        <button type="button" class="source-remove" :disabled="busy" @click="emit('remove')">
-          <i class="pi pi-trash" />{{ t("sources.remove") }}
-        </button>
+        <span class="source-actions">
+          <button type="button" class="action-btn btn-scan source-reread" :disabled="busy || view.state === 'reading'" @click="emit('reread')">
+            <i class="pi pi-refresh" />{{ t("sources.reread") }}
+          </button>
+          <button type="button" class="action-btn btn-delete source-remove" :disabled="busy" @click="emit('remove')">
+            <i class="pi pi-trash" />{{ t("sources.remove") }}
+          </button>
+        </span>
       </template>
     </header>
 
-    <div v-if="isChannel" class="stack">
-      <small class="muted">{{ t("sources.vk.hint") }}</small>
-      <div class="grid-fit" @focusout="commitChannel" @keyup.enter="commitChannel">
-        <StGroup>
-          <StIcon icon="pi pi-youtube" />
-          <StInput v-model="channel" :label="t('sources.vk.channel')" />
-        </StGroup>
-        <StGroup>
-          <StIcon icon="pi pi-search" />
-          <StInput v-model="query" :label="t('sources.vk.query')" />
-        </StGroup>
-      </div>
-      <small v-if="!vkQuery(query)" class="source-reason">{{ t("sources.vk.queryMissing") }}</small>
-    </div>
-    <StGroup v-else>
-      <StIcon icon="pi pi-link" />
-      <div class="constructor-item item-floating-label"><input class="item-input" :value="item.url" readonly /></div>
-      <div class="constructor-item url-actions">
-        <button type="button" class="url-action-btn" :title="t('sources.address.copy')" @click="copyAddress">
-          <i class="pi pi-clipboard" />
-        </button>
-        <a class="url-action-btn" :href="item.url" target="_blank" rel="noopener" :title="t('sources.address.open')">
-          <i class="pi pi-external-link" />
-        </a>
-      </div>
-    </StGroup>
-
-    <StGroup>
-      <div class="constructor-item item-label-icon item-label-text-icon" :title="t('sources.profile.label')">
-        <i class="pi pi-filter" /><span>{{ t("sources.profile.label") }}</span>
-      </div>
-      <StSelect
-        :model-value="item.profileId" :options="options" :placeholder="t('sources.profile.none')"
-        @update:model-value="emit('change', { profileId: $event as number | null })"
-      />
-    </StGroup>
-    <small v-if="item.profileId === null && !isTorrent" class="muted">{{ t("sources.profile.hint") }}</small>
-    <div v-if="view.reason" class="source-reason">{{ reasonText(view.reason) }}</div>
-
-    <ul v-if="!isTorrent && view.players.length" class="players grid-fit">
-      <li v-for="player in view.players" :key="player.player" class="player stack" :class="{ 'is-off': player.off }">
-        <div class="cluster">
-          <label class="cluster player-switch">
-            <input
-              type="checkbox" class="form-switch-input" :checked="!player.off" :disabled="busy"
-              :aria-label="t('sources.player.use', { player: player.title })"
-              @change="emit('change', { playersOff: togglePlayer(item.playersOff, player.player) })"
-            />
-            <b>{{ player.title }}</b>
-          </label>
-          <span v-if="player.off" class="muted">{{ t("sources.player.off") }}</span>
-        </div>
-        <div class="cluster muted">
-          <span>{{ playerCaption(player) }}</span>
-        </div>
-        <div v-if="player.chooseSeason" class="stack">
+    <div class="source-body stack">
+      <div v-if="isChannel" class="stack">
+        <small class="muted">{{ t("sources.vk.hint") }}</small>
+        <div class="grid-fit" @focusout="commitChannel" @keyup.enter="commitChannel">
           <StGroup>
+            <StIcon icon="pi pi-youtube" />
+            <StInput v-model="channel" :label="t('sources.vk.channel')" />
+          </StGroup>
+          <StGroup>
+            <StIcon icon="pi pi-search" />
+            <StInput v-model="query" :label="t('sources.vk.query')" />
+          </StGroup>
+        </div>
+        <small v-if="!vkQuery(query)" class="source-reason">{{ t("sources.vk.queryMissing") }}</small>
+      </div>
+      <StGroup v-else>
+        <StIcon icon="pi pi-link" />
+        <div class="constructor-item item-floating-label"><input class="item-input" :value="item.url" readonly /></div>
+        <div class="constructor-item url-actions">
+          <button type="button" class="url-action-btn" :title="t('sources.address.copy')" @click="copyAddress">
+            <i class="pi pi-clipboard" />
+          </button>
+          <a class="url-action-btn" :href="item.url" target="_blank" rel="noopener" :title="t('sources.address.open')">
+            <i class="pi pi-external-link" />
+          </a>
+        </div>
+      </StGroup>
+
+      <StGroup>
+        <div class="constructor-item item-label-icon item-label-text-icon" :title="t('sources.profile.label')">
+          <i class="pi pi-filter" /><span>{{ t("sources.profile.label") }}</span>
+        </div>
+        <StSelect
+          :model-value="item.profileId" :options="options" :placeholder="t('sources.profile.none')"
+          @update:model-value="emit('change', { profileId: $event as number | null })"
+        />
+      </StGroup>
+      <small v-if="item.profileId === null && !isTorrent" class="muted">{{ t("sources.profile.hint") }}</small>
+      <div v-if="view.reason" class="source-reason">{{ reasonText(view.reason) }}</div>
+
+      <div v-if="!isTorrent && player" class="players stack">
+        <div class="st-tabs player-tabs" role="tablist" :aria-label="t('sources.player.tabs')">
+          <button
+            v-for="each in view.players" :key="each.player" type="button" class="st-tab player-tab" role="tab"
+            :class="{ active: each.player === player.player, 'is-off': each.off }" :aria-selected="each.player === player.player"
+            @click="picked = each.player"
+          >
+            <span class="player-name">{{ each.title }}</span><small class="player-rows">{{ each.rows }}</small>
+          </button>
+        </div>
+        <div class="player stack" :class="{ 'is-off': player.off }" role="tabpanel" :data-player="player.player">
+          <div class="player-top">
+            <span v-if="player.off" class="muted">{{ t("sources.player.off") }}</span>
+            <span v-for="line in player.coverage" :key="spanText(line)" class="player-fact">
+              {{ t("sources.table.episodes") }} <b>{{ spanText(line) }}</b>
+              <span v-if="line.gaps" class="player-gaps">{{ t("sources.range.gaps", { gaps: line.gaps }) }}</span>
+            </span>
+            <span v-if="player.steps" class="player-fact">{{ t("sources.table.resolution") }} <b>{{ player.steps }}</b></span>
+            <span class="player-fact">{{ t("sources.table.rows") }} <b>{{ player.rows }}</b></span>
+            <PowerSwitch
+              class="player-switch" :on="!player.off" :busy="busy" :label="t('sources.player.use', { player: player.title })"
+              @toggle="emit('change', { playersOff: togglePlayer(item.playersOff, player.player) })"
+            />
+          </div>
+          <StGroup v-if="player.chooseSeason" class="player-season">
             <div class="constructor-item item-label-icon item-label-text-icon" :title="t('sources.vibix.season')">
               <i class="pi pi-th-large" /><span>{{ t("sources.vibix.season") }}</span>
             </div>
@@ -150,46 +165,89 @@ async function copyAddress(): Promise<void> {
               @update:model-value="emit('change', { vibixSeason: $event as number | null })"
             />
           </StGroup>
-          <small v-if="item.vibixSeason === null" class="muted">{{ t("sources.vibix.hint") }}</small>
+          <small v-if="player.chooseSeason && item.vibixSeason === null" class="muted">{{ t("sources.vibix.hint") }}</small>
+          <div v-if="player.voices.length" class="voice-scroll">
+            <table class="voice-table">
+              <thead>
+                <tr>
+                  <th>{{ t("sources.table.group") }}</th>
+                  <th>{{ t("sources.table.voice") }}</th>
+                  <th>{{ t("sources.table.episodes") }}</th>
+                  <th>{{ t("sources.table.resolution") }}</th>
+                  <th class="voice-rows">{{ t("sources.table.rows") }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="voice in player.voices" :key="`${voice.name}\u0000${voice.group ?? ''}`">
+                  <td>{{ voice.group ?? t("sources.voice.noGroup") }}</td>
+                  <td>{{ voice.name }}</td>
+                  <td>
+                    <div v-for="line in voice.coverage" :key="spanText(line)">
+                      {{ spanText(line) }}
+                      <span v-if="line.gaps" class="player-gaps voice-gaps">{{ t("sources.range.gaps", { gaps: line.gaps }) }}</span>
+                    </div>
+                  </td>
+                  <td><div v-for="line in stepsLines(voice.coverage)" :key="line" class="voice-steps">{{ line }}</div></td>
+                  <td class="voice-rows">{{ voice.rows }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <small v-else-if="item.profileId !== null && view.state === 'ready' && !player.off" class="muted">
+            {{ t("sources.range.none") }}
+          </small>
         </div>
-        <ul v-if="player.coverage.length" class="lines coverage">
-          <li v-for="line in player.coverage" :key="line">{{ line }}</li>
-        </ul>
-        <ul v-if="player.voiceLines.length" class="lines voices">
-          <li v-for="line in player.voiceLines" :key="line">{{ line }}</li>
-        </ul>
-        <small v-if="item.profileId !== null && view.state === 'ready' && !player.coverage.length && !player.off" class="muted">
-          {{ t("sources.range.none") }}
-        </small>
-      </li>
-    </ul>
-    <div v-else-if="!isTorrent && view.state === 'ready'" class="muted">{{ t("sources.player.none") }}</div>
+      </div>
+      <div v-else-if="!isTorrent && view.state === 'ready'" class="muted">{{ t("sources.player.none") }}</div>
+    </div>
   </article>
 </template>
 
 <style scoped>
 .source-card {
-  padding: var(--space); border: var(--border-width) solid var(--border-color);
-  border-radius: var(--card-border-radius); background: var(--bg-white);
+  border: var(--border-width) solid var(--border-color); border-radius: var(--card-border-radius); background: var(--bg-white);
+  box-shadow: var(--card-shadow);
 }
-.source-head { justify-content: space-between; }
-.source-head > b { margin-inline-end: auto; }
-.source-type { display: inline-flex; align-items: center; gap: 0.5rem; }
+/* The head of a source is the head of a season of the output tab: a band above the fields. */
+.source-head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; padding: 0.6rem 0.75rem;
+  background: linear-gradient(135deg, var(--bg-light) 0%, var(--border-color) 100%); border-bottom: var(--border-width) solid var(--border-color);
+  border-radius: var(--card-border-radius) var(--card-border-radius) 0 0;
+}
+.source-title { display: inline-flex; align-items: center; gap: 0.5rem; min-inline-size: 0; font-weight: 600; color: #2c3e50; }
+.source-place { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .source-state { display: inline-flex; align-items: center; gap: var(--space); color: var(--text-muted); }
 .source-state.is-ready { color: var(--color-green-1); }
 .source-state.is-failed { color: var(--color-red-1); }
 .source-state.is-reading { color: var(--color-blue); }
+.source-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-inline-start: auto; }
+/* The buttons of the head are those of the main screen at the height of the head of a season. */
+.source-actions .action-btn { min-block-size: 2rem; padding-block: 0.25rem; font-size: 0.85rem; }
+.source-actions .action-btn:disabled { opacity: 0.5; cursor: default; }
+.source-body { padding: var(--space); }
 .source-reason { color: var(--color-red-1); overflow-wrap: anywhere; }
 .muted { color: var(--text-muted); font-size: smaller; }
-.source-reread, .source-remove {
-  display: inline-flex; align-items: center; gap: var(--space); cursor: pointer;
-  background: none; border: none; color: var(--color-red-1);
+.player-tabs { flex-wrap: wrap; align-self: flex-start; }
+.player-tab { padding-block: 0.3rem; font-size: 0.85rem; }
+.player-rows { color: var(--text-muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+.player-tab.is-off .player-name { text-decoration: line-through; }
+.player-top { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.9rem; font-size: 0.875rem; color: var(--color-gray-600); }
+.player-top b { color: #2c3e50; }
+/* The switch of a player stands in the corner, as every switch of the window does. */
+.player-switch { margin-inline-start: auto; }
+.player-gaps { color: var(--text-muted); font-size: 0.8rem; }
+.player-fact .player-gaps { margin-inline-start: 0.375rem; }
+.voice-gaps { display: block; }
+.player-season { max-inline-size: 36rem; }
+.voice-scroll { overflow-x: auto; }
+.voice-table { inline-size: 100%; border-collapse: collapse; border: var(--border-width) solid var(--border-color); font-size: 0.875rem; }
+.voice-table th {
+  background: var(--bg-light); font-weight: 700; text-align: start; padding: 0.45rem 0.6rem; color: #2c3e50;
+  border-bottom: var(--border-width) solid var(--border-color); white-space: nowrap;
 }
-.source-reread:disabled, .source-remove:disabled { cursor: default; opacity: 0.5; }
-.source-reread { color: var(--color-blue); }
-.players { list-style: none; margin: 0; padding: 0; }
-.player { padding: var(--space); border: var(--border-width) solid var(--border-color); border-radius: var(--border-radius); }
-.player.is-off .lines, .player.is-off .player-switch b { opacity: 0.5; }
-.player-switch { cursor: pointer; }
-.lines { list-style: none; margin: 0; padding: 0; display: grid; gap: calc(var(--space) / 2); overflow-wrap: anywhere; }
+.voice-table td { padding: 0.4rem 0.6rem; border-bottom: var(--border-width) solid var(--border-color); vertical-align: top; }
+.voice-table tbody tr:nth-child(odd) { background: rgba(0, 0, 0, 0.02); }
+.voice-steps { white-space: nowrap; }
+.voice-rows { inline-size: 1%; text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.player.is-off .voice-table, .player.is-off .player-fact { opacity: 0.5; }
 </style>

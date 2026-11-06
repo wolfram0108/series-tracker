@@ -1,6 +1,7 @@
 // The output of a series as the window reads it: episodes joined from the layout, references, levers and voice-overs.
 // Pure functions only: no network, no interface and no texts, so the window words everything it shows.
 import { compareNames } from "./collate"
+import { placeOf } from "./sources"
 import type { components } from "../api/schema"
 import type { VoiceDub } from "../stores/voices"
 import type { MediaFile } from "../composables/outputCalls"
@@ -446,15 +447,6 @@ export interface SourceMark {
   n: number
   color: number
   place: string
-}
-
-function placeOf(url: string): string {
-  try {
-    const link = new URL(url.split("|")[0])
-    return link.pathname.startsWith("/@") ? `${link.host} ${link.pathname.slice(1)}` : link.host
-  } catch {
-    return url
-  }
 }
 
 export function sourceMarks(

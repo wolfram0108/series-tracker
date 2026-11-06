@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
-  coverageOf, draftBody, itemOfSource, joinVkAddress, pageHost, phaseText, playerCaption, profileOptions, progressText,
-  readEnded, seasonPositions, siteOf, sourceCaption, sourceTypeOf, splitVkAddress, summaryOf, togglePlayer,
-  viewOf, voiceLinesOf, type LayoutRow, type PlayerSummary, type SeriesSource, type SourceSummary,
+  coverageOf, draftBody, itemOfSource, joinVkAddress, pageHost, phaseText, placeOf, profileOptions, progressText,
+  readEnded, seasonPositions, siteOf, sourceCaption, sourceTypeOf, spanText, splitVkAddress, stepsLines, summaryOf, togglePlayer,
+  viewOf, voicesOf, type LayoutRow, type PlayerSummary, type SeriesSource, type SourceSummary,
 } from "./sources"
 import type { PageStatus } from "../stores/sourceTables"
 
@@ -22,7 +22,7 @@ describe("viewOf", () => {
     const view = viewOf({ summary: release, playersOff: [] })
     expect(view.state).toBe("noProfile")
     expect(view.players.map((p) => [p.title, p.rows, p.groups])).toEqual([["VK", 13, 0], ["Vibix", 23, 2], ["kodik", 5, 1]])
-    expect(view.players.map((p) => [p.coverage, p.voiceLines])).toEqual([[[], []], [[], []], [[], []]])
+    expect(view.players.map((p) => [p.coverage, p.voices, p.steps])).toEqual([[[], [], null], [[], [], null], [[], [], null]])
   })
 
   it("takes the label of a player from the table and falls back to the kind of the player", () => {
@@ -36,7 +36,8 @@ describe("viewOf", () => {
       layoutRow({ player: "kodik", row_key: "k", episode_start: 5, episode_end: 5 }),
     ]
     const players = viewOf({ summary: release, playersOff: [], rows }).players
-    expect(players.map((p) => p.coverage)).toEqual([["1-3 (720p-1080p)"], [], ["5 (720p-1080p)"]])
+    expect(players.map((p) => p.coverage.map(spanText))).toEqual([["1–3"], [], ["5"]])
+    expect(players.map((p) => p.steps)).toEqual(["720p–1080p", null, "720p–1080p"])
   })
 
   it("offers the choice of a season only for a catalog with several seasons", () => {
@@ -100,25 +101,43 @@ describe("the lines of a player from the rows of the constructor", () => {
   const two = layoutRow({ row_key: "b", episode_start: 11, episode_end: 50, heights: [480, 720], voice_name: "", voice_label: "Неизвестная озвучка 2" })
   const late = layoutRow({ row_key: "c", episode_start: 61, episode_end: 120, heights: [360, 1440], voice_name: "", voice_label: "Неизвестная озвучка 2" })
 
-  it("joins the episodes that follow one another, leaves the gaps, and gives each range the steps of its rows", () => {
-    expect(coverageOf([pva, two, late])).toEqual(["1-50 (480p-2160p), 61-120 (360p-1440p)"])
+  it("joins the episodes that follow one another into one span and names the episodes missing inside it", () => {
+    expect(coverageOf([pva, two, late])).toEqual([{
+      season: null, span: "1–120", gaps: "51–60",
+      steps: [{ ranges: "1–50", steps: "480p–2160p" }, { ranges: "61–120", steps: "360p–1440p" }],
+    }])
   })
 
-  it("gives a voice-over a line with its episodes, its name and its group, or `Нет` when it has none", () => {
-    expect(voiceLinesOf([pva, two, late])).toEqual([
-      "1-10 ПВА ШОУ (Группа ПВА ШОУ)", "11-50, 61-120 Неизвестная озвучка 2 (Нет)",
-    ])
+  it("gives one resolution when every range shares it, and the ranges of each resolution when they differ", () => {
+    // The layout of a release of the server: three single episodes missing, every range at the same steps.
+    const gapped = [[330, 346], [348, 463], [465, 479], [481, 496]].map(([from, to], index) =>
+      layoutRow({ row_key: `g${index}`, episode_start: from, episode_end: to, heights: [360, 1080] }))
+    expect(coverageOf(gapped)).toEqual([{ season: null, span: "330–496", gaps: "347, 464, 480", steps: [{ ranges: null, steps: "360p–1080p" }] }])
+    expect(stepsLines(coverageOf(gapped))).toEqual(["360p–1080p"])
+    expect(stepsLines(coverageOf([pva, two, late]))).toEqual(["1–50: 480p–2160p", "61–120: 360p–1440p"])
+  })
+
+  it("gives a voice-over a row with its group, its name, its episodes and its rows, and no group when it has none", () => {
+    expect(voicesOf([pva, two, late]).map((voice) => [voice.group, voice.name, voice.coverage.map(spanText), voice.coverage[0].gaps, voice.rows]))
+      .toEqual([["ПВА ШОУ", "ПВА ШОУ", ["1–10"], "", 1], [null, "Неизвестная озвучка 2", ["11–120"], "51–60", 2]])
   })
 
   it("names a season only when there are several, and takes a single episode as a number", () => {
-    expect(coverageOf([layoutRow({ season: 1, episode_start: 3, episode_end: 3, heights: [] })])).toEqual(["3"])
-    expect(coverageOf([layoutRow({ season: 1 }), layoutRow({ season: 2, episode_start: 4, episode_end: 6, heights: [1080] })]))
-      .toEqual(["Сезон 1: 1 (720p-1080p)", "Сезон 2: 4-6 (1080p)"])
+    expect(coverageOf([layoutRow({ season: 1, episode_start: 3, episode_end: 3, heights: [] })]).map(spanText)).toEqual(["3"])
+    const two = coverageOf([layoutRow({ season: 1 }), layoutRow({ season: 2, episode_start: 4, episode_end: 6, heights: [1080] })])
+    expect(two.map(spanText)).toEqual(["Сезон 1: 1", "Сезон 2: 4–6"])
+    expect(stepsLines(two)).toEqual(["720p–1080p", "1080p"])
   })
 
   it("leaves out the rows the constructor excluded or gave no number", () => {
     const lost = [layoutRow({ excluded: true }), layoutRow({ episode_start: null, episode_end: null })]
-    expect([coverageOf(lost), voiceLinesOf(lost)]).toEqual([[], []])
+    expect([coverageOf(lost), voicesOf(lost)]).toEqual([[], []])
+  })
+
+  it("names a source by its site, and a channel of VK by the site and the channel, as the output tab does", () => {
+    expect(placeOf("https://dunhuatv.ru/761-vechnaja-volja.html")).toBe("dunhuatv.ru")
+    expect(placeOf("https://vkvideo.ru/@mir.donghua|Вечная воля")).toBe("vkvideo.ru @mir.donghua")
+    expect(placeOf("not an address")).toBe("not an address")
   })
 })
 
@@ -128,12 +147,6 @@ describe("texts", () => {
   it("counts players and rows of a source with the right plural forms", () => {
     expect(sourceCaption(view.players)).toBe("3 плеера, 41 строка")
     expect(sourceCaption([view.players[0]])).toBe("1 плеер, 13 строк")
-  })
-
-  it("counts only the rows of a player: its seasons and resolutions are the constructor's and come with the rows of the layout", () => {
-    expect(playerCaption(view.players[1])).toBe("23 строки")
-    expect(playerCaption(view.players[0])).toBe("13 строк")
-    expect(playerCaption({ ...view.players[2], rows: 21 })).toBe("21 строка")
   })
 
   it("words the progress of a read by phase and by how far it is", () => {

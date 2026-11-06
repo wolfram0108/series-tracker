@@ -33,10 +33,12 @@ export interface PlayerView {
   rows: number
   /** How many groups the player keeps (the seasons of a catalog): only the choice of a catalog season needs it. */
   groups: number
-  /** The episodes the constructor took from the player, with the gaps left in, one line to a season: `1-50 (480p-2160p), 61-120`. */
-  coverage: string[]
-  /** One line to a voice-over: its episodes, its name and its group (or the word for none); both lists come from the rows of the constructor. */
-  voiceLines: string[]
+  /** The episodes the constructor took from the player, an entry to a season, with the gaps between them. */
+  coverage: Coverage[]
+  /** All the resolution steps of the player, from the lowest to the highest. */
+  steps: string | null
+  /** A row to a voice-over; like the coverage, it comes from the rows of the constructor only. */
+  voices: VoiceRow[]
   off: boolean
   /** The player shows a catalog of several seasons, so the source may name the one it takes. */
   chooseSeason: boolean
@@ -103,35 +105,74 @@ function spansOf(rows: LayoutRow[]): Span[] {
   return spans
 }
 
-function spanText(span: Span, withSteps: boolean): string {
-  const range = span.from === span.to ? `${span.from}` : `${span.from}-${span.to}`
-  if (!withSteps || span.low === null || span.high === null) return range
-  const low = t("sources.height.step", { height: span.low })
-  const steps = span.low === span.high ? low : `${low}-${t("sources.height.step", { height: span.high })}`
-  return t("sources.range.steps", { range, steps })
+const rangeText = (from: number, to: number): string => (from === to ? `${from}` : `${from}–${to}`)
+
+function stepsText(low: number | null, high: number | null): string | null {
+  if (low === null || high === null) return null
+  const lowText = t("sources.height.step", { height: low })
+  return low === high ? lowText : `${lowText}–${t("sources.height.step", { height: high })}`
 }
 
-/** The ranges of the rows, a line to a season (a season is named only when there are several). */
-function rangeLines(rows: LayoutRow[], withSteps: boolean): string[] {
+/** The episodes of rows in one season: from the first to the last, the numbers missing between them, and the resolution
+ *  steps — one entry when every range shares them, else an entry to each set of steps with the ranges that have it. */
+export interface Coverage {
+  /** The season, named only when the rows hold several. */
+  season: number | null
+  span: string
+  /** The episodes missing between the first and the last, as numbers and ranges; empty when none is. */
+  gaps: string
+  steps: { ranges: string | null; steps: string }[]
+}
+
+function seasonCoverage(rows: LayoutRow[], season: number | null): Coverage {
+  const spans = spansOf(rows)
+  const gaps = spans.slice(1).map((span, index) => rangeText(spans[index].to + 1, span.from - 1)).join(", ")
+  const bySteps = new Map<string, string[]>()
+  for (const span of spans) {
+    const steps = stepsText(span.low, span.high)
+    if (steps !== null) bySteps.set(steps, [...(bySteps.get(steps) ?? []), rangeText(span.from, span.to)])
+  }
+  const steps = bySteps.size <= 1
+    ? [...bySteps.keys()].map((each) => ({ ranges: null, steps: each }))
+    : [...bySteps.entries()].map(([each, ranges]) => ({ ranges: ranges.join(", "), steps: each }))
+  return { season, span: rangeText(spans[0].from, spans[spans.length - 1].to), gaps, steps }
+}
+
+/** The episodes of the rows, an entry to a season (a season is named only when there are several). */
+export function coverageOf(rows: LayoutRow[]): Coverage[] {
   const seasons = new Map<number, LayoutRow[]>()
   for (const row of numbered(rows)) seasons.set(row.season ?? 0, [...(seasons.get(row.season ?? 0) ?? []), row])
   const ordered = [...seasons.entries()].sort(([a], [b]) => a - b)
-  return ordered.map(([season, group]) => {
-    const text = spansOf(group).map((span) => spanText(span, withSteps)).join(", ")
-    return ordered.length > 1 && season > 0 ? t("sources.range.season", { season, ranges: text }) : text
-  })
+  return ordered.map(([season, group]) => seasonCoverage(group, ordered.length > 1 && season > 0 ? season : null))
 }
 
-/** The episodes of a player, with the gaps the constructor left, and the resolution steps of each range. */
-export function coverageOf(rows: LayoutRow[]): string[] {
-  return rangeLines(rows, true)
+/** The episodes of a coverage as the window writes them, with its season when it is named. */
+export function spanText(coverage: Coverage): string {
+  return coverage.season === null ? coverage.span : t("sources.range.season", { season: coverage.season, ranges: coverage.span })
 }
 
-const groupText = (group: string | null | undefined): string =>
-  group ? t("sources.voice.group", { group }) : t("sources.voice.noGroup")
+/** The resolution of a coverage: the steps alone, or a line to each set of steps with its ranges. */
+export function stepsLines(coverage: Coverage[]): string[] {
+  return coverage.flatMap((each) => each.steps.map((part) =>
+    part.ranges === null ? part.steps : t("sources.range.part", { ranges: part.ranges, steps: part.steps })))
+}
 
-/** A line to a voice-over: its episodes, its name (or the label of the layout when it has none) and its group. */
-export function voiceLinesOf(rows: LayoutRow[]): string[] {
+/** All the steps of the rows, from the lowest to the highest. */
+function stepsOf(rows: LayoutRow[]): string | null {
+  const heights = numbered(rows).flatMap((row) => row.heights ?? [])
+  return heights.length ? stepsText(Math.min(...heights), Math.max(...heights)) : null
+}
+
+/** A voice-over of a player as the table of the player shows it: its group, its name (or the label of the layout when it
+ *  has none), its episodes and how many rows of the constructor it has. */
+export interface VoiceRow {
+  group: string | null
+  name: string
+  coverage: Coverage[]
+  rows: number
+}
+
+export function voicesOf(rows: LayoutRow[]): VoiceRow[] {
   const voices = new Map<string, { name: string; group: string | null; rows: LayoutRow[] }>()
   for (const row of numbered(rows)) {
     const name = row.voice_name.trim() || row.voice_label
@@ -143,9 +184,7 @@ export function voiceLinesOf(rows: LayoutRow[]): string[] {
   return [...voices.values()]
     .map((voice) => ({ voice, first: Math.min(...voice.rows.map((row) => row.episode_start as number)) }))
     .sort((a, b) => a.first - b.first || a.voice.name.localeCompare(b.voice.name))
-    .map(({ voice }) => t("sources.voice.line", {
-      ranges: rangeLines(voice.rows, false).join("; "), name: voice.name, group: groupText(voice.group),
-    }))
+    .map(({ voice }) => ({ group: voice.group, name: voice.name, coverage: coverageOf(voice.rows), rows: voice.rows.length }))
 }
 
 function playerView(player: PlayerSummary, playersOff: string[], layout: LayoutRow[]): PlayerView {
@@ -159,7 +198,8 @@ function playerView(player: PlayerSummary, playersOff: string[], layout: LayoutR
     // The lines are built from the rows the constructor made by the rules of the assigned profile and from nothing else:
     // without a profile (no rows of the layout) there is no line, and the card tells to assign one.
     coverage: coverageOf(rows),
-    voiceLines: voiceLinesOf(rows),
+    steps: stepsOf(rows),
+    voices: voicesOf(rows),
     off: playersOff.includes(player.player),
     chooseSeason: player.player === CATALOG_PLAYER && player.groups > 1,
   }
@@ -211,6 +251,16 @@ export function pageHost(url: string): string {
   }
 }
 
+/** Where a source is, as every tab names it: the site, and the channel of a VK channel (`vkvideo.ru @name`). */
+export function placeOf(url: string): string {
+  try {
+    const link = new URL(url.split("|")[0])
+    return link.pathname.startsWith("/@") ? `${link.host} ${link.pathname.slice(1)}` : link.host
+  } catch {
+    return url
+  }
+}
+
 /** The phase, how far it is and how fast (R-36); a read that does not know its total yet says only the phase. */
 export function progressText(progress: PageProgress): string {
   const phase = phaseText(progress.phase)
@@ -225,11 +275,6 @@ export function progressText(progress: PageProgress): string {
 export function sourceCaption(players: PlayerView[]): string {
   const rows = players.reduce((sum, player) => sum + player.rows, 0)
   return t("sources.caption.source", { players: tn("sources.count.players", players.length), rows: tn("sources.count.rows", rows) })
-}
-
-/** The rows the page gave a player: a count of the table, never a season or a resolution. */
-export function playerCaption(player: PlayerView): string {
-  return tn("sources.count.rows", player.rows)
 }
 
 // --- the choices that belong to a source -----------------------------------------------------------------------------

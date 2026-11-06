@@ -169,7 +169,8 @@ describe("useSourceDrafts", () => {
     const drafts = useSourceDrafts()
     await drafts.add(PAGE)
     const [player] = drafts.items.value[0].view.players
-    expect([player.coverage, player.voiceLines]).toEqual([["1-12 (720p)"], ["1-12 Неизвестная озвучка 1 (Нет)"]])
+    expect([player.coverage.map((each) => each.span), player.steps]).toEqual([["1–12"], "720p"])
+    expect(player.voices.map((voice) => [voice.group, voice.name, voice.rows])).toEqual([[null, "Неизвестная озвучка 1", 1]])
   })
 
   it("blocks the series while a source could not be read, and frees it once that source is removed", async () => {

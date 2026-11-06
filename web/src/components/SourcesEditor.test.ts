@@ -34,16 +34,22 @@ beforeEach(() => {
 })
 
 describe("SourcesEditor", () => {
-  it("draws a group per source with its players and their counts, and no episode, season, resolution or voice-over of the table", () => {
-    const text = mountEditor().text()
-    expect(text).toContain("3 плеера, 41 строка")
-    expect(text).toContain("13 строк")
-    expect(text).toContain("23 строки")
-    for (const word of ["сезона", "до 1080p", "группа"]) expect(text).not.toContain(word)
-    expect(mountEditor().findAll("ul.lines")).toHaveLength(0)
+  it("names a source by its place in the head, and draws its players as tabs with their counts and no table without rows", () => {
+    const w = mountEditor()
+    expect(w.find(".source-head .source-place").text()).toBe("1.ruchime.org")
+    expect(w.find(".source-head").text()).toContain("3 плеера, 41 строка")
+    expect(w.findAll(".player-tab").map((tab) => [tab.find(".player-name").text(), tab.find(".player-rows").text()]))
+      .toEqual([["VK", "13"], ["Vibix", "23"], ["kodik", "5"]])
+    for (const word of ["сезона", "до 1080p", "группа"]) expect(w.text()).not.toContain(word)
+    expect(w.find(".voice-table").exists()).toBe(false)
   })
 
-  it("draws the ranges with their resolutions and a line per voice-over with its group, from the rows of the constructor only", () => {
+  it("names a channel of VK by its site and its channel, as the output tab does", () => {
+    const channel = itemOfSource(stored({ source_type: "vk_video", url: "https://vkvideo.ru/@kino|тайтл" }), null, null)
+    expect(mountEditor([channel]).find(".source-place").text()).toBe("vkvideo.ru @kino")
+  })
+
+  it("draws the episodes with their gaps and a row per voice-over with its group, from the rows of the constructor only", async () => {
     const part = (over: Partial<LayoutRow>): LayoutRow => ({
       series_id: 1, source_id: 7, row_key: "r", excluded: false, season: 1, episode_start: 1, episode_end: 1,
       voice_label: "", voice_name: "", voice_group: null, player: "vk", player_label: "VK", group: "", text: "",
@@ -55,22 +61,26 @@ describe("SourcesEditor", () => {
       part({ row_key: "c", episode_start: 61, episode_end: 120, heights: [360, 1440], voice_label: "Неизвестная озвучка 2" }),
     ]
     const w = mountEditor([itemOfSource(stored({ parser_profile_id: 4 }), { ...summary, status: "ready" }, null, rows)])
-    expect(w.findAll("li.player")[0].findAll("ul.coverage li").map((li) => li.text())).toEqual([
-      "1-50 (480p-2160p), 61-120 (360p-1440p)",
+    expect(w.find(".player-fact b").text()).toBe("1–120")
+    expect(w.find(".player-fact .player-gaps").text()).toBe("пропуски: 51–60")
+    expect(w.find(".player-top").text()).toContain("Разрешение 360p–2160p")
+    expect(w.findAll(".voice-table tbody tr").map((row) => row.findAll("td").map((cell) => cell.text()))).toEqual([
+      ["ПВА ШОУ", "ПВА ШОУ", "1–10", "480p–2160p", "1"],
+      ["Нет", "Неизвестная озвучка 2", "11–120 пропуски: 51–60", "11–50: 480p–720p61–120: 360p–1440p", "2"],
     ])
-    expect(w.findAll("li.player")[0].findAll("ul.voices li").map((li) => li.text())).toEqual([
-      "1-10 ПВА ШОУ (Группа ПВА ШОУ)", "11-50, 61-120 Неизвестная озвучка 2 (Нет)",
-    ])
-    expect(w.findAll("li.player")[1].findAll("ul.lines")).toHaveLength(0)
-    expect(w.findAll("li.player")[1].text()).toContain("Правила профиля не определили ни одной серии")
+    await w.findAll(".player-tab")[1].trigger("click")
+    expect(w.find(".voice-table").exists()).toBe(false)
+    expect(w.find(".player").text()).toContain("Правила профиля не определили ни одной серии")
   })
 
-  it("offers the season of the catalog only at the player that keeps several", () => {
+  it("offers the season of the catalog only at the player that keeps several", async () => {
     const w = mountEditor()
-    expect(w.findAll("li.player")).toHaveLength(3)
-    const withChoice = w.findAll("li.player").filter((li) => li.text().includes("Сезон каталога"))
-    expect(withChoice).toHaveLength(1)
-    expect(withChoice[0].text()).toContain("Vibix")
+    const offered: string[] = []
+    for (const tab of w.findAll(".player-tab")) {
+      await tab.trigger("click")
+      if (w.find(".player-season").exists()) offered.push(w.find(".player").attributes("data-player") as string)
+    }
+    expect(offered).toEqual(["vibix"])
   })
 
   it("tells the profile is missing and that rows have no numbers without it", () => {
@@ -81,9 +91,11 @@ describe("SourcesEditor", () => {
 
   it("switches a player off with the list of the disabled ones", async () => {
     const w = mountEditor([itemOfSource(stored({ players_off: ["kodik"] }), summary, null)])
-    const boxes = w.findAll("li.player input[type=checkbox]")
-    expect(boxes.map((box) => (box.element as HTMLInputElement).checked)).toEqual([true, true, false])
-    await boxes[0].setValue(false)
+    expect(w.findAll(".player-tab").map((tab) => tab.classes().includes("is-off"))).toEqual([false, false, true])
+    await w.findAll(".player-tab")[2].trigger("click")
+    expect((w.find(".player-switch input").element as HTMLInputElement).checked).toBe(false)
+    await w.findAll(".player-tab")[0].trigger("click")
+    await w.find(".player-switch input").setValue(false)
     expect(w.emitted("change")?.[0]).toEqual([7, { playersOff: ["kodik", "vk"] }])
   })
 
@@ -118,7 +130,7 @@ describe("SourcesEditor", () => {
     expect(w.find("button.source-remove").exists()).toBe(false)
     expect(w.find(".source-add").exists()).toBe(false)
     expect((w.find("input[readonly]").element as HTMLInputElement).value).toBe("https://kinozal.tv/details.php?id=1")
-    expect(w.findAll("li.player")).toHaveLength(0)
+    expect(w.find(".players").exists()).toBe(false)
   })
 
   it("hands a typed address to the host and clears the field only when a source was made of it", async () => {
