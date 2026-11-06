@@ -132,6 +132,10 @@ class Packing:
             del self._queue[key]
         self._on_queue()
 
+    def forget(self, series_id: int) -> None:
+        """A series that is gone leaves the queue whole, its failed and cut short tasks too, and the queue is told anew."""
+        self._drop(series_id, keep_failed=False)
+
     async def pack(self, series: dict, *, only: set[tuple] | None = None, skip: set[tuple] = frozenset()) -> Packed:
         """The episodes of `only` (all when None) but those of `skip` (slots (season, episode, part or 0))."""
         def asked(slot: tuple) -> bool:

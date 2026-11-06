@@ -633,3 +633,23 @@ async def test_the_first_step_of_a_sync_finishes_an_owed_publication_in_its_fold
     finally:
         await library.stop()
         await media.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_series_leaves_the_queue_of_the_packing_its_failed_slots_too(rig):
+    """Н-21: a slot failed, the series is deleted, a new window connects: the queue it is given has nothing of the series."""
+    fake, voices, packer, probe, db_path, media_dir = rig
+    sub = probe.bus.subscribe("downloads.pack.queue.changed")
+    put(media_dir, "e01.mp4")
+    put(media_dir, "e01.mkv", b"a file no row holds")
+    winner(db_path, "e01.mp4")
+    order(fake, [OWN])
+    assert (await pack(probe))["failed"] == 1
+    assert [task["series_id"] for task in pictures(sub)[-1]] == [2]
+
+    await probe.request("catalog.series.delete", {"series_id": 2}, timeout=5)
+    await probe.bus.settled()  # the owners have heard series.deleted
+    await probe.request("gateway.sse.clients", {"count": 1}, timeout=5)
+    await probe.bus.settled()
+
+    assert pictures(sub)[-1] == []

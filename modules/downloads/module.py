@@ -566,6 +566,7 @@ class DownloadsModule(BaseModule):
             await self._cancel_runner(task["id"])
             await self._end_task(task)
         await self.repo.drop_publications(series_id)
+        self._packing.forget(series_id)  # Н-21: its cards of the packing go with it
         await self._broadcast_queue()
         self.publish_event("series.purged", {"series_id": series_id, "owner": self.name})
 
