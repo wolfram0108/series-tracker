@@ -61,7 +61,7 @@ const countText = (state: TrackState | "reference", count: number): string => st
         </button>
         <button type="button" class="st-tab" :class="{ active: tab === 'reference' }" @click="tab = 'reference'">{{ t("output.tab.reference") }}</button>
         <button v-for="(group, index) in groups" :key="group" type="button" class="st-tab" :class="{ active: tab === group }" @click="tab = group">
-          <span class="tab-place">{{ index + 1 }}</span>{{ group }}
+          <span class="figure-mark">{{ index + 1 }}</span>{{ group }}
         </button>
       </div>
     </template>
@@ -78,7 +78,7 @@ const countText = (state: TrackState | "reference", count: number): string => st
         </thead>
         <tbody>
           <tr v-for="track in tracks" :key="track.group" :data-group="track.group">
-            <td><span class="tab-place">{{ track.pos }}</span></td>
+            <td><span class="figure-mark">{{ track.pos }}</span></td>
             <td><b>{{ track.group }}</b></td>
             <td class="level-counts">
               <span v-for="(count, state) in track.counts" :key="state" class="pill" :class="PILL[state]">{{ countText(state, count!) }}</span>
@@ -122,10 +122,6 @@ const countText = (state: TrackState | "reference", count: number): string => st
 .level-tracks td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
 .narrow { inline-size: 1%; white-space: nowrap; }
 .level-counts { display: flex; flex-wrap: wrap; gap: 0.3rem; }
-.tab-place {
-  display: inline-grid; place-items: center; inline-size: 1.1rem; block-size: 1.1rem; border-radius: 6px;
-  background: var(--color-gray-600); color: #fff; font-size: 0.7rem; font-weight: 700;
-}
 .level-action, .level-footer {
   border: 1px solid var(--border-color); background: var(--bg-white); border-radius: 8px; padding: 0.3rem 0.7rem;
   cursor: pointer; color: var(--color-gray-600); font: inherit; margin-inline-end: 0.3rem;

@@ -23,7 +23,7 @@ const title = (cell: TrackCell): string => t(cell.isReference ? "output.track.ce
 .track-strip { display: flex; gap: 0.125rem; padding: 0.2rem; max-inline-size: 100%; overflow: hidden; }
 .track-cell {
   flex: 0 1 auto; inline-size: 1.25rem; min-inline-size: 0.25rem; block-size: 1rem; overflow: hidden;
-  display: grid; place-items: center; border-radius: 4px; color: #fff; font-size: 0.625rem; font-weight: 700;
+  display: grid; place-items: center; border-radius: 4px; color: #fff; font-size: 0.625rem; font-weight: 700; line-height: 1;
 }
 .track-cell.is-done { background: #409444; }
 .track-cell.is-down { background: #009688; }

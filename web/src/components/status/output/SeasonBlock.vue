@@ -22,12 +22,11 @@ const props = withDefaults(defineProps<{
   voices: components["schemas"]["VoiceSpan"][]
   marks: Record<number, Mark>
   names?: { season?: number | null; episode?: number | null; part?: number | null; new_filename_preview?: string | null }[]
-  showNames?: boolean
   mode?: "cards" | "tiles"
   opened?: number | null
   queues?: Queues
   busy?: boolean
-}>(), { names: () => [], showNames: false, mode: "cards", opened: null, busy: false })
+}>(), { names: () => [], mode: "cards", opened: null, busy: false })
 
 const emit = defineEmits<{
   (e: "open", episode: number | null): void
@@ -155,7 +154,7 @@ function step(by: number): void {
         <template v-for="item in items" :key="item.view.episode">
           <EpisodeCard
             v-if="mode === 'cards'" :view="item.view" :cells="item.cells" :status="item.status" :marks="marks"
-            :file="showNames && wide ? item.file : undefined" :open="opened?.view.episode === item.view.episode"
+            :file="wide ? item.file : undefined" :open="opened?.view.episode === item.view.episode"
             @open="emit('open', opened?.view.episode === item.view.episode ? null : item.view.episode)"
           />
           <button
@@ -212,7 +211,7 @@ function step(by: number): void {
 .grid-ruler { position: absolute; visibility: hidden; pointer-events: none; inline-size: calc(6 * 1.25rem + 5 * 0.125rem + 1.4rem); }
 .episode-tile {
   all: unset; box-sizing: border-box; position: relative; overflow: hidden; block-size: 1.6rem; border-radius: 6px; cursor: pointer;
-  display: grid; place-items: center; font-size: 0.65rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  display: grid; place-items: center; font-size: 0.65rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 .episode-tile::after { content: ""; position: absolute; inset-inline: 0; inset-block-end: 0; block-size: 0.25rem; background: var(--source); }

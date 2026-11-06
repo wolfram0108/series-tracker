@@ -9,12 +9,5 @@ const style = computed(() => ({ background: props.mark ? `var(--source-${props.m
 </script>
 
 <template>
-  <span class="source-mark" :style="style" :title="mark ? t('output.source.mark', { n: mark.n }) : undefined">{{ mark?.n ?? "—" }}</span>
+  <span class="figure-mark" :style="style" :title="mark ? t('output.source.mark', { n: mark.n }) : undefined">{{ mark?.n ?? "—" }}</span>
 </template>
-
-<style scoped>
-.source-mark {
-  display: inline-grid; place-items: center; flex: none; min-inline-size: 1.5em; block-size: 1.3em; padding-inline: 0.3em;
-  border-radius: 6px; color: #fff; font-size: 0.75rem; font-weight: 700; font-variant-numeric: tabular-nums;
-}
-</style>

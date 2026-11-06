@@ -36,7 +36,7 @@ function drop(target: number): void {
         @dragstart="dragged = index" @dragover.prevent="over = index" @dragleave="over = null" @drop.prevent="drop(index)"
         @dragend="dragged = over = null"
       >
-        <span class="voice-order-position">{{ index + 1 }}</span>
+        <span class="figure-mark">{{ index + 1 }}</span>
         <span>{{ voice.label }}</span>
         <span class="voice-order-episodes">{{ voice.episodes }}</span>
       </li>
@@ -55,9 +55,5 @@ function drop(target: number): void {
 }
 .voice-order-item.is-over { outline: 0.125rem dashed var(--color-blue); }
 .voice-order-item.is-busy { cursor: not-allowed; opacity: 0.6; }
-.voice-order-position {
-  display: inline-grid; place-items: center; inline-size: 1.25rem; block-size: 1.25rem; border-radius: 6px;
-  background: var(--color-gray-600); color: #fff; font-size: 0.75rem; font-weight: 700;
-}
 .voice-order-episodes { color: var(--text-muted); }
 </style>

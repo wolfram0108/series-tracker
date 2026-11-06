@@ -65,7 +65,7 @@ const PILL: Record<EpisodeStatus, string> = {
         <button
           v-for="(group, index) in groups" :key="group" type="button" class="st-tab" :class="{ active: tab === group }" role="tab"
           :aria-selected="tab === group" @click="tab = group"
-        ><span class="tab-place">{{ index + 1 }}</span>{{ group }}</button>
+        ><span class="figure-mark">{{ index + 1 }}</span>{{ group }}</button>
       </div>
 
       <TrackTable
@@ -105,8 +105,4 @@ const PILL: Record<EpisodeStatus, string> = {
 .detail-switch:disabled { opacity: 0.5; cursor: default; }
 .detail-body { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.75rem 1rem; }
 .detail-tabs { flex-wrap: wrap; align-self: flex-start; }
-.tab-place {
-  display: inline-grid; place-items: center; inline-size: 1.1rem; block-size: 1.1rem; border-radius: 6px;
-  background: var(--color-gray-600); color: #fff; font-size: 0.7rem; font-weight: 700;
-}
 </style>

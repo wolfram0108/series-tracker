@@ -49,10 +49,8 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   // A lever is on its way to the core / a pass over the series is running: the controls that start them wait.
   const busy = ref(false)
   const syncing = ref(false)
-  // The names the files would get: asked for by the user, counted by the rules as they are now, so read again with the layout.
+  // The names the files get, counted by the rules as they are now: read with the layout, and again with every new one.
   const names = ref<RenameRow[]>([])
-  const namesWanted = ref(false)
-  const naming = ref(false)
 
   // The label of a player is a fact of the table of its source, so a voice-over of a player the episode has no line for is named too.
   const labels = computed<Record<string, string>>(() => Object.fromEntries(
@@ -99,7 +97,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     const broken = [layout, output].find((answer) => !answer.ok)
     failure.value = broken && !broken.ok ? broken.text : null
     if (packetDuringRead) void load()
-    if (namesWanted.value) void loadNames()
+    void loadNames()
   }
 
   // The files change with the downloads, not with the layout: they are read on their own, the newest ask writing.
@@ -113,21 +111,10 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   let namesAsked = 0
   async function loadNames(): Promise<void> {
     const ask = ++namesAsked
-    naming.value = true
     const answer = await fetchRenames(seriesId)
     if (ask !== namesAsked) return
-    naming.value = false
     if (answer.ok) names.value = answer.data.preview ?? []
     else failure.value = answer.text
-  }
-
-  function showNames(on: boolean): Promise<void> {
-    namesWanted.value = on
-    if (on) return loadNames()
-    namesAsked += 1
-    naming.value = false
-    names.value = []
-    return Promise.resolve()
   }
 
   // A refusal stays in `failure` until the next action; the words are also returned for the caller.
@@ -244,7 +231,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     })
   }
 
-  return { composition, references, loading, failure, busy, syncing, names, namesWanted, naming, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
-    sync, retryFailed, showNames, voiceOrders, order, marks, loadQueues, queuesOf, setOrder, setAllowed, setTaken, resetOrder,
+  return { composition, references, loading, failure, busy, syncing, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
+    sync, retryFailed, voiceOrders, order, marks, loadQueues, queuesOf, setOrder, setAllowed, setTaken, resetOrder,
     retry, redo, refetch }
 }

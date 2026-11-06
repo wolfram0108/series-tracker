@@ -76,7 +76,7 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
 .card-in { position: relative; display: flex; flex-direction: column; gap: 0.3rem; padding: 0.5rem; }
 .glass { background: rgba(248, 249, 250, 0.82); border-radius: 8px; box-shadow: 0 0 6px rgba(0, 0, 0, 0.15); color: #2c3e50; }
 .card-top { display: flex; align-items: center; gap: 0.375rem; min-inline-size: 0; }
-.card-num { flex: none; padding: 0.1rem 0.5rem; font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.card-num { flex: none; padding: 0.25rem 0.5rem; font-size: 1rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
 .card-name {
   flex: 1 1 auto; min-inline-size: 0; padding: 0.25rem 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--font-mono); font-size: 0.7rem;

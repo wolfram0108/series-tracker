@@ -55,3 +55,12 @@
   padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(0, 0, 0, 0.1);
   background-color: rgba(255, 255, 255, 0.3); color: inherit;
 }
+
+/* A figure in a small box (the place of a track, the number of a source): the line is the box itself, so the figure stands
+   in its middle whatever the line height around it. */
+.figure-mark {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  min-inline-size: 1.25rem; block-size: 1.25rem; padding-inline: 0.25rem; border-radius: 6px;
+  background: var(--color-gray-600); color: #fff; font-size: 0.75rem; font-weight: 700; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}

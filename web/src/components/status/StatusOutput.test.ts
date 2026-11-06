@@ -221,16 +221,26 @@ describe("StatusOutput", () => {
     expect(w.find(".output-failure").text()).toBe("Сериал не найден")
   })
 
-  it("shows the name the file would get in the first line of a card wider than the smallest, when the box is checked", async () => {
+  it("shows the name the file gets in the first line of a card wider than the smallest, always", async () => {
     const w = mountOutput()
-    await flushPromises()
-    expect(calls.fetchRenames).not.toHaveBeenCalled()
-    await w.find(".output-names input").setValue(true)
     await flushPromises()
     expect(w.findAll(".episode-card").map((each) => each.find(".card-name").exists())).toEqual([false, true, false])
     expect(w.find(".card-name").text()).toBe("Show s01e02.mp4")
-    await w.find(".output-names input").setValue(false)
+  })
+
+  it("leaves the name out of the smallest card", async () => {
+    roomFor(1)
+    const w = mountOutput()
+    await flushPromises()
     expect(w.find(".card-name").exists()).toBe(false)
+  })
+
+  it("puts the buttons first, then the sources, then the filters and the view", async () => {
+    const w = mountOutput()
+    await flushPromises()
+    const bars = w.findAll(".output-bar")
+    expect(bars[0].find(".output-sync").exists() && bars[0].find(".output-series-settings").exists()).toBe(true)
+    expect(bars[bars.length - 1].find(".output-filters").exists() && bars[bars.length - 1].find(".output-view").exists()).toBe(true)
   })
 
   it("has the sync of the series and the reset of failed attempts, each waits for its answer", async () => {
@@ -291,6 +301,6 @@ describe("StatusOutput", () => {
     const w = mountOutput()
     await flushPromises()
     expect(w.findAll(".output-source").map((each) => each.text())).toEqual(["11.ruchime.org", "2vkvideo.ru @chan"])
-    expect(w.find(".episode-card .source-mark").text()).toBe("1")
+    expect(w.find(".episode-card .figure-mark").text()).toBe("1")
   })
 })

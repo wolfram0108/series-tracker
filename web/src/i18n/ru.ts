@@ -167,7 +167,6 @@ export const ru = {
   "rules.block.or.label": "или",
   "rules.block.or.title": "Любой из соседних текстов: ставится между двумя блоками «Текст»",
   "rules.block.or.dangling": "«или» должен стоять между двумя блоками «Текст»",
-  "output.names": "Имена файлов",
   "output.filter.all": "Все",
   "output.filter.deviations": "Отклонения",
   "output.filter.errors": "Ошибки",

@@ -83,6 +83,18 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
 
 <template>
   <div class="status-output">
+    <div class="output-bar output-actions">
+      <Button :label="t('output.settings.series')" icon="pi pi-sliders-h" size="small" severity="info" class="output-series-settings"
+              @click="openSettings(null)" />
+      <Button class="output-retry-failed" :label="t('output.retryFailed')" icon="pi pi-replay" size="small" severity="secondary"
+              :disabled="!canSync" @click="output.retryFailed()" />
+      <Button :label="t('output.sync')" :icon="passing ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'" size="small" severity="warn"
+              class="output-sync" :disabled="!canSync" @click="output.sync()" />
+    </div>
+    <div v-if="legend.length" class="output-bar output-legend">
+      <span class="output-legend-name">{{ t("output.sources") }}</span>
+      <span v-for="each in legend" :key="each.id" class="output-source"><SourceMark :mark="each.mark" />{{ each.mark.place }}</span>
+    </div>
     <div class="output-bar">
       <div class="output-filters" role="group">
         <button
@@ -95,24 +107,6 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
         <button type="button" class="st-tab" :class="{ active: mode === 'cards' }" @click="mode = 'cards'">{{ t("output.view.cards") }}</button>
         <button type="button" class="st-tab" :class="{ active: mode === 'tiles' }" @click="mode = 'tiles'">{{ t("output.view.tiles") }}</button>
       </div>
-      <label class="output-names">
-        <input type="checkbox" :checked="output.namesWanted.value" @change="output.showNames(($event.target as HTMLInputElement).checked)" />
-        <span>{{ t("output.names") }}</span>
-        <i v-if="output.naming.value" class="pi pi-spin pi-spinner" />
-      </label>
-    </div>
-    <div class="output-bar">
-      <div v-if="legend.length" class="output-legend">
-        <span class="output-legend-name">{{ t("output.sources") }}</span>
-        <span v-for="each in legend" :key="each.id" class="output-source"><SourceMark :mark="each.mark" />{{ each.mark.place }}</span>
-      </div>
-      <span class="output-grow" />
-      <Button :label="t('output.settings.series')" icon="pi pi-sliders-h" size="small" severity="info" class="output-series-settings"
-              @click="openSettings(null)" />
-      <Button class="output-retry-failed" :label="t('output.retryFailed')" icon="pi pi-replay" size="small" severity="secondary"
-              :disabled="!canSync" @click="output.retryFailed()" />
-      <Button :label="t('output.sync')" :icon="passing ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'" size="small" severity="warn"
-              class="output-sync" :disabled="!canSync" @click="output.sync()" />
     </div>
 
     <p v-for="read in reading" :key="read.key" class="output-reading"><i class="pi pi-spin pi-spinner" /><span>{{ read.text }}</span></p>
@@ -123,7 +117,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
     <div v-else-if="all.length === 0" class="empty-state">{{ t("output.empty") }}</div>
     <SeasonBlock
       v-for="season in seasons" :key="season.season" :season="season.season" :episodes="season.shown" :total="season.episodes.length"
-      :voices="season.voices" :marks="output.marks.value" :names="output.names.value" :show-names="output.namesWanted.value"
+      :voices="season.voices" :marks="output.marks.value" :names="output.names.value"
       :mode="mode" :opened="opened?.season === season.season ? opened.episode : null"
       :queues="opened?.season === season.season ? output.queuesOf(season.season, opened.episode) : undefined" :busy="busy"
       @open="open(season.season, $event)" @settings="openSettings(season.season)"
@@ -167,8 +161,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
 .output-filter.is-on { background: #2c3e50; border-color: #2c3e50; color: #fff; }
 .output-filter:disabled { opacity: 0.45; cursor: default; }
 .output-view .st-tab { padding-block: 0.3rem; font-size: 0.85rem; }
-.output-names { display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; }
-.output-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+.output-legend { gap: 0.4rem; }
 .output-legend-name { color: var(--text-muted); font-size: 0.85rem; }
 .output-source {
   display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0.75rem 0.15rem 0.25rem; border-radius: 20px;

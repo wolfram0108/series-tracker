@@ -69,7 +69,7 @@ function act(row: (typeof rows.value)[number]): void {
     </thead>
     <tbody>
       <tr v-for="row in rows" :key="row.cell.pos" :data-group="row.cell.group">
-        <td><span class="track-place">{{ row.cell.pos }}</span></td>
+        <td><span class="figure-mark">{{ row.cell.pos }}</span></td>
         <td>
           <b>{{ row.cell.group }}</b>
           <span v-if="row.cell.isReference" class="pill pill-primary track-ref">{{ t("output.tracks.reference") }}</span>
@@ -102,10 +102,6 @@ function act(row: (typeof rows.value)[number]): void {
 .track-table td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
 .track-table tbody tr:nth-child(odd) { background: rgba(0, 0, 0, 0.02); }
 .narrow { inline-size: 1%; white-space: nowrap; }
-.track-place {
-  display: inline-grid; place-items: center; inline-size: 1.25rem; block-size: 1.25rem; border-radius: 6px;
-  background: var(--color-gray-600); color: #fff; font-size: 0.75rem; font-weight: 700;
-}
 .track-ref { margin-inline-start: 0.4rem; }
 .track-from { display: inline-flex; align-items: center; gap: 0.4rem; }
 .track-note { margin-inline-start: 0.4rem; color: var(--text-muted); }
