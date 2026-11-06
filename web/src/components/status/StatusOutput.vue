@@ -10,6 +10,8 @@ import {
 import { pageHost, progressText } from "../../lib/sources"
 import { useSeriesStore } from "../../stores/series"
 import { useSeriesReadsStore } from "../../stores/seriesReads"
+import { badgeOf, cutOf, cutsBySlot, cutState, type CompilationView, type CutState } from "../../lib/compilations"
+import CompilationBlock from "./output/CompilationBlock.vue"
 import LevelSettings from "./output/LevelSettings.vue"
 import SeasonBlock from "./output/SeasonBlock.vue"
 import SourceMark from "./output/SourceMark.vue"
@@ -35,9 +37,9 @@ const reading = computed(() => reads.forSeries(props.seriesId)
 type Filter = "all" | "deviations" | "errors" | "partial" | "working" | "off"
 const FILTERS: Filter[] = ["all", "deviations", "errors", "partial", "working", "off"]
 const filter = ref<Filter>("all")
-const mode = ref<"cards" | "tiles">("cards")
-const opened = ref<{ season: number; episode: number } | null>(null)
-const settingsOf = ref<{ season: number | null } | null>(null)
+const mode = ref<"cards" | "tiles" | "compilations">("cards")
+const opened = ref<{ season: number; episode: number; compilation?: string } | null>(null)
+const settingsOf = ref<{ season: number | null; compilation?: string } | null>(null)
 
 const orderOf = (season: number): string[] =>
   (output.voiceOrders.value.find((each) => each.season === season)?.voices ?? []).map((voice) => voice.label)
@@ -66,18 +68,46 @@ function open(season: number, episode: number | null): void {
   opened.value = episode === null ? null : { season, episode }
   if (episode !== null) void output.loadQueues(season, episode)
 }
-function openSettings(season: number | null): void {
-  settingsOf.value = { season }
-  void output.loadQueues(season, null)
+function openSettings(season: number | null, compilation: string | null = null): void {
+  settingsOf.value = { season, ...(compilation === null ? {} : { compilation }) }
+  void output.loadQueues(season, null, compilation)
 }
 
-const scopeOf = (season: number | null, episode: number | null = null): Scope =>
-  ({ ...(season === null ? {} : { season }), ...(episode === null ? {} : { episode }) })
+// Stage 12: the compilations of each season (their outline and letters on the cards, their blocks in the view
+// «Компиляции»), the cuts of the episodes, and the episode opened in a block of a compilation.
+const compilationsOf = (season: number): CompilationView[] => output.compilations.value.filter((view) => view.season === season)
+const cuts = computed(() => cutsBySlot(output.cuts.value))
+const compilationSeasons = computed(() => output.seasons.value
+  .map((season) => ({ season: season.season, episodes: season.episodes, views: compilationsOf(season.season) }))
+  .filter((season) => season.views.length > 0))
+function openInCompilation(season: number, key: string, episode: number | null): void {
+  opened.value = episode === null ? null : { season, episode, compilation: key }
+  if (episode !== null) void output.loadQueues(season, episode)
+}
+const settingsView = computed(() => output.compilations.value.find((view) => view.ref.key === settingsOf.value?.compilation))
+const settingsCompilation = computed(() => {
+  const view = settingsView.value
+  if (!view) return undefined
+  const counts: Partial<Record<CutState, number>> = {}
+  for (const each of view.episodes ?? []) {
+    if (!each.member) continue
+    const state: CutState = cutState(cutOf(cuts.value, view.season, each.episode)) ?? "ready"
+    counts[state] = (counts[state] ?? 0) + 1
+  }
+  const badge = badgeOf(view)
+  return { title: t("output.settings.titleCompilation", { letter: badge.letter, range: `${view.ref.start}–${view.ref.end}` }),
+    cuts: counts }
+})
+
+const scopeOf = (season: number | null, episode: number | null = null, compilation: string | null = null): Scope =>
+  ({ ...(season === null ? {} : { season }), ...(episode === null ? {} : { episode }),
+    ...(compilation === null ? {} : { compilation }) })
 const queueOrder = (scope: Scope, queue: QueueName, group: string | null, rows: QueueRow[]) => output.setOrder(scope, queue, group, rows)
 const queueAllow = (scope: Scope, queue: QueueName, row: QueueRow, allowed: boolean) => output.setAllowed(scope, queue, row, allowed)
 const queueTake = (scope: Scope, group: string, taken: boolean) => output.setTaken(scope, group, taken)
 const queueReset = (scope: Scope, queue: QueueName, group: string | null) => output.resetOrder(scope, queue, group)
 const settingsSeason = computed(() => settingsOf.value?.season ?? null)
+const settingsKey = computed(() => settingsOf.value?.compilation ?? null)
 const settingsEpisodes = computed(() => settingsSeason.value === null ? []
   : output.seasons.value.find((each) => each.season === settingsSeason.value)?.episodes ?? [])
 </script>
@@ -107,6 +137,8 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
       <div class="st-tabs output-view" role="group" :aria-label="t('output.view.label')">
         <button type="button" class="st-tab" :class="{ active: mode === 'cards' }" @click="mode = 'cards'">{{ t("output.view.cards") }}</button>
         <button type="button" class="st-tab" :class="{ active: mode === 'tiles' }" @click="mode = 'tiles'">{{ t("output.view.tiles") }}</button>
+        <button type="button" class="st-tab output-view-compilations" :class="{ active: mode === 'compilations' }"
+                @click="mode = 'compilations'">{{ t("output.view.compilations") }}</button>
       </div>
     </div>
 
@@ -116,10 +148,29 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
 
     <div v-if="output.loading.value && all.length === 0" class="empty-state">{{ t("output.loading") }}</div>
     <div v-else-if="all.length === 0" class="empty-state">{{ t("output.empty") }}</div>
+    <template v-if="mode === 'compilations'">
+      <div v-if="compilationSeasons.length === 0" class="empty-state">{{ t("output.compilations.empty") }}</div>
+      <template v-for="season in compilationSeasons" :key="season.season">
+        <CompilationBlock
+          v-for="view in season.views" :key="view.ref.key" :view="view" :season="season.views" :episodes="season.episodes"
+          :cuts="cuts" :marks="output.marks.value" :labels="output.labels.value" mode="cards"
+          :opened="opened?.compilation === view.ref.key ? opened.episode : null"
+          :queues="opened?.compilation === view.ref.key ? output.queuesOf(season.season, opened.episode) : undefined" :busy="busy"
+          @open="openInCompilation(season.season, view.ref.key, $event)" @settings="openSettings(season.season, view.ref.key)"
+          @switch="output.takeCompilation(season.season, view.ref.key, !$event)"
+          @member="(episode, key) => output.member(season.season, episode, key)"
+          @retry="(episode) => output.retryCut(season.season, episode)"
+          @queue-order="(episode, queue, group, rows) => queueOrder(scopeOf(season.season, episode), queue, group, rows)"
+          @queue-allow="(episode, queue, row, allowed) => queueAllow(scopeOf(season.season, episode), queue, row, allowed)"
+          @queue-reset="(episode, queue, group) => queueReset(scopeOf(season.season, episode), queue, group)"
+        />
+      </template>
+    </template>
     <SeasonBlock
-      v-for="season in seasons" :key="season.season" :season="season.season" :episodes="season.shown" :total="season.episodes.length"
+      v-for="season in mode === 'compilations' ? [] : seasons" :key="season.season" :season="season.season" :episodes="season.shown" :total="season.episodes.length"
       :voices="season.voices" :marks="output.marks.value" :names="output.names.value"
-      :mode="mode" :opened="opened?.season === season.season ? opened.episode : null"
+      :mode="mode === 'tiles' ? 'tiles' : 'cards'" :opened="opened?.season === season.season && !opened.compilation ? opened.episode : null"
+      :compilations="compilationsOf(season.season)"
       :queues="opened?.season === season.season ? output.queuesOf(season.season, opened.episode) : undefined" :busy="busy"
       @open="open(season.season, $event)" @settings="openSettings(season.season)"
       @switch-season="output.switchTo(season.season, null, $event)"
@@ -135,15 +186,16 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
     />
 
     <LevelSettings
-      v-if="settingsOf" :season="settingsSeason" :episodes="settingsEpisodes"
+      v-if="settingsOf" :key="`${settingsSeason}:${settingsKey}`" :season="settingsSeason" :episodes="settingsEpisodes"
       :order="settingsSeason === null ? [] : orderOf(settingsSeason)" :marks="output.marks.value"
-      :queues="output.queuesOf(settingsSeason, null)" :busy="busy"
+      :queues="output.queuesOf(settingsSeason, null, settingsKey)" :busy="busy" :compilation="settingsCompilation"
       @close="settingsOf = null"
-      @order="(queue, group, rows) => queueOrder(scopeOf(settingsSeason), queue, group, rows)"
-      @allow="(queue, row, allowed) => queueAllow(scopeOf(settingsSeason), queue, row, allowed)"
-      @take="(group, taken) => queueTake(scopeOf(settingsSeason), group, taken)"
-      @reset="(queue, group) => queueReset(scopeOf(settingsSeason), queue, group)"
-      @reset-level="output.reset(scopeOf(settingsSeason))"
+      @order="(queue, group, rows) => queueOrder(scopeOf(settingsSeason, null, settingsKey), queue, group, rows)"
+      @allow="(queue, row, allowed) => queueAllow(scopeOf(settingsSeason, null, settingsKey), queue, row, allowed)"
+      @take="(group, taken) => queueTake(scopeOf(settingsSeason, null, settingsKey), group, taken)"
+      @reset="(queue, group) => queueReset(scopeOf(settingsSeason, null, settingsKey), queue, group)"
+      @reset-level="output.reset(scopeOf(settingsSeason, null, settingsKey))"
+      @retry-cuts="settingsSeason !== null && output.retryCut(settingsSeason, null)"
       @retry="(group) => settingsSeason !== null && output.retry(settingsSeason, null, group)"
       @redo="(group) => settingsSeason !== null && output.redo(settingsSeason, null, group)"
     />

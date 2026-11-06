@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { computed } from "vue"
 import type { components } from "../../../api/schema"
 import type { Queues } from "../../../composables/outputCalls"
 import { t } from "../../../i18n"
 import {
-  allOff, episodeStatus, fileNamesOf, perRowOf, spansOf, trackCells, type EpisodeView, type QueueName, type QueueRow,
+  allOff, episodeStatus, fileNamesOf, spansOf, trackCells, type EpisodeView, type QueueName, type QueueRow,
   type SourceMark as Mark,
 } from "../../../lib/output"
+import { useCardGrid } from "../../../composables/useCardGrid"
 import VoiceOrder from "../VoiceOrder.vue"
+import { badgeOf, membersOf, memberOf, type CompilationView } from "../../../lib/compilations"
+import CompilationOutline from "./CompilationOutline.vue"
 import EpisodeCard from "./EpisodeCard.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
 import PowerSwitch from "./PowerSwitch.vue"
@@ -27,7 +30,9 @@ const props = withDefaults(defineProps<{
   opened?: number | null
   queues?: Queues
   busy?: boolean
-}>(), { names: () => [], mode: "cards", opened: null, busy: false })
+  /** The compilations of the season (stage 12): their outline behind the cards and their letters on them. */
+  compilations?: CompilationView[]
+}>(), { names: () => [], mode: "cards", opened: null, busy: false, compilations: () => [] })
 
 const emit = defineEmits<{
   (e: "open", episode: number | null): void
@@ -85,31 +90,13 @@ const videoText = computed(() => [
 const voicesText = computed(() => (Object.entries(meters.value.voices) as [keyof typeof meters.value.voices, number][])
   .filter(([, count]) => count > 0).map(([state, count]) => t(`output.meter.${state}`, { n: count })).join(" · "))
 
-// How many of the smallest cards the grid has room for, measured on the grid itself.
-const grid = ref<HTMLElement | null>(null)
-const ruler = ref<HTMLElement | null>(null)
-const places = ref(1)
-let observer: ResizeObserver | null = null
-function measure(): void {
-  if (!grid.value || !ruler.value) return
-  const unit = ruler.value.getBoundingClientRect().width
-  const gap = parseFloat(getComputedStyle(grid.value).columnGap) || 0
-  const width = grid.value.getBoundingClientRect().width
-  places.value = unit > 0 ? Math.max(1, Math.floor((width + gap) / (unit + gap))) : 1
-}
-onMounted(() => {
-  measure()
-  if (typeof ResizeObserver !== "undefined" && grid.value) {
-    observer = new ResizeObserver(measure)
-    observer.observe(grid.value)
-  }
-})
-onBeforeUnmount(() => observer?.disconnect())
-watch(() => props.mode, measure, { flush: "post" })
+const { grid, ruler, wide, columns, layout } = useCardGrid(() => props.mode, () => order.value.length, () => props.total)
 
-const perRow = computed(() => perRowOf(places.value, order.value.length, props.total))
-const wide = computed(() => perRow.value < Math.min(places.value, 6))
-const columns = computed(() => props.mode === "cards" ? { gridTemplateColumns: `repeat(${perRow.value}, minmax(0, 1fr))` } : {})
+const members = computed(() => membersOf(props.compilations))
+const outline = computed(() => props.compilations.map((view) => ({
+  color: badgeOf(view).color,
+  episodes: (view.episodes ?? []).filter((each) => each.member).map((each) => each.episode),
+})).filter((each) => each.episodes.length > 0))
 
 const opened = computed(() => items.value.find((item) => item.view.episode === props.opened) ?? null)
 function step(by: number): void {
@@ -152,15 +139,18 @@ function step(by: number): void {
       <VoiceOrder v-if="voices.length > 1" :voices="voices" :busy="busy" @order="emit('voice-order', $event)" />
       <div ref="grid" class="season-grid" :class="`is-${mode}`" :style="columns">
         <span ref="ruler" class="grid-ruler" aria-hidden="true" />
+        <CompilationOutline :grid="grid" :layout="layout + episodes.length + (opened ? 1 : 0)" :groups="outline" />
         <template v-for="item in items" :key="item.view.episode">
           <EpisodeCard
             v-if="mode === 'cards'" :view="item.view" :cells="item.cells" :status="item.status" :marks="marks"
             :file="wide ? item.file : undefined" :open="opened?.view.episode === item.view.episode" :busy="busy"
+            :badge="memberOf(members, season, item.view.episode)"
             @open="emit('open', opened?.view.episode === item.view.episode ? null : item.view.episode)"
             @switch="emit('switch-episode', item.view.episode, $event)"
           />
           <button
-            v-else type="button" class="episode-tile" :class="[`is-${item.status}`, { 'is-open': opened?.view.episode === item.view.episode }]"
+            v-else type="button" class="episode-tile" :data-episode="item.view.episode"
+            :class="[`is-${item.status}`, { 'is-open': opened?.view.episode === item.view.episode }]"
             :style="item.tone" :title="item.label" :aria-label="item.label"
             @click="emit('open', opened?.view.episode === item.view.episode ? null : item.view.episode)"
           >{{ item.view.episode }}</button>
@@ -180,49 +170,3 @@ function step(by: number): void {
     </div>
   </section>
 </template>
-
-<style scoped>
-.season-block { margin: 0; }
-.season-head {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; padding: 0.75rem 1.25rem;
-  background: linear-gradient(135deg, var(--bg-light) 0%, var(--border-color) 100%); border-bottom: 1px solid var(--border-color);
-  border-radius: var(--card-border-radius) var(--card-border-radius) 0 0;
-}
-.season-title { font-size: 1rem; font-weight: 600; color: #2c3e50; }
-.season-range { color: var(--text-muted); font-size: 0.8rem; }
-.season-meters { display: flex; flex-wrap: wrap; gap: 0.25rem 1.1rem; flex: 1 1 var(--measure); }
-.meter { display: flex; align-items: center; gap: 0.5rem; flex: 1 1 14rem; min-inline-size: 0; }
-.meter-name { flex: none; inline-size: 3.6rem; color: var(--text-muted); font-size: 0.75rem; }
-.meter-bar { display: flex; flex: 1 1 auto; block-size: 0.5rem; border-radius: 4px; overflow: hidden; background: #dee2e6; }
-.meter-bar .is-done { background: #409444; }
-.meter-bar .is-down { background: #009688; }
-.meter-bar .is-align { background: var(--color-blue); }
-.meter-bar .is-wait { background: #ced4da; }
-.meter-bar .is-error { background: var(--color-red-1); }
-.meter-bar .is-absent { background: var(--color-yellow-1); }
-.meter-text { font-size: 0.75rem; color: var(--color-gray-600); white-space: nowrap; }
-.season-settings { min-block-size: 2rem; padding-block: 0.25rem; font-size: 0.85rem; }
-.season-body { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.75rem 1.25rem; }
-.season-grid { position: relative; display: grid; grid-auto-flow: row dense; gap: 0.6rem; }
-.season-grid.is-tiles { grid-template-columns: repeat(auto-fill, minmax(2.25rem, 1fr)); gap: 0.25rem; }
-/* The width of the smallest card: a strip of six tracks and the padding around it (TrackStrip, EpisodeCard). */
-.grid-ruler { position: absolute; visibility: hidden; pointer-events: none; inline-size: calc(6 * 1.25rem + 5 * 0.125rem + 1.4rem); }
-.episode-tile {
-  all: unset; box-sizing: border-box; position: relative; overflow: hidden; block-size: 1.6rem; border-radius: calc(1.6rem * var(--round)); cursor: pointer;
-  display: grid; place-items: center; font-size: 0.65rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
-}
-.episode-tile::after { content: ""; position: absolute; inset-inline: 0; inset-block-end: 0; block-size: 0.25rem; background: var(--source); }
-.episode-tile:focus-visible, .episode-tile.is-open { outline: 0.125rem solid var(--color-blue); outline-offset: 0.0625rem; }
-.episode-tile.is-ready { background: linear-gradient(135deg, #4CAF50, #409444); color: #fff; }
-.episode-tile.is-down { background: linear-gradient(135deg, #009688, #00796D); color: #fff; }
-.episode-tile.is-align { background: var(--color-blue); color: #fff; }
-.episode-tile.is-wait { background: linear-gradient(135deg, #f0f2f5, #e9ecef); color: var(--color-gray-600); }
-.episode-tile.is-partial {
-  background: repeating-linear-gradient(45deg, var(--partial-ground) 0 0.4rem,
-    color-mix(in srgb, var(--partial-stripe) var(--partial-stripe-share), var(--partial-ground)) 0.4rem 0.8rem);
-  color: var(--color-gray-600);
-}
-.episode-tile.is-error { background: linear-gradient(135deg, #dc3545, #c82333); color: #fff; }
-.episode-tile.is-off { background: linear-gradient(135deg, #6c757d, #5a6268); color: #fff; }
-</style>

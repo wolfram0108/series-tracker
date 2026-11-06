@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue"
 import { t } from "../i18n"
+import { COMPILATION_COLORS, type CompilationView } from "../lib/compilations"
 import type { EpisodeView, SourceMark } from "../lib/output"
 import SeasonBlock from "../components/status/output/SeasonBlock.vue"
 
@@ -50,9 +51,19 @@ const toHex = (value: string): Hex => {
   return /^#[0-9a-f]{3}$/.test(short) ? "#" + [...short.slice(1)].map((digit) => digit + digit).join("") : short
 }
 
+// Stage 12: compilations of the sample season, so that their outlines, letters and colours are tuned on the real cards:
+// one takes two episodes that touch only at a corner, others lie side by side, one is a block of four.
+const TAKEN: [number, number[]][] = [[0, [2, 7]], [1, [3, 4, 5, 8]], [2, [9]], [3, [15, 16]], [4, [11, 12, 17, 18]]]
+const compilations: CompilationView[] = TAKEN.map(([index, taken]) => ({
+  season: 1, index, take: true,
+  ref: { key: `sample-${index}`, source_id: 2, row_key: `c${index}`, player: "vk", voice_group: "HORIZON", height: 2160,
+    start: Math.min(...taken), end: Math.max(...taken) + 1 },
+  episodes: taken.map((episode) => ({ episode, member: true, absence: null, elsewhere: null, own: false })),
+}))
+
 const root = (name: string): string => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-const current = ref({ ground: "#e9ecef", depth: 7, stripe: "#4caf50", share: 60 })
-const state = reactive({ ...current.value })
+const current = ref({ ground: "#e9ecef", depth: 7, stripe: "#4caf50", share: 60, colors: [] as string[], line: 0.16, fill: 0.28 })
+const state = reactive({ ...current.value, colors: [...current.value.colors] })
 const note = ref("")
 
 // What the window shows now is read from its tokens, so the page starts from the real colours and returns to them.
@@ -60,8 +71,10 @@ onMounted(() => {
   const ground = toHex(root("--partial-ground"))
   const end = rgb(toHex(root("--partial-ground-end")))
   const depth = Math.round(100 * (1 - end.reduce((sum, part) => sum + part, 0) / Math.max(1, rgb(ground).reduce((sum, part) => sum + part, 0))))
-  current.value = { ground, depth, stripe: toHex(root("--partial-stripe")), share: parseFloat(root("--partial-stripe-share")) }
-  Object.assign(state, current.value)
+  current.value = { ground, depth, stripe: toHex(root("--partial-stripe")), share: parseFloat(root("--partial-stripe-share")),
+    colors: Array.from({ length: COMPILATION_COLORS }, (_, index) => toHex(root(`--compilation-${index + 1}`))),
+    line: parseFloat(root("--compilation-line")), fill: parseFloat(root("--compilation-ground-share")) }
+  Object.assign(state, { ...current.value, colors: [...current.value.colors] })
 })
 
 const end = computed(() => darker(state.ground, state.depth))
@@ -70,6 +83,9 @@ const tokens = computed(() => ({
   "--partial-ground-end": end.value,
   "--partial-stripe": state.stripe,
   "--partial-stripe-share": `${state.share}%`,
+  ...Object.fromEntries(state.colors.map((colour, index) => [`--compilation-${index + 1}`, colour])),
+  "--compilation-line": `${state.line}rem`,
+  "--compilation-ground-share": `${state.fill}`,
 }))
 const block = computed(() => `:root {\n${Object.entries(tokens.value).map(([name, value]) => `  ${name}: ${value};`).join("\n")}\n}`)
 
@@ -78,7 +94,7 @@ function pick(field: "ground" | "stripe", value: string): void {
   note.value = ""
 }
 function reset(): void {
-  Object.assign(state, current.value)
+  Object.assign(state, { ...current.value, colors: [...current.value.colors] })
   note.value = t("tools.cardColors.resetDone")
 }
 const output = ref<HTMLElement | null>(null)
@@ -146,6 +162,25 @@ async function copy(): Promise<void> {
           </label>
         </section>
 
+        <section class="tune-sheet" aria-labelledby="tune-compilations">
+          <h2 id="tune-compilations" class="tune-label">{{ t("tools.cardColors.compilations") }}</h2>
+          <div class="tune-swatches" role="group" :aria-label="t('tools.cardColors.compilations')">
+            <label v-for="(colour, index) in state.colors" :key="index" class="tune-compilation" :title="colour">
+              <input type="color" :value="colour" @input="state.colors[index] = toHex(($event.target as HTMLInputElement).value)" />
+            </label>
+          </div>
+          <label class="tune-row">
+            <span>{{ t("tools.cardColors.line") }}</span>
+            <input v-model.number="state.line" type="range" min="0.06" max="0.3" step="0.02" />
+            <span class="tune-value">{{ state.line }}rem</span>
+          </label>
+          <label class="tune-row">
+            <span>{{ t("tools.cardColors.fill") }}</span>
+            <input v-model.number="state.fill" type="range" min="0" max="1" step="0.02" />
+            <span class="tune-value">{{ Math.round(state.fill * 100) }}%</span>
+          </label>
+        </section>
+
         <section class="tune-sheet" aria-labelledby="tune-rules">
           <h2 id="tune-rules" class="tune-label">{{ t("tools.cardColors.rules") }}</h2>
           <pre ref="output" class="tune-output">{{ block }}</pre>
@@ -158,8 +193,10 @@ async function copy(): Promise<void> {
       </div>
 
       <div class="tune-sample" :style="tokens">
-        <SeasonBlock :season="1" :episodes="episodes" :total="EPISODES" :voices="voices" :marks="marks" :names="names" mode="cards" />
-        <SeasonBlock :season="1" :episodes="episodes" :total="EPISODES" :voices="voices" :marks="marks" :names="names" mode="tiles" />
+        <SeasonBlock :season="1" :episodes="episodes" :total="EPISODES" :voices="voices" :marks="marks" :names="names" mode="cards"
+                     :compilations="compilations" />
+        <SeasonBlock :season="1" :episodes="episodes" :total="EPISODES" :voices="voices" :marks="marks" :names="names" mode="tiles"
+                     :compilations="compilations" />
       </div>
     </div>
   </main>
@@ -204,4 +241,6 @@ async function copy(): Promise<void> {
 .tune-btn.is-main { background: #2c3e50; border-color: #2c3e50; color: #fff; }
 .tune-btn:focus-visible { outline: 0.125rem solid var(--color-blue); outline-offset: 0.125rem; }
 .tune-note { min-block-size: 1.2em; }
+.tune-compilation { display: inline-flex; }
+.tune-compilation input { inline-size: 2rem; block-size: 2rem; padding: 0; border: none; background: none; cursor: pointer; }
 </style>

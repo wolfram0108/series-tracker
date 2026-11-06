@@ -71,4 +71,24 @@
   --partial-ground-end: #d9dbde;
   --partial-stripe: #4caf50;
   --partial-stripe-share: 60%;
+  /* The compilations of a season (stage 12): the colour of each, round the sixteen; the width of its outline and how much
+     of its colour shows behind its cards. Tuned on the page /#card-colors. */
+  --compilation-1: #364fc7;
+  --compilation-2: #f76707;
+  --compilation-3: #a61e4d;
+  --compilation-4: #f06595;
+  --compilation-5: #7950f2;
+  --compilation-6: #1098ad;
+  --compilation-7: #fab005;
+  --compilation-8: #495057;
+  --compilation-9: #c92a2a;
+  --compilation-10: #0b7285;
+  --compilation-11: #ae3ec9;
+  --compilation-12: #e8590c;
+  --compilation-13: #5c940d;
+  --compilation-14: #1c7ed6;
+  --compilation-15: #d6336c;
+  --compilation-16: #212529;
+  --compilation-line: 0.16rem;
+  --compilation-ground-share: 0.28;
 }

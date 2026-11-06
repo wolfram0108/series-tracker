@@ -9,6 +9,7 @@ import { useCompositionStore } from "../stores/composition"
 import type { components } from "../api/schema"
 import { useConformStore, type ConformSettingsView } from "../stores/conform"
 import { useVoicesStore, type VoiceDubEvent, type VoiceDubsSnapshot, type VoiceSettingsView } from "../stores/voices"
+import { useCutsStore, type CutEvent, type CutsSnapshot } from "../stores/cuts"
 
 type Schemas = components["schemas"]
 
@@ -24,6 +25,7 @@ export function setupRealtime(): void {
   const reads = useSeriesReadsStore()
   const composition = useCompositionStore()
   const voices = useVoicesStore()
+  const cuts = useCutsStore()
   const conform = useConformStore()
 
   sse.on("series_updated", (d) => series.applyDelta(d as SeriesDelta))
@@ -38,6 +40,8 @@ export function setupRealtime(): void {
   sse.on("pack_queue_update", (d) => queues.setPack(d as PackTask[]))
   sse.on("voice_dub_update", (d) => voices.apply(d as VoiceDubEvent))
   sse.on("voice_dubs_snapshot", (d) => voices.snapshot(d as VoiceDubsSnapshot))
+  sse.on("voice_cut_update", (d) => cuts.apply(d as CutEvent))
+  sse.on("voice_cuts_snapshot", (d) => cuts.snapshot(d as CutsSnapshot))
   sse.on("voice_settings_update", (d) => voices.applySettings(d as VoiceSettingsView))
   sse.on("conform_settings_update", (d) => conform.applySettings(d as ConformSettingsView))
 

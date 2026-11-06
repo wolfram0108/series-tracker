@@ -15,6 +15,9 @@ PRIORITY_KEY = "voices.source_priority"
 VOICE_GROUPS_KEY = "voices.groups"
 PLAYER_GROUPS_KEY = "voices.player_groups"
 MAX_TEMP_KEY = "voices.max_temp_episodes"
+# Stage 12: the height the file of a compilation is downloaded at for its cuts (0 or unset: the best it has). A check of
+# the cuts sets it low (720) so that the service encodes fast; the product leaves it unset.
+CUT_HEIGHT_KEY = "voices.cut_max_height"
 
 
 @dataclass(frozen=True)
@@ -23,6 +26,7 @@ class VoiceSettings:
     voices: Groups = NO_GROUPS
     players: Groups = NO_GROUPS
     max_temp_episodes: int = 0
+    cut_max_height: int = 0
     problems: tuple[str, ...] = ()
     # The groups as spelled by the user ({group: [names that put a voice-over or a player into it]}) and the
     # keys whose stored value was refused.
@@ -58,6 +62,22 @@ def _groups(raw: str | None, key: str, problems: list[str], rejected: list[str])
     return usable
 
 
+def _count(raw: str | None, key: str, problems: list[str], rejected: list[str]) -> int:
+    """A whole number not below 0; 0 (no limit) for nothing or for a wrong value, which is named."""
+    text = (raw or "").strip()
+    if not text:
+        return 0
+    try:
+        value = int(text)
+    except ValueError:
+        value = -1
+    if value < 0:
+        problems.append(f"{key}: ожидается целое число не меньше 0, лимита нет")
+        rejected.append(key)
+        return 0
+    return value
+
+
 def parse(values: Mapping[str, str | None]) -> VoiceSettings:
     """Typed settings from the raw values; a wrong value falls back to the default and is named."""
     problems: list[str] = []
@@ -68,21 +88,12 @@ def parse(values: Mapping[str, str | None]) -> VoiceSettings:
         problems.append(f"{PRIORITY_KEY}: ожидается непустой список строк, применён порядок по умолчанию")
         rejected.append(PRIORITY_KEY)
         priority = None
-    cap_raw = (values.get(MAX_TEMP_KEY) or "").strip()
-    cap = 0
-    if cap_raw:
-        try:
-            cap = int(cap_raw)
-        except ValueError:
-            cap = -1
-        if cap < 0:
-            problems.append(f"{MAX_TEMP_KEY}: ожидается целое число не меньше 0, лимита нет")
-            rejected.append(MAX_TEMP_KEY)
-            cap = 0
+    cap = _count(values.get(MAX_TEMP_KEY), MAX_TEMP_KEY, problems, rejected)
+    cut_height = _count(values.get(CUT_HEIGHT_KEY), CUT_HEIGHT_KEY, problems, rejected)
     voices = _groups(values.get(VOICE_GROUPS_KEY), VOICE_GROUPS_KEY, problems, rejected) or {}
     players = _groups(values.get(PLAYER_GROUPS_KEY), PLAYER_GROUPS_KEY, problems, rejected) or {}
     return VoiceSettings(
         priority=tuple(priority) if priority else tuple(DEFAULT_PRIORITY),
         voices=Groups.of(voices), players=Groups.of(players),
-        max_temp_episodes=cap, problems=tuple(problems),
+        max_temp_episodes=cap, cut_max_height=cut_height, problems=tuple(problems),
         voice_groups=voices, player_groups=players, rejected=tuple(rejected))

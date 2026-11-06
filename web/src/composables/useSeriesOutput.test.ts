@@ -26,11 +26,11 @@ const row = (over: Partial<Row> = {}): Row => ({
 })
 const reference = (over: Partial<Reference> = {}): Reference => ({
   season: 1, episode: 2, part: null, mark: "by_level", source_id: 7, row_key: "row", player: "vibix",
-  voice_group: "Ruchime", height: 1080, reason: null, ...over,
+  voice_group: "Ruchime", height: 1080, reason: null, compilation: null, ...over,
 })
 const packet = (over: Partial<ReferencePacket> = {}): ReferencePacket => ({
   season: 1, episode: 2, part: null, mark: "own", source_id: 8, row_key: "other", player: "kodik",
-  voice_group: "AniStar", height: 720, reason: null, series_id: 1, ...over,
+  voice_group: "AniStar", height: 720, reason: null, compilation: null, series_id: 1, ...over,
 })
 const summary: SourceSummary = {
   source_id: 7, url: PAGE, status: "no_profile",
@@ -63,6 +63,7 @@ beforeEach(() => {
   vi.mocked(calls.fetchComposition).mockReset().mockResolvedValue(ok(composition()))
   vi.mocked(calls.fetchOutput).mockReset().mockResolvedValue(ok([reference()]))
   vi.mocked(calls.fetchMedia).mockReset().mockResolvedValue(ok([]))
+  vi.mocked(calls.fetchCuts).mockReset().mockResolvedValue(ok({ items: [] }))
   vi.mocked(calls.setLever).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.resetLever).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.syncSeries).mockReset().mockResolvedValue(ok({ success: true }))

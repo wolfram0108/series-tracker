@@ -13,12 +13,14 @@ const props = withDefaults(defineProps<{
   queue: QueueName
   view: QueueView | undefined
   /** The level the panel is for: its own values may go back to the level above. */
-  level: "series" | "season" | "episode"
+  level: "series" | "season" | "compilation" | "episode"
   marks: Record<number, Mark>
   /** The group is the voice of the reference of the episode: its track comes from the video itself. */
   fromReference?: boolean
   busy?: boolean
-}>(), { fromReference: false, busy: false })
+  /** The words over the queue, when they are not those of its kind (REF 2 of a compilation, stage 12). */
+  hint?: string
+}>(), { fromReference: false, busy: false, hint: undefined })
 
 const emit = defineEmits<{
   (e: "order", rows: QueueRow[]): void
@@ -28,8 +30,8 @@ const emit = defineEmits<{
 }>()
 
 const own = computed(() => props.view?.order_level === props.level)
-const hint = computed(() => props.queue === "reference" ? t("output.queue.hintReference")
-  : t("output.queue.hintVoice", { group: props.view?.group ?? "" }))
+const hint = computed(() => props.hint ?? (props.queue === "reference" ? t("output.queue.hintReference")
+  : t("output.queue.hintVoice", { group: props.view?.group ?? "" })))
 </script>
 
 <template>
@@ -55,15 +57,3 @@ const hint = computed(() => props.queue === "reference" ? t("output.queue.hintRe
     <p v-else class="queue-note">{{ t("output.loading") }}</p>
   </div>
 </template>
-
-<style scoped>
-.queue-panel { display: flex; flex-direction: column; gap: 0.6rem; }
-.queue-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; font-size: 0.85rem; }
-.queue-grow { flex: 1 1 auto; }
-.queue-take { display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; }
-.queue-level { font-size: 0.75rem; border-radius: 6px; padding: 0.05rem 0.5rem; background: var(--color-gray-200); color: var(--color-gray-600); }
-.queue-level.is-own { background: rgba(13, 110, 253, 0.15); color: #0a58ca; font-weight: 600; }
-.queue-back { border: none; background: none; color: var(--color-blue); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
-.queue-back:disabled { opacity: 0.5; cursor: default; }
-.queue-note { margin: 0; color: var(--text-muted); font-size: 0.85rem; }
-</style>

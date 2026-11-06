@@ -97,8 +97,10 @@ export function resetLever(seriesId: number, body: Schemas["OutputSettingsReset"
 /** The queues of a level (the series, a season, or an episode of it) in the order the core tries their variants. */
 export type Queues = Schemas["QueuesReply"]
 
-export function fetchQueues(seriesId: number, season: number | null, episode: number | null): Promise<Answer<Queues>> {
-  const query = { ...(season === null ? {} : { season }), ...(episode === null ? {} : { episode }) }
+export function fetchQueues(seriesId: number, season: number | null, episode: number | null,
+                            compilation: string | null = null): Promise<Answer<Queues>> {
+  const query = { ...(season === null ? {} : { season }), ...(episode === null ? {} : { episode }),
+    ...(compilation === null ? {} : { compilation }) }
   return call(() => api.GET("/api/series/{series_id}/output/queues", {
     params: { path: { series_id: seriesId }, query },
   }), OUTPUT_WORDS)
@@ -114,6 +116,18 @@ export function retryDubs(seriesId: number, body: Schemas["DubsActionBody"]): Pr
 /** The redo of a track: the voice-overs of the scope whose track is placed are made anew now. */
 export function redoDubs(seriesId: number, body: Schemas["DubsActionBody"]): Promise<Answer<unknown>> {
   return call(() => api.POST("/api/series/{series_id}/output/dubs/redo", {
+    params: { path: { series_id: seriesId } }, body,
+  }), OUTPUT_WORDS)
+}
+
+/** The cuts of the episodes of the series out of their compilations (stage 12). */
+export function fetchCuts(seriesId: number): Promise<Answer<Schemas["CutsReply"]>> {
+  return call(() => api.GET("/api/series/{series_id}/output/cuts", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
+}
+
+/** The retry of a cut: the episodes of the scope whose cut failed are cut again now. */
+export function retryCuts(seriesId: number, body: Schemas["CutsActionBody"]): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/series/{series_id}/output/cuts/retry", {
     params: { path: { series_id: seriesId } }, body,
   }), OUTPUT_WORDS)
 }

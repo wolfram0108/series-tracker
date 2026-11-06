@@ -263,12 +263,15 @@ export function voiceColumns(view: EpisodeView): VoiceColumn[] {
 export interface Scope {
   season?: number
   episode?: number
+  /** The key of a compilation of the season: its level (stage 12). */
+  compilation?: string
 }
 
 function scopeFields(scope: Scope): Scope {
   return {
     ...(scope.season === undefined ? {} : { season: scope.season }),
     ...(scope.episode === undefined ? {} : { episode: scope.episode }),
+    ...(scope.compilation === undefined ? {} : { compilation: scope.compilation }),
   }
 }
 

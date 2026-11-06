@@ -172,6 +172,19 @@ A submission is on its way until its outcome is handled (`_sending`): no look at
 sends its voice-overs anew meanwhile, and a job accepted for voice-overs that are gone is cancelled at once.
 An operation carries out the entries it has just handed over; older ones belong to the recovery.
 
+Cuts out of compilations (stage 12, cuts.py, its own table of steps cut_lifecycle.py, table voice_cuts). An episode whose
+reference carries a compilation (`Reference.compilation`) is cut out of it by the service (conform.reverse) on the timeline
+of its single video (REF 2); the video of the cut is offered to the library (downloads.video.offer), which puts it into the
+next container of the episode with its tracks. The voice-overs of a slot whose cut has not ended wait, then are aligned to
+the video of the cut; the voice the video carries is the compilation's (planning `own`), unless the cut failed. A container
+that holds a cut the plan does not want any more gets its single video back the same way (downloaded again, uncapped).
+  voices.cuts.get {series_id} -> {items: [{series_id, season, episode, part, cut_key, status, from_ref_s, from_dub_s,
+      detail}]}; voices.cuts.retry {series_id, season, episode?, part?} -> {restarted}: the user's word to cut again the
+      failed cuts of the scope, admitted now. Events: voices.cut.changed {the same fields, epoch, rev} on every write of a
+      cut (status `removed` when it goes), voices.cuts.snapshot {epoch, rev, items} when an interface connects.
+  Setting `voices.cut_max_height` (integer; 0 or unset: the best the compilation has): the height the file of a compilation
+      is downloaded at for its cuts — a check sets it low so that the service encodes fast.
+
 Setting `voices.max_temp_episodes` (integer; 0 or unset: no limit) caps how many episodes may hold
 temporary files at once: further voice-overs stay planned until an episode settles.
 

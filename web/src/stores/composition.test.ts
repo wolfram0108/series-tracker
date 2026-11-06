@@ -4,7 +4,7 @@ import { useCompositionStore } from "./composition"
 
 const reference = (over = {}) => ({
   season: 1, episode: 2, part: null, mark: "by_level" as const, source_id: 7, row_key: "a", player: "vk",
-  voice_group: null, height: 1080, reason: null, series_id: 1, ...over,
+  voice_group: null, height: 1080, reason: null, compilation: null, series_id: 1, ...over,
 })
 
 describe("composition store", () => {

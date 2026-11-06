@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { t } from "../../../i18n"
+import type { Badge } from "../../../lib/compilations"
 import { outputLines, type EpisodeStatus, type EpisodeView, type SourceMark as Mark, type TrackCell } from "../../../lib/output"
 import PowerSwitch from "./PowerSwitch.vue"
 import SourceMark from "./SourceMark.vue"
@@ -18,6 +19,12 @@ const props = defineProps<{
   file?: string
   open?: boolean
   busy?: boolean
+  /** The compilation the episode stands in (stage 12): its letter in the corner, in its colour. */
+  badge?: Badge
+  /** Said in place of the tracks (the view «Компиляции»: where an episode not taken stands). */
+  note?: string
+  /** What the switch says, when it is not the switch of the episode itself. */
+  switchLabel?: string
 }>()
 defineEmits<{ (e: "open"): void; (e: "switch", off: boolean): void }>()
 
@@ -46,12 +53,15 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
         <span class="glass card-num">{{ view.episode }}</span>
         <span v-if="file" class="glass card-name" :title="file">{{ file }}</span>
         <span class="card-corner">
+          <span v-if="badge" class="glass card-flag card-badge" :style="{ '--tone': `var(--compilation-${badge.color})` }"
+                :title="t('output.compilation.badge', { letter: badge.letter })">{{ badge.letter }}</span>
           <span v-if="status === 'error' || own" class="glass card-flag" aria-hidden="true">
             <i class="pi" :class="status === 'error' ? 'pi-exclamation-triangle' : 'pi-sliders-h'" />
           </span>
           <span class="glass card-power">
             <PowerSwitch
-              :on="status !== 'off'" :busy="busy" :label="t(status === 'off' ? 'output.episode.enable' : 'output.episode.disable')"
+              :on="status !== 'off'" :busy="busy"
+              :label="switchLabel ?? t(status === 'off' ? 'output.episode.enable' : 'output.episode.disable')"
               @toggle="$emit('switch', !$event)"
             />
           </span>
@@ -62,7 +72,8 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
         <span class="card-where">{{ where }}</span>
         <span v-if="references.length > 1" class="card-parts">+{{ references.length - 1 }}</span>
       </span>
-      <TrackStrip class="glass card-strip" :cells="cells" />
+      <span v-if="note" class="glass card-note">{{ note }}</span>
+      <TrackStrip v-else class="glass card-strip" :cells="cells" />
     </span>
   </div>
 </template>
@@ -111,6 +122,11 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
 }
 .card-corner { flex: none; display: flex; align-items: center; gap: 0.375rem; margin-inline-start: auto; }
 .card-flag { padding-inline: 0.4rem; color: var(--color-red-1); }
+.card-badge { justify-content: center; min-inline-size: var(--card-row); background: var(--tone); color: #fff; font-weight: 700; }
+.card-note {
+  align-self: flex-start; padding-inline: 0.5rem; line-height: var(--card-row); font-size: 0.8rem; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-inline-size: 100%;
+}
 /* The switch is as high as the marks of the card; its box is a capsule around it, an even gap on every side. */
 .card-power {
   --switch-size: var(--figure-size); justify-content: center; padding-inline: calc((var(--card-row) - var(--figure-size)) / 2);

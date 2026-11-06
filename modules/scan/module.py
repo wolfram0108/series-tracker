@@ -26,7 +26,8 @@ Queries:
   scan.series.prepare {series_id} → the summary of a torrent scan without a download: the torrent is added to
       qBittorrent, split into its files (torrent_files) and left paused — the user picks the episodes in the
       composition, the next scan starts the download.
-  scan.output.get {series_id} → [Reference]: every slot of the series. One Reference per slot: an episode with
+  scan.output.get {series_id} → [Reference]: every slot of the series; an episode that stands in a compilation carries it
+      (`Reference.compilation`, stage 12), and the plan says it of the winner of the slot (`media_items.want_cut`). One Reference per slot: an episode with
       parts has one per part. Marks: by_level, own, other_player, none, unfit, and `off` for a slot the user switched
       off (an episode or a season switched off, or a row of the plan switched off): it takes nothing and plans no
       voice-over (core/contracts/reference.py).

@@ -9,11 +9,16 @@ import { useCompositionStore, type ReferencePacket } from "../stores/composition
 import { useQueuesStore } from "../stores/queues"
 import { useSeriesStore } from "../stores/series"
 import { useVoicesStore } from "../stores/voices"
+import { useCutsStore } from "../stores/cuts"
 import {
-  fetchComposition, fetchMedia, fetchOutput, fetchQueues, fetchRenames, redoDubs, refetchReference, resetFailures, resetLever,
-  retryDubs, setLever, setVoiceOrder, switchOutput, syncSeries, type Composition, type MediaFile, type Queues, type RenameRow,
+  fetchComposition, fetchCuts, fetchMedia, fetchOutput, fetchQueues, fetchRenames, redoDubs, refetchReference, resetFailures,
+  resetLever, retryCuts, retryDubs, setLever, setVoiceOrder, switchOutput, syncSeries, type Composition, type MediaFile,
+  type Queues, type RenameRow,
 } from "./outputCalls"
+import type { components } from "../api/schema"
 import type { Answer } from "./sourceCalls"
+
+type Schemas = components["schemas"]
 import { useSSE } from "./useSSE"
 
 // A reference is one entry per (season, episode, part); a packet replaces the entry of its own key.
@@ -39,6 +44,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const voices = useVoicesStore()
   const queues = useQueuesStore()
   const seriesStore = useSeriesStore()
+  const cutsStore = useCutsStore()
   const composition = ref<Composition | null>(null)
   const references = ref<Reference[]>([])
   // The files of the plan: the status of the video of a reference is read from them.
@@ -87,11 +93,12 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     const ask = ++asked
     loading.value = true
     packetDuringRead = false
-    const [layout, output] = await Promise.all([fetchComposition(seriesId), fetchOutput(seriesId)])
+    const [layout, output, cutList] = await Promise.all([fetchComposition(seriesId), fetchOutput(seriesId), fetchCuts(seriesId)])
     if (ask !== asked) return
     loading.value = false
     if (layout.ok) composition.value = layout.data
     if (output.ok) references.value = output.data
+    if (cutList.ok) readCuts.value = cutList.data.items ?? []
     void loadFiles()
     Object.values(store.references[seriesId] ?? {}).forEach((packet) => merged.add(packet))
     const broken = [layout, output].find((answer) => !answer.ok)
@@ -156,25 +163,42 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
 
   // The queues of the levels the window has open, read when one is opened and again with every new layout.
   const levelQueues = ref<Record<string, Queues>>({})
-  const queueKey = (season: number | null, episode: number | null): string => JSON.stringify([season, episode])
+  const queueKey = (season: number | null, episode: number | null, compilation: string | null = null): string =>
+    JSON.stringify([season, episode, compilation])
   const queuesAsked = new Map<string, number>()
-  async function loadQueues(season: number | null, episode: number | null = null): Promise<void> {
-    const key = queueKey(season, episode)
+  async function loadQueues(season: number | null, episode: number | null = null, compilation: string | null = null): Promise<void> {
+    const key = queueKey(season, episode, compilation)
     const ask = (queuesAsked.get(key) ?? 0) + 1
     queuesAsked.set(key, ask)
-    const answer = await fetchQueues(seriesId, season, episode)
+    const answer = await fetchQueues(seriesId, season, episode, compilation)
     if (queuesAsked.get(key) !== ask) return
     if (answer.ok) levelQueues.value = { ...levelQueues.value, [key]: answer.data }
     else failure.value = answer.text
   }
-  const queuesOf = (season: number | null, episode: number | null = null): Queues | undefined =>
-    levelQueues.value[queueKey(season, episode)]
+  const queuesOf = (season: number | null, episode: number | null = null, compilation: string | null = null): Queues | undefined =>
+    levelQueues.value[queueKey(season, episode, compilation)]
   const reloadQueues = (): void => {
     for (const key of Object.keys(levelQueues.value)) {
-      const [season, episode] = JSON.parse(key) as [number | null, number | null]
-      void loadQueues(season, episode)
+      const [season, episode, compilation] = JSON.parse(key) as [number | null, number | null, string | null]
+      void loadQueues(season, episode, compilation ?? null)
     }
   }
+
+  // Stage 12: the compilations of every season, the cuts of the episodes (read once, then the pushes of the core), the
+  // compilation an episode stands in (the user's word, or "" for none) and the switch of a whole compilation.
+  const compilations = computed(() => composition.value?.compilations ?? [])
+  const readCuts = ref<Schemas["CutItem"][]>([])
+  const cuts = computed(() => {
+    const pushed = cutsStore.forSeries(seriesId)
+    const known = new Set(pushed.map((cut) => `${cut.season}:${cut.episode}:${cut.part ?? 0}`))
+    return [...pushed, ...readCuts.value.filter((cut) => !known.has(`${cut.season}:${cut.episode}:${cut.part ?? 0}`))]
+  })
+  const member = (season: number, episode: number, key: string): Promise<string | null> =>
+    set({ season, episode }, "compilation.member", null, key)
+  const takeCompilation = (season: number, key: string, taken: boolean): Promise<string | null> =>
+    taken ? reset({ season, compilation: key }, "compilation.take", null) : set({ season, compilation: key }, "compilation.take", null, false)
+  const retryCut = (season: number, episode: number | null): Promise<string | null> =>
+    act(() => retryCuts(seriesId, { season, ...(episode === null ? {} : { episode }) }), busy)
 
   // A queue of a level takes the order the user dragged its rows into, leaves a variant out, or takes a voice-over at all.
   const leversOf = (queue: QueueName) => queueLevers(composition.value?.levers ?? [], queue)
@@ -233,5 +257,5 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
 
   return { composition, references, loading, failure, busy, syncing, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
     sync, retryFailed, voiceOrders, order, marks, loadQueues, queuesOf, setOrder, setAllowed, setTaken, resetOrder,
-    retry, redo, refetch }
+    retry, redo, refetch, compilations, cuts, member, takeCompilation, retryCut, labels }
 }

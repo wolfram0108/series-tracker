@@ -80,6 +80,7 @@ beforeEach(() => {
   vi.mocked(calls.fetchOutput).mockReset().mockResolvedValue(ok([
     reference(1, 1), reference(1, 2, { mark: "own" }), reference(2, 1)]))
   vi.mocked(calls.fetchMedia).mockReset().mockResolvedValue(ok([]))
+  vi.mocked(calls.fetchCuts).mockReset().mockResolvedValue(ok({ items: [] }))
   vi.mocked(calls.fetchQueues).mockReset().mockResolvedValue(ok(queues()))
   for (const each of [calls.switchOutput, calls.syncSeries, calls.setLever, calls.resetLever, calls.retryDubs, calls.redoDubs,
     calls.refetchReference]) vi.mocked(each).mockReset().mockResolvedValue(ok({ success: true }))
@@ -173,7 +174,7 @@ describe("StatusOutput", () => {
     await flushPromises()
     await w.findAll(".episode-card")[0].trigger("click")
     await flushPromises()
-    expect(calls.fetchQueues).toHaveBeenCalledWith(1, 1, 1)
+    expect(calls.fetchQueues).toHaveBeenCalledWith(1, 1, 1, null)
     const detail = w.find(".episode-detail")
     expect(detail.attributes("data-episode")).toBe("1")
     expect(detail.findAll(".track-table tbody tr").map((each) => each.attributes("data-group"))).toEqual(["Ruchime", "AniStar"])
@@ -221,7 +222,7 @@ describe("StatusOutput", () => {
     await flushPromises()
     await w.find(".output-series-settings").trigger("click")
     await flushPromises()
-    expect(calls.fetchQueues).toHaveBeenCalledWith(1, null, null)
+    expect(calls.fetchQueues).toHaveBeenCalledWith(1, null, null, null)
   })
 
   it("switches an episode off from its detail, and a season from its header", async () => {
@@ -325,5 +326,68 @@ describe("StatusOutput", () => {
     await flushPromises()
     expect(w.findAll(".output-source").map((each) => each.text())).toEqual(["11.ruchime.org", "2vkvideo.ru @chan"])
     expect(w.find(".episode-card .figure-mark").text()).toBe("1")
+  })
+
+  // --- stage 12: the compilations of a season ---------------------------------------------------------------------
+
+  const KEY = 'compilation:["ПВА",9,"vk",1,1,2]'
+  const withCompilation = (member: boolean[]): Composition => ({
+    ...composition(),
+    compilations: [{
+      season: 1, index: 0, take: true,
+      ref: { key: KEY, source_id: 9, row_key: "c", player: "vk", voice_group: "ПВА", height: 2160, start: 1, end: 2 },
+      episodes: [
+        { episode: 1, member: member[0], absence: member[0] ? null : "own", elsewhere: null, own: !member[0] },
+        { episode: 2, member: member[1], absence: member[1] ? null : "not_better", elsewhere: null, own: false },
+      ],
+    }],
+  })
+
+  it("puts the letter of its compilation on the card of an episode it takes, and none on the others", async () => {
+    vi.mocked(calls.fetchComposition).mockResolvedValue(ok(withCompilation([true, false])))
+    const w = mountOutput()
+    await flushPromises()
+    const badges = w.findAll(".episode-card").map((card) => card.find(".card-badge").exists() ? card.find(".card-badge").text() : "")
+    expect(badges).toEqual(["A", "", ""])
+  })
+
+  it("shows a compilation as a block of its episodes and takes an episode in or out by the switch of its card", async () => {
+    vi.mocked(calls.fetchComposition).mockResolvedValue(ok(withCompilation([true, false])))
+    vi.mocked(calls.fetchCuts).mockResolvedValue(ok({ items: [
+      { series_id: 1, season: 1, episode: 1, part: 0, cut_key: KEY, status: "aligning" }] }))
+    const w = mountOutput()
+    await flushPromises()
+    await w.find(".output-view-compilations").trigger("click")
+    const block = w.find(".compilation-block")
+    expect(block.exists()).toBe(true)
+    const cardsHere = block.findAll(".episode-card")
+    expect(cardsHere.map((card) => card.classes().find((name) => name.startsWith("is-")))).toEqual(["is-align", "is-off"])
+    expect(cardsHere[1].find(".card-note").text()).toBe("не выше своей серии")
+    expect(cardsHere[1].find(".power-switch input").attributes("disabled")).toBeDefined()  // the compilation is no better
+    await cardsHere[0].find(".power-switch input").setValue(false)
+    expect(calls.setLever).toHaveBeenCalledWith(1, { season: 1, episode: 1, lever: "compilation.member", target: null, value: "" })
+  })
+
+  it("opens an episode of a compilation with its compilations and its REF 2, and the settings on the level of the compilation", async () => {
+    vi.mocked(calls.fetchComposition).mockResolvedValue(ok(withCompilation([true, true])))
+    const w = mountOutput()
+    await flushPromises()
+    await w.find(".output-view-compilations").trigger("click")
+    await w.find(".compilation-block .episode-card").trigger("click")
+    await flushPromises()
+    expect(w.findAll(".episode-detail .detail-tabs .st-tab").map((tab) => tab.text())).toEqual(["Компиляции", "РЕФ 2"])
+    expect(w.find(".compilation-table [data-compilation]").exists()).toBe(true)
+    await w.find(".compilation-block .season-settings").trigger("click")
+    await flushPromises()
+    expect(calls.fetchQueues).toHaveBeenCalledWith(1, 1, null, KEY)
+  })
+
+  it("switches a whole compilation off by its header", async () => {
+    vi.mocked(calls.fetchComposition).mockResolvedValue(ok(withCompilation([true, true])))
+    const w = mountOutput()
+    await flushPromises()
+    await w.find(".output-view-compilations").trigger("click")
+    await w.find(".compilation-block .season-head .power-switch input").setValue(false)
+    expect(calls.setLever).toHaveBeenCalledWith(1, { season: 1, compilation: KEY, lever: "compilation.take", target: null, value: false })
   })
 })

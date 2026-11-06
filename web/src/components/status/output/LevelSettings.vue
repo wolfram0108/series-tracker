@@ -3,6 +3,7 @@ import { computed, ref } from "vue"
 import ModalShell from "../../ModalShell.vue"
 import type { Queues } from "../../../composables/outputCalls"
 import { t } from "../../../i18n"
+import type { CutState } from "../../../lib/compilations"
 import { trackCells, type EpisodeView, type QueueName, type QueueRow, type SourceMark as Mark, type TrackState } from "../../../lib/output"
 import QueuePanel from "./QueuePanel.vue"
 
@@ -16,7 +17,9 @@ const props = withDefaults(defineProps<{
   marks: Record<number, Mark>
   queues?: Queues
   busy?: boolean
-}>(), { episodes: () => [], busy: false })
+  /** The level of a compilation of the season (stage 12): its title, and how many of its episodes are cut, by state. */
+  compilation?: { title: string; cuts: Partial<Record<CutState, number>> }
+}>(), { episodes: () => [], busy: false, compilation: undefined })
 
 const emit = defineEmits<{
   (e: "close"): void
@@ -27,11 +30,18 @@ const emit = defineEmits<{
   (e: "reset-level"): void
   (e: "retry", group: string): void
   (e: "redo", group: string): void
+  (e: "retry-cuts"): void
 }>()
 
-const level = computed(() => (props.season === null ? "series" : "season"))
-const tab = ref<string>(props.season === null ? "reference" : "tracks")
-const groups = computed(() => props.queues ? (props.queues.groups ?? []).map((each) => each.group) : props.order)
+const level = computed(() => (props.compilation ? "compilation" : props.season === null ? "series" : "season"))
+const tab = ref<string>(props.compilation ? "cuts" : props.season === null ? "reference" : "tracks")
+// A compilation has its REF 2 and its cuts; the voice-overs are set on the season and on the episode.
+const groups = computed(() => props.compilation ? []
+  : props.queues ? (props.queues.groups ?? []).map((each) => each.group) : props.order)
+const CUT_PILL: Record<CutState, string> = {
+  wait: "pill-secondary", down: "pill-primary", align: "pill-primary", ready: "pill-success", error: "pill-danger",
+}
+const cutEntries = computed(() => Object.entries(props.compilation?.cuts ?? {}).filter(([, count]) => count) as [CutState, number][])
 const groupQueue = (group: string) => (props.queues?.groups ?? []).find((each) => each.group === group)
 
 // How many episodes each track of the season is in each state.
@@ -54,13 +64,19 @@ const countText = (state: TrackState | "reference", count: number): string => st
 
 <template>
   <ModalShell size="xl" fixed-height @close="emit('close')">
-    <template #title>{{ season === null ? t("output.settings.titleSeries") : t("output.settings.titleSeason", { n: season }) }}</template>
+    <template #title>{{ compilation ? compilation.title : season === null ? t("output.settings.titleSeries")
+      : t("output.settings.titleSeason", { n: season }) }}</template>
     <template #header-extra>
       <div class="header-tabs st-tabs" role="tablist">
-        <button v-if="season !== null" type="button" class="st-tab" :class="{ active: tab === 'tracks' }" @click="tab = 'tracks'">
+        <button v-if="compilation" type="button" class="st-tab" :class="{ active: tab === 'cuts' }" @click="tab = 'cuts'">
+          {{ t("output.tab.cuts") }}
+        </button>
+        <button v-else-if="season !== null" type="button" class="st-tab" :class="{ active: tab === 'tracks' }" @click="tab = 'tracks'">
           {{ t("output.tab.tracks") }}
         </button>
-        <button type="button" class="st-tab" :class="{ active: tab === 'reference' }" @click="tab = 'reference'">{{ t("output.tab.reference") }}</button>
+        <button type="button" class="st-tab" :class="{ active: tab === 'reference' }" @click="tab = 'reference'">
+          {{ compilation ? t("output.tab.ref2") : t("output.tab.reference") }}
+        </button>
         <button v-for="(group, index) in groups" :key="group" type="button" class="st-tab" :class="{ active: tab === group }" @click="tab = group">
           <span class="figure-mark">{{ index + 1 }}</span>{{ group }}
         </button>
@@ -68,7 +84,17 @@ const countText = (state: TrackState | "reference", count: number): string => st
     </template>
 
     <div class="level-settings">
-      <table v-if="tab === 'tracks'" class="level-tracks">
+      <div v-if="tab === 'cuts' && compilation" class="level-cuts">
+        <span class="level-counts">
+          <span v-for="[state, count] in cutEntries" :key="state" class="pill" :class="CUT_PILL[state]">
+            {{ t(`output.cut.meter.${state}`, { n: count }) }}
+          </span>
+        </span>
+        <button v-if="compilation.cuts.error" type="button" class="level-action do-retry-cuts" :disabled="busy" @click="emit('retry-cuts')">
+          {{ t("output.cut.retryAll", { n: compilation.cuts.error }) }}
+        </button>
+      </div>
+      <table v-else-if="tab === 'tracks'" class="level-tracks">
         <thead>
           <tr>
             <th class="narrow">{{ t("output.tracks.place") }}</th>
@@ -97,6 +123,7 @@ const countText = (state: TrackState | "reference", count: number): string => st
       </table>
       <QueuePanel
         v-else-if="tab === 'reference'" queue="reference" :level="level" :view="queues?.reference" :marks="marks" :busy="busy"
+        :hint="compilation ? t('output.queue.hintRef2Level') : undefined"
         @order="emit('order', 'reference', null, $event)" @allow="(row, allowed) => emit('allow', 'reference', row, allowed)"
         @reset="emit('reset', 'reference', null)"
       />
@@ -123,6 +150,7 @@ const countText = (state: TrackState | "reference", count: number): string => st
 .level-tracks td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
 .narrow { inline-size: 1%; white-space: nowrap; }
 .level-counts { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.level-cuts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; }
 .level-action, .level-footer {
   border: 1px solid var(--border-color); background: var(--bg-white); border-radius: 8px; padding: 0.3rem 0.7rem;
   cursor: pointer; color: var(--color-gray-600); font: inherit; margin-inline-end: 0.3rem;

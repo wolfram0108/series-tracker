@@ -138,6 +138,7 @@ class Cuts:
     async def start(self, root: str) -> None:
         """Every admitted planned cut takes the file of its compilation; the first sends the download."""
         from .module import FILE_KEY, file_path
+        cap = (await self._m._settings()).cut_max_height
         for cut in await self._repo.cuts_of():
             if cut["status"] != "planned" or not cut["admitted"]:
                 continue
@@ -156,7 +157,8 @@ class Cuts:
             if file["claimed"]:
                 # No cap: the episodes are cut out of the compilation in the quality it has.
                 self._m.send_command("downloads.fetch", {"key": f"{FILE_KEY}{file['id']}", "url": data["url"],
-                                                         "path": file["temp_path"], "series_id": cut["series_id"]})
+                                                         "path": file["temp_path"], "series_id": cut["series_id"],
+                                                         **({"max_height": cap} if cap else {})})
             elif file["status"] == "ready":
                 self._m._kick(cut["series_id"])
 

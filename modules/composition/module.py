@@ -5,6 +5,13 @@ and the group of its voice-over; the pure rules are in `project.py`, the levers 
 `settings.py`. The module owns the tables `composition_rows`, `composition_state`, `composition_sources`,
 `unknown_voices` and `output_settings`. It reads no site, picks no reference and downloads nothing. Torrent sources of a series are not its business.
 
+Compilations (stage 12, `compilations.py`): a row whose video holds several episodes is a compilation, named by its key in
+domain terms (group, source, player, season, range). It is a level of the levers between a season and an episode
+(`output_settings.compilation`): an episode inherits from the compilation it stands in. An episode stands in at most one: the
+user's word (`compilation.member`: a key, or "" for none) while that compilation still takes it, else the shortest
+compilation that covers it, is switched on (`compilation.take`) and is higher than its best single video. Settings set
+`compilation.member` to a compilation that is no higher are refused (`compilation_not_better`).
+
 Queries:
   composition.get {series_id, include_excluded?} → CompositionReply: the rows of the layout in the order of the sources
       (rows the constructor excluded, gave no episode number, or the source's own choice left out — a switched-off
@@ -12,7 +19,9 @@ Queries:
       source (status waiting / no_profile / ready / failed, players with rows, seasons, resolutions and voice-overs
       with their groups, `place`: the site and the channel its rows come from, as the line of the constructor names them), the levers of the series and of each season of the layout as the headers of those levels
       show them (`levels`, the series first), and the levers of every episode of the layout with the level each comes
-      from. A series not counted yet has revision 0 and nothing else.
+      from, with the compilation it stands in (`EpisodeSettings.compilation`), and the compilations of every season with
+      the episodes each holds and why the others are not in it (`compilations`). A series not counted yet has revision 0
+      and nothing else.
   composition.recompute {series_id} → {rev, changed}: counts the series now, with the tables as they are stored (no
       read of a site), and answers when a count that began no earlier than the request has ended, its record is
       written and its event is out. `changed` tells whether that count published. A count already running is

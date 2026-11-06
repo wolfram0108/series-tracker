@@ -3,6 +3,7 @@ import { computed, ref } from "vue"
 import { t } from "../../../i18n"
 import type { Queues } from "../../../composables/outputCalls"
 import type { EpisodeStatus, EpisodeView, QueueName, QueueRow, SourceMark as Mark, TrackCell } from "../../../lib/output"
+import CompilationTable, { type CompilationRow } from "./CompilationTable.vue"
 import PowerSwitch from "./PowerSwitch.vue"
 import QueuePanel from "./QueuePanel.vue"
 import TrackTable from "./TrackTable.vue"
@@ -17,7 +18,9 @@ const props = withDefaults(defineProps<{
   file?: string
   queues?: Queues
   busy?: boolean
-}>(), { busy: false })
+  /** The view «Компиляции» (stage 12): the compilations that cover the episode, and its REF 2 instead of its tracks. */
+  compilations?: CompilationRow[]
+}>(), { busy: false, compilations: undefined })
 
 const emit = defineEmits<{
   (e: "close"): void
@@ -30,9 +33,11 @@ const emit = defineEmits<{
   (e: "allow", queue: QueueName, row: QueueRow, allowed: boolean): void
   (e: "take", group: string, taken: boolean): void
   (e: "reset", queue: QueueName, group: string | null): void
+  (e: "member", key: string): void
+  (e: "retry-cut"): void
 }>()
 
-const tab = ref<string>("tracks")
+const tab = ref<string>(props.compilations ? "compilations" : "tracks")
 const groups = computed(() => props.cells.map((cell) => cell.group))
 const referenceGroup = computed(() => props.cells.find((cell) => cell.isReference)?.group ?? null)
 const groupQueue = (group: string) => (props.queues?.groups ?? []).find((each) => each.group === group)
@@ -58,7 +63,13 @@ const PILL: Record<EpisodeStatus, string> = {
       <button type="button" class="icon-btn" :aria-label="t('output.episode.close')" @click="emit('close')"><i class="pi pi-times" /></button>
     </header>
     <div class="detail-body">
-      <div class="st-tabs detail-tabs" role="tablist">
+      <div v-if="compilations" class="st-tabs detail-tabs" role="tablist">
+        <button type="button" class="st-tab" :class="{ active: tab === 'compilations' }" role="tab"
+                :aria-selected="tab === 'compilations'" @click="tab = 'compilations'">{{ t("output.tab.compilations") }}</button>
+        <button type="button" class="st-tab" :class="{ active: tab === 'reference' }" role="tab"
+                :aria-selected="tab === 'reference'" @click="tab = 'reference'">{{ t("output.tab.ref2") }}</button>
+      </div>
+      <div v-else class="st-tabs detail-tabs" role="tablist">
         <button type="button" class="st-tab" :class="{ active: tab === 'tracks' }" role="tab" :aria-selected="tab === 'tracks'" @click="tab = 'tracks'">
           {{ t("output.tab.tracks") }}
         </button>
@@ -71,12 +82,17 @@ const PILL: Record<EpisodeStatus, string> = {
         ><span class="figure-mark">{{ index + 1 }}</span>{{ group }}</button>
       </div>
 
+      <CompilationTable
+        v-if="compilations && tab === 'compilations'" :rows="compilations" :marks="marks" :busy="busy" @member="emit('member', $event)"
+        @retry="emit('retry-cut')"
+      />
       <TrackTable
-        v-if="tab === 'tracks'" :view="view" :cells="cells" :marks="marks" :busy="busy"
+        v-else-if="tab === 'tracks'" :view="view" :cells="cells" :marks="marks" :busy="busy"
         @refetch="emit('refetch', $event)" @retry="emit('retry', $event)" @redo="emit('redo', $event)"
       />
       <QueuePanel
         v-else-if="tab === 'reference'" queue="reference" level="episode" :view="queues?.reference" :marks="marks" :busy="busy"
+        :hint="compilations ? t('output.queue.hintRef2') : undefined"
         @order="emit('order', 'reference', null, $event)" @allow="(row, allowed) => emit('allow', 'reference', row, allowed)"
         @reset="emit('reset', 'reference', null)"
       />
