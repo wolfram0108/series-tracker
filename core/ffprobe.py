@@ -4,6 +4,7 @@ The duration a file states is a word of its header: a file cut short keeps a who
 front, a Matroska written to the end once), so what a file holds is told by the packets it has (`readable_length`)."""
 from __future__ import annotations
 
+import json
 import shutil
 import statistics
 from dataclasses import dataclass
@@ -20,6 +21,11 @@ MIN_TIMED_FRAMES = 3
 # The tail of a file read for the end of its data: long against the interval between two key frames of a video (a few
 # seconds), so that a seek to it lands on data that is there, short against a file, so that the read is a small one.
 TAIL_S = 30.0
+# How far short of its end a stream may stop and still be whole: the last packet of a stream may end a little before the
+# end its header states (a frame, an audio packet), never by a second.
+END_SLACK_S = 1.0
+# The streams a file of a series is checked by; subtitles and attachments have no end to reach.
+MEDIA_KINDS = frozenset({"video", "audio"})
 
 
 async def duration_of(target: str, *, input_args: list[str] | None = None,
@@ -40,35 +46,65 @@ async def duration_of(target: str, *, input_args: list[str] | None = None,
 
 
 async def readable_length(path: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> float:
-    """Seconds of a file as far as its data goes: the end of the last packet of the streams that reach its tail, from the
-    start of the file; 0 when ffprobe is missing, the file does not read, or no packet is there where its header says
-    the end is. A stream that ends early (a subtitle) does not reach the tail and is not counted."""
+    """Seconds of a file as far as its data goes, from the start of the file; 0 when ffprobe is missing or the file does
+    not read. Each stream of video and audio is held to its own end, as the header states it: a stream that is shorter
+    than the others by design (an audio track that ends before the picture) is whole when its data reach its own end, and
+    a stream whose data stop short of it is where the file is cut. A file whose streams all reach their ends is as long as
+    its header says; one with a stream cut short is as long as the earliest cut. A file whose streams state no end of
+    their own is held to the end of the file by its longest stream."""
     executable = shutil.which("ffprobe")
     if not executable:
         return 0.0
     try:
-        code, out, _ = await run_capture([executable, "-v", "error", "-show_entries", "format=duration,start_time",
-                                          "-of", "default=noprint_wrappers=1", path], timeout=timeout)
-        stated = dict(line.split("=", 1) for line in out.decode().splitlines() if "=" in line) if code == 0 else {}
-        declared, start = _number(stated.get("duration")), _number(stated.get("start_time")) or 0.0
+        code, out, _ = await run_capture([executable, "-v", "error", "-show_entries",
+                                          "format=duration,start_time:stream=index,codec_type,start_time,duration"
+                                          ":stream_tags=DURATION", "-of", "json", path], timeout=timeout)
+        stated = json.loads(out.decode() or "{}") if code == 0 else {}
+        declared = _number((stated.get("format") or {}).get("duration"))
+        start = _number((stated.get("format") or {}).get("start_time")) or 0.0
         if not declared:
             return 0.0
-        tail = f"{max(0.0, start + declared - TAIL_S)}%"
-        code, out, _ = await run_capture([executable, "-v", "error", "-read_intervals", tail, "-show_entries",
+        ends = {str(each.get("index")): _stream_end(each) for each in stated.get("streams") or []
+                if each.get("codec_type") in MEDIA_KINDS}
+        known = [end for end in ends.values() if end is not None]
+        from_s = max(0.0, min(known or [start + declared]) - TAIL_S)
+        code, out, _ = await run_capture([executable, "-v", "error", "-read_intervals", f"{from_s}%", "-show_entries",
                                           "packet=stream_index,pts_time,duration_time", "-of", "csv=p=0", path],
                                          timeout=timeout)
-    except (OSError, TimeoutError):
+    except (OSError, TimeoutError, ValueError):
         return 0.0
     if code != 0:
         return 0.0
-    ends: dict[str, float] = {}
+    reached: dict[str, float] = {}
     for line in out.decode().splitlines():
         fields = line.strip().split(",")
         at = _number(fields[1]) if len(fields) > 1 else None
-        if at is not None:
+        if at is not None and fields[0] in ends:
             lasts = (_number(fields[2]) if len(fields) > 2 else None) or 0.0
-            ends[fields[0]] = max(ends.get(fields[0], 0.0), at + lasts)
-    return max(0.0, min(ends.values()) - start) if ends else 0.0
+            reached[fields[0]] = max(reached.get(fields[0], 0.0), at + lasts)
+    if not known:
+        whole = bool(reached) and max(reached.values()) >= start + declared - END_SLACK_S
+        return declared if whole else max(0.0, max(reached.values(), default=0.0) - start)
+    cuts = [reached.get(index, 0.0) for index, end in ends.items()
+            if end is not None and reached.get(index, 0.0) < end - END_SLACK_S]
+    return max(0.0, min(cuts) - start) if cuts else declared
+
+
+def _stream_end(stream: dict) -> float | None:
+    """Where a stream ends by its header: its start and its length (Matroska states the length as a tag of the stream)."""
+    length = _number(stream.get("duration"))
+    if length is None:
+        length = _clock((stream.get("tags") or {}).get("DURATION"))
+    return None if length is None else (_number(stream.get("start_time")) or 0.0) + length
+
+
+def _clock(text: str | None) -> float | None:
+    """'00:00:45.023000000' -> 45.023."""
+    try:
+        hours, minutes, seconds = str(text).split(":")
+        return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    except (ValueError, AttributeError):
+        return None
 
 
 def _number(word: str | None) -> float | None:

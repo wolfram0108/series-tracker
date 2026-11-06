@@ -38,7 +38,7 @@ case "$last" in
 esac
 local=$(cat "$FAKE_DIR/local_duration")
 case "$*" in
-  *format=duration,start_time*) printf 'duration=%s\\nstart_time=0.000000\\n' "$local" ;;
+  *format=duration,start_time*) printf '{"format": {"duration": "%s", "start_time": "0.000000"}, "streams": [{"index": 0, "codec_type": "video", "start_time": "0.000000", "duration": "%s"}]}\\n' "$local" "$local" ;;
   *-read_intervals*) [ "$local" != "0" ] && printf '0,%s,0.000000\\n' "$local" ;;
   *) echo "$local" ;;
 esac

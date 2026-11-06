@@ -296,3 +296,44 @@ async def test_a_download_whose_file_lost_its_second_half_is_not_taken_for_whole
     ok, error = await ytdlp.download("https://cdn.test/episode.mp4", str(cut), progress, whole_video=True)
 
     assert not ok and "неполная загрузка" in error and not cut.exists()
+
+
+@pytest.fixture
+def uneven(tmp_path):
+    """Whole files whose audio and picture end apart by design (an audio track shorter, or longer, than the picture), in
+    MP4 and in Matroska, and each of them with its second half lost."""
+    made = {}
+    for name, (video_s, audio_s) in (("short_audio", (60, 45)), ("short_video", (45, 60))):
+        for suffix, extra in (("mp4", ["-movflags", "+faststart"]), ("mkv", [])):
+            whole, cut = tmp_path / f"{name}.{suffix}", tmp_path / f"cut_{name}.{suffix}"
+            make(whole, "-f", "lavfi", "-i", f"testsrc=size=160x90:rate=10:duration={video_s}", "-f", "lavfi", "-i",
+                 f"sine=frequency=300:duration={audio_s}", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", *extra)
+            shutil.copyfile(whole, cut)
+            cut_in_half(cut)
+            made[f"{name}.{suffix}"] = (whole, cut)
+    return made
+
+
+@pytest.mark.asyncio
+async def test_a_stream_shorter_by_design_is_whole_and_a_stream_cut_short_is_where_the_file_ends(uneven):
+    """Each stream is held to its own end: the shorter audio of a whole file does not make it short, and the longer audio
+    of a file does not hide a picture that stops short of its end."""
+    for name, (whole, cut) in uneven.items():
+        assert await ffprobe.readable_length(str(whole)) == pytest.approx(60, abs=0.2), name
+        assert await ffprobe.readable_length(str(cut)) < 35, name
+
+
+@pytest.mark.asyncio
+async def test_a_whole_download_with_an_audio_track_shorter_than_its_picture_is_taken(uneven, monkeypatch):
+    whole, _ = uneven["short_audio.mp4"]
+
+    async def sixty(*_args, **_kwargs):
+        return 60.0
+
+    async def progress(_data):
+        pass
+
+    monkeypatch.setattr(ytdlp, "_announced_length", sixty)
+    assert await ytdlp.download("https://cdn.test/episode.mp4", str(whole), progress, whole_video=True) == (True,
+                                                                                                         "файл уже существует")
+    assert whole.exists()
