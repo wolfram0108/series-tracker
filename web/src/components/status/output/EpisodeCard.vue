@@ -108,7 +108,11 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
 }
 .card-corner { flex: none; display: flex; align-items: center; gap: 0.375rem; margin-inline-start: auto; }
 .card-flag { padding-inline: 0.4rem; color: var(--color-red-1); }
-.card-power { padding-inline: 0.25rem; pointer-events: auto; }
+/* The switch is as high as the marks of the card; its box is a capsule around it, an even gap on every side. */
+.card-power {
+  --switch-size: var(--figure-size); justify-content: center; padding-inline: calc((var(--card-row) - var(--figure-size)) / 2);
+  border-radius: calc(var(--card-row) / 2); pointer-events: auto;
+}
 .card-ref {
   align-self: flex-start; gap: 0.375rem; max-inline-size: 100%; min-inline-size: 0;
   padding-inline: calc((var(--card-row) - var(--figure-size)) / 2) 0.5rem; font-size: 0.8rem; font-weight: 600; white-space: nowrap;
