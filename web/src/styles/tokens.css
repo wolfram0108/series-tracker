@@ -52,3 +52,14 @@
   --source-8: #d84315; --source-9: #455a64; --source-10: #c2185b; --source-11: #2e7d32;
   --source-12: #b26a00; --source-13: #1565c0; --source-14: #880e4f; --source-15: #558b2f;
 }
+
+/* Rounded boxes: the radius of a box is a quarter of its height, so a smaller box is rounded in proportion; a box that
+   holds another at a padding is rounded by the radius of what it holds plus that padding, so the corners run alike.
+   Capsules (pills, chips) stay capsules. */
+:root {
+  --round: 0.25;
+  --figure-size: 1.25rem;
+  --track-size: 1rem;
+  --card-row: 1.75rem;
+  --card-pad: 0.5rem;
+}

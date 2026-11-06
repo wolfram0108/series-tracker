@@ -210,7 +210,7 @@ function step(by: number): void {
 /* The width of the smallest card: a strip of six tracks and the padding around it (TrackStrip, EpisodeCard). */
 .grid-ruler { position: absolute; visibility: hidden; pointer-events: none; inline-size: calc(6 * 1.25rem + 5 * 0.125rem + 1.4rem); }
 .episode-tile {
-  all: unset; box-sizing: border-box; position: relative; overflow: hidden; block-size: 1.6rem; border-radius: 6px; cursor: pointer;
+  all: unset; box-sizing: border-box; position: relative; overflow: hidden; block-size: 1.6rem; border-radius: calc(1.6rem * var(--round)); cursor: pointer;
   display: grid; place-items: center; font-size: 0.65rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }

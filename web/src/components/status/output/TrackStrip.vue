@@ -20,10 +20,11 @@ const title = (cell: TrackCell): string => t(cell.isReference ? "output.track.ce
 </template>
 
 <style scoped>
-.track-strip { display: flex; gap: 0.125rem; padding: 0.2rem; max-inline-size: 100%; overflow: hidden; }
+/* The strip keeps room around its cells for the outline of the track of the reference. */
+.track-strip { display: flex; align-items: center; gap: 0.125rem; padding-inline: calc((var(--card-row) - var(--track-size)) / 2); max-inline-size: 100%; overflow: hidden; }
 .track-cell {
-  flex: 0 1 auto; inline-size: 1.25rem; min-inline-size: 0.25rem; block-size: 1rem; overflow: hidden;
-  display: grid; place-items: center; border-radius: 4px; color: #fff; font-size: 0.625rem; font-weight: 700; line-height: 1;
+  flex: 0 1 auto; inline-size: var(--figure-size); min-inline-size: 0.25rem; block-size: var(--track-size); overflow: hidden;
+  display: grid; place-items: center; border-radius: calc(var(--track-size) * var(--round)); color: #fff; font-size: 0.625rem; font-weight: 700; line-height: 1;
 }
 .track-cell.is-done { background: #409444; }
 .track-cell.is-down { background: #009688; }
@@ -31,5 +32,6 @@ const title = (cell: TrackCell): string => t(cell.isReference ? "output.track.ce
 .track-cell.is-wait { background: #ced4da; color: #343a40; }
 .track-cell.is-error { background: var(--color-red-1); }
 .track-cell.is-none { background: none; border: 1px dashed #adb5bd; color: #adb5bd; }
-.track-cell.is-reference { box-shadow: 0 0 0 1.5px #fff, 0 0 0 3px #2c3e50; }
+/* An outline is painted above the cells around it, where a shadow lies under the next one. */
+.track-cell.is-reference { position: relative; z-index: 1; overflow: visible; outline: 0.125rem solid #2c3e50; outline-offset: 0.0625rem; }
 </style>

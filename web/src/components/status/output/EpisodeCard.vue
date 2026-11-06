@@ -57,7 +57,7 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
 <style scoped>
 .episode-card {
   all: unset; box-sizing: border-box; position: relative; overflow: hidden; min-inline-size: 0; cursor: pointer;
-  border-radius: var(--card-border-radius); box-shadow: var(--card-shadow); font: inherit;
+  border-radius: calc(var(--card-row) * var(--round) + var(--card-pad)); box-shadow: var(--card-shadow); font: inherit;
 }
 .episode-card::before {
   content: ""; position: absolute; inset: 0;
@@ -73,17 +73,21 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
 .is-wait { background: linear-gradient(135deg, #f0f2f5, #e9ecef); }
 .is-error { background: linear-gradient(135deg, #dc3545, #c82333); }
 .is-off { background: linear-gradient(135deg, #6c757d, #5a6268); }
-.card-in { position: relative; display: flex; flex-direction: column; gap: 0.3rem; padding: 0.5rem; }
-.glass { background: rgba(248, 249, 250, 0.82); border-radius: 8px; box-shadow: 0 0 6px rgba(0, 0, 0, 0.15); color: #2c3e50; }
+.card-in { position: relative; display: flex; flex-direction: column; gap: 0.3rem; padding: var(--card-pad); }
+/* Every line of a card is a box of one height, rounded by the same rule as the card around it. */
+.glass {
+  display: flex; align-items: center; min-block-size: var(--card-row); background: rgba(248, 249, 250, 0.82);
+  border-radius: calc(var(--card-row) * var(--round)); box-shadow: 0 0 6px rgba(0, 0, 0, 0.15); color: #2c3e50;
+}
 .card-top { display: flex; align-items: center; gap: 0.375rem; min-inline-size: 0; }
-.card-num { flex: none; padding: 0.25rem 0.5rem; font-size: 1rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.card-num { flex: none; padding-inline: 0.5rem; font-size: 1rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
 .card-name {
-  flex: 1 1 auto; min-inline-size: 0; padding: 0.25rem 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1 1 auto; min-inline-size: 0; padding-inline: 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--font-mono); font-size: 0.7rem;
 }
-.card-flag { flex: none; margin-inline-start: auto; padding: 0.2rem 0.35rem; color: var(--color-red-1); }
+.card-flag { flex: none; margin-inline-start: auto; padding-inline: 0.4rem; color: var(--color-red-1); }
 .card-ref {
-  align-self: flex-start; display: flex; align-items: center; gap: 0.375rem; padding: 0.2rem 0.4rem 0.2rem 0.2rem;
+  align-self: flex-start; gap: 0.375rem; padding-inline: calc((var(--card-row) - var(--figure-size)) / 2) 0.5rem;
   font-size: 0.8rem; font-weight: 600; white-space: nowrap;
 }
 .card-parts { color: var(--text-muted); font-weight: 500; }
