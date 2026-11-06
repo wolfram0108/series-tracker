@@ -208,6 +208,9 @@ class ScanModule(BaseModule):
         # The changes of a series by the user under way (scan.edit.begin/end) and the signal that none is left: a run
         # opens only after them, and none is admitted while a run is open or opening.
         self._edits: dict[int, set[str]] = {}
+        # The numbers whose end came before their beginning (the caller stopped waiting for the grant and gave it back): the
+        # beginning that comes later opens nothing.
+        self._ended_early: dict[int, set[str]] = {}
         # The configuration each open run works by (RunSnapshot), kept with its command in scan_tasks.
         self._snapshots: dict[int, RunSnapshot] = {}
         # The generation of the announcements of runs (RunChanged.seq), in the order they are published.
@@ -317,23 +320,35 @@ class ScanModule(BaseModule):
     # --- the admission of a change by the user (I-60) ------------------------------------------------------------
 
     async def on_edit_begin(self, env: Envelope) -> dict:
-        """A change of the series by the user begins: refused while a sync of it runs or opens; admitted, it gets its
-        number and holds off the opening of a sync until scan.edit.end with that number, which its admission sends once
-        every request of the change is answered (core/admission.py)."""
+        """A change of the series by the user begins: refused while a sync of it runs or opens; admitted under its
+        number, it holds off the opening of a sync until scan.edit.end with that number, which its admission sends once
+        every request of the change is answered (core/admission.py). The number is the caller's, known before the grant:
+        a caller that stops waiting for the grant gives it back by that number, and an end that came first is kept, so
+        the grant that follows it opens nothing."""
         series_id = int(env.payload["series_id"])
+        token = env.payload.get("token") or uuid.uuid4().hex
+        early = self._ended_early.get(series_id, set())
+        if token in early:
+            early.discard(token)
+            if not early:
+                self._ended_early.pop(series_id, None)
+            return {"ok": True, "token": token, "ended": True}
         self._require_idle(series_id, availability.Action.EDIT)
-        token = uuid.uuid4().hex
         self._edits.setdefault(series_id, set()).add(token)
         self._edits_over.setdefault(series_id, asyncio.Event()).clear()
         return {"ok": True, "token": token}
 
     async def on_edit_end(self, env: Envelope) -> None:
-        """The change of that number is written whole; an end told twice is the same as once."""
+        """The change of that number is written whole; an end told twice is the same as once. An end of a number not
+        admitted yet is the end of a grant its caller gave up waiting for: it is kept for that grant."""
         series_id = int(env.payload["series_id"])
+        token = env.payload.get("token") or ""
         open_ = self._edits.get(series_id)
-        if open_ is None:
+        if open_ is None or token not in open_:
+            if token:
+                self._ended_early.setdefault(series_id, set()).add(token)
             return
-        open_.discard(env.payload.get("token") or "")
+        open_.discard(token)
         if open_:
             return
         self._edits.pop(series_id, None)
@@ -454,6 +469,7 @@ class ScanModule(BaseModule):
         async with self._lock(series_id):
             await self.repo.delete_for_series(series_id)
         self._locks.pop(series_id, None)
+        self._ended_early.pop(series_id, None)
         if self._runs.pop(series_id, None) is not None:  # its works go with the series: the run is over
             self._working.pop(series_id, None)
             packs = self._packs.pop(series_id, None)

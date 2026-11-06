@@ -1,6 +1,7 @@
 """Route registration and answer helpers shared by the gateway API blocks."""
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -44,15 +45,19 @@ async def admitted(gw: Any, series_id: int) -> AsyncIterator[None]:
     series runs, and a sync does not open until the change is written whole, however many modules it writes to (И-60).
     The admission lasts until every request of the change is answered, not until this block stops waiting: a fuse or a
     dropped HTTP request leaves a write in the hands of its handler (core/admission.py). The refusal is a BusRequestError
-    like any other, answered by `refusal`."""
+    like any other, answered by `refusal`. The number of the change is made here, before it is granted: a caller that
+    stops waiting for the grant (its fuse, a dropped request) gives the grant back by it, whether it was made or not."""
+    token = uuid.uuid4().hex
     try:
-        reply = await gw.request("scan.edit.begin", {"series_id": series_id})
+        await gw.request("scan.edit.begin", {"series_id": series_id, "token": token})
     except BusRequestError as exc:
         if NO_HANDLER not in str(exc):
-            raise
+            raise  # refused: the owner answered, nothing was granted
         yield  # no runs in this process: nothing to hold off
         return
-    token = (reply or {}).get("token") or ""
+    except BaseException:
+        gw.send_command("scan.edit.end", {"series_id": series_id, "token": token})
+        raise
     admission = Admission(token, lambda: gw.send_command("scan.edit.end", {"series_id": series_id, "token": token}),
                           log=getattr(gw, "log", None))
     current = current_admission.set(admission)

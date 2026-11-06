@@ -1533,6 +1533,52 @@ async def test_an_answer_that_comes_while_its_cancelled_caller_is_still_register
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stops", ["after_the_grant", "before_the_grant"])
+async def test_a_caller_that_stops_waiting_for_its_grant_gives_it_back_and_the_series_is_free(rig, monkeypatch, stops):
+    """Н-23: the caller is cancelled while the grant is on its way back (it was made), or before scan has read the request
+    (the end reaches scan first): either way no number is left open, and a sync opens."""
+    from modules.gateway.routing import admitted
+
+    publish, grants, editing = rig.bus.publish, [], None
+    held = asyncio.Event()
+
+    def watched(env):
+        if stops == "before_the_grant" and env.topic == "scan.edit.begin" and env.kind == "query":
+            # The request waits in front of scan; the caller is gone first, and its end goes out before the request is read.
+            grants.append(env)
+            editing.cancel()
+            held.set()
+            return 1
+        result = publish(env)
+        if env.topic == "scan.edit.begin" and env.kind == "query":
+            grants.append(env)
+        elif stops == "after_the_grant" and env.kind == "reply" and grants and env.correlation_id == grants[0].correlation_id:
+            editing.cancel()
+        return result
+
+    monkeypatch.setattr(rig.bus, "publish", watched)
+    entered = []
+
+    async def edit():
+        async with admitted(rig.probe, rig.series_id):
+            entered.append(True)
+
+    editing = asyncio.create_task(edit())
+    with pytest.raises(asyncio.CancelledError):
+        await editing
+    monkeypatch.setattr(rig.bus, "publish", publish)
+    if stops == "before_the_grant":
+        await held.wait()
+        await rig.bus.settled()  # the end is in
+        publish(grants[0])  # now the request is read: it opens nothing
+    await rig.bus.settled()
+
+    assert entered == [] and not rig.scan._edits.get(rig.series_id) and not rig.scan._ended_early.get(rig.series_id)
+    rig.world.rows = [rig.row("a", 1, 1)]
+    await asyncio.wait_for(rig.run(download=False), 10)
+
+
+@pytest.mark.asyncio
 async def test_a_change_that_does_not_end_is_told_in_the_log_and_the_sync_still_waits_for_it(rig, monkeypatch, caplog):
     """K-10: the admission is not released (a late write would land in the sync), but the wait is not silent."""
     import modules.scan.module as scan_module
