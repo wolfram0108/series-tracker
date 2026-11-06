@@ -29,13 +29,20 @@ echo data > "$out"
 exit $(cat "$FAKE_DIR/ffmpeg_rc" 2>/dev/null || echo 0)
 """
 
-# The stream announces `remote_duration`; the downloaded file measures `local_duration`.
+# The stream announces `remote_duration`; the downloaded file measures `local_duration`, its header and its data alike: each
+# question answered in the shape the real ffprobe gives (the length of the header, the packets of the tail).
 FFPROBE = """#!/bin/bash
 last="${@: -1}"
 case "$last" in
-  http*) cat "$FAKE_DIR/remote_duration" ;;
-  *) cat "$FAKE_DIR/local_duration" ;;
+  http*) cat "$FAKE_DIR/remote_duration"; exit 0 ;;
 esac
+local=$(cat "$FAKE_DIR/local_duration")
+case "$*" in
+  *format=duration,start_time*) printf 'duration=%s\\nstart_time=0.000000\\n' "$local" ;;
+  *-read_intervals*) [ "$local" != "0" ] && printf '0,%s,0.000000\\n' "$local" ;;
+  *) echo "$local" ;;
+esac
+exit 0
 """
 
 
