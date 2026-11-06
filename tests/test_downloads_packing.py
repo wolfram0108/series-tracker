@@ -549,7 +549,7 @@ async def test_a_slot_whose_packing_a_stop_cut_short_is_seen_until_its_record_is
     assert [(task["episode"], task["status"]) for task in pictures(sub)[-1]] == [(1, "interrupted")]
     before = sorted(os.listdir(media_dir))
 
-    # Н-16: a look at the series outside a run (the disk check, a recount of the plan) changes no file: the record waits.
+    # A look at the series outside a run (the disk check, a recount of the plan) changes no file: the record waits.
     await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=5)
     probe.publish_event("scan.plan.updated", {"series_id": 2})
     await probe.bus.settled()
@@ -559,7 +559,7 @@ async def test_a_slot_whose_packing_a_stop_cut_short_is_seen_until_its_record_is
     assert pictures(sub)[-1] == [] and open_publications(db_path) == 0
 
 
-# --- the folder of a series moves while a publication is owed (Н-15) ----------------------------------------------------------
+# --- the folder of a series moves while a publication is owed ----------------------------------------------------------------
 
 async def _owed_publication(rig):
     """A publication cut short after its replace: the container is in place, the source video and the track are owed."""

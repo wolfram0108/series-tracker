@@ -40,7 +40,7 @@ _TITLE_PATH = re.compile(r"^/catalog/item/([^/]+)/?$")
 _OWN_CVH = "/iframeCVH.html"
 _OWN_VK = "/iframeVK.html"
 _VK_VIDEO = re.compile(r"^(?:video)?(-?\d+)_(\d+)$")
-# The kinds of a voice-over the site puts before its name ("Озвучка AniStar", "Субтитры SovetRomantica").
+# The kinds of a voice-over the site puts before its name: a voice-over or subtitles.
 _VOICE = re.compile(r"^(Озвучка|Субтитры)\s+(.+)$")
 
 

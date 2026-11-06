@@ -966,6 +966,7 @@ def test_every_trace_of_an_assistant_in_a_message_is_found(tmp_path, message):
     "Fix the maintain script and the domain mail",
     "Правка: ввод адреса, новые тесты, стили",
     "Типы интерфейса — сгенерированные из схемы API",
+    "Правило — в CLAUDE.md",
 ])
 def test_an_honest_message_passes_and_words_are_matched_whole(tmp_path, message):
     repo, base = two_commits(tmp_path, {"a": "1\n"}, {"a": "2\n"}, message)

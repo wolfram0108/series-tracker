@@ -85,7 +85,7 @@ function getBlockClasses(block: PatternBlock, index: number): string {
   if (["add", "subtract"].includes(block.type)) classes.push("block-type-operation")
   else if (block.type === "text") classes.push("block-type-text")
   else classes.push(`block-type-${block.type}`)
-  // Glued units: the suffix touches the number it modifies, «или» touches the texts it joins.
+  // Glued units: the suffix touches the number it modifies, the block or touches the texts it joins.
   if (joinsPrevious(props.blocks, index)) classes.push("is-glued")
   if (joinsNext(props.blocks, index)) classes.push("carries-attachment")
   if (isDanglingOr(props.blocks, index)) classes.push("is-dangling")

@@ -250,7 +250,7 @@ async def test_a_source_that_states_no_length_leaves_the_download_unfinished_and
     assert os.path.exists(target)  # nothing was proved against it: the next try looks again
 
 
-# --- what a file holds, not what its header says (Н-17) -------------------------------------------------------------------------
+# --- what a file holds, not what its header says -------------------------------------------------------------------------------
 
 def cut_in_half(path) -> None:
     with open(path, "r+b") as out:

@@ -801,7 +801,7 @@ def test_a_condition_that_is_not_from_a_source_leaves_that_source_out():
     assert process_title(profile, "PID:1.ruchime.org | P:VK | Серия 1")["extracted"] == {}
 
 
-# --- блок «или»: один из соседних текстов -----------------------------------------
+# --- the block or: any of the texts next to it ------------------------------------
 
 OR = ("or", "")
 

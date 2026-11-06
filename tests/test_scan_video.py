@@ -170,7 +170,7 @@ async def test_the_steps_of_a_synchronization_follow_one_another_by_signals(rig)
     await rig.run()
     await rig.world.dispatched.get()
     await rig.world.dispatched.get()
-    # The publications a stop cut short are finished in their folder before it moves (Н-15).
+    # The publications a stop cut short are finished in their folder before it moves.
     assert rig.world.order == [
         f"downloads.publications.finish {rig.series_id}", f"library.relocation.apply {rig.series_id}", "downloads.fs.sync", f"sources.table.get {URL1}", "composition.recompute",
         "composition.get", "voices.settings.get", "renaming.reprocess", f"downloads.dispatch {rig.series_id}",
@@ -1307,7 +1307,7 @@ async def test_the_run_is_told_with_its_snapshot_and_the_open_runs_are_given_wit
     assert open_runs == [{"series_id": rig.series_id,
                           "snapshot": {"profiles": open_runs[0]["snapshot"]["profiles"],
                                        "voices": rig.world.voices_export}}]
-    # Н-20: the announcements are numbered in order, and the reading is as of the last of them.
+    # The announcements are numbered in order, and the reading is as of the last of them.
     assert [each["seq"] for each in told] == sorted({each["seq"] for each in told}) and told[0]["seq"] > 0
     assert (await rig.probe.request("scan.runs.get", {}, timeout=5))["as_of"] == told[-1]["seq"]
     work_state(rig, "downloads", False)

@@ -14,7 +14,8 @@ from guard_common import Outcome, Violation, git, run_guard
 NAME = "commit_attribution"
 DEFAULT_BASE = "fa9231d"
 PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("имя ассистента", re.compile(r"\b(?:claude|anthropic|chatgpt|openai|gpt|copilot|gemini|llm)\b", re.I)),
+    # CLAUDE.md is the name of the instructions file of the project, not a trace of who wrote the commit.
+    ("имя ассистента", re.compile(r"\b(?:claude(?!\.md\b)|anthropic|chatgpt|openai|gpt|copilot|gemini|llm)\b", re.I)),
     ("трейлер соавтора", re.compile(r"\bco-authored-by\b", re.I)),
     ("«generated with/by»", re.compile(r"\bgenerated\s+(?:with|by)\b", re.I)),
     ("«сгенерировано»", re.compile(r"\bсгенерировано\b", re.I)),

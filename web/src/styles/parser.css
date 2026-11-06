@@ -175,7 +175,7 @@
   flex-wrap: wrap;
   gap: var(--pattern-gap);
   min-height: 38px;
-  /* Every block of a line is as tall as the tallest one: a text with its field, a number, «или» alike. */
+  /* Every block of a line is as tall as the tallest one: a text with its field, a number, the block or alike. */
   align-items: stretch;
   align-content: flex-start;
   padding: 0.25rem;
@@ -206,7 +206,7 @@
 }
 .block-type-whitespace { background-color: #f8f9fa; border: 1px dashed #ced4da; }
 .block-type-or { background-color: #fef3c7; color: #92400e; font-weight: 600; }
-/* An «или» without a text on one of its sides: the template is not finished yet. */
+/* A block or without a text on one of its sides: the template is not finished yet. */
 .pattern-block.is-dangling { outline: 1px dashed #dc2626; }
 .block-type-any_text,
 .block-type-start_of_line,

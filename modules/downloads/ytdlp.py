@@ -292,7 +292,7 @@ async def _probe_duration_ffprobe(stream_url: str, headers: dict | None = None) 
 
 
 async def _local_duration(path: str) -> float:
-    """Seconds of a file on disk as far as its data goes, not as its header states (Н-17); 0 when it cannot be read."""
+    """Seconds of a file on disk as far as its data goes, not as its header states; 0 when it cannot be read."""
     return await readable_length(path, timeout=PROBE_TIMEOUT_S)
 
 

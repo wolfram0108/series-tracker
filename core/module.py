@@ -170,7 +170,7 @@ class BaseModule:
     async def _handle_one(self, env: Envelope, handler: Handler) -> None:
         # A request of an admitted change is handled under that admission: what the handler asks of others is part of the
         # change, and the answer goes back only once those requests are answered too (late ones included), so the change
-        # is over when its last write is, however deep (И-60).
+        # is over when its last write is, however deep.
         relay = _Relay(env.admission, self.log) if env.admission and env.kind == "query" else None
         context = current_admission.set(relay.admission) if relay is not None else None
         try:
@@ -185,7 +185,7 @@ class BaseModule:
                 # A refusal by the table of what is allowed is the module's answer, not its failure: no trace is due.
                 self.log.info("отказ на топике '%s': %s", env.topic, describe(str(exc)))
                 payload = {ERROR_KEY: f"{type(exc).__name__}: {exc}"}
-            except Exception as exc:  # noqa: BLE001 — модуль не должен умирать
+            except Exception as exc:  # noqa: BLE001 - a module does not die of one handler
                 self.log.exception("ошибка обработчика '%s' на топике '%s'",
                                    getattr(handler, "__name__", "?"), env.topic)
                 payload = {ERROR_KEY: f"{type(exc).__name__}: {exc}"}

@@ -566,7 +566,7 @@ class DownloadsModule(BaseModule):
             await self._cancel_runner(task["id"])
             await self._end_task(task)
         await self.repo.drop_publications(series_id)
-        self._packing.forget(series_id)  # Н-21: its cards of the packing go with it
+        self._packing.forget(series_id)  # its cards of the packing go with it, the failed ones too
         await self._broadcast_queue()
         self.publish_event("series.purged", {"series_id": series_id, "owner": self.name})
 
@@ -581,7 +581,7 @@ class DownloadsModule(BaseModule):
 
     async def on_publications_finish(self, env: Envelope) -> dict:
         """The first step of a sync: the publications of containers a stop or a failure cut short are finished (or closed)
-        before anything moves the folder of the series or acts on its files (Н-15, И-61)."""
+        before anything moves the folder of the series or acts on its files (И-61)."""
         series = await self.request("catalog.series.get", {"series_id": env.payload["series_id"]})
         async with self._turn(series, in_run=True):
             pass
