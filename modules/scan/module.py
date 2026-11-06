@@ -7,8 +7,9 @@ through `composition`; scan only waits for the tables, asks for the layout, choo
 `planner.py`) and the outcome of the choice in `scan_references`.
 
 Queries:
-  scan.runs.get → {runs: [{series_id, snapshot}]} — the open runs of syncs as their commands are written (an executor that
-      starts again takes them before its works: И-60).
+  scan.runs.get → {runs: [{series_id, snapshot}], as_of} — the open runs of syncs as their commands are written (an
+      executor that starts again takes them before its works: И-60), as of the generation `as_of` of the announcements of
+      runs (RunChanged.seq): a series whose announcement is newer than that is told by the announcement, not by the reading.
   scan.series.run {series_id, force_replace?, download?, retry_failed?} → {changed, ...}. retry_failed (with download):
       the same sync, in which voices.dispatch is told to forget the failed attempts (a failed download is retried by
       every sync already). changed tells whether anything was
@@ -209,6 +210,8 @@ class ScanModule(BaseModule):
         self._edits: dict[int, set[str]] = {}
         # The configuration each open run works by (RunSnapshot), kept with its command in scan_tasks.
         self._snapshots: dict[int, RunSnapshot] = {}
+        # The generation of the announcements of runs (RunChanged.seq), in the order they are published.
+        self._run_seq = 0
         self._failed: set[int] = set()  # the series whose last run ended failed (its error stays until the next scan)
         self._edits_over: dict[int, asyncio.Event] = {}
         self._aborted: set[int] = set()
@@ -256,12 +259,13 @@ class ScanModule(BaseModule):
     async def on_runs_get(self, env: Envelope) -> dict:
         """The runs of syncs that are open, as their commands are written: each with its snapshot. An executor that starts
         again takes them before it takes up its works, so that a pass of a run works by the snapshot (И-60)."""
+        as_of = self._run_seq
         runs = []
         for task in await self.repo.incomplete_tasks():
             results = task["results_data"] or {}
             if results.get("video_sync"):
                 runs.append({"series_id": task["series_id"], "snapshot": results.get("snapshot")})
-        return {"runs": runs}
+        return {"runs": runs, "as_of": as_of}
 
     async def on_system_started(self, env: Envelope) -> None:
         """Every module is up: the scans that were under way are taken up again. The work needs the catalog, the
@@ -788,9 +792,10 @@ class ScanModule(BaseModule):
         """The modules hear the run (the snapshot, the refusals); the card of the series is busy for all of it."""
         if not active:
             self._snapshots.pop(series_id, None)
+        self._run_seq += 1
         self.publish_event(RUN_CHANGED, RunChanged(series_id=series_id, active=active,
-                                                   snapshot=self._snapshots.get(series_id) if active else None
-                                                   ).model_dump(mode="json"))
+                                                   snapshot=self._snapshots.get(series_id) if active else None,
+                                                   seq=self._run_seq).model_dump(mode="json"))
         self.publish_event("series.busy.contribution", {"source": "sync", "series_id": series_id, "busy": active})
 
     async def _hold_run(self, series_id: int, intent: int) -> None:

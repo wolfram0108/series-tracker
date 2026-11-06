@@ -1306,9 +1306,13 @@ async def test_the_run_is_told_with_its_snapshot_and_the_open_runs_are_given_wit
     assert open_runs == [{"series_id": rig.series_id,
                           "snapshot": {"profiles": open_runs[0]["snapshot"]["profiles"],
                                        "voices": rig.world.voices_export}}]
+    # Н-20: the announcements are numbered in order, and the reading is as of the last of them.
+    assert [each["seq"] for each in told] == sorted({each["seq"] for each in told}) and told[0]["seq"] > 0
+    assert (await rig.probe.request("scan.runs.get", {}, timeout=5))["as_of"] == told[-1]["seq"]
     work_state(rig, "downloads", False)
     await rig.bus.settled()
-    assert (await rig.probe.request("scan.runs.get", {}, timeout=5))["runs"] == []
+    closed = (await rig.probe.request("scan.runs.get", {}, timeout=5))
+    assert closed["runs"] == [] and closed["as_of"] > told[-1]["seq"]
 
 
 # --- an admission lasts until the change is answered, not until its caller stops waiting (N-12, N-14) -------------------
@@ -1427,6 +1431,104 @@ async def test_a_card_written_by_the_real_catalog_after_the_fuse_is_written_befo
         assert rig.query("SELECT name FROM series WHERE id=?", (rig.series_id,))[0]["name"] == "LATE"
     finally:
         release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_write_nested_under_the_handler_of_an_admitted_request_holds_the_admission_until_it_is_written(
+        rig, monkeypatch):
+    """Н-18: the switch of an output asks the catalog to write; the scan stops waiting for it (its fuse) and answers the
+    gateway with an error, but the write is still going, so the admission holds and the sync opens after it."""
+    from modules.catalog import CatalogModule
+    from modules.gateway.routing import admitted
+
+    catalog = next(module for module in rig.runner.modules if isinstance(module, CatalogModule))
+    update, request = catalog.repo.update_series, rig.scan.request
+    entered, release, committed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    run_open_at_commit: list[bool] = []
+
+    async def held_update(series_id, fields):
+        entered.set()
+        await release.wait()
+        run_open_at_commit.append(series_id in rig.scan._runs)
+        result = await update(series_id, fields)
+        committed.set()
+        return result
+
+    async def short_fuse(topic, payload=None, **kwargs):
+        if topic == "catalog.series.update":
+            kwargs["timeout"] = 0.05
+        return await request(topic, payload, **kwargs)
+
+    monkeypatch.setattr(catalog.repo, "update_series", held_update)
+    monkeypatch.setattr(rig.scan, "request", short_fuse)
+    rig.world.rows = [rig.row("a", 1, 1)]
+    rig.world.work = {"downloads": True}
+
+    async def edit():
+        async with admitted(rig.probe, rig.series_id):
+            await rig.probe.request("scan.output.switch", {"series_id": rig.series_id, "season": 1, "episode": 1,
+                                                           "off": True}, timeout=0.2)
+
+    editing = asyncio.create_task(edit())
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        with pytest.raises((asyncio.TimeoutError, BusRequestError)):
+            await editing
+        assert rig.scan._edits.get(rig.series_id)  # held: the nested write has not been answered
+        running = asyncio.create_task(rig.run())
+        assert await wait_until(lambda: rig.series_id in rig.scan._running, rig.bus, *rig.runner.modules)
+        assert rig.series_id not in rig.scan._runs
+        release.set()
+        await asyncio.wait_for(committed.wait(), 5)
+        await asyncio.wait_for(running, 10)
+        assert run_open_at_commit == [False]
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_an_answer_that_comes_while_its_cancelled_caller_is_still_registered_is_counted_once(rig):
+    """Н-19: the answer is queued, the caller is cancelled before its consumer runs, then the answer is read: it is counted
+    there, so the admission ends."""
+    from core import BaseModule
+    from core.envelope import Envelope
+    from modules.gateway.routing import admitted
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    asked: list[Envelope] = []
+
+    class Slow(BaseModule):
+        name = "review_slow"
+
+        def register(self):
+            self.handle("review.slow", self.query)
+
+        async def query(self, env):
+            asked.append(env)
+            entered.set()
+            await release.wait()
+
+    slow = Slow(rig.bus)
+    await slow.start()
+
+    async def edit():
+        async with admitted(rig.probe, rig.series_id):
+            await rig.probe.request("review.slow", {}, timeout=5)
+
+    editing = asyncio.create_task(edit())
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        env = asked[0]
+        rig.bus.publish(Envelope(topic=env.reply_to, kind="reply", correlation_id=env.correlation_id, payload={}))
+        editing.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await editing
+        release.set()
+        assert await wait_until(lambda: not rig.scan._edits.get(rig.series_id), rig.bus, *rig.runner.modules)
+        assert not rig.probe._admitted
+    finally:
+        release.set()
+        await slow.stop()
 
 
 @pytest.mark.asyncio

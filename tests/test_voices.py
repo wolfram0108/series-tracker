@@ -168,6 +168,8 @@ class Neighbours(BaseModule):
         self.uids = {}  # episode -> media item of its reference (default: u<episode>)
         self.file_revs = {}  # episode -> revision of the file of its reference (default: 0)
         self.open_runs = []  # the runs scan has written down as open: [{series_id, snapshot}]
+        self.runs_as_of = 0  # the generation of the announcements of runs the reading is as of
+        self.before_runs = None  # what happens after the reading and before its answer (an announcement heard first)
         self.extra_items = []  # more media items of the plan, as downloads.episodes.get shows them
         self.item_keys: dict[int, str] = {}  # episode -> the row of the reference video, when not the reference's own
         self.marks = {}  # (season, episode) -> mark of the reference when it is not the usual one
@@ -266,7 +268,9 @@ class Neighbours(BaseModule):
         return [reference.model_dump(mode="json") for reference in self.references_list()]
 
     async def on_runs(self, env):
-        return {"runs": self.open_runs}
+        if self.before_runs is not None:
+            await self.before_runs()
+        return {"runs": self.open_runs, "as_of": self.runs_as_of}
 
     async def on_episodes(self, env):
         reference = next(s for s in self.sources if s["url"] == self.reference_url)
@@ -3413,3 +3417,25 @@ async def test_a_run_told_with_its_snapshot_is_worked_by_it_and_a_restart_takes_
         assert 7 in again._in_run and again._run_values[7] == taken
     finally:
         await again.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_reading_of_the_open_runs_older_than_the_end_of_a_run_does_not_open_it_again(dubs):
+    """Н-20: the reading saw the run open; its end is announced before the reading is answered. The end is newer (its
+    generation is past the one the reading is as of), so the series stays out of the run, with no snapshot."""
+    probe, neighbours, voices, bus = dubs
+    taken = {"voices.source_priority": json.dumps(["cvh", "kodik"])}
+    await voices.on_run_changed(Envelope("scan.run.changed", "event", {
+        "series_id": 7, "active": True, "snapshot": {"profiles": {}, "voices": taken}, "seq": 4}))
+    neighbours.open_runs = [{"series_id": 7, "snapshot": {"profiles": {}, "voices": taken}}]
+    neighbours.runs_as_of = 4
+    # The end reaches voices before the answer of the reading does: the order in which the older reading would undo it.
+    neighbours.before_runs = lambda: voices.on_run_changed(Envelope("scan.run.changed", "event", {
+        "series_id": 7, "active": False, "seq": 5}))
+    await voices._take_open_runs()
+
+    assert 7 not in voices._in_run and 7 not in voices._run_values
+    # A reading newer than every announcement heard is taken as it is.
+    neighbours.before_runs, neighbours.runs_as_of = None, 6
+    await voices._take_open_runs()
+    assert 7 in voices._in_run and voices._run_values[7] == taken

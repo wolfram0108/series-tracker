@@ -340,6 +340,9 @@ class VoicesModule(BaseModule):
         # The settings of the voice-overs each open run took (RunSnapshot.voices): every pass of a series in a run works
         # by them, not by the settings as they are now (I-60).
         self._run_values: dict[int, dict] = {}
+        # The generation of the last announcement of a run heard for each series (RunChanged.seq): a reading of the open
+        # runs older than it says nothing of that series.
+        self._run_heard: dict[int, int] = {}
         self._owed_plans: set[int] = set()
         self._work = WorkReport(self.name, self._has_work, self.publish_event)
         super().__init__(bus)
@@ -542,15 +545,19 @@ class VoicesModule(BaseModule):
     async def _take_open_runs(self) -> None:
         """The runs a restart left open, as scan has their commands written: the series are in a run, by its snapshot."""
         try:
-            runs = (await self.request("scan.runs.get", {}))["runs"]
+            reply = await self.request("scan.runs.get", {})
         except BusRequestError as exc:
             if NO_HANDLER not in str(exc):
                 raise
             return  # no runs in this process
-        for run in runs:
-            self._in_run.add(int(run["series_id"]))
+        as_of = int(reply.get("as_of") or 0)
+        for run in reply["runs"]:
+            series_id = int(run["series_id"])
+            if self._run_heard.get(series_id, 0) > as_of:
+                continue  # its run was announced after this reading (opened again or closed): the announcement stands
+            self._in_run.add(series_id)
             if run.get("snapshot") is not None:
-                self._run_values[int(run["series_id"])] = dict(RunSnapshot.model_validate(run["snapshot"]).voices)
+                self._run_values[series_id] = dict(RunSnapshot.model_validate(run["snapshot"]).voices)
 
     def _take_run_values(self, series_id: int, values: dict | None) -> None:
         """The settings a run handed over with its step are the settings of the whole run of the series."""
@@ -608,6 +615,7 @@ class VoicesModule(BaseModule):
 
     async def on_run_changed(self, env: Envelope) -> None:
         run = RunChanged.model_validate(env.payload)
+        self._run_heard[run.series_id] = max(self._run_heard.get(run.series_id, 0), run.seq)
         if run.active:
             self._in_run.add(run.series_id)
             if run.snapshot is not None:

@@ -25,6 +25,9 @@ class RunChanged(BaseModel):
     series_id: int
     active: bool
     snapshot: RunSnapshot | None = None
+    # The generation of the announcement: every announcement of a run is numbered in order, and the open runs a query reads
+    # are as of a number (`scan.runs.get` → `as_of`), so that a reader orders the two and an older reading undoes no news.
+    seq: int = 0
 
 
 # An episode of a series as the works of a run name it: (season, episode, part), with no part as 0.
