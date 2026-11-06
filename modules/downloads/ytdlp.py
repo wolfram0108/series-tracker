@@ -26,7 +26,7 @@ from typing import Awaitable, Callable
 from urllib.parse import urlsplit
 
 from core import storage
-from core.ffprobe import duration_of, video_gaps
+from core.ffprobe import duration_of, readable_length, video_gaps
 from core.proc import run_capture, spawn
 from core.retry import UNTIMED, Budget, retrying
 
@@ -292,8 +292,8 @@ async def _probe_duration_ffprobe(stream_url: str, headers: dict | None = None) 
 
 
 async def _local_duration(path: str) -> float:
-    """Duration of a file on disk; 0 when it cannot be read."""
-    return await duration_of(path, timeout=PROBE_TIMEOUT_S)
+    """Seconds of a file on disk as far as its data goes, not as its header states (Н-17); 0 when it cannot be read."""
+    return await readable_length(path, timeout=PROBE_TIMEOUT_S)
 
 
 async def _download_direct_ffmpeg(stream_url: str, headers: dict,

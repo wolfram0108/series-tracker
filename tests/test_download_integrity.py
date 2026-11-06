@@ -248,3 +248,51 @@ async def test_a_source_that_states_no_length_leaves_the_download_unfinished_and
     ok, error = await ytdlp.download("https://vk.com/video-1_2", target, lambda _data: None)
     assert not ok and "не сообщил длину" in error and _transient_download_error(error)
     assert os.path.exists(target)  # nothing was proved against it: the next try looks again
+
+
+# --- what a file holds, not what its header says (Н-17) -------------------------------------------------------------------------
+
+def cut_in_half(path) -> None:
+    with open(path, "r+b") as out:
+        out.truncate(os.path.getsize(path) // 2)
+
+
+@pytest.fixture
+def halves(tmp_path):
+    """A clip with its index in front (MP4, faststart) and one in Matroska, each whole and with its second half lost: the
+    header of both keeps the whole length."""
+    made = {}
+    for name, extra in (("clip.mp4", ["-movflags", "+faststart"]), ("clip.mkv", [])):
+        whole, cut = tmp_path / f"whole-{name}", tmp_path / f"cut-{name}"
+        make(whole, "-f", "lavfi", "-i", "testsrc=size=160x120:rate=25:duration=40", "-f", "lavfi", "-i",
+             "sine=frequency=300:duration=40", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", *extra)
+        shutil.copyfile(whole, cut)
+        cut_in_half(cut)
+        made[name] = (whole, cut)
+    return made
+
+
+@pytest.mark.asyncio
+async def test_the_readable_length_is_where_the_data_ends_and_not_the_length_the_header_states(halves):
+    for name, (whole, cut) in halves.items():
+        assert await ffprobe.duration_of(str(cut)) == pytest.approx(40, abs=0.1), name  # the header lies
+        assert await ffprobe.readable_length(str(whole)) == pytest.approx(40, abs=0.1), name
+        assert await ffprobe.readable_length(str(cut)) < 30, name
+    assert await ffprobe.readable_length("/no/such/file.mp4") == 0.0
+
+
+@pytest.mark.asyncio
+async def test_a_download_whose_file_lost_its_second_half_is_not_taken_for_whole(halves, monkeypatch):
+    """The source announces the whole length, the file on disk has it in its header and half of the data."""
+    whole, cut = halves["clip.mp4"]
+
+    async def forty(*_args, **_kwargs):
+        return 40.0
+
+    async def progress(_data):
+        pass
+
+    monkeypatch.setattr(ytdlp, "_announced_length", forty)
+    ok, error = await ytdlp.download("https://cdn.test/episode.mp4", str(cut), progress, whole_video=True)
+
+    assert not ok and "неполная загрузка" in error and not cut.exists()
