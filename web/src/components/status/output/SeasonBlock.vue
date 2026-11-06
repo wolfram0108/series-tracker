@@ -10,6 +10,7 @@ import {
 import VoiceOrder from "../VoiceOrder.vue"
 import EpisodeCard from "./EpisodeCard.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
+import PowerSwitch from "./PowerSwitch.vue"
 
 // A season: its header (the state of its videos and voice-overs, the order of the tracks of its containers, its settings)
 // and its episodes as cards or tiles. How many cards a row holds follows the tracks and the number of episodes of the
@@ -143,9 +144,9 @@ function step(by: number): void {
       <button type="button" class="action-btn btn-status season-settings" @click="emit('settings')">
         <i class="pi pi-sliders-h" />{{ t("output.settings.season") }}
       </button>
-      <button type="button" class="season-switch" :disabled="busy" @click="emit('switch-season', !off)">
-        {{ t(off ? "output.season.enable" : "output.season.disable") }}
-      </button>
+      <PowerSwitch
+        :on="!off" :busy="busy" :label="t(off ? 'output.season.enable' : 'output.season.disable')" @toggle="emit('switch-season', !$event)"
+      />
     </header>
     <div class="season-body">
       <VoiceOrder v-if="voices.length > 1" :voices="voices" :busy="busy" @order="emit('voice-order', $event)" />
@@ -154,8 +155,9 @@ function step(by: number): void {
         <template v-for="item in items" :key="item.view.episode">
           <EpisodeCard
             v-if="mode === 'cards'" :view="item.view" :cells="item.cells" :status="item.status" :marks="marks"
-            :file="wide ? item.file : undefined" :open="opened?.view.episode === item.view.episode"
+            :file="wide ? item.file : undefined" :open="opened?.view.episode === item.view.episode" :busy="busy"
             @open="emit('open', opened?.view.episode === item.view.episode ? null : item.view.episode)"
+            @switch="emit('switch-episode', item.view.episode, $event)"
           />
           <button
             v-else type="button" class="episode-tile" :class="[`is-${item.status}`, { 'is-open': opened?.view.episode === item.view.episode }]"
@@ -200,11 +202,6 @@ function step(by: number): void {
 .meter-bar .is-absent { background: var(--color-yellow-1); }
 .meter-text { font-size: 0.75rem; color: var(--color-gray-600); white-space: nowrap; }
 .season-settings { min-block-size: 2rem; padding-block: 0.25rem; font-size: 0.85rem; }
-.season-switch {
-  border: 1px solid var(--border-color); background: var(--bg-white); border-radius: 8px; padding: 0.3rem 0.7rem;
-  cursor: pointer; color: var(--color-gray-600); font: inherit; font-size: 0.85rem;
-}
-.season-switch:disabled { opacity: 0.5; cursor: default; }
 .season-body { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.75rem 1.25rem; }
 .season-grid { position: relative; display: grid; grid-auto-flow: row dense; gap: 0.6rem; }
 .season-grid.is-tiles { grid-template-columns: repeat(auto-fill, minmax(2.25rem, 1fr)); gap: 0.25rem; }

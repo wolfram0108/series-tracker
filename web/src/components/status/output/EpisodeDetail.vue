@@ -3,6 +3,7 @@ import { computed, ref } from "vue"
 import { t } from "../../../i18n"
 import type { Queues } from "../../../composables/outputCalls"
 import type { EpisodeStatus, EpisodeView, QueueName, QueueRow, SourceMark as Mark, TrackCell } from "../../../lib/output"
+import PowerSwitch from "./PowerSwitch.vue"
 import QueuePanel from "./QueuePanel.vue"
 import TrackTable from "./TrackTable.vue"
 
@@ -50,9 +51,10 @@ const PILL: Record<EpisodeStatus, string> = {
       <span class="detail-grow" />
       <button type="button" class="icon-btn" :aria-label="t('output.episode.prev')" @click="emit('step', -1)"><i class="pi pi-chevron-left" /></button>
       <button type="button" class="icon-btn" :aria-label="t('output.episode.next')" @click="emit('step', 1)"><i class="pi pi-chevron-right" /></button>
-      <button type="button" class="detail-switch" :disabled="busy" @click="emit('switch', status !== 'off')">
-        {{ t(status === "off" ? "output.episode.enable" : "output.episode.disable") }}
-      </button>
+      <PowerSwitch
+        :on="status !== 'off'" :busy="busy" :label="t(status === 'off' ? 'output.episode.enable' : 'output.episode.disable')"
+        @toggle="emit('switch', !$event)"
+      />
       <button type="button" class="icon-btn" :aria-label="t('output.episode.close')" @click="emit('close')"><i class="pi pi-times" /></button>
     </header>
     <div class="detail-body">
@@ -99,11 +101,10 @@ const PILL: Record<EpisodeStatus, string> = {
 .detail-title { margin: 0; font-size: 1rem; font-weight: 600; color: #2c3e50; }
 .detail-file { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); overflow-wrap: anywhere; }
 .detail-grow { flex: 1 1 auto; }
-.icon-btn, .detail-switch {
+.icon-btn {
   border: 1px solid var(--border-color); background: var(--bg-white); border-radius: 8px; cursor: pointer;
   color: var(--color-gray-600); font: inherit; padding: 0.3rem 0.6rem;
 }
-.detail-switch:disabled { opacity: 0.5; cursor: default; }
 .detail-body { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.75rem 1rem; }
 .detail-tabs { flex-wrap: wrap; align-self: flex-start; }
 </style>

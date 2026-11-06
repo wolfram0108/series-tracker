@@ -172,6 +172,7 @@ export const ru = {
   "output.filter.all": "Все",
   "output.filter.deviations": "Отклонения",
   "output.filter.errors": "Ошибки",
+  "output.filter.partial": "Неполные",
   "output.filter.working": "В работе",
   "output.filter.off": "Отключены",
   "output.view.label": "Вид",

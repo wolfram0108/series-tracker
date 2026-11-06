@@ -32,8 +32,8 @@ const reads = useSeriesReadsStore()
 const reading = computed(() => reads.forSeries(props.seriesId)
   .map((read) => ({ key: read.sourceId, text: t("output.reading", { site: pageHost(read.url), text: progressText(read) }) })))
 
-type Filter = "all" | "deviations" | "errors" | "working" | "off"
-const FILTERS: Filter[] = ["all", "deviations", "errors", "working", "off"]
+type Filter = "all" | "deviations" | "errors" | "partial" | "working" | "off"
+const FILTERS: Filter[] = ["all", "deviations", "errors", "partial", "working", "off"]
 const filter = ref<Filter>("all")
 const mode = ref<"cards" | "tiles">("cards")
 const opened = ref<{ season: number; episode: number } | null>(null)
@@ -46,6 +46,7 @@ const PASS: Record<Filter, (view: EpisodeView) => boolean> = {
   all: () => true,
   deviations: isDeviation,
   errors: (view) => statusOf(view) === "error",
+  partial: (view) => statusOf(view) === "partial",
   working: (view) => ["down", "align"].includes(statusOf(view)),
   off: (view) => statusOf(view) === "off",
 }

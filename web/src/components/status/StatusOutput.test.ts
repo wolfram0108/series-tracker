@@ -137,12 +137,35 @@ describe("StatusOutput", () => {
     const w = mountOutput()
     await flushPromises()
     const filter = w.findAll(".output-filter")
-    expect(filter.map((each) => each.find("strong").text())).toEqual(["3", "1", "0", "0", "0"])
+    expect(filter.map((each) => each.find("strong").text())).toEqual(["3", "1", "0", "0", "0", "0"])
     await w.find(".output-filter.is-deviations").trigger("click")
     expect(cards(w)).toEqual([["1", "2"]])
     expect(w.findAll(".season-block")).toHaveLength(1)
     await w.find(".output-filter.is-all").trigger("click")
     expect(w.findAll(".episode-card")).toHaveLength(3)
+  })
+
+  it("counts as partial an episode done but for a voice-over no source has, and keeps it under its own filter", async () => {
+    useVoicesStore().snapshot({ items: [
+      { series_id: 1, season: 1, episode: 1, part: null, voice_key: "AniStar", voice_label: "AniStar", status: "absent",
+        state: "absent", hint: "absent", detail: null, source_id: null, player: null },
+    ], epoch: 1, rev: 1 } as never)
+    vi.mocked(calls.fetchMedia).mockResolvedValue(ok([{ unique_id: "u1", source_id: 7, row_key: "r1-1", status: "completed" }]))
+    const w = mountOutput()
+    await flushPromises()
+    expect(w.find(".output-filter.is-partial strong").text()).toBe("1")
+    await w.find(".output-filter.is-partial").trigger("click")
+    expect(cards(w)).toEqual([["1", "1"]])
+    expect(w.find(".episode-card").classes()).toContain("is-partial")
+  })
+
+  it("turns an episode off with the switch in the corner of its card, without opening it", async () => {
+    const w = mountOutput()
+    await flushPromises()
+    await w.findAll(".episode-card")[1].find(".power-switch input").setValue(false)
+    await flushPromises()
+    expect(calls.switchOutput).toHaveBeenCalledWith(1, { season: 1, episode: 2, off: true })
+    expect(w.find(".episode-detail").exists()).toBe(false)
   })
 
   it("opens an episode below its row with its tracks, and asks for the queues of that episode", async () => {
@@ -206,8 +229,8 @@ describe("StatusOutput", () => {
     await flushPromises()
     await w.findAll(".episode-card")[1].trigger("click")
     await flushPromises()
-    await w.find(".detail-switch").trigger("click")
-    await w.findAll(".season-switch")[1].trigger("click")
+    await w.find(".episode-detail .power-switch input").setValue(false)
+    await w.findAll(".season-head .power-switch input")[1].setValue(false)
     expect(vi.mocked(calls.switchOutput).mock.calls).toEqual([
       [1, { season: 1, episode: 2, off: true }], [1, { season: 2, off: true }]])
   })
@@ -216,7 +239,7 @@ describe("StatusOutput", () => {
     vi.mocked(calls.switchOutput).mockResolvedValueOnce({ ok: false, text: "Сериал не найден" })
     const w = mountOutput()
     await flushPromises()
-    await w.findAll(".season-switch")[0].trigger("click")
+    await w.findAll(".season-head .power-switch input")[0].setValue(false)
     await flushPromises()
     expect(w.find(".output-failure").text()).toBe("Сериал не найден")
   })

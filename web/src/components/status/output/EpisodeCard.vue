@@ -2,11 +2,13 @@
 import { computed } from "vue"
 import { t } from "../../../i18n"
 import { outputLines, type EpisodeStatus, type EpisodeView, type SourceMark as Mark, type TrackCell } from "../../../lib/output"
+import PowerSwitch from "./PowerSwitch.vue"
 import SourceMark from "./SourceMark.vue"
 import TrackStrip from "./TrackStrip.vue"
 
 // A card of an episode: coloured by its state; its number with the name of its file (when the card is wider than the
-// smallest one); the source and the resolution of its reference; its tracks. One button: it opens the episode below its row.
+// smallest one); the source and the resolution of its reference; its tracks. The card opens the episode below its row;
+// the switch in its corner turns the episode on and off without opening it.
 const props = defineProps<{
   view: EpisodeView
   cells: TrackCell[]
@@ -15,8 +17,9 @@ const props = defineProps<{
   /** The name the file of the episode gets; shown in the first line when there is room. */
   file?: string
   open?: boolean
+  busy?: boolean
 }>()
-defineEmits<{ (e: "open"): void }>()
+defineEmits<{ (e: "open"): void; (e: "switch", off: boolean): void }>()
 
 const references = computed(() => outputLines(props.view).filter((line) => line.kind === "reference"))
 const reference = computed(() => references.value[0] ?? null)
@@ -32,31 +35,41 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
 </script>
 
 <template>
-  <button
-    type="button" class="episode-card" :class="[`is-${status}`, { 'is-open': open }]" :aria-expanded="open" :aria-label="label"
-    :data-season="view.season" :data-episode="view.episode" @click="$emit('open')"
+  <div
+    class="episode-card" :class="[`is-${status}`, { 'is-open': open }]" :data-season="view.season" :data-episode="view.episode"
+    @click="$emit('open')"
   >
+    <!-- The whole card is the button: a press of it (or of Enter on it) comes up to the card as one click. -->
+    <button type="button" class="card-hit" :aria-expanded="open" :aria-label="label" />
     <span class="card-in">
       <span class="card-top">
         <span class="glass card-num">{{ view.episode }}</span>
         <span v-if="file" class="glass card-name" :title="file">{{ file }}</span>
-        <span v-if="status === 'error' || own || status === 'off'" class="glass card-flag" aria-hidden="true">
-          <i class="pi" :class="status === 'off' ? 'pi-power-off' : status === 'error' ? 'pi-exclamation-triangle' : 'pi-sliders-h'" />
+        <span class="card-corner">
+          <span v-if="status === 'error' || own" class="glass card-flag" aria-hidden="true">
+            <i class="pi" :class="status === 'error' ? 'pi-exclamation-triangle' : 'pi-sliders-h'" />
+          </span>
+          <span class="glass card-power">
+            <PowerSwitch
+              :on="status !== 'off'" :busy="busy" :label="t(status === 'off' ? 'output.episode.enable' : 'output.episode.disable')"
+              @toggle="$emit('switch', !$event)"
+            />
+          </span>
         </span>
       </span>
       <span class="glass card-ref">
         <SourceMark :mark="sourceId === null ? null : marks[sourceId]" />
-        <span>{{ where }}</span>
+        <span class="card-where">{{ where }}</span>
         <span v-if="references.length > 1" class="card-parts">+{{ references.length - 1 }}</span>
       </span>
       <TrackStrip class="glass card-strip" :cells="cells" />
     </span>
-  </button>
+  </div>
 </template>
 
 <style scoped>
 .episode-card {
-  all: unset; box-sizing: border-box; position: relative; overflow: hidden; min-inline-size: 0; cursor: pointer;
+  box-sizing: border-box; position: relative; overflow: hidden; min-inline-size: 0; cursor: pointer;
   border-radius: calc(var(--card-row) * var(--round) + var(--card-pad)); box-shadow: var(--card-shadow); font: inherit;
 }
 .episode-card {
@@ -69,7 +82,7 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
   background-size: 2.5rem 2.5rem;
 }
 .episode-card:hover { box-shadow: var(--card-hover-shadow); }
-.episode-card:focus-visible, .episode-card.is-open { outline: 0.1875rem solid var(--color-blue); outline-offset: 0.125rem; }
+.episode-card:has(.card-hit:focus-visible), .episode-card.is-open { outline: 0.1875rem solid var(--color-blue); outline-offset: 0.125rem; }
 .is-ready { background: linear-gradient(135deg, #4CAF50, #409444); }
 /* Put together in part: the green of done with the gray stripes of what no source has. */
 .is-partial { background: linear-gradient(135deg, #4CAF50, #409444); --stripe: rgba(108, 117, 125, 0.6); }
@@ -78,7 +91,9 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
 .is-wait { background: linear-gradient(135deg, #f0f2f5, #e9ecef); }
 .is-error { background: linear-gradient(135deg, #dc3545, #c82333); }
 .is-off { background: linear-gradient(135deg, #6c757d, #5a6268); }
-.card-in { position: relative; display: flex; flex-direction: column; gap: 0.3rem; padding: var(--card-pad); }
+.card-hit { all: unset; position: absolute; inset: 0; cursor: pointer; }
+/* The lines let a press through to the button under them; only the switch takes it itself. */
+.card-in { position: relative; pointer-events: none; display: flex; flex-direction: column; gap: 0.3rem; padding: var(--card-pad); }
 /* Every line of a card is a box of one height, rounded by the same rule as the card around it. */
 .glass {
   display: flex; align-items: center; min-block-size: var(--card-row); background: rgba(248, 249, 250, 0.82);
@@ -86,15 +101,20 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
 }
 .card-top { display: flex; align-items: center; gap: 0.375rem; min-inline-size: 0; }
 .card-num { flex: none; padding-inline: 0.5rem; font-size: 1rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+/* As wide as its text; what does not fit ends in an ellipsis (a block, as a flex box does not cut its text). */
 .card-name {
-  flex: 1 1 auto; min-inline-size: 0; padding-inline: 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--font-mono); font-size: 0.7rem;
+  display: block; flex: 0 1 auto; min-inline-size: 0; padding-inline: 0.5rem; line-height: var(--card-row);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 0.7rem;
 }
-.card-flag { flex: none; margin-inline-start: auto; padding-inline: 0.4rem; color: var(--color-red-1); }
+.card-corner { flex: none; display: flex; align-items: center; gap: 0.375rem; margin-inline-start: auto; }
+.card-flag { padding-inline: 0.4rem; color: var(--color-red-1); }
+.card-power { padding-inline: 0.25rem; pointer-events: auto; }
 .card-ref {
-  align-self: flex-start; gap: 0.375rem; padding-inline: calc((var(--card-row) - var(--figure-size)) / 2) 0.5rem;
-  font-size: 0.8rem; font-weight: 600; white-space: nowrap;
+  align-self: flex-start; gap: 0.375rem; max-inline-size: 100%; min-inline-size: 0;
+  padding-inline: calc((var(--card-row) - var(--figure-size)) / 2) 0.5rem; font-size: 0.8rem; font-weight: 600; white-space: nowrap;
 }
-.card-parts { color: var(--text-muted); font-weight: 500; }
+.card-ref > .figure-mark { flex: none; }
+.card-where { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.card-parts { flex: none; color: var(--text-muted); font-weight: 500; }
 .card-strip { align-self: flex-start; }
 </style>
