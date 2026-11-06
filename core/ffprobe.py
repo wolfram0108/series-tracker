@@ -27,15 +27,36 @@ END_SLACK_S = 1.0
 # The streams a file of a series is checked by; subtitles and attachments have no end to reach.
 MEDIA_KINDS = frozenset({"video", "audio"})
 # A picture a file carries as a video stream (a cover, a thumbnail track, a still image) is no picture of the film: it
-# has one frame, or a few, and no end to reach. The stream specifier of ffmpeg for the video that moves leaves them out.
+# has one frame, or a few, and no end to reach. This rule is the only one: the stream specifiers of ffmpeg ("V") leave out
+# a different set of pictures, so the film is chosen here and named to ffmpeg and ffprobe by its index.
 STILL_PICTURE = ("attached_pic", "timed_thumbnails", "still_image")
-MOVING_VIDEO = "V"
+STREAM_ENTRIES = f"stream=index,codec_type,height:stream_disposition={','.join(STILL_PICTURE)}"
 
 
 def is_still_picture(stream: dict) -> bool:
     """Whether a stream ffprobe describes (with its disposition) is a picture carried along, not the video of the file."""
     disposition = stream.get("disposition") or {}
     return any(disposition.get(flag) for flag in STILL_PICTURE)
+
+
+def film_stream(streams: list[dict]) -> dict | None:
+    """The video of the film among the streams ffprobe describes: the first video stream that is no picture carried along."""
+    return next((each for each in streams if each.get("codec_type") == "video" and not is_still_picture(each)), None)
+
+
+async def streams_of(target: str, *, input_args: list[str] | None = None,
+                     timeout: float = DEFAULT_TIMEOUT_S) -> list[dict] | None:
+    """The streams of a file or a stream, with their kinds, heights and dispositions; None when they cannot be read.
+    `input_args` go before the target (the headers of a stream)."""
+    executable = shutil.which("ffprobe")
+    if not executable:
+        return None
+    try:
+        code, out, _ = await run_capture([executable, "-v", "error", *(input_args or []), "-show_entries", STREAM_ENTRIES,
+                                          "-of", "json", target], timeout=timeout)
+        return json.loads(out.decode() or "{}").get("streams") or [] if code == 0 else None
+    except (OSError, TimeoutError, ValueError):
+        return None
 
 
 async def duration_of(target: str, *, input_args: list[str] | None = None,
@@ -147,7 +168,13 @@ async def video_gaps(path: str, *, longer_than: float, timeout: float = 120.0) -
     executable = shutil.which("ffprobe")
     if not executable:
         return Gaps(False, reason="ffprobe не найден")
-    cmd = [executable, "-v", "error", "-select_streams", f"{MOVING_VIDEO}:0", "-show_entries", "packet=pts_time", "-of",
+    streams = await streams_of(path, timeout=timeout)
+    if streams is None:
+        return Gaps(False, reason="файл не читается")
+    film = film_stream(streams)
+    if film is None:
+        return Gaps(False, reason="в файле нет видео")
+    cmd = [executable, "-v", "error", "-select_streams", str(film["index"]), "-show_entries", "packet=pts_time", "-of",
            "csv=p=0", path]
     try:
         code, out, _ = await run_capture(cmd, timeout=timeout)

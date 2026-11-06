@@ -2,6 +2,7 @@
 and still exits 0, and the audio and the length of the file stay whole, so only the pauses between the frames tell.
 A look that could not be made is not a file without holes."""
 import asyncio
+import json
 import os
 import shutil
 import subprocess
@@ -179,7 +180,10 @@ async def test_a_file_whose_packets_carry_side_data_is_looked_at_and_a_file_with
     target.write_bytes(b"x")
 
     def answer(text):
+        """ffprobe as it answers: the streams of the file (one video) when asked for them, the packets otherwise."""
         async def run(cmd, timeout):
+            if ffprobe.STREAM_ENTRIES in cmd:
+                return 0, json.dumps({"streams": [{"index": 0, "codec_type": "video", "disposition": {}}]}).encode(), b""
             return 0, text.encode(), b""
         return run
 
@@ -415,3 +419,30 @@ async def test_a_cover_the_file_carries_is_no_video_of_the_film(covered, monkeyp
     monkeypatch.setattr(ytdlp, "_announced_length", forty)
     assert (await ytdlp.download("https://cdn.test/e.mp4", str(whole), progress, whole_video=True, progressive=True))[0]
     assert whole.exists()
+
+
+@pytest.mark.parametrize("flags", [("attached_pic",), ("timed_thumbnails",), ("still_image",), ("attached_pic", "still_image")])
+def test_the_film_is_the_first_video_that_is_no_picture_carried_along_whatever_flag_marks_the_picture(flags):
+    """One rule chooses the film for every check and for the build (they name it to ffmpeg by its index): a picture is
+    left out by any of the three marks, wherever it stands among the streams."""
+    picture = {"index": 0, "codec_type": "video", "disposition": {flag: 1 for flag in flags}}
+    film = {"index": 2, "codec_type": "video", "disposition": {"default": 1}}
+    sound = {"index": 1, "codec_type": "audio", "disposition": {}}
+
+    assert ffprobe.film_stream([picture, sound, film]) is film
+    assert ffprobe.film_stream([film, picture]) is film
+    assert ffprobe.film_stream([picture, sound]) is None and ffprobe.film_stream([]) is None
+
+
+@pytest.mark.asyncio
+async def test_the_build_and_the_measure_of_the_frame_take_the_film_by_its_index(covered, tmp_path):
+    from core import container
+    from modules.sources.players.frames import frame_height
+    whole, _cut, only = covered
+    built = tmp_path / "built.mkv"
+
+    assert await container.build(str(built), str(whole), "id", [container.AudioIn("Main", str(whole), 0, "id", own=True)]) is None
+    streams = await ffprobe.streams_of(str(built))
+    assert [(each["codec_type"], each.get("height")) for each in streams if each["codec_type"] == "video"] == [("video", 90)]
+    assert await frame_height(str(whole), {}) == 90 and await frame_height(str(only), {}) is None
+    assert await container.build(str(tmp_path / "none.mkv"), str(only), "id", []) == "no_video"

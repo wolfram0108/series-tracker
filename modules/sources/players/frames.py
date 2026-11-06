@@ -5,30 +5,22 @@ so a height that matters is measured on the stream itself, with the headers the 
 """
 from __future__ import annotations
 
-import asyncio
-import shutil
 from typing import Mapping
 
-from core.ffprobe import MOVING_VIDEO
-from core.proc import run_capture
+from core.ffprobe import film_stream, streams_of
 
 MEASURE_TIMEOUT_S = 40.0
 
 
 async def frame_height(url: str, headers: Mapping[str, str]) -> int | None:
-    """The height of the first video stream; None when ffprobe is missing or the stream cannot be read."""
-    executable = shutil.which("ffprobe")
-    if not executable:
-        return None
+    """The height of the film of the stream (core.ffprobe.film_stream: no picture it carries); None when ffprobe is missing
+    or the stream cannot be read."""
     agent = headers.get("User-Agent")
     blob = "".join(f"{key}: {value}\r\n" for key, value in headers.items() if key != "User-Agent")
-    cmd = [executable, "-v", "error", *(["-user_agent", agent] if agent else []), *(["-headers", blob] if blob else []),
-           "-select_streams", f"{MOVING_VIDEO}:0", "-show_entries", "stream=height", "-of", "csv=p=0", url]
+    streams = await streams_of(url, input_args=[*(["-user_agent", agent] if agent else []),
+                                                *(["-headers", blob] if blob else [])], timeout=MEASURE_TIMEOUT_S)
+    film = film_stream(streams or [])
     try:
-        _, out, _ = await run_capture(cmd, timeout=MEASURE_TIMEOUT_S)
-    except (OSError, asyncio.TimeoutError):
-        return None
-    try:
-        return int(out.decode().strip().splitlines()[0])
-    except (ValueError, IndexError):
+        return int(film["height"]) if film is not None else None
+    except (KeyError, TypeError, ValueError):
         return None

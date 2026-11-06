@@ -17,7 +17,7 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Sequence
 
-from .ffprobe import MOVING_VIDEO, is_still_picture
+from .ffprobe import film_stream, streams_of
 from .proc import run_capture
 
 LANGUAGE = "rus"
@@ -89,16 +89,20 @@ class Contents:
 async def build(output: str, video: str, video_identity: str, tracks: Sequence[AudioIn], *, publication: str = "",
                 timeout: float = BUILD_TIMEOUT_S) -> str | None:
     """Write the container at `output` (an .mkv the caller puts in place); None when it was built and reads back as asked,
-    else the reason. The video is the first video stream of `video`; a track of the same file is taken from it."""
+    else the reason. The video is the film of `video` (core.ffprobe.film_stream); a track of the same file is taken
+    from it."""
     executable = shutil.which("ffmpeg")
     if executable is None:
         return "ffmpeg_missing"
+    film = film_stream(await streams_of(video, timeout=READ_TIMEOUT_S) or [])
+    if film is None:
+        return "no_video"  # the file has no film to build of (no video stream, or only a picture it carries)
     sources = [video] + [path for path in dict.fromkeys(track.path for track in tracks) if path != video]
     index_of = {path: number for number, path in enumerate(sources)}
     cmd = [executable, "-y", "-hide_banner", "-loglevel", "error"]
     for path in sources:
         cmd += ["-i", path]
-    cmd += ["-map", f"0:{MOVING_VIDEO}:0"]  # the film, not a cover the file carries
+    cmd += ["-map", f"0:{film['index']}"]
     for track in tracks:
         cmd += ["-map", f"{index_of[track.path]}:a:{track.stream}"]
     cmd += ["-map_metadata", "-1", "-map_chapters", "-1", "-c", "copy", "-max_interleave_delta", "0",
@@ -175,8 +179,7 @@ async def contents(path: str, *, timeout: float = READ_TIMEOUT_S) -> Contents | 
     except ValueError:
         duration = 0.0
     return Contents(video=tags.get("st_video", ""), duration=duration,
-                    has_video=any(each.get("codec_type") == "video" and not is_still_picture(each) for each in streams),
-                    audio=audio,
+                    has_video=film_stream(streams) is not None, audio=audio,
                     publication=tags.get("st_publication", ""))
 
 
