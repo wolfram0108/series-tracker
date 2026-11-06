@@ -3038,6 +3038,24 @@ async def test_a_job_leaves_the_history_with_its_folder_when_the_owner_asked_for
 
 
 @pytest.mark.asyncio
+async def test_a_clear_queue_keeps_a_job_that_ended_in_an_error_with_its_folder(dubs):
+    probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
+    await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
+    submit = dict(neighbours.submits[0])
+    neighbours.clear_finished = True
+    settled_sub = bus.subscribe("voices.episode.settled")
+    # One pair of the job is aligned and placed, the other failed in the service: the job ended in an error.
+    result = job_done(neighbours, "job-1", BlackCat={"ok": False, "error": "CUDA out of memory"})
+    neighbours.jobs["job-1"] = result
+    probe.publish_event("conform.job.finished", result)
+    await asyncio.wait_for(settled_sub.queue.get(), 5)
+    await quiet(voices)
+    assert neighbours.conform_cancels == []
+    assert os.path.isdir(submit["out_dir"])
+    assert not [entry for entry in await voices.repo.cleanup_list() if entry["kind"] == "job"]
+
+
+@pytest.mark.asyncio
 async def test_a_replaced_reference_takes_the_finished_job_out_of_the_history_with_its_folder(dubs):
     probe, neighbours, voices, submit = await settled_with_a_record(dubs)
     out_dir = submit["out_dir"]

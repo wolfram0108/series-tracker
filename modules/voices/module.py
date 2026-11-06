@@ -178,8 +178,9 @@ temporary files at once: further voice-overs stay planned until an episode settl
 The folder a job wrote in (`<episode folder>/_aligned/<key>`: a track that was refused, the plots, the statistics) is
 kept while the record of the job is in the service's history, because the interface shows the plots from there. The
 record leaves the history when the owner deletes it, or when this module deletes it: the setting `conform.clear_finished`
-asks it to at once when the episode is settled, and a replaced reference, a dropped episode and a deleted series always
-do. The service then drops what it kept for the record, `conform.job.removed` tells this module, and the folder of the
+asks it to at once when the episode is settled, for every job but one that ended in an error (a voice-over of it failed
+or was turned down: its record and plots stay for the owner), and a replaced reference, a dropped episode and a deleted
+series always do. The service then drops what it kept for the record, `conform.job.removed` tells this module, and the folder of the
 job goes, with the empty folders around it. A record removed while the module was not listening is found by asking
 the service (`conform.job.get`, status `gone`) when the service becomes reachable and when an episode is settled. The
 series' own folders in the work folder go when every voice-over of the series is settled and the folders are empty.

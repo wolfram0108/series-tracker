@@ -32,6 +32,10 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
+# The ends of a voice-over that mean its job ended in an error: a clear queue keeps such a job.
+KEPT_JOBS = frozenset({S.FAILED, S.REJECTED})
+
+
 def _in(steps: Iterable[S]) -> tuple[str, tuple[str, ...]]:
     """`IN (...)` for a set of steps and its parameters."""
     values = tuple(sorted(step.value for step in steps))
@@ -458,9 +462,11 @@ class VoicesRepository:
 
     async def hand_over_jobs(self, series_id: int, season: int, episode: int, part: int) -> None:
         """The jobs of an episode that is settled go to the journal: the service drops their records and the
-        folders they wrote in are removed."""
-        await self._db.execute_many(_jobs("series_id=? AND season=? AND episode=? AND part=?",
-                                          (series_id, season, episode, part)))
+        folders they wrote in are removed. A job that ended in an error stays: a voice-over of it that failed or was
+        turned down still holds it, so its record and its plots stay for the owner to look into."""
+        marks, kept = _in(KEPT_JOBS)
+        await self._db.execute_many(_jobs(f"series_id=? AND season=? AND episode=? AND part=? AND status NOT {marks}",
+                                          (series_id, season, episode, part, *kept)))
 
     async def settle_episode(self, series_id: int, season: int, episode: int, part: int,
                              folders: Iterable[str]) -> None:

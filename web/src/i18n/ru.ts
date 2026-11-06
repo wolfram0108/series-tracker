@@ -430,7 +430,7 @@ export const ru = {
   "conform.settings.local": "Рабочая папка здесь",
   "conform.settings.daemon": "Эта же папка на демоне",
   "conform.settings.clearFinished": "Очищать очередь выравнивания по завершении",
-  "conform.settings.clearFinishedHint": "Завершённая задача выравнивания уходит из истории демона вместе с её графиками.",
+  "conform.settings.clearFinishedHint": "Завершённая задача выравнивания уходит из истории демона вместе с её графиками; задача, закончившаяся ошибкой, остаётся.",
   "conform.settings.connecting": "Подключаюсь к демону…",
   "conform.settings.loadFailed": "Не удалось загрузить настройки сервера выравнивания",
   "conform.settings.saveFailed": "Не удалось сохранить настройки сервера выравнивания",
