@@ -157,7 +157,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
       <template v-for="season in compilationSeasons" :key="season.season">
         <CompilationBlock
           v-for="view in season.views" :key="view.ref.key" :view="view" :season="season.views" :episodes="season.episodes"
-          :cuts="cuts" :marks="output.marks.value" :labels="output.labels.value" mode="cards"
+          :cuts="cuts" :marks="output.marks.value" :labels="output.labels.value" :order="orderOf(season.season)" mode="cards"
           :opened="opened?.compilation === view.ref.key ? opened.episode : null"
           :queues="opened?.compilation === view.ref.key ? output.queuesOf(season.season, opened.episode) : undefined" :busy="busy"
           @open="openInCompilation(season.season, view.ref.key, $event)" @settings="openSettings(season.season, view.ref.key)"

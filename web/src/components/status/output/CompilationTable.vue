@@ -64,9 +64,11 @@ const CUT_PILL: Record<CutState, string> = {
           <td>{{ row.view.ref.height ? t("output.height", { height: row.view.ref.height }) : "—" }}</td>
           <td class="compilation-range">{{ range(row) }}</td>
           <td>
-            <span v-if="row.member && row.cut" class="pill" :class="CUT_PILL[row.cut]">{{ t(`output.cut.${row.cut}`) }}</span>
-            <button v-if="row.member && row.cut === 'error'" type="button" class="action-btn btn-scan do-retry-cut" :disabled="busy"
-                    @click="emit('retry')">{{ t("output.cut.retry") }}</button>
+            <template v-if="row.member && row.cut">
+              <span class="pill" :class="CUT_PILL[row.cut]">{{ t(`output.cut.${row.cut}`) }}</span>
+              <button v-if="row.cut === 'error'" type="button" class="action-btn btn-scan do-retry-cut" :disabled="busy"
+                      @click="emit('retry')">{{ t("output.cut.retry") }}</button>
+            </template>
             <span v-else class="muted">—</span>
           </td>
           <td>{{ row.member && row.share !== null ? t("output.compilation.share", { n: Math.round(row.share * 100) }) : "—" }}</td>

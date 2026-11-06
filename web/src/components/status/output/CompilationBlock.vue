@@ -26,6 +26,8 @@ const props = withDefaults(defineProps<{
   marks: Record<number, Mark>
   /** The label of each player of each source ("source:player"). */
   labels: Record<string, string>
+  /** The voice-overs of the season in the order of the tracks: the strip of a card. */
+  order: string[]
   mode?: "cards" | "tiles"
   opened?: number | null
   queues?: Queues
@@ -64,7 +66,7 @@ const items = computed(() => (props.view.episodes ?? []).flatMap((each) => {
     ? t("output.compilation.absence.elsewhere", { letter: badgeOf(elsewhere).letter, range: range(elsewhere) })
     : t(`output.compilation.absence.${absence}`)
   const fits = props.view.take && absence !== "not_better" && (member || each.absence === "elsewhere" || each.absence === "own")
-  return [{ view, each: { ...each, member }, cut, status, note, fits, cells: trackCells(view, []) }]
+  return [{ view, each: { ...each, member }, cut, status, note, fits, cells: trackCells(view, props.order) }]
 }))
 
 const cutCounts = computed(() => {
@@ -80,7 +82,7 @@ const cutText = computed(() => (Object.entries(cutCounts.value) as [CutState, nu
   .filter(([, count]) => count > 0).map(([state, count]) => t(`output.cut.meter.${state}`, { n: count })).join(" · "))
 
 // The rows hold as many cards as those of the season: the block is a copy of the season's for a part of its episodes.
-const { grid, ruler, columns } = useCardGrid(() => props.mode, () => 2, () => props.episodes.length)
+const { grid, ruler, columns } = useCardGrid(() => props.mode, () => props.order.length, () => props.episodes.length)
 
 const opened = computed(() => items.value.find((item) => item.view.episode === props.opened) ?? null)
 function step(by: number): void {
