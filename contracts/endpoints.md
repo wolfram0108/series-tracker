@@ -177,7 +177,7 @@ gateway с `diag=True` (в проде выключен) — в таблице 10
 
 | Метод | Путь | Назначение | Панель |
 |---|---|---|---|
-| GET | `/api/stream` | SSE-поток событий шины | `useSSE.ts` |
+| GET | `/api/stream` | SSE-поток событий шины (`frames=each\|batch`) | `useSSE.ts` |
 | GET | `/` | Боевой фронт (`web/dist/index.html`) | браузер |
 | GET | `/legacy` | Старый фронт (откат) | браузер |
 | GET | `/v2`, `/v2/` | Редирект 307 на `/` | браузер |
@@ -792,8 +792,10 @@ voice_group, height, reason}`; `mark` — `by_level` | `own` | `other_player` | 
 
 ## 7. Поток событий SSE
 
-Один эндпоинт — `GET /api/stream`, `text/event-stream`. Кадр:
-`event: <имя>\ndata: <json>\n\n`; каждые 15 с — keepalive-комментарий. Топики
+Один эндпоинт — `GET /api/stream`, `text/event-stream`. Кадр при
+`frames=each` (по умолчанию): `event: <имя>\ndata: <json>\n\n`; при
+`frames=batch` (боевой фронт) — кадр на ход: `event: batch\ndata: [{event, data}, ...]\n\n`
+(подробно — [sse_contract.md](sse_contract.md)); каждые 15 с — keepalive-комментарий. Топики
 шины, не попавшие в `SSE_MAP`, в поток не передаются.
 
 | Событие SSE | Топик шины | Payload |

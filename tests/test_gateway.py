@@ -93,6 +93,48 @@ async def test_bus_event_reaches_sse_with_mapped_name(system, monkeypatch):
     assert "секрет" not in text
 
 
+@pytest.mark.asyncio
+async def test_a_burst_goes_as_one_frame_of_its_events_in_order_when_the_stream_is_read_by_turns(system, monkeypatch):
+    # A burst published at once is one turn: the interface takes it in one task and counts its screen once.
+    bus, _, gateway = system
+    monkeypatch.setitem(gateway_module.SSE_MAP, "demo.things.changed", ("things_changed", None))
+    monkeypatch.setitem(gateway_module.SSE_MAP, "demo.other.changed", ("other_changed", None))
+
+    stream = gateway._sse_stream("batch")
+    announced = bus.subscribe("gateway.sse.clients")
+    first = asyncio.ensure_future(stream.__anext__())
+    await asyncio.wait_for(announced.queue.get(), 5)
+    bus.unsubscribe(announced)
+    for each in range(200):
+        bus.publish(Envelope(topic="demo.things.changed", kind="event", payload={"id": each}))
+    bus.publish(Envelope(topic="внутренний.топик", kind="event", payload={"секрет": True}))
+    bus.publish(Envelope(topic="demo.other.changed", kind="event", payload={"id": "last"}))
+    frame = await asyncio.wait_for(first, 5)
+    await stream.aclose()
+
+    name, data = frame.split("\n", 1)
+    assert name == "event: batch" and frame.endswith("\n\n")
+    turn = json.loads(data.removeprefix("data: "))
+    assert turn == [{"event": "things_changed", "data": {"id": each}} for each in range(200)] + [
+        {"event": "other_changed", "data": {"id": "last"}}]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_read_by_turns_ends_its_subscription_when_closed(system, monkeypatch):
+    # Starlette closes the stream at a frame when the client goes: the turns under it must let the bus go too.
+    bus, _, gateway = system
+    monkeypatch.setitem(gateway_module.SSE_MAP, "demo.things.changed", ("things_changed", None))
+    stream = gateway._sse_stream("batch")
+    announced = bus.subscribe("gateway.sse.clients")
+    first = asyncio.ensure_future(stream.__anext__())
+    assert (await asyncio.wait_for(announced.queue.get(), 5)).payload == {"count": 1}
+    bus.publish(Envelope(topic="demo.things.changed", kind="event", payload={"id": 1}))
+    await asyncio.wait_for(first, 5)
+    await stream.aclose()
+    assert (await asyncio.wait_for(announced.queue.get(), 5)).payload == {"count": 0}
+    assert gateway._sse_subs == {}
+
+
 async def _collect_sse_events(gateway, bus, envelopes, expected):
     """Прогоняет конверты через живой SSE-генератор, возвращает
     [(имя события, payload)] первых `expected` событий."""

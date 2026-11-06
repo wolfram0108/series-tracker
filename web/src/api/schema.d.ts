@@ -359,7 +359,8 @@ export interface paths {
         /**
          * Reset Failures
          * @description Неудачные попытки сериала забываются: отклонённые и сбойные озвучки начинаются с первого источника своей
-         *     цепочки. Это правка сериала, а не синхронизация: работа по ним идёт со следующей синхронизацией.
+         *     цепочки, видео, которое не скачалось, снова участвует в выборе референса. Это правка сериала, а не
+         *     синхронизация: работа по ним идёт со следующей синхронизацией.
          */
         post: operations["reset_failures_api_series__series_id__failures_reset_post"];
         delete?: never;
@@ -2942,7 +2943,9 @@ export type $defs = Record<string, never>;
 export interface operations {
     stream_api_stream_get: {
         parameters: {
-            query?: never;
+            query?: {
+                frames?: "each" | "batch";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2956,6 +2959,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

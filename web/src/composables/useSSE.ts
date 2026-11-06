@@ -1,7 +1,8 @@
 import { ref } from "vue"
 
-/** SSE events of the contract (from the gateway SSE_MAP). The server sends frames
- *  `event: <name>\ndata: <json>\n\n`; EventSource ignores the keepalive comments itself. */
+/** SSE events of the contract (from the gateway SSE_MAP). The stream is read in frames of a turn
+ *  (`frames=batch`): `event: batch\ndata: [{event, data}, ...]`, the events in their order; EventSource ignores the
+ *  keepalive comments itself. */
 export const SSE_EVENTS = [
   "series_updated",
   "series_added",
@@ -42,28 +43,43 @@ const handlers = new Map<SSEEvent, Set<Handler>>()
 let source: EventSource | null = null
 const connected = ref(false)
 
-function dispatch(event: SSEEvent, raw: string) {
-  let data: unknown = null
+const known = new Set<string>(SSE_EVENTS)
+
+// A handler that throws loses its own event only, not the rest of the turn.
+function deliver(event: SSEEvent, data: unknown) {
+  handlers.get(event)?.forEach((h) => {
+    try {
+      h(data)
+    } catch (error) {
+      console.error(error)
+    }
+  })
+}
+
+// A turn is handed to the handlers in one task, so a burst of events changes the screen once, not once per event.
+function dispatchTurn(raw: string) {
+  let turn: unknown
   try {
-    data = raw ? JSON.parse(raw) : null
+    turn = JSON.parse(raw)
   } catch {
     return // битый кадр — пропускаем
   }
-  handlers.get(event)?.forEach((h) => h(data))
+  if (!Array.isArray(turn)) return
+  for (const each of turn as { event?: unknown; data?: unknown }[]) {
+    if (typeof each?.event === "string" && known.has(each.event)) deliver(each.event as SSEEvent, each.data ?? null)
+  }
 }
 
 function connect() {
   if (source) return // одно соединение
-  source = new EventSource("/api/stream")
+  source = new EventSource("/api/stream?frames=batch")
   source.onopen = () => {
     connected.value = true
   }
   source.onerror = () => {
     connected.value = false // браузер переподключится сам
   }
-  for (const ev of SSE_EVENTS) {
-    source.addEventListener(ev, (e) => dispatch(ev, (e as MessageEvent).data))
-  }
+  source.addEventListener("batch", (e) => dispatchTurn((e as MessageEvent).data))
 }
 
 function disconnect() {

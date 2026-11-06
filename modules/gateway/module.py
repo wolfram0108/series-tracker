@@ -11,8 +11,9 @@ series_deleted добавятся при ревизии CRUD сериалов.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 import os
 import secrets
 import signal
@@ -340,8 +341,8 @@ class GatewayModule(BaseModule):
         self._describe_events(app)
 
         @app.get("/api/stream")
-        async def stream() -> StreamingResponse:
-            return StreamingResponse(self._sse_stream(),
+        async def stream(frames: Literal["each", "batch"] = "each") -> StreamingResponse:
+            return StreamingResponse(self._sse_stream(frames),
                                      media_type="text/event-stream")
 
         if self._diag:
@@ -436,7 +437,9 @@ class GatewayModule(BaseModule):
 
     # --- SSE: шина -> браузер -------------------------------------------------
 
-    async def _sse_stream(self):
+    async def _sse_batches(self):
+        """The events of the stream by turns: what queued up while the last turn was being written is one list, each
+        state once. An empty list is a quiet interval, for the keepalive."""
         # Разрыв соединения обнаруживает Starlette: он закрывает генератор
         # (GeneratorExit), и finally снимает подписку.
         sub = self.bus.subscribe("#")
@@ -452,15 +455,16 @@ class GatewayModule(BaseModule):
                     env = await asyncio.wait_for(sub.queue.get(),
                                                  timeout=_KEEPALIVE_SECONDS)
                 except asyncio.TimeoutError:
-                    # Комментарий держит соединение живым через прокси.
-                    yield ": keepalive\n\n"
+                    yield []
                     continue
-                # What queued up while the last packet was being written goes in one turn, each state once.
                 batch = [env]
                 while not sub.queue.empty():
                     batch.append(sub.queue.get_nowait())
+                events = []
                 for env in latest_only(batch):
                     if env is _STREAM_END:
+                        if events:
+                            yield events
                         return
                     if env.kind != "event":
                         continue
@@ -468,9 +472,9 @@ class GatewayModule(BaseModule):
                     if mapping is None:
                         continue
                     sse_name, transform = mapping
-                    payload = transform(env.payload) if transform else env.payload
-                    data = json.dumps(payload, ensure_ascii=False)
-                    yield f"event: {sse_name}\ndata: {data}\n\n"
+                    events.append((sse_name, transform(env.payload) if transform else env.payload))
+                if events:
+                    yield events
         finally:
             self._sse_subs.pop(sub.sub_id, None)
             self.bus.unsubscribe(sub)
@@ -479,3 +483,17 @@ class GatewayModule(BaseModule):
                                {"count": self._sse_clients})
             self.log.info("SSE-клиент отключился (осталось: %d)",
                           self._sse_clients)
+
+    async def _sse_stream(self, frames: str = "each"):
+        """The stream as frames: `each` — a frame per event; `batch` — a frame per turn, so that a burst of events is
+        taken by the interface at once and its screen is counted once, not once per event."""
+        async with contextlib.aclosing(self._sse_batches()) as turns:
+            async for events in turns:
+                if not events:
+                    yield ": keepalive\n\n"  # a comment keeps the connection alive through proxies
+                elif frames == "batch":
+                    data = json.dumps([{"event": name, "data": payload} for name, payload in events], ensure_ascii=False)
+                    yield f"event: batch\ndata: {data}\n\n"
+                else:
+                    for name, payload in events:
+                        yield f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
