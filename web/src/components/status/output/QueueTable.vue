@@ -69,7 +69,7 @@ const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" 
     </thead>
     <tbody>
       <tr
-        v-for="(row, index) in rows" :key="keyOf(row)" draggable="true" class="queue-row"
+        v-for="(row, index) in rows" :key="keyOf(row)" draggable="true" class="variant-row"
         :class="{ 'is-first': first && keyOf(first) === keyOf(row), 'is-skipped': !row.allowed, 'is-over': over === index }"
         @dragstart="dragged = index" @dragover.prevent="over = index" @dragleave="over = null" @drop.prevent="drop(index)"
         @dragend="dragged = over = null"
@@ -88,10 +88,10 @@ const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" 
         <td>{{ height(row) }}</td>
         <td v-if="queue === 'reference'">{{ row.group }}</td>
         <td v-if="level">{{ row.episodes }}</td>
-        <td class="queue-mark">
+        <td class="queue-mark-cell"><span class="queue-mark">
           <span v-if="markOf(row)" class="pill" :class="row.allowed ? (queue === 'reference' ? 'pill-primary' : 'pill-success') : 'pill-secondary'">{{ markOf(row) }}</span>
           <span v-if="levelOf(row)" class="queue-level">{{ levelOf(row) }}</span>
-        </td>
+        </span></td>
       </tr>
     </tbody>
   </table>
@@ -104,17 +104,18 @@ const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" 
   border-bottom: 1px solid var(--border-color); white-space: nowrap;
 }
 .queue-table td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
-.queue-row:nth-child(odd) { background: rgba(0, 0, 0, 0.02); }
-.queue-row { cursor: grab; }
-.queue-row.is-first { background: rgba(25, 135, 84, 0.1); }
-.queue-row.is-skipped td { color: #adb5bd; }
-.queue-row.is-over td { box-shadow: inset 0 2px 0 var(--color-blue); }
+.variant-row:nth-child(odd) { background: rgba(0, 0, 0, 0.02); }
+.variant-row { cursor: grab; }
+.variant-row.is-first { background: rgba(25, 135, 84, 0.1); }
+.variant-row.is-skipped td { color: #adb5bd; }
+.variant-row.is-over td { box-shadow: inset 0 2px 0 var(--color-blue); }
 .queue-take, .queue-handle { inline-size: 1%; }
 .queue-drag { border: none; background: none; color: #adb5bd; cursor: grab; padding: 0.2rem; }
 .queue-drag:focus-visible { outline: 0.125rem solid var(--color-blue); border-radius: 4px; }
 .queue-player { font-weight: 600; }
 .queue-source { display: inline-flex; align-items: center; gap: 0.4rem; }
 .queue-place { color: var(--text-muted); }
-.queue-mark { white-space: nowrap; display: flex; gap: 0.4rem; align-items: center; }
+.queue-mark-cell { white-space: nowrap; }
+.queue-mark { display: inline-flex; gap: 0.4rem; align-items: center; }
 .queue-level { color: var(--text-muted); font-size: 0.75rem; }
 </style>

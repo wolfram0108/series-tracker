@@ -180,7 +180,7 @@ describe("StatusOutput", () => {
     await w.findAll(".episode-card")[0].trigger("click")
     await flushPromises()
     await button(w, t("output.tab.reference"))!.trigger("click")
-    const rows = w.findAll(".queue-row")
+    const rows = w.findAll(".variant-row")
     expect(rows.map((each) => each.find(".queue-player").text())).toEqual(["Vibix", "Kodik"])
     await rows[1].trigger("dragstart")
     await rows[0].trigger("dragover")

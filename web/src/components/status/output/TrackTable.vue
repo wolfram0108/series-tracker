@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import { t } from "../../../i18n"
+import { t, type MessageKey } from "../../../i18n"
 import { outputLines, type EpisodeView, type SourceMark as Mark, type TrackCell, type TrackState } from "../../../lib/output"
 import { reasonText } from "../../../lib/reason"
 import SourceMark from "./SourceMark.vue"
@@ -17,6 +17,12 @@ const emit = defineEmits<{
 
 // A voice-over no source has a line of is not helped by trying again.
 const NO_SOURCE = new Set(["no_source", "not_in_any_source"])
+// The track of the reference is the file of the video: it is worded as the files of the plan are.
+const FILE_WORDS: Record<TrackState, MessageKey> = {
+  done: "output.file.status.completed", down: "output.file.status.downloading", align: "output.file.status.processing",
+  wait: "output.file.status.pending", error: "output.file.status.error", none: "output.file.status.none",
+}
+const stateText = (cell: TrackCell): string => t(cell.isReference ? FILE_WORDS[cell.state] : `output.track.state.${cell.state}`)
 const PILL: Record<TrackState, string> = {
   done: "pill-success", down: "pill-primary", align: "pill-primary", wait: "pill-secondary", error: "pill-danger", none: "pill-secondary",
 }
@@ -73,7 +79,7 @@ function act(row: (typeof rows.value)[number]): void {
           <span v-else class="muted">—</span>
         </td>
         <td>
-          <span class="pill" :class="PILL[row.cell.state]">{{ t(`output.track.state.${row.cell.state}`) }}</span>
+          <span class="pill" :class="PILL[row.cell.state]">{{ stateText(row.cell) }}</span>
           <span v-if="row.note" class="track-note">{{ row.note }}</span>
         </td>
         <td class="narrow">
