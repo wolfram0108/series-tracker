@@ -63,3 +63,12 @@
   --card-row: 1.75rem;
   --card-pad: 0.5rem;
 }
+
+/* An episode put together in part (the output tab): a ground, and stripes of a share of their colour over it. The card
+   lays the stripes over the ground, the tile mixes them in; the page /#card-colors tunes these four. */
+:root {
+  --partial-ground: #e9ecef;
+  --partial-ground-end: #d9dbde;
+  --partial-stripe: #4caf50;
+  --partial-stripe-share: 60%;
+}

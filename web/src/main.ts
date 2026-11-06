@@ -24,22 +24,25 @@ import "./styles/parser.css"
 import { STPreset } from "./theme/preset"
 import App from "./App.vue"
 import Gallery from "./Gallery.vue"
+import CardColors from "./tools/CardColors.vue"
 import { setupRealtime } from "./composables/useRealtime"
 import { useSeriesStore } from "./stores/series"
 import { useScannerStore } from "./stores/scanner"
 import { useAuthStore } from "./stores/auth"
 import { api } from "./api/client"
 
-// Галерея согласованных форм/объектов (Ф2) сохранена и доступна по якорю
-// #gallery (например /v2#gallery). На обычном адресе монтируется реальное
-// приложение. Галерея на мок-данных — real-time/загрузки ей не нужны.
-const isGallery = window.location.hash.replace(/^#\/?/, "") === "gallery"
+// Страницы на образцах вместо приложения, по якорю: #gallery — галерея
+// согласованных форм/объектов (Ф2), #card-colors — подбор цветов карточки
+// неполной серии на настоящих компонентах. Живые данные им не нужны.
+const PAGES = { gallery: Gallery, "card-colors": CardColors } as const
+const page = PAGES[window.location.hash.replace(/^#\/?/, "") as keyof typeof PAGES]
+const onSamples = page !== undefined
 
 // Тема — производный пресет под токены series-tracker (Ф2).
 // darkModeSelector привязан к классу .st-dark (которого нет) — иначе
 // PrimeVue по умолчанию (darkModeSelector: 'system') включает тёмный вид
 // при тёмной теме браузера. series-tracker — светлый.
-createApp(isGallery ? Gallery : App)
+createApp(page ?? App)
   .use(createPinia())
   .use(PrimeVue, {
     theme: { preset: STPreset, options: { darkModeSelector: ".st-dark" } },
@@ -48,8 +51,8 @@ createApp(isGallery ? Gallery : App)
   .mount("#app")
 
 // Ф3: real-time слой — стартовая загрузка + SSE-подписки сторов (только для
-// реального приложения; галерее живые данные не нужны).
-if (!isGallery) {
+// реального приложения; страницам на образцах живые данные не нужны).
+if (!onSamples) {
   // Перехват 401: запрос, отклонённый замком, открывает модалку входа.
   // /api/login и /api/me исключены — их 401 штатный, не повод для модалки.
   api.use({
