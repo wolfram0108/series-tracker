@@ -195,9 +195,11 @@ def _watch(bus=None, runner=None) -> None:
     _watched = (bus, *runner.modules) if runner is not None else ()
 
 
-async def _wait(predicate, timeout=3.0):
+async def _wait(predicate):
+    """Until the condition holds, woken by the steps of the system; the safeguard is the suite's one, a failure, not a
+    pace: a short one turned red under the load of a parallel run (the pipeline moves on timers of its own)."""
     bus, *modules = _watched
-    return await wait_until(predicate, bus, *modules, seconds=timeout)
+    return await wait_until(predicate, bus, *modules)
 
 
 def _torrent(torrent_id="tid1"):
