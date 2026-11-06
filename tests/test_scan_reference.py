@@ -506,3 +506,54 @@ def test_a_previous_reference_that_had_no_row_holds_nothing():
     nothing = Reference(season=1, episode=1, mark=ReferenceMark.NONE)
     rows = [unsure("a"), row(S, 1, "b", 1, 1, player="kodik", height=720)]
     assert only(choose(rows, previous=[nothing])).row.row_key == "b"
+
+
+# --- a video whose download failed: the next by the order takes its place -------------------------------------------------------
+
+def failed_of(each):
+    return (each.source_id, each.row_key, each.link)
+
+
+def test_a_video_that_did_not_download_is_passed_over_and_the_next_by_the_order_says_why():
+    best, second = row(S, 1, "a", 1, 1, player="vk", height=1080), row(S, 2, "b", 1, 1, player="kodik", height=720)
+    chosen = only(choose([best, second], failed={failed_of(best)}))
+
+    assert chosen.row.row_key == "b" and chosen.reference.mark == ReferenceMark.OTHER_PLAYER
+    assert parse(chosen.reference.reason) == {"code": "reference_download_failed", "params": {
+        "taken": "kodik", "failed": "vk", "taken_source": 2, "failed_source": 1}}
+    # A failure of a video that is not the first by the order changes nothing.
+    untouched = only(choose([best, second], failed={failed_of(second)}))
+    assert untouched.row.row_key == "a" and untouched.reference.mark == ReferenceMark.BY_LEVEL
+
+
+def test_when_every_video_of_an_episode_did_not_download_the_best_stays_to_be_tried_again_and_it_says_which():
+    rows = [row(S, 1, "a", 1, 1, player="vk"), row(S, 2, "b", 1, 1, player="kodik")]
+    chosen = only(choose(rows, failed={failed_of(each) for each in rows}))
+
+    assert chosen.row.row_key == "a" and chosen.reference.mark == ReferenceMark.BY_LEVEL
+    assert parse(chosen.reference.reason) == {"code": "reference_download_failed_all", "params": {"players": "kodik, vk"}}
+
+
+def test_the_failure_is_of_the_video_the_same_row_showing_another_video_is_a_candidate_again():
+    before = row(S, 1, "a", 1, 1, player="vk", link="https://v.test/old")
+    now = row(S, 1, "a", 1, 1, player="vk", link="https://v.test/new")
+    second = row(S, 2, "b", 1, 1, player="kodik", height=720)
+
+    assert only(choose([now, second], failed={failed_of(before)})).row.row_key == "a"
+
+
+def test_a_variant_the_user_picked_that_did_not_download_gives_way_to_the_next_and_says_so():
+    picked, second = row(S, 1, "a", 1, 1, player="vk"), row(S, 2, "b", 1, 1, player="kodik", height=720)
+    chosen = only(choose([picked, second], [episode_settings(1, 1, pick())], failed={failed_of(picked)}))
+
+    assert chosen.row.row_key == "b" and chosen.reference.mark == ReferenceMark.OTHER_PLAYER
+    assert parse(chosen.reference.reason)["code"] == "reference_download_failed"
+
+
+def test_a_held_reference_whose_answer_is_unsure_is_not_held_once_its_download_failed():
+    held = row(S, 1, "a", 1, 1, player="vk", state=RowState.NOT_OBTAINED)
+    second = row(S, 2, "b", 1, 1, player="kodik", height=720)
+    previous = Reference(season=1, episode=1, mark=ReferenceMark.BY_LEVEL, source_id=1, row_key="a", player="vk")
+
+    assert only(choose([held, second], previous=[previous])).row.row_key == "a"  # held while unsure
+    assert only(choose([held, second], previous=[previous], failed={failed_of(held)})).row.row_key == "b"

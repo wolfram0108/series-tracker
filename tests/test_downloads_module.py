@@ -1578,3 +1578,17 @@ async def test_an_interface_that_connects_gets_the_queues_as_they_are(system):
     got = await asyncio.wait_for(downloads.queue.get(), 5)
     assert "tasks" in got.payload and "count" in got.payload
     assert (await asyncio.wait_for(packing.queue.get(), 5)).payload == {"tasks": [], "count": 0}
+
+
+@pytest.mark.asyncio
+async def test_the_reset_of_failed_attempts_makes_the_failed_videos_of_the_series_candidates_again(system):
+    """The rows whose download failed are passed over by the choice of the reference (the next source is taken); the
+    user's reset makes them candidates again, of that series only, and fetches nothing by itself."""
+    _, _, _, probe, db_path, _ = system
+    _add_item(db_path, "failed", 1, status="error")
+    _add_item(db_path, "other", 1, status="error", series_id=3)
+    _add_item(db_path, "fine", 2, status="completed", filename="e02.mp4")
+
+    assert await probe.request("downloads.failures.forget", {"series_id": 2}, timeout=5) == {"reset": 1}
+    items = _items(db_path)
+    assert (items["failed"]["status"], items["other"]["status"], items["fine"]["status"]) == ("pending", "error", "completed")

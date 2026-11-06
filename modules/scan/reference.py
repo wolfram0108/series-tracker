@@ -14,6 +14,11 @@ is its word: the reference follows it.
 A slot is (season, episode, part): the pieces of one episode that are different videos. Of the playable single rows
 of a slot, whose player takes part in the choice, the best by `RANKING` is the reference. A voice-over picked by the
 user narrows the candidates to that voice-over and is never replaced by the best of another one.
+
+A video whose download failed for good (`failed`: its source, row and link) is passed over: the next by `RANKING` is the
+reference, with the mark of another player and the reason (ЭТАП_10: «если скачивание не удаётся, то выбирается плеер по
+следующему приоритету»). When every video of the episode failed there is no next one: the best stays, with the reason,
+and is tried again. The failure is of that video: the same row showing another video is a candidate again.
 """
 from __future__ import annotations
 
@@ -28,6 +33,8 @@ from core.reasons import reason
 from core.voice_names import NO_GROUPS, Groups, rank
 
 Slot = tuple[int, int, int | None]
+# A video whose download failed: (source id, row key, link of the row).
+Failed = tuple[int, str, str]
 
 
 @dataclass(frozen=True)
@@ -104,7 +111,7 @@ class _Levers:
 def choose(rows: Sequence[CompositionRow], settings: Iterable[EpisodeSettings], players: Sequence[str],
            sources: Sequence[int], ranking: Sequence[RankKey] = RANKING,
            previous: Iterable[Reference] = (), player_groups: Groups = NO_GROUPS,
-           on_disk: Collection[tuple[int, str]] = ()) -> list[Chosen]:
+           on_disk: Collection[tuple[int, str]] = (), failed: Collection[Failed] = ()) -> list[Chosen]:
     """One outcome per slot of every episode that has a row in the layout, in the order of season, episode, part.
 
     `players` is the order of players of the settings, best first; `sources` the ids of the sources of the series in
@@ -146,7 +153,7 @@ def choose(rows: Sequence[CompositionRow], settings: Iterable[EpisodeSettings], 
                 chosen.append(_held(gone, episode_levers))
                 continue
             chosen.append(_decide(season, episode, part, slot, compilations.get((season, episode), []),
-                                  episode_levers, order, ranking, held.get((season, episode, part))))
+                                  episode_levers, order, ranking, held.get((season, episode, part)), set(failed)))
     return chosen
 
 
@@ -157,19 +164,32 @@ def _held(previous: Reference, levers: _Levers) -> Chosen:
 
 
 def _decide(season: int, episode: int, part: int | None, singles: list[Candidate], compilations: list[Candidate],
-            levers: _Levers, order: Order, ranking: Sequence[RankKey], held: Reference | None) -> Chosen:
+            levers: _Levers, order: Order, ranking: Sequence[RankKey], held: Reference | None,
+            failed: Collection[Failed] = frozenset()) -> Chosen:
+    def lost(candidate: Candidate) -> bool:
+        return (candidate.row.source_id, candidate.row.row_key, candidate.row.link) in failed
+
     if levers.choice is None and held is not None:
         unsure = next((candidate.row for candidate in singles
                        if (candidate.row.source_id, candidate.row.row_key) == (held.source_id, held.row_key)
-                       and candidate.row.state == RowState.NOT_OBTAINED and levers.allows(candidate.row)), None)
+                       and candidate.row.state == RowState.NOT_OBTAINED and levers.allows(candidate.row)
+                       and not lost(candidate)), None)
         if unsure is not None:
             # The mark is the one the levers of the episode give now: the same as before unless they changed.
             return _taken(season, episode, part, unsure, ReferenceMark.OWN if levers.own else ReferenceMark.BY_LEVEL,
                           height=unsure.height or held.height)
     voice = levers.choice.group if levers.choice else None
-    playable = [candidate for candidate in singles if candidate.row.state == RowState.PLAYABLE
-                and levers.allows(candidate.row)]
-    pool = [candidate for candidate in playable if voice is None or candidate.row.voice_label == voice]
+    allowed = [candidate for candidate in singles if candidate.row.state == RowState.PLAYABLE
+               and levers.allows(candidate.row) and (voice is None or candidate.row.voice_label == voice)]
+    pool = [candidate for candidate in allowed if not lost(candidate)]
+    failures = [candidate for candidate in allowed if lost(candidate)]
+    if not pool and failures:
+        # Every video of the episode failed: there is no next one, so the best stays and the next sync tries it again
+        # (a failure that passes, as a host not resolved yet, is not a reason to leave the episode without a video).
+        players = ", ".join(sorted({candidate.row.player for candidate in failures}))
+        best = _best(failures, order, ranking).row
+        return _taken(season, episode, part, best, ReferenceMark.OWN if levers.own else ReferenceMark.BY_LEVEL,
+                      reason("reference_download_failed_all", players=players))
     if not pool:
         return _without(season, episode, part, compilations, levers, voice)
     if levers.choice is not None:
@@ -177,11 +197,21 @@ def _decide(season: int, episode: int, part: int | None, singles: list[Candidate
                   and candidate.row.player == levers.choice.player]
         if not picked:
             best = _best(pool, order, ranking).row
-            why = reason("reference_other_player", taken=best.player, missing=levers.choice.player,
-                         taken_source=best.source_id, missing_source=levers.choice.source_id)
+            gave_up = next((candidate.row for candidate in failures if candidate.row.source_id == levers.choice.source_id
+                            and candidate.row.player == levers.choice.player), None)
+            why = (reason("reference_download_failed", taken=best.player, failed=gave_up.player,
+                          taken_source=best.source_id, failed_source=gave_up.source_id) if gave_up is not None else
+                   reason("reference_other_player", taken=best.player, missing=levers.choice.player,
+                          taken_source=best.source_id, missing_source=levers.choice.source_id))
             return _taken(season, episode, part, best, ReferenceMark.OTHER_PLAYER, why)
         pool = picked
     best = _best(pool, order, ranking).row
+    first = _best(pool + failures, order, ranking).row
+    if lost(Candidate(first, 0)) and levers.choice is None:
+        # The video the order puts first did not download: the next one by the order takes its place, and says why.
+        why = reason("reference_download_failed", taken=best.player, failed=first.player, taken_source=best.source_id,
+                     failed_source=first.source_id)
+        return _taken(season, episode, part, best, ReferenceMark.OTHER_PLAYER, why)
     return _taken(season, episode, part, best, ReferenceMark.OWN if levers.own else ReferenceMark.BY_LEVEL)
 
 

@@ -292,12 +292,14 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/series/{series_id}/failures/reset", response_model=FailuresReset, responses=_ERRORS)
     async def reset_failures(series_id: int):
         """Неудачные попытки сериала забываются: отклонённые и сбойные озвучки начинаются с первого источника своей
-        цепочки. Это правка сериала, а не синхронизация: работа по ним идёт со следующей синхронизацией."""
+        цепочки, видео, которое не скачалось, снова участвует в выборе референса. Это правка сериала, а не
+        синхронизация: работа по ним идёт со следующей синхронизацией."""
         try:
             async with admitted(gw, series_id):
-                reply = await gw.request("voices.failures.forget", {"series_id": series_id})
+                voices = await gw.request("voices.failures.forget", {"series_id": series_id})
+                videos = await gw.request("downloads.failures.forget", {"series_id": series_id})
         except BusRequestError as exc:
             return _error_response(exc)
-        return {"success": True, "reset": int((reply or {}).get("reset") or 0)}
+        return {"success": True, "reset": int((voices or {}).get("reset") or 0) + int((videos or {}).get("reset") or 0)}
 
     return r

@@ -1120,6 +1120,52 @@ async def test_a_run_is_not_closed_while_an_executor_has_not_answered_however_th
     assert runs_of([await next_event(runs)]) == [False] and rig.world.payloads["downloads.pack"] == [{"skip": []}]
 
 
+async def test_an_episode_whose_video_did_not_download_is_fetched_from_the_next_source_by_the_order_in_the_same_run(rig):
+    """ЭТАП_10: «если скачивание не удаётся, то выбирается плеер по следующему приоритету». The reference of the episode
+    is VK; its download fails for good; when the work ends the run does not close: it counts the references again, which
+    passes that video over, and hands the work over once more (Kodik); then it closes."""
+    import sqlite3
+    rig.world.rows = [rig.row("a", 1, 1, player="vk", height=1080), rig.row("b", 1, 1, player="kodik", height=720)]
+    rig.world.work = {"downloads": True}
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    await rig.run()
+    assert [each["row_key"] for each in rig.query("SELECT row_key FROM scan_references")] == ["a"]
+    dispatched = len(rig.world.payloads["downloads.dispatch"])
+
+    with sqlite3.connect(rig.db_path) as conn:  # downloads gave up on the video: the row of the plan says so
+        conn.execute("UPDATE media_items SET status='error' WHERE row_key='a'")
+        conn.commit()
+    work_state(rig, "downloads", False)
+    assert await wait_until(lambda: len(rig.world.payloads["downloads.dispatch"]) > dispatched, rig.bus,
+                            *rig.runner.modules)
+    reference = rig.query("SELECT row_key, mark, reason FROM scan_references")[0]
+    assert reference["row_key"] == "b" and reference["mark"] == "other_player"
+    assert parse(reference["reason"])["code"] == "reference_download_failed"
+    assert runs_of(drain(runs)) == [True]  # the run goes on with the work it gave out again
+    # The failed row stays as the record of the failure; the next source has a row of its own.
+    rows = {each["row_key"]: each["status"] for each in rig.query("SELECT row_key, status FROM media_items")}
+    assert rows["a"] == "error" and "b" in rows
+
+    work_state(rig, "downloads", False)  # the next source ended its work: no new failure, the run closes
+    assert runs_of([await next_event(runs)]) == [False]
+
+
+async def test_a_run_whose_failed_episode_has_no_next_source_closes_and_leaves_it_to_the_next_sync(rig):
+    import sqlite3
+    rig.world.rows = [rig.row("a", 1, 1, player="vk")]
+    rig.world.work = {"downloads": True}
+    runs = rig.bus.subscribe(RUN_CHANGED)
+    await rig.run()
+    assert runs_of(drain(runs)) == [True]
+    dispatched = len(rig.world.payloads["downloads.dispatch"])
+    with sqlite3.connect(rig.db_path) as conn:
+        conn.execute("UPDATE media_items SET status='error'")
+        conn.commit()
+    work_state(rig, "downloads", False)
+    assert runs_of([await next_event(runs)]) == [False]
+    assert len(rig.world.payloads["downloads.dispatch"]) == dispatched  # the failed source is not tried again at once
+
+
 async def test_each_episode_is_packed_as_soon_as_no_executor_holds_work_of_it_and_the_whole_series_at_the_end(rig):
     """Each episode is a process of its own: its container is made when its last work ends, not when the last work of
     the series does. The episodes with no work are packed once the run has heard every executor."""

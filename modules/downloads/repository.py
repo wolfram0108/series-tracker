@@ -277,6 +277,11 @@ class DownloadsRepository:
              "WHERE unique_id=?", (relative, unique_id)),
             done])
 
+    async def forget_failures(self, series_id: int) -> int:
+        """The rows whose download failed are videos to fetch again: the choice of the reference takes them once more."""
+        return await self._db.execute(
+            "UPDATE media_items SET status='pending' WHERE series_id=? AND status='error'", (series_id,))
+
     async def fail_publish(self, task_id: int, unique_id: str, message: str) -> None:
         """The file could not be put under its name and certainly was not: the task fails, its work file stays."""
         await self.keep_failed(task_id, unique_id, message)

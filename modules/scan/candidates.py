@@ -88,8 +88,10 @@ def place(series_id: int, chosen: Iterable[Chosen], existing: list[dict[str, Any
         # The same row of the layout, numbered otherwise now, is kept in place. So is one that shows another video
         # while nothing was fetched from the row and no task waits for it: there is no file to mix up. A row with a
         # fetched video, or a task for one, that now shows another is the earlier video, which the new one displaces.
+        # A row whose download failed is the record of the video it showed: another video is a row of its own.
         if moved is not None and moved not in known and (
-                moved.get("source_url") == row.link or not (is_settled(moved) or moved["unique_id"] in busy)):
+                moved.get("source_url") == row.link
+                or not (is_settled(moved) or failed(moved) or moved["unique_id"] in busy)):
             known.append(moved)
         fields = {
             "season": each.reference.season, "episode_start": each.reference.episode, "episode_end": None,
@@ -142,9 +144,23 @@ def _held_row(chosen: Chosen, existing: list[dict[str, Any]]) -> dict[str, Any] 
 def obsolete(existing: list[dict[str, Any]], kept: Collection[str], busy: Collection[str]) -> list[str]:
     """The rows that stand for nothing: not the winner of any slot, not fetched, with no download under way.
 
-    `busy` are the rows that have a task in the queue of downloads: deleting one would leave the task without a row."""
+    `busy` are the rows that have a task in the queue of downloads: deleting one would leave the task without a row. A
+    row whose download failed stays: it is the record of the failure, by which the choice of the reference passes that
+    video over (until the row shows another video or the user resets the failed attempts)."""
     return [item["unique_id"] for item in existing
-            if item["unique_id"] not in kept and not is_settled(item) and item["unique_id"] not in busy]
+            if item["unique_id"] not in kept and not is_settled(item) and item["unique_id"] not in busy
+            and not failed(item)]
+
+
+def failed(item: dict[str, Any]) -> bool:
+    """A row whose download failed for good (downloads marks it so when the budget of attempts is spent)."""
+    return item.get("status") == "error"
+
+
+def failures(existing: Iterable[dict[str, Any]]) -> set[tuple[int, str, str]]:
+    """The videos whose download failed: (source id, row key, link), the input of the choice of the reference."""
+    return {(item["source_id"], item["row_key"], item.get("source_url") or "") for item in existing
+            if failed(item) and item.get("source_id") is not None and item.get("row_key") is not None}
 
 
 def rows_after(existing: list[dict[str, Any]], inserts: list[dict[str, Any]], updates: Iterable[tuple[str, dict[str, Any]]],

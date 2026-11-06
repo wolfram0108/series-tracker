@@ -47,6 +47,8 @@ Queries / commands:
       record in media_items or download_tasks (the voice-overs of a series go to a temporary directory). The executor keeps no
       state: the owner of the queue (voices) sends the command again after a restart. It has a limit of its own, the setting
       max_parallel_dub_downloads (2 by default).
+  downloads.failures.forget {series_id} -> {reset} - the user's reset of failed attempts (a change under the admission
+      of the series): the rows whose download failed take part in the choice of the reference again.
   downloads.publications.finish {series_id} -> {owed} - the first step of a sync, before the move of the folder: the
       publications of containers a stop or a failure cut short are finished (or closed) in the folder they began in.
   downloads.items.rename {series_id, names: {key: name}} -> {renamed} - the names the plan gives the ready files of the series now
@@ -207,6 +209,7 @@ class DownloadsModule(BaseModule):
         self.handle("downloads.fs.sync", self.on_fs_sync)
         self.handle("downloads.items.rename", self.on_items_rename)
         self.handle("downloads.publications.finish", self.on_publications_finish)
+        self.handle("downloads.failures.forget", self.on_failures_forget)
         self.handle("downloads.item.set_filename", self.on_set_filename)
         self.handle("downloads.item.set_status", self.on_set_status)
         self.handle("series.deleted", self.on_series_deleted)
@@ -578,6 +581,17 @@ class DownloadsModule(BaseModule):
             self.log.warning("каталог недоступен: задачи удалённых сериалов не проверены: %s", exc)
             return
         await self._discard_tasks(await self.repo.tasks_without_series(ids))
+
+    async def on_failures_forget(self, env: Envelope) -> dict:
+        """The user's reset of failed attempts: the videos whose download failed are candidates again, so the next sync
+        takes the reference by the order of players once more (a failure passes a video over until then). A change of
+        the series under its admission, not a sync: nothing is fetched now."""
+        series_id = int(env.payload["series_id"])
+        reset = await self.repo.forget_failures(series_id)
+        if reset:
+            self.log.info("серия %d: неудачные загрузки видео сброшены по команде пользователя: %d", series_id, reset)
+            await self._contribute(series_id)
+        return {"reset": reset}
 
     async def on_publications_finish(self, env: Envelope) -> dict:
         """The first step of a sync: the publications of containers a stop or a failure cut short are finished (or closed)

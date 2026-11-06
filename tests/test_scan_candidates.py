@@ -209,7 +209,15 @@ def test_rows_that_stand_for_nothing_and_are_not_fetched_are_left_over():
     rows = [item("win", "a"), item("lost", "b"), item("failed", "c", status="error"),
             item("done", "d", status="completed", filename="x.mp4"), item("going", "e", status="downloading"),
             item("sliced", "f", slicing_status="completed")]
-    assert obsolete(rows, {"win"}, ()) == ["lost", "failed"]
+    # A row whose download failed stays: it is the record by which the choice passes that video over.
+    assert obsolete(rows, {"win"}, ()) == ["lost"]
+
+
+def test_a_failed_row_is_the_record_of_its_video_and_another_video_of_the_row_is_a_row_of_its_own():
+    failed = item(ids.row_unique_id(S, SRC, "k"), "https://v.test/old", status="error", source_id=SRC, row_key="k")
+    again = place(S, chosen_of(row(S, SRC, "k", 1, 1, link="https://v.test/new", height=480)), [failed])[0]
+    assert again.unique_id != failed["unique_id"] and again.is_new and "status" not in again.fields
+    assert candidates.failures([failed]) == {(SRC, "k", "https://v.test/old")}
 
 
 def test_a_row_with_a_task_in_the_queue_is_not_left_over():

@@ -213,6 +213,8 @@ class ScanModule(BaseModule):
         self._snapshots: dict[int, RunSnapshot] = {}
         # The generation of the announcements of runs (RunChanged.seq), in the order they are published.
         self._run_seq = 0
+        # The rows whose failed download an open run has already passed over (it took the next source for them).
+        self._passed_over: dict[int, set[str]] = {}
         self._failed: set[int] = set()  # the series whose last run ended failed (its error stays until the next scan)
         self._edits_over: dict[int, asyncio.Event] = {}
         self._aborted: set[int] = set()
@@ -930,6 +932,8 @@ class ScanModule(BaseModule):
         for while the run was open is done now (a plan; the disk follows it at the next sync)."""
         if series_id not in self._runs or series_id in self._closing:
             return  # the run is closing already: one packing, one end
+        if await self._next_source(series_id):
+            return  # the run goes on: the episodes whose video did not download are fetched from the next source
         self._closing.add(series_id)
         try:
             # A packing of ready episodes that goes ends first; then only what the run still owes is asked for.
@@ -945,6 +949,7 @@ class ScanModule(BaseModule):
             self._closing.discard(series_id)
         intent = self._runs.pop(series_id, None)
         self._working.pop(series_id, None)
+        self._passed_over.pop(series_id, None)
         # The series is free either way; a failed last step ends the run as failed, with its reason kept as the error
         # of the series until the next sync, not as a success.
         if intent is not None:
@@ -962,6 +967,42 @@ class ScanModule(BaseModule):
         if series_id in self._owed:
             self._owed.discard(series_id)
             await self._follow_layout(series_id)
+
+    async def _next_source(self, series_id: int) -> bool:
+        """Every work of the run has ended, and the downloads of some references failed for good (ЭТАП_10: «если скачивание
+        не удаётся, то выбирается плеер по следующему приоритету»): the references are counted again, which passes those
+        videos over, and the work is handed over once more, in this run. True when it was; a run that does not download,
+        or one with no failure it has not passed over yet, closes. Each pass passes at least one more video over, so the
+        run ends."""
+        intent = self._runs.get(series_id)
+        task = await self.repo.get_task(intent) if intent is not None else None
+        if task is None or not (task["results_data"] or {}).get("download", True):
+            return False
+        failed = {item["unique_id"] for item in await self.repo.items_for_series(series_id) if candidates.failed(item)}
+        seen = self._passed_over.setdefault(series_id, set())
+        if not failed - seen:
+            return False
+        seen |= failed
+        try:
+            series = await self.request("catalog.series.get", {"series_id": series_id})
+            before = await self._winners(series_id)
+            await self._refresh(series, announce=True)
+            if await self._winners(series_id) == before:
+                return False  # no episode has a next source: the failed ones are tried again by the next sync
+            await self._hand_over(series_id, True)
+        except (BusRequestError, ScanAborted, SyncFailed) as exc:
+            self.log.warning("сериал %d: переход к следующему источнику не удался: %s", series_id, exc)
+            return False
+        self.log.info("сериал %d: загрузка %d серий не удалась — взят следующий источник по приоритету", series_id,
+                      len(failed))
+        # The executors are heard again, as after the first hand-over: the run closes when this work ends too.
+        await self._ask_working(series_id)
+        return True
+
+    async def _winners(self, series_id: int) -> dict[tuple, tuple]:
+        """The video each episode of the series is to be fetched from, as the references stand."""
+        return {(each["season"], each["episode"], each["part"]): (each["source_id"], each["row_key"])
+                for each in await self.repo.references(series_id)}
 
     async def _fingerprint(self, series_id: int) -> tuple:
         """The references and the rows of the plan as stored: two equal fingerprints mean the run changed nothing."""
@@ -988,7 +1029,7 @@ class ScanModule(BaseModule):
                                       self._standing_sources(series, layout),
                                       previous=[output.reference_of(each) for each in stored],
                                       player_groups=Groups.of(voices.player_groups),
-                                      on_disk=candidates.on_disk(existing))
+                                      on_disk=candidates.on_disk(existing), failed=candidates.failures(existing))
             memory, seasons = self._ignored_episodes(series), self._ignored_seasons(series)
             queued = await self._queued(series_id)
             # When the queue cannot be told, every row that is not fetched is held: none is turned to another video.
