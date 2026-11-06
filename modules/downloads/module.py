@@ -249,19 +249,30 @@ class DownloadsModule(BaseModule):
         return self._locks.setdefault(series_id, asyncio.Lock())
 
     @asynccontextmanager
-    async def _turn(self, series: dict):
-        """A look at a series, or a change of its files and names, in its turn; the publications of its containers that a
-        stop or a failure cut short are finished first, so nothing acts on a file or a name such a publication still owes
-        (И-61). The packing finishes them itself (`Packing.pack`)."""
+    async def _turn(self, series: dict, *, in_run: bool):
+        """A look at a series, or a change of its files and names, in its turn; it says whether the series is free to act
+        on. In a step of a run the publications of its containers that a stop or a failure cut short are finished first,
+        so nothing acts on a file or a name such a publication still owes (И-61); the packing finishes them itself
+        (`Packing.pack`). Outside a run the disk is not changed (Т11-10): a series with a publication owed is not free —
+        it is left as it is until a run finishes the publication."""
         async with self._lock(series["id"]):
-            if series.get("kind") == SeriesKind.VIDEO:
+            if series.get("kind") != SeriesKind.VIDEO:
+                yield True
+            elif in_run:
                 await self._packing.settle(series)
-            yield
+                yield True
+            elif await self._packing.owes(series):
+                self.log.info("серия %s: публикация контейнера не доведена — серия ждёт прогона", series["id"])
+                yield False
+            else:
+                yield True
 
     async def _look_at(self, series: dict) -> None:
         """Reconcile a series and tell the window if anything changed; a series the neighbours cannot answer for waits."""
         try:
-            async with self._turn(series):
+            async with self._turn(series, in_run=False) as free:
+                if not free:
+                    return
                 done = await self._reconcile(series)
         except (BusRequestError, OSError, storage.StorageTimeout) as exc:
             self.log.warning("серия %s: сверка не удалась, повторим: %s", series.get("id"), exc)
@@ -357,7 +368,9 @@ class DownloadsModule(BaseModule):
     async def on_plan_updated(self, env: Envelope) -> None:
         series_id = env.payload["series_id"]
         series = await self.request("catalog.series.get", {"series_id": series_id})
-        async with self._turn(series):
+        async with self._turn(series, in_run=False) as free:
+            if not free:
+                return
             done = await self._reconcile(series)
         self.log.info("план %d: сверка — %s", series_id, done)
         if done.changed:
@@ -371,7 +384,7 @@ class DownloadsModule(BaseModule):
         if not os.path.isabs(series.get("save_path") or ""):
             self.log.error("серия %d: путь сохранения не абсолютный (%r) — загрузка не запущена", series_id, series.get("save_path"))
             raise ValueError(f"путь сохранения не абсолютный: {series.get('save_path')!r}")
-        async with self._turn(series):
+        async with self._turn(series, in_run=True):
             done = await self._reconcile(series, sync=True)
             created = await self._make_tasks(series)
         self.log.info("диспетч %d: сверка — %s; задач создано %d", series_id, done, created)
@@ -409,7 +422,7 @@ class DownloadsModule(BaseModule):
         and nothing is fetched."""
         series_id = env.payload["series_id"]
         series = await self.request("catalog.series.get", {"series_id": series_id})
-        async with self._turn(series):
+        async with self._turn(series, in_run=True):
             done = await self._reconcile(series, sync=True)
         self.log.info("синхронизация %d без загрузки: сверка — %s", series_id, done)
         if done.changed:
@@ -568,7 +581,7 @@ class DownloadsModule(BaseModule):
         series = await self.request("catalog.series.get", {"series_id": series_id})
         if series.get("kind") != SeriesKind.VIDEO or not os.path.isabs(series.get("save_path") or ""):
             return {"renamed": 0}
-        async with self._turn(series):
+        async with self._turn(series, in_run=True):
             await self.repo.record_renames(series_id, env.payload["names"])
             renamed = await self._settle(series)
         return {"renamed": renamed}
@@ -588,7 +601,10 @@ class DownloadsModule(BaseModule):
             self.log.warning("серия %d: путь %s недоступен — сверка диска пропущена", series_id, series["save_path"])
             await self._contribute(series_id)
             return {"adopted": 0, "lost": 0}
-        async with self._turn(series):
+        async with self._turn(series, in_run=False) as free:
+            if not free:
+                await self._contribute(series_id)
+                return {"adopted": 0, "lost": 0}
             lost = await self.library.release_lost(series)
             done = await self._reconcile(series)
         # The walk of the disk is the authoritative point: readiness is published always, even if nothing changed (otherwise
@@ -682,7 +698,8 @@ class DownloadsModule(BaseModule):
 
     async def _publish(self, task: dict, series: dict) -> str:
         """The file is whole: it takes the name of its video (see publication.py), in the turn of the series."""
-        async with self._turn(series):
+        # A download is a work of the run that gave it out: its file is put in its place inside that run.
+        async with self._turn(series, in_run=True):
             return await self._publication.run(task, series)
 
     async def _run_download(self, task: dict) -> None:

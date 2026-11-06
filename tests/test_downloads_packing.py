@@ -323,6 +323,11 @@ STOPS = ("in_build", "after_replace", "in_finish")
 BETWEEN = ("nothing", "rename")
 
 
+def open_publications(db_path: str) -> int:
+    with sqlite3.connect(db_path) as conn:
+        return conn.execute("SELECT COUNT(*) FROM pack_publications").fetchone()[0]
+
+
 async def cut_short(rig, stop: str, monkeypatch) -> None:
     """A packing that a stop cuts at the point named, with an old container of the same video in another resolution
     under the name the winner is to take (it reads like the new one but for its number)."""
@@ -538,7 +543,13 @@ async def test_a_slot_whose_packing_a_stop_cut_short_is_seen_until_its_record_is
     sub = probe.bus.subscribe("downloads.pack.queue.changed")
     await cut_short(rig, "in_finish", monkeypatch)
     assert [(task["episode"], task["status"]) for task in pictures(sub)[-1]] == [(1, "interrupted")]
+    before = sorted(os.listdir(media_dir))
 
-    await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=5)  # a look at the series finishes the record first
+    # Н-16: a look at the series outside a run (the disk check, a recount of the plan) changes no file: the record waits.
+    await probe.request("downloads.fs.sync", {"series_id": 2}, timeout=5)
+    probe.publish_event("scan.plan.updated", {"series_id": 2})
+    await probe.bus.settled()
+    assert sorted(os.listdir(media_dir)) == before and open_publications(db_path) == 1
 
-    assert pictures(sub)[-1] == []
+    await pack(probe)  # a step of a run finishes it
+    assert pictures(sub)[-1] == [] and open_publications(db_path) == 0

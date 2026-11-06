@@ -242,12 +242,14 @@ def check(h: Harness, *, converged: bool) -> list[str]:
             found.append(f"L7 {label(item)} was taken out and still holds {name!r}")
     live_keys = {task["task_key"] for task in tasks if task["status"] in LIVE}
     owed = {item.get("rename_to") for item in items if item.get("rename_to")}
+    # A publication a failure cut short owns its work files until a run finishes it: between runs the disk is not changed.
+    journal = {row["staging"] for row in h.query("SELECT staging FROM pack_publications")}
     for name in files:
         if name.startswith(".renaming."):
             if converged or not any(name == f".renaming.{item['unique_id']}" for item in items):
                 found.append(f"L10 {name!r} lies aside and no row is moving a file")
         elif name.startswith("."):
-            if not any(name.startswith(f".{key}.") for key in live_keys):
+            if not any(name.startswith(f".{key}.") for key in live_keys) and (converged or name not in journal):
                 found.append(f"L4 work file {name!r} has no task")
         elif name not in held and name not in owed:
             found.append(f"L3 {name!r} lies in the library and no row holds it")

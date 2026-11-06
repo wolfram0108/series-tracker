@@ -348,6 +348,10 @@ class Packing:
             self._publish("downloads.item.renamed", {"series_id": series["id"], "unique_id": record["unique_id"],
                                                      "filename": record["name"]})
 
+    async def owes(self, series: dict) -> bool:
+        """Whether a publication of the series was cut short and is not finished yet (only a run finishes it)."""
+        return bool(await self._repo.publications(series["id"]))
+
     async def settle(self, series: dict) -> None:
         """Finish the publications a stop or a failure cut short, before anything else acts on the files or the names of
         the series. A publication is the one under its name only when the container there carries its number: before its
