@@ -33,6 +33,12 @@ class OkResponse(ApiModel):
     message: str | None = None
 
 
+class FailuresReset(ApiModel):
+    """Неудачные попытки сериала сброшены: сколько озвучек начато сначала (работа — со следующей синхронизацией)."""
+    success: bool
+    reset: int = 0
+
+
 class ErrorResponse(ApiModel):
     """Ошибка (отдаётся через JSONResponse; здесь — для документации
     `responses={code: {"model": ErrorResponse}}`)."""

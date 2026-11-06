@@ -16,7 +16,7 @@ from core.contracts import DubItem
 
 from .routing import admitted
 
-from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, OkResponse,
+from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, FailuresReset, OkResponse,
                       QueueTask, SeriesCreate, SeriesObject, SeriesUpdate,
                       VoiceDubs)
 
@@ -275,20 +275,29 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             response_model_exclude_none=True,
             responses={409: {"model": ErrorResponse},
                        500: {"model": ErrorResponse}})
-    async def scan_series(series_id: int, download: bool = True, retry_failed: bool = False):
+    async def scan_series(series_id: int, download: bool = True):
         """Синхронный скан одной серии, как в оригинале: HTTP ждёт
         результата; force_replace scan берёт из настройки отладки.
-        download=false — скан без загрузки: сверка файлов, таблицы, раскладка и план, но ничего не качается.
-        retry_failed=true — та же синхронизация, в которой неудачные попытки забываются и делаются заново."""
+        download=false — скан без загрузки: сверка файлов, таблицы, раскладка и план, но ничего не качается."""
         try:
             result = await gw.request("scan.series.run", {
-                "series_id": series_id, **({} if download else {"download": False}),
-                **({"retry_failed": True} if retry_failed else {})})
+                "series_id": series_id, **({} if download else {"download": False})})
         except BusRequestError as exc:
             msg = str(exc).split(": ", 1)[-1]
             code = 409 if "not_allowed" in msg else 500
             return JSONResponse({"success": False, "error": msg},
                                 status_code=code)
         return {"success": True, **result}
+
+    @r.post("/api/series/{series_id}/failures/reset", response_model=FailuresReset, responses=_ERRORS)
+    async def reset_failures(series_id: int):
+        """Неудачные попытки сериала забываются: отклонённые и сбойные озвучки начинаются с первого источника своей
+        цепочки. Это правка сериала, а не синхронизация: работа по ним идёт со следующей синхронизацией."""
+        try:
+            async with admitted(gw, series_id):
+                reply = await gw.request("voices.failures.forget", {"series_id": series_id})
+        except BusRequestError as exc:
+            return _error_response(exc)
+        return {"success": True, "reset": int((reply or {}).get("reset") or 0)}
 
     return r

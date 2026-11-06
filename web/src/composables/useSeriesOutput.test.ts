@@ -66,6 +66,7 @@ beforeEach(() => {
   vi.mocked(calls.setLever).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.resetLever).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.syncSeries).mockReset().mockResolvedValue(ok({ success: true }))
+  vi.mocked(calls.resetFailures).mockReset().mockResolvedValue(ok({ success: true, reset: 1 }))
   vi.mocked(calls.switchOutput).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.fetchRenames).mockReset().mockResolvedValue(ok({
     preview: [{ unique_id: "u1", season: 1, episode: 2, part: null, new_filename_preview: "Show s01e02.mp4" }] }))
@@ -243,8 +244,10 @@ describe("useSeriesOutput", () => {
     expect(output.failure.value).toBe("Проход уже идёт")
     expect(calls.syncSeries).toHaveBeenCalledWith(1)
 
+    const syncs = vi.mocked(calls.syncSeries).mock.calls.length
     expect(await output.retryFailed()).toBeNull()
-    expect(calls.syncSeries).toHaveBeenLastCalledWith(1, true)
+    expect(calls.resetFailures).toHaveBeenCalledWith(1)
+    expect(vi.mocked(calls.syncSeries).mock.calls.length).toBe(syncs) // the reset is no sync
   })
 
   it("switches an episode or a season off and on with the body the core reads, and returns a refusal in words", async () => {

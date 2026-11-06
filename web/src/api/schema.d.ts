@@ -339,9 +339,29 @@ export interface paths {
          * @description Синхронный скан одной серии, как в оригинале: HTTP ждёт
          *     результата; force_replace scan берёт из настройки отладки.
          *     download=false — скан без загрузки: сверка файлов, таблицы, раскладка и план, но ничего не качается.
-         *     retry_failed=true — та же синхронизация, в которой неудачные попытки забываются и делаются заново.
          */
         post: operations["scan_series_api_series__series_id__scan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/series/{series_id}/failures/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Failures
+         * @description Неудачные попытки сериала забываются: отклонённые и сбойные озвучки начинаются с первого источника своей
+         *     цепочки. Это правка сериала, а не синхронизация: работа по ним идёт со следующей синхронизацией.
+         */
+        post: operations["reset_failures_api_series__series_id__failures_reset_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1925,6 +1945,21 @@ export interface components {
          * @enum {string}
          */
         Exclusion: "rule" | "no_number" | "source";
+        /**
+         * FailuresReset
+         * @description Неудачные попытки сериала сброшены: сколько озвучек начато сначала (работа — со следующей синхронизацией).
+         */
+        FailuresReset: {
+            /** Success */
+            success: boolean;
+            /**
+             * Reset
+             * @default 0
+             */
+            reset: number;
+        } & {
+            [key: string]: unknown;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -3659,7 +3694,6 @@ export interface operations {
         parameters: {
             query?: {
                 download?: boolean;
-                retry_failed?: boolean;
             };
             header?: never;
             path: {
@@ -3676,6 +3710,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reset_failures_api_series__series_id__failures_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FailuresReset"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Conflict */

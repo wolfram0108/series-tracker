@@ -52,6 +52,7 @@ beforeEach(() => {
   vi.mocked(calls.fetchMedia).mockReset().mockResolvedValue(ok([]))
   vi.mocked(calls.switchOutput).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.syncSeries).mockReset().mockResolvedValue(ok({ success: true }))
+  vi.mocked(calls.resetFailures).mockReset().mockResolvedValue(ok({ success: true, reset: 1 }))
   vi.mocked(calls.setLever).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.fetchRenames).mockReset().mockResolvedValue(ok({
     preview: [{ unique_id: "u2", season: 1, episode: 2, part: null, new_filename_preview: "Show s01e02.mp4" }] }))
@@ -153,12 +154,13 @@ describe("StatusOutput", () => {
     expect(calls.syncSeries).toHaveBeenCalledWith(1)
   })
 
-  it("resets the failed attempts by the same sync, told to forget them", async () => {
+  it("resets the failed attempts by a change of the series, and starts no sync", async () => {
     const w = mountOutput()
     await flushPromises()
     await w.find(".output-bar .output-retry-failed").trigger("click")
     await flushPromises()
-    expect(calls.syncSeries).toHaveBeenCalledWith(1, true)
+    expect(calls.resetFailures).toHaveBeenCalledWith(1)
+    expect(calls.syncSeries).not.toHaveBeenCalled()
   })
 
   it("draws the button of the pass by the table of the core and the state the core reports, not only by its own call", async () => {

@@ -1104,7 +1104,7 @@ async def test_a_run_is_not_closed_while_an_executor_has_not_answered_however_th
     gate = rig.world.work_gates["voices"] = asyncio.Event()
     runs = rig.bus.subscribe(RUN_CHANGED)
     running = rig.start_run()
-    await wait_until(lambda: f"voices.work.get {rig.series_id}" in rig.world.order, rig.bus, *rig.runner.modules)
+    assert await wait_until(lambda: f"voices.work.get {rig.series_id}" in rig.world.order, rig.bus, *rig.runner.modules)
     work_state(rig, "downloads", False)
     # The event is taken in (the bus cannot go quiet: voices' answer is held), and still nothing closes.
     assert await wait_until(lambda: rig.scan._working[rig.series_id].seen.get("downloads") == rig.world.seq,
@@ -1199,7 +1199,7 @@ async def test_an_answer_counted_before_an_event_does_not_undo_it(rig):
     gate = rig.world.work_gates["voices"] = asyncio.Event()
     runs = rig.bus.subscribe(RUN_CHANGED)
     running = rig.start_run()
-    await wait_until(lambda: f"voices.work.get {rig.series_id}" in rig.world.order, rig.bus, *rig.runner.modules)
+    assert await wait_until(lambda: f"voices.work.get {rig.series_id}" in rig.world.order, rig.bus, *rig.runner.modules)
     work_state(rig, "voices", False)  # counted after the reply that is on its way
     gate.set()
     await running
@@ -1249,19 +1249,6 @@ async def test_a_change_admitted_before_a_sync_holds_its_opening_and_none_is_adm
     again = await rig.probe.request("scan.edit.begin", {"series_id": rig.series_id}, timeout=STUCK_S)
     assert again["ok"] is True and again["token"] != token
     rig.probe.send_command("scan.edit.end", {"series_id": rig.series_id, "token": again["token"]})
-
-
-async def test_a_sync_that_retries_the_failed_tells_the_voice_overs_and_keeps_the_word_with_its_command(rig):
-    """The button «Сбросить неудачные попытки» is a sync whose voices.dispatch forgets the failed attempts; the word is kept
-    with the command, so that a run resumed after a restart still retries. A plain sync says nothing of it."""
-    rig.world.rows = [rig.row("a", 1, 1)]
-    await rig.run()
-    assert "retry_failed" not in rig.world.payloads["voices.dispatch"][-1]
-    rig.world.work = {"downloads": True}  # the run stays open while its work goes on: its command is in the database
-    await rig.run(retry_failed=True)
-    assert rig.world.payloads["voices.dispatch"][-1]["retry_failed"] is True
-    stored = json.loads(rig.query("SELECT results_data FROM scan_tasks")[0]["results_data"])
-    assert stored["retry_failed"] is True
 
 
 async def test_a_run_works_by_the_configuration_it_took_when_it_started(rig):

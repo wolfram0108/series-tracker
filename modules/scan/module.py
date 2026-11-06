@@ -10,9 +10,7 @@ Queries:
   scan.runs.get → {runs: [{series_id, snapshot}], as_of} — the open runs of syncs as their commands are written (an
       executor that starts again takes them before its works: И-60), as of the generation `as_of` of the announcements of
       runs (RunChanged.seq): a series whose announcement is newer than that is told by the announcement, not by the reading.
-  scan.series.run {series_id, force_replace?, download?, retry_failed?} → {changed, ...}. retry_failed (with download):
-      the same sync, in which voices.dispatch is told to forget the failed attempts (a failed download is retried by
-      every sync already). changed tells whether anything was
+  scan.series.run {series_id, force_replace?, download?} → {changed, ...}. changed tells whether anything was
       actually changed: torrent — tasks were created; video — the references or the rows of the plan differ from
       what they were before the run. A video series answers {kind: "video", changed, sources: [{source_id, url,
       state: ready | stale | skipped, reason}], references: {by_level, own, other_player, none, unfit}, in_plan}.
@@ -292,7 +290,7 @@ class ScanModule(BaseModule):
         # VK-серии): пере-скан по профилю + переименование + усыновление, но
         # БЕЗ постановки новых загрузок (контракт «Сохранить → усыновление»).
         return await self._run_series(int(p["series_id"]), bool(force),
-                                      download=p.get("download", True), retry_failed=bool(p.get("retry_failed")))
+                                      download=p.get("download", True))
 
     async def on_media_list(self, env: Envelope) -> list[dict]:
         """Состав медиа-элементов серии (владелец строк — scan, Р-12);
@@ -586,7 +584,7 @@ class ScanModule(BaseModule):
             raise SyncFailed(reason("scan_step_failed", step=topic)) from exc
 
     async def _run_series(self, series_id: int, force: bool = False,
-                          download: bool = True, resume: int | None = None, retry_failed: bool = False) -> dict:
+                          download: bool = True, resume: int | None = None) -> dict:
         """A scan of one series. The command is written down before anything is waited for, so that a restart finds
         it: a video synchronization is a task of `scan_tasks` until it ends (`resume` is the task a restart found)."""
         self._require_idle(series_id)
@@ -601,8 +599,7 @@ class ScanModule(BaseModule):
         intent = resume
         try:
             if intent is None:
-                intent = await self.repo.create_task(series_id, [], {"video_sync": True, "download": download,
-                                                                      **({"retry_failed": True} if retry_failed else {})})
+                intent = await self.repo.create_task(series_id, [], {"video_sync": True, "download": download})
             self._owned.add(intent)
             series = await self.request("catalog.series.get",
                                         {"series_id": series_id})
@@ -625,7 +622,7 @@ class ScanModule(BaseModule):
             await self.repo.delete_error_tasks(series_id)
             series = await self._relocate(series)
             if video:
-                result = await self._sync_video(series, download, retry_failed)
+                result = await self._sync_video(series, download)
                 await self._hold_run(series_id, intent)
                 intent = None  # the run keeps the command now: it ends when the works of the run end
             else:
@@ -745,7 +742,7 @@ class ScanModule(BaseModule):
 
     # --- video branch: synchronisation and the plan of references ----------------------------------
 
-    async def _sync_video(self, series: dict, download: bool, retry_failed: bool = False) -> dict:
+    async def _sync_video(self, series: dict, download: bool) -> dict:
         """Tables of all sources -> layout -> references and plan -> (with download) the download and the voice-overs.
 
         Each step starts on the signal that the one before it ended, and any step that fails fails the scan."""
@@ -775,21 +772,20 @@ class ScanModule(BaseModule):
         self._alive(series_id)
         await self._reprocess_names(series_id)
         self._alive(series_id)
-        await self._hand_over(series_id, download, retry_failed)
+        await self._hand_over(series_id, download)
         changed = before != await self._fingerprint(series_id)
         return {"kind": "video", "changed": changed, "sources": [each.as_dict() for each in tables],
                 "references": output.marks(refreshed.references), "in_plan": refreshed.in_plan}
 
-    async def _hand_over(self, series_id: int, download: bool = True, retry_failed: bool = False) -> None:
+    async def _hand_over(self, series_id: int, download: bool = True) -> None:
         """The work goes to those who do it, and the command of the user is kept until each of them has written the work
         down: a receiver answers after its record, so a stop at any point of the hand-over finds the command again and
         the next run gives the work again (a receiver takes the same work twice as once). Without download the receivers
         bring the disk in line with the plan (`downloads.settle`, `voices.settle`) and fetch nothing."""
         settings = {"settings": self._snapshots[series_id].voices} if series_id in self._snapshots else {}
-        retry = {"retry_failed": True} if retry_failed and download else {}
         answers = await asyncio.gather(
             self.request("downloads.dispatch" if download else "downloads.settle", {"series_id": series_id}),
-            self.request("voices.dispatch" if download else "voices.settle", {"series_id": series_id, **settings, **retry}),
+            self.request("voices.dispatch" if download else "voices.settle", {"series_id": series_id, **settings}),
             return_exceptions=True)
         for answer in answers:
             if isinstance(answer, BusRequestError) and NO_HANDLER in str(answer):
@@ -1137,7 +1133,7 @@ class ScanModule(BaseModule):
             return
         try:
             await self._run_series(series_id, download=bool(task["results_data"].get("download", True)),
-                                   resume=task["id"], retry_failed=bool(task["results_data"].get("retry_failed")))
+                                   resume=task["id"])
         except Exception:  # noqa: BLE001 - the failure is kept as the error task of the series
             self.log.exception("возобновление синхронизации сериала %d не удалось", series_id)
 

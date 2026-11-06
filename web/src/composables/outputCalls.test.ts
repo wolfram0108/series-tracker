@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const client = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() }))
 vi.mock("../api/client", () => ({ api: client }))
 
-import { fetchComposition, fetchOutput, fetchRenames, resetLever, setLever, switchOutput, syncSeries } from "./outputCalls"
+import { fetchComposition, fetchOutput, fetchRenames, resetFailures, resetLever, setLever, switchOutput, syncSeries } from "./outputCalls"
 
 beforeEach(() => Object.values(client).forEach((fn) => fn.mockReset()))
 
@@ -55,11 +55,10 @@ describe("the calls to the output of the core", () => {
     expect(client.POST).toHaveBeenCalledWith("/api/series/{series_id}/scan", { params: { path: { series_id: 1 } } })
   })
 
-  it("asks for the same sync with the failed attempts forgotten when the reset of failures is pressed", async () => {
-    client.POST.mockResolvedValueOnce({ data: { success: true } })
-    expect(await syncSeries(1, true)).toEqual({ ok: true, data: { success: true } })
-    expect(client.POST).toHaveBeenCalledWith("/api/series/{series_id}/scan",
-      { params: { path: { series_id: 1 }, query: { retry_failed: true } } })
+  it("asks for the reset of the failed attempts by its own path, not for a sync", async () => {
+    client.POST.mockResolvedValueOnce({ data: { success: true, reset: 2 } })
+    expect(await resetFailures(1)).toEqual({ ok: true, data: { success: true, reset: 2 } })
+    expect(client.POST).toHaveBeenCalledWith("/api/series/{series_id}/failures/reset", { params: { path: { series_id: 1 } } })
   })
 
   it("says only that the action was refused when the refusal has no words", async () => {

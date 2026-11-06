@@ -871,9 +871,10 @@ async def test_a_pair_the_service_turned_down_with_no_source_left_is_rejected_an
 
 
 @pytest.mark.asyncio
-async def test_a_sync_that_retries_the_failed_starts_a_rejected_voice_over_over_and_a_plain_sync_does_not(dubs):
-    """The button «Сбросить неудачные попытки»: a sync with retry_failed begins the rejected voice-over again from the
-    first source of its chain; a plain sync leaves a rejection as it is, and the placed track of the other voice stays."""
+async def test_the_reset_of_failed_attempts_sets_a_rejected_voice_over_back_and_only_the_next_sync_fetches_it(dubs):
+    """The button «Сбросить неудачные попытки» is a change of the series, not a sync: the rejected voice-over is set back
+    to the first source of its chain and nothing is fetched; the next sync fetches it. A plain sync leaves a rejection as
+    it is, and the placed track of the other voice stays."""
     probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1", RedHeadSound={"ok": False, "refused": True}))
@@ -882,10 +883,18 @@ async def test_a_sync_that_retries_the_failed_starts_a_rejected_voice_over_over_
     await quiet(voices)
     assert len(neighbours.fetches) == 2 and {r["voice_key"]: r["status"] for r in await rows(probe)} == {
         "BlackCat": "placed", "RedHeadSound": "rejected"}
-    probe.send_command("voices.dispatch", {"series_id": 7, "retry_failed": True})
+
+    assert await probe.request("voices.failures.forget", {"series_id": 7}, timeout=5) == {"reset": 1}
+    await quiet(voices)
+    by_voice = {r["voice_key"]: r for r in await rows(probe)}
+    assert by_voice["RedHeadSound"]["status"] not in ("rejected", "downloading") and by_voice["RedHeadSound"]["attempt"] == 0
+    assert len(neighbours.fetches) == 2  # nothing is fetched by the reset itself
+    assert await probe.request("voices.failures.forget", {"series_id": 7}, timeout=5) == {"reset": 0}
+
+    probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 3)
     by_voice = {r["voice_key"]: r for r in await rows(probe)}
-    assert by_voice["RedHeadSound"]["status"] == "downloading" and by_voice["RedHeadSound"]["attempt"] == 0
+    assert by_voice["RedHeadSound"]["status"] == "downloading"
     assert neighbours.fetches[-1]["url"] == "https://site/title.html#kodik-RedHeadSound-1"
     assert by_voice["BlackCat"]["status"] == "placed"
 

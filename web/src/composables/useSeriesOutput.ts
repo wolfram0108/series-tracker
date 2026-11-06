@@ -7,9 +7,8 @@ import { useQueuesStore } from "../stores/queues"
 import { useSeriesStore } from "../stores/series"
 import { useVoicesStore } from "../stores/voices"
 import {
-  fetchComposition, fetchMedia, fetchOutput, fetchRenames, resetLever, setLever, setVoiceOrder, switchOutput,
-  syncSeries,
-  type Composition, type MediaFile, type RenameRow,
+  fetchComposition, fetchMedia, fetchOutput, fetchRenames, resetFailures, resetLever, setLever, setVoiceOrder, switchOutput,
+  syncSeries, type Composition, type MediaFile, type RenameRow,
 } from "./outputCalls"
 import type { Answer } from "./sourceCalls"
 import { useSSE } from "./useSSE"
@@ -154,7 +153,8 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     act(() => switchOutput(seriesId, { season, ...(episode === null ? {} : { episode }), off }), busy)
 
   const sync = (): Promise<string | null> => act(() => syncSeries(seriesId), syncing)
-  const retryFailed = (): Promise<string | null> => act(() => syncSeries(seriesId, true), syncing)
+  // A change of the series like a lever, not a pass: it starts no sync.
+  const retryFailed = (): Promise<string | null> => act(() => resetFailures(seriesId), busy)
 
   // The order of the voice-overs of a season (the tracks of its containers); the new order comes back as an event.
   const voiceOrders = computed(() => composition.value?.voice_orders ?? [])

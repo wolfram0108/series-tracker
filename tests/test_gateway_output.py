@@ -61,9 +61,18 @@ async def test_a_scan_of_a_series_downloads_unless_the_window_asks_for_the_statu
     async with serving(tmp_path, answers) as (client, owners, _, _):
         assert (await client.post("/api/series/1/scan")).status_code == 200
         assert (await client.post("/api/series/1/scan?download=false")).status_code == 200
-        assert (await client.post("/api/series/1/scan?retry_failed=true")).status_code == 200
-    assert owners.asked("scan.series.run") == [{"series_id": 1}, {"series_id": 1, "download": False},
-                                               {"series_id": 1, "retry_failed": True}]
+    assert owners.asked("scan.series.run") == [{"series_id": 1}, {"series_id": 1, "download": False}]
+
+
+async def test_the_reset_of_failed_attempts_is_a_change_of_the_series_and_starts_no_sync(tmp_path):
+    """The button «Сбросить неудачные попытки»: the voice-overs forget what failed, inside the admission of a change of
+    the series; no sync is asked for (the work goes on with the next one)."""
+    answers = {"voices.failures.forget": {"reset": 2}}
+    async with serving(tmp_path, answers) as (client, owners, _, spy):
+        response = await client.post("/api/series/1/failures/reset")
+    assert response.status_code == 200 and response.json() == {"success": True, "reset": 2}
+    assert owners.asked("voices.failures.forget") == [{"series_id": 1}] and owners.asked("scan.series.run") == []
+    assert topics(spy) == ["scan.edit.begin", "voices.failures.forget", "scan.edit.end"]
 
 
 async def test_the_composition_of_a_torrent_series_is_the_torrent_plan_with_iso_dates(tmp_path):
