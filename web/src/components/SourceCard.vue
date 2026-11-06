@@ -5,6 +5,7 @@ import StGroup from "./StGroup.vue"
 import StIcon from "./StIcon.vue"
 import StInput from "./StInput.vue"
 import StSelect from "./StSelect.vue"
+import SourceMark from "./status/output/SourceMark.vue"
 import { t, type MessageKey } from "../i18n"
 import { reasonText } from "../lib/reason"
 import {
@@ -16,7 +17,8 @@ import type { DraftPatch } from "../composables/useSourceDrafts"
 // One source of a series: its address, its constructor profile, and what its table holds — players with the episodes
 // and the voice-overs that the rules of the profile made of its rows, and the group of each voice-over. The numbers of
 // episodes exist only as the constructor's answer; a group is made in the settings, nowhere else.
-const props = defineProps<{ item: SourceItem; profiles: { id: number; name: string }[]; busy?: boolean }>()
+// `place` is the place of the source in the list of its series: with its colour, the mark the output tab shows it by.
+const props = defineProps<{ item: SourceItem; profiles: { id: number; name: string }[]; busy?: boolean; place?: number }>()
 const emit = defineEmits<{ (e: "change", patch: DraftPatch): void; (e: "remove"): void; (e: "reread"): void }>()
 const toast = useToast()
 
@@ -65,7 +67,10 @@ async function copyAddress(): Promise<void> {
 <template>
   <article class="source-card stack">
     <header class="cluster source-head">
-      <b>{{ t(`sources.type.${item.sourceType}` as MessageKey) }}</b>
+      <b class="source-type">
+        <SourceMark v-if="place !== undefined && item.color !== null" :mark="{ n: place, color: item.color, place: '' }" />
+        {{ t(`sources.type.${item.sourceType}` as MessageKey) }}
+      </b>
       <template v-if="!isTorrent">
         <span class="source-state" :class="`is-${view.state}`">
           <i v-if="view.state === 'reading'" class="pi pi-spin pi-spinner" />{{ stateText }}
@@ -169,6 +174,7 @@ async function copyAddress(): Promise<void> {
 }
 .source-head { justify-content: space-between; }
 .source-head > b { margin-inline-end: auto; }
+.source-type { display: inline-flex; align-items: center; gap: 0.5rem; }
 .source-state { display: inline-flex; align-items: center; gap: var(--space); color: var(--text-muted); }
 .source-state.is-ready { color: var(--color-green-1); }
 .source-state.is-failed { color: var(--color-red-1); }

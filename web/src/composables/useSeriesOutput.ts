@@ -1,14 +1,17 @@
 import { computed, onMounted, ref, watch, type Ref } from "vue"
 import { t } from "../i18n"
-import { bySeason, joinEpisodes, resetBody, setBody, type Reference, type Scope } from "../lib/output"
+import {
+  bySeason, groupTarget, joinEpisodes, orderValue, queueLevers, resetBody, setBody, sourceMarks, variantTarget,
+  type QueueName, type QueueRow, type Reference, type Scope,
+} from "../lib/output"
 import { reasonText } from "../lib/reason"
 import { useCompositionStore, type ReferencePacket } from "../stores/composition"
 import { useQueuesStore } from "../stores/queues"
 import { useSeriesStore } from "../stores/series"
 import { useVoicesStore } from "../stores/voices"
 import {
-  fetchComposition, fetchMedia, fetchOutput, fetchRenames, resetFailures, resetLever, setLever, setVoiceOrder, switchOutput,
-  syncSeries, type Composition, type MediaFile, type RenameRow,
+  fetchComposition, fetchMedia, fetchOutput, fetchQueues, fetchRenames, redoDubs, refetchReference, resetFailures, resetLever,
+  retryDubs, setLever, setVoiceOrder, switchOutput, syncSeries, type Composition, type MediaFile, type Queues, type RenameRow,
 } from "./outputCalls"
 import type { Answer } from "./sourceCalls"
 import { useSSE } from "./useSSE"
@@ -161,10 +164,69 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const order = (season: number, labels: string[]): Promise<string | null> =>
     act(() => setVoiceOrder(seriesId, { season, labels }), busy)
 
+  // The number and the colour of each source of the series, as the catalog keeps them (the same on every tab).
+  const marks = computed(() => sourceMarks(seriesStore.byId(seriesId)?.sources ?? []))
+
+  // The queues of the levels the window has open, read when one is opened and again with every new layout.
+  const levelQueues = ref<Record<string, Queues>>({})
+  const queueKey = (season: number | null, episode: number | null): string => JSON.stringify([season, episode])
+  const queuesAsked = new Map<string, number>()
+  async function loadQueues(season: number | null, episode: number | null = null): Promise<void> {
+    const key = queueKey(season, episode)
+    const ask = (queuesAsked.get(key) ?? 0) + 1
+    queuesAsked.set(key, ask)
+    const answer = await fetchQueues(seriesId, season, episode)
+    if (queuesAsked.get(key) !== ask) return
+    if (answer.ok) levelQueues.value = { ...levelQueues.value, [key]: answer.data }
+    else failure.value = answer.text
+  }
+  const queuesOf = (season: number | null, episode: number | null = null): Queues | undefined =>
+    levelQueues.value[queueKey(season, episode)]
+  const reloadQueues = (): void => {
+    for (const key of Object.keys(levelQueues.value)) {
+      const [season, episode] = JSON.parse(key) as [number | null, number | null]
+      void loadQueues(season, episode)
+    }
+  }
+
+  // A queue of a level takes the order the user dragged its rows into, leaves a variant out, or takes a voice-over at all.
+  const leversOf = (queue: QueueName) => queueLevers(composition.value?.levers ?? [], queue)
+  const setOrder = (scope: Scope, queue: QueueName, group: string | null, rows: readonly QueueRow[]): Promise<string | null> => {
+    const lever = leversOf(queue).order
+    if (!lever) return Promise.resolve(null)
+    return set(scope, lever, queue === "voice" && group !== null ? groupTarget(group) : null, orderValue(queue, rows))
+  }
+  const setAllowed = (scope: Scope, queue: QueueName, row: QueueRow, allowed: boolean): Promise<string | null> => {
+    const lever = leversOf(queue).allow
+    if (!lever) return Promise.resolve(null)
+    return set(scope, lever, variantTarget(row.group, row.source_id, row.player), allowed)
+  }
+  const setTaken = (scope: Scope, group: string, taken: boolean): Promise<string | null> => {
+    const lever = leversOf("voice").take
+    return lever ? set(scope, lever, groupTarget(group), taken) : Promise.resolve(null)
+  }
+  // "As the level above": the order of the queue on this level goes back to the level above.
+  const resetOrder = (scope: Scope, queue: QueueName, group: string | null): Promise<string | null> => {
+    const lever = leversOf(queue).order
+    if (!lever) return Promise.resolve(null)
+    return reset(scope, lever, queue === "voice" && group !== null ? groupTarget(group) : null)
+  }
+
+  // The actions on tracks: each is the one command it names, and what it changes comes as events.
+  const retry = (season: number, episode: number | null, voiceLabel: string | null): Promise<string | null> =>
+    act(() => retryDubs(seriesId, { season, episode, voice_label: voiceLabel }), busy)
+  const redo = (season: number, episode: number | null, voiceLabel: string | null): Promise<string | null> =>
+    act(() => redoDubs(seriesId, { season, episode, voice_label: voiceLabel }), busy)
+  const refetch = (season: number, episode: number, part: number | null): Promise<string | null> =>
+    act(() => refetchReference(seriesId, { season, episode, part }), busy)
+
   if (kind === "video") {
     onMounted(() => void load())
     // The layout moved to a newer revision: the output is read again. The same or an older revision changes nothing.
-    watch(() => store.layoutChanged[seriesId]?.rev, () => void load())
+    watch(() => store.layoutChanged[seriesId]?.rev, () => {
+      void load()
+      reloadQueues()
+    })
     // A packet carries the whole reference of its episode part, so it replaces that entry and needs no read.
     watch(() => store.references[seriesId], (record) => {
       const fresh = Object.values(record ?? {}).filter((packet) => !merged.has(packet))
@@ -183,5 +245,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   }
 
   return { composition, references, loading, failure, busy, syncing, names, namesWanted, naming, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
-    sync, retryFailed, showNames, voiceOrders, order }
+    sync, retryFailed, showNames, voiceOrders, order, marks, loadQueues, queuesOf, setOrder, setAllowed, setTaken, resetOrder,
+    retry, redo, refetch }
 }

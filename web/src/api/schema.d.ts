@@ -529,6 +529,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/series/{series_id}/output/queues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Output Queues
+         * @description The queue of the reference and of the voice-over of each group of a level (the series, a season, or an episode
+         *     of a season), in the order the core tries their variants, with what the levers of the level say of each.
+         */
+        get: operations["output_queues_api_series__series_id__output_queues_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/series/{series_id}/output/dubs/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Dubs
+         * @description «Повторить»: the voice-overs of the scope that failed or were rejected start over and go to download now.
+         */
+        post: operations["retry_dubs_api_series__series_id__output_dubs_retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/series/{series_id}/output/dubs/redo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redo Dubs
+         * @description «Пересоздать»: the voice-overs of the scope whose track is placed are made anew, now; the container of the
+         *     episode takes the new tracks at the next sync.
+         */
+        post: operations["redo_dubs_api_series__series_id__output_dubs_redo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/series/{series_id}/output/reference/refetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refetch Reference
+         * @description «Скачать заново»: the reference video of the episode is downloaded again now; its file is replaced when the new
+         *     one is whole, and the voice-overs of the episode are aligned to it again.
+         */
+        post: operations["refetch_reference_api_series__series_id__output_reference_refetch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/series/{series_id}/output/switch": {
         parameters: {
             query?: never;
@@ -1883,6 +1966,35 @@ export interface components {
          */
         DubStatus: "pending" | "downloading" | "ready" | "aligning" | "aligned" | "placed" | "rejected" | "failed";
         /**
+         * DubsActionBody
+         * @description The voice-overs an action of the user is about, without the series: a season, an episode of it (and a part), a group.
+         */
+        DubsActionBody: {
+            /** Season */
+            season: number;
+            /** Episode */
+            episode?: number | null;
+            /** Part */
+            part?: number | null;
+            /** Voice Label */
+            voice_label?: string | null;
+        };
+        /**
+         * DubsRestarted
+         * @description How many voice-overs of the scope were started over and admitted to download now.
+         */
+        DubsRestarted: {
+            /** Success */
+            success: boolean;
+            /**
+             * Restarted
+             * @default 0
+             */
+            restarted: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * DynamicObject
          * @description Динамический ответ (форма зависит от данных/типа серии): главы,
          *     композиция, медиа-элементы, превью. extra='allow' пропускает всё —
@@ -1961,6 +2073,25 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /**
+         * GroupQueue
+         * @description The queue of the voice-over of one group, and whether the level takes that voice-over at all (`voice.take`).
+         */
+        GroupQueue: {
+            /** Rows */
+            rows?: components["schemas"]["QueueRow"][];
+            /** @default default */
+            order_level: components["schemas"]["Level"];
+            /** Group */
+            group: string;
+            /**
+             * Take
+             * @default true
+             */
+            take: boolean;
+            /** @default default */
+            take_level: components["schemas"]["Level"];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1996,6 +2127,7 @@ export interface components {
             default?: unknown;
             /** Consumer */
             consumer: string;
+            queue: components["schemas"]["Queue"];
         };
         /** NamingPreviewAccepted */
         NamingPreviewAccepted: {
@@ -2147,12 +2279,74 @@ export interface components {
             heights?: number[];
         };
         /**
+         * Queue
+         * @description The queue a lever acts on: the reference of an episode, or the voice-over of a group. A window draws the
+         *     levers of a queue on its tab.
+         * @enum {string}
+         */
+        Queue: "reference" | "voice";
+        /**
+         * QueueRow
+         * @description A variant of a queue in its place: a voice-over group at a player of a source, the best height it has on the level,
+         *     the episodes of the level it plays in (`1–10, 12`), and whether the queue takes it (`allowed`, from `allowed_level`).
+         */
+        QueueRow: {
+            /** Group */
+            group: string;
+            /** Source Id */
+            source_id: number;
+            /** Player */
+            player: string;
+            /** Player Label */
+            player_label: string;
+            /** Height */
+            height?: number | null;
+            /**
+             * Episodes
+             * @default
+             */
+            episodes: string;
+            /**
+             * Allowed
+             * @default true
+             */
+            allowed: boolean;
+            /** @default default */
+            allowed_level: components["schemas"]["Level"];
+        };
+        /**
          * QueueTask
          * @description Задача очереди (агент/загрузки/прогресс). Поля динамические —
          *     extra='allow' пропускает всё; жёстко фиксировать не требуется.
          */
         QueueTask: {
             [key: string]: unknown;
+        };
+        /**
+         * QueueView
+         * @description The variants of one queue in the order they are tried; `order_level` is the level the user's order comes from.
+         */
+        QueueView: {
+            /** Rows */
+            rows?: components["schemas"]["QueueRow"][];
+            /** @default default */
+            order_level: components["schemas"]["Level"];
+        };
+        /**
+         * QueuesReply
+         * @description The queue of the reference and the queue of each group of the level, the groups in the order of the tracks of the
+         *     container (a season, an episode) or by name (the series).
+         */
+        QueuesReply: {
+            /** Series Id */
+            series_id: number;
+            /** Season */
+            season?: number | null;
+            /** Episode */
+            episode?: number | null;
+            reference?: components["schemas"]["QueueView"];
+            /** Groups */
+            groups?: components["schemas"]["GroupQueue"][];
         };
         /**
          * Reason
@@ -2198,6 +2392,33 @@ export interface components {
          * @enum {string}
          */
         ReferenceMark: "by_level" | "own" | "other_player" | "none" | "unfit" | "off";
+        /**
+         * RefetchBody
+         * @description The episode whose reference video is downloaded again, without the series.
+         */
+        RefetchBody: {
+            /** Season */
+            season: number;
+            /** Episode */
+            episode: number;
+            /** Part */
+            part?: number | null;
+        };
+        /**
+         * RefetchQueued
+         * @description Whether a download that replaces the file went to the queue (false: one is in the queue already).
+         */
+        RefetchQueued: {
+            /** Success */
+            success: boolean;
+            /**
+             * Queued
+             * @default false
+             */
+            queued: boolean;
+        } & {
+            [key: string]: unknown;
+        };
         /**
          * RowState
          * @description `not_obtained` is not `absent`: the answer stayed unsure to the end, the player may still have the video.
@@ -2399,6 +2620,11 @@ export interface components {
             vibix_season?: number | null;
             /** Players Off */
             players_off?: string[];
+            /**
+             * Color
+             * @default 0
+             */
+            color: number;
         };
         /**
          * SeriesUpdate
@@ -2579,11 +2805,11 @@ export interface components {
         };
         /**
          * ValueShape
-         * @description The shape of the value of a lever: a flag, the pick of a variant of a group (or auto), or the pick of a
-         *     reference (a variant with its group, or auto). A window draws a lever by its target and its shape.
+         * @description The shape of the value of a lever: a flag, or the order of variants the user put first in a queue (a list,
+         *     empty for the order of the rule). A window draws a lever by its target and its shape.
          * @enum {string}
          */
-        ValueShape: "flag" | "variant_pick" | "reference_pick";
+        ValueShape: "flag" | "variant_order";
         /**
          * VoiceDubs
          * @description The voice-overs of a series; the shape of a record is the contract model core.contracts.DubItem.
@@ -4442,6 +4668,271 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    output_queues_api_series__series_id__output_queues_get: {
+        parameters: {
+            query?: {
+                season?: number | null;
+                episode?: number | null;
+            };
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueuesReply"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    retry_dubs_api_series__series_id__output_dubs_retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DubsActionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DubsRestarted"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    redo_dubs_api_series__series_id__output_dubs_redo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DubsActionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DubsRestarted"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    refetch_reference_api_series__series_id__output_reference_refetch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefetchBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefetchQueued"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

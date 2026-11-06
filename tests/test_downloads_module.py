@@ -1594,7 +1594,7 @@ async def test_the_reset_of_failed_attempts_makes_the_failed_videos_of_the_serie
     assert (items["failed"]["status"], items["other"]["status"], items["fine"]["status"]) == ("pending", "error", "completed")
 
 
-# --- the user's refetch of a reference: a task that replaces the file of a ready row (Р-70) ---------------------------------
+# --- the user's refetch of a reference: a task that replaces the file of a ready row ---------------------------------
 
 def _in_season_one(db_path, uid):
     with sqlite3.connect(db_path) as conn:

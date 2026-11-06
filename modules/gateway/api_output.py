@@ -97,18 +97,18 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
 
     @r.post("/api/series/{series_id}/output/dubs/retry", response_model=DubsRestarted, responses=_ERR)
     async def retry_dubs(series_id: int, body: DubsActionBody):
-        """«Повторить»: the voice-overs of the scope that failed or were rejected start over and go to download now."""
+        """The retry of the window: the voice-overs of the scope that failed or were rejected start over and go to download now."""
         return await restart_dubs(series_id, body, "voices.dubs.retry")
 
     @r.post("/api/series/{series_id}/output/dubs/redo", response_model=DubsRestarted, responses=_ERR)
     async def redo_dubs(series_id: int, body: DubsActionBody):
-        """«Пересоздать»: the voice-overs of the scope whose track is placed are made anew, now; the container of the
+        """The redo of the window: the voice-overs of the scope whose track is placed are made anew, now; the container of the
         episode takes the new tracks at the next sync."""
         return await restart_dubs(series_id, body, "voices.dubs.redo")
 
     @r.post("/api/series/{series_id}/output/reference/refetch", response_model=RefetchQueued, responses=_ERR)
     async def refetch_reference(series_id: int, body: RefetchBody):
-        """«Скачать заново»: the reference video of the episode is downloaded again now; its file is replaced when the new
+        """The refetch of the window: the reference video of the episode is downloaded again now; its file is replaced when the new
         one is whole, and the voice-overs of the episode are aligned to it again."""
         try:
             async with admitted(gw, series_id):

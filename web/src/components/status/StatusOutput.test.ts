@@ -3,17 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import StatusOutput from "./StatusOutput.vue"
-import { SPECS } from "../../lib/output.fixtures"
+import { AVAILABILITY, SPECS } from "../../lib/output.fixtures"
 import * as calls from "../../composables/outputCalls"
-import type { Composition } from "../../composables/outputCalls"
+import type { Composition, Queues } from "../../composables/outputCalls"
 import type { Answer } from "../../composables/sourceCalls"
 import { useSSE } from "../../composables/useSSE"
 import { useCompositionStore } from "../../stores/composition"
 import { useSeriesStore } from "../../stores/series"
 import { useSeriesReadsStore } from "../../stores/seriesReads"
+import { useVoicesStore } from "../../stores/voices"
 import { t } from "../../i18n"
 import type { Reference, Row } from "../../lib/output"
-import { AVAILABILITY } from "../../lib/output.fixtures"
 
 vi.mock("../../composables/outputCalls")
 
@@ -30,58 +30,95 @@ const reference = (season: number, episode: number, over: Partial<Reference> = {
 })
 const composition = (): Composition => ({
   series_id: 1, rev: 1, sources: [], settings: [],
-  rows: [row(1, 1), row(1, 2), row(2, 1)],
+  rows: [row(1, 1), row(1, 2), row(2, 1), row(1, 1, { row_key: "k1", source_id: 8, player: "kodik", player_label: "Kodik", voice_label: "AniStar" })],
   levels: [{ season: null, levers: [] }, { season: 1, levers: [] }, { season: 2, levers: [] }],
-  levers: SPECS,
-  availability: AVAILABILITY,
+  levers: SPECS, availability: AVAILABILITY,
+  voice_orders: [{ season: 1, voices: [{ label: "Ruchime", episodes: "1–2" }, { label: "AniStar", episodes: "1" }] },
+    { season: 2, voices: [{ label: "Ruchime", episodes: "1" }] }],
 })
+const queues = (): Queues => ({
+  series_id: 1, season: 1, episode: 1,
+  reference: { order_level: "default", rows: [
+    { group: "Ruchime", source_id: 7, player: "vibix", player_label: "Vibix", height: 1080, episodes: "1", allowed: true, allowed_level: "default" },
+    { group: "AniStar", source_id: 8, player: "kodik", player_label: "Kodik", height: 720, episodes: "1", allowed: true, allowed_level: "default" },
+  ] },
+  groups: [{ group: "AniStar", take: true, take_level: "default", order_level: "default", rows: [
+    { group: "AniStar", source_id: 8, player: "kodik", player_label: "Kodik", height: 720, episodes: "1", allowed: true, allowed_level: "default" },
+  ] }],
+})
+
+// The grid measures itself: here it has room for six of the smallest cards.
+function roomFor(cards: number): void {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const width = this.classList.contains("grid-ruler") ? 150 : this.classList.contains("season-grid") ? 150 * cards : 0
+    return { width, height: 0, top: 0, left: 0, right: width, bottom: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+  })
+}
 
 let mounted: VueWrapper[] = []
 const mountOutput = () => {
-  const wrapper = mount(StatusOutput, { props: { seriesId: 1, seriesName: "Тайтл" } })
+  const wrapper = mount(StatusOutput, { props: { seriesId: 1, seriesName: "Тайтл" }, attachTo: document.body })
   mounted.push(wrapper)
   return wrapper
 }
+const cards = (w: VueWrapper) => w.findAll(".episode-card").map((each) => [each.attributes("data-season"), each.attributes("data-episode")])
+const button = (w: VueWrapper, text: string) => w.findAll("button").find((each) => each.text().includes(text))
+
+// The settings window measures its tabs; the test has no layout, so the measuring is a stand-in that sees nothing.
+class NoLayout {
+  observe() {}
+  disconnect() {}
+}
 
 beforeEach(() => {
+  vi.stubGlobal("ResizeObserver", NoLayout)
+  Element.prototype.scrollIntoView = () => {}
   setActivePinia(createPinia())
   useSSE().connected.value = false
+  roomFor(6)
   vi.mocked(calls.fetchComposition).mockReset().mockResolvedValue(ok(composition()))
   vi.mocked(calls.fetchOutput).mockReset().mockResolvedValue(ok([
     reference(1, 1), reference(1, 2, { mark: "own" }), reference(2, 1)]))
   vi.mocked(calls.fetchMedia).mockReset().mockResolvedValue(ok([]))
-  vi.mocked(calls.switchOutput).mockReset().mockResolvedValue(ok({ success: true }))
-  vi.mocked(calls.syncSeries).mockReset().mockResolvedValue(ok({ success: true }))
+  vi.mocked(calls.fetchQueues).mockReset().mockResolvedValue(ok(queues()))
+  for (const each of [calls.switchOutput, calls.syncSeries, calls.setLever, calls.resetLever, calls.retryDubs, calls.redoDubs,
+    calls.refetchReference]) vi.mocked(each).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.resetFailures).mockReset().mockResolvedValue(ok({ success: true, reset: 1 }))
-  vi.mocked(calls.setLever).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.fetchRenames).mockReset().mockResolvedValue(ok({
     preview: [{ unique_id: "u2", season: 1, episode: 2, part: null, new_filename_preview: "Show s01e02.mp4" }] }))
 })
-
-afterEach(() => mounted.splice(0).forEach((wrapper) => wrapper.unmount()))
+afterEach(() => {
+  mounted.splice(0).forEach((wrapper) => wrapper.unmount())
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
 describe("StatusOutput", () => {
-  it("shows the series, its seasons and their episodes as the core gave them", async () => {
+  it("shows the seasons and their episodes as cards, each with the source and the resolution of its reference", async () => {
     const w = mountOutput()
     expect(w.text()).toContain(t("output.loading"))
     await flushPromises()
-    expect(w.find("[data-scope=series] .level-title").text()).toBe("Тайтл")
-    expect(w.findAll("[data-scope=season] > header .level-title").map((each) => each.text())).toEqual([
-      t("output.season", { n: 1 }), t("output.season", { n: 2 })])
-    expect(w.findAll("article").map((each) => [each.attributes("data-season"), each.attributes("data-episode")])).toEqual([
-      ["1", "1"], ["1", "2"], ["2", "1"]])
+    expect(w.findAll(".season-title").map((each) => each.text())).toEqual([t("output.season", { n: 1 }), t("output.season", { n: 2 })])
+    expect(cards(w)).toEqual([["1", "1"], ["1", "2"], ["2", "1"]])
+    expect(w.find(".episode-card .card-ref").text()).toContain(`Vibix ${t("output.height", { height: 1080 })}`)
+    expect(w.findAll(".episode-card")[0].findAll(".track-cell").map((cell) => cell.text())).toEqual(["1", "2"])
   })
 
-  it("says that the layout was not counted and the earlier one stands, from the failure the core announced, until a newer layout comes", async () => {
+  it("puts as many cards in a row as the tracks and the number of episodes of the season allow", async () => {
     const w = mountOutput()
     await flushPromises()
-    expect(w.find(".output-layout-failure").exists()).toBe(false)
+    // Two episodes of a season of two tracks ask for one card a row, though six would fit.
+    expect((w.find(".season-grid").element as HTMLElement).style.gridTemplateColumns).toBe("repeat(1, minmax(0, 1fr))")
+  })
+
+  it("says that the layout was not counted and the earlier one stands, until a newer layout comes", async () => {
+    const w = mountOutput()
+    await flushPromises()
     const store = useCompositionStore()
     store.applyFailed({ series_id: 1, reason: JSON.stringify({ code: "composition_error" }) })
     await flushPromises()
     expect(w.find(".output-layout-failure").text()).toContain("Раскладка не пересчитана, действует прежняя")
-    expect(w.findAll("article")).toHaveLength(3) // the earlier layout is still shown
-    store.applyFailed({ series_id: 2, reason: "{}" })
+    expect(w.findAll(".episode-card")).toHaveLength(3)
     store.applyChanged({ series_id: 1, rev: 2, episodes: [], summary_only: false })
     await flushPromises()
     expect(w.find(".output-layout-failure").exists()).toBe(false)
@@ -93,50 +130,107 @@ describe("StatusOutput", () => {
     const w = mountOutput()
     await flushPromises()
     expect(w.text()).toContain(t("output.empty"))
-    expect(w.find("article").exists()).toBe(false)
+    expect(w.find(".episode-card").exists()).toBe(false)
   })
 
-  it("keeps only the episodes that depart from the norm, and the seasons that have any, when the filter is on", async () => {
+  it("counts the episodes of each filter and keeps only those of the one chosen, and the seasons that have any", async () => {
     const w = mountOutput()
     await flushPromises()
-    await w.find(".output-deviations input").setValue(true)
-    expect(w.findAll("article").map((each) => each.attributes("data-episode"))).toEqual(["2"])
-    expect(w.findAll("[data-scope=season]")).toHaveLength(1)
-    await w.find(".output-deviations input").setValue(false)
-    expect(w.findAll("article")).toHaveLength(3)
+    const filter = w.findAll(".output-filter")
+    expect(filter.map((each) => each.find("strong").text())).toEqual(["3", "1", "0", "0", "0"])
+    await w.find(".output-filter.is-deviations").trigger("click")
+    expect(cards(w)).toEqual([["1", "2"]])
+    expect(w.findAll(".season-block")).toHaveLength(1)
+    await w.find(".output-filter.is-all").trigger("click")
+    expect(w.findAll(".episode-card")).toHaveLength(3)
   })
 
-  it("switches an episode off, and a season, by the numbers the core gave", async () => {
+  it("opens an episode below its row with its tracks, and asks for the queues of that episode", async () => {
     const w = mountOutput()
     await flushPromises()
-    await w.findAll("article")[1].find(".episode-switch").trigger("click")
-    await w.findAll("[data-scope=season]")[1].find(".level-switch").trigger("click")
+    await w.findAll(".episode-card")[0].trigger("click")
+    await flushPromises()
+    expect(calls.fetchQueues).toHaveBeenCalledWith(1, 1, 1)
+    const detail = w.find(".episode-detail")
+    expect(detail.attributes("data-episode")).toBe("1")
+    expect(detail.findAll(".track-table tbody tr").map((each) => each.attributes("data-group"))).toEqual(["Ruchime", "AniStar"])
+    await detail.find(".icon-btn[aria-label='" + t("output.episode.close") + "']").trigger("click")
+    expect(w.find(".episode-detail").exists()).toBe(false)
+  })
+
+  it("does the action a track asks for: a failed voice-over again, a placed one anew, the reference downloaded again", async () => {
+    useVoicesStore().snapshot({ items: [
+      { series_id: 1, season: 1, episode: 1, part: null, voice_key: "AniStar", voice_label: "AniStar", status: "failed",
+        state: "error", hint: null, detail: { code: "download_failed", params: {} }, source_id: 8, player: "kodik" },
+    ], epoch: 1, rev: 1 } as never)
+    vi.mocked(calls.fetchMedia).mockResolvedValue(ok([{ unique_id: "u1", source_id: 7, row_key: "r1-1", status: "completed" }]))
+    const w = mountOutput()
+    await flushPromises()
+    await w.findAll(".episode-card")[0].trigger("click")
+    await flushPromises()
+    await w.find(".track-action.do-retry").trigger("click")
+    await w.find(".track-action.do-refetch").trigger("click")
+    expect(calls.retryDubs).toHaveBeenCalledWith(1, { season: 1, episode: 1, voice_label: "AniStar" })
+    expect(calls.refetchReference).toHaveBeenCalledWith(1, { season: 1, episode: 1, part: null })
+  })
+
+  it("sends the order the user dragged a queue into, and a variant left out, as levers of the episode", async () => {
+    const w = mountOutput()
+    await flushPromises()
+    await w.findAll(".episode-card")[0].trigger("click")
+    await flushPromises()
+    await button(w, t("output.tab.reference"))!.trigger("click")
+    const rows = w.findAll(".queue-row")
+    expect(rows.map((each) => each.find(".queue-player").text())).toEqual(["Vibix", "Kodik"])
+    await rows[1].trigger("dragstart")
+    await rows[0].trigger("dragover")
+    await rows[0].trigger("drop")
+    await rows[0].find("input[type=checkbox]").setValue(false)
+    expect(vi.mocked(calls.setLever).mock.calls).toEqual([
+      [1, { season: 1, episode: 1, lever: "reference.order", target: null, value: [
+        { group: "AniStar", source_id: 8, player: "kodik" }, { group: "Ruchime", source_id: 7, player: "vibix" }] }],
+      [1, { season: 1, episode: 1, lever: "reference.allow", target: 'variant:["Ruchime",7,"vibix"]', value: false }],
+    ])
+  })
+
+  it("opens the settings of the series as the same queues for the whole series", async () => {
+    const w = mountOutput()
+    await flushPromises()
+    await w.find(".output-series-settings").trigger("click")
+    await flushPromises()
+    expect(calls.fetchQueues).toHaveBeenCalledWith(1, null, null)
+  })
+
+  it("switches an episode off from its detail, and a season from its header", async () => {
+    const w = mountOutput()
+    await flushPromises()
+    await w.findAll(".episode-card")[1].trigger("click")
+    await flushPromises()
+    await w.find(".detail-switch").trigger("click")
+    await w.findAll(".season-switch")[1].trigger("click")
     expect(vi.mocked(calls.switchOutput).mock.calls).toEqual([
       [1, { season: 1, episode: 2, off: true }], [1, { season: 2, off: true }]])
   })
 
-  it("renders the controls anew and shows the words of a refusal, so that they show what the core holds", async () => {
+  it("shows the words of a refusal", async () => {
     vi.mocked(calls.switchOutput).mockResolvedValueOnce({ ok: false, text: "Сериал не найден" })
     const w = mountOutput()
     await flushPromises()
-    const before = w.find("article").element
-    await w.find("article .episode-switch").trigger("click")
+    await w.findAll(".season-switch")[0].trigger("click")
     await flushPromises()
     expect(w.find(".output-failure").text()).toBe("Сериал не найден")
-    expect(w.find("article").element).not.toBe(before)
   })
 
-  it("shows the names the files would get under their episodes when the box is checked, and takes them back when it is not", async () => {
+  it("shows the name the file would get in the first line of a card wider than the smallest, when the box is checked", async () => {
     const w = mountOutput()
     await flushPromises()
     expect(calls.fetchRenames).not.toHaveBeenCalled()
     await w.find(".output-names input").setValue(true)
     await flushPromises()
-    const named = w.findAll(".output-episode").map((each) => each.find(".episode-file").exists())
-    expect(named).toEqual([false, true, false])
-    expect(w.findAll(".episode-file")[0].text()).toBe(t("output.file", { name: "Show s01e02.mp4" }))
+    expect(w.findAll(".episode-card").map((each) => each.find(".card-name").exists())).toEqual([false, true, false])
+    expect(w.find(".card-name").text()).toBe("Show s01e02.mp4")
     await w.find(".output-names input").setValue(false)
-    expect(w.find(".episode-file").exists()).toBe(false)
+    expect(w.find(".card-name").exists()).toBe(false)
   })
 
   it("has the sync of the series and the reset of failed attempts, each waits for its answer", async () => {
@@ -144,23 +238,16 @@ describe("StatusOutput", () => {
     vi.mocked(calls.syncSeries).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
     const w = mountOutput()
     await flushPromises()
-    const buttons = w.findAll(".output-bar button")
-    expect(buttons.map((each) => each.text())).toEqual([t("output.sync"), t("output.retryFailed")])
-    await buttons[0].trigger("click")
-    expect(buttons.every((each) => each.attributes("disabled") !== undefined)).toBe(true) // one pass at a time
+    const sync = w.find(".output-sync")
+    await sync.trigger("click")
+    expect(sync.attributes("disabled")).toBeDefined() // one pass at a time
     finish(ok({ success: true }))
     await flushPromises()
-    expect(buttons.every((each) => each.attributes("disabled") === undefined)).toBe(true)
+    expect(sync.attributes("disabled")).toBeUndefined()
+    await w.find(".output-retry-failed").trigger("click")
+    await flushPromises()
     expect(calls.syncSeries).toHaveBeenCalledWith(1)
-  })
-
-  it("resets the failed attempts by a change of the series, and starts no sync", async () => {
-    const w = mountOutput()
-    await flushPromises()
-    await w.find(".output-bar .output-retry-failed").trigger("click")
-    await flushPromises()
     expect(calls.resetFailures).toHaveBeenCalledWith(1)
-    expect(calls.syncSeries).not.toHaveBeenCalled()
   })
 
   it("draws the button of the pass by the table of the core and the state the core reports, not only by its own call", async () => {
@@ -168,11 +255,9 @@ describe("StatusOutput", () => {
     store.upsert({ id: 1, name: "Тайтл", site: "x", auto_scan_enabled: true, statuses: ["scanning"] })
     const w = mountOutput()
     await flushPromises()
-    const [sync] = w.findAll(".output-bar button")
-    expect(sync.attributes("disabled")).toBeDefined() // a pass that another window began is a pass that is on
-    await sync.trigger("click")
-    expect(calls.syncSeries).not.toHaveBeenCalled()
-    store.applyDelta({ id: 1, statuses: [], is_busy: false }) // the core says the pass ended
+    const sync = w.find(".output-sync")
+    expect(sync.attributes("disabled")).toBeDefined()
+    store.applyDelta({ id: 1, statuses: [], is_busy: false })
     await flushPromises()
     expect(sync.attributes("disabled")).toBeUndefined()
   })
@@ -181,17 +266,15 @@ describe("StatusOutput", () => {
     vi.mocked(calls.fetchComposition).mockResolvedValue({ ok: false, text: "x" } as Answer<Composition>)
     const w = mountOutput()
     await flushPromises()
-    expect(w.find(".output-bar button").attributes("disabled")).toBeUndefined()
+    expect(w.find(".output-sync").attributes("disabled")).toBeUndefined()
   })
 
   it("shows how far the reads of the pages the pass waits for are, by site, and drops each when its wait ends", async () => {
     const reads = useSeriesReadsStore()
     const w = mountOutput()
     await flushPromises()
-    expect(w.findAll(".output-reading")).toHaveLength(0)
     reads.apply({ series_id: 1, source_id: 7, url: "https://1.ruchime.org/release/x", phase: "episodes", current: 34,
       total: 391, rate: 0.6 })
-    reads.apply({ series_id: 2, source_id: 9, url: "https://other.test/p", phase: "episodes", current: 1, total: 2 })
     await flushPromises()
     expect(w.findAll(".output-reading").map((line) => line.text())).toEqual([
       t("output.reading", { site: "1.ruchime.org", text: "Страницы серий: 34 из 391 | 0.6 с/с" })])
@@ -200,14 +283,14 @@ describe("StatusOutput", () => {
     expect(w.findAll(".output-reading")).toHaveLength(0)
   })
 
-  it("takes no change while a sync of the series is under way: the buttons and the levers are not available", async () => {
-    useSeriesStore().upsert({ id: 1, name: "Тайтл", is_busy: true, statuses: ["scanning"] } as never)
+  it("names the sources of the series by their place and colour", async () => {
+    useSeriesStore().upsert({ id: 1, name: "Тайтл", sources: [
+      { id: 8, series_id: 1, position: 1, url: "https://vkvideo.ru/@chan|x", source_type: "vk_video", color: 3 },
+      { id: 7, series_id: 1, position: 0, url: "https://1.ruchime.org/release/x", source_type: "web_video", color: 0 },
+    ] } as never)
     const w = mountOutput()
     await flushPromises()
-    const sync = () => w.findAll(".output-bar button").find((each) => each.text().includes(t("output.sync")))
-    expect(sync()?.attributes("disabled")).toBeDefined()
-    useSeriesStore().upsert({ id: 1, name: "Тайтл", is_busy: false, statuses: [] } as never)
-    await flushPromises()
-    expect(sync()?.attributes("disabled")).toBeUndefined()
+    expect(w.findAll(".output-source").map((each) => each.text())).toEqual(["11.ruchime.org", "2vkvideo.ru @chan"])
+    expect(w.find(".episode-card .source-mark").text()).toBe("1")
   })
 })

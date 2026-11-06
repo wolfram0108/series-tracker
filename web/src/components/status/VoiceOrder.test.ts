@@ -2,7 +2,6 @@
 import { describe, expect, it } from "vitest"
 import { mount } from "@vue/test-utils"
 import VoiceOrder from "./VoiceOrder.vue"
-import { t } from "../../i18n"
 
 const voices = [
   { label: "ПВА ШОУ", episodes: "1–50" },
@@ -13,10 +12,8 @@ const voices = [
 describe("VoiceOrder", () => {
   it("shows the voice-overs of the season in their order with the episodes each has", () => {
     const w = mount(VoiceOrder, { props: { voices } })
-    expect(w.findAll(".voice-order-item").map((item) => item.text())).toEqual([
-      `1${t("output.voices.label", { label: "ПВА ШОУ", episodes: "1–50" })}`,
-      `2${t("output.voices.label", { label: "ruchime", episodes: "20–51" })}`,
-      `3${t("output.voices.label", { label: "AniStar", episodes: "3" })}`,
+    expect(w.findAll(".voice-order-item").map((item) => item.findAll("span").map((part) => part.text()))).toEqual([
+      ["1", "ПВА ШОУ", "1–50"], ["2", "ruchime", "20–51"], ["3", "AniStar", "3"],
     ])
   })
 

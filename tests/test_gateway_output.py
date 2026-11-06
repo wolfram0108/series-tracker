@@ -248,7 +248,7 @@ async def test_the_queues_of_a_level_are_the_answer_of_composition(tmp_path):
 
 
 async def test_the_actions_on_a_track_go_to_their_owners_inside_the_admission_and_start_no_sync(tmp_path):
-    """«Повторить», «Пересоздать», «Скачать заново»: each is one command of the owner of the work, under the admission
+    """Retry, redo and refetch: each is one command of the owner of the work, under the admission
     of a change of the series."""
     answers = {"voices.dubs.retry": {"restarted": 1}, "voices.dubs.redo": {"restarted": 2},
                "downloads.reference.refetch": {"queued": True}}

@@ -93,3 +93,34 @@ export function resetLever(seriesId: number, body: Schemas["OutputSettingsReset"
     params: { path: { series_id: seriesId } }, body,
   }), OUTPUT_WORDS)
 }
+
+/** The queues of a level (the series, a season, or an episode of it) in the order the core tries their variants. */
+export type Queues = Schemas["QueuesReply"]
+
+export function fetchQueues(seriesId: number, season: number | null, episode: number | null): Promise<Answer<Queues>> {
+  const query = { ...(season === null ? {} : { season }), ...(episode === null ? {} : { episode }) }
+  return call(() => api.GET("/api/series/{series_id}/output/queues", {
+    params: { path: { series_id: seriesId }, query },
+  }), OUTPUT_WORDS)
+}
+
+/** The retry of a track: the voice-overs of the scope that failed start over and go to download now. */
+export function retryDubs(seriesId: number, body: Schemas["DubsActionBody"]): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/series/{series_id}/output/dubs/retry", {
+    params: { path: { series_id: seriesId } }, body,
+  }), OUTPUT_WORDS)
+}
+
+/** The redo of a track: the voice-overs of the scope whose track is placed are made anew now. */
+export function redoDubs(seriesId: number, body: Schemas["DubsActionBody"]): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/series/{series_id}/output/dubs/redo", {
+    params: { path: { series_id: seriesId } }, body,
+  }), OUTPUT_WORDS)
+}
+
+/** The refetch of a reference: the reference video of the episode is downloaded again now. */
+export function refetchReference(seriesId: number, body: Schemas["RefetchBody"]): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/series/{series_id}/output/reference/refetch", {
+    params: { path: { series_id: seriesId } }, body,
+  }), OUTPUT_WORDS)
+}

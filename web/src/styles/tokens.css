@@ -43,3 +43,12 @@
   --text-muted: #6c757d;
   --stripe-intensity: 0.3;
 }
+
+/* The colours of the sources of a series (series_sources.color is the index): told apart from each other and from the
+   colours of the statuses, with white figures on them. */
+:root {
+  --source-0: #3f51b5; --source-1: #ef6c00; --source-2: #00838f; --source-3: #ad1457;
+  --source-4: #6d4c41; --source-5: #827717; --source-6: #6a1b9a; --source-7: #1a237e;
+  --source-8: #d84315; --source-9: #455a64; --source-10: #c2185b; --source-11: #2e7d32;
+  --source-12: #b26a00; --source-13: #1565c0; --source-14: #880e4f; --source-15: #558b2f;
+}

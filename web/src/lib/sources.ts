@@ -58,6 +58,8 @@ export interface SourceItem {
   profileId: number | null
   vibixSeason: number | null
   playersOff: string[]
+  /** The colour the catalog gave the source in its series (0–15 of the palette); none for a draft not saved yet. */
+  color: number | null
   view: SourceView
 }
 
@@ -310,6 +312,7 @@ export function itemOfSource(
     profileId: source.parser_profile_id ?? null,
     vibixSeason: source.vibix_season ?? null,
     playersOff,
+    color: source.color ?? null,
     view: viewOf({ summary, playersOff, live, rows: layout.filter((row) => row.source_id === source.id) }),
   }
 }

@@ -87,7 +87,7 @@ function clear(): void {
 <template>
   <div class="sources stack">
     <SourceCard
-      v-for="item in items" :key="item.id" :item="item" :profiles="profiles" :busy="busy"
+      v-for="(item, index) in items" :key="item.id" :item="item" :profiles="profiles" :busy="busy" :place="index + 1"
       @change="emit('change', item.id, $event)" @remove="editable && emit('remove', item.id)"
       @reread="emit('reread', item.id)"
     />

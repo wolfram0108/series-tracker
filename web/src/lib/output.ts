@@ -208,11 +208,6 @@ export function allowedIn(table: Record<string, string[]> | undefined, action: s
   return (table?.[action] ?? []).includes(state)
 }
 
-/** Whether the table of the core allows the action in the state: a control is drawn enabled only where it does. */
-export function canDo(view: EpisodeView, action: string, state: string): boolean {
-  return allowedIn(view.availability, action, state)
-}
-
 /** One voice-over group and its variants: a column of the output. */
 export interface VoiceColumn {
   group: string
@@ -225,20 +220,8 @@ function labelOf(rows: Row[], sourceId: number, player: string): string {
   return named?.player_label || player
 }
 
-const byPlayer = (a: PlayerOption, b: PlayerOption): number =>
+const byPlayer = (a: Variant, b: Variant): number =>
   a.sourceId - b.sourceId || compareNames(a.player, b.player)
-
-/** The distinct source and player pairs the view has lines for. */
-export function sourcePlayers(view: EpisodeView): PlayerOption[] {
-  const pairs = new Map<string, PlayerOption>()
-  for (const row of view.rows) {
-    const key = keyOf(row.source_id, row.player)
-    if (!pairs.has(key)) {
-      pairs.set(key, { sourceId: row.source_id, player: row.player, playerLabel: labelOf(view.rows, row.source_id, row.player) })
-    }
-  }
-  return [...pairs.values()].sort(byPlayer)
-}
 
 /** The voice-over groups of the view with the variants of each: one column per group, alphabetically, the variants
  *  by source and player. */
@@ -269,28 +252,6 @@ export function voiceColumns(view: EpisodeView): VoiceColumn[] {
   return [...columns.values()]
     .sort((a, b) => compareNames(a.group, b.group))
     .map((column) => ({ ...column, variants: column.variants.sort(byPlayer) }))
-}
-
-// --- the values of the levers ----------------------------------------------------------------------------------------
-
-export interface LeverState {
-  value: unknown
-  level: Schemas["Level"]
-}
-
-/** The value of a lever for a target and the level it comes from; no record means the default the core gave the lever. */
-export function leverState(
-  levers: Lever[], specs: LeverSpec[], lever: string, target: string | null | undefined,
-): LeverState {
-  const wanted = target ?? null
-  const found = levers.find((each) => each.lever === lever && (each.target ?? null) === wanted)
-  if (found) return { value: found.value, level: found.level }
-  return { value: specs.find((spec) => spec.name === lever)?.default ?? null, level: "default" }
-}
-
-/** Whether the level itself sets the lever, not merely inherits it from the level above. */
-export function isOwn(state: LeverState, level: "series" | "season" | "episode"): boolean {
-  return state.level === level
 }
 
 // --- the bodies of the commands --------------------------------------------------------------------------------------
@@ -363,22 +324,6 @@ export function referenceOf(view: EpisodeView, part: number | null = null): Refe
   return view.references.find((reference) => (reference.part ?? null) === part) ?? null
 }
 
-/** One view for a set of episodes (a season, a whole series): the rows of all of them once each, so that the choices of
- *  a lever offered on a level are those any episode of the level could take. */
-export function scopeView(views: EpisodeView[]): EpisodeView {
-  const seen = new Set<string>()
-  const rows: Row[] = []
-  for (const view of views) {
-    for (const row of view.rows) {
-      const key = `${row.source_id}/${row.row_key}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      rows.push(row)
-    }
-  }
-  return { season: 0, episode: 0, references: [], rows, levers: [], dubs: [], availability: views[0]?.availability ?? {} }
-}
-
 // --- the lines of the output of an episode ---------------------------------------------------------------------------
 
 /** One line of "the voice-overs on the output": the reference or a voice-over, the variant it comes from and its status.
@@ -425,4 +370,136 @@ export function outputLines(view: EpisodeView): OutputLine[] {
     })
   }
   return lines
+}
+
+// --- the window of the output: the grid, the card and the marks of the sources ----------------------------------------------
+
+/** The most cards a row of a season holds: the smallest card has room for six tracks. */
+export const MAX_PER_ROW = 6
+
+/**
+ * How many cards a row of a season holds. `places` is how many of the smallest cards the width has room for. The tracks
+ * of the season say how many may stand in a row (a strip of tracks is one line: up to 6 tracks a card is the smallest, up
+ * to 12 twice as wide, up to 18 three times, more a whole row); the number of its episodes says how many it asks for (up
+ * to 12 one, up to 24 two, up to 48 four, more as many as may). The smaller of the two is taken: the episodes only widen a
+ * card, never narrow it below what its tracks need.
+ */
+export function perRowOf(places: number, tracks: number, episodes: number): number {
+  const fit = Math.max(1, Math.min(MAX_PER_ROW, places))
+  const units = tracks >= 19 ? fit : Math.min(fit, Math.ceil(Math.max(tracks, 1) / 6))
+  const byTracks = Math.max(1, Math.floor(fit / units))
+  const byEpisodes = episodes <= 12 ? 1 : episodes <= 24 ? 2 : episodes <= 48 ? 4 : MAX_PER_ROW
+  return Math.min(byTracks, byEpisodes)
+}
+
+/** The state of one track of an episode, as a cell of its strip shows it. */
+export type TrackState = "done" | "down" | "align" | "wait" | "error" | "none"
+
+const FILE_STATE: Record<string, TrackState> = {
+  completed: "done", downloading: "down", processing: "down", publishing: "down", pending: "wait", error: "error",
+}
+const DUB_STATE: Record<Schemas["DubState"], TrackState> = {
+  done: "done", downloading: "down", download_queued: "down", align_queued: "align", running: "align", planned: "wait",
+  error: "error",
+}
+
+/** One cell of the strip of an episode: the track at its place in the container. The track of the reference is the
+ *  voice of the video itself: its state is the state of the file of the video. */
+export interface TrackCell {
+  pos: number
+  group: string
+  state: TrackState
+  isReference: boolean
+}
+
+/** The tracks of an episode in the order of the container of its season (`order`). */
+export function trackCells(view: EpisodeView, order: readonly string[]): TrackCell[] {
+  const lines = outputLines(view)
+  return order.map((group, index) => {
+    const reference = lines.find((line) => line.kind === "reference" && line.group === group)
+    if (reference) return { pos: index + 1, group, state: FILE_STATE[reference.file ?? ""] ?? "wait", isReference: true }
+    const dub = lines.find((line) => line.kind === "dub" && line.group === group)
+    return { pos: index + 1, group, state: dub?.dub ? DUB_STATE[dub.dub.state] : "none", isReference: false }
+  })
+}
+
+/** The state of an episode as its card is coloured: switched off; an error anywhere (no reference, a track that failed);
+ *  work under way (a download, then an alignment); everything done; else waiting. */
+export type EpisodeStatus = "off" | "error" | "down" | "align" | "ready" | "wait"
+
+export function episodeStatus(view: EpisodeView, cells: readonly TrackCell[]): EpisodeStatus {
+  if (isOff(view)) return "off"
+  const marks = view.references.map((reference) => reference.mark)
+  if (marks.includes("none") || marks.includes("unfit") || cells.some((cell) => cell.state === "error")) return "error"
+  if (cells.some((cell) => cell.state === "down")) return "down"
+  if (cells.some((cell) => cell.state === "align")) return "align"
+  const present = cells.filter((cell) => cell.state !== "none")
+  return present.length > 0 && present.every((cell) => cell.state === "done") ? "ready" : "wait"
+}
+
+/** The mark of a source in its series: its place in the list of the series (from 1), its colour (0–15 of the palette)
+ *  and where it is (the site, and the channel of a VK channel). */
+export interface SourceMark {
+  n: number
+  color: number
+  place: string
+}
+
+function placeOf(url: string): string {
+  try {
+    const link = new URL(url.split("|")[0])
+    return link.pathname.startsWith("/@") ? `${link.host} ${link.pathname.slice(1)}` : link.host
+  } catch {
+    return url
+  }
+}
+
+export function sourceMarks(
+  sources: readonly { id: number; position?: number; color?: number; url?: string }[],
+): Record<number, SourceMark> {
+  const ordered = [...sources].sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.id - b.id)
+  return Object.fromEntries(ordered.map((source, index) => [
+    source.id, { n: index + 1, color: source.color ?? index % 16, place: placeOf(source.url ?? "") }]))
+}
+
+// --- the levers of a queue, as the core describes them -------------------------------------------------------------------
+
+export type QueueName = Schemas["Queue"]
+export type QueueRow = Schemas["QueueRow"]
+
+/** The levers that act on a queue, found by their description, not by their names: its order (`variant_order`), the flag
+ *  that leaves a variant out of it (a flag of a variant) and, for a voice-over, the flag that takes its group at all. */
+export interface QueueLevers {
+  order?: string
+  allow?: string
+  take?: string
+}
+
+export function queueLevers(specs: readonly LeverSpec[], queue: QueueName): QueueLevers {
+  const of = (target: LeverSpec["target"], shape: LeverSpec["shape"]) =>
+    specs.find((spec) => spec.queue === queue && spec.target === target && spec.shape === shape)?.name
+  return {
+    order: of(queue === "reference" ? "none" : "group", "variant_order"),
+    allow: of("variant", "flag"),
+    take: queue === "voice" ? of("group", "flag") : undefined,
+  }
+}
+
+/** The value of an order lever for the rows of a queue in the order the user put them: the reference names the group of a
+ *  variant, a voice-over does not (its group is the target of the lever). */
+export function orderValue(queue: QueueName, rows: readonly QueueRow[]): Record<string, unknown>[] {
+  return rows.map((row) => queue === "reference"
+    ? { group: row.group, source_id: row.source_id, player: row.player }
+    : { source_id: row.source_id, player: row.player })
+}
+
+/** `1–50, 52` of a set of episode numbers, as the core words the episodes of a voice-over. */
+export function spansOf(numbers: Iterable<number>): string {
+  const runs: [number, number][] = []
+  for (const number of [...new Set(numbers)].sort((a, b) => a - b)) {
+    const last = runs[runs.length - 1]
+    if (last && number === last[1] + 1) last[1] = number
+    else runs.push([number, number])
+  }
+  return runs.map(([first, end]) => (first === end ? String(first) : `${first}–${end}`)).join(", ")
 }

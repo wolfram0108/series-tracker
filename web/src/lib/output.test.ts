@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest"
 import type { components } from "../api/schema"
 import type { VoiceDub } from "../stores/voices"
 import {
-  allOff, bySeason, fileNamesOf, groupTarget, isDeviation, isOff, isOwn, joinEpisodes, leverState, outputLines, parseGroupTarget,
-  parseVariantTarget, referenceOf, resetBody, scopeView, setBody, sourcePlayers, variantTarget, voiceColumns,
-  type EpisodeView, type Lever, type LeverState, type Reference, type Row,
+  allOff, bySeason, episodeStatus, fileNamesOf, groupTarget, isDeviation, isOff, joinEpisodes, orderValue, outputLines,
+  parseGroupTarget, parseVariantTarget, perRowOf, queueLevers, referenceOf, resetBody, setBody, sourceMarks, spansOf,
+  trackCells, variantTarget, voiceColumns, type EpisodeView, type Lever, type QueueRow, type Reference, type Row,
 } from "./output"
 import { SPECS } from "./output.fixtures"
 
@@ -113,15 +113,6 @@ describe("the choices of an episode", () => {
   ]
   const view = episodeOf({ rows: lines })
 
-  it("lists the source and player pairs of the episode, labelled from any of their lines", () => {
-    expect(sourcePlayers(view)).toEqual([
-      { sourceId: 7, player: "vibix", playerLabel: "Vibix" },
-      { sourceId: 7, player: "vk", playerLabel: "vk" },
-      { sourceId: 8, player: "kodik", playerLabel: "Kodik" },
-      { sourceId: 9, player: "astar", playerLabel: "astar" },
-    ])
-  })
-
   it("makes a column of every voice-over label of the episode, alphabetically, with the variants of each by source and player", () => {
     expect(voiceColumns(view).map((column) => [column.group, column.variants.map((each) => `${each.sourceId}/${each.player}`)])).toEqual([
       ["AniStar", ["7/vibix", "8/kodik"]],
@@ -148,48 +139,6 @@ describe("the choices of an episode", () => {
 
   it("makes no column for no lines", () => {
     expect(voiceColumns(episodeOf({ rows: [] }))).toEqual([])
-  })
-})
-
-describe("leverState", () => {
-  const target = variantTarget("AniStar", 7, "vibix")
-  const levers = [
-    lever("reference.choice", null, { group: "AniStar", source_id: 7, player: "vibix" }, "series"),
-    lever("voice.take", groupTarget("AniStar"), false, "episode"),
-    lever("variant.allow", target, false, "season"),
-  ]
-
-  it("takes the value and the level of the record with this lever and target", () => {
-    expect(leverState(levers, SPECS, "variant.allow", target)).toEqual({ value: false, level: "season" })
-    expect(leverState(levers, SPECS, "voice.take", groupTarget("AniStar"))).toEqual({ value: false, level: "episode" })
-  })
-
-  it("reads a record without a target as the target null", () => {
-    expect(leverState(levers, SPECS, "reference.choice", null).level).toBe("series")
-    expect(leverState(levers, SPECS, "reference.choice", undefined).level).toBe("series")
-  })
-
-  it("gives the default the core described for the lever when no record sets it", () => {
-    expect(leverState(levers, SPECS, "variant.allow", variantTarget("Ruchime", 8, "kodik"))).toEqual({ value: true, level: "default" })
-    expect(leverState(levers, SPECS, "voice.take", groupTarget("Ruchime"))).toEqual({ value: true, level: "default" })
-    expect(leverState([], SPECS, "voice.player", groupTarget("AniStar"))).toEqual({ value: null, level: "default" })
-    const later = [...SPECS, { name: "variant.mute", target: "variant" as const, shape: "flag" as const, default: false, consumer: "voices" }]
-    expect(leverState([], later, "variant.mute", target)).toEqual({ value: false, level: "default" })
-  })
-
-  it("gives null at the default level for a lever the core does not describe", () => {
-    expect(leverState([], SPECS, "unknown.lever", null)).toEqual({ value: null, level: "default" })
-    expect(leverState([], SPECS, "constructor", null)).toEqual({ value: null, level: "default" })
-  })
-})
-
-describe("isOwn", () => {
-  it("tells the level that sets a lever from the levels that only inherit it", () => {
-    const state: LeverState = { value: 1, level: "season" }
-    expect(isOwn(state, "season")).toBe(true)
-    expect(isOwn(state, "series")).toBe(false)
-    expect(isOwn(state, "episode")).toBe(false)
-    expect(isOwn({ value: null, level: "default" }, "series")).toBe(false)
   })
 })
 
@@ -324,19 +273,6 @@ describe("targets", () => {
   })
 })
 
-describe("scopeView", () => {
-  it("gathers the rows of the episodes of a level once each, so options are those of any episode", () => {
-    const shared = row()
-    const one = episodeOf({ season: 1, episode: 1, rows: [shared] })
-    const two = episodeOf({ season: 1, episode: 2, rows: [shared, { ...row(), row_key: "other", player: "kodik" }] })
-    const merged = scopeView([one, two])
-    expect(merged.rows).toHaveLength(2)
-    expect(sourcePlayers(merged).map((each) => each.player).sort()).toEqual(["kodik", row().player].sort())
-    expect(merged.references).toEqual([])
-    expect(merged.levers).toEqual([])
-  })
-})
-
 describe("outputLines", () => {
   const ref1 = (over: Partial<Reference> = {}): Reference => ref(1, 1, { source_id: 7, row_key: "a", player: "vk", voice_group: "ПВА ШОУ", height: 2160, ...over })
   const dubOn = (label: string, over: Partial<VoiceDub> = {}): VoiceDub => ({ ...dub(1, 1), voice_key: label, voice_label: label, source_id: 9, player: "kodik", ...over })
@@ -369,5 +305,83 @@ describe("outputLines", () => {
     expect(outputLines(episodeOf({ references: [none] }))).toEqual([])
     const [line] = outputLines(episodeOf({ dubs: [dubOn("AniStar", { source_id: null, player: null })] }))
     expect([line.player, line.playerLabel, line.height]).toEqual([null, null, null])
+  })
+})
+
+describe("perRowOf", () => {
+  it("takes as many cards a row as the tracks allow, narrowed by the number of episodes, never more than fit", () => {
+    // places: 6 of the smallest cards fit; then the tracks (5, 12, 18, 30) and the episodes (12, 18, 40, 655).
+    expect([5, 12, 18, 30].map((tracks) => perRowOf(6, tracks, 655))).toEqual([6, 3, 2, 1])
+    expect([12, 18, 24, 40, 48, 49].map((episodes) => perRowOf(6, 5, episodes))).toEqual([1, 2, 2, 4, 4, 6])
+    expect(perRowOf(6, 12, 24)).toBe(2) // the episodes ask for 2, the tracks allow 3
+    expect(perRowOf(6, 12, 100)).toBe(3) // the episodes ask for more, the tracks allow 3
+    expect([1, 2, 3, 4].map((places) => perRowOf(places, 12, 655))).toEqual([1, 1, 1, 2]) // a narrow window
+    expect(perRowOf(0, 5, 655)).toBe(1)
+  })
+})
+
+describe("the strip and the state of an episode", () => {
+  const ref1: Reference = ref(1, 1, { source_id: 7, row_key: "a", player: "vk", voice_group: "A" })
+  const dubOf = (label: string, state: VoiceDub["state"]): VoiceDub => ({ ...dub(1, 1, state), voice_key: label, voice_label: label })
+  const view = (files: string, ...dubs: VoiceDub[]) => episodeOf({
+    references: [ref1], dubs, files: [{ unique_id: "u", source_id: 7, row_key: "a", status: files }],
+    rows: [row({ source_id: 7, row_key: "a", player: "vk", voice_label: "A" })],
+  })
+
+  it("gives a cell per track in the order of the container: the reference by its file, a voice-over by its state", () => {
+    const cells = trackCells(view("completed", dubOf("B", "running"), dubOf("C", "error")), ["C", "A", "B", "D"])
+    expect(cells.map((cell) => [cell.pos, cell.group, cell.state, cell.isReference])).toEqual([
+      [1, "C", "error", false], [2, "A", "done", true], [3, "B", "align", false], [4, "D", "none", false]])
+  })
+
+  it("colours an episode by the worst of its tracks, and by its switch", () => {
+    const status = (each: EpisodeView, order: string[]) => episodeStatus(each, trackCells(each, order))
+    expect(status(view("completed", dubOf("B", "done")), ["A", "B"])).toBe("ready")
+    expect(status(view("downloading", dubOf("B", "done")), ["A", "B"])).toBe("down")
+    expect(status(view("completed", dubOf("B", "align_queued")), ["A", "B"])).toBe("align")
+    expect(status(view("pending", dubOf("B", "planned")), ["A", "B"])).toBe("wait")
+    expect(status(view("completed", dubOf("B", "error")), ["A", "B"])).toBe("error")
+    expect(status(episodeOf({ references: [ref(1, 1, { mark: "none" })] }), [])).toBe("error")
+    expect(status(episodeOf({ references: [ref(1, 1, { mark: "off" })] }), [])).toBe("off")
+  })
+})
+
+describe("the marks of the sources", () => {
+  it("numbers the sources by their place in the series and keeps the colour each was given", () => {
+    const marks = sourceMarks([
+      { id: 40, position: 3, color: 7, url: "https://animakima.ru/pages/x/" },
+      { id: 33, position: 0, color: 0, url: "https://dunhuatv.ru/761.html" },
+      { id: 38, position: 1, color: 2, url: "https://vkvideo.ru/@mir.donghua|Вечная воля" },
+    ])
+    expect(marks).toEqual({
+      33: { n: 1, color: 0, place: "dunhuatv.ru" }, 38: { n: 2, color: 2, place: "vkvideo.ru @mir.donghua" },
+      40: { n: 3, color: 7, place: "animakima.ru" },
+    })
+  })
+})
+
+describe("the levers of a queue", () => {
+  it("finds them by their description, not by their names", () => {
+    expect(queueLevers(SPECS, "reference")).toEqual({ order: "reference.order", allow: "reference.allow", take: undefined })
+    expect(queueLevers(SPECS, "voice")).toEqual({ order: "voice.order", allow: "voice.allow", take: "voice.take" })
+    expect(queueLevers([], "voice")).toEqual({ order: undefined, allow: undefined, take: undefined })
+  })
+
+  it("makes the value of an order from the rows in the order the user put them", () => {
+    const rows: QueueRow[] = [
+      { group: "A", source_id: 2, player: "kodik", player_label: "Kodik", episodes: "1", allowed: true, allowed_level: "default" },
+      { group: "B", source_id: 1, player: "vk", player_label: "VK", episodes: "1", allowed: false, allowed_level: "season" },
+    ]
+    expect(orderValue("reference", rows)).toEqual([
+      { group: "A", source_id: 2, player: "kodik" }, { group: "B", source_id: 1, player: "vk" }])
+    expect(orderValue("voice", rows)).toEqual([{ source_id: 2, player: "kodik" }, { source_id: 1, player: "vk" }])
+  })
+})
+
+describe("spansOf", () => {
+  it("words a set of episodes as runs", () => {
+    expect(spansOf([3, 1, 2, 5, 7, 6, 2])).toBe("1–3, 5–7")
+    expect(spansOf([4])).toBe("4")
+    expect(spansOf([])).toBe("")
   })
 })

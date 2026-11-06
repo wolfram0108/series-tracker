@@ -8,8 +8,9 @@ export const AVAILABILITY: Record<string, string[]> = {
 }
 
 export const SPECS: LeverSpec[] = [
-  { name: "reference.choice", target: "none", shape: "reference_pick", default: null, consumer: "scan" },
-  { name: "variant.allow", target: "variant", shape: "flag", default: true, consumer: "scan" },
-  { name: "voice.take", target: "group", shape: "flag", default: true, consumer: "voices" },
-  { name: "voice.player", target: "group", shape: "variant_pick", default: null, consumer: "voices" },
+  { name: "reference.order", target: "none", shape: "variant_order", default: [], consumer: "scan", queue: "reference" },
+  { name: "reference.allow", target: "variant", shape: "flag", default: true, consumer: "scan", queue: "reference" },
+  { name: "voice.take", target: "group", shape: "flag", default: true, consumer: "voices", queue: "voice" },
+  { name: "voice.order", target: "group", shape: "variant_order", default: [], consumer: "voices", queue: "voice" },
+  { name: "voice.allow", target: "variant", shape: "flag", default: true, consumer: "voices", queue: "voice" },
 ]

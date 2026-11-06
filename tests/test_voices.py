@@ -3450,11 +3450,11 @@ async def test_a_reading_of_the_open_runs_older_than_the_end_of_a_run_does_not_o
     assert 7 in voices._in_run and voices._run_values[7] == taken
 
 
-# --- the user's word to do voice-overs again, now (Р-70) ---------------------------------------------------------------------
+# --- the user's word to do voice-overs again, now ---------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_a_retry_of_a_rejected_voice_over_fetches_it_again_now_and_leaves_the_others_as_they_are(dubs):
-    """«Повторить» does what it says: the rejected voice-over of the scope starts over from the first source of its chain
+    """The retry does what it says: the rejected voice-over of the scope starts over from the first source of its chain
     and goes to download at once, with no sync; the placed track of the other voice stays."""
     probe, neighbours, voices, bus, sub, ref = await two_voices_ready(dubs)
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])

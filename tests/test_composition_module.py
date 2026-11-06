@@ -1504,7 +1504,7 @@ async def test_the_order_of_the_voices_of_a_season_is_shown_kept_and_set_by_the_
                               timeout=STUCK_S)
 
 
-# --- the queues of a level, as the window lists them (Р-70) -------------------------------------------------------------
+# --- the queues of a level, as the window lists them -------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_the_queues_of_a_level_follow_the_order_of_players_and_then_the_order_the_user_set_on_it(system):

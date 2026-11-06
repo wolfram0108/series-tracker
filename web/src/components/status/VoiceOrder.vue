@@ -25,33 +25,39 @@ function drop(target: number): void {
 </script>
 
 <template>
-  <section class="stack voice-order">
-    <span class="voice-order-title">{{ t("output.voices.title") }}</span>
-    <ol class="stack voice-order-list">
+  <section class="voice-order" :aria-label="t('output.voices.title')">
+    <span class="voice-order-title">{{ t("output.tracks") }}</span>
+    <ol class="voice-order-list">
       <li
         v-for="(voice, index) in voices" :key="voice.label"
-        class="cluster voice-order-item" :class="{ 'is-over': over === index, 'is-busy': busy }"
+        class="voice-order-item" :class="{ 'is-over': over === index, 'is-busy': busy }"
         :draggable="!busy"
         :aria-label="t('output.voices.item', { position: index + 1, label: voice.label, episodes: voice.episodes })"
         @dragstart="dragged = index" @dragover.prevent="over = index" @dragleave="over = null" @drop.prevent="drop(index)"
         @dragend="dragged = over = null"
       >
-        <i class="pi pi-bars voice-order-handle" aria-hidden="true" />
         <span class="voice-order-position">{{ index + 1 }}</span>
-        <span>{{ t("output.voices.label", { label: voice.label, episodes: voice.episodes }) }}</span>
+        <span>{{ voice.label }}</span>
+        <span class="voice-order-episodes">{{ voice.episodes }}</span>
       </li>
     </ol>
   </section>
 </template>
 
 <style scoped>
-.voice-order-title { font-weight: 600; }
-.voice-order-list { margin: 0; padding: 0; list-style: none; }
+.voice-order { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem; }
+.voice-order-title { color: var(--text-muted); font-size: 0.85rem; }
+.voice-order-list { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0; padding: 0; list-style: none; }
 .voice-order-item {
-  align-items: center; padding: 0.4em 0.6em; border: 1px solid var(--border-color, currentColor);
-  border-radius: 0.4em; cursor: grab; background: var(--surface-card, transparent);
+  display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.2rem 0.75rem 0.2rem 0.25rem; cursor: grab;
+  background: var(--bg-light); border: 1px solid var(--border-color); border-radius: 20px; font-size: 0.85rem; font-weight: 500;
+  color: var(--color-gray-600);
 }
-.voice-order-item.is-over { outline: 0.125rem dashed var(--primary-color, currentColor); }
+.voice-order-item.is-over { outline: 2px dashed var(--color-blue); }
 .voice-order-item.is-busy { cursor: not-allowed; opacity: 0.6; }
-.voice-order-handle, .voice-order-position { color: var(--text-muted); }
+.voice-order-position {
+  display: inline-grid; place-items: center; inline-size: 1.25rem; block-size: 1.25rem; border-radius: 6px;
+  background: var(--color-gray-600); color: #fff; font-size: 0.75rem; font-weight: 700;
+}
+.voice-order-episodes { color: var(--text-muted); }
 </style>

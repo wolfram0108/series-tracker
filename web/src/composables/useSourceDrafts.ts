@@ -50,6 +50,7 @@ export function useSourceDrafts() {
     profileId: draft.profileId,
     vibixSeason: draft.vibixSeason,
     playersOff: draft.playersOff,
+    color: null,
     view: viewOf({
       summary: draft.summary, playersOff: draft.playersOff, rows: draft.rows, live: tables.forUrl(draft.canonical),
       asked: draft.asked,

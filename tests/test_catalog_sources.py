@@ -549,7 +549,7 @@ async def test_the_card_and_the_sources_of_a_busy_series_are_not_changed(system,
             await probe.request(topic, payload, timeout=5)
 
 
-# --- the colour of a source (Р-72) ----------------------------------------------------------------------------------
+# --- the colour of a source ----------------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_a_source_takes_the_first_colour_its_series_has_free_and_keeps_it(system):
