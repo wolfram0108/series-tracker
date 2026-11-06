@@ -10,7 +10,7 @@ import {
 import { pageHost, progressText } from "../../lib/sources"
 import { useSeriesStore } from "../../stores/series"
 import { useSeriesReadsStore } from "../../stores/seriesReads"
-import { badgeOf, cutOf, cutsBySlot, cutState, type CompilationView, type CutState } from "../../lib/compilations"
+import { badgeOf, cardStatus, cutOf, cutsBySlot, heldCut, takes, type CompilationView, type CutState } from "../../lib/compilations"
 import CompilationBlock from "./output/CompilationBlock.vue"
 import LevelSettings from "./output/LevelSettings.vue"
 import SeasonBlock from "./output/SeasonBlock.vue"
@@ -89,9 +89,13 @@ const settingsCompilation = computed(() => {
   const view = settingsView.value
   if (!view) return undefined
   const counts: Partial<Record<CutState, number>> = {}
+  const episodes = new Map((output.seasons.value.find((each) => each.season === view.season)?.episodes ?? [])
+    .map((episode) => [episode.episode, episode] as const))
+  const height = (_season: number, episode: number) =>
+    episodes.get(episode)?.references.find((each) => each.source_id != null)?.height ?? null
   for (const each of view.episodes ?? []) {
-    if (!each.member) continue
-    const state: CutState = cutState(cutOf(cuts.value, view.season, each.episode)) ?? "ready"
+    if (!takes(view, each.episode, height)) continue
+    const state = cardStatus(true, cutOf(cuts.value, view.season, each.episode), heldCut(episodes.get(each.episode), view.ref.key)) as CutState
     counts[state] = (counts[state] ?? 0) + 1
   }
   const badge = badgeOf(view)

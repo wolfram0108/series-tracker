@@ -36,7 +36,8 @@ describe("compilations", () => {
     const cut = { series_id: 1, season: 1, episode: 1, part: 0, cut_key: "k", status: "aligning" }
     expect(cardStatus(false, cut)).toBe("off")
     expect(cardStatus(true, cut)).toBe("align")
-    expect(cardStatus(true, undefined)).toBe("ready")
+    expect(cardStatus(true, undefined)).toBe("wait")
+    expect(cardStatus(true, undefined, { key: "k" })).toBe("ready")
     expect(shareOf({ ...cut, from_ref_s: 1260, from_dub_s: 40 })).toBeCloseTo(0.969, 3)
   })
 

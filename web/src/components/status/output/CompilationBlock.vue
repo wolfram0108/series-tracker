@@ -4,7 +4,7 @@ import type { Queues } from "../../../composables/outputCalls"
 import { useCardGrid } from "../../../composables/useCardGrid"
 import { t } from "../../../i18n"
 import {
-  badgeOf, cardStatus, cutOf, cutState, shareOf, takes, type CompilationView, type CutItem, type CutState,
+  badgeOf, cardStatus, cutOf, cutState, heldCut, shareOf, takes, type CompilationView, type CutItem, type CutState,
 } from "../../../lib/compilations"
 import { trackCells, type EpisodeView, type QueueName, type QueueRow, type SourceMark as Mark } from "../../../lib/output"
 import type { CompilationRow } from "./CompilationTable.vue"
@@ -57,7 +57,7 @@ const items = computed(() => (props.view.episodes ?? []).flatMap((each) => {
   if (!view) return []
   const member = takes(props.view, each.episode, height)
   const cut = member ? cutOf(props.cuts, props.view.season, each.episode) : undefined
-  const status = cardStatus(member, cut)
+  const status = cardStatus(member, cut, heldCut(view, props.view.ref.key))
   const elsewhere = each.elsewhere ? props.season.find((other) => other.ref.key === each.elsewhere) : undefined
   const absence = each.member && !member ? "not_better" : each.absence ?? "own"
   const note = member ? undefined : elsewhere
@@ -70,7 +70,7 @@ const items = computed(() => (props.view.episodes ?? []).flatMap((each) => {
 const cutCounts = computed(() => {
   const counts: Record<CutState, number> = { wait: 0, down: 0, align: 0, ready: 0, error: 0 }
   for (const item of items.value) {
-    if (item.each.member) counts[cutState(item.cut) ?? "ready"] += 1
+    if (item.each.member) counts[item.status as CutState] += 1
   }
   return counts
 })
@@ -79,7 +79,8 @@ const share = (count: number, all: number): string => `${all === 0 ? 0 : (count 
 const cutText = computed(() => (Object.entries(cutCounts.value) as [CutState, number][])
   .filter(([, count]) => count > 0).map(([state, count]) => t(`output.cut.meter.${state}`, { n: count })).join(" · "))
 
-const { grid, ruler, columns } = useCardGrid(() => props.mode, () => 2, () => items.value.length)
+// The rows hold as many cards as those of the season: the block is a copy of the season's for a part of its episodes.
+const { grid, ruler, columns } = useCardGrid(() => props.mode, () => 2, () => props.episodes.length)
 
 const opened = computed(() => items.value.find((item) => item.view.episode === props.opened) ?? null)
 function step(by: number): void {
@@ -95,8 +96,10 @@ const rows = computed<CompilationRow[]>(() => {
     const each = (view.episodes ?? []).find((one) => one.episode === episode)
     const member = takes(view, episode, height)
     const cut = member ? cutOf(props.cuts, view.season, episode) : undefined
+    const held = heldCut(byEpisode.value.get(episode), view.ref.key)
     return {
-      view, badge: badgeOf(view), member, player: playerOf(view), cut: cutState(cut), share: shareOf(cut),
+      view, badge: badgeOf(view), member, player: playerOf(view),
+      cut: member ? cutState(cut) ?? (held ? "ready" : "wait") : null, share: shareOf(cut ?? held),
       fits: view.take && (member || ((each?.absence === "elsewhere" || each?.absence === "own")
         && (height(view.season, episode) ?? 0) < (view.ref.height ?? 0))),
     }

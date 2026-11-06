@@ -15,11 +15,28 @@ export function fetchComposition(seriesId: number): Promise<Answer<Composition>>
 }
 
 /** The file of a row of the plan as the downloads keep it: the status of the video of a reference is read from it. */
+/** What the video of a container is cut of (stage 12): the key of its compilation and the seconds taken from it and from
+ *  the episode itself. */
+export interface CutOf { key: string; from_ref_s?: number | null; from_dub_s?: number | null }
+
 export interface MediaFile {
   unique_id: string
   source_id: number | null
   row_key: string | null
   status: string
+  /** The video of the container in place, and the one the next build puts in, when cut out of a compilation. */
+  cut?: CutOf | null
+  pending_cut?: CutOf | null
+}
+
+const cutOfStored = (value: unknown): CutOf | null => {
+  if (typeof value !== "string" || !value) return null
+  try {
+    const parsed = JSON.parse(value) as CutOf
+    return typeof parsed?.key === "string" ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 /** The files of the plan of the series (the rows of its plan with their status). */
@@ -29,11 +46,13 @@ export async function fetchMedia(seriesId: number): Promise<Answer<MediaFile[]>>
     OUTPUT_WORDS,
   )
   if (!answer.ok) return answer
-  const items = Array.isArray(answer.data) ? (answer.data as Partial<MediaFile>[]) : []
+  const items = Array.isArray(answer.data) ? (answer.data as Record<string, unknown>[]) : []
   return {
     ok: true,
     data: items.map((item) => ({
-      unique_id: String(item.unique_id ?? ""), source_id: item.source_id ?? null, row_key: item.row_key ?? null, status: String(item.status ?? ""),
+      unique_id: String(item.unique_id ?? ""), source_id: (item.source_id as number | null) ?? null,
+      row_key: (item.row_key as string | null) ?? null, status: String(item.status ?? ""),
+      cut: cutOfStored(item.cut), pending_cut: cutOfStored(item.pending_cut),
     })),
   }
 }

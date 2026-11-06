@@ -1,5 +1,6 @@
 import type { components } from "../api/schema"
-import type { EpisodeStatus } from "./output"
+import type { CutOf } from "../composables/outputCalls"
+import type { EpisodeStatus, EpisodeView } from "./output"
 
 type Schemas = components["schemas"]
 
@@ -78,15 +79,23 @@ const CUT_STATES: Record<string, CutState> = {
 }
 export const cutState = (cut: CutItem | undefined): CutState | null => cut ? CUT_STATES[cut.status] ?? "wait" : null
 
-/** The card of an episode in the view «Компиляции»: off when it does not stand in the compilation, else its cut. A member
- *  whose cut has ended and gone (its video is in the container) is ready. */
-export function cardStatus(member: boolean, cut: CutItem | undefined): EpisodeStatus {
+/** The video of the episode cut out of the compilation that lies in its container, or waits for its next build: what is
+ *  left of a cut whose work has ended. */
+export function heldCut(view: EpisodeView | undefined, key: string): CutOf | null {
+  const reference = view?.references.find((each) => each.source_id != null)
+  const file = (view?.files ?? []).find((each) => each.source_id === reference?.source_id && each.row_key === reference?.row_key)
+  return [file?.cut, file?.pending_cut].find((each) => each?.key === key) ?? null
+}
+
+/** The card of an episode in the view «Компиляции»: off when it is not cut out of the compilation; else its cut while one
+ *  is under way, ready when its video is the compilation's, waiting before anything began. */
+export function cardStatus(member: boolean, cut: CutItem | undefined, held: CutOf | null = null): EpisodeStatus {
   if (!member) return "off"
-  return cutState(cut) ?? "ready"
+  return cutState(cut) ?? (held ? "ready" : "wait")
 }
 
 /** The share of the video of a cut taken from the compilation, 0…1; null while it is not known. */
-export function shareOf(cut: CutItem | undefined): number | null {
+export function shareOf(cut: Pick<CutItem, "from_ref_s" | "from_dub_s"> | CutOf | null | undefined): number | null {
   const ref = cut?.from_ref_s ?? null
   const own = cut?.from_dub_s ?? null
   if (ref === null || own === null || ref + own <= 0) return null
