@@ -19,6 +19,7 @@ from schema_db import migrated
 VK = "https://vkvideo.ru/@chan|запрос"
 RUCHIME = "https://1.ruchime.org/release/a"
 DUNHUATV = "https://dunhuatv.ru/title/x"
+ANIMAKIMA = "https://animakima.ru/pages/x/"
 
 
 @pytest.fixture
@@ -90,7 +91,7 @@ async def test_a_series_is_given_with_its_kind_and_its_sources(system):
     assert [s["id"] for s in two["sources"]] == list(video.source_ids)
     assert two["sources"][0] == {"id": video.source_ids[0], "series_id": video.series_id, "position": 0,
                                  "url": RUCHIME, "source_type": "web_video", "parser_profile_id": 2,
-                                 "vibix_season": 2, "players_off": ["vk"]}
+                                 "vibix_season": 2, "players_off": ["vk"], "color": 0}
     assert two["sources"][1]["url"] == VK
     for each in (*one["sources"], *two["sources"]):
         assert list(each) == list(SeriesSource.model_fields)
@@ -313,7 +314,7 @@ async def test_a_source_is_added_at_the_end_and_announced(system):
     added = (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[-1]
     assert added == {"id": reply["id"], "series_id": made.series_id, "position": 1, "url": RUCHIME,
                      "source_type": "web_video", "parser_profile_id": 2,
-                     "vibix_season": None, "players_off": ["vk"]}
+                     "vibix_season": None, "players_off": ["vk"], "color": 1}
 
 
 @pytest.mark.asyncio
@@ -546,3 +547,29 @@ async def test_the_card_and_the_sources_of_a_busy_series_are_not_changed(system,
                 await probe.request(topic, payload, timeout=5)
         else:
             await probe.request(topic, payload, timeout=5)
+
+
+# --- the colour of a source (Р-72) ----------------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_source_takes_the_first_colour_its_series_has_free_and_keeps_it(system):
+    _, probe = system
+    made = await create_series(probe, sources=[source(url=VK, source_type="vk_video"),
+                                               source(url=RUCHIME, source_type="web_video")])
+    other = await create_series(probe, name="2", sources=[source(url=RUCHIME, source_type="web_video")])
+    third = await probe.request("catalog.sources.add", {
+        "series_id": made.series_id, "source": source(url=DUNHUATV, source_type="web_video")}, timeout=5)
+
+    def colours(series_id):
+        return probe.request("catalog.sources.list", {"series_id": series_id}, timeout=5)
+
+    assert [(each["id"], each["color"]) for each in await colours(made.series_id)] == [
+        (made.source_ids[0], 0), (made.source_ids[1], 1), (third["id"], 2)]
+    assert [each["color"] for each in await colours(other.series_id)] == [0]  # colours are of a series
+    await probe.request("catalog.sources.remove", {"source_id": made.source_ids[1]}, timeout=5)
+    fourth = await probe.request("catalog.sources.add", {
+        "series_id": made.series_id, "source": source(url=ANIMAKIMA, source_type="web_video")}, timeout=5)
+    by_id = {each["id"]: each["color"] for each in await colours(made.series_id)}
+    assert by_id == {made.source_ids[0]: 0, third["id"]: 2, fourth["id"]: 1}  # the freed colour, the others kept
+    with pytest.raises(BusRequestError):
+        await probe.request("catalog.sources.update", {"source_id": third["id"], "fields": {"color": 5}}, timeout=5)

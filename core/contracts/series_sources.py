@@ -30,6 +30,8 @@ class SeriesSource(BaseModel):
     parser_profile_id: int | None = None
     vibix_season: int | None = None
     players_off: list[str] = Field(default_factory=list)
+    # The colour of the source in its series (0–15 of the palette of the interface): given once when it comes, kept by it.
+    color: int = 0
 
 
 class SourceEvent(BaseModel):

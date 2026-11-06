@@ -30,12 +30,20 @@ _WRITABLE = {"name", "name_en", "site", "save_path", "season", "quality",
              "ignored_seasons", "ignored_episodes"}
 
 _SOURCE_COLUMNS = ("id, series_id, position, url, source_type, parser_profile_id, "
-                   "vibix_season, players_off")
+                   "vibix_season, players_off, color")
+
+# The colours of the palette of the interface a source may take.
+COLORS = 16
+
+# A new source takes the first colour no source of its series has; when every one is taken, the colours go round.
+_FREE_COLOR = (f"(WITH RECURSIVE palette(color) AS (SELECT 0 UNION ALL SELECT color + 1 FROM palette WHERE color < {COLORS - 1}) "
+               "SELECT COALESCE(MIN(color), (SELECT COUNT(*) FROM series_sources WHERE series_id=?) % "
+               f"{COLORS}) FROM palette WHERE color NOT IN (SELECT color FROM series_sources WHERE series_id=?))")
 
 _ADD_SOURCE = ("INSERT INTO series_sources (series_id, position, url, source_type, parser_profile_id, "
-               "vibix_season, players_off) "
+               "vibix_season, players_off, color) "
                "VALUES (?, COALESCE(?, (SELECT MAX(position) + 1 FROM series_sources WHERE series_id=?), 0), "
-               "?, ?, ?, ?, ?)")
+               f"?, ?, ?, ?, ?, {_FREE_COLOR})")
 
 
 def _source(row: dict) -> dict:
@@ -51,7 +59,7 @@ def _stored(values: dict) -> dict:
 def _add_source_args(series_id: int, values: dict) -> tuple:
     stored = _stored(values)
     return (series_id, stored.get("position"), series_id, stored["url"], stored["source_type"],
-            stored["parser_profile_id"], stored["vibix_season"], stored["players_off"])
+            stored["parser_profile_id"], stored["vibix_season"], stored["players_off"], series_id, series_id)
 
 
 def _refusal(exc: sqlite3.IntegrityError, values: dict) -> Exception:
