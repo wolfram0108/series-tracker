@@ -6,7 +6,10 @@ current carries the admission's number (`Envelope.admission`) and is counted, an
 called once — when its block is left and every counted request has been answered, in time or late. A handler always
 answers (an error is an answer too); one that never does holds the admission, and a sync of the series waits for it.
 Only the requests of the task that opened the admission are its own: a task started inside the block (it inherits the
-context) is other work — a sync started so would wait for the admission that waits for it.
+context) is other work — a sync started so would wait for the admission that waits for it. The handler of a request that
+carries the number works under it too (`BaseModule._handle_one`): its own requests carry the number, and its answer goes
+back once they are answered, so the admission lasts until the last write of the change at any depth. An answer is counted
+once, when it comes, whatever its caller is doing then.
 """
 from __future__ import annotations
 

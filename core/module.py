@@ -140,14 +140,15 @@ class BaseModule:
             return await asyncio.wait_for(fut, timeout)
         finally:
             self._pending.pop(env.correlation_id, None)
-            # A fuse or a cancellation of the caller cancels the future, not the work: the admission waits for the answer.
-            if admission is not None and (unanswerable or (fut.done() and not fut.cancelled())):
-                self._admitted.pop(env.correlation_id, None)
+            # A fuse or a cancellation of the caller cancels the future, not the work: the admission counts the request
+            # when its answer comes (`_consume_replies`); only a request nobody received has no answer to wait for.
+            if unanswerable and self._admitted.pop(env.correlation_id, None) is not None:
                 admission.answered(env.correlation_id)
 
     def background(self) -> set[asyncio.Task]:
         """Задачи, в которых модуль работает вне обработчиков шины; тот, кто ждёт тишины, ждёт и их."""
         return set(self._bg)
+
 
     # --- потребители -------------------------------------------------------
 
@@ -167,40 +168,46 @@ class BaseModule:
                     self.bus.processed(sub)
 
     async def _handle_one(self, env: Envelope, handler: Handler) -> None:
+        # A request of an admitted change is handled under that admission: what the handler asks of others is part of the
+        # change, and the answer goes back only once those requests are answered too (late ones included), so the change
+        # is over when its last write is, however deep (И-60).
+        relay = _Relay(env.admission, self.log) if env.admission and env.kind == "query" else None
+        context = current_admission.set(relay.admission) if relay is not None else None
         try:
-            result = handler(env)
-            if inspect.isawaitable(result):
-                result = await result
-            if env.kind == "query" and env.reply_to:
-                self.bus.publish(Envelope(
-                    topic=env.reply_to, kind="reply", payload=result,
-                    correlation_id=env.correlation_id))
-        except asyncio.CancelledError:
-            raise
-        except NotAllowed as exc:
-            # A refusal by the table of what is allowed is the module's answer, not its failure: no trace is due.
-            self.log.info("отказ на топике '%s': %s", env.topic, describe(str(exc)))
-            if env.kind == "query" and env.reply_to:
-                self.bus.publish(Envelope(
-                    topic=env.reply_to, kind="reply",
-                    payload={ERROR_KEY: f"{type(exc).__name__}: {exc}"},
-                    correlation_id=env.correlation_id))
-        except Exception as exc:  # noqa: BLE001 — модуль не должен умирать
-            self.log.exception("ошибка обработчика '%s' на топике '%s'",
-                               getattr(handler, "__name__", "?"), env.topic)
-            if env.kind == "query" and env.reply_to:
-                self.bus.publish(Envelope(
-                    topic=env.reply_to, kind="reply",
-                    payload={ERROR_KEY: f"{type(exc).__name__}: {exc}"},
-                    correlation_id=env.correlation_id))
+            try:
+                result = handler(env)
+                if inspect.isawaitable(result):
+                    result = await result
+                payload = result
+            except asyncio.CancelledError:
+                raise
+            except NotAllowed as exc:
+                # A refusal by the table of what is allowed is the module's answer, not its failure: no trace is due.
+                self.log.info("отказ на топике '%s': %s", env.topic, describe(str(exc)))
+                payload = {ERROR_KEY: f"{type(exc).__name__}: {exc}"}
+            except Exception as exc:  # noqa: BLE001 — модуль не должен умирать
+                self.log.exception("ошибка обработчика '%s' на топике '%s'",
+                                   getattr(handler, "__name__", "?"), env.topic)
+                payload = {ERROR_KEY: f"{type(exc).__name__}: {exc}"}
+        finally:
+            if context is not None:
+                current_admission.reset(context)
+        if relay is not None:
+            await relay.over()
+        if env.kind == "query" and env.reply_to:
+            self.bus.publish(Envelope(
+                topic=env.reply_to, kind="reply", payload=payload,
+                correlation_id=env.correlation_id))
 
     async def _consume_replies(self, sub: Subscription) -> None:
         while True:
             env: Envelope = await sub.queue.get()
             try:
-                late = self._admitted.pop(env.correlation_id, None)
-                if late is not None and env.correlation_id not in self._pending:
-                    late.answered(env.correlation_id)  # the caller stopped waiting; the admission did not
+                # The answer is counted where it comes, once, whatever its caller is doing: waiting, gone by its fuse, or
+                # cancelled with its future still registered.
+                admitted = self._admitted.pop(env.correlation_id, None)
+                if admitted is not None:
+                    admitted.answered(env.correlation_id)
                 fut = self._pending.get(env.correlation_id)
                 if fut is None or fut.done():
                     continue  # a reply that came after the fuse is ignored
@@ -210,3 +217,16 @@ class BaseModule:
                     fut.set_result(env.payload)
             finally:
                 self.bus.processed(sub)
+
+
+class _Relay:
+    """The admission a request carried, for the handler of that request: its own requests are counted, and it is over once
+    the handler is done and every one of them is answered."""
+
+    def __init__(self, token: str, log) -> None:
+        self._over = asyncio.Event()
+        self.admission = Admission(token, self._over.set, log=log)
+
+    async def over(self) -> None:
+        self.admission.close()
+        await self._over.wait()
