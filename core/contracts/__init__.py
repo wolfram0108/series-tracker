@@ -8,7 +8,7 @@ from .composition import (CompositionChanged, CompositionFailed, CompositionGetR
                           CompositionPreviewRequest, CompositionReply, PreviewLine, SeasonVoiceOrder, VoiceOrderSet, VoiceSpan,
                           CompositionRow, EpisodeRef, Exclusion, PlayerSummary, SourceStatus, SourceSummary)
 from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
-from .output_settings import (LEVER_FORMS, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, GroupVariant, PlayerVariant, Queue, EffectiveLever, EpisodeSettings, LeverSpec,
+from .output_settings import (LEVER_FORMS, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, GroupQueue, GroupVariant, PlayerVariant, Queue, QueueRow, QueueView, QueuesGet, QueuesReply, EffectiveLever, EpisodeSettings, LeverSpec,
                               Level, LevelSettings, SettingRecord, SettingsReset, SettingsSet,
                               TargetKind, ValueShape, group_target, parse_group_target, parse_variant_target, variant_target)
 from .reference import OutputSwitch, Reference, ReferenceChanged, ReferenceMark
@@ -35,7 +35,7 @@ __all__ = ["Action", "NotAllowed", "allowed", "refusal", "require", "variant_sta
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
            "CompositionReply", "CompositionRow", "PreviewLine", "SeasonVoiceOrder", "VoiceOrderSet", "VoiceSpan",
            "EpisodeRef", "Exclusion", "PlayerSummary", "SourceStatus", "SourceSummary",
-           "REFERENCE_ALLOW", "REFERENCE_ORDER", "VOICE_ALLOW", "VOICE_ORDER", "VOICE_TAKE", "GroupVariant", "PlayerVariant", "Queue", "EffectiveLever", "EpisodeSettings", "LeverSpec", "Level", "LevelSettings", "SettingRecord", "SettingsReset", "SettingsSet",
+           "REFERENCE_ALLOW", "REFERENCE_ORDER", "VOICE_ALLOW", "VOICE_ORDER", "VOICE_TAKE", "GroupQueue", "GroupVariant", "PlayerVariant", "Queue", "QueueRow", "QueueView", "QueuesGet", "QueuesReply", "EffectiveLever", "EpisodeSettings", "LeverSpec", "Level", "LevelSettings", "SettingRecord", "SettingsReset", "SettingsSet",
            "TargetKind", "ValueShape",
            "group_target", "parse_group_target", "parse_variant_target", "variant_target",
            "OutputSwitch", "Reference", "ReferenceChanged", "ReferenceMark",

@@ -12,9 +12,8 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from core import BusRequestError
-from core.contracts import (CompositionGetRequest, CompositionReply, OutputSwitch, Reference, SeriesKind, SettingsReset,
-                            VoiceOrderSet,
-                            SettingsSet)
+from core.contracts import (CompositionGetRequest, CompositionReply, OutputSwitch, QueuesGet, QueuesReply, Reference,
+                            SeriesKind, SettingsReset, SettingsSet, VoiceOrderSet)
 
 from .routing import admitted, refusal
 from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, OkResponse, OutputSettingsReset, OutputSettingsSet,
@@ -75,6 +74,16 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         """The reference of every episode of the series and why it is that one (the mark)."""
         try:
             return await gw.request("scan.output.get", {"series_id": series_id})
+        except BusRequestError as exc:
+            return refusal(exc, with_success=False)
+
+    @r.get("/api/series/{series_id}/output/queues", response_model=QueuesReply, responses=_ERR1)
+    async def output_queues(series_id: int, season: int | None = None, episode: int | None = None):
+        """The queue of the reference and of the voice-over of each group of a level (the series, a season, or an episode
+        of a season), in the order the core tries their variants, with what the levers of the level say of each."""
+        query = _contract(QueuesGet, series_id=series_id, season=season, episode=episode)
+        try:
+            return await gw.request("composition.queues.get", query.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 

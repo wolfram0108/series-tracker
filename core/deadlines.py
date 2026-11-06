@@ -88,6 +88,7 @@ _NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
     "conform.job.get": (STANDARD_S, ("settings.value.get", "settings.value.get")),
     "conform.settings.get": (QUICK_S, ("settings.value.get",) * 3),
     "conform.settings.set": (QUICK_S, ("settings.value.get",) * 3 + ("settings.values.set_many",)),
+    "composition.queues.get": (QUICK_S, ("voices.settings.get",)),
     "conform.workspace": (QUICK_S, ("settings.value.get",)),
     "rules.profiles.delete": (QUICK_S, ("catalog.sources.by_profile",) * 2),
     "scan.edit.begin": (QUICK_S, ("catalog.series.get",)),

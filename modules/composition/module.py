@@ -32,6 +32,9 @@ Queries:
       refuses the request with ValueError(reason). With `lines` (typed, or the file names of a release) no table is
       asked: the reply is `ready`, has no summary, and its lines are those given (key = their place in the list),
       each with the answer of the profile when one is given.
+  composition.queues.get {series_id, season?, episode?} → QueuesReply: the queue of the reference and of the voice-over of
+      each group of a level, in the order the core tries their variants (`core.variant_queue`), with the value and the
+      level of every lever of the level that acts on them (`queues.py`). The order of players is asked of voices.
   composition.settings.set {series_id, season?, episode?, lever, target?, value} → {ok}: sets the value of a lever
       at a level. Refused with ValueError(reason) — `unknown_lever`, `bad_target` or `bad_value` — and nothing is stored.
   composition.settings.reset {series_id, season?, episode?, lever?, target?} → {ok}: the levers of the level (or the
@@ -63,7 +66,8 @@ Events (incoming) — every one of them only asks for a recount of the series it
   once more when the running count ends; series are counted independently of each other.
 
 Neighbours (all over the bus): catalog.series.get / .list, catalog.sources.by_profile, sources.table.get,
-rules.apply (one request per source with a profile, all lines of its table at once), voices.groups.resolve (all
+rules.apply (one request per source with a profile, all lines of its table at once), voices.settings.get (the order of
+players, for the queues), voices.groups.resolve (all
 names in one request). A source without a table or without a profile does not stop the others. Start this module
 after the modules it asks; a request that gets no answer fails the recount, not the start.
 
@@ -82,12 +86,15 @@ from core.contracts import (REFERENCE_ORDER, RUN_CHANGED, VOICE_ORDER, RunChange
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
                             RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
-                            SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState, VoiceOrderSet)
+                            QueuesGet, QueuesReply, SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState,
+                            VoiceOrderSet, VoiceSettingsView)
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
+from core.variant_queue import Order
+from core.voice_names import Groups
 
-from . import levers, project, settings
+from . import levers, project, queues, settings
 from .project import SourceInput
 from .repository import CompositionRepository, StoredSource
 
@@ -147,6 +154,7 @@ class CompositionModule(BaseModule):
 
     def register(self) -> None:
         self.handle("composition.get", self.on_get)
+        self.handle("composition.queues.get", self.on_queues_get)
         # Waits for a whole count, so the requests for different series must not queue behind each other.
         self.handle("composition.recompute", self.on_recompute, concurrent=True)
         self.handle("composition.preview", self.on_preview, concurrent=True)
@@ -214,6 +222,24 @@ class CompositionModule(BaseModule):
             # A series counted before the orders were kept shows its default order until its next count writes it.
             voice_orders=project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows))
         return reply.model_dump(mode="json")
+
+    async def on_queues_get(self, env: Envelope) -> dict:
+        """The queues of a level in the order the core tries their variants: the same rule, the same order of players and
+        of sources, and the same levers the choice of the reference and the plan of voice-overs read."""
+        request = QueuesGet.model_validate(env.payload)
+        stored = await self.repo.stored(request.series_id)
+        voices = VoiceSettingsView.model_validate(await self.request("voices.settings.get", {}))
+        order = Order(tuple(voices.priority), {each.summary.source_id: place for place, each in enumerate(stored.sources)},
+                      Groups.of(voices.player_groups))
+        orders = project.season_orders(stored.orders, stored.rows, {})
+        groups = (orders.get(request.season, []) if request.season is not None
+                  else [label for season in sorted(orders) for label in orders[season]])
+        reference, by_group = queues.build(
+            availability.lines_of_level(stored.rows, request.season, request.episode),
+            settings.effective(settings.canonical(stored.records), request.season, request.episode),
+            order, list(dict.fromkeys(groups)), request.episode)
+        return QueuesReply(series_id=request.series_id, season=request.season, episode=request.episode,
+                           reference=reference, groups=by_group).model_dump(mode="json")
 
     async def on_voice_order_set(self, env: Envelope) -> dict:
         """The user's order of the voice-overs of a season: the order of the tracks in its containers (ЭТАП_11). It is a

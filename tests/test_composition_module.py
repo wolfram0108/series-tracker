@@ -16,7 +16,7 @@ import pytest
 from composition_fakes import (HOST, OTHER_PAGE, PAGE, FakeCatalog, FakeRules, FakeSources, FakeVoices, lecturer,
                                source)
 from core import BaseModule, Bus, BusRequestError, Runner
-from core.contracts import (CompositionPreviewReply, CompositionReply, EffectiveLever, Level, ReleaseTable, RowState,
+from core.contracts import (CompositionPreviewReply, CompositionReply, EffectiveLever, Level, QueuesReply, ReleaseTable, RowState,
                             Queue, TargetKind, ValueShape,
                             RowVoice, SettingsReset, SettingsSet, SourceStatus, TableRow, TableState,
                             group_target, variant_target)
@@ -1502,3 +1502,28 @@ async def test_the_order_of_the_voices_of_a_season_is_shown_kept_and_set_by_the_
     with pytest.raises(BusRequestError, match="not_allowed"):
         await s.probe.request("composition.voice_order.set", {"series_id": series_id, "season": 1, "labels": labels},
                               timeout=STUCK_S)
+
+
+# --- the queues of a level, as the window lists them (Р-70) -------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_the_queues_of_a_level_follow_the_order_of_players_and_then_the_order_the_user_set_on_it(system):
+    s = system
+    series_id = await laid_out(s, page(row("a", "Серия 1"), row("b", "Серия 1", player="kodik"), row("c", "Серия 2")))
+    source_id = only_source(s, series_id)
+
+    async def queues(**level):
+        return QueuesReply.model_validate(await s.probe.request(
+            "composition.queues.get", {"series_id": series_id, **level}, timeout=STUCK_S))
+
+    shown = await queues(season=1)
+    assert [(each.player, each.episodes) for each in shown.reference.rows] == [("vk", "1–2"), ("kodik", "1")]
+    assert shown.reference.order_level == Level.DEFAULT and [each.group for each in shown.groups] == [choice(1)[0]["group"]]
+    await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=1)
+    await s.set(series_id, "voice.allow", False, season=1, episode=1, target=variant_target(choice(1)[0]["group"], source_id, "vk"))
+    shown = await queues(season=1)
+    assert [each.player for each in shown.reference.rows] == ["kodik", "vk"] and shown.reference.order_level == Level.SEASON
+    episode = await queues(season=1, episode=1)
+    assert [(each.player, each.allowed, each.allowed_level) for each in episode.groups[0].rows] == [
+        ("vk", False, Level.EPISODE), ("kodik", True, Level.DEFAULT)]
+    assert [each.player for each in (await queues()).reference.rows] == ["vk", "kodik"]  # the series keeps the rule

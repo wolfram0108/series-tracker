@@ -184,3 +184,47 @@ class LevelSettings(BaseModel):
 
     season: int | None = None
     levers: list[EffectiveLever] = Field(default_factory=list)
+
+
+class QueuesGet(_Scope):
+    """The query `composition.queues.get`: the queues of a level, as its window lists them."""
+
+
+class QueueRow(BaseModel):
+    """A variant of a queue in its place: a voice-over group at a player of a source, the best height it has on the level,
+    the episodes of the level it plays in (`1–10, 12`), and whether the queue takes it (`allowed`, from `allowed_level`)."""
+
+    group: str
+    source_id: int
+    player: str
+    player_label: str
+    height: int | None = None
+    episodes: str = ""
+    allowed: bool = True
+    allowed_level: Level = Level.DEFAULT
+
+
+class QueueView(BaseModel):
+    """The variants of one queue in the order they are tried; `order_level` is the level the user's order comes from."""
+
+    rows: list[QueueRow] = Field(default_factory=list)
+    order_level: Level = Level.DEFAULT
+
+
+class GroupQueue(QueueView):
+    """The queue of the voice-over of one group, and whether the level takes that voice-over at all (`voice.take`)."""
+
+    group: str
+    take: bool = True
+    take_level: Level = Level.DEFAULT
+
+
+class QueuesReply(BaseModel):
+    """The queue of the reference and the queue of each group of the level, the groups in the order of the tracks of the
+    container (a season, an episode) or by name (the series)."""
+
+    series_id: int
+    season: int | None = None
+    episode: int | None = None
+    reference: QueueView = Field(default_factory=QueueView)
+    groups: list[GroupQueue] = Field(default_factory=list)

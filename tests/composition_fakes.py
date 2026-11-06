@@ -14,7 +14,8 @@ from typing import Callable
 
 from core import BaseModule
 from core.contracts import (GroupsResolveReply, GroupsResolveRequest, ReleaseTable, RuleResult, RulesApplyReply,
-                            RulesApplyRequest, TableFailed, TableGetReply, TableGetRequest, TableReady, TableState)
+                            RulesApplyRequest, TableFailed, TableGetReply, TableGetRequest, TableReady, TableState,
+                            VoiceSettingsView)
 from core.reasons import reason
 from core.voice_names import fold_name
 from modules.rules.numbering import season_of, settle_parts
@@ -267,10 +268,16 @@ class FakeVoices(BaseModule):
         self.asked: list[list[str]] = []
         self.values: list[dict | None] = []  # the stored settings a request named (a run's snapshot), or None
         self.garbage = False
+        self.priority = ["vk", "cvh", "kodik"]  # the order of players the queues are ranked by
         super().__init__(bus)
 
     def register(self) -> None:
         self.handle("voices.groups.resolve", self.on_resolve)
+        self.handle("voices.settings.get", self.on_settings_get)
+
+    async def on_settings_get(self, env) -> dict:
+        return VoiceSettingsView(priority=self.priority, voice_groups=self.groups, default_priority=self.priority,
+                                 rejected=[]).model_dump()
 
     async def on_resolve(self, env) -> dict:
         request = GroupsResolveRequest.model_validate(env.payload)

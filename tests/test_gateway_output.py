@@ -235,3 +235,13 @@ async def test_a_request_for_the_sources_only_reaches_composition_as_it_is(tmp_p
         await client.get("/api/series/1/composition?sources_only=true")
     assert owners.asked("composition.get") == [{"series_id": 1, "include_excluded": False, "sources_only": True}]
 
+
+
+async def test_the_queues_of_a_level_are_the_answer_of_composition(tmp_path):
+    queues = {"series_id": 1, "season": 4, "episode": 11, "reference": {"rows": [], "order_level": "default"}, "groups": []}
+    async with serving(tmp_path, {"composition.queues.get": queues}) as (client, owners, _, spy):
+        response = await client.get("/api/series/1/output/queues", params={"season": 4, "episode": 11})
+        alone = await client.get("/api/series/1/output/queues", params={"episode": 11})
+    assert response.status_code == 200 and response.json() == queues
+    assert owners.asked("composition.queues.get") == [{"series_id": 1, "season": 4, "episode": 11}]
+    assert alone.status_code == 422  # an episode is told within its season
