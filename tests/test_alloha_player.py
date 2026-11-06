@@ -10,14 +10,17 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
+
+from core.reasons import parse
 
 from core.retry import Budget
 from modules.sources import policy
 from modules.sources.players import alloha
 from modules.sources.players.alloha import AllohaPlayer, link_of, parse_link, read_answer
 from modules.sources.players.contract import Kind, PlayerRef, StreamUnavailable
-from sources_support import STEP_LIMIT_S, within
+from sources_support import STEP_LIMIT_S, Web, within
 
 PAGE = "https://old.yummyani.me/catalog/item/lyubov-pod-gipnozom"
 IFRAME = ("//alloha.yani.tv/?token_movie=8bf4&translation=158&season=1&episode=5&token=8b55"
@@ -40,11 +43,15 @@ ACCESS = {"host": "cdn.vkvideo.test", "authorizations": "token-of-the-episode", 
 
 
 class Request:
-    def __init__(self, method: str, url: str, headers: dict) -> None:
-        self.method, self.url, self._headers = method, url, headers
+    def __init__(self, method: str, url: str, headers: dict, status: int | None = 200) -> None:
+        self.method, self.url, self._headers, self._status = method, url, headers, status
 
     async def all_headers(self) -> dict:
         return dict(self._headers)
+
+    async def response(self):
+        """What the CDN answered; None for a request that got no answer (a host that does not resolve)."""
+        return None if self._status is None else SimpleNamespace(status=self._status)
 
 
 class Response:
@@ -101,8 +108,10 @@ class Page:
     async def click(self, _x: int, _y: int) -> None:
         self.browser.clicks += 1
         if self.browser.plays:
-            await self.emit("request", Request("OPTIONS", "https://cdn.vkvideo.test/0/abc", {"origin": "x"}))
-            await self.emit("request", Request("GET", "https://cdn.vkvideo.test/0/abc", ACCESS))
+            await self.emit("requestfinished", Request("OPTIONS", "https://cdn.vkvideo.test/0/abc", {"origin": "x"}))
+            for status in self.browser.cdn_answers:
+                key = {**ACCESS, "authorizations": f"token-{status}"}
+                await self.emit("requestfinished", Request("GET", "https://cdn.vkvideo.test/0/abc", key, status))
 
 
 class Context:
@@ -118,8 +127,10 @@ class Context:
 
 class Browser:
     def __init__(self, player_answer: dict | None = None, plays: bool = True,
-                 episodes: dict[str, dict | None] | None = None) -> None:
+                 episodes: dict[str, dict | None] | None = None, cdn_answers: tuple = (200,)) -> None:
         self.player_answer, self.plays, self.episodes = player_answer, plays, episodes or {}
+        # What the CDN answers to each request of the player that carries the access headers, in order.
+        self.cdn_answers = cdn_answers
         self.routed, self.parents, self.iframes, self.switches = [], [], [], []
         self.clicks = self.closed = self.opened = 0
 
@@ -193,16 +204,51 @@ async def test_an_ask_with_no_answer_or_no_browser_is_unsure_and_the_page_is_clo
 
 # --- a stream: the player played once, the access headers caught -------------------------------------------------------------------
 
-async def test_a_stream_is_the_best_file_within_the_cap_with_the_headers_of_the_request_that_carried_the_access():
-    browser = Browser(answer(track("1")))
+def cdn(answer_of=lambda request: "#EXTM3U\n") -> Web:
+    """The CDN of the files as the server sees it: the manifest of the stream, or what the test makes of it."""
+    return Web().route("vkvideo.test", answer_of)
+
+
+async def stream_of(player, http, cap=720):
+    return await within(player.stream(player.ref_of(PAGE, IFRAME).url, http, cap, None), STEP_LIMIT_S, "the stream")
+
+
+async def test_a_stream_is_the_best_file_within_the_cap_with_the_headers_of_the_request_the_cdn_answered():
+    """The preflight carries no access, and a request the CDN did not answer (a host not resolved yet, a refusal) proves
+    no key: the headers are those of the first request it answered. What a client sets itself is not handed on."""
+    browser = Browser(answer(track("1")), cdn_answers=(None, 403, 200))
     player = a_player(browser)
-    got = await within(player.stream(player.ref_of(PAGE, IFRAME).url, None, 720, None), STEP_LIMIT_S, "the stream")
+    web = cdn()
+    async with web.client() as http:
+        got = await stream_of(player, http)
 
     assert got["stream_url"] == "https://cdn1.vkvideo.test/720.m3u8"
-    # The preflight carries no access; what a client sets itself is not handed on.
-    assert got["headers"] == {"authorizations": "token-of-the-episode", "accepts-controls": "control",
+    assert got["headers"] == {"authorizations": "token-200", "accepts-controls": "control",
                               "user-agent": "Mozilla/5.0 Firefox", "origin": "https://alloha.yani.tv"}
     assert browser.clicks == 1 and browser.closed == browser.opened == 1
+    # The manifest is opened from here with those headers before the download is given the stream.
+    [opened] = web.requests
+    assert str(opened.url) == got["stream_url"] and opened.headers["authorizations"] == "token-200"
+
+
+@pytest.mark.parametrize("cdn_says", ["unresolved", "refused"])
+async def test_a_stream_the_server_cannot_open_is_a_refusal_that_may_pass_with_its_host(cdn_says):
+    """The CDN makes the names of its hosts as players ask: one may not resolve here yet. That is said before the
+    download, as a refusal that may pass; the downloader asks again later, and then the run takes the next source."""
+    def answer_of(request):
+        if cdn_says == "unresolved":
+            raise httpx.ConnectError("[Errno -2] Name or service not known")
+        return 403, "Forbidden"
+
+    browser = Browser(answer(track("1")))
+    player = a_player(browser)
+    async with cdn(answer_of).client() as http:
+        with pytest.raises(StreamUnavailable) as refused:
+            await stream_of(player, http)
+
+    assert refused.value.transient
+    cause = parse(parse(refused.value.reason)["params"]["cause"])
+    assert cause["code"] == "stream_unreachable" and cause["params"]["host"] == "cdn1.vkvideo.test"
 
 
 async def test_a_player_that_does_not_start_is_asked_again_by_the_policy_and_then_is_no_stream(quick):
@@ -210,7 +256,8 @@ async def test_a_player_that_does_not_start_is_asked_again_by_the_policy_and_the
     player = a_player(browser)
 
     with pytest.raises(StreamUnavailable) as refused:
-        await within(player.stream(player.ref_of(PAGE, IFRAME).url, None, None, None), STEP_LIMIT_S, "the stream")
+        async with cdn().client() as http:
+            await stream_of(player, http, None)
 
     assert refused.value.transient and browser.opened == browser.closed == 2 and browser.clicks == 2
 

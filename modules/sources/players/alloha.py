@@ -29,6 +29,7 @@ from core.reasons import reason
 
 from ..policy import probe_from, settle
 from .contract import Answer, Kind, PlayerRef, Reading, StreamUnavailable
+from .http import get_answer
 from .vk_files import pick_file
 
 logger = logging.getLogger("sources")
@@ -54,6 +55,8 @@ ANSWER_TIMEOUT_S = 30.0
 PLAY_TIMEOUT_S = 30.0
 # A switch answers in a quarter of a second (measured 06.11); past this the open is left and the rest asked one by one.
 SWITCH_TIMEOUT_S = 10.0
+# The manifest of the stream is a few lines: past this the host does not answer here.
+MANIFEST_TIMEOUT_S = 20.0
 # Browser pages at once: each is a whole player, the asks of a table come in a burst.
 PARALLEL_PAGES = 2
 
@@ -128,14 +131,19 @@ class _Shown:
         if isinstance(data, dict) and "hlsSource" in data:
             await self.answers.put(data)
 
-    async def on_request(self, request) -> None:
+    async def on_finished(self, request) -> None:
+        """The access headers of the first request to the CDN that the CDN answered: a request that went out and got no
+        answer (a host not resolved yet, a refusal) proves no address and no key."""
         if not self._play or self.accessed.done() or request.method == "OPTIONS":
             return
         try:
             headers = await request.all_headers()
+            if _ACCESS_HEADER not in {key.lower() for key in headers}:
+                return
+            response = await request.response()
         except Exception:  # noqa: BLE001 - a request gone with its page carries nothing
             return
-        if _ACCESS_HEADER in {key.lower() for key in headers} and not self.accessed.done():
+        if response is not None and response.status < 400 and not self.accessed.done():
             self.accessed.set_result({key: value for key, value in headers.items() if key.lower() not in _OWN_HEADERS})
 
     async def answer(self, timeout_s: float) -> Any:
@@ -233,6 +241,14 @@ class AllohaPlayer:
         if picked is None or not playing.headers:
             probe = probe_from(verdict, ref, self.label)
             raise StreamUnavailable(reason("player_failed", player=self.label, cause=probe.reason), True)
+        # The address is the player's, opened in the browser; the download opens it from here. Its host may not resolve
+        # here yet (the CDN makes its names as players ask), and then nothing of it would be fetched: that is said now,
+        # as a refusal that may pass, not found by the downloader as a stream that never opens.
+        opened = await get_answer(http, picked[1], "", headers=dict(playing.headers), timeout=MANIFEST_TIMEOUT_S)
+        if opened.status is None or opened.status >= 400:
+            cause = reason("stream_unreachable", host=urlsplit(picked[1]).hostname or "",
+                           error=opened.error or str(opened.status))
+            raise StreamUnavailable(reason("player_failed", player=self.label, cause=cause), True)
         return {"stream_url": picked[1], "headers": dict(playing.headers)}
 
     async def _open(self, link: str, *, play: bool) -> tuple[Any, dict[str, str]]:
@@ -265,7 +281,7 @@ class AllohaPlayer:
                 page = await context.new_page()
                 shown = _Shown(page, play)
                 page.on("response", shown.on_response)
-                page.on("request", shown.on_request)
+                page.on("requestfinished", shown.on_finished)
                 await page.route(parent, lambda route: route.fulfill(status=200, content_type="text/html", body=_BLANK))
                 await page.goto(parent, wait_until="domcontentloaded", timeout=OPEN_TIMEOUT_S * 1000)
                 await page.evaluate(_INSERT, _absolute(iframe))
