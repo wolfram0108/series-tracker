@@ -84,8 +84,8 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
 .episode-card:hover { box-shadow: var(--card-hover-shadow); }
 .episode-card:has(.card-hit:focus-visible), .episode-card.is-open { outline: 0.1875rem solid var(--color-blue); outline-offset: 0.125rem; }
 .is-ready { background: linear-gradient(135deg, #4CAF50, #409444); }
-/* Put together in part: the green of done with the gray stripes of what no source has. */
-.is-partial { background: linear-gradient(135deg, #4CAF50, #409444); --stripe: rgba(108, 117, 125, 0.6); }
+/* Put together in part: a light ground with the green stripes of done. */
+.is-partial { background: linear-gradient(135deg, #e9ecef, #d9dbde); --stripe: rgba(76, 175, 80, 0.6); }
 .is-down { background: linear-gradient(135deg, #009688, #00796D); }
 .is-align { background: linear-gradient(135deg, var(--color-blue-1), color-mix(in srgb, var(--color-blue-1) 85%, black)); }
 .is-wait { background: linear-gradient(135deg, #f0f2f5, #e9ecef); }
