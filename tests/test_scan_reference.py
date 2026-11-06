@@ -1,15 +1,15 @@
 """The choice of the reference (modules/scan/reference.py): a pure function, tested on rows of a layout with known answers.
 
 M-18 (resolution, then the order of players, then the order of sources), M-19 (a compilation is never the reference),
-M-21 (a pick on the series, a season or an episode, inheritance, `other_player`), M-22 (no candidate, nothing swapped
-for the picked voice-over), the lever `variant.allow`, the strict order of the keys and the determinism of the answer.
+the queue of the user (`reference.order` on the series, a season or an episode, inheritance, `other_player`), M-22 (no
+candidate), the lever `reference.allow`, the strict order of the keys and the determinism of the answer.
 """
 import random
 
 import pytest
 
-from core.contracts import (REFERENCE_CHOICE, VARIANT_ALLOW, Exclusion, Level, Reference, ReferenceChoice,
-                            ReferenceMark, RowState, variant_target)
+from core.contracts import (REFERENCE_ALLOW, REFERENCE_ORDER, Exclusion, Level, Reference, ReferenceMark, RowState,
+                            variant_target)
 from core.reasons import parse
 from core.voice_names import Groups
 from modules.scan import reference
@@ -29,13 +29,19 @@ def only(chosen):
     return chosen[0]
 
 
+def queue(*variants, level=Level.SERIES):
+    """The user's order of the reference: (group, source id, player) of each variant, first one first."""
+    return lever(REFERENCE_ORDER, [{"group": group, "source_id": source_id, "player": player}
+                                   for group, source_id, player in variants], level)
+
+
 def pick(group="Ruchime", source_id=1, player="vk", level=Level.SERIES):
-    return lever(REFERENCE_CHOICE, ReferenceChoice(group=group, source_id=source_id, player=player).model_dump(),
-                 level)
+    """An order of one variant: the one the user put first."""
+    return queue((group, source_id, player), level=level)
 
 
 def deny(source_id, player, level=Level.SERIES, value=False, group="Ruchime"):
-    return lever(VARIANT_ALLOW, value, level, variant_target(group, source_id, player))
+    return lever(REFERENCE_ALLOW, value, level, variant_target(group, source_id, player))
 
 
 # --- M-18: the best single row ----------------------------------------------------------------
@@ -217,7 +223,7 @@ def test_rows_that_rank_the_same_are_told_apart_by_their_place_in_the_layout():
     assert only(choose(list(reversed(rows)))).row.row_key == "second"
 
 
-# --- M-21: the pick of the user, on a series, a season or an episode ------------------------------------
+# --- the queue of the user, on a series, a season or an episode ------------------------------------
 
 def test_a_pick_of_the_series_is_honoured_and_marked_by_the_level():
     rows = [row(S, 1, "vk", 1, 1, player="vk", height=1080, voice="Ruchime"),
@@ -240,7 +246,7 @@ def test_a_pick_of_the_episode_itself_is_marked_own():
 
 def test_an_episode_that_sets_the_auto_choice_itself_is_marked_own_too():
     rows = [row(S, 1, "a1", 1, 1)]
-    chosen = only(choose(rows, [episode_settings(1, 1, lever(REFERENCE_CHOICE, None, Level.EPISODE))]))
+    chosen = only(choose(rows, [episode_settings(1, 1, lever(REFERENCE_ORDER, [], Level.EPISODE))]))
     assert chosen.reference.mark == ReferenceMark.OWN
 
 
@@ -253,15 +259,23 @@ def test_an_episode_keeps_its_own_pick_when_the_season_picks_another():
         34: "ruchime", 35: "ani35"}
 
 
-def test_when_the_picked_player_has_no_row_the_next_player_of_the_same_voice_is_taken_and_marked():
+def test_when_the_first_variant_of_the_queue_has_no_row_the_next_of_the_queue_is_taken_and_marked():
     rows = [row(S, 1, "vk", 1, 1, player="vk", voice="AniLibria", height=720),
             row(S, 1, "vibix", 1, 1, player="vibix", voice="AniLibria", height=1080),
             row(S, 2, "other", 1, 1, player="allvideo", voice="Ruchime", height=2160)]
-    chosen = only(choose(rows, [episode_settings(1, 1, pick("AniLibria", 2, "kodik", Level.EPISODE))]))
+    settings = [episode_settings(1, 1, queue(("AniLibria", 2, "kodik"), ("AniLibria", 1, "vibix"), level=Level.EPISODE))]
+    chosen = only(choose(rows, settings))
     assert chosen.row.row_key == "vibix"
     assert chosen.reference.mark == ReferenceMark.OTHER_PLAYER
     assert parse(chosen.reference.reason) == {"code": "reference_other_player", "params": {
         "taken": "vibix", "missing": "kodik", "taken_source": 1, "missing_source": 2}}
+
+
+def test_after_the_variants_of_the_queue_the_rest_follow_by_the_rule():
+    rows = [row(S, 1, "vk", 1, 1, player="vk", voice="AniLibria", height=720),
+            row(S, 2, "other", 1, 1, player="allvideo", voice="Ruchime", height=2160)]
+    chosen = only(choose(rows, [episode_settings(1, 1, pick("AniLibria", 2, "kodik"))]))
+    assert (chosen.row.row_key, chosen.reference.mark) == ("other", ReferenceMark.OTHER_PLAYER)
 
 
 def test_when_the_picked_player_has_a_row_nobody_can_play_the_next_player_of_the_voice_is_taken():
@@ -271,7 +285,7 @@ def test_when_the_picked_player_has_a_row_nobody_can_play_the_next_player_of_the
     assert (chosen.row.row_key, chosen.reference.mark) == ("vk", ReferenceMark.OTHER_PLAYER)
 
 
-def test_a_picked_voice_is_never_swapped_for_a_better_row_of_another_voice():
+def test_the_head_of_the_queue_is_taken_over_a_better_row_of_another_voice():
     rows = [row(S, 1, "loud", 1, 1, voice="Ruchime", height=2160),
             row(S, 2, "quiet", 1, 1, voice="AniLibria", player="kodik", height=360)]
     chosen = only(choose(rows, [episode_settings(1, 1, pick("AniLibria", 2, "kodik"))]))
@@ -286,29 +300,22 @@ def test_an_episode_with_only_rows_nobody_can_play_has_no_reference_and_says_why
     assert parse(chosen.reference.reason) == {"code": "reference_none", "params": {}}
 
 
-def test_a_voice_that_has_no_single_row_of_the_episode_leaves_it_without_a_reference_and_nothing_replaces_it():
-    rows = [row(S, 1, "other", 1, 5, voice="Ruchime", height=2160)]
-    chosen = only(choose(rows, [episode_settings(1, 5, pick("AniLibria", 2, "kodik", Level.EPISODE))]))
-    assert chosen.row is None and chosen.reference.mark == ReferenceMark.NONE
-    assert parse(chosen.reference.reason) == {"code": "reference_voice_missing", "params": {
-        "voice": "AniLibria", "season": 1, "episode": 5}}
-
-
-def test_a_picked_voice_that_only_a_compilation_holds_makes_the_episode_unfit():
+def test_an_episode_that_only_a_compilation_holds_is_unfit_whatever_the_queue():
     rows = [row(S, 1, "single", 1, 2, voice="Ruchime"), row(S, 2, "c", 1, 1, 2, voice="AniLibria", player="kodik")]
-    chosen = choose(rows, [episode_settings(1, 2, pick("AniLibria", 2, "kodik"))])
-    assert [(each.reference.episode, each.reference.mark) for each in chosen] == [
-        (1, ReferenceMark.UNFIT), (2, ReferenceMark.UNFIT)]
+    chosen = choose(rows, [episode_settings(1, 1, pick("AniLibria", 2, "kodik")),
+                           episode_settings(1, 2, pick("AniLibria", 2, "kodik"))])
+    assert [(each.reference.episode, each.reference.mark, each.row.row_key if each.row else None) for each in chosen] == [
+        (1, ReferenceMark.UNFIT, None), (2, ReferenceMark.OTHER_PLAYER, "single")]
 
 
-def test_a_pick_of_a_voice_that_has_vanished_from_the_layout_is_not_hidden_by_the_best_row():
-    """S-7: the pick of a row that is gone leaves the episode without a reference; the auto choice does not stand in."""
+def test_a_queue_naming_a_variant_that_has_left_the_layout_says_the_reference_is_another_one():
+    """What the user put first is gone: the next of the queue stands in, marked, so that the window shows it."""
     rows = [row(S, 1, "left", 1, 1, voice="Ruchime")]
     chosen = only(choose(rows, [episode_settings(1, 1, pick("Gone", 3, "kodik"))]))
-    assert chosen.reference.mark == ReferenceMark.NONE
+    assert (chosen.row.row_key, chosen.reference.mark) == ("left", ReferenceMark.OTHER_PLAYER)
 
 
-# --- the lever variant.allow -----------------------------------------------------------------------------
+# --- the lever reference.allow ---------------------------------------------------------------------------
 
 def test_a_player_left_out_of_the_choice_gives_no_candidate():
     rows = [row(S, 1, "vk", 1, 1, player="vk", height=2160), row(S, 2, "kodik", 1, 1, player="kodik", height=720)]
@@ -336,16 +343,16 @@ def test_a_setting_of_the_episode_about_participation_is_the_own_setting_of_the_
         == ReferenceMark.BY_LEVEL
 
 
-def test_a_picked_player_that_is_left_out_is_replaced_by_the_next_one_of_its_voice():
+def test_a_variant_of_the_queue_the_user_left_out_is_skipped_and_the_next_is_his_choice():
     rows = [row(S, 1, "vk", 1, 1, player="vk", voice="AniLibria"),
             row(S, 2, "kodik", 1, 1, player="kodik", voice="AniLibria")]
     chosen = only(choose(rows, [episode_settings(1, 1, pick("AniLibria", 2, "kodik"), deny(2, "kodik", group="AniLibria"))]))
-    assert (chosen.row.row_key, chosen.reference.mark) == ("vk", ReferenceMark.OTHER_PLAYER)
+    assert (chosen.row.row_key, chosen.reference.mark) == ("vk", ReferenceMark.BY_LEVEL)
 
 
-def test_a_value_of_the_pick_that_is_not_one_is_the_auto_choice():
+def test_an_item_of_the_queue_that_is_not_a_variant_is_skipped():
     rows = [row(S, 1, "vk", 1, 1)]
-    chosen = only(choose(rows, [episode_settings(1, 1, lever(REFERENCE_CHOICE, {"group": "x"}, Level.SERIES))]))
+    chosen = only(choose(rows, [episode_settings(1, 1, lever(REFERENCE_ORDER, [{"group": "x"}], Level.SERIES))]))
     assert chosen.reference.mark == ReferenceMark.BY_LEVEL and chosen.row.row_key == "vk"
 
 
@@ -397,7 +404,7 @@ def test_a_player_left_out_of_the_choice_is_not_held():
     assert chosen.row.row_key == "b"
 
 
-def test_a_pick_of_the_user_is_stronger_than_the_hold():
+def test_a_queue_of_the_user_is_stronger_than_the_hold():
     rows = [unsure("a", voice="Ruchime"), row(S, 2, "b", 1, 1, player="kodik", voice="AniLibria", height=720)]
     chosen = only(choose(rows, [episode_settings(1, 1, pick("AniLibria", 2, "kodik"))], previous=[held()]))
     assert (chosen.row.row_key, chosen.reference.mark) == ("b", ReferenceMark.BY_LEVEL)
@@ -405,7 +412,7 @@ def test_a_pick_of_the_user_is_stronger_than_the_hold():
 
 def test_the_held_reference_carries_the_mark_the_levers_of_the_episode_give_now():
     rows = [unsure("a")]
-    assert only(choose(rows, [episode_settings(1, 1, lever(REFERENCE_CHOICE, None, Level.EPISODE))],
+    assert only(choose(rows, [episode_settings(1, 1, lever(REFERENCE_ORDER, [], Level.EPISODE))],
                        previous=[held(mark=ReferenceMark.BY_LEVEL)])).reference.mark == ReferenceMark.OWN
     assert only(choose(rows, previous=[held(mark=ReferenceMark.OWN)])).reference.mark == ReferenceMark.BY_LEVEL
 
@@ -453,7 +460,8 @@ def _levers(name):
 def _expected(place, other, levers, disk, standing):
     """The law told on its own, not by the code: what stands for episode 1."""
     if levers == "pick_b":
-        return "b" if other != "none" else None
+        # The queue of the user is stronger than any hold; without b the next of the queue is a, if it plays.
+        return "b" if other != "none" else ("a" if place == "playable" else None)
     if levers == "none" and place == "not_obtained":
         return "a"
     if levers == "none" and place in ("missing", "no_number") and disk and standing:

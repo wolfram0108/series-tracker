@@ -60,7 +60,7 @@ def test_the_parts_of_one_episode_are_planned_apart_each_for_the_reference_of_it
 def test_a_variant_the_user_left_out_is_not_a_candidate_of_its_voice_and_the_others_are():
     rows = [row(1, "cvh", "Ref", 1), row(1, "vk", "A", 1), row(2, "cvh", "A", 1), row(3, "kodik", "A", 1)]
     leave_out = lambda source_id, player, voice="A": EpisodeSettings(season=1, episode=1, levers=[  # noqa: E731
-        EffectiveLever(lever="variant.allow", target=variant_target(voice, source_id, player), value=False,
+        EffectiveLever(lever="voice.allow", target=variant_target(voice, source_id, player), value=False,
                        level=Level.SERIES)])
     ref = reference_of(rows, "Ref", 1)
     assert [each[0] for each in chains(planned(rows, [ref]))[(1, 1, "A")]] == ["cvh", "kodik", "vk"]
@@ -73,7 +73,7 @@ def test_a_variant_the_user_left_out_is_not_a_candidate_of_its_voice_and_the_oth
 def test_a_voice_over_whose_variants_are_all_left_out_is_planned_with_no_source():
     rows = [row(1, "cvh", "Ref", 1), row(1, "vk", "A", 1)]
     settings = [EpisodeSettings(season=1, episode=1, levers=[EffectiveLever(
-        lever="variant.allow", target=variant_target("A", 1, "vk"), value=False, level=Level.EPISODE)])]
+        lever="voice.allow", target=variant_target("A", 1, "vk"), value=False, level=Level.EPISODE)])]
     assert chains(planned(rows, [reference_of(rows, "Ref", 1)], settings))[(1, 1, "A")] == []
 
 
@@ -107,15 +107,20 @@ def test_a_player_that_is_not_playing_is_not_a_candidate_and_the_next_player_is_
     assert result[(1, 1, "A")] == [("kodik", "kodik:A:1")] and result[(1, 1, "B")] == []
 
 
-def test_the_player_of_the_lever_goes_first_when_it_has_a_row_and_is_ignored_when_it_has_none():
-    rows = [row(1, "cvh", "Ref", 1), row(1, "cvh", "A", 1), row(2, "kodik", "A", 1)]
+def test_the_variants_of_the_queue_of_the_user_go_first_in_his_order_and_a_variant_with_no_row_is_skipped():
+    rows = [row(1, "cvh", "Ref", 1), row(1, "cvh", "A", 1), row(2, "kodik", "A", 1), row(3, "vk", "A", 1)]
     references = [reference_of(rows, "Ref", 1)]
-    pick = EpisodeSettings(season=1, episode=1, levers=[lever("voice.player", "A", {"source_id": 2, "player": "kodik"})])
-    assert [each[0] for each in chains(planned(rows, references, [pick]))[(1, 1, "A")]] == ["kodik", "cvh"]
-    none = EpisodeSettings(season=1, episode=1, levers=[lever("voice.player", "A", {"source_id": 9, "player": "vk"})])
-    assert [each[0] for each in chains(planned(rows, references, [none]))[(1, 1, "A")]] == ["cvh", "kodik"]
-    auto = EpisodeSettings(season=1, episode=1, levers=[lever("voice.player", "A", None)])
-    assert [each[0] for each in chains(planned(rows, references, [auto]))[(1, 1, "A")]] == ["cvh", "kodik"]
+
+    def order(*variants):
+        return EpisodeSettings(season=1, episode=1, levers=[lever(
+            "voice.order", "A", [{"source_id": source_id, "player": player} for source_id, player in variants])])
+
+    assert [each[0] for each in chains(planned(rows, references))[(1, 1, "A")]] == ["cvh", "kodik", "vk"]
+    assert [each[0] for each in chains(planned(rows, references, [order((2, "kodik"))]))[(1, 1, "A")]] == ["kodik", "cvh", "vk"]
+    assert [each[0] for each in chains(planned(rows, references, [order((3, "vk"), (2, "kodik"))]))[(1, 1, "A")]] == [
+        "vk", "kodik", "cvh"]
+    assert [each[0] for each in chains(planned(rows, references, [order((9, "vk"))]))[(1, 1, "A")]] == ["cvh", "kodik", "vk"]
+    assert [each[0] for each in chains(planned(rows, references, [order()]))[(1, 1, "A")]] == ["cvh", "kodik", "vk"]
 
 
 def test_a_voice_the_lever_turns_off_is_not_planned_for_that_episode_alone():
@@ -207,7 +212,7 @@ def test_the_order_of_the_chain_is_the_same_for_a_compilation_and_a_single_row()
     rows = [row(1, "cvh", "Ref", 2), row(1, "kodik", "A", 2), row(2, "cvh", "A", 1, end=3)]
     chain = chains(planned(rows, [reference_of(rows, "Ref", 2)]))[(1, 2, "A")]
     assert chain == [("cvh", "cvh:A:1-3"), ("kodik", "kodik:A:2")]
-    pick = EpisodeSettings(season=1, episode=2, levers=[lever("voice.player", "A", {"source_id": 1, "player": "kodik"})])
+    pick = EpisodeSettings(season=1, episode=2, levers=[lever("voice.order", "A", [{"source_id": 1, "player": "kodik"}])])
     assert chains(planned(rows, [reference_of(rows, "Ref", 2)], [pick]))[(1, 2, "A")] == [
         ("kodik", "kodik:A:2"), ("cvh", "cvh:A:1-3")]
 
@@ -331,7 +336,7 @@ def test_the_row_with_the_name_is_judged_with_the_others_even_when_its_own_link_
 def test_a_variant_the_user_left_out_is_named_by_its_source_and_player_not_by_the_link_it_has_now():
     """The link of a row may change after the work began; the work that runs from the variant is found by what the variant is."""
     rows = [row(1, "cvh", "Ref", 1), row(1, "cvh", "A", 1, link="https://site/new-link"), row(1, "kodik", "A", 1)]
-    leave_out = EffectiveLever(lever="variant.allow", target=variant_target("A", 1, "cvh"), value=False, level=Level.EPISODE)
+    leave_out = EffectiveLever(lever="voice.allow", target=variant_target("A", 1, "cvh"), value=False, level=Level.EPISODE)
     found = planned(rows, [reference_of(rows, "Ref", 1)], settings=[EpisodeSettings(season=1, episode=1, levers=[leave_out])])
     [dub] = [each for each in found.dubs if each.voice_key == "A"]
     assert dub.left_out == frozenset({(1, "cvh")}) and [each.player for each in dub.chain] == ["kodik"]

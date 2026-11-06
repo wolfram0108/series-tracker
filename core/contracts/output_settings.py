@@ -4,8 +4,9 @@ A record is kept in domain terms (numbers the constructor gave, the name of a vo
 a kind of player), so that it outlives a new reading of a table. No record means "as the level above".
 
 A variant is one place a voice-over of an episode can be had from: a voice-over group at a player of a source. The output
-of an episode is the variants of its voice-overs; a lever tells which of them is the reference, which take part, which
-is preferred.
+of an episode is the variants of its voice-overs. They are tried in queues — one for the reference, one for the
+voice-over of each group — in the order of `core.variant_queue`; a lever puts the variants the user named first, in his
+order, and a flag of a variant leaves it out of one queue.
 """
 from __future__ import annotations
 
@@ -18,10 +19,11 @@ from pydantic import BaseModel, Field, model_validator
 
 
 # The levers every consumer reads by name; the registry that gives them meaning is the composition module's.
-REFERENCE_CHOICE = "reference.choice"
-VARIANT_ALLOW = "variant.allow"
+REFERENCE_ORDER = "reference.order"
+REFERENCE_ALLOW = "reference.allow"
+VOICE_ORDER = "voice.order"
+VOICE_ALLOW = "voice.allow"
 VOICE_TAKE = "voice.take"
-VOICE_PLAYER = "voice.player"
 
 
 class Level(StrEnum):
@@ -40,21 +42,27 @@ class TargetKind(StrEnum):
 
 
 class ValueShape(StrEnum):
-    """The shape of the value of a lever: a flag, the pick of a variant of a group (or auto), or the pick of a
-    reference (a variant with its group, or auto). A window draws a lever by its target and its shape."""
+    """The shape of the value of a lever: a flag, or the order of variants the user put first in a queue (a list,
+    empty for the order of the rule). A window draws a lever by its target and its shape."""
 
     FLAG = "flag"
-    VARIANT_PICK = "variant_pick"
-    REFERENCE_PICK = "reference_pick"
+    VARIANT_ORDER = "variant_order"
+
+
+class Queue(StrEnum):
+    """The queue a lever acts on: the reference of an episode, or the voice-over of a group. A window draws the
+    levers of a queue on its tab."""
+
+    REFERENCE = "reference"
+    VOICE = "voice"
 
 
 # The forms a window knows how to draw. A lever of another form is refused when it is registered, so that no registered
 # lever can be missing from a window; a form joins by a control in the window (web/src/lib/output.ts: RENDERED_FORMS)
 # and a line here.
 LEVER_FORMS: frozenset[tuple[TargetKind, ValueShape]] = frozenset({
-    (TargetKind.NONE, ValueShape.REFERENCE_PICK), (TargetKind.NONE, ValueShape.FLAG),
-    (TargetKind.GROUP, ValueShape.FLAG), (TargetKind.GROUP, ValueShape.VARIANT_PICK),
-    (TargetKind.VARIANT, ValueShape.FLAG)})
+    (TargetKind.NONE, ValueShape.VARIANT_ORDER), (TargetKind.GROUP, ValueShape.VARIANT_ORDER),
+    (TargetKind.GROUP, ValueShape.FLAG), (TargetKind.VARIANT, ValueShape.FLAG)})
 
 _GROUP_TARGET = re.compile(r"group:(.+)", re.DOTALL)
 
@@ -119,17 +127,18 @@ class LeverSpec(BaseModel):
     shape: ValueShape
     default: Any = None
     consumer: str
+    queue: Queue
 
 
-class PlayerPick(BaseModel):
-    """The value of `voice.player`: one player of one source."""
+class PlayerVariant(BaseModel):
+    """An item of `voice.order`: one player of one source (the group is the target of the lever)."""
 
     source_id: int
     player: str
 
 
-class ReferenceChoice(PlayerPick):
-    """The value of `reference.choice`: a voice-over group (its `voice_label`) at one player of one source."""
+class GroupVariant(PlayerVariant):
+    """An item of `reference.order`: a voice-over group (its `voice_label`) at one player of one source."""
 
     group: str
 

@@ -3288,8 +3288,8 @@ async def test_the_levers_choose_which_voice_overs_an_episode_gets_and_where_fro
     probe, neighbours, voices, bus = dubs
     neighbours.levers[(1, 1)] = [EffectiveLever(lever="voice.take", target=group_target("BlackCat"), value=False,
                                                 level=Level.EPISODE)]
-    neighbours.levers[(1, 2)] = [EffectiveLever(lever="voice.player", target=group_target("BlackCat"),
-                                                value={"source_id": 1, "player": "kodik"}, level=Level.SEASON)]
+    neighbours.levers[(1, 2)] = [EffectiveLever(lever="voice.order", target=group_target("BlackCat"),
+                                                value=[{"source_id": 1, "player": "kodik"}], level=Level.SEASON)]
     probe.send_command("voices.dispatch", {"series_id": 7})
     await settled(neighbours, 2)
     await quiet(voices)

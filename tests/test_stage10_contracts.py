@@ -72,14 +72,14 @@ def test_a_compilation_is_a_range_that_spans_more_than_one_episode():
 
 
 def test_the_level_of_a_record_follows_the_numbers_it_names():
-    assert SettingRecord(series_id=1, lever="reference.choice").level == Level.SERIES
-    assert SettingRecord(series_id=1, season=2, lever="reference.choice").level == Level.SEASON
-    assert SettingRecord(series_id=1, season=2, episode=34, lever="reference.choice").level == Level.EPISODE
+    assert SettingRecord(series_id=1, lever="reference.order").level == Level.SERIES
+    assert SettingRecord(series_id=1, season=2, lever="reference.order").level == Level.SEASON
+    assert SettingRecord(series_id=1, season=2, episode=34, lever="reference.order").level == Level.EPISODE
 
 
 def test_an_episode_is_set_within_a_season():
     with pytest.raises(ValidationError):
-        SettingRecord(series_id=1, episode=34, lever="reference.choice")
+        SettingRecord(series_id=1, episode=34, lever="reference.order")
 
 
 def test_targets_name_domain_things_not_row_ids():

@@ -8,8 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from core.contracts import (LEVER_FORMS, REFERENCE_CHOICE, VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, LeverSpec, TargetKind, ValueShape,
-                            parse_group_target, parse_variant_target)
+from core.contracts import (LEVER_FORMS, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, LeverSpec, Queue,
+                            TargetKind, ValueShape, parse_group_target, parse_variant_target)
 
 
 def _no_sources(value: Any) -> frozenset[int]:
@@ -28,41 +28,46 @@ def _is_id(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _is_pick(value: Any, shape: dict[str, Callable[[Any], bool]]) -> bool:
-    """Auto (None) or a dict that has exactly the fields of `shape`, each of its kind."""
-    if value is None:
-        return True
+def _is_item(value: Any, shape: dict[str, Callable[[Any], bool]]) -> bool:
+    """A dict that has exactly the fields of `shape`, each of its kind."""
     if not isinstance(value, dict) or set(value) != set(shape):
         return False
     # No builtin `all` here: this module's own `all` is the registry listing.
     return not [key for key, check in shape.items() if not check(value[key])]
 
 
-def _is_reference_choice(value: Any) -> bool:
-    return _is_pick(value, {"group": _is_name, "source_id": _is_id, "player": _is_name})
+# An item of an order names its variant by what the target of the lever does not: the group too when there is no target.
+_ITEMS: dict[TargetKind, dict[str, Callable[[Any], bool]]] = {
+    TargetKind.NONE: {"group": _is_name, "source_id": _is_id, "player": _is_name},
+    TargetKind.GROUP: {"source_id": _is_id, "player": _is_name},
+}
 
 
-def _is_variant_pick(value: Any) -> bool:
-    return _is_pick(value, {"source_id": _is_id, "player": _is_name})
+def _is_order(value: Any, target: TargetKind) -> bool:
+    """A list of distinct variants in the form the target asks for; an empty list is the order of the rule."""
+    if not isinstance(value, list) or target not in _ITEMS:
+        return False
+    items = [tuple(sorted(each.items())) for each in value if _is_item(each, _ITEMS[target])]
+    return len(items) == len(value) == len(set(items))
 
 
-def _picked_source(value: Any) -> frozenset[int]:
-    return frozenset({value["source_id"]}) if isinstance(value, dict) and _is_id(value.get("source_id")) else frozenset()
+def _order_sources(value: Any) -> frozenset[int]:
+    return frozenset(each["source_id"] for each in value if isinstance(each, dict) and _is_id(each.get("source_id"))) \
+        if isinstance(value, list) else frozenset()
 
 
-# What a value is, by its shape: the one place that says which values a lever of a shape takes.
-_ACCEPTS: dict[ValueShape, Callable[[Any], bool]] = {
-    ValueShape.FLAG: _is_flag,
-    ValueShape.VARIANT_PICK: _is_variant_pick,
-    ValueShape.REFERENCE_PICK: _is_reference_choice,
+# What a value is, by its shape (and the target, for the form of an item): the one place that says which values a lever takes.
+_ACCEPTS: dict[ValueShape, Callable[[Any, TargetKind], bool]] = {
+    ValueShape.FLAG: lambda value, target: _is_flag(value),
+    ValueShape.VARIANT_ORDER: _is_order,
 }
 
 
 @dataclass(frozen=True)
 class Lever:
-    """`consumer` is the module that acts on the lever.
+    """`consumer` is the module that acts on the lever, `queue` the queue it acts on.
 
-    `value_sources` names the sources of the series a value points at, so that a removed source takes the records
+    `value_sources` names the sources of the series a value points at, so that a removed source leaves the records
     that mention it, whatever shape the value of a lever has."""
 
     name: str
@@ -70,11 +75,12 @@ class Lever:
     shape: ValueShape
     default: Any
     consumer: str
+    queue: Queue
     value_sources: Callable[[Any], frozenset[int]] = _no_sources
 
     def accepts(self, value: Any) -> bool:
         """Whether a value is one of the lever's values."""
-        return _ACCEPTS[self.shape](value)
+        return _ACCEPTS[self.shape](value, self.target)
 
     def accepts_target(self, target: str | None) -> bool:
         """Whether `target` is the form this lever points at; a lever without a target takes none."""
@@ -94,7 +100,7 @@ class Lever:
 
     def spec(self) -> LeverSpec:
         return LeverSpec(name=self.name, target=self.target, shape=self.shape, default=self.default,
-                         consumer=self.consumer)
+                         consumer=self.consumer, queue=self.queue)
 
 
 _levers: dict[str, Lever] = {}
@@ -128,7 +134,8 @@ def specs() -> list[LeverSpec]:
     return [lever.spec() for lever in _levers.values()]
 
 
-register(Lever(REFERENCE_CHOICE, TargetKind.NONE, ValueShape.REFERENCE_PICK, None, "scan", _picked_source))
-register(Lever(VARIANT_ALLOW, TargetKind.VARIANT, ValueShape.FLAG, True, "scan"))
-register(Lever(VOICE_TAKE, TargetKind.GROUP, ValueShape.FLAG, True, "voices"))
-register(Lever(VOICE_PLAYER, TargetKind.GROUP, ValueShape.VARIANT_PICK, None, "voices", _picked_source))
+register(Lever(REFERENCE_ORDER, TargetKind.NONE, ValueShape.VARIANT_ORDER, [], "scan", Queue.REFERENCE, _order_sources))
+register(Lever(REFERENCE_ALLOW, TargetKind.VARIANT, ValueShape.FLAG, True, "scan", Queue.REFERENCE))
+register(Lever(VOICE_TAKE, TargetKind.GROUP, ValueShape.FLAG, True, "voices", Queue.VOICE))
+register(Lever(VOICE_ORDER, TargetKind.GROUP, ValueShape.VARIANT_ORDER, [], "voices", Queue.VOICE, _order_sources))
+register(Lever(VOICE_ALLOW, TargetKind.VARIANT, ValueShape.FLAG, True, "voices", Queue.VOICE))

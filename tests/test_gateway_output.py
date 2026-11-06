@@ -140,9 +140,9 @@ async def test_a_lever_is_set_with_the_series_of_the_path_and_the_body_as_it_cam
 
 async def test_a_lever_of_the_series_level_needs_no_season(tmp_path):
     async with serving(tmp_path, {"composition.settings.set": {"ok": True}}) as (client, owners, _, _):
-        await client.put("/api/series/1/output/settings", json={"lever": "reference.choice", "value": None})
+        await client.put("/api/series/1/output/settings", json={"lever": "reference.order", "value": []})
     assert owners.asked("composition.settings.set") == [{
-        "series_id": 1, "season": None, "episode": None, "lever": "reference.choice", "target": None, "value": None}]
+        "series_id": 1, "season": None, "episode": None, "lever": "reference.order", "target": None, "value": []}]
 
 
 @pytest.mark.parametrize("code", ["unknown_lever", "bad_target", "bad_value"])
@@ -172,12 +172,12 @@ async def test_a_level_is_reset_with_the_series_of_the_path(tmp_path):
         response = await client.post("/api/series/1/output/settings/reset", json={"season": 2})
         await client.post("/api/series/1/output/settings/reset", json={})
         await client.post("/api/series/1/output/settings/reset", json={
-            "season": 2, "episode": 3, "lever": "voice.player", "target": "group:Group"})
+            "season": 2, "episode": 3, "lever": "voice.order", "target": "group:Group"})
     assert response.status_code == 200 and response.json() == {"success": True}
     assert owners.asked("composition.settings.reset") == [
         {"series_id": 1, "season": 2, "episode": None, "lever": None, "target": None},
         {"series_id": 1, "season": None, "episode": None, "lever": None, "target": None},
-        {"series_id": 1, "season": 2, "episode": 3, "lever": "voice.player", "target": "group:Group"}]
+        {"series_id": 1, "season": 2, "episode": 3, "lever": "voice.order", "target": "group:Group"}]
 
 
 async def test_a_reset_the_registry_refuses_is_a_400_with_the_code(tmp_path):

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import pytest
 
 from core import BaseModule, Bus, BusRequestError, Runner, ids
-from core.contracts import (REFERENCE_CHOICE, VARIANT_ALLOW, Level, Reference, ReferenceChanged, ReferenceChoice,
+from core.contracts import (REFERENCE_ALLOW, REFERENCE_ORDER, Level, Reference, ReferenceChanged,
                             ReferenceMark, RowState, TableState, variant_target)
 from core.db import Database
 from core.envelope import Envelope
@@ -727,18 +727,17 @@ async def test_the_tag_of_the_file_is_the_group_of_the_voice_over_else_its_name_
 
 # --- the pick of the user; what vanishes (S-7, S-11, S-14) --------------------------------------------------------------
 
-async def test_the_pick_of_a_voice_over_that_has_gone_leaves_the_episode_without_a_reference(rig):
-    """S-7 (M-22): nothing stands in for the picked voice-over, and the row of the plan it left is dropped."""
+async def test_a_queue_whose_first_variant_has_gone_takes_the_next_and_says_so(rig):
+    """What the user put first is not in the layout: the next of the queue stands in, marked as another player."""
     rig.world.rows = [rig.row("a", 1, 1, voice="Ruchime")]
     await rig.run()
-    gone = ReferenceChoice(group="AniLibria", source_id=rig.source_ids[0], player="kodik").model_dump()
-    rig.world.settings = [episode_settings(1, 1, lever(REFERENCE_CHOICE, gone, Level.EPISODE))]
+    gone = [{"group": "AniLibria", "source_id": rig.source_ids[0], "player": "kodik"}]
+    rig.world.settings = [episode_settings(1, 1, lever(REFERENCE_ORDER, gone, Level.EPISODE))]
     await rig.run()
     reference = (await rig.output())[0]
-    assert reference.mark == MARK.NONE and reference.source_id is None
-    assert parse(reference.reason) == {"code": "reference_voice_missing", "params": {
-        "voice": "AniLibria", "season": 1, "episode": 1}}
-    assert rig.media() == {}
+    assert (reference.row_key, reference.mark) == ("a", MARK.OTHER_PLAYER)
+    assert parse(reference.reason)["code"] == "reference_other_player"
+    assert list(rig.media()) == ["a"]
 
 
 async def test_the_row_that_was_the_reference_vanishes_from_the_table(rig):
@@ -757,10 +756,10 @@ async def test_the_row_that_was_the_reference_vanishes_from_the_table(rig):
 
 async def test_a_reset_of_the_setting_of_an_episode_recounts_its_reference_and_downloads_nothing(rig):
     """S-14: the episode goes back to its season; the reference is counted again from the event, without a download."""
-    own = ReferenceChoice(group="AniLibria", source_id=rig.source_ids[0], player="kodik").model_dump()
+    own = [{"group": "AniLibria", "source_id": rig.source_ids[0], "player": "kodik"}]
     rig.world.rows = [rig.row("auto", 1, 1, height=1080), rig.row("own", 1, 1, height=480, player="kodik",
                                                                  voice="AniLibria")]
-    rig.world.settings = [episode_settings(1, 1, lever(REFERENCE_CHOICE, own, Level.EPISODE))]
+    rig.world.settings = [episode_settings(1, 1, lever(REFERENCE_ORDER, own, Level.EPISODE))]
     await rig.run()
     assert (await rig.output())[0].mark == MARK.OWN and list(rig.media()) == ["own"]
     changes, plan = rig.bus.subscribe("scan.reference.changed"), rig.bus.subscribe("scan.plan.updated")
@@ -799,7 +798,7 @@ async def test_a_new_order_of_players_recounts_the_references_of_video_series(ri
 async def test_a_player_left_out_of_the_choice_is_not_the_reference(rig):
     rig.world.rows = [rig.row("vk", 1, 1, player="vk", height=2160), rig.row("kodik", 1, 1, player="kodik", height=720)]
     rig.world.settings = [episode_settings(1, 1, lever(
-        VARIANT_ALLOW, False, Level.SERIES, variant_target("Ruchime", rig.source_ids[0], "vk")))]
+        REFERENCE_ALLOW, False, Level.SERIES, variant_target("Ruchime", rig.source_ids[0], "vk")))]
     await rig.run()
     assert (await rig.output())[0].row_key == "kodik"
 

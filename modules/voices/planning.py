@@ -3,8 +3,9 @@
 The input is what the other modules already decided: the rows of the layout (their numbers are the constructor's,
 their voice-over group is `voice_label`), the reference of every episode (`scan`) and the output levers of every
 episode (`composition`). The voice-overs of an episode are every voice of the layout but the one already in the
-reference video, except the voices the levers turn off; the candidates of a voice are its rows that cover the episode
-and play, the player of the lever first, then by the order of players in the settings, then by the order of sources.
+reference video, except the voices the levers turn off (`voice.take`); the candidates of a voice are its rows that cover
+the episode and play, but the variants the user left out (`voice.allow`), in the queue of `core.variant_queue`: the
+variants of the user's order (`voice.order`) first, in his order, then the others by the rule of voice-overs.
 A row that covers several episodes (a compilation) is a candidate like any other; its video is one file for every
 episode it covers.
 """
@@ -14,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, NamedTuple, Sequence
 
 from core.variant_queue import VOICE_RANKING, Candidate as QueueItem, Order, ranked
-from core.contracts import (DubStatus as S, VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, CompositionRow, EffectiveLever, EpisodeSettings,
+from core.contracts import (DubStatus as S, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, CompositionRow, EffectiveLever, EpisodeSettings,
                             Reference, ReferenceMark, RowState, group_target, parse_variant_target)
 
 
@@ -110,13 +111,13 @@ def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settin
             undecided.add(slot)
             continue
         with_reference.add(slot)
-        take_off, picks, denied = _levers(levers.get((ref.season, ref.episode), ()))
+        take_off, orders, denied = _levers(levers.get((ref.season, ref.episode), ()))
         for label in voices:
             if label == ref_row.voice_label or group_target(label) in take_off:
                 continue
             fitting = [row for row in by_voice.get((ref.season, label), ()) if _covers(row, ref.episode, ref_row.part)]
             covering = [row for row in fitting if (label, row.source_id, row.player) not in denied]
-            chain = _chain(covering, picks.get(group_target(label)), priority, players, places or {})
+            chain = _chain(covering, orders.get(group_target(label), ()), priority, players, places or {})
             kept = {each.url for each in chain}
             left = [row for row in fitting if (label, row.source_id, row.player) in denied and row.link not in kept]
             dubs.append(PlannedDub(ref.season, ref.episode, slot[2], label, label, chain,
@@ -125,25 +126,24 @@ def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settin
     return Plan(tuple(dubs), frozenset(with_reference), frozenset(undecided))
 
 
-def _levers(levers: Iterable[EffectiveLever]) -> tuple[set[str], dict[str, tuple[int, str]], set[tuple[str, int, str]]]:
-    """(targets taken off, {target: (source id, player) the user picked}, (group, source id, player) of the variants
-    the user left out) of the levers of one episode."""
+def _levers(levers: Iterable[EffectiveLever]) -> tuple[set[str], dict[str, list[tuple[int, str]]], set[tuple[str, int, str]]]:
+    """(targets taken off, {target: the (source id, player) the user put first, in his order}, (group, source id, player)
+    of the variants the user left out) of the levers of one episode."""
     take_off: set[str] = set()
-    picks: dict[str, tuple[int, str]] = {}
+    orders: dict[str, list[tuple[int, str]]] = {}
     denied: set[tuple[str, int, str]] = set()
     for lever in levers:
         if lever.target is None:
             continue
-        if lever.lever == VARIANT_ALLOW and lever.value is False:
+        if lever.lever == VOICE_ALLOW and lever.value is False:
             variant = parse_variant_target(lever.target)
             if variant is not None:
                 denied.add(variant)
-            continue
-        if lever.lever == VOICE_TAKE and lever.value is False:
+        elif lever.lever == VOICE_TAKE and lever.value is False:
             take_off.add(lever.target)
-        elif lever.lever == VOICE_PLAYER and isinstance(lever.value, dict):
-            picks[lever.target] = (lever.value.get("source_id"), lever.value.get("player"))
-    return take_off, picks, denied
+        elif lever.lever == VOICE_ORDER and isinstance(lever.value, list):
+            orders[lever.target] = [(each.get("source_id"), each.get("player")) for each in lever.value if isinstance(each, dict)]
+    return take_off, orders, denied
 
 
 def _covers(row: CompositionRow, episode: int, part: int | None) -> bool:
@@ -151,12 +151,12 @@ def _covers(row: CompositionRow, episode: int, part: int | None) -> bool:
     return row.episode_start <= episode <= row.episode_end and row.part == part
 
 
-def _chain(rows: Sequence[CompositionRow], pick: tuple[int, str] | None, priority: Sequence[str],
+def _chain(rows: Sequence[CompositionRow], preferred: Sequence[tuple[int, str]], priority: Sequence[str],
            players, places: Mapping[int, Sequence[str]]) -> tuple[Candidate, ...]:
-    """The playing rows in the order of `core.variant_queue`: the picked variant first, then by the rule of voice-overs."""
+    """The playing rows in the order of `core.variant_queue`: the user's order first, then by the rule of voice-overs."""
     playing = [QueueItem(row, place) for place, row in enumerate(rows) if row.state == RowState.PLAYABLE and row.link]
     ordered = ranked(playing, Order(tuple(priority), player_groups=players), VOICE_RANKING,
-                     preferred=[pick] if pick is not None else (), identity=lambda item: (item.row.source_id, item.row.player))
+                     preferred, identity=lambda item: (item.row.source_id, item.row.player))
     chain: dict[str, Candidate] = {}
     for row in (item.row for item in ordered):
         chain.setdefault(row.link, Candidate(row.player, row.voice_label, row.link,

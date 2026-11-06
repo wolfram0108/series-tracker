@@ -110,8 +110,8 @@ downloads, its files and its rows.
 Paths of the working files are taken from the rows (folder of `temp_path`), never from the settings of the
 moment or from the service's path map.
 
-Downloading is delegated to downloads.fetch. A dub tries its main candidate first (the player of the lever
-`voice.player`, else by the order of players in the settings), then the other rows of the same voice that cover the
+Downloading is delegated to downloads.fetch. A dub tries its chain in the order of its queue (the variants of the lever
+`voice.order` first, then by the order of players in the settings: `core.variant_queue`), the rows of the same voice that cover the
 episode; when none gives the file the row is `failed`, a warning is logged, and the next dispatch offers it again from
 the main candidate. A dub is `ready` once its file
 is on disk; rows left `downloading` by a restart are sent again on start.

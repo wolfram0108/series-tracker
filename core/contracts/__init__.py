@@ -8,8 +8,8 @@ from .composition import (CompositionChanged, CompositionFailed, CompositionGetR
                           CompositionPreviewRequest, CompositionReply, PreviewLine, SeasonVoiceOrder, VoiceOrderSet, VoiceSpan,
                           CompositionRow, EpisodeRef, Exclusion, PlayerSummary, SourceStatus, SourceSummary)
 from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
-from .output_settings import (LEVER_FORMS, REFERENCE_CHOICE, VARIANT_ALLOW, VOICE_PLAYER, VOICE_TAKE, EffectiveLever, EpisodeSettings, LeverSpec,
-                              Level, LevelSettings, PlayerPick, ReferenceChoice, SettingRecord, SettingsReset, SettingsSet,
+from .output_settings import (LEVER_FORMS, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, GroupVariant, PlayerVariant, Queue, EffectiveLever, EpisodeSettings, LeverSpec,
+                              Level, LevelSettings, SettingRecord, SettingsReset, SettingsSet,
                               TargetKind, ValueShape, group_target, parse_group_target, parse_variant_target, variant_target)
 from .reference import OutputSwitch, Reference, ReferenceChanged, ReferenceMark
 from .release_table import (LINE_FIELDS, LINE_SEPARATOR, ReleaseTable, RowState, RowVoice, SiteResolveReply, SiteResolveRequest,
@@ -35,7 +35,7 @@ __all__ = ["Action", "NotAllowed", "allowed", "refusal", "require", "variant_sta
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
            "CompositionReply", "CompositionRow", "PreviewLine", "SeasonVoiceOrder", "VoiceOrderSet", "VoiceSpan",
            "EpisodeRef", "Exclusion", "PlayerSummary", "SourceStatus", "SourceSummary",
-           "REFERENCE_CHOICE", "VARIANT_ALLOW", "VOICE_PLAYER", "VOICE_TAKE", "EffectiveLever", "EpisodeSettings", "LeverSpec", "Level", "LevelSettings", "PlayerPick", "ReferenceChoice", "SettingRecord", "SettingsReset", "SettingsSet",
+           "REFERENCE_ALLOW", "REFERENCE_ORDER", "VOICE_ALLOW", "VOICE_ORDER", "VOICE_TAKE", "GroupVariant", "PlayerVariant", "Queue", "EffectiveLever", "EpisodeSettings", "LeverSpec", "Level", "LevelSettings", "SettingRecord", "SettingsReset", "SettingsSet",
            "TargetKind", "ValueShape",
            "group_target", "parse_group_target", "parse_variant_target", "variant_target",
            "OutputSwitch", "Reference", "ReferenceChanged", "ReferenceMark",

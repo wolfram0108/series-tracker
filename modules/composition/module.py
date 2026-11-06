@@ -78,7 +78,7 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from core import BaseModule
-from core.contracts import (REFERENCE_CHOICE, RUN_CHANGED, VOICE_PLAYER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
+from core.contracts import (REFERENCE_ORDER, RUN_CHANGED, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
                             RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
@@ -328,18 +328,19 @@ class CompositionModule(BaseModule):
                              availability.SERIES_SCANNING if series_id in self._frozen else availability.SERIES_IDLE)
 
     async def _require_pickable(self, record: SettingsSet) -> None:
-        """A variant is picked as the reference, or as the first one of its group, only where the table of what is allowed
-        lets it: the same rule the window draws its marks by."""
-        if not isinstance(record.value, dict) or record.lever not in (REFERENCE_CHOICE, VOICE_PLAYER):
+        """A variant is put into the order of the reference, or of a group, only where the table of what is allowed lets
+        it: the same rule the window lists the variants of a queue by."""
+        if not isinstance(record.value, list) or not record.value or record.lever not in (REFERENCE_ORDER, VOICE_ORDER):
             return
-        group = record.value.get("group") if record.lever == REFERENCE_CHOICE else parse_group_target(record.target or "")
-        action = availability.Action.CHOOSE_REFERENCE if record.lever == REFERENCE_CHOICE else availability.Action.PREFER_VARIANT
+        action = availability.Action.CHOOSE_REFERENCE if record.lever == REFERENCE_ORDER else availability.Action.PREFER_VARIANT
         stored = await self.repo.stored(record.series_id)
         # The state is that of the level the setting is for, as the window shows it: the lines of that season or episode.
-        found = [row for row in availability.lines_of_level(stored.rows, record.season, record.episode)
-                 if row.voice_label == group and row.source_id == record.value.get("source_id")
-                 and row.player == record.value.get("player")]
-        availability.require(action, availability.variant_state(found))
+        lines = availability.lines_of_level(stored.rows, record.season, record.episode)
+        for item in record.value:
+            group = item.get("group") if record.lever == REFERENCE_ORDER else parse_group_target(record.target or "")
+            found = [row for row in lines if row.voice_label == group and row.source_id == item.get("source_id")
+                     and row.player == item.get("player")]
+            availability.require(action, availability.variant_state(found))
 
     async def on_settings_reset(self, env: Envelope) -> dict:
         scope = SettingsReset.model_validate(env.payload)

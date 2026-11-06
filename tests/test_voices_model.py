@@ -156,7 +156,7 @@ def test_a_chain_holds_no_variant_that_was_left_out_and_what_is_left_out_is_name
                 link = "https://site/same" if shared and (source_id, player) in ((1, "cvh"), (2, "cvh")) else None
                 rows.append(row(source_id, player, "G", 1, link=link))
             references = [Reference(season=1, episode=1, mark=ReferenceMark.BY_LEVEL, source_id=1, row_key=rows[0].row_key)]
-            levers = [EffectiveLever(lever="variant.allow", target=variant_target("G", source_id, player), value=False, level=Level.EPISODE)
+            levers = [EffectiveLever(lever="voice.allow", target=variant_target("G", source_id, player), value=False, level=Level.EPISODE)
                       for source_id, player in left]
             found = plan(rows, references, [EpisodeSettings(season=1, episode=1, levers=levers)], PRIORITY, NO_GROUPS)
             [dub] = [each for each in found.dubs if each.voice_key == "G"]

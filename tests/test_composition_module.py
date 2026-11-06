@@ -17,7 +17,7 @@ from composition_fakes import (HOST, OTHER_PAGE, PAGE, FakeCatalog, FakeRules, F
                                source)
 from core import BaseModule, Bus, BusRequestError, Runner
 from core.contracts import (CompositionPreviewReply, CompositionReply, EffectiveLever, Level, ReleaseTable, RowState,
-                            TargetKind, ValueShape,
+                            Queue, TargetKind, ValueShape,
                             RowVoice, SettingsReset, SettingsSet, SourceStatus, TableRow, TableState,
                             group_target, variant_target)
 from core.db import Database
@@ -426,22 +426,22 @@ async def test_what_was_set_for_a_voice_over_follows_it_into_the_group_the_user_
     unknown = "Неизвестная озвучка 1"
     source_id = only_source(s, series_id)
     await s.set(series_id, "voice.take", False, season=1, target=group_target(unknown))
-    await s.set(series_id, "variant.allow", False, season=1, target=variant_target(unknown, source_id, "vk"))
-    await s.set(series_id, "reference.choice", {"group": unknown, "source_id": source_id, "player": "vk"})
+    await s.set(series_id, "reference.allow", False, season=1, target=variant_target(unknown, source_id, "vk"))
+    await s.set(series_id, "reference.order", [{"group": unknown, "source_id": source_id, "player": "vk"}])
     await s.set(series_id, "voice.take", False, season=1, target=group_target("Неизвестная озвучка 2"))
 
     await s.counted(lambda: s.voices.set_groups({"Стар": ["AniStar"]}))
     made = {(lever, target) for lever, target, _ in records_of(s, series_id)}
-    assert ("voice.take", group_target("Стар")) in made and ("variant.allow", variant_target("Стар", source_id, "vk")) in made
+    assert ("voice.take", group_target("Стар")) in made and ("reference.allow", variant_target("Стар", source_id, "vk")) in made
     assert ("voice.take", group_target("Неизвестная озвучка 2")) in made  # another voice-over keeps its own
     assert not any(unknown in (target or "") for _, target in made)
-    assert [value for lever, _, value in records_of(s, series_id) if lever == "reference.choice"] == [
-        {"group": "Стар", "source_id": source_id, "player": "vk"}]
+    assert [value for lever, _, value in records_of(s, series_id) if lever == "reference.order"] == [
+        [{"group": "Стар", "source_id": source_id, "player": "vk"}]]
 
     await s.counted(lambda: s.voices.set_groups({}))
     back = {(lever, target) for lever, target, _ in records_of(s, series_id)}
-    assert ("voice.take", group_target(unknown)) in back and ("variant.allow", variant_target(unknown, source_id, "vk")) in back
-    assert [value["group"] for lever, _, value in records_of(s, series_id) if lever == "reference.choice"] == [unknown]
+    assert ("voice.take", group_target(unknown)) in back and ("reference.allow", variant_target(unknown, source_id, "vk")) in back
+    assert [value[0]["group"] for lever, _, value in records_of(s, series_id) if lever == "reference.order"] == [unknown]
 
 
 @pytest.mark.asyncio
@@ -467,9 +467,9 @@ async def test_a_series_whose_names_are_all_empty_asks_the_groups_nothing(system
 
 # --- M-33: levers on the bus, C-13 to C-17 -------------------------------------------------------------------------
 
-def choice(source_id: int, player: str = "vk") -> dict:
-    """A variant the layouts of these tests have: the voice-over `Ruchime` of the standard page, at a player of the source."""
-    return {"group": "Неизвестная озвучка 1", "source_id": source_id, "player": player}
+def choice(source_id: int, player: str = "vk") -> list:
+    """An order of one variant the layouts of these tests have: the voice-over of the standard page, at a player of the source."""
+    return [{"group": "Неизвестная озвучка 1", "source_id": source_id, "player": player}]
 
 
 def rich_standard(url: str = PAGE) -> ReleaseTable:
@@ -488,21 +488,21 @@ async def test_a_season_value_reaches_the_episodes_that_follow_it_and_not_the_on
     s = system
     series_id = await laid_out(s, rich_standard())
     source_id = only_source(s, series_id)
-    assert await s.set(series_id, "reference.choice", choice(source_id), season=1) == {"ok": True}
+    assert await s.set(series_id, "reference.order", choice(source_id), season=1) == {"ok": True}
     assert s.taken(s.changed)[0]["episodes"] == season_one(1, 2, 3, 4, 5)
 
-    await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=3)
-    await s.set(series_id, "variant.allow", False, season=1, episode=3, target=variant_target("Ruchime", source_id, "vk"))
+    await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=1, episode=3)
+    await s.set(series_id, "reference.allow", False, season=1, episode=3, target=variant_target("Ruchime", source_id, "vk"))
     assert [event["episodes"] for event in s.taken(s.changed)] == [season_one(3), season_one(3)]
 
-    await s.set(series_id, "reference.choice", choice(source_id, "allvideo"), season=1)
+    await s.set(series_id, "reference.order", choice(source_id, "allvideo"), season=1)
     assert [event["episodes"] for event in s.taken(s.changed)] == [season_one(1, 2, 4, 5)]
     at = levers_by_episode(await s.get(series_id))
-    assert (at[1, 3]["reference.choice"].value, at[1, 3]["reference.choice"].level) == (choice(source_id, "kodik"),
+    assert (at[1, 3]["reference.order"].value, at[1, 3]["reference.order"].level) == (choice(source_id, "kodik"),
                                                                                          Level.EPISODE)
-    assert (at[1, 4]["reference.choice"].value, at[1, 4]["reference.choice"].level) == (choice(source_id, "allvideo"),
+    assert (at[1, 4]["reference.order"].value, at[1, 4]["reference.order"].level) == (choice(source_id, "allvideo"),
                                                                                          Level.SEASON)
-    assert at[2, 1]["reference.choice"].level == Level.DEFAULT
+    assert at[2, 1]["reference.order"].level == Level.DEFAULT
 
 
 @pytest.mark.asyncio
@@ -511,8 +511,8 @@ async def test_resetting_an_episode_back_to_its_season_touches_that_episode_alon
     s = system
     series_id = await laid_out(s, rich_standard())
     source_id = only_source(s, series_id)
-    await s.set(series_id, "reference.choice", choice(source_id), season=1)
-    await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=3)
+    await s.set(series_id, "reference.order", choice(source_id), season=1)
+    await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=1, episode=3)
     s.taken(s.changed)
     assert await s.reset(series_id, season=1, episode=3) == {"ok": True}
     assert [event["episodes"] for event in s.taken(s.changed)] == [season_one(3)]
@@ -540,11 +540,11 @@ async def test_a_reset_of_one_lever_takes_that_lever_back_and_leaves_the_others_
     s = system
     series_id = await laid_out(s)
     await s.set(series_id, "voice.take", False, season=1, target=group_target("Рутина"))
-    await s.set(series_id, "reference.choice", choice(only_source(s, series_id)), season=1)
+    await s.set(series_id, "reference.order", choice(only_source(s, series_id)), season=1)
     s.taken(s.changed)
     await s.reset(series_id, season=1, lever="voice.take", target=group_target("Рутина"))
     assert s.taken(s.changed)[0]["episodes"] == season_one(1, 2, 3, 4, 5)
-    assert s.sql("SELECT lever FROM output_settings WHERE series_id = ?", series_id) == [("reference.choice",)]
+    assert s.sql("SELECT lever FROM output_settings WHERE series_id = ?", series_id) == [("reference.order",)]
 
 
 @pytest.mark.asyncio
@@ -556,9 +556,9 @@ async def test_a_source_that_is_removed_takes_the_settings_that_point_at_it_and_
     await s.counted(lambda: s.sources.finish(PAGE, standard()))
     await s.counted(lambda: s.sources.finish(OTHER_PAGE, page(*season_rows(1, range(1, 4), player="kodik"),
                                                               url=OTHER_PAGE)))
-    await s.set(series_id, "reference.choice", choice(second, "kodik"), season=1)
-    await s.set(series_id, "variant.allow", False, season=1, episode=2, target=variant_target("Ruchime", second, "kodik"))
-    await s.set(series_id, "variant.allow", False, season=1, target=variant_target("Ruchime", first, "vk"))
+    await s.set(series_id, "reference.order", choice(second, "kodik"), season=1)
+    await s.set(series_id, "reference.allow", False, season=1, episode=2, target=variant_target("Ruchime", second, "kodik"))
+    await s.set(series_id, "reference.allow", False, season=1, target=variant_target("Ruchime", first, "vk"))
     s.taken(s.changed)
 
     await s.counted(lambda: s.catalog.remove_source(second))
@@ -567,9 +567,9 @@ async def test_a_source_that_is_removed_takes_the_settings_that_point_at_it_and_
     assert {r.source_id for r in reply.rows} == {first} and len(reply.rows) == 7
     assert event["episodes"] == season_one(1, 2, 3, 4, 5)
     assert s.sql("SELECT lever, target FROM output_settings WHERE series_id = ?", series_id) == [
-        ("variant.allow", variant_target("Ruchime", first, "vk"))]
+        ("reference.allow", variant_target("Ruchime", first, "vk"))]
     assert s.sql("SELECT source_id FROM composition_sources WHERE series_id = ?", series_id) == [(first,)]
-    assert levers_by_episode(reply)[1, 2]["reference.choice"].level == Level.DEFAULT
+    assert levers_by_episode(reply)[1, 2]["reference.order"].level == Level.DEFAULT
 
 
 @pytest.mark.asyncio
@@ -578,8 +578,8 @@ async def test_an_episode_that_leaves_the_layout_takes_its_own_settings_and_the_
     s = system
     series_id = await laid_out(s, rich_standard())
     source_id = only_source(s, series_id)
-    await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=5)
-    await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=2)
+    await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=1, episode=5)
+    await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=1, episode=2)
     await s.set(series_id, "voice.take", False, season=1, target=group_target("Рутина"))
     s.taken(s.changed)
     await s.counted(lambda: s.sources.finish(PAGE, page(*season_rows(1, range(1, 4)), *season_rows(2, [1]),
@@ -587,7 +587,7 @@ async def test_an_episode_that_leaves_the_layout_takes_its_own_settings_and_the_
                                                         *season_rows(1, range(1, 4), player="allvideo"))))
     assert s.sql("SELECT season, episode, lever FROM output_settings WHERE series_id = ?"
                  " ORDER BY season, episode, lever", series_id) == [(1, None, "voice.take"),
-                                                                   (1, 2, "reference.choice")]
+                                                                   (1, 2, "reference.order")]
     assert s.taken(s.changed)[0]["episodes"] == refs((1, 4), (1, 5), (2, 2))
 
 
@@ -597,7 +597,7 @@ async def test_the_settings_of_a_series_without_an_answered_source_are_not_taken
     s = system
     series_id = await laid_out(s, rich_standard())
     source_id = only_source(s, series_id)
-    await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=2)
+    await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=1, episode=2)
     await s.counted(lambda: s.catalog.update_source(source_id, parser_profile_id=None))
     reply = await s.get(series_id)
     assert reply.rows == [] and reply.sources[0].status == SourceStatus.NO_PROFILE
@@ -611,13 +611,13 @@ async def test_a_command_the_registry_refuses_is_refused_with_its_reason_and_sto
     s = system
     series_id = await laid_out(s)
     for lever, value, target, code in [("no.such", True, None, "unknown_lever"),
-                                       ("variant.allow", True, None, "bad_target"),
+                                       ("reference.allow", True, None, "bad_target"),
                                        ("voice.take", "yes", group_target("Рутина"), "bad_value")]:
         with pytest.raises(BusRequestError) as caught:
             await s.set(series_id, lever, value, season=1, target=target)
         assert code_of(caught.value) == code
     with pytest.raises(BusRequestError) as caught:
-        await s.reset(series_id, season=1, lever="variant.allow")
+        await s.reset(series_id, season=1, lever="reference.allow")
     assert code_of(caught.value) == "bad_target"
     with pytest.raises(BusRequestError) as caught:
         await s.set(999, "voice.take", True, target=group_target("Рутина"))
@@ -649,7 +649,7 @@ async def test_a_consumer_and_a_lever_that_are_only_registered_work_with_the_mod
     s = system
     consumer = Consumer(s.bus)
     await consumer.start()
-    levers.register(Lever("fake.mute", TargetKind.GROUP, ValueShape.FLAG, False, "voices"))
+    levers.register(Lever("fake.mute", TargetKind.GROUP, ValueShape.FLAG, False, "voices", Queue.VOICE))
     try:
         series_id = await laid_out(s)
         for _ in range(2):
@@ -932,7 +932,7 @@ async def test_what_the_database_keeps_of_a_series_the_catalog_no_longer_has_is_
     with closing(sqlite3.connect(db_path)) as conn:
         conn.execute("INSERT INTO composition_state (series_id, rev) VALUES (42, 3)")
         conn.execute("INSERT INTO unknown_voices (series_id, name_key, number) VALUES (42, 'x', 1)")
-        conn.execute("INSERT INTO output_settings (series_id, lever, value) VALUES (42, 'reference.choice', 'null')")
+        conn.execute("INSERT INTO output_settings (series_id, lever, value) VALUES (42, 'reference.order', 'null')")
         conn.commit()
     again = CompositionModule(s.bus, Database(str(db_path)))
     await again.start()
@@ -993,8 +993,8 @@ def test_a_level_of_a_lever_is_kept_once_whether_or_not_it_has_a_season_or_an_ep
     insert = ("INSERT INTO output_settings (series_id, season, episode, lever, target, value)"
               " VALUES (?, ?, ?, ?, ?, 'true')")
     levels = [(1, None, None, "voice.take", "group:a"), (1, 1, None, "voice.take", "group:a"),
-              (1, 1, 2, "voice.take", "group:a"), (1, None, None, "reference.choice", None),
-              (2, None, None, "reference.choice", None)]
+              (1, 1, 2, "voice.take", "group:a"), (1, None, None, "reference.order", None),
+              (2, None, None, "reference.order", None)]
     with closing(sqlite3.connect(path)) as conn:
         for level in levels:
             conn.execute(insert, level)
@@ -1033,25 +1033,25 @@ async def test_the_series_and_each_season_show_their_own_levers_and_what_they_in
     assert [level.season for level in (await s.get(series_id)).levels] == [None, 1, 2]
     await s.set(series_id, "voice.take", False, target=group_target("Рутина"))
     await s.set(series_id, "voice.take", True, season=1, target=group_target("Рутина"))
-    await s.set(series_id, "reference.choice", choice(only_source(s, series_id)), season=2)
+    await s.set(series_id, "reference.order", choice(only_source(s, series_id)), season=2)
     shown = headers(await s.get(series_id))
-    assert shown[None]["voice.take"] == (False, Level.SERIES) and shown[None]["reference.choice"] == (None, Level.DEFAULT)
-    assert shown[1]["voice.take"] == (True, Level.SEASON) and shown[1]["reference.choice"] == (None, Level.DEFAULT)
+    assert shown[None]["voice.take"] == (False, Level.SERIES) and shown[None]["reference.order"] == ([], Level.DEFAULT)
+    assert shown[1]["voice.take"] == (True, Level.SEASON) and shown[1]["reference.order"] == ([], Level.DEFAULT)
     assert shown[2]["voice.take"] == (False, Level.SERIES)
-    assert shown[2]["reference.choice"] == (choice(only_source(s, series_id)), Level.SEASON)
+    assert shown[2]["reference.order"] == (choice(only_source(s, series_id)), Level.SEASON)
 
 
 @pytest.mark.asyncio
 async def test_an_episode_with_a_value_of_its_own_leaves_the_headers_as_they_are(system):
     s = system
     series_id = await laid_out(s, rich_standard())
-    await s.set(series_id, "reference.choice", choice(only_source(s, series_id)), season=1)
+    await s.set(series_id, "reference.order", choice(only_source(s, series_id)), season=1)
     before = (await s.get(series_id)).levels
-    await s.set(series_id, "reference.choice", choice(only_source(s, series_id), "kodik"), season=1, episode=3)
+    await s.set(series_id, "reference.order", choice(only_source(s, series_id), "kodik"), season=1, episode=3)
     await s.set(series_id, "voice.take", False, season=1, episode=3, target=group_target("Рутина"))
     after = await s.get(series_id)
     assert after.levels == before
-    assert levers_by_episode(after)[1, 3]["reference.choice"].level == Level.EPISODE
+    assert levers_by_episode(after)[1, 3]["reference.order"].level == Level.EPISODE
 
 
 @pytest.mark.asyncio
@@ -1375,13 +1375,13 @@ async def test_a_variant_without_a_line_that_plays_is_refused_as_the_reference_a
     series_id = await laid_out(s, page(row("a", "Серия 1"), row("b", "Серия 2", player="kodik", state=RowState.ABSENT)))
     source_id = only_source(s, series_id)
     with pytest.raises(BusRequestError, match="not_allowed"):
-        await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1)
+        await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=1)
     with pytest.raises(BusRequestError, match="not_allowed"):
-        await s.set(series_id, "voice.player", {"source_id": source_id, "player": "kodik"}, target=group_target(choice(1)["group"]))
+        await s.set(series_id, "voice.order", [{"source_id": source_id, "player": "kodik"}], target=group_target(choice(1)[0]["group"]))
     with pytest.raises(BusRequestError, match="not_allowed"):
-        await s.set(series_id, "reference.choice", choice(source_id, "allvideo"), season=1)  # no line of it at all
+        await s.set(series_id, "reference.order", choice(source_id, "allvideo"), season=1)  # no line of it at all
     assert s.sql("SELECT lever FROM output_settings WHERE series_id = ?", series_id) == []
-    assert await s.set(series_id, "reference.choice", choice(source_id), season=1) == {"ok": True}
+    assert await s.set(series_id, "reference.order", choice(source_id), season=1) == {"ok": True}
 
 
 @pytest.mark.asyncio
@@ -1390,9 +1390,9 @@ async def test_a_variant_of_compilations_only_may_be_preferred_and_not_made_the_
     series_id = await laid_out(s, page(row("a", "Серия 1"), row("c", "2-4 серия", player="kodik")))
     source_id = only_source(s, series_id)
     with pytest.raises(BusRequestError, match="not_allowed"):
-        await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1)
-    assert await s.set(series_id, "voice.player", {"source_id": source_id, "player": "kodik"},
-                       target=group_target(choice(source_id)["group"])) == {"ok": True}
+        await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=1)
+    assert await s.set(series_id, "voice.order", [{"source_id": source_id, "player": "kodik"}],
+                       target=group_target(choice(source_id)[0]["group"])) == {"ok": True}
 
 
 @pytest.mark.asyncio
@@ -1410,16 +1410,16 @@ async def test_a_variant_is_judged_by_the_lines_of_the_level_it_is_set_for_as_th
     s = system
     series_id = await laid_out(s, page(row("a", "Серия 1"), row("b", "Серия 2"), row("c", "Серия 1", player="kodik")))
     source_id = only_source(s, series_id)
-    assert await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=1) == {"ok": True}
-    assert await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1) == {"ok": True}
-    assert await s.set(series_id, "reference.choice", choice(source_id, "kodik")) == {"ok": True}
+    assert await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=1, episode=1) == {"ok": True}
+    assert await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=1) == {"ok": True}
+    assert await s.set(series_id, "reference.order", choice(source_id, "kodik")) == {"ok": True}
     with pytest.raises(BusRequestError, match="not_allowed"):
-        await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=1, episode=2)
+        await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=1, episode=2)
     with pytest.raises(BusRequestError, match="not_allowed"):
-        await s.set(series_id, "voice.player", {"source_id": source_id, "player": "kodik"},
-                    target=group_target(choice(source_id)["group"]), season=1, episode=2)
+        await s.set(series_id, "voice.order", [{"source_id": source_id, "player": "kodik"}],
+                    target=group_target(choice(source_id)[0]["group"]), season=1, episode=2)
     with pytest.raises(BusRequestError, match="not_allowed"):  # a season that has no line of the variant
-        await s.set(series_id, "reference.choice", choice(source_id, "kodik"), season=2)
+        await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=2)
 
 
 # --- a sync of the series is one run: its layout is the snapshot, its levers are not changed (stage 11) ---------------

@@ -16,7 +16,7 @@ export type LeverSpec = Schemas["LeverSpec"]
  *  output_settings.py: LEVER_FORMS); a test keeps the two lists one list. A lever of another form is not hidden: the
  *  window says it cannot draw it. */
 export const RENDERED_FORMS = [
-  "none/reference_pick", "none/flag", "group/flag", "group/variant_pick", "variant/flag",
+  "none/variant_order", "group/variant_order", "group/flag", "variant/flag",
 ] as const
 
 const RENDERED = new Set<string>(RENDERED_FORMS)

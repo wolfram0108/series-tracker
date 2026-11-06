@@ -76,21 +76,27 @@ def apply_reset(records: Sequence[SettingRecord], scope: SettingsReset) -> list[
 
 
 def without_source(records: Sequence[SettingRecord], source_id: int) -> list[SettingRecord]:
-    """The records after a source has left the series: those that point at it, by target or by value, are gone."""
-    def points_at(each: SettingRecord) -> bool:
+    """The records after a source has left the series: a record that points at it by its target is gone; an order loses
+    the variants of that source and keeps the others (an order left empty is gone: it was the order of the rule)."""
+    kept: list[SettingRecord] = []
+    for each in records:
         lever = levers.get(each.lever)
-        return lever is not None and source_id in lever.sources_of(each.target, each.value)
-
-    return canonical([each for each in records if not points_at(each)])
+        if lever is None or source_id not in lever.sources_of(each.target, each.value):
+            kept.append(each)
+        elif lever.shape == ValueShape.VARIANT_ORDER and source_id not in lever.sources_of(each.target, None):
+            rest = [item for item in each.value if item.get("source_id") != source_id]
+            if rest:
+                kept.append(each.model_copy(update={"value": rest}))
+    return canonical(kept)
 
 
 def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
              on_conflict: Callable[[list[SettingRecord]], None] | None = None) -> list[SettingRecord]:
     """The records after voice-over groups changed their names: what was set for a group (or for a variant of it, or as
-    the group of the reference) is set for the group it became. A record that would meet one the new name has already
+    the group of a variant in an order) is set for the group it became. A record that would meet one the new name has already
     set at the same level meets it with the rest. Records of several groups that became one meet each other: a flag that is off
-    stands over one that is on (what the user switched off is not switched on by a merge); picks that are the same are
-    one, and picks that differ go back to the level above, which `on_conflict` is told."""
+    stands over one that is on (what the user switched off is not switched on by a merge); orders that are the same are
+    one, and orders that differ go back to the level above, which `on_conflict` is told."""
     if not renames:
         return list(records)
 
@@ -101,9 +107,10 @@ def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
             target = group_target(renames[found])
         elif isinstance(target, str) and (variant := parse_variant_target(target)) is not None and variant[0] in renames:
             target = variant_target(renames[variant[0]], variant[1], variant[2])
-        if (lever is not None and lever.shape == ValueShape.REFERENCE_PICK and isinstance(value, dict)
-                and value.get("group") in renames):
-            value = {**value, "group": renames[value["group"]]}
+        if (lever is not None and lever.shape == ValueShape.VARIANT_ORDER and isinstance(value, list)
+                and any(isinstance(each, dict) and each.get("group") in renames for each in value)):
+            value = _deduplicated([{**each, "group": renames.get(each.get("group"), each.get("group"))}
+                                   if isinstance(each, dict) and "group" in each else each for each in value])
         return record if (target, value) == (record.target, record.value) else record.model_copy(
             update={"target": target, "value": value})
 
@@ -130,6 +137,15 @@ def retarget(records: Sequence[SettingRecord], renames: Mapping[str, str],
         elif on_conflict is not None:
             on_conflict(group)
     return canonical(settled)
+
+
+def _deduplicated(items: list) -> list:
+    """An order with each variant once, at its first place: two groups that became one may name one variant twice."""
+    seen: list = []
+    for each in items:
+        if each not in seen:
+            seen.append(each)
+    return seen
 
 
 def _merged(group: list[SettingRecord]) -> SettingRecord | None:

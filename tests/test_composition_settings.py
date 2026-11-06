@@ -5,11 +5,11 @@ import random
 
 import pytest
 
-from core.contracts import (EffectiveLever, Level, SettingRecord, SettingsReset, TargetKind, ValueShape, group_target,
+from core.contracts import (EffectiveLever, Level, Queue, SettingRecord, SettingsReset, TargetKind, ValueShape, group_target,
                             variant_target)
 from core.reasons import parse
 from modules.composition import levers
-from modules.composition.levers import Lever, _picked_source
+from modules.composition.levers import Lever, _order_sources
 from modules.composition.settings import (affected, apply_reset, apply_set, effective, levels, retarget, validate,
                                           validate_reset, without_source, within_episodes)
 
@@ -17,12 +17,12 @@ VK = variant_target("Ruchime", 1, "vk")
 KODIK = variant_target("Ruchime", 2, "kodik")
 GROUP = group_target("Ruchime")
 OTHER_GROUP = group_target("AniStar")
-CHOICE_VK = {"group": "Ruchime", "source_id": 1, "player": "vk"}
-CHOICE_KODIK = {"group": "Ruchime", "source_id": 2, "player": "kodik"}
-CHOICE = "reference.choice"
-ALLOW = "variant.allow"
+CHOICE_VK = [{"group": "Ruchime", "source_id": 1, "player": "vk"}]
+CHOICE_KODIK = [{"group": "Ruchime", "source_id": 2, "player": "kodik"}]
+CHOICE = "reference.order"
+ALLOW = "reference.allow"
 TAKE = "voice.take"
-PLAYER = "voice.player"
+PLAYER = "voice.order"
 
 EPISODES = [(season, episode) for season in (1, 2) for episode in range(1, 41)]
 
@@ -38,7 +38,7 @@ def levers_of(records, season, episode):
 @pytest.fixture
 def volume():
     """A lever nobody wrote any code for: it comes only by registration and goes with the test."""
-    fake = Lever("fake.volume", TargetKind.GROUP, ValueShape.FLAG, False, "voices")
+    fake = Lever("fake.volume", TargetKind.GROUP, ValueShape.FLAG, False, "voices", Queue.VOICE)
     levers.register(fake)
     yield fake
     levers.unregister(fake.name)
@@ -48,16 +48,16 @@ def volume():
 
 
 def test_with_no_record_a_lever_without_a_target_has_its_default_and_targets_have_no_entries():
-    assert effective([], 1, 5) == [EffectiveLever(lever=CHOICE, target=None, value=None, level=Level.DEFAULT)]
+    assert effective([], 1, 5) == [EffectiveLever(lever=CHOICE, target=None, value=[], level=Level.DEFAULT)]
 
 
 def test_an_episode_takes_its_own_value_else_the_season_then_the_series_then_the_default():
-    records = [rec(CHOICE, CHOICE_VK), rec(CHOICE, CHOICE_KODIK, season=1), rec(CHOICE, None, season=1, episode=34)]
-    assert levers_of(records, 1, 34)[(CHOICE, None)] == (None, Level.EPISODE)
+    records = [rec(CHOICE, CHOICE_VK), rec(CHOICE, CHOICE_KODIK, season=1), rec(CHOICE, [], season=1, episode=34)]
+    assert levers_of(records, 1, 34)[(CHOICE, None)] == ([], Level.EPISODE)
     assert levers_of(records, 1, 35)[(CHOICE, None)] == (CHOICE_KODIK, Level.SEASON)
     assert levers_of(records, 2, 1)[(CHOICE, None)] == (CHOICE_VK, Level.SERIES)
     assert levers_of(records[:1] + records[2:], 1, 35)[(CHOICE, None)] == (CHOICE_VK, Level.SERIES)
-    assert levers_of([], 1, 35)[(CHOICE, None)] == (None, Level.DEFAULT)
+    assert levers_of([], 1, 35)[(CHOICE, None)] == ([], Level.DEFAULT)
 
 
 def test_a_season_and_the_series_have_their_own_values_by_the_same_rule():
@@ -68,7 +68,7 @@ def test_a_season_and_the_series_have_their_own_values_by_the_same_rule():
 
 
 def test_an_own_value_equal_to_the_default_is_still_an_own_value():
-    assert levers_of([rec(CHOICE, None, season=1)], 1, 5)[(CHOICE, None)] == (None, Level.SEASON)
+    assert levers_of([rec(CHOICE, [], season=1)], 1, 5)[(CHOICE, None)] == ([], Level.SEASON)
 
 
 def test_a_lever_with_targets_lists_the_targets_that_have_a_record_on_the_chain_of_the_episode():
@@ -85,7 +85,7 @@ def test_a_lever_with_targets_lists_the_targets_that_have_a_record_on_the_chain_
 def test_every_lever_and_target_is_given_once_whatever_the_records_and_the_order_they_come_in():
     records = [rec(ALLOW, False, target=VK), rec(ALLOW, True, season=1, target=VK), rec(ALLOW, False, season=1, episode=2, target=VK),
                rec(TAKE, False, target=GROUP), rec(TAKE, True, season=1, target=GROUP), rec(TAKE, False, target=OTHER_GROUP),
-               rec(CHOICE, CHOICE_VK), rec(CHOICE, CHOICE_KODIK, season=1), rec(PLAYER, {"source_id": 2, "player": "kodik"}, target=GROUP)]
+               rec(CHOICE, CHOICE_VK), rec(CHOICE, CHOICE_KODIK, season=1), rec(PLAYER, [{"source_id": 2, "player": "kodik"}], target=GROUP)]
     expected = {}
     for season, episode in [(1, 2), (1, 3), (2, 1), (1, None), (None, None)]:
         expected[season, episode] = effective(records, season, episode)
@@ -100,8 +100,8 @@ def test_every_lever_and_target_is_given_once_whatever_the_records_and_the_order
 
 
 def test_a_value_handed_out_is_a_copy_the_caller_may_change():
-    records = [rec(CHOICE, dict(CHOICE_VK))]
-    effective(records, 1, 1)[0].value["player"] = "changed"
+    records = [rec(CHOICE, [dict(CHOICE_VK[0])])]
+    effective(records, 1, 1)[0].value[0]["player"] = "changed"
     assert effective(records, 1, 1)[0].value == CHOICE_VK
 
 
@@ -113,7 +113,7 @@ def test_an_episode_without_a_season_is_refused():
 def test_a_record_the_registry_no_longer_accepts_is_ignored():
     records = [rec(CHOICE, "garbage"), rec("gone.lever", 1), rec(ALLOW, False, target="not-a-target"),
                rec(ALLOW, "no", target=VK), rec(TAKE, False, target=None)]
-    assert effective(records, 1, 1) == [EffectiveLever(lever=CHOICE, target=None, value=None, level=Level.DEFAULT)]
+    assert effective(records, 1, 1) == [EffectiveLever(lever=CHOICE, target=None, value=[], level=Level.DEFAULT)]
 
 
 # ---- the episodes a change touches (I-23) ------------------------------------------------------------------------
@@ -123,7 +123,7 @@ def test_a_season_value_changes_only_the_episodes_of_the_season_that_follow_it()
     """C-13: the reference of the season is set, episode 34 has its own pick and its source off; then the season's changes."""
     before = [rec(CHOICE, CHOICE_VK, season=1),
               rec(ALLOW, False, season=1, episode=34, target=VK), rec(CHOICE, CHOICE_KODIK, season=1, episode=34)]
-    after = apply_set(before, rec(CHOICE, {"group": "Ruchime", "source_id": 2, "player": "kodik"}, season=1))
+    after = apply_set(before, rec(CHOICE, [{"group": "Ruchime", "source_id": 2, "player": "kodik"}], season=1))
     assert levers_of(after, 1, 34) == levers_of(before, 1, 34)
     assert levers_of(after, 1, 33)[(CHOICE, None)] == (CHOICE_KODIK, Level.SEASON) != levers_of(before, 1, 33)[(CHOICE, None)]
     assert affected(before, after, EPISODES) == {(1, episode) for episode in range(1, 41)} - {(1, 34)}
@@ -192,7 +192,7 @@ SEASON_2 = {(2, episode) for episode in range(1, 41)}
     (lambda r: apply_set(r, rec(ALLOW, True, season=1, target=VK)), SEASON_1),
     (lambda r: apply_set(r, rec(TAKE, True, season=1, target=GROUP)), SEASON_1 - {(1, 2)}),
     (lambda r: apply_reset(r, SettingsReset(series_id=1, season=1, episode=2, lever=TAKE, target=GROUP)), {(1, 2)}),
-    (lambda r: apply_set(r, rec(PLAYER, {"source_id": 2, "player": "kodik"}, season=2, episode=7, target=GROUP)),
+    (lambda r: apply_set(r, rec(PLAYER, [{"source_id": 2, "player": "kodik"}], season=2, episode=7, target=GROUP)),
      {(2, 7)}),
     (lambda r: apply_reset(r, SettingsReset(series_id=1, season=1)), SEASON_1),
     (lambda r: apply_reset(r, SettingsReset(series_id=1)), set(EPISODES)),
@@ -204,7 +204,7 @@ def test_every_kind_of_change_touches_the_episodes_that_follow_the_level_it_move
 
 
 def test_resetting_the_series_leaves_the_seasons_and_episodes_their_own_values():
-    before = [rec(CHOICE, CHOICE_VK), rec(CHOICE, CHOICE_KODIK, season=1), rec(CHOICE, None, season=2, episode=1)]
+    before = [rec(CHOICE, CHOICE_VK), rec(CHOICE, CHOICE_KODIK, season=1), rec(CHOICE, [], season=2, episode=1)]
     after = apply_reset(before, SettingsReset(series_id=1))
     assert after == before[1:]
     assert affected(before, after, EPISODES) == {(2, episode) for episode in range(2, 41)}
@@ -214,9 +214,9 @@ def test_resetting_the_series_leaves_the_seasons_and_episodes_their_own_values()
 
 
 @pytest.mark.parametrize("record", [
-    rec(CHOICE, None), rec(CHOICE, CHOICE_VK, season=1), rec(CHOICE, None, season=1, episode=2),
+    rec(CHOICE, []), rec(CHOICE, CHOICE_VK, season=1), rec(CHOICE, [], season=1, episode=2),
     rec(ALLOW, False, target=VK), rec(TAKE, True, season=1, target=GROUP),
-    rec(PLAYER, None, target=GROUP), rec(PLAYER, {"source_id": 2, "player": "kodik"}, season=1, episode=1, target=GROUP),
+    rec(PLAYER, [], target=GROUP), rec(PLAYER, [{"source_id": 2, "player": "kodik"}], season=1, episode=1, target=GROUP),
 ])
 def test_a_record_in_the_terms_of_the_registry_is_accepted(record):
     assert validate(record) is None
@@ -225,20 +225,20 @@ def test_a_record_in_the_terms_of_the_registry_is_accepted(record):
 @pytest.mark.parametrize("record, code", [
     (rec("no.such", True), "unknown_lever"),
     (rec("no.such", None, target=GROUP), "unknown_lever"),
-    (rec(CHOICE, None, target=GROUP), "bad_target"),
+    (rec(CHOICE, [], target=GROUP), "bad_target"),
     (rec(ALLOW, True), "bad_target"),
     (rec(ALLOW, True, target=GROUP), "bad_target"),
     (rec(ALLOW, True, target="source:1"), "bad_target"),
     (rec(TAKE, True, target=VK), "bad_target"),
     (rec(TAKE, True), "bad_target"),
     (rec(TAKE, "as_above", target=GROUP), "bad_value"),
-    (rec(PLAYER, None, target="Ruchime"), "bad_target"),
+    (rec(PLAYER, [], target="Ruchime"), "bad_target"),
     (rec(CHOICE, "auto"), "bad_value"),
-    (rec(CHOICE, {"group": "Ruchime", "source_id": 1}), "bad_value"),
+    (rec(CHOICE, [{"group": "Ruchime", "source_id": 1}]), "bad_value"),
     (rec(ALLOW, None, target=VK), "bad_value"),
     (rec(ALLOW, 1, target=VK), "bad_value"),
     (rec(TAKE, "yes", target=GROUP), "bad_value"),
-    (rec(PLAYER, {"player": "kodik"}, target=GROUP), "bad_value"),
+    (rec(PLAYER, [{"player": "kodik"}], target=GROUP), "bad_value"),
 ])
 def test_a_record_the_registry_refuses_is_refused_with_a_coded_reason(record, code):
     why = validate(record)
@@ -257,8 +257,8 @@ def test_setting_a_value_adds_a_record_and_setting_it_again_replaces_it():
 
 
 def test_an_own_value_of_none_is_a_value_and_the_way_back_to_the_level_above_is_a_reset_of_the_lever():
-    records = [rec(CHOICE, CHOICE_VK), rec(CHOICE, None, season=1), rec(ALLOW, False, season=1, target=VK)]
-    assert levers_of(records, 1, 1)[(CHOICE, None)] == (None, Level.SEASON)
+    records = [rec(CHOICE, CHOICE_VK), rec(CHOICE, [], season=1), rec(ALLOW, False, season=1, target=VK)]
+    assert levers_of(records, 1, 1)[(CHOICE, None)] == ([], Level.SEASON)
     back = apply_reset(records, SettingsReset(series_id=1, season=1, lever=CHOICE))
     assert back == [rec(CHOICE, CHOICE_VK), rec(ALLOW, False, season=1, target=VK)]
     assert levers_of(back, 1, 1)[(CHOICE, None)] == (CHOICE_VK, Level.SERIES)
@@ -298,9 +298,9 @@ def test_a_reset_of_a_level_or_of_a_known_lever_is_accepted(scope):
 def test_the_records_given_are_not_changed_and_what_is_stored_does_not_share_the_callers_value():
     records = [rec(ALLOW, False, season=1, target=VK)]
     kept = [each.model_copy(deep=True) for each in records]
-    value = dict(CHOICE_VK)
+    value = [dict(CHOICE_VK[0])]
     new = apply_set(records, rec(CHOICE, value))
-    value["player"] = "changed"
+    value[0]["player"] = "changed"
     assert records == kept and new != records
     assert [each.value for each in new if each.lever == CHOICE] == [CHOICE_VK]
     assert apply_reset(records, SettingsReset(series_id=1, season=1)) == [] and records == kept
@@ -314,7 +314,7 @@ def test_a_record_that_is_refused_is_not_stored():
 
 def test_records_come_back_in_one_order_so_that_independent_edits_commute():
     edits = [rec(ALLOW, False, season=1, target=VK), rec(CHOICE, CHOICE_VK), rec(TAKE, False, season=2, episode=4, target=GROUP),
-             rec(ALLOW, True, target=KODIK), rec(PLAYER, None, season=1, target=OTHER_GROUP)]
+             rec(ALLOW, True, target=KODIK), rec(PLAYER, [], season=1, target=OTHER_GROUP)]
     results = set()
     for order in itertools.permutations(edits):
         records = []
@@ -342,22 +342,30 @@ def test_a_source_that_leaves_takes_every_record_that_points_at_it_by_target_or_
     """C-16."""
     records = [rec(ALLOW, False, target=VK), rec(ALLOW, False, season=1, target=KODIK),
                rec(CHOICE, CHOICE_VK, season=1), rec(CHOICE, CHOICE_KODIK, season=2),
-               rec(PLAYER, {"source_id": 1, "player": "vk"}, season=1, target=GROUP),
-               rec(PLAYER, {"source_id": 2, "player": "kodik"}, season=1, target=OTHER_GROUP),
-               rec(TAKE, False, season=1, target=GROUP), rec(CHOICE, None, season=3)]
+               rec(PLAYER, [{"source_id": 1, "player": "vk"}], season=1, target=GROUP),
+               rec(PLAYER, [{"source_id": 2, "player": "kodik"}], season=1, target=OTHER_GROUP),
+               rec(TAKE, False, season=1, target=GROUP), rec(CHOICE, [], season=3)]
     after = without_source(records, 1)
     assert {(each.lever, each.target, each.season) for each in after} == {
         (ALLOW, KODIK, 1), (CHOICE, None, 2), (PLAYER, OTHER_GROUP, 1), (TAKE, GROUP, 1), (CHOICE, None, 3)}
-    assert levers_of(after, 1, 5)[(CHOICE, None)] == (None, Level.DEFAULT)
-    assert without_source(records, 9) == apply_set(records, rec(CHOICE, None, season=3))
+    assert levers_of(after, 1, 5)[(CHOICE, None)] == ([], Level.DEFAULT)
+    assert without_source(records, 9) == apply_set(records, rec(CHOICE, [], season=3))
+
+
+def test_an_order_loses_only_the_variants_of_a_source_that_leaves_and_keeps_the_others_in_their_order():
+    records = [rec(CHOICE, CHOICE_VK + CHOICE_KODIK, season=1),
+               rec(PLAYER, [{"source_id": 2, "player": "kodik"}, {"source_id": 1, "player": "vk"}], target=GROUP)]
+    after = without_source(records, 1)
+    assert [(each.lever, each.value) for each in after] == [
+        (PLAYER, [{"source_id": 2, "player": "kodik"}]), (CHOICE, CHOICE_KODIK)]
 
 
 def test_a_source_that_leaves_takes_the_records_of_a_lever_registered_later_that_points_at_it(volume):
-    pointing = Lever("fake.pin", TargetKind.GROUP, ValueShape.VARIANT_PICK, None, "scan", _picked_source)
+    pointing = Lever("fake.pin", TargetKind.GROUP, ValueShape.VARIANT_ORDER, [], "scan", Queue.REFERENCE, _order_sources)
     levers.register(pointing)
     try:
-        records = [rec("fake.pin", {"source_id": 1, "player": "vk"}, target=GROUP),
-                   rec("fake.pin", {"source_id": 4, "player": "vk"}, season=1, target=GROUP),
+        records = [rec("fake.pin", [{"source_id": 1, "player": "vk"}], target=GROUP),
+                   rec("fake.pin", [{"source_id": 4, "player": "vk"}], season=1, target=GROUP),
                    rec("fake.volume", True, target=GROUP)]
         assert {(each.lever, each.season) for each in without_source(records, 1)} == {
             ("fake.pin", 1), ("fake.volume", None)}
@@ -397,11 +405,12 @@ def test_a_lever_added_by_registration_is_inherited_validated_set_reset_and_coun
 
 
 def test_a_lever_without_a_target_registered_later_has_its_default_in_every_episode():
-    levers.register(Lever("fake.mode", TargetKind.NONE, ValueShape.FLAG, True, "scan"))
+    levers.register(Lever("fake.mode", TargetKind.NONE, ValueShape.VARIANT_ORDER, [], "scan", Queue.REFERENCE))
+    first = [{"group": "G", "source_id": 1, "player": "vk"}]
     try:
-        assert levers_of([], 1, 1)[("fake.mode", None)] == (True, Level.DEFAULT)
-        records = apply_set([], rec("fake.mode", False, season=2))
-        assert levers_of(records, 2, 9)[("fake.mode", None)] == (False, Level.SEASON)
+        assert levers_of([], 1, 1)[("fake.mode", None)] == ([], Level.DEFAULT)
+        records = apply_set([], rec("fake.mode", first, season=2))
+        assert levers_of(records, 2, 9)[("fake.mode", None)] == (first, Level.SEASON)
         assert affected([], records, EPISODES) == {pair for pair in EPISODES if pair[0] == 2}
     finally:
         levers.unregister("fake.mode")
@@ -425,8 +434,8 @@ def test_the_headers_show_the_series_and_each_season_by_the_value_of_the_level_i
     shown = levels(records, [2, 1, 1])
     assert [each.season for each in shown] == [None, 1, 2]
     by_level = {each.season: {(x.lever, x.target): (x.value, x.level) for x in each.levers} for each in shown}
-    assert by_level[None] == {(CHOICE, None): (None, Level.DEFAULT), (TAKE, GROUP): (False, Level.SERIES)}
-    assert by_level[1] == {(CHOICE, None): (None, Level.DEFAULT), (TAKE, GROUP): (True, Level.SEASON)}
+    assert by_level[None] == {(CHOICE, None): ([], Level.DEFAULT), (TAKE, GROUP): (False, Level.SERIES)}
+    assert by_level[1] == {(CHOICE, None): ([], Level.DEFAULT), (TAKE, GROUP): (True, Level.SEASON)}
     assert by_level[2] == {(CHOICE, None): (CHOICE_KODIK, Level.SEASON), (TAKE, GROUP): (False, Level.SERIES)}
 
 
@@ -441,14 +450,14 @@ def test_what_was_set_for_a_group_a_variant_of_it_and_the_reference_of_it_is_set
     unknown, made = "Неизвестная озвучка 1", "Стар"
     records = [rec(TAKE, False, season=1, target=group_target(unknown)),
                rec(ALLOW, False, season=1, episode=2, target=variant_target(unknown, 1, "vk")),
-               rec(CHOICE, {"group": unknown, "source_id": 1, "player": "vk"}, season=1),
-               rec(PLAYER, {"source_id": 2, "player": "kodik"}, target=group_target(unknown)),
+               rec(CHOICE, [{"group": unknown, "source_id": 1, "player": "vk"}], season=1),
+               rec(PLAYER, [{"source_id": 2, "player": "kodik"}], target=group_target(unknown)),
                rec(TAKE, False, target=group_target("Другая"))]
     after = retarget(records, {unknown: made})
     assert sorted((each.lever, each.target) for each in after) == sorted([
         (TAKE, group_target(made)), (ALLOW, variant_target(made, 1, "vk")), (CHOICE, None),
         (PLAYER, group_target(made)), (TAKE, group_target("Другая"))])
-    assert [each.value for each in after if each.lever == CHOICE] == [{"group": made, "source_id": 1, "player": "vk"}]
+    assert [each.value for each in after if each.lever == CHOICE] == [[{"group": made, "source_id": 1, "player": "vk"}]]
     assert retarget(after, {made: unknown}) == canonical_of(records)
 
 
@@ -487,13 +496,13 @@ def test_two_equal_settings_of_groups_that_became_one_are_one_setting():
 
 
 def test_two_different_picks_of_groups_that_became_one_go_back_to_the_level_above_and_equal_ones_stay():
-    different = [rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("A")),
-                 rec(PLAYER, {"source_id": 2, "player": "kodik"}, target=group_target("B"))]
+    different = [rec(PLAYER, [{"source_id": 1, "player": "vk"}], target=group_target("A")),
+                 rec(PLAYER, [{"source_id": 2, "player": "kodik"}], target=group_target("B"))]
     assert retarget(different, {"A": "C", "B": "C"}) == []
-    equal = [rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("A")),
-             rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("B"))]
+    equal = [rec(PLAYER, [{"source_id": 1, "player": "vk"}], target=group_target("A")),
+             rec(PLAYER, [{"source_id": 1, "player": "vk"}], target=group_target("B"))]
     assert [(each.target, each.value) for each in retarget(equal, {"A": "C", "B": "C"})] == [
-        (group_target("C"), {"source_id": 1, "player": "vk"})]
+        (group_target("C"), [{"source_id": 1, "player": "vk"}])]
 
 
 def test_the_variants_of_groups_that_became_one_meet_only_where_the_source_and_the_player_are_the_same():
@@ -519,13 +528,13 @@ def test_a_group_that_takes_the_name_of_an_existing_group_keeps_what_was_switche
 
 def test_a_pick_of_a_group_that_takes_the_name_of_an_existing_group_goes_back_to_the_level_above_when_the_picks_differ():
     told = []
-    different = [rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("A")),
-                 rec(PLAYER, {"source_id": 2, "player": "kodik"}, target=group_target("B"))]
+    different = [rec(PLAYER, [{"source_id": 1, "player": "vk"}], target=group_target("A")),
+                 rec(PLAYER, [{"source_id": 2, "player": "kodik"}], target=group_target("B"))]
     assert retarget(different, {"A": "B"}, told.append) == [] and len(told) == 1
-    equal = [rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("A")),
-             rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("B"))]
+    equal = [rec(PLAYER, [{"source_id": 1, "player": "vk"}], target=group_target("A")),
+             rec(PLAYER, [{"source_id": 1, "player": "vk"}], target=group_target("B"))]
     assert [(each.target, each.value) for each in retarget(equal, {"A": "B"})] == [
-        (group_target("B"), {"source_id": 1, "player": "vk"})]
+        (group_target("B"), [{"source_id": 1, "player": "vk"}])]
 
 
 def test_the_records_of_the_name_that_do_not_meet_any_that_came_stay_as_they_are():
@@ -537,7 +546,7 @@ def test_the_records_of_the_name_that_do_not_meet_any_that_came_stay_as_they_are
 
 def test_a_conflict_that_cannot_be_settled_is_told_to_whoever_asks():
     told = []
-    records = [rec(PLAYER, {"source_id": 1, "player": "vk"}, target=group_target("A")),
-               rec(PLAYER, {"source_id": 2, "player": "kodik"}, target=group_target("B"))]
+    records = [rec(PLAYER, [{"source_id": 1, "player": "vk"}], target=group_target("A")),
+               rec(PLAYER, [{"source_id": 2, "player": "kodik"}], target=group_target("B"))]
     retarget(records, {"A": "C", "B": "C"}, told.append)
     assert len(told) == 1 and sorted(each.target for each in told[0]) == [group_target("C")] * 2

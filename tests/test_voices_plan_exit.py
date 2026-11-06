@@ -54,7 +54,7 @@ async def test_a_track_already_placed_is_removed_when_its_voice_over_leaves_the_
 def leave_out(neighbours, voice, player, season=1, episode=1):
     """The user leaves the variant (voice-over, source 1, player) out of the episode."""
     neighbours.levers.setdefault((season, episode), []).append(
-        EffectiveLever(lever="variant.allow", target=variant_target(voice, 1, player), value=False, level=Level.EPISODE))
+        EffectiveLever(lever="voice.allow", target=variant_target(voice, 1, player), value=False, level=Level.EPISODE))
 
 
 def players_of(row):

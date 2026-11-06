@@ -202,7 +202,7 @@ def aim(live: Live) -> str:
     sources = live.call("GET", f"{live.series_path()}/sources")
     channel_id = next(each["id"] for each in sources if "vkvideo.ru" in each["url"])
     live.call("PUT", f"{live.series_path()}/output/settings", json={
-        "lever": "reference.choice", "target": None, "value": {"group": "AniStar", "source_id": channel_id, "player": "vk"}})
+        "lever": "reference.order", "target": None, "value": [{"group": "AniStar", "source_id": channel_id, "player": "vk"}]})
     output = live.call("GET", f"{live.series_path()}/output")
     wanted = [each for each in output if each["mark"] != "off"]
     assert [each["episode"] for each in wanted] == [KEEP], f"wanted {[each['episode'] for each in wanted]}"
