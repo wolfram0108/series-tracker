@@ -18,7 +18,7 @@ CHANGED = "https://site/title.html#kodik-Red-1-4"
 def compilation(first=1, last=3, *, voice="Red", player="kodik", link=LINK):
     return CompositionRow(
         series_id=7, source_id=1, row_key=f"{player}:{voice}:{first}-{last}", season=1, episode_start=first,
-        episode_end=last, voice_label=voice, player=player, heights=[720], state=RowState.PLAYABLE, link=link)
+        episode_end=last, voice_group=voice, voice_label=voice, player=player, heights=[720], state=RowState.PLAYABLE, link=link)
 
 
 def world(neighbours, *, videos=(1, 2, 3)):

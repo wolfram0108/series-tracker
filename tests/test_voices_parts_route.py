@@ -48,7 +48,7 @@ class PartsWorld(Neighbours):
             for player, label in (("cvh", "Ref"), ("kodik", LABEL)):
                 found.append(CompositionRow(
                     series_id=7, source_id=1, row_key=f"{player}:{label}:{part}", season=1, episode_start=1, episode_end=1,
-                    part=part, voice_group=None, voice_label=label, player=player, heights=[720], state=RowState.PLAYABLE,
+                    part=part, voice_group=label, voice_label=label, player=player, heights=[720], state=RowState.PLAYABLE,
                     link=f"https://site/{label}-p{part}"))
         return found
 

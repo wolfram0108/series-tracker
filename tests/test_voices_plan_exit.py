@@ -277,7 +277,7 @@ def shift_cvh_black_cat(neighbours, keep=True):
     source = neighbours.sources[2]
     moved_rows = [CompositionRow(
         series_id=7, source_id=1, row_key=f"cvh:BlackCat:{number}", season=1, episode_start=number + 1,
-        episode_end=number + 1, voice_label="BlackCat", player="cvh", heights=[720], state=RowState.PLAYABLE,
+        episode_end=number + 1, voice_group="BlackCat", voice_label="BlackCat", player="cvh", heights=[720], state=RowState.PLAYABLE,
         link=source["links"][str(number)]) for number in (1, 2)]
     source["episodes"] = []
     neighbours.extra_rows = moved_rows if keep else []

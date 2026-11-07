@@ -32,7 +32,7 @@ class CutWorld(Neighbours):
         self.offer_reply = {"accepted": True}
         self.lose_reverse = False  # the service takes the batch and the answer never comes back
         self.extra_rows.append(CompositionRow(
-            series_id=7, source_id=2, row_key="comp", season=1, episode_start=1, episode_end=3, voice_label="ПВА",
+            series_id=7, source_id=2, row_key="comp", season=1, episode_start=1, episode_end=3, voice_group="ПВА", voice_label="ПВА",
             player="vk", heights=[2160], state=RowState.PLAYABLE, link=COMP_URL))
 
     def register(self):

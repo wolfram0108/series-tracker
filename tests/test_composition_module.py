@@ -1512,6 +1512,7 @@ async def test_the_queues_of_a_level_follow_the_order_of_players_and_then_the_or
     s = system
     series_id = await laid_out(s, page(row("a", "Серия 1"), row("b", "Серия 1", player="kodik"), row("c", "Серия 2")))
     source_id = only_source(s, series_id)
+    await s.counted(lambda: s.voices.set_groups({"Рутина": ["ruchime"]}))  # a voice-over is queued only for a group
 
     async def queues(**level):
         return QueuesReply.model_validate(await s.probe.request(
@@ -1519,9 +1520,9 @@ async def test_the_queues_of_a_level_follow_the_order_of_players_and_then_the_or
 
     shown = await queues(season=1)
     assert [(each.player, each.episodes) for each in shown.reference.rows] == [("vk", "1–2"), ("kodik", "1")]
-    assert shown.reference.order_level == Level.DEFAULT and [each.group for each in shown.groups] == [choice(1)[0]["group"]]
-    await s.set(series_id, "reference.order", choice(source_id, "kodik"), season=1)
-    await s.set(series_id, "voice.allow", False, season=1, episode=1, target=variant_target(choice(1)[0]["group"], source_id, "vk"))
+    assert shown.reference.order_level == Level.DEFAULT and [each.group for each in shown.groups] == ["Рутина"]
+    await s.set(series_id, "reference.order", [{**choice(source_id, "kodik")[0], "group": "Рутина"}], season=1)
+    await s.set(series_id, "voice.allow", False, season=1, episode=1, target=variant_target("Рутина", source_id, "vk"))
     shown = await queues(season=1)
     assert [each.player for each in shown.reference.rows] == ["kodik", "vk"] and shown.reference.order_level == Level.SEASON
     episode = await queues(season=1, episode=1)

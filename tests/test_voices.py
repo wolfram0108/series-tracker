@@ -228,7 +228,8 @@ class Neighbours(BaseModule):
     def rows(self):
         return [CompositionRow(
             series_id=7, source_id=1, row_key=self.row_key(source, number), season=self.season_of(number),
-            episode_start=number, episode_end=number, voice_group=None, voice_label=source["studio"],
+            episode_start=number, episode_end=number,
+            voice_group=None if source["studio"].startswith("Неизвестная") else source["studio"], voice_label=source["studio"],
             player=source["player"], heights=[720], state=RowState.PLAYABLE, link=source["links"][str(number)],
             video=source.get("videos", {}).get(str(number), ""))
             for source in self.sources for number in source["episodes"]] + list(self.extra_rows)
@@ -1611,9 +1612,9 @@ def test_two_voices_with_the_same_safe_title_get_two_names():
 @pytest.mark.asyncio
 async def test_a_track_never_overwrites_the_track_of_another_voice(dubs):
     probe, neighbours, voices, bus = dubs
-    # Voices the layout could not group are numbered; their names differ by a digit and are as like as titles can be.
-    neighbours.sources.append(linked("kodik", "Неизвестная озвучка 1", range(1, 4)))
-    neighbours.sources.append(linked("kodik", "Неизвестная озвучка 2", range(1, 4)))
+    # Two groups whose names differ by a digit, as like as titles can be.
+    neighbours.sources.append(linked("kodik", "Озвучка 1", range(1, 4)))
+    neighbours.sources.append(linked("kodik", "Озвучка 2", range(1, 4)))
     neighbours.plan[:] = [(1, 1)]
     reference_on_disk(neighbours)
     sub = bus.subscribe("voices.dub.changed")

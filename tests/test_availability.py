@@ -22,7 +22,7 @@ EXPECTED = {
 
 def line(state=RowState.PLAYABLE, start=1, end=1):
     return CompositionRow(series_id=1, source_id=1, row_key=f"{state}{start}{end}", season=1, episode_start=start, episode_end=end,
-                          voice_label="V", voice_name="V", player="vk", state=state, link="https://x")
+                          voice_group="V", voice_label="V", voice_name="V", player="vk", state=state, link="https://x")
 
 
 def test_every_action_is_allowed_in_exactly_the_states_the_table_names():

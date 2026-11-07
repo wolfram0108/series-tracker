@@ -59,6 +59,12 @@ class CompositionRow(BaseModel):
     video: str = ""
 
     @property
+    def grouped(self) -> bool:
+        """The voice-over of the row is one of the user's groups. Only such a row is taken into work as a voice-over or a
+        compilation; a row of an unknown voice-over waits for its group (it may still be the reference of an episode)."""
+        return self.voice_group is not None
+
+    @property
     def is_compilation(self) -> bool:
         return (self.episode_start is not None and self.episode_end is not None
                 and self.episode_end > self.episode_start)

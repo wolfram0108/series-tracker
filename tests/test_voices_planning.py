@@ -14,7 +14,8 @@ def row(source_id, player, voice, episode, *, end=None, season=1, part=None, sta
     key = f"{player}:{voice}:{episode}" + (f"-{end}" if end else "") + (f":p{part}" if part else "")
     return CompositionRow(
         series_id=7, source_id=source_id, row_key=key, season=season, episode_start=episode,
-        episode_end=end or episode, part=part, voice_label=voice, player=player, state=state, excluded=excluded,
+        episode_end=end or episode, part=part, voice_label=voice,
+        voice_group=None if voice.startswith("Неизвестная") else voice, player=player, state=state, excluded=excluded,
         link=f"https://site/{key}" if link is None else link)
 
 
@@ -172,15 +173,18 @@ def test_only_the_rows_of_the_season_of_the_reference_cover_it():
     assert chains(planned(rows, references)) == {(2, 1, "A"): [("kodik", "kodik:A:1")]}
 
 
-def test_voices_the_layout_could_not_group_are_voices_of_their_own():
-    rows = [row(1, "cvh", "Ref", 1), row(1, "kodik", "Неизвестная озвучка 1", 1),
-            row(1, "vibix", "Неизвестная озвучка 2", 1), row(2, "kodik", "Group", 1)]
-    result = chains(planned(rows, [reference_of(rows, "Ref", 1)]))
-    assert sorted(result) == [(1, 1, "Group"), (1, 1, "Неизвестная озвучка 1"), (1, 1, "Неизвестная озвучка 2")]
-    # An unknown voice is addressed by the lever through its label as a group is through its name.
-    off = EpisodeSettings(season=1, episode=1, levers=[lever("voice.take", "Неизвестная озвучка 2", False)])
-    assert sorted(chains(planned(rows, [reference_of(rows, "Ref", 1)], [off]))) == [
-        (1, 1, "Group"), (1, 1, "Неизвестная озвучка 1")]
+def test_a_voice_over_in_no_group_is_taken_into_no_work_until_the_user_puts_it_into_one():
+    """The rows of an unknown voice-over (no group of the user names it) are planned for no episode: neither a single row
+    nor a compilation; a voice-over in a group beside them is planned as ever."""
+    rows = [row(1, "cvh", "Ref", 1), row(1, "cvh", "Ref", 2), row(1, "kodik", "Неизвестная озвучка 1", 1),
+            row(1, "vk", "Неизвестная озвучка 2", 1, end=2), row(2, "kodik", "Group", 1)]
+    result = chains(planned(rows, [reference_of(rows, "Ref", 1), reference_of(rows, "Ref", 2)]))
+    assert sorted(result) == [(1, 1, "Group"), (1, 2, "Group")]  # episode 2 has no row of it: an empty chain
+
+
+def test_an_unknown_voice_over_may_still_be_the_reference_and_its_voice_overs_are_planned():
+    rows = [row(1, "cvh", "Неизвестная озвучка 1", 1), row(2, "kodik", "Group", 1)]
+    assert sorted(chains(planned(rows, [reference_of(rows, "Неизвестная озвучка 1", 1)]))) == [(1, 1, "Group")]
 
 
 def test_a_compilation_row_is_a_candidate_of_every_episode_it_covers_and_marks_its_file():
@@ -365,7 +369,8 @@ def test_a_started_work_stands_exactly_while_the_layout_does_not_give_its_video_
             return []
         voice, episode, exclusion = placing
         return [CompositionRow(series_id=7, source_id=1, row_key=key, season=1, episode_start=episode, episode_end=episode,
-                               voice_label=voice, player="kodik", state=RowState.PLAYABLE, excluded=exclusion is not None,
+                               voice_group=voice, voice_label=voice, player="kodik", state=RowState.PLAYABLE,
+                               excluded=exclusion is not None,
                                exclusion=exclusion, link=f"https://site/{key}")]
 
     exclusions = (None, Exclusion.RULE, Exclusion.SOURCE, Exclusion.NO_NUMBER)

@@ -13,7 +13,7 @@ from modules.composition import compilations, settings
 def row(source_id, start, end=None, height=1080, player="vk", group="ПВА ШОУ", state=RowState.PLAYABLE, season=1, key=None):
     end = start if end is None else end
     return CompositionRow(series_id=1, source_id=source_id, row_key=key or f"{source_id}:{start}-{end}:{height}",
-                          season=season, episode_start=start, episode_end=end, voice_label=group, player=player,
+                          season=season, episode_start=start, episode_end=end, voice_group=group, voice_label=group, player=player,
                           heights=[height], state=state)
 
 
@@ -41,6 +41,16 @@ def test_an_episode_stands_in_the_shortest_compilation_higher_than_its_single_vi
     found = members(rows)
     assert found[(1, 12)] == key(1, 11, 13)
     assert found[(1, 1)] == found[(1, 20)] == key(1, 1, 20)
+
+
+def test_a_compilation_of_a_voice_over_in_no_group_is_no_compilation_and_takes_nothing():
+    """A compilation is taken into work only for a group of the user: one of an unknown voice-over is not listed, takes no
+    episode and the next compilation of a group takes them."""
+    unknown = row(1, 1, 4, 2160).model_copy(update={"voice_group": None, "voice_label": "Неизвестная озвучка 1"})
+    rows = singles(1, 4) + [unknown, row(3, 1, 13, 2160)]
+    found = compilations.resolve(rows, [], ORDER)
+    assert [view.ref.key for view in found.views] == [key(3, 1, 13)]
+    assert set(members(rows).values()) == {key(3, 1, 13)}
 
 
 def test_a_compilation_no_higher_than_the_single_video_takes_nothing():

@@ -97,8 +97,8 @@ def plan(rows: Iterable[CompositionRow], references: Iterable[Reference], settin
     voices: dict[str, None] = {}
     for row in rows:
         by_key[(row.source_id, row.row_key)] = row
-        if row.excluded or row.season is None or row.episode_start is None or row.episode_end is None:
-            continue
+        if row.excluded or row.season is None or row.episode_start is None or row.episode_end is None or not row.grouped:
+            continue  # an unknown voice-over is no voice-over of the episode until the user puts it into a group
         voices.setdefault(row.voice_label)
         by_voice.setdefault((row.season, row.voice_label), []).append(row)
     levers = {(each.season, each.episode): each.levers for each in settings}

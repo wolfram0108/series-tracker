@@ -39,7 +39,7 @@ def compilations(rows: Sequence[CompositionRow]) -> list[CompilationRef]:
     """One reference per key over the rows that play and are numbered, its video the highest row (the earlier on a tie)."""
     best: dict[str, tuple[CompositionRow, int]] = {}
     for position, row in enumerate(rows):
-        if row.excluded or row.state != RowState.PLAYABLE or not row.is_compilation or row.season is None:
+        if row.excluded or row.state != RowState.PLAYABLE or not row.is_compilation or not row.grouped or row.season is None:
             continue
         key = compilation_key(row.voice_label, row.source_id, row.player, row.season, row.episode_start, row.episode_end)
         held = best.get(key)

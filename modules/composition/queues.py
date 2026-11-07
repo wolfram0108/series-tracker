@@ -64,7 +64,8 @@ def build(lines: Sequence[CompositionRow], levers: Iterable[EffectiveLever], ord
     reference = QueueView(rows=[row_of(each, REFERENCE_ALLOW) for each in reference_queue], order_level=order_level)
 
     queues: list[GroupQueue] = []
-    present = {key[0] for key in by_variant}
+    # A voice-over is queued only for a group: the rows of an unknown voice-over are taken into no work.
+    present = {key[0] for key, items in by_variant.items() if all(row.grouped for _, row in items)}
     for group in [each for each in groups if each in present] + sorted(present - set(groups)):
         target = group_target(group)
         order_value, order_level = value(VOICE_ORDER, target, [])
