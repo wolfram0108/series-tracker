@@ -89,6 +89,14 @@ export function heldCut(view: EpisodeView | undefined, key: string): CutOf | nul
   return [file?.cut, file?.pending_cut].find((each) => each?.key === key) ?? null
 }
 
+/** The state of an episode while it is being cut out of its compilation: the step of its cut, which outranks its tracks
+ *  (the video they go with is not there yet); null when no cut is under way (none, or its video is made). */
+export function cutOverride(cut: CutItem | undefined): EpisodeStatus | null {
+  if (!cut) return null
+  const state = CUT_STATES[cut.status]
+  return state === undefined || state === "ready" ? null : state
+}
+
 /** The card of an episode in the view «Компиляции»: off when it is not cut out of the compilation; else its cut while one
  *  is under way, ready when its video is the compilation's, waiting before anything began. */
 export function cardStatus(member: boolean, cut: CutItem | undefined, held: CutOf | null = null): EpisodeStatus {

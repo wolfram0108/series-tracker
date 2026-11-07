@@ -10,7 +10,7 @@ import {
 import { pageHost, progressText } from "../../lib/sources"
 import { useSeriesStore } from "../../stores/series"
 import { useSeriesReadsStore } from "../../stores/seriesReads"
-import { badgeOf, cardStatus, cutOf, cutsBySlot, heldCut, takes, type CompilationView, type CutState } from "../../lib/compilations"
+import { badgeOf, cardStatus, cutOf, cutOverride, cutsBySlot, heldCut, takes, type CompilationView, type CutState } from "../../lib/compilations"
 import CompilationBlock from "./output/CompilationBlock.vue"
 import LevelSettings from "./output/LevelSettings.vue"
 import SeasonBlock from "./output/SeasonBlock.vue"
@@ -43,7 +43,8 @@ const settingsOf = ref<{ season: number | null; compilation?: string } | null>(n
 
 const orderOf = (season: number): string[] =>
   (output.voiceOrders.value.find((each) => each.season === season)?.voices ?? []).map((voice) => voice.label)
-const statusOf = (view: EpisodeView): EpisodeStatus => episodeStatus(view, trackCells(view, orderOf(view.season)))
+const statusOf = (view: EpisodeView): EpisodeStatus => cutOverride(cutOf(cuts.value, view.season, view.episode))
+  ?? episodeStatus(view, trackCells(view, orderOf(view.season)))
 const PASS: Record<Filter, (view: EpisodeView) => boolean> = {
   all: () => true,
   deviations: isDeviation,
@@ -176,7 +177,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
       v-for="season in mode === 'compilations' ? [] : seasons" :key="season.season" :season="season.season" :episodes="season.shown" :total="season.episodes.length"
       :voices="season.voices" :marks="output.marks.value" :names="output.names.value"
       :mode="mode === 'tiles' ? 'tiles' : 'cards'" :opened="opened?.season === season.season && !opened.compilation ? opened.episode : null"
-      :compilations="compilationsOf(season.season)"
+      :compilations="compilationsOf(season.season)" :cuts="cuts"
       :queues="opened?.season === season.season ? output.queuesOf(season.season, opened.episode) : undefined" :busy="busy"
       @open="open(season.season, $event)" @settings="openSettings(season.season)"
       @switch-season="output.switchTo(season.season, null, $event)"

@@ -351,6 +351,16 @@ describe("StatusOutput", () => {
     expect(badges).toEqual(["A", "", ""])
   })
 
+  it("shows an episode being cut out of its compilation as at work, not ready, and counts it under its filter", async () => {
+    vi.mocked(calls.fetchComposition).mockResolvedValue(ok(withCompilation([true, false])))
+    vi.mocked(calls.fetchCuts).mockResolvedValue(ok({ items: [
+      { series_id: 1, season: 1, episode: 1, part: 0, cut_key: KEY, status: "aligning" }] }))
+    const w = mountOutput()
+    await flushPromises()
+    expect(w.find(".episode-card[data-episode='1']").classes()).toContain("is-align")
+    expect(w.find(".output-filter.is-working strong").text()).toBe("1")
+  })
+
   it("shows a compilation as a block of its episodes and takes an episode in or out by the switch of its card", async () => {
     vi.mocked(calls.fetchComposition).mockResolvedValue(ok(withCompilation([true, false])))
     vi.mocked(calls.fetchCuts).mockResolvedValue(ok({ items: [

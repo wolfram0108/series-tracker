@@ -9,7 +9,7 @@ import {
 } from "../../../lib/output"
 import { useCardGrid } from "../../../composables/useCardGrid"
 import VoiceOrder from "../VoiceOrder.vue"
-import { badgeOf, membersOf, memberOf, takes, type CompilationView } from "../../../lib/compilations"
+import { badgeOf, cutOf, cutOverride, membersOf, memberOf, takes, type CompilationView, type CutItem } from "../../../lib/compilations"
 import CompilationOutline from "./CompilationOutline.vue"
 import EpisodeCard from "./EpisodeCard.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
@@ -32,7 +32,9 @@ const props = withDefaults(defineProps<{
   busy?: boolean
   /** The compilations of the season (stage 12): their outline behind the cards and their letters on them. */
   compilations?: CompilationView[]
-}>(), { names: () => [], mode: "cards", opened: null, busy: false, compilations: () => [] })
+  /** The cuts of the episodes out of their compilations: a cut under way is the state of its episode. */
+  cuts?: Map<string, CutItem>
+}>(), { names: () => [], mode: "cards", opened: null, busy: false, compilations: () => [], cuts: () => new Map() })
 
 const emit = defineEmits<{
   (e: "open", episode: number | null): void
@@ -52,7 +54,7 @@ const emit = defineEmits<{
 const order = computed(() => props.voices.map((voice) => voice.label))
 const items = computed(() => props.episodes.map((view) => {
   const cells = trackCells(view, order.value)
-  const status = episodeStatus(view, cells)
+  const status = cutOverride(cutOf(props.cuts, view.season, view.episode)) ?? episodeStatus(view, cells)
   const source = view.references.find((each) => each.source_id != null)?.source_id
   const mark = source == null ? undefined : props.marks[source]
   return {
