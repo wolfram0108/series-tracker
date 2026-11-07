@@ -62,7 +62,8 @@ function draw(): void {
     pieces.push(...found.map((piece) => ({ ...piece, row: piece.row + offset })))
     offset += band.length + 3
   }
-  size.value = { width: box.width, height: grid.scrollHeight }
+  // The box of the grid, not its scroll height: that counts this layer too, so the layer could never shrink with the grid.
+  size.value = { width: box.width, height: box.height }
   drawn.value = props.groups.map((each, index) => {
     const own = pieces.filter((piece) => piece.owner === index)
     const rows = own.map((piece) => piece.row)
