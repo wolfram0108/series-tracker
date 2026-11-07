@@ -41,10 +41,12 @@ const rows = computed(() => {
     const action: Action = cell.isReference ? (cell.state === "done" ? "refetch" : null)
       : cell.state === "done" ? "redo"
       : cell.state === "error" ? "retry" : null
+    // A placed track the service did not vouch for is done, and marked so.
+    const pill = cell.state === "done" && detail?.code === "align_unsure" ? "pill-warning" : PILL[cell.state]
     return {
       cell, sourceId, part: line?.part ?? null,
       where: line && (line.playerLabel ?? line.player) ? `${line.playerLabel ?? line.player}${height}` : "",
-      note: detail ? reasonText(detail) : "", action,
+      note: detail ? reasonText(detail) : "", action, pill,
     }
   })
 })
@@ -79,7 +81,7 @@ function act(row: (typeof rows.value)[number]): void {
           <span v-else class="muted">—</span>
         </td>
         <td>
-          <span class="pill" :class="PILL[row.cell.state]">{{ stateText(row.cell) }}</span>
+          <span class="pill" :class="row.pill">{{ stateText(row.cell) }}</span>
           <span v-if="row.note" class="track-note">{{ row.note }}</span>
         </td>
         <td class="narrow">

@@ -411,8 +411,9 @@ class VoicesRepository:
         rows = await self._db.fetch_all(f"{_ROWS} WHERE submit_key=? ORDER BY id", (key,))
         return [self._row(row) for row in rows]
 
-    async def mark_aligned(self, dub_id: int, aligned_path: str) -> bool:
-        return await self._move(lifecycle.ALIGNED, "aligned_path=?", (aligned_path,), "id=?", (dub_id,))
+    async def mark_aligned(self, dub_id: int, aligned_path: str, doubt: str | None = None) -> bool:
+        """`doubt` is the mark the track keeps through its placing: the service did not vouch for its sync."""
+        return await self._move(lifecycle.ALIGNED, "aligned_path=?, outcome=?", (aligned_path, doubt), "id=?", (dub_id,))
 
     async def begin_move(self, dub_id: int, destination: str, source: str) -> None:
         """Write down where a track is going before it moves; a restart finishes the move from this."""

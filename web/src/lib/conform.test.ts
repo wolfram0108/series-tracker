@@ -42,6 +42,8 @@ describe("isAccepted", () => {
 describe("verdictOf", () => {
   it("tells a pair the service turned down from a pair it failed to process", () => {
     expect(verdictOf(result())).toBe("accepted")
+    expect(verdictOf(result({ suspect: true }))).toBe("accepted")
+    expect(verdictOf(result({ critical: ["слух метался: 38 резов"] }))).toBe("unsure")
     expect(verdictOf(result({ ok: false, refused: true }))).toBe("rejected")
     expect(verdictOf(result({ ok: false, error: "CUDA out of memory" }))).toBe("failed")
   })

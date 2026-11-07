@@ -920,10 +920,10 @@ async def test_a_result_that_breaks_the_handler_fails_its_voice_and_not_the_batc
     await statuses_until(sub, ["ready", "ready", "aligning", "aligning"])
     real = voices.repo.mark_aligned
 
-    async def broken(dub_id, track):
+    async def broken(dub_id, track, doubt=None):
         if "redheadsound" in track.lower():
             raise RuntimeError("database is locked")
-        return await real(dub_id, track)
+        return await real(dub_id, track, doubt)
 
     monkeypatch.setattr(voices.repo, "mark_aligned", broken)
     probe.publish_event("conform.job.finished", job_done(neighbours, "job-1"))
@@ -1298,6 +1298,10 @@ async def test_what_the_service_adds_to_an_ok_verdict_is_no_ground_to_refuse_the
     stem = os.path.splitext(ref)[0]
     assert os.path.isfile(f"{stem}.BlackCat.ru.flac") and os.path.isfile(f"{stem}.RedHeadSound.ru.flac")
     assert {r["status"] for r in await rows(probe)} == {"placed"}
+    # A critical finding means the service does not vouch for the sync: the placed track keeps that mark; the rest does not.
+    detail = {r["voice_key"]: r["detail"] for r in await rows(probe)}
+    assert detail["RedHeadSound"] == {"code": "align_unsure", "params": {"text": "нет общего звука"}}
+    assert detail["BlackCat"] is None
     said = [record.getMessage() for record in caplog.records if "сервис сообщил" in record.getMessage()]
     assert any("79% кадров" in text for text in said) and any("нет общего звука" in text for text in said)
     assert not any("отклонена" in record.getMessage() for record in caplog.records)

@@ -51,6 +51,15 @@ def turned_down(result: DubResult | None) -> bool:
     return result is not None and not result.ok and result.refused
 
 
+def doubt(result: DubResult | None) -> str | None:
+    """The mark a placed track keeps when the service did not vouch for its sync (`critical`): the track is the service's
+    output and is placed, but the window shows that it is in step with the reference only as far as the service could
+    tell. None when the service raised nothing critical."""
+    if result is None or not result.critical:
+        return None
+    return reason("align_unsure", text="; ".join(result.critical))
+
+
 def told(result: DubResult | None) -> str:
     """What the service said besides its verdict, for the journal; empty when it said nothing."""
     if result is None:

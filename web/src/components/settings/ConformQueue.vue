@@ -24,8 +24,13 @@ const statusClass = (status: string) =>
 // The keys are written out, never built from a value, so every text stays findable in the catalog.
 const VERDICT: Record<Verdict, MessageKey> = {
   accepted: "agents.conform.verdict.accepted",
+  unsure: "agents.conform.verdict.unsure",
   rejected: "agents.conform.verdict.rejected",
   failed: "agents.conform.verdict.failed",
+}
+
+const VERDICT_PILL: Record<Verdict, string> = {
+  accepted: "pill-success", unsure: "pill-warning", rejected: "pill-danger", failed: "pill-danger",
 }
 
 const dubStateText = (state: DubState): string =>
@@ -105,7 +110,7 @@ function openPlot(task: ConformTask, episode: string, row: DubRow) {
               <template v-if="row.result">{{ resultMetrics(row.result) }}</template>
               <template v-else>{{ dubStateText(row.state) }}</template>
             </span>
-            <div v-if="row.result" class="pill" :class="verdictOf(row.result) === 'accepted' ? 'pill-success' : 'pill-danger'">
+            <div v-if="row.result" class="pill" :class="VERDICT_PILL[verdictOf(row.result)]">
               {{ t(VERDICT[verdictOf(row.result)]) }}
             </div>
             <div v-else-if="row.state === 'running'" class="pill pill-primary">

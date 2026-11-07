@@ -229,7 +229,7 @@ from core.reasons import describe, parse as parse_reason, reason
 
 from . import editor, planning
 from .planning import candidate_of
-from .alignment import ENDED, job_failure, refusal, result_for, told, track_of, turned_down
+from .alignment import ENDED, doubt, job_failure, refusal, result_for, told, track_of, turned_down
 from .cleanup import ARTIFACT, JOB, PATH, SUBMISSION, TREE, Cleanup, prune, remove_if_empty
 from .lifecycle import FINAL, WORKING
 from .outputs import Output, SidecarOutput
@@ -1677,7 +1677,7 @@ class VoicesModule(BaseModule):
         if verdict is None and not await self._io(os.path.isfile, track):
             verdict = reason("output_missing")
         if verdict is None:
-            await self.repo.mark_aligned(row["id"], track)
+            await self.repo.mark_aligned(row["id"], track, doubt(result))
             if told(result):
                 self.log.info("сериал %d, s%02de%02d: озвучка %s выровнена, сервис сообщил: %s", row["series_id"],
                               row["season"], row["episode"], row["voice_label"], told(result))
