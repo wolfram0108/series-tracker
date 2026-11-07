@@ -92,20 +92,20 @@ function clear(): void {
       @reread="emit('reread', item.id)"
     />
     <div v-if="editable" class="stack">
-      <div class="source-add cluster">
-        <!-- A channel of VK stays one field: its address and its query are the two parts of it. -->
-        <StGroup>
-          <StIcon icon="pi pi-link" />
-          <StInput v-model="address" :label="t('sources.add.label')" @keyup.enter="add" />
-          <template v-if="channel">
-            <StIcon icon="pi pi-search" />
-            <StInput v-model="query" class="source-query" :label="t('sources.vk.query')" @keyup.enter="add" />
-          </template>
-        </StGroup>
-        <button type="button" class="source-action" :disabled="busy || adding || !ready" @click="add">
-          <i class="pi" :class="adding ? 'pi-spin pi-spinner' : 'pi-plus'" />{{ t("sources.add.button") }}
-        </button>
-      </div>
+      <!-- A channel of VK stays one field: its address and its query are the two parts of it. -->
+      <StGroup class="source-add">
+        <StIcon icon="pi pi-link" />
+        <StInput v-model="address" :label="t('sources.add.label')" @keyup.enter="add" />
+        <template v-if="channel">
+          <StIcon icon="pi pi-search" />
+          <StInput v-model="query" class="source-query" :label="t('sources.vk.query')" @keyup.enter="add" />
+        </template>
+        <div class="item-button-group">
+          <button type="button" class="btn-icon btn-add btn-text-icon" :disabled="busy || adding || !ready" @click="add">
+            <i class="pi" :class="adding ? 'pi-spin pi-spinner' : 'pi-plus'" /><span>{{ t("sources.add.button") }}</span>
+          </button>
+        </div>
+      </StGroup>
       <small v-if="channel" class="source-hint">{{ t("sources.vk.hint") }}</small>
     </div>
     <div v-if="error" class="source-error">{{ error }}</div>
@@ -113,7 +113,6 @@ function clear(): void {
 </template>
 
 <style scoped>
-.source-add > :first-child { flex: 1 1 var(--measure); }
 .source-hint { color: var(--text-muted); font-size: smaller; }
 .source-error { color: var(--color-red-1); overflow-wrap: anywhere; }
 </style>

@@ -518,16 +518,18 @@ onBeforeUnmount(() => {
             @keyup.enter="vkQuery(candidateQuery) && addCandidate()"
           />
         </template>
+        <div v-if="candidate" class="item-button-group">
+          <button
+            type="button" class="btn-icon btn-add btn-text-icon" :disabled="candidateChannel && !vkQuery(candidateQuery)"
+            @click="addCandidate"
+          >
+            <i class="pi pi-plus" /><span>{{ t("sources.add.button") }}</span>
+          </button>
+        </div>
       </StGroup>
       <div v-if="urlError" class="add-error">{{ urlError }}</div>
       <div v-if="parsing" class="add-hint">Распознаём ссылку…</div>
       <div v-if="candidate && candidateChannel" class="add-hint">{{ t("sources.vk.hint") }}</div>
-      <button
-        v-if="candidate" type="button" class="source-action" :disabled="candidateChannel && !vkQuery(candidateQuery)"
-        @click="addCandidate"
-      >
-        <i class="pi pi-plus" />{{ t("sources.add.button") }}
-      </button>
     </div>
 
     <div v-if="parsed || kind === 'video'">

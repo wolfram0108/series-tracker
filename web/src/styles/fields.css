@@ -167,6 +167,8 @@
 }
 .btn-icon:hover { filter: brightness(90%); }
 .btn-icon:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(40%); }
+/* A button with an icon and a word inside a group: as wide as its text, not the 50px of an icon. */
+.item-button-group .btn-text-icon { width: auto; padding: 0 1rem; gap: 0.4rem; white-space: nowrap; }
 .btn-add, .btn-confirm { background-image: linear-gradient(135deg, var(--color-green-2), var(--color-green-1)); }
 .btn-edit { background-image: linear-gradient(135deg, var(--color-yellow-2), var(--color-yellow-1)); }
 .btn-delete, .btn-cancel { background-image: linear-gradient(135deg, var(--color-red-2), var(--color-red-1)); }

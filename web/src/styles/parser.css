@@ -405,13 +405,6 @@
   color: inherit;
 }
 .parser-test-actions { display: flex; justify-content: flex-end; margin-top: 0.25rem; }
-/* Кнопка «Получить с VK» — icon+text внутри группы (шире btn-icon 50px) */
-.item-button-group .btn-text-icon {
-  width: auto;
-  padding: 0 1rem;
-  gap: 0.4rem;
-  white-space: nowrap;
-}
 .test-results-container {
   display: flex;
   flex-direction: column;
