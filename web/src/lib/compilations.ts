@@ -36,8 +36,9 @@ export const badgeOf = (view: CompilationView): Badge =>
 
 const slot = (season: number, episode: number): string => `${season}:${episode}`
 
-/** The height of the reference an episode has now (its single video), null when not known. */
-export type ReferenceHeight = (season: number, episode: number) => number | null
+/** The height of the reference an episode has now (its single video), null when not known; `off` when the user switched the
+ *  episode off (it takes nothing, from a compilation neither). */
+export type ReferenceHeight = (season: number, episode: number) => number | null | "off"
 
 /** Whether the episode is cut out of the compilation: it stands in it and the compilation is higher than the reference
  *  the episode has now — which may be a video held on disk that the layout does not show (the same rule as the choice of
@@ -46,6 +47,7 @@ export function takes(view: CompilationView, episode: number, height: ReferenceH
   const each = (view.episodes ?? []).find((one) => one.episode === episode)
   if (!each?.member) return false
   const own = height(view.season, episode)
+  if (own === "off") return false
   return own === null || (view.ref.height ?? 0) > own
 }
 

@@ -4,7 +4,7 @@ import type { components } from "../../../api/schema"
 import type { Queues } from "../../../composables/outputCalls"
 import { t } from "../../../i18n"
 import {
-  allOff, episodeStatus, fileNamesOf, spansOf, trackCells, type EpisodeView, type QueueName, type QueueRow,
+  allOff, episodeStatus, fileNamesOf, isOff, spansOf, trackCells, type EpisodeView, type QueueName, type QueueRow,
   type SourceMark as Mark,
 } from "../../../lib/output"
 import { useCardGrid } from "../../../composables/useCardGrid"
@@ -94,7 +94,7 @@ const { grid, ruler, wide, columns, layout } = useCardGrid(() => props.mode, () 
 
 // The height of the reference each episode has now: a compilation no higher than it is not cut, whatever the layout says.
 const heights = computed(() => new Map(props.episodes.map((view) => [view.episode,
-  view.references.find((each) => each.source_id != null)?.height ?? null] as const)))
+  isOff(view) ? "off" as const : view.references.find((each) => each.source_id != null)?.height ?? null] as const)))
 const height = (_season: number, episode: number) => heights.value.get(episode) ?? null
 const members = computed(() => membersOf(props.compilations, height))
 const outline = computed(() => props.compilations.map((view) => ({

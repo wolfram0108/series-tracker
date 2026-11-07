@@ -214,6 +214,7 @@ export const ru = {
   "output.compilation.absence.not_better": "не выше своей серии",
   "output.compilation.absence.no_single": "нет своей серии",
   "output.compilation.absence.off": "компиляция выключена",
+  "output.compilation.absence.episode_off": "серия выключена",
   "output.compilation.hint": "Серия стоит в одной компиляции. Включение в другой выключает её здесь.",
   "output.compilation.table.take": "В компиляции",
   "output.compilation.table.source": "Компиляция",

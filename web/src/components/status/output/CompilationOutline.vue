@@ -18,7 +18,8 @@ const size = ref({ width: 0, height: 0 })
 
 function draw(): void {
   const grid = props.grid
-  const cells = grid ? [...grid.querySelectorAll<HTMLElement>("[data-episode]")] : []
+  // The cards and the tiles alone: an opened episode below its row carries the number of its episode too.
+  const cells = grid ? [...grid.querySelectorAll<HTMLElement>(".episode-card[data-episode], .episode-tile[data-episode]")] : []
   if (!grid || cells.length === 0 || props.groups.length === 0) {
     drawn.value = []
     return
@@ -28,26 +29,39 @@ function draw(): void {
   const tops = [...new Set(placed.map((each) => Math.round(each.rect.top)))].sort((a, b) => a - b)
   const lefts = [...new Set(placed.map((each) => Math.round(each.rect.left)))].sort((a, b) => a - b)
   const first = placed[0].rect
-  const at = new Map<string, number>()
-  for (const each of placed) at.set(`${tops.indexOf(Math.round(each.rect.top))},${lefts.indexOf(Math.round(each.rect.left))}`, each.episode)
-  const group = new Map<number, number>()
-  props.groups.forEach((each, index) => each.episodes.forEach((episode) => group.set(episode, index)))
-  const second = (axis: "left" | "top", line: number) => placed.find((each) => Math.round(each.rect[axis]) === line)?.rect
   const style = getComputedStyle(grid)
   const gapX = parseFloat(style.columnGap) || 0
   const gapY = parseFloat(style.rowGap) || 0
-  const geometry: Geometry = {
-    x0: first.left - box.left, y0: first.top - box.top,
-    pitchX: lefts.length > 1 ? second("left", lefts[1])!.left - first.left : first.width + gapX,
-    pitchY: tops.length > 1 ? second("top", tops[1])!.top - first.top : first.height + gapY,
-    w: first.width, h: first.height,
-    radius: Math.min(parseFloat(getComputedStyle(cells[0]).borderTopLeftRadius) || 0, first.width / 2, first.height / 2),
-    rows: tops.length, cols: lefts.length,
-  }
-  const pieces = outlinePieces(geometry, (row, col) => {
-    const episode = at.get(`${row},${col}`)
-    return episode === undefined ? -1 : group.get(episode) ?? -1
+  const pitchX = lefts.length > 1 ? lefts[1] - lefts[0] : first.width + gapX
+  const pitchY = first.height + gapY
+  const group = new Map<number, number>()
+  props.groups.forEach((each, index) => each.episodes.forEach((episode) => group.set(episode, index)))
+  const at = new Map<string, number>()
+  for (const each of placed) at.set(`${tops.indexOf(Math.round(each.rect.top))},${lefts.indexOf(Math.round(each.rect.left))}`, each.episode)
+  // Rows that follow one another at the step of the grid form a band; an opened episode between two rows breaks it, and
+  // each band is outlined on its own (nothing is drawn across the opened episode).
+  const bands: number[][] = []
+  tops.forEach((top, index) => {
+    const band = bands[bands.length - 1]
+    if (band && Math.abs(top - tops[band[band.length - 1]] - pitchY) < 2) band.push(index)
+    else bands.push([index])
   })
+  const radius = Math.min(parseFloat(getComputedStyle(cells[0]).borderTopLeftRadius) || 0, first.width / 2, first.height / 2)
+  const pieces: Piece[] = []
+  let offset = 0
+  for (const band of bands) {
+    const geometry: Geometry = {
+      x0: lefts[0] - box.left, y0: tops[band[0]] - box.top, pitchX, pitchY, w: first.width, h: first.height, radius,
+      rows: band.length, cols: lefts.length,
+    }
+    const found = outlinePieces(geometry, (row, col) => {
+      const episode = at.get(`${band[row]},${col}`)
+      return episode === undefined ? -1 : group.get(episode) ?? -1
+    })
+    // The rows of every band are counted apart, so that pieces of two bands are never neighbours.
+    pieces.push(...found.map((piece) => ({ ...piece, row: piece.row + offset })))
+    offset += band.length + 3
+  }
   size.value = { width: box.width, height: grid.scrollHeight }
   drawn.value = props.groups.map((each, index) => {
     const own = pieces.filter((piece) => piece.owner === index)

@@ -4,7 +4,7 @@ import Button from "primevue/button"
 import { useSeriesOutput } from "../../composables/useSeriesOutput"
 import { t } from "../../i18n"
 import {
-  allowedIn, episodeStatus, isDeviation, trackCells, type EpisodeStatus, type EpisodeView, type QueueName, type QueueRow,
+  allowedIn, episodeStatus, isDeviation, isOff, trackCells, type EpisodeStatus, type EpisodeView, type QueueName, type QueueRow,
   type Scope,
 } from "../../lib/output"
 import { pageHost, progressText } from "../../lib/sources"
@@ -91,8 +91,10 @@ const settingsCompilation = computed(() => {
   const counts: Partial<Record<CutState, number>> = {}
   const episodes = new Map((output.seasons.value.find((each) => each.season === view.season)?.episodes ?? [])
     .map((episode) => [episode.episode, episode] as const))
-  const height = (_season: number, episode: number) =>
-    episodes.get(episode)?.references.find((each) => each.source_id != null)?.height ?? null
+  const height = (_season: number, episode: number) => {
+    const found = episodes.get(episode)
+    return found && isOff(found) ? "off" as const : found?.references.find((each) => each.source_id != null)?.height ?? null
+  }
   for (const each of view.episodes ?? []) {
     if (!takes(view, each.episode, height)) continue
     const state = cardStatus(true, cutOf(cuts.value, view.season, each.episode), heldCut(episodes.get(each.episode), view.ref.key)) as CutState

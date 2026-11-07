@@ -6,7 +6,7 @@ import { t } from "../../../i18n"
 import {
   badgeOf, cardStatus, cutOf, cutState, heldCut, shareOf, takes, type CompilationView, type CutItem, type CutState,
 } from "../../../lib/compilations"
-import { trackCells, type EpisodeView, type QueueName, type QueueRow, type SourceMark as Mark } from "../../../lib/output"
+import { isOff, trackCells, type EpisodeView, type QueueName, type QueueRow, type SourceMark as Mark } from "../../../lib/output"
 import type { CompilationRow } from "./CompilationTable.vue"
 import EpisodeCard from "./EpisodeCard.vue"
 import EpisodeDetail from "./EpisodeDetail.vue"
@@ -51,8 +51,10 @@ const range = (view: CompilationView) => `${view.ref.start}–${view.ref.end}`
 const playerOf = (view: CompilationView) => props.labels[`${view.ref.source_id}:${view.ref.player}`] ?? view.ref.player
 const byEpisode = computed(() => new Map(props.episodes.map((view) => [view.episode, view] as const)))
 // The height of the reference an episode has now (a video held on disk may be higher than the layout shows).
-const height = (_season: number, episode: number) =>
-  byEpisode.value.get(episode)?.references.find((each) => each.source_id != null)?.height ?? null
+const height = (_season: number, episode: number) => {
+  const view = byEpisode.value.get(episode)
+  return view && isOff(view) ? "off" as const : view?.references.find((each) => each.source_id != null)?.height ?? null
+}
 
 const items = computed(() => (props.view.episodes ?? []).flatMap((each) => {
   const view = byEpisode.value.get(each.episode)
@@ -61,11 +63,11 @@ const items = computed(() => (props.view.episodes ?? []).flatMap((each) => {
   const cut = member ? cutOf(props.cuts, props.view.season, each.episode) : undefined
   const status = cardStatus(member, cut, heldCut(view, props.view.ref.key))
   const elsewhere = each.elsewhere ? props.season.find((other) => other.ref.key === each.elsewhere) : undefined
-  const absence = each.member && !member ? "not_better" : each.absence ?? "own"
+  const absence = isOff(view) ? "episode_off" : each.member && !member ? "not_better" : each.absence ?? "own"
   const note = member ? undefined : elsewhere
     ? t("output.compilation.absence.elsewhere", { letter: badgeOf(elsewhere).letter, range: range(elsewhere) })
     : t(`output.compilation.absence.${absence}`)
-  const fits = props.view.take && absence !== "not_better" && (member || each.absence === "elsewhere" || each.absence === "own")
+  const fits = props.view.take && absence !== "not_better" && absence !== "episode_off" && (member || each.absence === "elsewhere" || each.absence === "own")
   return [{ view, each: { ...each, member }, cut, status, note, fits, cells: trackCells(view, props.order) }]
 }))
 
@@ -103,7 +105,7 @@ const rows = computed<CompilationRow[]>(() => {
       view, badge: badgeOf(view), member, player: playerOf(view),
       cut: member ? cutState(cut) ?? (held ? "ready" : "wait") : null, share: shareOf(cut ?? held),
       fits: view.take && (member || ((each?.absence === "elsewhere" || each?.absence === "own")
-        && (height(view.season, episode) ?? 0) < (view.ref.height ?? 0))),
+        && height(view.season, episode) !== "off" && (Number(height(view.season, episode)) || 0) < (view.ref.height ?? 0))),
     }
   })
 })

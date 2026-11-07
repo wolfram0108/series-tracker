@@ -30,6 +30,7 @@ describe("compilations", () => {
     const height = (_season: number, episode: number) => (episode === 3 ? 2160 : episode === 2 ? 720 : null)
     expect([1, 2, 3].map((episode) => takes(compilation, episode, height))).toEqual([true, true, false])
     expect([...membersOf([compilation], height).keys()]).toEqual(["1:1", "1:2"])
+    expect(takes(compilation, 1, () => "off")).toBe(false)  // an episode switched off takes nothing
   })
 
   it("colours a card by its cut and turns off an episode that is not in the compilation", () => {
