@@ -54,6 +54,8 @@ _MEDIA = re.compile(r"/(serial|season)/([^/]+)/([^/?#]+)")
 _LINK = re.compile(r"^kodik=(?:(season)/)?([^/]+)/([^/]+)/(\d+)$")
 _TRANSLATION_ID = re.compile(r"var\s+translationId\s*=\s*(?:Number\()?(\d+)")
 _TRANSLATION_TITLE = re.compile(r"""var\s+translationTitle\s*=\s*["']([^"']*)["']""")
+# Kodik fills a gap of a voice-over with an item of another one and says so in its text: "4 серия (Другой перевод: AniStar)".
+_OTHER_VOICE = re.compile(r"\(\s*Другой перевод:\s*([^)]*?)\s*\)")
 SERIAL = "serial"
 SEASON = "season"
 
@@ -252,6 +254,13 @@ def is_kodik_url(url: str) -> bool:
     return (urlparse(url).hostname or "").endswith("kodikplayer.com")
 
 
+def voice_of_item(voice: KodikVoice, text: str) -> RowVoice:
+    """The voice-over an item plays: the one of its list, unless the item says it is another one's put in its place; the
+    kind of that other one is not told."""
+    other = _OTHER_VOICE.search(text)
+    return RowVoice(name=other.group(1), kind="") if other and other.group(1) else RowVoice(name=voice.studio, kind=voice.kind)
+
+
 def voice_iframe(voice: KodikVoice) -> str:
     return iframe_url(voice.media_id, voice.media_hash, voice.media_kind)
 
@@ -338,7 +347,7 @@ class KodikPlayer:
                 found += [Entry(
                     key=f"{voice.translation_id}:{item.id}",
                     ref=self.ref_of(page_url, season.media_id, season.media_hash, item.id, season.media_kind),
-                    text=item.text, group=season.title, voice=RowVoice(name=voice.studio, kind=voice.kind),
+                    text=item.text, group=season.title, voice=voice_of_item(voice, item.text),
                     site_fields={"value": item.value, "translation_id": voice.translation_id}) for item in session.items.values()]
         return found
 

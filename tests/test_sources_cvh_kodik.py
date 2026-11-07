@@ -186,6 +186,20 @@ def season_web() -> Web:
     return web
 
 
+async def test_an_item_kodik_put_in_the_place_of_a_missing_one_is_the_voice_over_its_text_names():
+    """Kodik fills a gap of a voice-over with an episode of another one ("Другой перевод: X"): that row is X's, never the
+    voice-over of the list, whose name would be put on another studio's sound."""
+    player, web = kodik.KodikPlayer(), Web()
+    web.route("kodikplayer.com/season/64820/", season_page(("501", "1", "1 серия", ""),
+                                                          ("502", "2", "2 серия (Другой перевод: AniDUB)", "")))
+    source = PlayerRef("kodik", "https://kodikplayer.com/season/64820/8cc4/720p?translations=false&episode=1")
+    async with web.client() as http:
+        found = await within(read_catalog(player, source, http, PAGE), STEP_LIMIT_S, "the catalog of the season")
+
+    assert [(e.key, e.voice.name, e.voice.kind, e.text) for e in found] == [
+        ("910:501", "AniStar", "", "1 серия"), ("910:502", "AniDUB", "", "2 серия (Другой перевод: AniDUB)")]
+
+
 async def test_an_iframe_of_one_season_is_the_voice_its_page_names_and_its_items_are_asked_through_that_season():
     player, web = kodik.KodikPlayer(), season_web()
     source = PlayerRef("kodik", "https://kodikplayer.com/season/64820/8cc4/720p?translations=false&episode=1")
