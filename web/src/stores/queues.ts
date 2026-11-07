@@ -1,5 +1,5 @@
 import { defineStore } from "pinia"
-import { ref } from "vue"
+import { shallowRef } from "vue"
 
 /** Задача очереди — динамический объект контракта (DynamicObject), поля
  *  зависят от конкретной очереди. */
@@ -29,13 +29,14 @@ export interface PackTask {
 
 /** Очереди агентов — голые массивы (старый контракт сохранён). Наполняются
  *  push-событиями SSE; HTTP-загрузка — через настройки/агентов при открытии. */
+// Each queue is a picture the core pushes whole and the window only reads, so it is held without a deep proxy.
 export const useQueuesStore = defineStore("queues", () => {
-  const agent = ref<QueueTask[]>([]) // agent_queue_update (у задач есть hash)
-  const torrents = ref<QueueTask[]>([]) // torrent_progress_update (мониторинг)
-  const downloads = ref<QueueTask[]>([]) // download_queue_update (yt-dlp)
-  const slicing = ref<QueueTask[]>([]) // slicing_queue_update (ffmpeg)
-  const conform = ref<ConformPicture | null>(null) // conform_queue_update (alignment daemon)
-  const pack = ref<PackTask[]>([]) // pack_queue_update (the containers of the episodes)
+  const agent = shallowRef<QueueTask[]>([]) // agent_queue_update (у задач есть hash)
+  const torrents = shallowRef<QueueTask[]>([]) // torrent_progress_update (мониторинг)
+  const downloads = shallowRef<QueueTask[]>([]) // download_queue_update (yt-dlp)
+  const slicing = shallowRef<QueueTask[]>([]) // slicing_queue_update (ffmpeg)
+  const conform = shallowRef<ConformPicture | null>(null) // conform_queue_update (alignment daemon)
+  const pack = shallowRef<PackTask[]>([]) // pack_queue_update (the containers of the episodes)
 
   const setAgent = (t: QueueTask[]) => (agent.value = t)
   const setTorrents = (t: QueueTask[]) => (torrents.value = t)

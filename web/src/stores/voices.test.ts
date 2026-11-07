@@ -24,6 +24,16 @@ describe("voices store", () => {
     expect(store.dubName("cf1", "other.mp4")).toBe("other")
   })
 
+  it("follows the voice-overs in the names of the queue: a new job, a renamed voice-over and a snapshot", () => {
+    const store = useVoicesStore()
+    store.apply(event(1, { job_id: "cf1", file: "blackcat.mp4" }))
+    expect(store.dubName("cf1", "blackcat.mp4")).toBe("BlackCat")
+    store.apply(event(2, { job_id: "cf1", file: "blackcat.mp4", voice_label: "Black Cat" }))
+    expect(store.dubName("cf1", "blackcat.mp4")).toBe("Black Cat")
+    store.snapshot(snapshot(3, [{ ...dub({ voice_key: "anistar", voice_label: "AniStar" }), job_id: "cf9", file: "anistar.mkv" } as never]))
+    expect([store.dubName("cf9", "anistar.mkv"), store.dubName("cf1", "blackcat.mp4")]).toEqual(["AniStar", "blackcat"])
+  })
+
   it("keeps the parts of one voice-over of an episode apart and removes only the part that was removed", () => {
     const store = useVoicesStore()
     store.apply(event(1, { part: 1 }))

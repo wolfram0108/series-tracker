@@ -1,5 +1,5 @@
 import { defineStore } from "pinia"
-import { ref } from "vue"
+import { computed, ref, shallowRef } from "vue"
 import type { components } from "../api/schema"
 import { compareNames } from "../lib/collate"
 
@@ -27,7 +27,9 @@ const sameDub = (dub: VoiceDub, part: number | null | undefined, voiceKey: strin
 
 /** Voice-overs per episode of every series, fed only by the core's pushes (snapshot, then updates). */
 export const useVoicesStore = defineStore("voices", () => {
-  const bySlot = ref<Record<string, VoiceDub[]>>({})
+  // Replaced whole on every change, never edited in place: a deep proxy over thousands of voice-overs would only add a
+  // tracked read to every look-up.
+  const bySlot = shallowRef<Record<string, VoiceDub[]>>({})
   // The newest settings the core announced; the settings screen follows it.
   const settings = ref<VoiceSettingsView | null>(null)
   // The newest stamp seen per voice-over; a removed one stays here so that a late packet cannot revive it.
@@ -124,12 +126,23 @@ export const useVoicesStore = defineStore("voices", () => {
   /** The name of a voice-over in the alignment queue: the job that aligns it and the file it was sent as; the file
    *  without its extension while the core holds no such voice-over any more. */
   function dubName(jobId: string, file: string): string {
-    for (const list of Object.values(bySlot.value)) {
-      const found = list.find((dub) => dub.job_id === jobId && dub.file === file)
-      if (found) return found.voice_label
-    }
-    return file.replace(/\.[^.]+$/, "")
+    return byJobFile.value.get(jobFile(jobId, file)) ?? file.replace(/\.[^.]+$/, "")
   }
+
+  // The alignment queue names a row by its job and file on every picture it pushes; the index follows the voice-overs,
+  // not the pictures, so a name costs one look-up however many voice-overs the series have.
+  const jobFile = (jobId: string, file: string) => `${jobId}\u0000${file}`
+  const byJobFile = computed(() => {
+    const index = new Map<string, string>()
+    for (const list of Object.values(bySlot.value)) {
+      for (const dub of list) {
+        if (!dub.job_id || !dub.file) continue
+        const key = jobFile(dub.job_id, dub.file)
+        if (!index.has(key)) index.set(key, dub.voice_label)
+      }
+    }
+    return index
+  })
 
   function applySettings(next: VoiceSettingsView): void {
     settings.value = next
