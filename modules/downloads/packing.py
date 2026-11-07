@@ -222,6 +222,9 @@ class Packing:
             given = await self._packer.contents(path) if await storage.call(os.path.isfile, path) else None
             if given is not None and given.has_video:
                 pending, cut = (path, given), json.loads(winner["pending_cut"]) if winner.get("pending_cut") else None
+                if cut is not None and given.height:
+                    # The cut is as high as its file, not as the compilation the layout lists: a capped download is lower.
+                    cut = {**cut, "height": given.height}
             else:
                 self._log.warning("серия %s: видео для сборки %s не читается — остаётся прежнее видео", series["id"],
                                   winner["pending_video"])

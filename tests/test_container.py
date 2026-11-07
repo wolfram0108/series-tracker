@@ -75,7 +75,8 @@ def test_the_tracks_of_a_container_go_into_a_new_video_of_the_same_identity(medi
     new = str(tmp / "new.mkv")
     assert asyncio.run(container.build(new, better, "1:a", [AudioIn("ПВА ШОУ", better, 0, "1:a"),
                                                              AudioIn("ruchime", old, 1, "1:a")])) is None
-    assert asyncio.run(container.contents(new)).labels == ["ПВА ШОУ", "ruchime"]
+    found = asyncio.run(container.contents(new))
+    assert found.labels == ["ПВА ШОУ", "ruchime"] and found.height == 180  # the height of the film the file holds
 
 
 @pytest.mark.parametrize("case, expected", [

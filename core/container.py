@@ -70,6 +70,8 @@ class Contents:
     has_video: bool
     audio: list[AudioOut] = field(default_factory=list)
     publication: str = ""
+    # The height of the film as the file holds it (0 when unknown): what is named after the video is named by this.
+    height: int = 0
 
     @property
     def labels(self) -> list[str]:
@@ -178,9 +180,9 @@ async def contents(path: str, *, timeout: float = READ_TIMEOUT_S) -> Contents | 
         duration = float(info.get("format", {}).get("duration") or 0.0)
     except ValueError:
         duration = 0.0
-    return Contents(video=tags.get("st_video", ""), duration=duration,
-                    has_video=film_stream(streams) is not None, audio=audio,
-                    publication=tags.get("st_publication", ""))
+    film = film_stream(streams)
+    return Contents(video=tags.get("st_video", ""), duration=duration, has_video=film is not None, audio=audio,
+                    publication=tags.get("st_publication", ""), height=int((film or {}).get("height") or 0))
 
 
 def _tags(holder: dict) -> dict[str, str]:

@@ -10,7 +10,7 @@ import sqlite3
 import pytest
 
 from core import BaseModule, Bus, Runner
-from core.container import AudioIn
+from core.container import AudioIn, AudioOut, Contents
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.downloads import DownloadsModule
@@ -681,6 +681,22 @@ async def test_a_cut_offered_by_voices_is_held_by_the_row_and_one_the_plan_does_
     again = await probe.request("downloads.video.offer", {"series_id": 2, "unique_id": "win", "path": str(offered),
                                                           "cut": CUT}, timeout=10)
     assert again == {"accepted": True}  # an answer that was lost: the same video is held already
+
+
+@pytest.mark.asyncio
+async def test_the_container_of_a_cut_is_named_by_the_height_of_its_video_not_of_the_compilation_listed(rig):
+    """A compilation fetched under a cap is lower than the layout lists it: the row says the height its video has."""
+    fake, voices, packer, probe, db_path, media_dir = rig
+    path = put(media_dir, "e01.mkv", b"https://v/win")
+    await made(packer, path, SAME, [AudioIn(OWN, path, 0, SAME, own=True)])
+    winner(db_path, "e01.mkv")
+    held = put(media_dir, ".win.video.mkv", b"the cut")
+    packer.made[os.stat(held).st_ino] = Contents(video="", duration=1.0, has_video=True,
+                                                 audio=[AudioOut(0, "", "", True, "", False)], height=720)
+    place(db_path, "win", want_cut=CUT["key"], pending_video=".win.video.mkv", pending_cut=json.dumps(CUT))
+    order(fake, [OWN, DUB])
+    assert outcome(await pack(probe)) == {"packed": 1}
+    assert json.loads(_items(db_path)["win"]["cut"])["height"] == 720
 
 
 @pytest.mark.asyncio
