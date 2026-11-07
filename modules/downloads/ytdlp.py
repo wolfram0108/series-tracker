@@ -65,6 +65,16 @@ HLS_FORMAT = "b[protocol*=m3u8]/b"
 # (одно соединение на поток) — не подвержены этой дыре, но без -N
 # параллелизма (медленнее).
 DASH_FALLBACK_FORMAT = "b[protocol!*=m3u8]"
+
+
+def capped(selector: str, max_height: int | None) -> str:
+    """The selector under a cap of height, as a player picks a file (`sources.players.vk_files.pick_file`): the best of
+    each alternative not above the cap, else the lowest of them; the selector as it is without a cap."""
+    if not max_height:
+        return selector
+    alternatives = selector.split("/")
+    assert all(each.startswith("b") for each in alternatives), selector
+    return "/".join([f"{each}[height<={max_height}]" for each in alternatives] + ["w" + each[1:] for each in alternatives])
 _WARNING_LINE = re.compile(
     r"^\s*(?:WARNING:|It is strongly recommended|Run \"yt-dlp --update\"|"
     r"To suppress this warning)", re.IGNORECASE)
@@ -383,7 +393,8 @@ async def download(video_url: str, full_output_path: str,
                    headers: dict | None = None,
                    threads: int = 6,
                    progressive: bool = False,
-                   whole_video: bool = False) -> tuple[bool, str]:
+                   whole_video: bool = False,
+                   max_height: int | None = None) -> tuple[bool, str]:
     """Two-phase video download. Supports parts of a ready file, direct ffmpeg copy and yt-dlp.
 
     `whole_video` asks for a video with no hole: the file is a file of the library, which stays as it was fetched. A voice-over
@@ -391,14 +402,15 @@ async def download(video_url: str, full_output_path: str,
     fails: the service refused each voice-over short of segments (1 % of frames matched) and took each whole one.
 
     `progressive` marks one ready file address: it is asked for in parts at once, and by one stream when the server
-    cannot serve parts. The name is owned from the first step to the last: the programs, their leftovers and the publication."""
+    cannot serve parts. `max_height` caps a page the downloader reads itself (a resolved stream is one file already).
+    The name is owned from the first step to the last: the programs, their leftovers and the publication."""
     if not os.path.isabs(full_output_path):
         return False, "путь сохранения должен быть абсолютным"
     try:
         with storage.hold(full_output_path):
             announced = await _announced_length(video_url, headers, progressive)
             done = await _download_owned(video_url, full_output_path, on_progress, headers, threads, progressive,
-                                         announced=announced)
+                                         announced=announced, max_height=max_height)
             done = await _as_long_as_announced(done, full_output_path, announced)
             return await _whole_or_discarded(done, full_output_path) if whole_video else done
     except storage.StorageBusy:  # an operation on this name has not ended: a file written now could be lost
@@ -477,7 +489,7 @@ async def _download_ranged_file(video_url: str, headers: dict, full_output_path:
 
 async def _download_owned(video_url: str, full_output_path: str, on_progress: ProgressCb,
                           headers: dict | None, threads: int, progressive: bool = False, *,
-                          announced: float | None = None) -> tuple[bool, str]:
+                          announced: float | None = None, max_height: int | None = None) -> tuple[bool, str]:
     await storage.call(os.makedirs, os.path.dirname(full_output_path), exist_ok=True)
     if await storage.call(os.path.exists, full_output_path):
         return True, "файл уже существует"
@@ -495,12 +507,12 @@ async def _download_owned(video_url: str, full_output_path: str, on_progress: Pr
     # НЕ из промежуточного TS (находка 52)
     duration = announced if announced is not None else await _probe_duration(video_url)
     raw = await _phase_download(video_url, full_output_path, on_progress,
-                                threads, HLS_FORMAT)
+                                threads, capped(HLS_FORMAT, max_height))
     if not isinstance(raw, str) and not _unavailable_error(raw[1]):
         # VK HLS fragments are fragile; progressive/DASH retry is reliable.
         await storage.call(_cleanup_artifacts, full_output_path, owns=full_output_path)
         raw = await _phase_download(video_url, full_output_path, on_progress,
-                                    threads, DASH_FALLBACK_FORMAT)
+                                    threads, capped(DASH_FALLBACK_FORMAT, max_height))
     if not isinstance(raw, str):
         await storage.call(_cleanup_artifacts, full_output_path, owns=full_output_path)
         return raw  # (False, error)

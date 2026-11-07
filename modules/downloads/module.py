@@ -964,6 +964,8 @@ class DownloadsModule(BaseModule):
             if stream_error is not None:
                 return (False, *stream_error)
             kw: dict = {"threads": self._threads}
+            if job.get("max_height"):
+                kw["max_height"] = job["max_height"]  # a page the downloader reads itself keeps the cap of the job
             if headers:
                 kw["headers"] = headers
             if progressive:

@@ -1237,6 +1237,18 @@ async def test_fetch_downloads_a_stream_without_touching_the_media_tables(system
 
 
 @pytest.mark.asyncio
+async def test_fetch_of_a_page_no_player_resolves_keeps_its_cap_for_the_downloader(system, tmp_path):
+    """A page the downloader reads itself (a VK page without the key of its player) is fetched under the cap of the job,
+    as a player picks its file; a job without a cap asks for no cap."""
+    bus, _, dl, probe, _, _ = system
+    capped, free = "https://vk.com/video-1_2", "https://vk.com/video-1_3"
+    await _fetch(probe, bus, 2, jobs=[
+        {"key": "dub:1", "url": capped, "path": str(tmp_path / "a.mp4"), "max_height": 720, "series_id": 3},
+        {"key": "dub:2", "url": free, "path": str(tmp_path / "b.mp4"), "series_id": 3}])
+    assert dl.kwargs[capped].get("max_height") == 720 and "max_height" not in dl.kwargs[free]
+
+
+@pytest.mark.asyncio
 async def test_fetch_failure_is_reported_and_leaves_no_partial_file(system, tmp_path):
     bus, fake, dl, probe, _, _ = system
     path = str(tmp_path / "t" / "x.mp4")

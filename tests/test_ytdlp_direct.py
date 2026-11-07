@@ -326,3 +326,55 @@ async def test_a_cancelled_download_keeps_its_name_until_the_program_is_dead(fak
     storage.when_free(target, free.set)
     await asyncio.wait_for(free.wait(), 5)
     assert not storage.busy(target)
+
+
+# The formats of a page as yt-dlp reads them (VK gives HLS at every height and progressive files at some).
+PAGE_FORMATS = [
+    {"format_id": f"{kind}-{height}", "url": f"https://cdn.test/{height}.{'m3u8' if kind == 'hls' else 'mp4'}",
+     "protocol": "m3u8_native" if kind == "hls" else "https", "ext": "mp4", "height": height, "vcodec": "avc1",
+     "acodec": "mp4a"}
+    for kind, heights in (("hls", (360, 720, 1080, 2160)), ("url", (480, 1080))) for height in heights]
+
+
+def picked(tmp_path, selector: str, formats=PAGE_FORMATS) -> str:
+    """The format the real yt-dlp picks by the selector from the formats of a page, with no network."""
+    import json
+    import shutil
+    import subprocess
+    info = tmp_path / "info.json"
+    info.write_text(json.dumps({"id": "x", "title": "x", "extractor": "generic", "extractor_key": "Generic",
+                                "webpage_url": "https://vk.test/v", "formats": formats}))
+    out = subprocess.run([shutil.which("yt-dlp"), "--no-warnings", "--load-info-json", str(info), "-f", selector,
+                          "--simulate", "--print", "format_id"], capture_output=True, text=True, timeout=60)
+    return out.stdout.strip()
+
+
+@pytest.mark.parametrize(("selector", "cap", "expected"), [
+    (ytdlp.HLS_FORMAT, None, "hls-2160"),
+    (ytdlp.HLS_FORMAT, 720, "hls-720"),
+    (ytdlp.HLS_FORMAT, 1440, "hls-1080"),
+    (ytdlp.HLS_FORMAT, 240, "hls-360"),          # nothing fits: the lowest above the cap
+    (ytdlp.DASH_FALLBACK_FORMAT, None, "url-1080"),
+    (ytdlp.DASH_FALLBACK_FORMAT, 720, "url-480"),
+    (ytdlp.DASH_FALLBACK_FORMAT, 240, "url-480"),
+])
+def test_a_page_is_downloaded_under_the_cap_as_a_player_picks_its_file(tmp_path, selector, cap, expected):
+    assert picked(tmp_path, ytdlp.capped(selector, cap)) == expected
+
+
+@pytest.mark.asyncio
+async def test_the_cap_reaches_both_phases_of_the_page_download(tmp_path, monkeypatch):
+    """The HLS phase and its progressive retry both ask for the capped format."""
+    asked = []
+
+    async def phase(url, path, on_progress, threads, selector):
+        asked.append(selector)
+        return False, "HTTP Error 404"
+
+    async def length(url):
+        return 0.0
+
+    monkeypatch.setattr(ytdlp, "_phase_download", phase)
+    monkeypatch.setattr(ytdlp, "_probe_duration", length)
+    await ytdlp.download("https://vk.com/video-1_2", str(tmp_path / "v.mp4"), noop, max_height=720)
+    assert asked == [ytdlp.capped(ytdlp.HLS_FORMAT, 720), ytdlp.capped(ytdlp.DASH_FALLBACK_FORMAT, 720)]
