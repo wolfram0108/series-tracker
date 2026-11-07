@@ -8,13 +8,13 @@ import sqlite3
 import pytest
 
 from core import Bus, Runner
-from core.contracts import CompilationRef, CompositionRow, Reference, RowState, compilation_key
+from core.contracts import WORK_STATE, CompilationRef, CompositionRow, Reference, RowState, compilation_key
 from core.db import Database
 from modules.settings import SettingsModule
 from modules.voices import VoicesModule
 from series_factory import insert_series
 from settle import wait_until
-from test_voices import (Neighbours, Probe, _running, finish, linked, quiet, reference_on_disk, touch)
+from test_voices import (Neighbours, Probe, _running, drained, finish, linked, quiet, reference_on_disk, touch)
 
 KEY = compilation_key("ПВА", 2, "vk", 1, 1, 3)
 COMP_URL = "https://vk/comp-1-3"
@@ -31,6 +31,7 @@ class CutWorld(Neighbours):
         self.offers = []
         self.offer_reply = {"accepted": True}
         self.lose_reverse = False  # the service takes the batch and the answer never comes back
+        self.voice = "ПВА"  # the voice-over group of the compilation
         self.extra_rows.append(CompositionRow(
             series_id=7, source_id=2, row_key="comp", season=1, episode_start=1, episode_end=3, voice_group="ПВА", voice_label="ПВА",
             player="vk", heights=[2160], state=RowState.PLAYABLE, link=COMP_URL))
@@ -42,7 +43,7 @@ class CutWorld(Neighbours):
 
     def references_list(self):
         found = super().references_list()
-        ref = CompilationRef(key=KEY, source_id=2, row_key="comp", player="vk", voice_group="ПВА", height=2160,
+        ref = CompilationRef(key=KEY, source_id=2, row_key="comp", player="vk", voice_group=self.voice, height=2160,
                              start=1, end=3)
         return [each.model_copy(update={"compilation": ref}) if each.episode in self.members else each for each in found]
 
@@ -235,6 +236,27 @@ async def test_a_cut_is_work_of_its_episode_until_it_ends(world):
     await compilation_downloaded(world)
     work = await probe.request("voices.work.get", {"series_id": 7}, timeout=5)
     assert work["active"] and [1, 1, 0] in [list(each) for each in work["busy"]]
+
+
+@pytest.mark.asyncio
+async def test_the_run_hears_that_the_cut_of_an_episode_ended_without_asking(world):
+    """The run of a sync builds the container of an episode once no executor holds work of it: the end of a cut is told
+    by the event of work, as the end of a voice-over is, not only to a question."""
+    probe, neighbours, voices, bus = world
+    # The cut is the only work of the episodes: the compilation speaks with the voice of the reference, and no voice-over of
+    # another group is there.
+    del neighbours.sources[1:]
+    neighbours.voice = "FumoDub"
+    neighbours.extra_rows[:] = [row.model_copy(update={"voice_group": "FumoDub", "voice_label": "FumoDub"})
+                                for row in neighbours.extra_rows]
+    await compilation_downloaded(world)
+    told = bus.subscribe(WORK_STATE)
+    for result in reverse_done(neighbours):
+        probe.publish_event("conform.job.finished", result)
+    await until(lambda: len(neighbours.offers) == 2, neighbours.offers)
+    await quiet(voices)
+    states = [each for each in drained(told) if each["owner"] == "voices"]
+    assert states and states[-1]["busy"] == [] and states[-1]["active"] is False
 
 
 @pytest.mark.asyncio

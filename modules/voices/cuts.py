@@ -473,6 +473,9 @@ class Cuts:
             return
         self._m.publish_event("voices.cut.changed", {**self.record(cut), "rev": self._m._next_rev(),
                                                      "epoch": await self._m._generation()})
+        # A cut is work of its episode: the run of the sync hears of every step of it, as of a voice-over's, or it waits
+        # for an episode whose cut has ended and never builds its container.
+        await self._m._tell_work(cut["series_id"])
 
     async def _announce_slot(self, series_id: int, slot: Slot) -> None:
         for cut in await self._repo.cuts_of(series_id):
