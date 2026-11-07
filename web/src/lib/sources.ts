@@ -241,6 +241,15 @@ export function viewOf(input: ViewInput): SourceView {
 
 // --- texts -----------------------------------------------------------------------------------------------------------
 
+/** The Russian and the English name of a release among the names its site writes: the first in Cyrillic, the first
+ * in Latin letters with no Cyrillic; empty when the site gives none. */
+export function titlesOf(names: string[]): { ru: string; en: string } {
+  const cyrillic = /[\u0400-\u04FF]/
+  const ru = names.find((name) => cyrillic.test(name)) ?? ""
+  const en = names.find((name) => /[A-Za-z]/.test(name) && !cyrillic.test(name)) ?? ""
+  return { ru: ru.trim(), en: en.trim() }
+}
+
 /** One line per player of the parts it could not give, by what the site calls them (a part with no player is the page
  * of an episode); a player whose parts the site does not name is told by their count. Reasons stay in the log. */
 export function unreadLines(unread: UnreadPart[]): string[] {

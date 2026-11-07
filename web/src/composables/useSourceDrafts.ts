@@ -21,6 +21,8 @@ interface Draft {
   summary: SourceSummary | null
   /** The rows the rules of the profile made of the page, as the core's last complete answer gave them. */
   rows: LayoutRow[]
+  /** The names of the release as the site writes them, from the last complete table. */
+  names: string[]
   asked: { state: PreviewReply["state"]; reason?: string | null } | null
   /** The news of the page that the last answer already knew; only news after it asks the preview again. */
   handled: PageStatus | null
@@ -79,6 +81,7 @@ export function useSourceDrafts() {
     draft.summary = answer.data.summary ?? draft.summary
     // Rows come with a summary: a failed read that kept no complete table leaves the earlier rows in force.
     draft.rows = answer.data.summary ? (answer.data.rows ?? []) : draft.rows
+    draft.names = answer.data.names?.length ? answer.data.names : draft.names
     draft.handled = before
     await settle(draft)
   }
@@ -113,7 +116,7 @@ export function useSourceDrafts() {
       }
       const draft: Draft = {
         key: `draft-${++counter}`, url, sourceType, profileId: null, vibixSeason: null,
-        playersOff: [], canonical: "", summary: null, rows: [], asked: { state: "reading" }, handled: null,
+        playersOff: [], canonical: "", summary: null, rows: [], names: [], asked: { state: "reading" }, handled: null,
       }
       drafts.value.push(draft)
       await ask(drafts.value[drafts.value.length - 1], true)
@@ -140,6 +143,7 @@ export function useSourceDrafts() {
     if (rereads) {
       draft.summary = null
       draft.rows = []
+      draft.names = []
       draft.asked = { state: "reading" }
       draft.canonical = ""
       await ask(draft, true)
@@ -170,6 +174,8 @@ export function useSourceDrafts() {
   /** The sources as `POST /api/series` takes them. */
   const bodies = computed<SourceDraft[]>(() => items.value.map((item) => draftBody(item)))
   const failed = computed(() => items.value.some((item) => item.view.state === "failed"))
+  /** The names of the release by the first source whose page gave any. */
+  const names = computed(() => drafts.value.find((draft) => draft.names.length)?.names ?? [])
 
-  return { items, bodies, failed, error, busy, add, remove, change, reread, reset }
+  return { items, bodies, failed, names, error, busy, add, remove, change, reread, reset }
 }

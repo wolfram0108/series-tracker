@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   coverageOf, draftBody, itemOfSource, joinVkAddress, pageHost, phaseText, placeOf, profileOptions, progressText,
   readEnded, seasonPositions, siteOf, sourceCaption, sourceTypeOf, spanText, splitVkAddress, stepsLines, summaryOf, togglePlayer,
-  unreadLines, viewOf, voicesOf, type LayoutRow, type PlayerSummary, type SeriesSource, type SourceSummary,
+  titlesOf, unreadLines, viewOf, voicesOf, type LayoutRow, type PlayerSummary, type SeriesSource, type SourceSummary,
 } from "./sources"
 import type { PageStatus } from "../stores/sourceTables"
 
@@ -268,5 +268,20 @@ describe("unreadLines", () => {
     expect(unreadLines(unread)).toEqual(["CDN VideoHub: не прочитано — 2 части"])
     expect(viewOf({ summary: { ...release, unread }, playersOff: [] }).unread).toEqual(["CDN VideoHub: не прочитано — 2 части"])
     expect(viewOf({ summary: release, playersOff: [] }).unread).toEqual([])
+  })
+})
+
+describe("titlesOf", () => {
+  it("takes the first name in Cyrillic as the Russian one and the first in Latin letters as the English one", () => {
+    expect(titlesOf(["Любовь под гипнозом", "Hypnosis love", "Кохання під гіпнозом"]))
+      .toEqual({ ru: "Любовь под гипнозом", en: "Hypnosis love" })
+    expect(titlesOf(["Steel Ball Run", "Невероятное приключение ДжоДжо: Гонка «Стальной шар» "]))
+      .toEqual({ ru: "Невероятное приключение ДжоДжо: Гонка «Стальной шар»", en: "Steel Ball Run" })
+  })
+
+  it("leaves a name empty when the site gives none in its script", () => {
+    expect(titlesOf(["Только русское"])).toEqual({ ru: "Только русское", en: "" })
+    expect(titlesOf(["鬥破蒼穹", "Doupo Cangqiong"])).toEqual({ ru: "", en: "Doupo Cangqiong" })
+    expect(titlesOf([])).toEqual({ ru: "", en: "" })
   })
 })

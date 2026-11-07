@@ -13,7 +13,7 @@ import SourcesEditor from "./SourcesEditor.vue"
 import { api } from "../api/client"
 import { t } from "../i18n"
 import { reasonText } from "../lib/reason"
-import { joinVkAddress, siteOf, sourceTypeOf, splitVkAddress, vkQuery } from "../lib/sources"
+import { joinVkAddress, siteOf, sourceTypeOf, splitVkAddress, titlesOf, vkQuery } from "../lib/sources"
 import { useApi } from "../composables/useApi"
 import { useSSE } from "../composables/useSSE"
 import { useSourceDrafts } from "../composables/useSourceDrafts"
@@ -58,9 +58,15 @@ const isQualityOptionsReady = ref(false)
 const showValidation = ref(false)
 // Sources of a video series pile up here until "Add"; a torrent series has the one address of the field above.
 const {
-  items: sourceItems, bodies: sourceBodies, failed: sourcesFailed, error: sourcesError, busy: sourcesBusy,
+  items: sourceItems, bodies: sourceBodies, failed: sourcesFailed, names: sourceNames, error: sourcesError, busy: sourcesBusy,
   add: addDraft, remove: removeDraft, change: changeDraft, reread: rereadDraft,
 } = useSourceDrafts()
+// The names the page of a source gives fill the fields the user left empty, as the names of a tracker page do.
+watch(sourceNames, (names) => {
+  const titles = titlesOf(names)
+  if (!newSeries.name.trim()) newSeries.name = titles.ru
+  if (!newSeries.name_en.trim()) newSeries.name_en = titles.en
+})
 // The address of the field that a site reads: it becomes a source on the user's word, so a half-typed one makes none.
 const candidate = ref("")
 // A candidate that is a channel of VK needs its query: the channel is read whole and only the query keeps its videos.

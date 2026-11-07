@@ -47,6 +47,17 @@ describe("useSourceDrafts", () => {
     }])
   })
 
+  it("keeps the names the page gives once its table is read, and forgets them when the address changes", async () => {
+    site({ site: "ruchime", canonical_url: PAGE })
+    preview.mockResolvedValueOnce(page({ state: "ready", summary, names: ["Название", "Title"] }))
+    const drafts = useSourceDrafts()
+    await drafts.add(PAGE)
+    expect(drafts.names.value).toEqual(["Название", "Title"])
+    preview.mockResolvedValueOnce(page({ state: "reading" }))
+    await drafts.change(drafts.items.value[0].id, { url: `${PAGE}-2` })
+    expect(drafts.names.value).toEqual([])
+  })
+
   it("keeps a VK channel as channel and query and asks for that address", async () => {
     site({ site: "vk_channel", canonical_url: "https://vkvideo.ru/@kino|тайтл" })
     preview.mockResolvedValueOnce(page({ url: "https://vkvideo.ru/@kino|тайтл" }))
