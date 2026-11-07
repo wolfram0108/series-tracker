@@ -113,6 +113,7 @@ class YummyAniSite:
         ctx.progress(PHASE_RELEASE, 2, 2)
 
         catalogs: list[PlayerRef] = []
+        voices: dict[PlayerRef, list[str]] = {}
         entries: dict[str, list[Entry]] = {}
         unknown: Counter = Counter()
         for item in listed:
@@ -122,10 +123,11 @@ class YummyAniSite:
                 unknown[str((item.get("data") or {}).get("player") or urlparse(iframe).hostname)] += 1
                 continue
             player = self.players.get(ref.name)
+            data = item.get("data") or {}
             if player.series_scope:
                 catalogs.append(ref)
+                voices.setdefault(ref, []).append(voice_of(data.get("dubbing", "")).name)
                 continue
-            data = item.get("data") or {}
             number_text = str(item.get("number") or "").strip()
             entries.setdefault(ref.name, []).append(Entry(
                 key=player.video_of(ref.url) or str(item.get("video_id")), ref=ref,
@@ -137,8 +139,8 @@ class YummyAniSite:
             raise SiteError(reason("no_players_empty", site=SITE_NAME))
         own = [Listed(self.players.get(name), url, last_of_each(_once(found), lambda each: (each.voice.name, each.voice.kind), ctx.recent))
                for name, found in entries.items()]
-        return TableDraft(names=title_names(title),
-                          rows=await table_rows(self.players, [(url, {ref.name: ref}) for ref in catalogs], ctx, own))
+        body = await table_rows(self.players, [(url, {ref.name: ref}) for ref in catalogs], ctx, own, names=voices)
+        return TableDraft(names=title_names(title), rows=body.rows, unread=body.unread)
 
     def _ref(self, url: str, iframe: str) -> PlayerRef | None:
         """The player behind an iframe: the site's own page of CDN VideoHub or of VK, or the player that knows the iframe."""

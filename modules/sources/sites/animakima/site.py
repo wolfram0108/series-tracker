@@ -3,7 +3,7 @@
 The page holds no player: it holds the buttons of its players and the list of its episodes, and the API of the site gives
 what a button shows (`get_player_view`). The view of a player that lists the whole title (the widget of CDN VideoHub, the
 iframe of Kodik) is read by that player as it is read on any page that embeds it; a view no player knows is not read, and
-the log says so. The own player of the site shows one episode at a time: its rows are the episodes of the page, each asked
+the log says so; a view the API does not give is an unread part of the page. The own player of the site shows one episode at a time: its rows are the episodes of the page, each asked
 of the player. The table is the whole of it, with no choice of a player or a voice-over, and nothing here numbers an episode.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import logging
 import re
 from urllib.parse import urlparse
 
-from core.contracts import RowVoice
+from core.contracts import RowVoice, UnreadPart
 from core.reasons import reason
 
 from ...players.animakima import VIEW, AnimakimaError, AnimakimaPlayer, read_view, view_request
@@ -107,30 +107,33 @@ class AnimakimaSite:
         ctx.progress(PHASE_RELEASE, 1, 1 + len(views))
 
         refs: dict[str, PlayerRef] = {}
+        unread: list[UnreadPart] = []
         for done, view in enumerate(views, start=2):
             if view != VIEW:
-                found = await self._listed(url, aid, view, ctx)
+                try:
+                    found = await self._listed(url, aid, view, ctx)
+                except AnimakimaError as exc:
+                    unread.append(UnreadPart(part=f"view:{view}", names=[view], reason=exc.reason))
+                    found = None
                 if found is not None:
                     refs[found.name] = found
             ctx.progress(PHASE_RELEASE, done, 1 + len(views))
 
         own = self._own_entries(url, aid, page, ctx) if VIEW in views else []
         if not refs and not own:
-            raise SiteError(reason("no_players_empty", site=SITE_NAME))
+            raise SiteError(unread[0].reason if unread else reason("no_players_empty", site=SITE_NAME))
         listed = [Listed(self.players.get(AnimakimaPlayer.name), url, own)] if own else []
-        rows = await table_rows(self.players, [(url, refs)] if refs else [], ctx, listed)
-        return TableDraft(names=title_names(page), rows=rows)
+        body = await table_rows(self.players, [(url, refs)] if refs else [], ctx, listed)
+        return TableDraft(names=title_names(page), rows=body.rows, unread=[*unread, *body.unread])
 
     async def _page(self, url: str, ctx: ReadContext) -> str:
         ctx.progress(PHASE_RELEASE, 0, 1)
         return (await read_page(url, ctx, SITE_NAME)).text
 
     async def _listed(self, url: str, aid: str, view: str, ctx: ReadContext) -> PlayerRef | None:
-        """The player that lists the whole title behind a button; None, and a line in the log, for a view no player knows."""
-        try:
-            shown = read_view(await ask(lambda: view_request(ctx.http, aid, view, referer=url)), SITE_NAME)
-        except AnimakimaError as exc:
-            raise SiteError(exc.reason) from exc
+        """The player that lists the whole title behind a button; None, and a line in the log, for a view no player knows.
+        Raises `AnimakimaError` for a view the API does not give."""
+        shown = read_view(await ask(lambda: view_request(ctx.http, aid, view, referer=url)), SITE_NAME)
         found = next((ref for player in self.players if (ref := player.find(shown.data, url)) is not None), None)
         if found is None:
             logger.info("%s: player %r of %s is not read: no player knows its view", SITE_NAME, view, url)

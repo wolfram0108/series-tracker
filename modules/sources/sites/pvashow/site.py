@@ -142,4 +142,5 @@ class PvaShowSite:
         unique = list(first.values())
         recent = last_of_each(unique, lambda each: each.group, ctx.recent)
         listed = [Listed(self.players.get(AllVideoPlayer.name), url, recent, known)]
-        return TableDraft(names=title_names(page), site_voice=voice, rows=await table_rows(self.players, [], ctx, listed))
+        body = await table_rows(self.players, [], ctx, listed)
+        return TableDraft(names=title_names(page), site_voice=voice, rows=body.rows, unread=body.unread)

@@ -5,7 +5,7 @@ import re
 import pytest
 
 from core.contracts import (CompositionRow, Exclusion, PlayerSummary, ReleaseTable, RowState, RowVoice, RuleLine, RuleResult,
-                            RulesApplyReply, SeriesSource, SourceStatus, SourceType, TableRow, line_of)
+                            RulesApplyReply, SeriesSource, SourceStatus, SourceType, TableRow, UnreadPart, line_of)
 from core.voice_names import fold_name
 from sources_support import json_of, text_of
 from modules.composition.project import (UNKNOWN_VOICE_LABEL, SourceInput, group_renames, layout_episodes, lines_for,
@@ -169,6 +169,14 @@ def test_a_failed_read_without_any_table_gives_the_reason_and_nothing_else():
 def test_a_ready_source_has_no_reason():
     out = project([item(source(), table(row("a")), {"a": {"episode": 1}})], {}, {})
     assert (out.sources[0].status, out.sources[0].reason) == (SourceStatus.READY, None)
+
+
+def test_the_parts_of_the_page_its_last_read_could_not_get_are_in_the_summary_and_the_source_is_ready():
+    gap = UnreadPart(part="kodik:season/1/a?", player_label="Kodik", names=["Комната Диди"], reason='{"code":"player_status"}')
+    tbl = table(row("a")).model_copy(update={"unread": [gap]})
+    out = project([item(source(), tbl, {"a": {"episode": 1}})], {}, {})
+    assert (out.sources[0].status, out.sources[0].unread) == (SourceStatus.READY, [gap])
+    assert [r.row_key for r in out.rows] == ["a"]
 
 
 def test_the_summary_counts_players_rows_and_seasons_without_a_number():

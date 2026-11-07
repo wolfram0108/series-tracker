@@ -114,8 +114,8 @@ class AnimesssSite:
         refs = [ref for donor, item in donors(playlist.text) if (ref := self._ref(url, donor, item)) is not None]
         if not refs:
             raise SiteError(reason("no_players_empty", site=SITE_NAME))
-        return TableDraft(names=title_names(page),
-                          rows=await table_rows(self.players, [(url, {ref.name: ref}) for ref in refs], ctx))
+        body = await table_rows(self.players, [(url, {ref.name: ref}) for ref in refs], ctx)
+        return TableDraft(names=title_names(page), rows=body.rows, unread=body.unread)
 
     def _ref(self, url: str, donor: str, item: dict[str, str]) -> PlayerRef | None:
         """The player behind an item: the widget of CDN VideoHub by its numbers, or the player that knows the iframe."""

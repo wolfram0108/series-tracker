@@ -117,6 +117,22 @@ async def test_the_table_has_every_player_of_the_api_each_read_as_on_any_page_th
     assert any("'Плеер Sibnet'" in record.getMessage() for record in caplog.records)
 
 
+async def test_a_list_of_kodik_that_does_not_open_is_an_unread_part_named_by_its_voice_over_and_the_rest_is_read():
+    broken = "//kodikplayer.com/season/117721/da5c/720p?translations=false&only_episode=true&episode={n}"
+    web = site_web()
+    web.route("/api/anime/700/videos", json.dumps({"response": [*VIDEOS["response"],
+                                                                video("Kodik", "Озвучка Комната Диди", 1, broken)]}),
+              first=True)
+    web.route("kodikplayer.com/season/117721/", (500, ""), first=True)
+
+    table = await read(web)
+
+    assert [(part.part, part.player_label, part.names, parse(part.reason)["code"]) for part in table.unread] == [
+        ("kodik:season/117721/da5c?", "Kodik", ["Комната Диди"], "player_status")]
+    assert {row.player for row in table.rows} == {"kodik", "cvh", "vk", "alloha"} and len(table.rows) == 6
+    assert {row.part for row in table.rows if row.player == "kodik"} == {"kodik:season/64820/8cc4?"}
+
+
 @pytest.mark.parametrize("title", [{"response": {"title": "без номера"}}, (404, "")])
 async def test_a_title_the_api_does_not_give_is_refused(title):
     with pytest.raises(SiteError) as refused:

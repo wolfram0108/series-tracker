@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import pytest
 
 from core import BaseModule, Bus
-from core.contracts import ReleaseTable, RowState, RowVoice, TableGetRequest, TableRow
+from core.contracts import ReleaseTable, RowState, RowVoice, TableGetRequest, TableRow, UnreadPart
 from core.db import Database
 from core.reasons import parse, reason
 from modules.sources.module import SourcesModule
@@ -58,6 +58,7 @@ class FakeSite:
         self.go.set()
         self.failure: Exception | None = None
         self.rows = episodes
+        self.unread = lambda _read_number: []
         self.steps: list[tuple[str, int, int]] = []
 
     def match_url(self, url: str) -> bool:
@@ -76,7 +77,8 @@ class FakeSite:
         await self.go.wait()
         if self.failure is not None:
             raise self.failure
-        return TableDraft(names=["Фейк"], site_voice="Ruchime", channel="fake-channel", rows=self.rows(len(self.reads)))
+        return TableDraft(names=["Фейк"], site_voice="Ruchime", channel="fake-channel", rows=self.rows(len(self.reads)),
+                          unread=self.unread(len(self.reads)))
 
 
 async def entry(site: FakeSite) -> str:
@@ -335,6 +337,108 @@ async def test_a_repeated_row_key_rejects_the_whole_table(system):
 
     assert failure["reason"] == reason("duplicate_key", key="a1", player="vk")
     assert await system.stored_texts() == ["Серия 1 (чтение 1)", "Серия 2 (чтение 1)"]
+
+
+# --- a part of a page that cannot be read ------------------------------------------------------------------------------
+
+GAP = UnreadPart(part="kodik:2", player_label="Kodik", names=["Комната Диди"],
+                 reason=reason("player_status", player="Kodik", status=500))
+
+
+def parted(read_number: int, *parts: str) -> list[TableRow]:
+    """A row the page lists itself, then the rows of the catalogs (parts) the read got."""
+    every = {"k1": row("k1:1", f"Kodik 1 (чтение {read_number})", player="kodik", part="kodik:1"),
+             "k2": row("k2:1", f"Kodik 2 (чтение {read_number})", player="kodik", part="kodik:2")}
+    return [row("own", f"Своя (чтение {read_number})"), *(every[part] for part in parts)]
+
+
+async def read_again(system: System) -> dict:
+    system.clock.advance(hours=2)
+    await system.get()
+    await system.next(system.ready)
+    return (await system.get())["table"]
+
+
+async def test_a_part_that_cannot_be_read_keeps_its_rows_of_the_last_read_that_got_it_and_is_named(system):
+    system.site.rows = lambda number: parted(number, "k1", "k2")
+    await system.get()
+    await system.next(system.ready)
+    system.site.rows = lambda number: parted(number, "k1")
+    system.site.unread = lambda number: [GAP]
+
+    second = await read_again(system)
+    third = await read_again(system)
+
+    assert [each["text"] for each in second["rows"]] == ["Своя (чтение 2)", "Kodik 1 (чтение 2)", "Kodik 2 (чтение 1)"]
+    assert [each["text"] for each in third["rows"]] == ["Своя (чтение 3)", "Kodik 1 (чтение 3)", "Kodik 2 (чтение 1)"]
+    assert second["unread"] == third["unread"] == [GAP.model_dump(mode="json")]
+    assert await system.stored_texts() == ["Своя (чтение 3)", "Kodik 1 (чтение 3)", "Kodik 2 (чтение 1)"]
+    system.site.rows = lambda number: parted(number, "k1", "k2")
+    system.site.unread = lambda number: []
+    whole = await read_again(system)
+    assert [each["text"] for each in whole["rows"]] == ["Своя (чтение 4)", "Kodik 1 (чтение 4)", "Kodik 2 (чтение 4)"]
+    assert whole["unread"] == []
+
+
+async def test_the_first_read_of_a_page_with_a_part_unread_gives_the_rest_and_names_the_part(system):
+    system.site.rows = lambda number: parted(number, "k1")
+    system.site.unread = lambda number: [GAP]
+
+    await system.get()
+    await system.next(system.ready)
+    table = (await system.get())["table"]
+
+    assert [each["text"] for each in table["rows"]] == ["Своя (чтение 1)", "Kodik 1 (чтение 1)"]
+    assert table["unread"] == [GAP.model_dump(mode="json")] and table["complete"] is True
+
+
+async def test_a_read_that_got_no_part_of_the_page_fails_with_the_reason_of_the_part_and_the_old_table_stays(system):
+    await system.get()
+    await system.next(system.ready)
+    system.site.rows = lambda number: []
+    system.site.unread = lambda number: [GAP]
+    system.clock.advance(hours=2)
+
+    await system.get()
+
+    assert (await system.next(system.failed))["reason"] == GAP.reason
+    assert await system.stored_texts() == ["Серия 1 (чтение 1)", "Серия 2 (чтение 1)"]
+
+
+async def test_a_row_that_the_read_lists_again_is_not_kept_twice_from_its_unread_part(system):
+    system.site.rows = lambda number: parted(number, "k1", "k2")
+    await system.get()
+    await system.next(system.ready)
+    # The video of the unread catalog is listed by the other one now: it is one row, of the catalog that was read.
+    system.site.rows = lambda number: [*parted(number, "k1"),
+                                       row("k2:1", f"Kodik 2 в каталоге 1 (чтение {number})", player="kodik", part="kodik:1")]
+    system.site.unread = lambda number: [GAP]
+
+    table = await read_again(system)
+
+    assert [each["text"] for each in table["rows"]] == ["Своя (чтение 2)", "Kodik 1 (чтение 2)",
+                                                        "Kodik 2 в каталоге 1 (чтение 2)"]
+
+
+async def test_a_part_unread_over_a_table_stored_before_rows_named_their_parts_fails_the_read(system):
+    await system.get()
+    await system.next(system.ready)
+    await system.db.execute("UPDATE release_tables SET unread = NULL WHERE url = ?", (PAGE,))
+    system.site.rows = lambda number: parted(number, "k1")
+    system.site.unread = lambda number: [GAP]
+    system.clock.advance(hours=2)
+
+    await system.get()
+
+    assert (await system.next(system.failed))["reason"] == GAP.reason
+    assert await system.stored_texts() == ["Серия 1 (чтение 1)", "Серия 2 (чтение 1)"]
+    # The read that gets the page whole marks it: a part that fails after it keeps its rows.
+    system.site.rows = lambda number: parted(number, "k1", "k2")
+    system.site.unread = lambda number: []
+    assert [each["text"] for each in (await read_again(system))["rows"]][-1] == "Kodik 2 (чтение 3)"
+    system.site.rows = lambda number: parted(number, "k1")
+    system.site.unread = lambda number: [GAP]
+    assert [each["text"] for each in (await read_again(system))["rows"]][-1] == "Kodik 2 (чтение 3)"
 
 
 async def test_a_read_that_does_not_end_is_cut_by_the_safeguard_and_the_page_is_free_again(db_path, tmp_path):

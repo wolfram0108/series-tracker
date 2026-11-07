@@ -314,7 +314,7 @@ async def test_a_series_is_asked_of_vk_in_one_batch_when_the_player_page_issues_
     assert of(draft, "vk", 390).state is RowState.ABSENT
 
 
-# --- a read that cannot give the whole page gives none of it ----------------------------------------------------------------
+# --- a read that cannot give the page gives none of it; a part it cannot get is named ---------------------------------------
 
 @pytest.mark.parametrize("web, code", [
     (Web().route(f"/release/{SLUG}", (404, "")), "site_status"),
@@ -337,24 +337,27 @@ async def test_a_host_that_does_not_answer_is_a_refusal_with_a_reason():
     assert parse(refused.value.reason)["code"] == "site_unreachable"
 
 
-async def test_an_unread_page_of_an_episode_refuses_the_table_instead_of_leaving_a_hole_in_it():
+async def test_an_unread_page_of_an_episode_is_an_unread_part_and_the_other_pages_are_read():
     web = web_of(release_with([entry(1), entry(2), entry(3)]))
     web.route("/episode-2", (500, ""), first=True)
 
-    with pytest.raises(SiteError) as refused:
-        await Run().read(a_site(), web)
+    draft = await Run().read(a_site(), web)
 
-    assert parse(refused.value.reason) == {"code": "pages_unread", "params": {"site": "Ruchime", "count": 1, "total": 3}}
+    assert [(part.part, part.names, parse(part.reason)["code"]) for part in draft.unread] == [
+        (f"{RELEASE}/episode-2", ["Серия 2"], "page_status")]
+    page_rows = [row for row in draft.rows if row.player in ("vk", "allvideo")]
+    assert sorted({row.site_fields["number"] for row in page_rows}) == [1, 3]
+    assert {row.part for row in page_rows} == {f"{RELEASE}/episode-1", f"{RELEASE}/episode-3"}
 
 
-async def test_a_catalog_that_cannot_be_captured_refuses_the_table_after_one_more_try():
+async def test_a_catalog_that_cannot_be_captured_is_an_unread_part_after_one_more_try():
     site = RuchimeSite(PlayerRegistry.standard())
     asked = catalog_of(site, SLUG, failure=VibixUnavailable(reason("vibix_api_timeout")))
 
-    with pytest.raises(SiteError) as refused:
-        await Run().read(site, web_of(release_with([entry(1)])))
+    draft = await Run().read(site, web_of(release_with([entry(1)])))
 
-    assert parse(refused.value.reason)["code"] == "player_failed" and len(asked) == 2
+    assert [(part.part.split(":")[0], parse(part.reason)["code"]) for part in draft.unread] == [("vibix", "player_failed")]
+    assert len(asked) == 2 and {row.player for row in draft.rows} == {"vk", "allvideo", "kodik"}
 
 
 async def test_a_release_whose_pages_do_not_show_vibix_has_no_catalog_to_capture():
@@ -392,14 +395,15 @@ def test_the_players_of_the_site_are_the_players_of_the_module_when_it_gives_the
     assert site.players is given and site.players.get("vibix") is given.get("vibix")
 
 
-async def test_a_kodik_iframe_that_cannot_be_opened_refuses_the_table_with_the_reason_of_the_player():
+async def test_a_kodik_iframe_that_cannot_be_opened_is_an_unread_part_with_the_reason_of_the_player():
     web = web_of(release_with([entry(1)]))
     web.route("kodikplayer.com/serial/", (500, ""), first=True)
 
-    with pytest.raises(SiteError) as refused:
-        await Run().read(a_site(), web)
+    draft = await Run().read(a_site(), web)
 
-    assert parse(refused.value.reason) == {"code": "player_status", "params": {"player": "Kodik", "status": 500}}
+    assert [(part.part.split(":")[0], part.player_label, parse(part.reason)) for part in draft.unread] == [
+        ("kodik", "Kodik", {"code": "player_status", "params": {"player": "Kodik", "status": 500}})]
+    assert "kodik" not in {row.player for row in draft.rows} and {"vk", "vibix"} <= {row.player for row in draft.rows}
 
 
 async def test_the_catalog_of_a_player_is_read_once_however_many_pages_show_it():

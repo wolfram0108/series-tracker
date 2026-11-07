@@ -3,7 +3,8 @@
 The table is the whole page: the rows of VK and AllVideo for each entry of the list, and a row for each entry of the
 catalogs of the players that list a whole series (Vibix, Kodik), whatever the resolution already found and whatever the
 source of a series switches off (the choices are applied to the table afterwards). A row carries the text of the site as it
-is; no number of an episode or a season is made here.
+is; no number of an episode or a season is made here. The page of an episode and a catalog are parts of the page: one that
+cannot be read is named in the table, and the core keeps the rows it gave the read before.
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from core.contracts import RowVoice, TableRow
+from core.contracts import RowVoice, TableRow, UnreadPart
 from core.reasons import reason
 
 from ...players.asking import ask_many, outcome_of
@@ -62,11 +63,15 @@ class RuchimeSite:
 
         site_voice = release_voice(release.text)
         pages = await self._read_pages(slug, listed, ctx)
-        rows = await self._rows(slug, listed, pages, site_voice, ctx)
-        return TableDraft(names=release_names(release.text, slug), site_voice=site_voice, rows=rows)
+        unread = [UnreadPart(part=page.url, names=[str(entry.get("title") or entry.get("number") or "")],
+                             reason=page.failure) for entry, page in zip(listed, pages) if page is not None and page.failure]
+        read = [page if page is not None and not page.failure else None for page in pages]
+        rows, catalogs = await self._rows(slug, listed, read, site_voice, ctx)
+        return TableDraft(names=release_names(release.text, slug), site_voice=site_voice, rows=rows,
+                          unread=[*unread, *catalogs])
 
     async def _read_pages(self, slug: str, listed: list[dict], ctx: ReadContext) -> list[EpisodePage | None]:
-        """The page of every entry that has one; a table with an unread page is not the whole page, so it is refused."""
+        """The page of every entry that has one; a page that could not be read says why (`failure`)."""
         sem = asyncio.Semaphore(MAX_CONCURRENT_PAGES)
         total, done = len(listed), 0
         every = list(self.players)
@@ -80,15 +85,12 @@ class RuchimeSite:
             return page
 
         ctx.progress(PHASE_EPISODES, 0, total)
-        pages = list(await asyncio.gather(*(read_one(entry) for entry in listed)))
-        failed = [page for page in pages if page is not None and page.failure]
-        if failed:
-            raise SiteError(reason("pages_unread", site="Ruchime", count=len(failed), total=len(pages)))
-        return pages
+        return list(await asyncio.gather(*(read_one(entry) for entry in listed)))
 
     async def _rows(self, slug: str, listed: list[dict], pages: list[EpisodePage | None], site_voice: str,
-                    ctx: ReadContext) -> list[TableRow]:
-        """The rows of the players of the pages (one ref per entry), then the rows of the catalogs the pages show."""
+                    ctx: ReadContext) -> tuple[list[TableRow], list[UnreadPart]]:
+        """The rows of the players of the pages (one ref per entry, the page its part), then the rows of the catalogs the
+        pages show; and the catalogs that could not be read."""
         pacer = self.players.pacer
         page_players = [player for player in self.players if not player.series_scope]
         sources: dict[str, list[tuple[int, dict, EpisodePage]]] = {player.name: [] for player in page_players}
@@ -101,7 +103,7 @@ class RuchimeSite:
             self.players, [(page.url, page.refs) for page in pages if page is not None], ctx)
         # A video that two entries share (a compilation) is asked once.
         asked = AskCount(ctx, sum(len({page.refs[name] for _index, _entry, page in found}) for name, found in sources.items())
-                         + sum(len(catalog.entries) for catalog in catalogs))
+                         + sum(len(catalog.entries) for catalog in catalogs.read))
         ctx.progress(PHASE_PLAYERS, 0, asked.total)
         rows: list[TableRow] = []
         for player in page_players:
@@ -109,9 +111,9 @@ class RuchimeSite:
             refs = [page.refs[player.name] for _index, _entry, page in found]
             pages_of = {page.refs[player.name]: page.url for _index, _entry, page in found}
             verdicts = await ask_many(player, refs, ctx.http, lambda ref: pages_of[ref], pacer, on_asked=asked)
-            rows += [self._row(player, index, entry, page.refs[player.name], verdicts[page.refs[player.name]], site_voice)
-                     for index, entry, page in found]
-        return rows + await rows_of_catalogs(catalogs, ctx, pacer, asked)
+            rows += [self._row(player, index, entry, page.refs[player.name], verdicts[page.refs[player.name]], site_voice
+                               ).model_copy(update={"part": page.url}) for index, entry, page in found]
+        return rows + await rows_of_catalogs(catalogs.read, ctx, pacer, asked), catalogs.unread
 
     def _row(self, player: Player, index: int, entry: dict, ref: PlayerRef, verdict, site_voice: str) -> TableRow:
         outcome = outcome_of(verdict, ref, getattr(player, "label", player.name))

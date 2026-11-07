@@ -237,11 +237,8 @@ async def test_an_item_kodik_has_no_answer_for_is_absent():
 @pytest.mark.parametrize("route, code", [
     (("dunhuatv.ru/28-", (404, "")), "site_status"),
     (("dunhuatv.ru/28-", "<h1>Пусто</h1>"), "no_players_empty"),
-    (("/player/sv/playlist", (503, "")), "player_status"),
-    (("kodikplayer.com/serial/", (500, "")), "player_status"),
-    (("kodikplayer.com/serial/", "<html>no list</html>"), "kodik_no_episode_list"),
 ])
-async def test_a_page_or_a_catalog_that_cannot_be_read_refuses_the_table_with_a_reason(route, code):
+async def test_a_page_that_cannot_be_read_refuses_the_table_with_a_reason(route, code):
     web = web_of()
     web.route(route[0], route[1], first=True)
 
@@ -249,6 +246,22 @@ async def test_a_page_or_a_catalog_that_cannot_be_read_refuses_the_table_with_a_
         await Run().read(a_site(), web)
 
     assert parse(refused.value.reason)["code"] == code
+
+
+@pytest.mark.parametrize("route, code, unread, read", [
+    (("/player/sv/playlist", (503, "")), "player_status", "cvh", "kodik"),
+    (("kodikplayer.com/serial/", (500, "")), "player_status", "kodik", "cvh"),
+    (("kodikplayer.com/serial/", "<html>no list</html>"), "kodik_no_episode_list", "kodik", "cvh"),
+])
+async def test_a_catalog_that_cannot_be_read_is_an_unread_part_and_the_other_catalog_is_read(route, code, unread, read):
+    web = web_of()
+    web.route(route[0], route[1], first=True)
+
+    draft = await Run().read(a_site(), web)
+
+    assert [(part.part.split(":")[0], parse(part.reason)["code"]) for part in draft.unread] == [(unread, code)]
+    assert draft.rows and {row.player for row in draft.rows} == {read}
+    assert {row.part.split(":")[0] for row in draft.rows} == {read}
 
 
 async def test_a_host_that_does_not_answer_is_a_refusal_with_a_reason():

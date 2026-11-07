@@ -182,7 +182,7 @@ async def test_a_page_with_nothing_to_read_refuses_the_table_with_a_reason(text,
     assert parse(refused.value.reason)["code"] == code
 
 
-async def test_a_view_the_api_refuses_refuses_the_table_rather_than_leaving_a_player_out():
+async def test_a_page_none_of_whose_views_the_api_gives_refuses_the_table():
     web = site_web(page(views=("cdnvh", "kodik")))
     web.route("animakima.ru/api/", (403, "forbidden"), method="POST", first=True)
 
@@ -190,6 +190,20 @@ async def test_a_view_the_api_refuses_refuses_the_table_rather_than_leaving_a_pl
         await read(web)
 
     assert parse(refused.value.reason)["code"] == "site_status"
+
+
+async def test_a_view_the_api_refuses_is_an_unread_part_and_the_other_players_are_read():
+    def refuse_kodik(request: httpx.Request):
+        return (403, "forbidden") if dict(parse_qsl(request.content.decode())).get("type") == "kodik" else api(request)
+
+    web = site_web()
+    web.route("animakima.ru/api/", refuse_kodik, method="POST", first=True)
+
+    table = await read(web)
+
+    assert [(part.part, part.names, parse(part.reason)["code"]) for part in table.unread] == [
+        ("view:kodik", ["kodik"], "site_status")]
+    assert "kodik" not in {row.player for row in table.rows} and {"cvh", "animakima"} <= {row.player for row in table.rows}
 
 
 async def test_a_page_the_site_does_not_give_refuses_the_table():

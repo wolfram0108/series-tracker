@@ -4,6 +4,11 @@ A page is read by exactly one task. Every other request for it is answered "read
 task (`ready` or `failed`); nothing waits on a clock. A table reaches consumers only when it is complete, and while a
 read runs or has failed they keep getting the last complete table. The state "reading" is stored, so a stop in the
 middle of a read makes the read begin again at the next start.
+
+A read that could not get some parts of a page (a catalog of a player, the page of an episode) is still complete: the
+parts are named in the table (`unread`), and the rows the last read gave of every part not read this time are kept, so a
+part that did not answer is not taken for one that is gone. A read that got no part at all is a failed read, and so is one
+with parts unread over a table stored before its rows named their parts.
 """
 from __future__ import annotations
 
@@ -15,7 +20,7 @@ from typing import Callable
 import httpx
 
 from core.contracts import (ReleaseTable, SiteResolveReply, TableFailed, TableGetReply, TableGetRequest, TableProgress,
-                            TableReady, TableState)
+                            TableReady, TableRow, TableState, UnreadPart)
 from core.deadlines import TABLE_READ_S
 from core.logging import get_logger
 from core.reasons import describe, reason
@@ -201,8 +206,28 @@ class TableReader:
             seen.add(row.key)
         # Which video each row is, read by its player from its link: the one place a table learns it, whatever site read it.
         rows = [row.model_copy(update={"video": self._players.video_of(row.player, row.link)}) for row in draft.rows]
+        if draft.unread:
+            rows = rows + await self._kept(key, rows, draft.unread)
         return ReleaseTable(url=key, site=site.name, names=draft.names, site_voice=draft.site_voice, channel=draft.channel,
-                            read_at=self._stamp(), complete=True, rows=rows)
+                            read_at=self._stamp(), complete=True, rows=rows, unread=draft.unread)
+
+    async def _kept(self, key: str, rows: list[TableRow], unread: list[UnreadPart]) -> list[TableRow]:
+        """The rows of the last complete table of every part this read did not get; a row whose video this read listed
+        again is not kept twice."""
+        if not rows:
+            raise SiteError(unread[0].reason)
+        stored = await self._repo.stored(key)
+        if stored.table is None:
+            kept: list[TableRow] = []
+        elif not stored.parted:
+            raise SiteError(unread[0].reason)
+        else:
+            parts, keys = {row.part for row in rows} | {""}, {row.key for row in rows}
+            kept = [row for row in stored.table.rows if row.part not in parts and row.key not in keys]
+        self._log.warning("table of %s read without %d of its parts (%s); %d rows kept from the read of %s", key,
+                          len(unread), "; ".join(f"{each.part}: {describe(each.reason)}" for each in unread), len(kept),
+                          stored.table.read_at if stored.table is not None else "none")
+        return kept
 
     async def _settle(self, site: Site, key: str, table: ReleaseTable | None, problem: str | None) -> str | None:
         """Write the outcome before any event: the stored table, or the failure. Returns the reason of a failure."""

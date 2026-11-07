@@ -10,6 +10,7 @@ import type { PageProgress, PageStatus } from "../stores/sourceTables"
 type Schemas = components["schemas"]
 
 export type SourceSummary = Schemas["SourceSummary"]
+export type UnreadPart = Schemas["UnreadPart"]
 export type PlayerSummary = Schemas["PlayerSummary"]
 export type SeriesSource = Schemas["SeriesSource"]
 export type SourceDraft = Schemas["SourceDraft"]
@@ -50,6 +51,8 @@ export interface SourceView {
   reason: string | null
   progress: PageProgress | null
   players: PlayerView[]
+  /** The parts of the page the last read could not get, one line per player; their rows are those of the read before. */
+  unread: string[]
 }
 
 /** What a source window item is, whether it is a draft of the add window or a source of a stored series. */
@@ -220,9 +223,10 @@ export interface ViewInput {
 export function viewOf(input: ViewInput): SourceView {
   const { summary, live, asked } = input
   const players = (summary?.players ?? []).map((player) => playerView(player, input.playersOff, input.rows ?? []))
+  const unread = unreadLines(summary?.unread ?? [])
   const settled = (state: SourceState, reason: string | null = null): SourceView =>
-    ({ state, reason, progress: null, players })
-  if (live?.state === "reading") return { state: "reading", reason: null, progress: live.progress, players }
+    ({ state, reason, progress: null, players, unread })
+  if (live?.state === "reading") return { state: "reading", reason: null, progress: live.progress, players, unread }
   if (live?.state === "failed") return settled("failed", live.reason)
   if (asked?.state === "reading") return settled("reading")
   if (asked?.state === "failed") return settled("failed", asked.reason ?? summary?.reason ?? null)
@@ -236,6 +240,19 @@ export function viewOf(input: ViewInput): SourceView {
 }
 
 // --- texts -----------------------------------------------------------------------------------------------------------
+
+/** One line per player of the parts it could not give, by what the site calls them (a part with no player is the page
+ * of an episode); a player whose parts the site does not name is told by their count. Reasons stay in the log. */
+export function unreadLines(unread: UnreadPart[]): string[] {
+  const byPlayer = new Map<string, UnreadPart[]>()
+  for (const part of unread) byPlayer.set(part.player_label ?? "", [...(byPlayer.get(part.player_label ?? "") ?? []), part])
+  return [...byPlayer.entries()].map(([player, parts]) => {
+    const named = parts.every((part) => (part.names ?? []).some(Boolean))
+    const what = named ? [...new Set(parts.flatMap((part) => (part.names ?? []).filter(Boolean)))].join(", ")
+      : tn("sources.count.parts", parts.length)
+    return player ? t("sources.unread.player", { player, what }) : t("sources.unread.pages", { what })
+  })
+}
 
 export function phaseText(phase: string): string {
   const key = `sources.phase.${phase}`

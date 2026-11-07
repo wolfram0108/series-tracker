@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from .compilation import CompilationView
 from .output_settings import EpisodeSettings, LeverSpec, LevelSettings
-from .release_table import RowState, TableState
+from .release_table import RowState, TableState, UnreadPart
 from .rules import RuleResult
 
 
@@ -117,6 +117,8 @@ class SourceSummary(BaseModel):
     players: list[PlayerSummary] = Field(default_factory=list)
     # Where the rows of its table come from (release_table.place_of); empty before a table was read.
     place: list[str] = Field(default_factory=list)
+    # The parts of the page the last read could not get: their rows are those of the read before.
+    unread: list[UnreadPart] = Field(default_factory=list)
 
 
 class CompositionGetRequest(BaseModel):

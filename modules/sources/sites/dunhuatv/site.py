@@ -70,4 +70,5 @@ class DunhuaTvSite:
         refs = {player.name: ref for player in self.players if (ref := player.find(answer.text, url)) is not None}
         if not refs:
             raise SiteError(reason("no_players_empty", site=SITE_NAME))
-        return TableDraft(names=title_names(answer.text), rows=await table_rows(self.players, [(url, refs)], ctx))
+        body = await table_rows(self.players, [(url, refs)], ctx)
+        return TableDraft(names=title_names(answer.text), rows=body.rows, unread=body.unread)

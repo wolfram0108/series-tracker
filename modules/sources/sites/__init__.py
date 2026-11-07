@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.contracts import TableRow
+from core.contracts import TableRow, UnreadPart
 
 if TYPE_CHECKING:
     import httpx
@@ -49,7 +49,8 @@ class ReadContext:
 
 
 class TableDraft(BaseModel):
-    """What a site returns: the head and the rows. Row keys are unique within the page (the core rejects a repeat)."""
+    """What a site returns: the head, the rows and the parts of the page it could not read (`UnreadPart`; the core keeps
+    their rows of the read before). Row keys are unique within the page (the core rejects a repeat)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -58,6 +59,7 @@ class TableDraft(BaseModel):
     # The channel of the site the page belongs to (the community of a VK channel); a site of one publisher gives none.
     channel: str = ""
     rows: list[TableRow] = Field(default_factory=list)
+    unread: list[UnreadPart] = Field(default_factory=list)
 
 
 class Site(Protocol):

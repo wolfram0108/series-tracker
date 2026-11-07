@@ -1,8 +1,8 @@
 """Репозиторий sources: таблица trackers (зеркала, типы аутентификации) и таблицы страниц сайтов.
 
-Tables of pages: `release_tables` holds, per page, the head of the last complete table and the state of the read in
-progress; `release_rows` holds the rows of that complete table. A new complete table replaces the rows in one
-transaction.
+Tables of pages: `release_tables` holds, per page, the head of the last complete table (with the parts its read could
+not get) and the state of the read in progress; `release_rows` holds the rows of that complete table. A new complete table
+replaces the rows in one transaction.
 """
 from __future__ import annotations
 
@@ -10,38 +10,40 @@ import json
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from core.contracts import ReleaseTable, RowState, RowVoice, TableRow
+from core.contracts import ReleaseTable, RowState, RowVoice, TableRow, UnreadPart
 from core.db import Database
 
 from . import hosts
 
 # One statement is one snapshot: the head and the rows of a page cannot come from two different tables.
 _LAST_TABLE = (
-    'SELECT t.site, t.names, t.site_voice, t.channel, t.read_at, t.complete, t.state AS read_state, t.reason AS read_reason, r.seq, r."key" AS row_key, r.player, r.player_label,'
+    'SELECT t.site, t.names, t.site_voice, t.channel, t.read_at, t.complete, t.unread, t.state AS read_state, t.reason AS read_reason, r.seq, r."key" AS row_key, r.player, r.player_label,'
     " r.grp, r.text, r.voice_name, r.voice_kind, r.heights, r.state AS row_state, r.reason AS row_reason,"
-    " r.duration_s, r.published, r.link, r.video, r.site_fields"
+    " r.duration_s, r.published, r.link, r.video, r.site_fields, r.part"
     " FROM release_tables t LEFT JOIN release_rows r ON r.url = t.url WHERE t.url = ? ORDER BY r.seq")
 
 _SAVE_HEAD = (
-    "INSERT INTO release_tables (url, site, names, site_voice, channel, read_at, complete, state, reason, reading_since)"
-    " VALUES (?, ?, ?, ?, ?, ?, 1, 'ready', NULL, NULL)"
+    "INSERT INTO release_tables (url, site, names, site_voice, channel, read_at, unread, complete, state, reason,"
+    " reading_since) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'ready', NULL, NULL)"
     " ON CONFLICT (url) DO UPDATE SET site = excluded.site, names = excluded.names, site_voice = excluded.site_voice,"
-    " channel = excluded.channel,"
+    " channel = excluded.channel, unread = excluded.unread,"
     " read_at = excluded.read_at, complete = 1, state = 'ready', reason = NULL, reading_since = NULL")
 
 _SAVE_ROW = (
     'INSERT INTO release_rows (url, seq, "key", player, player_label, grp, text, voice_name, voice_kind, heights,'
-    " state, reason, duration_s, published, link, video, site_fields)"
-    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    " state, reason, duration_s, published, link, video, site_fields, part)"
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 
 @dataclass(frozen=True)
 class Stored:
     """What the page has: the last complete table (None while there is none) and how the last read ended.
-    `state` is `reading`, `ready` or `failed` (None for a page never asked for); `reason` is the failure of the last read."""
+    `state` is `reading`, `ready` or `failed` (None for a page never asked for); `reason` is the failure of the last read.
+    `parted` is False for a table stored before its rows named their parts: a part of it cannot keep its rows."""
     table: ReleaseTable | None
     state: str | None
     reason: str | None
+    parted: bool = True
 
 
 def _row_of(record: dict) -> TableRow:
@@ -50,7 +52,7 @@ def _row_of(record: dict) -> TableRow:
         text=record["text"], voice=RowVoice(name=record["voice_name"], kind=record["voice_kind"]),
         heights=json.loads(record["heights"]), state=RowState(record["row_state"]), reason=record["row_reason"],
         duration_s=record["duration_s"], published=record["published"], link=record["link"], video=record["video"],
-        site_fields=json.loads(record["site_fields"]))
+        site_fields=json.loads(record["site_fields"]), part=record["part"])
 
 
 class SourcesRepository:
@@ -94,8 +96,9 @@ class SourcesRepository:
             url=url, site=head["site"], names=json.loads(head["names"]), site_voice=head["site_voice"],
             channel=head["channel"],
             read_at=head["read_at"], complete=True,
-            rows=[_row_of(record) for record in records if record["seq"] is not None]) if head["complete"] else None
-        return Stored(table, head["read_state"], head["read_reason"])
+            rows=[_row_of(record) for record in records if record["seq"] is not None],
+            unread=[UnreadPart.model_validate(each) for each in json.loads(head["unread"] or "[]")]) if head["complete"] else None
+        return Stored(table, head["read_state"], head["read_reason"], parted=head["unread"] is not None)
 
     async def last_table(self, url: str) -> ReleaseTable | None:
         """The last complete table of the page; None while the page has never been read completely."""
@@ -107,13 +110,14 @@ class SourcesRepository:
             raise ValueError("only a complete table is stored")
         statements: list[tuple[str, tuple]] = [
             (_SAVE_HEAD, (table.url, table.site, json.dumps(table.names, ensure_ascii=False), table.site_voice,
-                          table.channel, table.read_at)),
+                          table.channel, table.read_at,
+                          json.dumps([each.model_dump(mode="json") for each in table.unread], ensure_ascii=False))),
             ("DELETE FROM release_rows WHERE url = ?", (table.url,))]
         for seq, row in enumerate(table.rows):
             statements.append((_SAVE_ROW, (
                 table.url, seq, row.key, row.player, row.player_label, row.group, row.text, row.voice.name,
                 row.voice.kind, json.dumps(row.heights), row.state.value, row.reason, row.duration_s, row.published,
-                row.link, row.video, json.dumps(row.site_fields, ensure_ascii=False))))
+                row.link, row.video, json.dumps(row.site_fields, ensure_ascii=False), row.part)))
         await self._db.execute_many(statements)
 
     async def mark_reading(self, url: str, site: str, since: str) -> None:

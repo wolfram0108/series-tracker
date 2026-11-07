@@ -53,14 +53,30 @@ class TableRow(BaseModel):
     video: str = ""
     # The site's own numbers and marks, for a human and for debugging; no decision reads them.
     site_fields: dict[str, Any] = Field(default_factory=dict)
+    # The part of the page the row was read from (the catalog of a player, the page of an episode); empty for the rows the
+    # page lists itself. A part that cannot be read keeps the rows it gave before (`ReleaseTable.unread`).
+    part: str = ""
 
     @property
     def height(self) -> int | None:
         return max(self.heights) if self.heights else None
 
 
+class UnreadPart(BaseModel):
+    """A part of a page the read could not get: its rows are the ones it gave the last read that got it, if any.
+    `names` are what the site calls its content (the voice-overs of a catalog, the title of an episode)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    part: str
+    player_label: str = ""
+    names: list[str] = Field(default_factory=list)
+    reason: str
+
+
 class ReleaseTable(BaseModel):
-    """The head and the rows of one page; published to consumers only when `complete`."""
+    """The head and the rows of one page; published to consumers only when `complete`. A page some part of which could
+    not be read is still complete: the part is named in `unread` and keeps its rows of the read before."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -73,6 +89,7 @@ class ReleaseTable(BaseModel):
     read_at: str | None = None
     complete: bool = False
     rows: list[TableRow] = Field(default_factory=list)
+    unread: list[UnreadPart] = Field(default_factory=list)
 
     def row(self, key: str) -> TableRow | None:
         return next((row for row in self.rows if row.key == key), None)

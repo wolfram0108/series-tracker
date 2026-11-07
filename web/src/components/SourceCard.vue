@@ -131,6 +131,7 @@ async function copyAddress(): Promise<void> {
       </StGroup>
       <small v-if="item.profileId === null && !isTorrent" class="muted">{{ t("sources.profile.hint") }}</small>
       <div v-if="view.reason" class="source-reason">{{ reasonText(view.reason) }}</div>
+      <div v-for="line in view.unread" :key="line" class="source-reason" :title="t('sources.unread.hint')">{{ line }}</div>
 
       <div v-if="!isTorrent && player" class="players stack">
         <div class="st-tabs player-tabs" role="tablist" :aria-label="t('sources.player.tabs')">

@@ -2949,6 +2949,8 @@ export interface components {
             players?: components["schemas"]["PlayerSummary"][];
             /** Place */
             place?: string[];
+            /** Unread */
+            unread?: components["schemas"]["UnreadPart"][];
         };
         /**
          * SourceType
@@ -2982,6 +2984,24 @@ export interface components {
          */
         TmdbInfo: {
             [key: string]: unknown;
+        };
+        /**
+         * UnreadPart
+         * @description A part of a page the read could not get: its rows are the ones it gave the last read that got it, if any.
+         *     `names` are what the site calls its content (the voice-overs of a catalog, the title of an episode).
+         */
+        UnreadPart: {
+            /** Part */
+            part: string;
+            /**
+             * Player Label
+             * @default
+             */
+            player_label: string;
+            /** Names */
+            names?: string[];
+            /** Reason */
+            reason: string;
         };
         /** ValidationError */
         ValidationError: {

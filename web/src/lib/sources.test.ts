@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   coverageOf, draftBody, itemOfSource, joinVkAddress, pageHost, phaseText, placeOf, profileOptions, progressText,
   readEnded, seasonPositions, siteOf, sourceCaption, sourceTypeOf, spanText, splitVkAddress, stepsLines, summaryOf, togglePlayer,
-  viewOf, voicesOf, type LayoutRow, type PlayerSummary, type SeriesSource, type SourceSummary,
+  unreadLines, viewOf, voicesOf, type LayoutRow, type PlayerSummary, type SeriesSource, type SourceSummary,
 } from "./sources"
 import type { PageStatus } from "../stores/sourceTables"
 
@@ -248,5 +248,25 @@ describe("readEnded", () => {
     expect(readEnded({ state: "reading" }, null, null)).toBe(false)
     expect(readEnded({ state: "ready" }, done, null)).toBe(false)
     expect(readEnded(null, done, null)).toBe(false)
+  })
+})
+
+describe("unreadLines", () => {
+  const status = '{"code":"player_status","params":{"player":"Kodik","status":500}}'
+  it("names the parts a player could not give by what the site calls them, one line per player, without the reason", () => {
+    const lines = unreadLines([
+      { part: "kodik:season/1/a?", player_label: "Kodik", names: ["Комната Диди"], reason: status },
+      { part: "kodik:season/2/b?", player_label: "Kodik", names: ["Flowers Media", "Комната Диди"], reason: status },
+      { part: "https://1.ruchime.org/release/x/episode-2", player_label: "", names: ["Серия 2"], reason: status },
+    ])
+    expect(lines).toEqual(["Kodik: не прочитано — Комната Диди, Flowers Media", "Не прочитаны страницы: Серия 2"])
+  })
+
+  it("counts the parts of a player the site does not name, and the view of the source carries the lines", () => {
+    const unread = [{ part: "cvh:1", player_label: "CDN VideoHub", names: [], reason: status },
+      { part: "cvh:2", player_label: "CDN VideoHub", names: ["AniStar"], reason: status }]
+    expect(unreadLines(unread)).toEqual(["CDN VideoHub: не прочитано — 2 части"])
+    expect(viewOf({ summary: { ...release, unread }, playersOff: [] }).unread).toEqual(["CDN VideoHub: не прочитано — 2 части"])
+    expect(viewOf({ summary: release, playersOff: [] }).unread).toEqual([])
   })
 })
