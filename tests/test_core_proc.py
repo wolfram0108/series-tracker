@@ -106,3 +106,59 @@ def test_programs_are_started_only_through_core_proc():
                  if path.name != "proc.py" and any(call in path.read_text(encoding="utf-8") for call in (
                      "create_subprocess_exec", "create_subprocess_shell", "subprocess.Popen", "subprocess.run"))]
     assert offenders == [], "a program that starts elsewhere escapes the holds of its task"
+
+
+# --- the end of a program is known whoever reaps it --------------------------------------------------------------------
+# The service runs on uvloop: its loop learns of the end of a child only from its own wait, so a child reaped by another
+# wait is never reported, and `proc.wait()` does not end. `exited` takes the end from the kernel as well.
+
+LOOP_SILENCE_S = 1.0  # how long the loop's silence is watched: the subject of the test, nothing waits for it to pass
+
+
+def test_under_uvloop_the_end_of_a_child_reaped_elsewhere_is_known_to_exited_though_the_loop_never_tells():
+    uvloop = pytest.importorskip("uvloop")
+
+    async def scenario() -> tuple[bool, int]:
+        process = await proc.spawn(sys.executable, "-c", "pass")
+        os.waitpid(process.pid, 0)  # another wait takes the child before the loop looks
+        try:
+            await asyncio.wait_for(asyncio.shield(process.wait()), LOOP_SILENCE_S)
+            told = True
+        except asyncio.TimeoutError:
+            told = False
+        return told, await asyncio.wait_for(proc.exited(process), 5)
+
+    assert uvloop.run(scenario()) == (False, proc.LOST)
+
+
+def test_the_code_of_a_program_comes_from_the_kernel_when_the_wait_of_the_loop_does_not_end():
+    uvloop = pytest.importorskip("uvloop")
+
+    async def scenario() -> int:
+        process = await proc.spawn(sys.executable, "-c", "import sys; sys.exit(3)")
+        process.wait = lambda: asyncio.get_running_loop().create_future()  # a wait that never ends
+        return await asyncio.wait_for(proc.exited(process), 5)
+
+    assert uvloop.run(scenario()) == 3
+
+
+@pytest.mark.asyncio
+async def test_stop_kills_a_running_program_and_gives_the_signal_that_ended_it():
+    process = await proc.spawn(*SLEEP)
+    assert await asyncio.wait_for(proc.stop(process), 5) == -9 and not alive(process.pid)
+    assert await proc.stop(process) == -9, "a program that has ended is not signalled again"
+
+
+def test_a_hold_attached_to_a_program_ends_with_the_program_though_the_loop_never_reports_it(tmp_path):
+    uvloop = pytest.importorskip("uvloop")
+    from core import storage
+    path = str(tmp_path / "e.mp4")
+
+    async def scenario() -> bool:
+        with storage.hold(path):
+            process = await proc.spawn(sys.executable, "-c", "pass")
+        os.waitpid(process.pid, 0)
+        await path_free(path, seconds=5)
+        return storage.busy(path)
+
+    assert uvloop.run(scenario()) is False

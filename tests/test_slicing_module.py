@@ -14,6 +14,7 @@ from core.db import Database
 from modules.slicing import SlicingModule
 from modules.slicing import chapters as ch
 from modules.slicing.module import run_ffmpeg
+from proc_helpers import Spy
 from series_factory import insert_series
 from settle import wait_until
 from schema_db import migrated
@@ -117,7 +118,6 @@ async def test_run_ffmpeg_publishes_final_on_success(tmp_path, monkeypatch):
 async def test_run_ffmpeg_owns_the_output_while_ffmpeg_writes(tmp_path, monkeypatch):
     """The cut writes beside its target for as long as ffmpeg lives: no other change may take that name then."""
     from core import storage
-    from modules.slicing import module as slicing_module
     binp = tmp_path / "bin"
     binp.mkdir()
     gate = tmp_path / "gate"
@@ -127,19 +127,12 @@ async def test_run_ffmpeg_owns_the_output_while_ffmpeg_writes(tmp_path, monkeypa
     stub.write_text("#!/bin/bash\nread -r _ < \"%s\"\necho cut > \"${@: -1}\"\n" % gate)
     stub.chmod(0o755)
     monkeypatch.setenv("PATH", f"{binp}:/usr/bin:/bin")
-    spawned = asyncio.Event()
-    spawn = slicing_module.spawn
-
-    async def spawn_and_tell(*args, **kwargs):
-        process = await spawn(*args, **kwargs)
-        spawned.set()  # ffmpeg is alive from here on
-        return process
-
-    monkeypatch.setattr(slicing_module, "spawn", spawn_and_tell)
+    spy = Spy()  # ffmpeg is alive once it is started
+    monkeypatch.setattr("core.proc.asyncio.create_subprocess_exec", spy)
     out = str(tmp_path / "Show s01e03.mp4")
     cut = asyncio.create_task(run_ffmpeg("src.mp4", "00:00:00", None, out))
     try:
-        await asyncio.wait_for(spawned.wait(), 10)
+        await asyncio.wait_for(spy.spawned.wait(), 10)
         assert storage.busy(out) and storage.busy(out + ".slicing.mp4")
         with pytest.raises(storage.StorageBusy):
             await storage.call(lambda: None, owns=out)

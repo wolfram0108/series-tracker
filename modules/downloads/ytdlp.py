@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
 import shutil
@@ -27,7 +28,7 @@ from urllib.parse import urlsplit
 
 from core import storage
 from core.ffprobe import duration_of, readable_length, video_gaps
-from core.proc import run_capture, spawn
+from core.proc import REAP_TIMEOUT_S, exited, run_capture, spawn, stop
 from core.retry import UNTIMED, Budget, retrying
 
 from . import ranged
@@ -173,11 +174,10 @@ def ffmpeg_progress(fields: dict, duration: float,
             "speed": round(speed, 1)}
 
 
-async def _drain_stderr(stream, refused: list[int] | None = None) -> list[bytes]:
+async def _drain_stderr(stream, tail: list[bytes], refused: list[int] | None = None) -> None:
     """Read stderr in the background so a full pipe never blocks the process (a broken VK HLS floods ffmpeg with thousands of
-    'Packet corrupt' lines). Only the tail is kept for the error text; the numbers of refused segments go to `refused` as the lines
-    arrive, before the tail pushes them out."""
-    tail: list[bytes] = []
+    'Packet corrupt' lines). Only the tail is kept for the error text, in `tail` as the lines arrive; the numbers of refused
+    segments go to `refused` before the tail pushes them out."""
     while True:
         line = await stream.readline()
         if not line:
@@ -187,7 +187,13 @@ async def _drain_stderr(stream, refused: list[int] | None = None) -> list[bytes]
         tail.append(line)
         if len(tail) > 50:
             del tail[0]
-    return tail
+
+
+async def _stderr_tail(drain: asyncio.Future, tail: list[bytes]) -> str:
+    """The tail of stderr of a program that has ended. A child it left behind may keep the pipe open: it is not waited for."""
+    with contextlib.suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(drain, REAP_TIMEOUT_S)
+    return b"".join(tail).decode("utf-8", errors="replace")
 
 
 class _Silent(Exception):
@@ -325,7 +331,9 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
 
     proc = await spawn(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     refused: list[int] = []
-    stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr, refused))
+    lines: list[bytes] = []
+    stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr, lines, refused))
+    code: int | None = None
     fields: dict[str, str] = {}
     last_size = 0
     last_at = time.monotonic()
@@ -356,17 +364,16 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
                 await on_progress(data)
                 fields = {}
         if not stopped:
-            await proc.wait()
+            code = await exited(proc)
     finally:
-        if proc.returncode is None:
-            proc.kill()
-            await proc.wait()
-    tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
+        if code is None:
+            code = await stop(proc)
+    tail = await _stderr_tail(stderr_task, lines)
 
     if stopped:
         await storage.discard(tmp_out)
         return False, stopped
-    if proc.returncode == 0:
+    if code == 0:
         got = await _local_duration(tmp_out)
         if got <= 0 or short_of(got, duration):
             await storage.discard(tmp_out)
@@ -377,9 +384,9 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
         await on_progress({"phase": "download", "progress": 100, "eta": 0, "speed": 0.0})
         return True, ""
     last = tail.strip().splitlines()[-1] if tail.strip() else ""
-    if _interrupted(proc.returncode, tail):
-        return False, f"{INTERRUPTED}: ffmpeg direct download: {last or proc.returncode}"
-    return False, f"ffmpeg direct download: {last or proc.returncode}"
+    if _interrupted(code, tail):
+        return False, f"{INTERRUPTED}: ffmpeg direct download: {last or code}"
+    return False, f"ffmpeg direct download: {last or code}"
 
 
 def _unavailable_error(error: str) -> bool:
@@ -540,8 +547,10 @@ async def _phase_download(video_url: str, full_output_path: str,
         "-f", format_selector, "-N", str(threads),
         "-o", out_template, video_url,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr))
+    lines: list[bytes] = []
+    stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr, lines))
     stopped = ""
+    code: int | None = None
     started = time.monotonic()
     try:
         assert proc.stdout is not None
@@ -557,20 +566,19 @@ async def _phase_download(video_url: str, full_output_path: str,
             if data:
                 await on_progress(data)
         if not stopped:
-            await proc.wait()
+            code = await exited(proc)
     finally:
-        if proc.returncode is None:  # отмена/сбой — убить процесс (находка 45)
-            proc.kill()
-            await proc.wait()
-    tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
+        if code is None:  # отмена/сбой — убить процесс (находка 45)
+            code = await stop(proc)
+    tail = await _stderr_tail(stderr_task, lines)
 
     if stopped:
         return False, stopped
-    if proc.returncode != 0 and _interrupted(proc.returncode, tail):
-        return False, f"{INTERRUPTED}: yt-dlp завершился с кодом {proc.returncode}"
-    if proc.returncode != 0:
+    if code != 0 and _interrupted(code, tail):
+        return False, f"{INTERRUPTED}: yt-dlp завершился с кодом {code}"
+    if code != 0:
         error = _ytdlp_error(
-            tail, f"yt-dlp завершился с кодом {proc.returncode}")
+            tail, f"yt-dlp завершился с кодом {code}")
         if "Video unavailable" in tail or "Private video" in tail:
             error = "видео недоступно или приватно"
         return False, error
@@ -609,9 +617,11 @@ async def _phase_remux(raw: str, full_output_path: str,
     # stderr дренируем параллельно: битый VK-hls сыпет тысячи
     # 'Packet corrupt' в stderr, без вычитки буфер переполняется и
     # ffmpeg намертво виснет на записи в него (deadlock — находка 48).
-    stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr))
+    lines: list[bytes] = []
+    stderr_task = asyncio.ensure_future(_drain_stderr(proc.stderr, lines))
     fields: dict[str, str] = {}
     stopped = ""
+    code: int | None = None
     started = time.monotonic()
     try:
         assert proc.stdout is not None
@@ -631,21 +641,22 @@ async def _phase_remux(raw: str, full_output_path: str,
             if key == "progress":  # конец блока метрик -> эмитим прогресс
                 await on_progress(ffmpeg_progress(fields, duration))
                 fields = {}
+        if not stopped:
+            code = await exited(proc)
     finally:
-        if proc.returncode is None:
-            proc.kill()
-            await proc.wait()
-    tail = b"".join(await stderr_task).decode("utf-8", errors="replace")
+        if code is None:
+            code = await stop(proc)
+    tail = await _stderr_tail(stderr_task, lines)
 
     if stopped:
         await storage.discard(tmp_out)
         return False, stopped
-    if proc.returncode == 0:
+    if code == 0:
         await storage.call(os.replace, tmp_out, full_output_path, owns=(tmp_out, full_output_path))  # atomic publication
         await on_progress({"phase": "remux", "progress": 100, "eta": 0,
                            "speed": 0.0})
         return True, ""
     last = tail.strip().splitlines()[-1] if tail.strip() else ""
-    if _interrupted(proc.returncode, tail):
-        return False, f"{INTERRUPTED}: ffmpeg remux: {last or proc.returncode}"
-    return False, f"ffmpeg remux: {last or proc.returncode}"
+    if _interrupted(code, tail):
+        return False, f"{INTERRUPTED}: ffmpeg remux: {last or code}"
+    return False, f"ffmpeg remux: {last or code}"

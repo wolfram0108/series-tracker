@@ -100,6 +100,7 @@ import json
 import os
 import shutil
 import time
+import traceback
 from dataclasses import asdict, dataclass
 
 from core import BaseModule, BusRequestError, storage
@@ -121,6 +122,10 @@ OFFER_COPY_TIMEOUT_S = 1800.0
 
 PROGRESS_DB_THROTTLE = 2.0     # seconds between writes of progress to the database: the window needs a picture, not every tick
 PROGRESS_EVENT_THROTTLE = 1.0  # seconds between queue events on progress
+# A download says it is alive by its progress; its silent steps (a probe of the length, a check of the file) end well within
+# this. A download silent for longer waits for what will not come: it is taken off, the log shows what it waited for, and
+# it is tried again.
+SILENCE_FUSE_S = 900.0
 # What the queue tells of a fetch of a voice-over as it goes: the fields a task of the plan keeps in its row.
 FETCH_PROGRESS = ("progress", "dlspeed", "eta", "total_size_mb")
 MAX_DOWNLOAD_ATTEMPTS = 3
@@ -152,6 +157,19 @@ def source_of_candidate(sources: list[dict], source_id: int | None) -> dict | No
 def _transient_download_error(error: str) -> bool:
     lowered = (error or "").lower()
     return any(marker in lowered for marker in _TRANSIENT_MARKERS)
+
+
+def awaited(task: asyncio.Task) -> str:
+    """Where a task waits: the chain of the coroutines it awaits, innermost last (a task's own stack shows only the first)."""
+    frames, step = [], task.get_coro()
+    while step is not None:
+        frame = getattr(step, "cr_frame", None) or getattr(step, "gi_frame", None)
+        if frame is None:
+            break
+        frames.append(frame)
+        step = getattr(step, "cr_await", None) or getattr(step, "gi_yieldfrom", None)
+    return "".join(traceback.format_list([(f.f_code.co_filename, f.f_lineno, f.f_code.co_name, "") for f in frames])) \
+        or repr(task)
 
 
 def _download_budget() -> Budget:
@@ -818,7 +836,7 @@ class DownloadsModule(BaseModule):
                     self._last_db_write[task_id] = now
                 if now - self._last_event > PROGRESS_EVENT_THROTTLE:
                     self._last_event = now
-                    await self._broadcast_queue()
+                    self._announce_queue()
 
             series = await self.request("catalog.series.get", {"series_id": series_id})
             work = self.library.work_path(task)
@@ -839,7 +857,7 @@ class DownloadsModule(BaseModule):
                     kw["headers"] = stream_headers
                 if progressive:
                     kw["progressive"] = True
-                ok, error = await self._download(stream_url, work, on_progress, **kw)
+                ok, error = await self._watched(uid, stream_url, work, on_progress, **kw)
                 transient = not ok and _transient_download_error(error)
             if ok:
                 await self._finish_download(task, series)
@@ -956,7 +974,7 @@ class DownloadsModule(BaseModule):
             now = time.monotonic()
             if now - self._last_event > PROGRESS_EVENT_THROTTLE:
                 self._last_event = now
-                await self._broadcast_queue()
+                self._announce_queue()
 
         async def attempt_once() -> tuple[bool, str, bool]:
             stream_url, headers, stream_error, progressive = await self._resolve_stream(
@@ -970,7 +988,7 @@ class DownloadsModule(BaseModule):
                 kw["headers"] = headers
             if progressive:
                 kw["progressive"] = True
-            done, failure = await self._download(stream_url, path, on_progress, **kw)
+            done, failure = await self._watched(key, stream_url, path, on_progress, **kw)
             return done, failure, not done and _transient_download_error(failure)
 
         budget = _download_budget()
@@ -978,28 +996,65 @@ class DownloadsModule(BaseModule):
         def report(result: tuple[bool, str, bool], attempt: int, pause: float) -> None:
             self.log.warning("загрузка %s: %s — повтор %d/%d через %.0f с", key, result[1], attempt, budget.attempts, pause)
 
+        stopped = False
         try:
             (ok, error, transient), _attempts, _exhausted = await retrying(
                 attempt_once, final=lambda result: result[0] or not result[2], budget=budget, on_retry=report)
         except asyncio.CancelledError:
-            await storage.call(Library.remove_download, path, timeout=storage.REMOVE_TIMEOUT_S, owns=path)
-            self._fetch_active.pop(key, None)
-            self._fetch_jobs.pop(key, None)
-            self._fetch_pump()
-            self._announce_queue()
+            stopped = True
             raise
         except Exception as exc:  # noqa: BLE001 - one failed fetch must not take the module down
             self.log.exception("сбой общей загрузки %s", key)
             ok, error, transient = False, f"внутренняя ошибка: {exc}", False
-        if not ok:
+        finally:
+            # The place of the fetch is given back whatever happens to what it wrote: a place kept by a fetch that ended
+            # would show it under way for ever and stop its owner from asking for it again.
+            if not ok:
+                await self._drop_fetched(path)
+            self._fetch_active.pop(key, None)
+            self._fetch_jobs.pop(key, None)
+            if not stopped:
+                self.publish_event("downloads.fetch.finished", {
+                    "key": key, "ok": ok, "error": "" if ok else error, "transient": transient,
+                    "path": path, "series_id": job.get("series_id")})
+            self._fetch_pump()
+            self._announce_queue()
+
+    async def _drop_fetched(self, path: str) -> None:
+        """What a fetch that did not end whole wrote goes; a name another operation still owns stays, and the log says so."""
+        try:
             await storage.call(Library.remove_download, path, timeout=storage.REMOVE_TIMEOUT_S, owns=path)
-        self._fetch_active.pop(key, None)
-        self._fetch_jobs.pop(key, None)
-        self.publish_event("downloads.fetch.finished", {
-            "key": key, "ok": ok, "error": "" if ok else error, "transient": transient,
-            "path": path, "series_id": job.get("series_id")})
-        self._fetch_pump()
-        self._announce_queue()
+        except OSError as exc:
+            self.log.warning("файлы незавершённой загрузки %s не удалены: %s", path, exc)
+
+    async def _watched(self, key: str, url: str, path: str, on_progress, **kw) -> tuple[bool, str]:
+        """A download under the fuse of silence: each report of progress is a sign of life, and a download that gives none
+        for SILENCE_FUSE_S is taken off with what it waited for in the log; its failure is one the queue tries again."""
+        alive = asyncio.Event()
+
+        async def told(data: dict) -> None:
+            alive.set()
+            await on_progress(data)
+
+        run = asyncio.ensure_future(self._download(url, path, told, **kw))
+        try:
+            while True:
+                alive.clear()
+                beat = asyncio.ensure_future(alive.wait())
+                done, _ = await asyncio.wait({run, beat}, timeout=SILENCE_FUSE_S, return_when=asyncio.FIRST_COMPLETED)
+                beat.cancel()
+                if run in done:
+                    return run.result()
+                if not done:
+                    self.log.warning("загрузка %s: нет признаков жизни %.0f с — снята и повторится; ждала:\n%s",
+                                     key, SILENCE_FUSE_S, awaited(run))
+                    run.cancel()
+                    await asyncio.gather(run, return_exceptions=True)
+                    return False, f"нет признаков жизни {SILENCE_FUSE_S:.0f} с (timeout)"
+        finally:
+            if not run.done():
+                run.cancel()
+                await asyncio.gather(run, return_exceptions=True)
 
     async def _candidate_may_use_ytdlp(self, series_id: int, unique_id: str) -> bool:
         """Whether the downloader may take over a candidate whose stream request failed: only a VK one."""

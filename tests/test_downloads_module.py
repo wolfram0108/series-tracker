@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from packing_support import FakePacker
-from core import BaseModule, Bus, BusRequestError, Envelope, Runner
+from core import BaseModule, Bus, BusRequestError, Envelope, Runner, storage
 from core.db import Database
 from modules.catalog import CatalogModule
 from modules.downloads import DownloadsModule
@@ -146,6 +146,7 @@ class FakeDownloader:
     def __init__(self):
         self.fail_urls: set[str] = set()
         self.timeouts: dict[str, int] = {}   # url -> how many more attempts end in a network timeout
+        self.silent: dict[str, int] = {}     # url -> how many more attempts wait for ever with no sign of life
         self.started: list[str] = []
         self.kwargs: dict[str, dict] = {}
         self.gate: asyncio.Event | None = None
@@ -161,6 +162,9 @@ class FakeDownloader:
         if self.bus is not None:
             self.bus.publish(Envelope(topic="test.downloader.entered", kind="event"))
         try:
+            if self.silent.get(url, 0):
+                self.silent[url] -= 1
+                await asyncio.get_running_loop().create_future()  # what a lost end of a program looks like from here
             await on_progress({"progress": 50, "dlspeed": 1024, "eta": 5,
                                "total_size_mb": 10.0})
             if self.gate:
@@ -1298,6 +1302,45 @@ async def test_fetch_gives_up_after_the_attempt_limit(system, tmp_path, monkeypa
         {"key": "dub:5", "url": "https://site/#cvh=5", "path": str(tmp_path / "d.mp4"), "series_id": 3}])
     assert done["ok"] is False and done["transient"] is True
     assert dl.started.count("https://site/#cvh=5") == 3 and not os.path.exists(tmp_path / "d.mp4")
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_silent_past_the_fuse_is_taken_off_with_what_it_waited_for_and_tried_again(system, tmp_path, monkeypatch,
+                                                                                                    caplog):
+    monkeypatch.setattr("modules.downloads.module.RETRY_DELAY_S", 0.0)
+    monkeypatch.setattr("modules.downloads.module.SILENCE_FUSE_S", 0.3)  # the fuse is the subject: a short one ends the wait
+    bus, _, dl, probe, _, _ = system
+    dl.silent["https://site/#kodik=7"] = 1
+    with caplog.at_level(logging.WARNING, logger="downloads"):
+        (done,) = await _fetch(probe, bus, 1, jobs=[
+            {"key": "dub:7", "url": "https://site/#kodik=7", "path": str(tmp_path / "s.mp4"), "series_id": 3}])
+    assert done["ok"] is True and dl.started.count("https://site/#kodik=7") == 2
+    taken_off = [record.getMessage() for record in caplog.records if "ждала" in record.getMessage()]
+    assert len(taken_off) == 1 and "__call__" in taken_off[0], "the log names what the download waited for"
+
+
+@pytest.mark.asyncio
+async def test_the_progress_of_a_fetch_does_not_wait_for_the_window_to_be_told(system, tmp_path):
+    bus, _, dl, probe, _, _ = system
+
+    async def never() -> None:
+        await asyncio.get_running_loop().create_future()
+
+    _running.downloads._broadcast_queue = never  # a telling of the window that does not end
+    (done,) = await _fetch(probe, bus, 1, jobs=[
+        {"key": "dub:8", "url": "https://site/#cvh=8", "path": str(tmp_path / "p.mp4"), "series_id": 3}])
+    assert done["ok"] is True and os.path.isfile(tmp_path / "p.mp4")
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_gives_its_place_back_though_what_it_wrote_cannot_be_removed(system, tmp_path):
+    bus, _, dl, probe, _, _ = system
+    path = str(tmp_path / "busy" / "x.mp4")
+    dl.fail_urls.add("https://site/#kodik=9")
+    with storage.hold(path):  # another operation owns the name: the removal is refused
+        (done,) = await _fetch(probe, bus, 1, jobs=[
+            {"key": "dub:9", "url": "https://site/#kodik=9", "path": path, "series_id": 3}])
+    assert done["ok"] is False and _running.downloads._fetch_active == {} and _running.downloads._fetch_jobs == {}
 
 
 @pytest.mark.asyncio

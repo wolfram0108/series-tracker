@@ -37,7 +37,7 @@ from datetime import datetime
 
 from core import BaseModule
 from core import storage
-from core.proc import spawn
+from core.proc import run_capture
 from core.db import Database
 from core.envelope import Envelope
 
@@ -78,21 +78,12 @@ async def _cut(executable: str, source: str, start: str, duration: str | None, t
     command += ["-c", "copy", tmp]
     success = False
     try:
-        proc = await spawn(
-            *command, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE)
+        # The deadline and a cancellation (the deletion of a series, Д2) stop ffmpeg inside run_capture.
         try:
-            _, stderr = await asyncio.wait_for(proc.communicate(),
-                                               FFMPEG_TIMEOUT)
+            code, _, stderr = await run_capture(command, timeout=FFMPEG_TIMEOUT)
         except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
             return False, f"ffmpeg не уложился в {FFMPEG_TIMEOUT:.0f} с"
-        except asyncio.CancelledError:
-            proc.kill()  # отмена (удаление серии, Д2) — убить процесс ffmpeg
-            await proc.wait()
-            raise
-        if proc.returncode != 0:
+        if code != 0:
             return False, stderr.decode("utf-8", "replace").strip()[-500:]
         await storage.call(os.replace, tmp, output, owns=(tmp, output))  # atomic publication
         success = True
