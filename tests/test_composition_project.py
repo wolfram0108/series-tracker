@@ -299,9 +299,10 @@ def test_the_lines_and_the_layout_of_real_values_of_ruchime_dunhuatv_kodik_and_c
         "PID:example.org | P:Kodik | Практикуя ци сто тысяч лет | 1-3 серия | G:1 сезон | V:Студия Константина Исаева | VT:voice | R:720p",
         "PID:example.org | P:CVH | Практикуя ци сто тысяч лет | 5 серия | G:1 сезон | V:AniStar | VT:Многоголосый | R:1080p"]
     out = project(
-        [item(first, ruchime, {"2:1": {"season": 2, "episode": 1}, "2:2": {"season": 2, "episode": 2}}),
+        [item(first, ruchime, {"2:1": {"season": 2, "episode": 1, "voiceover": "Ruchime"},
+                               "2:2": {"season": 2, "episode": 2, "voiceover": "Ruchime"}}),
          item(second, dunhuatv, {"1468548": {"season": 1, "start": 1, "end": 3},
-                                 "0191878f-7db0-7639-98c5-775f13d7dcce": {"season": 1, "episode": 5}})],
+                                 "0191878f-7db0-7639-98c5-775f13d7dcce": {"season": 1, "episode": 5, "voiceover": "AniStar"}})],
         {"Ruchime": "Ruchime", "AniStar": "AniStar"}, {})
     assert [(r.source_id, r.season, r.episode_start, r.episode_end, r.voice_label) for r in out.rows] == [
         (1, 2, 1, 1, "Ruchime"), (1, 2, 2, 2, "Ruchime"),
@@ -312,10 +313,19 @@ def test_the_lines_and_the_layout_of_real_values_of_ruchime_dunhuatv_kodik_and_c
 
 
 def test_a_voice_over_in_a_group_is_worded_by_the_group_and_takes_no_number():
-    out = project([item(source(), table(row("a", voice="AniStar")), {"a": {"episode": 1}})], {"AniStar": "Стар"}, {})
+    out = project([item(source(), table(row("a", voice="AniStar")), {"a": {"episode": 1, "voiceover": "AniStar"}})],
+                  {"AniStar": "Стар"}, {})
     only = out.rows[0]
     assert (only.voice_group, only.voice_label, only.voice_unknown) == ("Стар", "Стар", None)
     assert out.unknown_voices == {}
+
+
+def test_the_name_the_player_gave_never_puts_a_row_in_a_group_only_the_tag_of_the_constructor_does():
+    """The table is read by the constructor alone: a row the rule gave no tag is unknown, though the player called it by
+    the name of a group."""
+    out = project([item(source(), table(row("a", voice="AniStar")), {"a": {"episode": 1}})], {"AniStar": "Стар"}, {})
+    only = out.rows[0]
+    assert (only.voice_group, only.voice_name, only.voice_label) == (None, "", "Неизвестная озвучка 1")
 
 
 def test_unknown_voice_overs_are_numbered_in_order_of_appearance_and_spellings_are_one_name():
@@ -358,7 +368,7 @@ def test_a_number_is_never_given_to_another_name_even_when_the_old_one_has_left(
 
 
 def test_a_name_keeps_its_number_through_a_group_that_comes_and_goes():
-    inp = item(source(), table(row("a", voice="AniStar")), {"a": {"episode": 1}})
+    inp = item(source(), table(row("a", voice="AniStar")), {"a": {"episode": 1, "voiceover": "AniStar"}})
     before = project([inp], {}, {})
     grouped = project([inp], {"AniStar": "Стар"}, before.unknown_voices)
     after = project([inp], {}, grouped.unknown_voices)
@@ -378,10 +388,10 @@ def test_the_name_the_constructor_assigned_is_the_one_that_is_looked_up_and_numb
 
 
 @pytest.mark.parametrize("assigned", [None, "", "   "])
-def test_a_name_that_says_nothing_does_not_replace_the_one_of_the_player(assigned):
+def test_a_tag_that_says_nothing_leaves_the_row_unknown_whatever_the_player_called_it(assigned):
     only = one(item(source(), table(row("a", voice="AniStar")), {"a": {"episode": 1, "voiceover": assigned}}),
                groups={"AniStar": "Стар"})[0]
-    assert only.voice_group == "Стар"
+    assert (only.voice_group, only.voice_label) == (None, "Неизвестная озвучка 1")
 
 
 def test_a_row_with_no_voice_at_all_is_the_voice_with_the_empty_name():
@@ -404,17 +414,17 @@ def test_the_names_to_ask_the_groups_about_are_those_of_the_rows_the_constructor
     bare = item(source(id=2, position=1, profile=None), table(row("f", voice="Никто")),
                 {"f": {"episode": 1, "voiceover": "Stale"}})
     waiting = item(source(id=3, position=2))
-    assert voice_names([waiting, bare, first]) == ["AniStar", "Assigned"]
+    assert voice_names([waiting, bare, first]) == ["Assigned"]
 
 
-def test_a_row_carries_the_name_of_its_voice_over_as_it_came_and_the_name_the_constructor_assigned_wins():
+def test_a_row_carries_the_tag_the_constructor_gave_it_and_nothing_the_player_said():
     tbl = table(row("a", voice="AniStar"), row("b", voice="AniStar"), row("c"), row("d", voice="  "))
     out = project([item(source(), tbl, {
         "a": {"episode": 1}, "b": {"episode": 2, "voiceover": "Мой дубляж"}, "c": {"episode": 3, "voiceover": "VK-озвучка"},
-        "d": {"episode": 4, "voiceover": "  "}})], {"AniStar": "Стар"}, {}).rows
+        "d": {"episode": 4, "voiceover": "  "}})], {"AniStar": "Стар", "VK-озвучка": "ВК"}, {}).rows
     assert [(r.voice_name, r.voice_group, r.voice_label) for r in out] == [
-        ("AniStar", "Стар", "Стар"), ("Мой дубляж", None, "Неизвестная озвучка 1"),
-        ("VK-озвучка", None, "Неизвестная озвучка 2"), ("  ", None, "Неизвестная озвучка 3")]
+        ("", None, "Неизвестная озвучка 1"), ("Мой дубляж", None, "Неизвестная озвучка 2"),
+        ("VK-озвучка", "ВК", "ВК"), ("", None, "Неизвестная озвучка 3")]
 
 
 def test_a_row_of_the_layout_keeps_which_video_it_is():
@@ -423,11 +433,11 @@ def test_a_row_of_the_layout_keeps_which_video_it_is():
     assert [(r.row_key, r.video) for r in out] == [("a", "777"), ("b", "")]
 
 
-def test_the_name_of_a_voice_is_the_assigned_one_or_the_one_of_the_row():
+def test_the_name_of_a_voice_is_the_tag_of_the_constructor_alone():
     plain = row("a", voice="AniStar")
-    assert voice_name_of(plain, None) == "AniStar"
-    assert voice_name_of(plain, RuleResult()) == "AniStar"
-    assert voice_name_of(plain, RuleResult(voiceover="Мой")) == "Мой"
+    assert voice_name_of(plain, None) == ""
+    assert voice_name_of(plain, RuleResult()) == ""
+    assert voice_name_of(plain, RuleResult(voiceover=" Мой ")) == "Мой"
     assert voice_name_of(row("b"), RuleResult(voiceover="Мой")) == "Мой"
 
 
@@ -472,7 +482,8 @@ def test_equal_inputs_give_equal_projections_and_the_inputs_are_left_as_they_wer
     assert first == second
     assert snapshot == ([(i.source.model_dump(), i.table.model_dump() if i.table else None,
                           i.reply.model_dump() if i.reply else None) for i in inputs], groups, unknown)
-    assert first.unknown_voices == {"anistar": 4, "новая": 5, "": 6}
+    # No row is tagged: the group of "Animy" is not reached by the name the player gave, so it is an unknown one too.
+    assert first.unknown_voices == {"anistar": 4, "animy": 5, "новая": 6, "": 7}
     again = project(inputs, groups, first.unknown_voices)
     assert (again.rows, again.unknown_voices) == (first.rows, first.unknown_voices)
 

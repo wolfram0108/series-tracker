@@ -4,7 +4,7 @@ a test waits for events and never for time.
 
 `FakeRules` reads the text of a line the way a real profile of the stage would: the last field of the line that has no
 code (`CODE:value`) is the text of the row; "Серия 3" and "3 серия" are an episode, "1-3 серия" a range, "Трейлер" is excluded, "Сезон 2" or "2 сезон"
-anywhere in the line is the season (else the season of the card), and "[Имя]" in the text assigns a voice-over.
+anywhere in the line is the season (else the season of the card), and "[Имя]" in the text, else the field `V:` of the line, tags the voice-over.
 """
 import asyncio
 import itertools
@@ -210,8 +210,11 @@ def lecturer(text: str) -> dict:
         found.update(episode=int(single[1] or single[2]))
     if season := re.search(r"Сезон (\d+)|(\d+) сезон", text):
         found.update(season=int(season[1] or season[2]))
+    # A rule tags the voice-over: by a name in brackets, or by the field of the voice, as the owner's profiles do.
     if voice := re.search(r"\[(.+?)\]", last):
         found.update(voiceover=voice[1])
+    elif field := re.search(r"(?:^| \| )V:([^|]+?)(?: \| |$)", text):
+        found.update(voiceover=field[1])
     return found
 
 

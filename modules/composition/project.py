@@ -64,16 +64,14 @@ def selected_rows(source: SeriesSource, table: ReleaseTable) -> list[TableRow]:
 def lines_for(source: SeriesSource, table: ReleaseTable) -> list[RuleLine]:
     """What the constructor is asked about the source: one line with its key for every row in play."""
     return [RuleLine(key=row.key, text=line_of(table, row), player=row.player,
-                     voice=voice_name_of(row, None)) for row in selected_rows(source, table)]
+                     voice=row.voice.name) for row in selected_rows(source, table)]
 
 
 def voice_name_of(row: TableRow, result: RuleResult | None) -> str:
-    """The name the constructor assigned beats the one the player or the site gave: a voice-over is named by the rules
-    and the groups, not by the source."""
+    """The voice-over of a row is the tag the constructor gave it, and nothing else: the table is read by the constructor
+    alone. A row it gave no tag is an unknown voice-over, in no group, whatever the player or the site called it."""
     assigned = result.voiceover if result is not None else None
-    if assigned and assigned.strip():
-        return assigned
-    return row.voice.name
+    return assigned.strip() if assigned and assigned.strip() else ""
 
 
 def voice_names(inputs: Sequence[SourceInput]) -> list[str]:
@@ -96,8 +94,7 @@ def project(inputs: Sequence[SourceInput], groups: Mapping[str, str | None],
     for item in _ordered(inputs):
         summaries.append(_summary(item))
         for row, result in _answered_rows(item):
-            rows.append(_row_of(item.source, row, result, voice_name_of(row, result), groups,
-                                numbering))
+            rows.append(_row_of(item.source, row, result, voice_name_of(row, result), groups, numbering))
         rows.extend(_left_by_source(item))
     return Projection(rows, summaries, numbering)
 
@@ -175,14 +172,14 @@ def _left_by_source(item: SourceInput) -> Iterator[CompositionRow]:
         if row.key not in kept:
             yield CompositionRow(
                 series_id=item.source.series_id, source_id=item.source.id, row_key=row.key, excluded=True,
-                exclusion=Exclusion.SOURCE, voice_name=row.voice.name, player=row.player, player_label=row.player_label,
+                exclusion=Exclusion.SOURCE, player=row.player, player_label=row.player_label,
                 group=row.group, text=row.text, heights=list(row.heights), state=row.state, published=row.published,
                 link=row.link, video=row.video)
 
 
 def _row_of(source: SeriesSource, row: TableRow, result: RuleResult, name: str, groups: Mapping[str, str | None],
             numbering: dict[str, int]) -> CompositionRow:
-    group, label, number = _voice_of(name, groups, numbering)
+    group, label, number = _voice_of(name, groups, numbering, row.voice.name)
     return CompositionRow(
         series_id=source.series_id, source_id=source.id, row_key=row.key, **_numbers_of(result),
         voice_group=group, voice_label=label, voice_name=name, voice_unknown=number, player=row.player,
@@ -203,13 +200,15 @@ def _numbers_of(result: RuleResult) -> dict:
     return {**numbers, "excluded": True, "exclusion": Exclusion.NO_NUMBER}
 
 
-def _voice_of(name: str, groups: Mapping[str, str | None], numbering: dict[str, int]
+def _voice_of(name: str, groups: Mapping[str, str | None], numbering: dict[str, int], told: str = ""
               ) -> tuple[str | None, str, int | None]:
-    """(group, label, unknown number); a new unknown name takes the next number and keeps it for good."""
+    """(group, label, unknown number); a new unknown name takes the next number and keeps it for good. Only the tag of
+    the constructor (`name`) reaches a group; a row without one is numbered by what its table told (`told`), so that two
+    unknown voice-overs stay apart, and that word is never shown and never matched against a group."""
     group = groups.get(name) if name.strip() else None
     if group:
         return group, group, None
-    key = fold_name(name)
+    key = fold_name(name or told)
     if key not in numbering:
         numbering[key] = max(numbering.values(), default=0) + 1
     return None, UNKNOWN_VOICE_LABEL.format(number=numbering[key]), numbering[key]
