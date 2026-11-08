@@ -106,8 +106,9 @@ from .repository import ScanRepository
 from .torrent import TorrentScan
 from .sync import TableSignals
 
-# The executors whose works a run of a video series waits for (`<owner>.work.get`, events `work.series.state`).
-RUN_EXECUTORS = ("downloads", "voices")
+# The executor whose work a run of a video series waits for (`<owner>.work.get`, events `work.series.state`): the planner
+# downloads, cuts, aligns, builds and applies the plan of the series (modules/planner).
+RUN_EXECUTORS = ("planner",)
 
 
 @dataclass
@@ -145,44 +146,6 @@ class _RunWork:
         return not self.polling and not self.working
 
 
-def _listed(slots: set[Slot]) -> list[list]:
-    """Episodes in the order of the series, as a message carries them."""
-    return [list(slot) for slot in sorted(slots, key=lambda slot: (slot[0] or 0, slot[1], slot[2]))]
-
-
-@dataclass
-class _Packs:
-    """The packings a run of a series owes while it goes: the episodes whose work ended (`pending`), and `others`, every
-    episode no work is about, asked once when the run has heard every executor. One task does them one after another.
-    `failed` are the episodes whose packing failed and `unsure` that a packing failed whole: the close asks again for them."""
-
-    pending: set[Slot] = field(default_factory=set)
-    others: bool = False
-    task: asyncio.Task | None = None
-    failed: set[Slot] = field(default_factory=set)
-    unsure: bool = False
-
-
-@dataclass(frozen=True)
-class Refreshed:
-    """What a count of the references and the plan came to."""
-
-    in_plan: int
-    references: list[dict]
-    plan_changed: bool
-
-
-def _sources_of(series: dict) -> list[SeriesSource]:
-    return [SeriesSource.model_validate(each) for each in series.get("sources", [])]
-
-
-def _torrent_source(series: dict) -> SeriesSource:
-    """The source of a torrent series: the address and the profile of a torrent live in the source (Д-38)."""
-    found = torrent_source(series)
-    if found is None:
-        raise ScanError(f"у сериала «{series.get('name')}» нет торрент-источника")
-    return SeriesSource.model_validate(found)
-
 
 class ScanModule(BaseModule):
     name = "scan"
@@ -200,7 +163,6 @@ class ScanModule(BaseModule):
         self._runs: dict[int, int] = {}
         self._working: dict[int, _RunWork] = {}
         # The containers a run makes as its episodes get ready, before the run ends (each episode is a process of its own).
-        self._packs: dict[int, _Packs] = {}
         self._owed: set[int] = set()
         self._closing: set[int] = set()
         self._owned: set[int] = set()  # the tasks of scan_tasks that the scans running here keep
@@ -215,7 +177,6 @@ class ScanModule(BaseModule):
         # The generation of the announcements of runs (RunChanged.seq), in the order they are published.
         self._run_seq = 0
         # The rows whose failed download an open run has already passed over (it took the next source for them).
-        self._passed_over: dict[int, set[str]] = {}
         self._failed: set[int] = set()  # the series whose last run ended failed (its error stays until the next scan)
         self._edits_over: dict[int, asyncio.Event] = {}
         self._aborted: set[int] = set()
@@ -481,9 +442,6 @@ class ScanModule(BaseModule):
         self._ended_early.pop(series_id, None)
         if self._runs.pop(series_id, None) is not None:  # its works go with the series: the run is over
             self._working.pop(series_id, None)
-            packs = self._packs.pop(series_id, None)
-            if packs is not None and packs.task is not None:
-                packs.task.cancel()
             self._owed.discard(series_id)
             self._announce_run(series_id, False)
         self.publish_event("series.purged",
@@ -777,32 +735,14 @@ class ScanModule(BaseModule):
             {"snapshot": snapshot.model_dump(mode="json")} if snapshot is not None else {})}, units=len(_sources_of(series)))
         self._alive(series_id)
         refreshed = await self._refresh(series, announce=True)
-        # The disk follows the plan here and nowhere else: a recount on an event (a rule saved, an episode switched off)
-        # changes the plan alone; a sync names the files after the plan, then removes, displaces and withdraws what the
-        # plan does not want. Only a scan with download fetches what is missing.
+        # The disk follows the plan here and nowhere else: the planner counts the plan of the series from its asset and
+        # these tables, does its work and applies it once, at its end (modules/planner). Without download it applies only
+        # what needs no work.
         self._alive(series_id)
-        await self._reprocess_names(series_id)
-        self._alive(series_id)
-        await self._hand_over(series_id, download)
+        await self._step("planner.sync", {"series_id": series_id, "download": download})
         changed = before != await self._fingerprint(series_id)
         return {"kind": "video", "changed": changed, "sources": [each.as_dict() for each in tables],
                 "references": output.marks(refreshed.references), "in_plan": refreshed.in_plan}
-
-    async def _hand_over(self, series_id: int, download: bool = True) -> None:
-        """The work goes to those who do it, and the command of the user is kept until each of them has written the work
-        down: a receiver answers after its record, so a stop at any point of the hand-over finds the command again and
-        the next run gives the work again (a receiver takes the same work twice as once). Without download the receivers
-        bring the disk in line with the plan (`downloads.settle`, `voices.settle`) and fetch nothing."""
-        settings = {"settings": self._snapshots[series_id].voices} if series_id in self._snapshots else {}
-        answers = await asyncio.gather(
-            self.request("downloads.dispatch" if download else "downloads.settle", {"series_id": series_id}),
-            self.request("voices.dispatch" if download else "voices.settle", {"series_id": series_id, **settings}),
-            return_exceptions=True)
-        for answer in answers:
-            if isinstance(answer, BusRequestError) and NO_HANDLER in str(answer):
-                continue  # nobody does that kind of work in this process
-            if isinstance(answer, BaseException):
-                raise answer
 
     def _state(self, series_id: int) -> str:
         return availability.SERIES_SCANNING if series_id in self._running or series_id in self._runs \
@@ -878,87 +818,24 @@ class ScanModule(BaseModule):
             run.polling = False
         if run.done:
             await self._close_run(series_id)
-        else:
-            self._owe_pack(series_id, others=True)
 
     async def on_work_state(self, env: Envelope) -> None:
         state = WorkState.model_validate(env.payload)
         run = self._working.get(state.series_id)
         if state.series_id not in self._runs or run is None:
             return
-        freed = run.apply(state)
+        run.apply(state)
         if run.done:
-            # The episodes the last state freed are owed to the close, which packs what the run still owes.
-            self._packs.setdefault(state.series_id, _Packs()).pending |= freed if not run.polling else set()
             await self._close_run(state.series_id)
-        elif freed and not run.polling:
-            self._owe_pack(state.series_id, slots=freed)
-
-    def _owe_pack(self, series_id: int, *, slots: set[Slot] = frozenset(), others: bool = False) -> None:
-        """The run owes the containers of these episodes (or of every episode no work is about) now, not at its end."""
-        packs = self._packs.setdefault(series_id, _Packs())
-        packs.pending |= set(slots)
-        packs.others = packs.others or others
-        if packs.task is None or packs.task.done():
-            packs.task = asyncio.create_task(self._pack_owed(series_id, packs), name=f"scan.pack:{series_id}")
-            self._tasks.append(packs.task)
-
-    async def _pack_owed(self, series_id: int, packs: _Packs) -> None:
-        """One packing of the series at a time: an episode that got work again meanwhile waits for its end once more."""
-        while packs.others or packs.pending:
-            run = self._working.get(series_id)
-            if series_id not in self._runs or run is None or series_id in self._closing:
-                return  # the run closes: the close packs what is still owed
-            busy = run.slots
-            if packs.others:
-                packs.others, packs.pending = False, set()
-                _failure, failed = await self._pack(series_id, {"skip": _listed(busy)})
-                packs.unsure = packs.unsure or failed is None
-                packs.failed |= failed or set()
-            else:
-                ready, packs.pending = packs.pending - busy, set()
-                if ready:
-                    _failure, failed = await self._pack(series_id, {"only": _listed(ready)})
-                    packs.failed = (packs.failed - ready) | (ready if failed is None else failed)
-
-    async def _pack(self, series_id: int, scope: dict) -> tuple[str | None, set[Slot] | None]:
-        """Asks downloads to pack the episodes of `scope` (all with none). The reason of a failure (None when all went well)
-        and the episodes that failed (None when the packing failed whole and no episode of it is known to be done)."""
-        try:
-            packed = await self.request("downloads.pack", {"series_id": series_id, **scope})
-        except BusRequestError as exc:
-            if NO_HANDLER in str(exc):
-                return None, set()
-            self.log.error("сериал %d: упаковка не выполнена: %s", series_id, exc)
-            return reason("scan_step_failed", step="downloads.pack"), None
-        failed = {tuple(slot) for slot in packed.get("failed_slots", [])}
-        return (reason("sync_pack_failed", failed=packed["failed"]) if packed.get("failed") else None), failed
 
     async def _close_run(self, series_id: int) -> None:
-        """Every work of the run has ended: what is still owed is packed (ЭТАП_11) — every episode when the run packed
-        nothing yet (it had no work at all) or a packing of it failed whole, else the episodes freed and not packed yet and
-        those whose packing failed in it, once more; then the command goes, the series is free, and a recount an event asked
-        for while the run was open is done now (a plan; the disk follows it at the next sync)."""
+        """Every work of the run has ended: the command goes, the series is free, and a recount an event asked for while
+        the run was open is done now (a plan; the disk follows it at the next sync)."""
         if series_id not in self._runs or series_id in self._closing:
-            return  # the run is closing already: one packing, one end
-        if await self._next_source(series_id):
-            return  # the run goes on: the episodes whose video did not download are fetched from the next source
-        self._closing.add(series_id)
-        try:
-            # A packing of ready episodes that goes ends first; then only what the run still owes is asked for.
-            packs = self._packs.pop(series_id, None)
-            if packs is not None and packs.task is not None and not packs.task.done():
-                await asyncio.gather(packs.task, return_exceptions=True)
-            failure = None
-            if packs is None or packs.unsure or packs.others:
-                failure, _failed = await self._pack(series_id, {})
-            elif packs.pending or packs.failed:
-                failure, _failed = await self._pack(series_id, {"only": _listed(packs.pending | packs.failed)})
-        finally:
-            self._closing.discard(series_id)
+            return  # the run is closing already: one end
+        failure = None
         intent = self._runs.pop(series_id, None)
         self._working.pop(series_id, None)
-        self._passed_over.pop(series_id, None)
         # The series is free either way; a failed last step ends the run as failed, with its reason kept as the error
         # of the series until the next sync, not as a success.
         if intent is not None:
@@ -976,42 +853,6 @@ class ScanModule(BaseModule):
         if series_id in self._owed:
             self._owed.discard(series_id)
             await self._follow_layout(series_id)
-
-    async def _next_source(self, series_id: int) -> bool:
-        """Every work of the run has ended, and the downloads of some references failed for good (ЭТАП_10: «если скачивание
-        не удаётся, то выбирается плеер по следующему приоритету»): the references are counted again, which passes those
-        videos over, and the work is handed over once more, in this run. True when it was; a run that does not download,
-        or one with no failure it has not passed over yet, closes. Each pass passes at least one more video over, so the
-        run ends."""
-        intent = self._runs.get(series_id)
-        task = await self.repo.get_task(intent) if intent is not None else None
-        if task is None or not (task["results_data"] or {}).get("download", True):
-            return False
-        failed = {item["unique_id"] for item in await self.repo.items_for_series(series_id) if candidates.failed(item)}
-        seen = self._passed_over.setdefault(series_id, set())
-        if not failed - seen:
-            return False
-        seen |= failed
-        try:
-            series = await self.request("catalog.series.get", {"series_id": series_id})
-            before = await self._winners(series_id)
-            await self._refresh(series, announce=True)
-            if await self._winners(series_id) == before:
-                return False  # no episode has a next source: the failed ones are tried again by the next sync
-            await self._hand_over(series_id, True)
-        except (BusRequestError, ScanAborted, SyncFailed) as exc:
-            self.log.warning("сериал %d: переход к следующему источнику не удался: %s", series_id, exc)
-            return False
-        self.log.info("сериал %d: загрузка %d серий не удалась — взят следующий источник по приоритету", series_id,
-                      len(failed))
-        # The executors are heard again, as after the first hand-over: the run closes when this work ends too.
-        await self._ask_working(series_id)
-        return True
-
-    async def _winners(self, series_id: int) -> dict[tuple, tuple]:
-        """The video each episode of the series is to be fetched from, as the references stand."""
-        return {(each["season"], each["episode"], each["part"]): (each["source_id"], each["row_key"])
-                for each in await self.repo.references(series_id)}
 
     async def _fingerprint(self, series_id: int) -> tuple:
         """The references and the rows of the plan as stored: two equal fingerprints mean the run changed nothing."""

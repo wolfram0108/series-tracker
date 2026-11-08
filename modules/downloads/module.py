@@ -43,8 +43,10 @@ Queries / commands:
       superseded_by}]} - the reference episodes of the plan (read by voices).
   downloads.fs.sync {series_id} -> {adopted, lost} - the disk check (scan, the status window). A series of kind `torrent`
       answers {0, 0}: nothing is read, published or logged for it.
-  downloads.fetch {key, url, path, max_height?, series_id?} - the stream behind the link into an absolute path, with no
-      record in media_items or download_tasks (the voice-overs of a series go to a temporary directory). The executor keeps no
+  downloads.fetch {key, url, path, max_height?, series_id?, whole?, ytdlp?} - the stream behind the link into an absolute
+      path, with no record in media_items or download_tasks (the planner's downloads go to the work folder). `whole`: a
+      video that must come whole (a reference); `ytdlp`: the downloader may take over a link whose stream request failed
+      (a VK video). The executor keeps no
       state: the owner of the queue (voices) sends the command again after a restart. It has a limit of its own, the setting
       max_parallel_dub_downloads (2 by default).
   downloads.failures.forget {series_id} -> {reset} - the user's reset of failed attempts (a change under the admission
@@ -137,6 +139,10 @@ _TRANSIENT_MARKERS = ("прервано сигналом", "timed out", "timeout
                       "temporarily", "server returned 5", "server returned 429",
                       "server returned 403", "http error 403", "http error 408",
                       "http error 429", "http error 5")
+
+
+async def _always() -> bool:
+    return True
 
 
 async def _never() -> bool:
@@ -922,7 +928,7 @@ class DownloadsModule(BaseModule):
         return url, None, None, False
 
     async def on_fetch(self, env: Envelope) -> None:
-        job = {k: env.payload.get(k) for k in ("key", "url", "path", "max_height", "series_id")}
+        job = {k: env.payload.get(k) for k in ("key", "url", "path", "max_height", "series_id", "whole", "ytdlp")}
         if not os.path.isabs(job["path"] or ""):
             self.publish_event("downloads.fetch.finished", {
                 **job, "ok": False, "transient": False,
@@ -978,10 +984,12 @@ class DownloadsModule(BaseModule):
 
         async def attempt_once() -> tuple[bool, str, bool]:
             stream_url, headers, stream_error, progressive = await self._resolve_stream(
-                job["url"], max_height=job.get("max_height"), ytdlp_fallback=_never)
+                job["url"], max_height=job.get("max_height"), ytdlp_fallback=_always if job.get("ytdlp") else _never)
             if stream_error is not None:
                 return (False, *stream_error)
             kw: dict = {"threads": self._threads}
+            if job.get("whole"):
+                kw["whole_video"] = True  # a reference with a hole would skew every voice-over aligned to it
             if job.get("max_height"):
                 kw["max_height"] = job["max_height"]  # a page the downloader reads itself keeps the cap of the job
             if headers:

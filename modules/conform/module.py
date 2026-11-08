@@ -9,7 +9,8 @@ without a restart. The work folder is two settings, `conform.work_dir` (as this 
 daemon is given or writes lies inside it, and the paths cross the boundary through these two names.
 
 Query:
-  conform.submit {ref, dubs: [path], out_dir, cache_dir, label?, key?} -> SubmitReply (core/contracts):
+  conform.submit {ref, dubs: [path], out_dir, cache_dir, label?, key?, ref_atrack?, dub_atracks?} -> SubmitReply
+      (core/contracts):
       {outcome, job_id?, reason?, retry}
       One episode: a reference video and the voice-over files to align to it, local paths. `key`
       is written into the job's label so that the job can be found again when the answer is lost.
@@ -318,6 +319,8 @@ class ConformModule(BaseModule):
                 "out_dir": translate(payload["out_dir"], mapping),
                 "cache_dir": translate(payload["cache_dir"], mapping),
                 "keep_tmp": False, "label": job_label(payload.get("label"), payload.get("key")),
+                # A voice-over that is a container gives the track of its number (a track aligned out of an old file).
+                **({"dub_atracks": [int(each) for each in payload["dub_atracks"]]} if payload.get("dub_atracks") else {}),
                 # A reference that is a container holds several tracks: the alignment listens to the video's own sound.
                 **({"ref_atrack": int(payload["ref_atrack"])} if payload.get("ref_atrack") else {})}
 

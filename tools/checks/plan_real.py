@@ -22,6 +22,7 @@ sys.path.insert(0, ROOT)
 
 from core.contracts import CompositionRow, RulesApplyReply, SeriesSource, SourceType  # noqa: E402
 from core.db import Database  # noqa: E402
+from core.plan import inputs as plan_inputs  # noqa: E402
 from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Snapshot, Track, Video  # noqa: E402
 from modules.catalog.repository import CatalogRepository  # noqa: E402
 from modules.composition import project  # noqa: E402
@@ -101,14 +102,7 @@ class RealSeries:
 
 
 def online_of(rows: list[CompositionRow], places: dict[int, str], skipped: Counter) -> list[OnlineRow]:
-    online = []
-    for position, row in enumerate(rows):  # the place of a row in the layout, excluded rows counted, as the service does
-        if row.excluded or row.season is None or row.episode_start is None:
-            continue
-        online.append(OnlineRow(RowId(row.source_id, row.row_key, row.video or ""), row.season, row.episode_start,
-                                row.episode_end or row.episode_start, row.player, row.voice_group, max(row.heights or [0]),
-                                places.get(row.source_id, ""), row.link, row.voice_label, position, row.part))
-    return online
+    return list(plan_inputs.online_of(rows, places))
 
 
 PLAYERS = (VkPlayer, AllVideoPlayer, CdnVideoHubPlayer, KodikPlayer, AnimakimaPlayer, AllohaPlayer, VibixPlayer)
@@ -190,9 +184,8 @@ def asset_of(path: str, series_id: int, online: list[OnlineRow], places: dict[in
 
 def choices_of(path: str, series_id: int, info: dict, online: list[OnlineRow]) -> Choices:
     """What the user chose: the orders of the settings, and the levers of every episode as the service's own function
-    (modules/composition/settings.effective) resolves them through its levels, with the compilation it stands in."""
-    from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW,
-                                VOICE_ORDER, VOICE_TAKE, compilation_key, parse_group_target, parse_variant_target)
+    (modules/composition/settings.effective) resolves them through its levels, with the compilation it stands in — read by
+    the planner's own mapping (core/plan/inputs.py)."""
     from modules.composition import compilations as membership
     from modules.composition import settings as levers
 
@@ -206,46 +199,17 @@ def choices_of(path: str, series_id: int, info: dict, online: list[OnlineRow]) -
     rows = info["rows"]
     source_order = {each.source_id: place for place, each in enumerate(stored.sources)}
     members = membership.resolve(rows, records, source_order).members
-    by_key = {}
-    for row in rows:
-        if row.is_compilation and not row.excluded and row.season is not None:
-            key = compilation_key(row.voice_label, row.source_id, row.player, row.season, row.episode_start, row.episode_end)
-            found = next((each for each in online if each.id.source_id == row.source_id and each.id.row_key == row.row_key), None)
-            if found is not None:
-                by_key[key] = found.id
-    reference, reference_deny, voice_order, voice_deny, voice_off, member = {}, {}, {}, {}, {}, {}
+    episodes = []
     for slot in sorted({row.slot[:2] for row in online if not row.compilation}):
         stands = members.get(slot)
-        for lever in levers.effective(records, slot[0], slot[1], stands.key if stands is not None else None):
-            if lever.lever == REFERENCE_ORDER and isinstance(lever.value, list):
-                reference[slot] = tuple((each["group"], each["source_id"], each["player"]) for each in lever.value
-                                        if isinstance(each, dict) and {"group", "source_id", "player"} <= set(each))
-            elif lever.lever == REFERENCE_ALLOW and lever.value is False and lever.target:
-                variant = parse_variant_target(lever.target)
-                if variant is not None:
-                    reference_deny[slot] = reference_deny.get(slot, frozenset()) | {variant}
-            elif lever.lever == VOICE_ORDER and isinstance(lever.value, list) and lever.target:
-                group = parse_group_target(lever.target)
-                if group is not None:
-                    voice_order[(slot, group)] = tuple((each["source_id"], each["player"]) for each in lever.value
-                                                       if isinstance(each, dict) and {"source_id", "player"} <= set(each))
-            elif lever.lever == VOICE_ALLOW and lever.value is False and lever.target:
-                variant = parse_variant_target(lever.target)
-                if variant is not None:
-                    voice_deny[slot] = voice_deny.get(slot, frozenset()) | {variant}
-            elif lever.lever == VOICE_TAKE and lever.value is False and lever.target:
-                group = parse_group_target(lever.target)
-                if group is not None:
-                    voice_off[slot] = voice_off.get(slot, frozenset()) | {group}
-            elif lever.lever == COMPILATION_MEMBER and lever.value is not None:
-                member[slot] = by_key.get(lever.value) if lever.value else None
-    off_compilations = frozenset(row_id for key, row_id in by_key.items() if any(
-        lever.lever == COMPILATION_TAKE and lever.value is False
-        for lever in levers.effective(records, row_id_season(online, row_id), None, key)))
-    return Choices(players=tuple(info["voices"].priority), sources=tuple(each.source_id for each in stored.sources),
-                   groups=tuple(order), player_groups=info["voices"].players, off_episodes=frozenset(off),
-                   off_compilations=off_compilations, reference=reference, reference_deny=reference_deny,
-                   voice_order=voice_order, voice_deny=voice_deny, voice_off=voice_off, member=member)
+        episodes.append((slot[0], slot[1], levers.effective(records, slot[0], slot[1],
+                                                             stands.key if stands is not None else None)))
+    by_key = plan_inputs.compilations_of(rows, online)
+    compilation_levers = [(key, levers.effective(records, row_id_season(online, row_id), None, key))
+                          for key, row_id in by_key.items()]
+    return plan_inputs.choices_of(rows, online, episodes, compilation_levers, players=info["voices"].priority,
+                                  player_groups=info["voices"].players, sources=[each.source_id for each in stored.sources],
+                                  voice_order=order, off_episodes=off)
 
 
 def row_id_season(online: list[OnlineRow], row_id: RowId) -> int:

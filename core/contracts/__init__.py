@@ -44,3 +44,9 @@ __all__ = ["Absence", "CompilationEpisode", "CompilationRef", "CompilationView",
            "group_target", "parse_group_target", "parse_variant_target", "variant_target",
            "OutputSwitch", "Reference", "ReferenceChanged", "ReferenceMark",
            "GroupsResolveReply", "GroupsResolveRequest"]
+
+from .planner import (PlanAsset, PlanAssetTrack, PlanAssetVideo, PlanCommand, PlanDelete, PlanEpisode,  # noqa: E402
+                      PlanFailure, PlanGoalTrack, PlanGoalVideo, PlannerView, PlanRowRef, PlanSnapshot)
+
+__all__ += ["PlanAsset", "PlanAssetTrack", "PlanAssetVideo", "PlanCommand", "PlanDelete", "PlanEpisode", "PlanFailure",
+            "PlanGoalTrack", "PlanGoalVideo", "PlannerView", "PlanRowRef", "PlanSnapshot"]

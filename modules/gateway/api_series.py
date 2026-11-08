@@ -296,10 +296,9 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         синхронизация: работа по ним идёт со следующей синхронизацией."""
         try:
             async with admitted(gw, series_id):
-                voices = await gw.request("voices.failures.forget", {"series_id": series_id})
-                videos = await gw.request("downloads.failures.forget", {"series_id": series_id})
+                done = await gw.request("planner.failures.forget", {"series_id": series_id})
         except BusRequestError as exc:
             return _error_response(exc)
-        return {"success": True, "reset": int((voices or {}).get("reset") or 0) + int((videos or {}).get("reset") or 0)}
+        return {"success": True, "reset": int((done or {}).get("reset") or 0)}
 
     return r

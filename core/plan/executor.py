@@ -76,7 +76,7 @@ def table_after(containers: dict[str, Container], made: Plan, group: Group, resu
                 tracks.append(Track(way.dub, way.snapshot, slot, way.container.video.timeline))
             elif way.kind == "reuse":
                 track = next(each for each in way.container.tracks if each.dub == way.dub)
-                tracks.append(replace(track, episode=slot))
+                tracks.append(replace(track, episode=slot, tag=""))  # a new file keys it by its row
             else:
                 tracks.append(results[f"align:{slot}:{way.voice}"].value)
         built[goal.name] = Container(goal.name, video, tuple(tracks), goal.off)

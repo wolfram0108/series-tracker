@@ -183,6 +183,7 @@ SSE_MAP: dict[str, Outgoing] = {
     "scan.reference.changed": Outgoing("reference_changed"),
     "scan.series.progress": Outgoing("series_scan_progress"),
     "conform.queue.changed": Outgoing("conform_queue_update", latest=_whole),
+    "planner.series.changed": Outgoing("plan_update"),
     "voices.dub.changed": Outgoing("voice_dub_update"),
     "voices.dubs.snapshot": Outgoing("voice_dubs_snapshot"),
     "voices.cut.changed": Outgoing("voice_cut_update"),

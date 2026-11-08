@@ -9,11 +9,14 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError
+from typing import Literal
+
+from pydantic import BaseModel, ValidationError
 
 from core import BusRequestError
-from core.contracts import (CompositionGetRequest, CompositionReply, DubsScope, OutputSwitch, QueuesGet, QueuesReply, Reference,
-                            SeriesKind, SettingsReset, SettingsSet, VoiceOrderSet)
+from core.contracts import (CompositionGetRequest, CompositionReply, DubsScope, OutputSwitch, PlanDelete, PlannerView,
+                            PlanRowRef, QueuesGet, QueuesReply, Reference, SeriesKind, SettingsReset, SettingsSet,
+                            VoiceOrderSet)
 
 from .routing import admitted, refusal
 from .schemas import (CutsActionBody, CutsReply, DubsActionBody, DubsRestarted, DynamicObject, ErrorOnly, ErrorResponse, OkResponse,
@@ -34,6 +37,12 @@ def _contract(model, **fields):
         return model(**fields)
     except ValidationError as exc:
         raise RequestValidationError(exc.errors(include_url=False, include_context=False, include_input=False))
+
+
+class PlanDeleteBody(BaseModel):
+    kind: Literal["video", "track"]
+    name: str
+    dub: PlanRowRef | None = None
 
 
 def build_router(gw) -> APIRouter:  # gw: GatewayModule
@@ -87,6 +96,36 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
             return await gw.request("composition.queues.get", query.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
+
+    @r.get("/api/series/{series_id}/plan", response_model=PlannerView, responses=_ERR1)
+    async def plan(series_id: int):
+        """The plan of a video series (modules/planner): the asset with the provenance of every file and whether its row is
+        online, the goal of every episode as the last sync counted it, the failures and the commands «Удалить» that wait."""
+        try:
+            return await gw.request("planner.series.get", {"series_id": series_id})
+        except BusRequestError as exc:
+            return refusal(exc, with_success=False)
+
+    @r.post("/api/series/{series_id}/plan/delete", response_model=OkResponse, responses=_ERR)
+    async def plan_delete(series_id: int, body: PlanDeleteBody):
+        """«Удалить» of a file or of a track in it: carried out by the next sync. A video goes only for another video of its
+        episode; with none the file stays and the command waits."""
+        command = _contract(PlanDelete, series_id=series_id, **body.model_dump())
+        try:
+            await gw.request("planner.delete", command.model_dump(mode="json"))
+        except BusRequestError as exc:
+            return refusal(exc)
+        return {"success": True}
+
+    @r.post("/api/series/{series_id}/plan/delete/cancel", response_model=OkResponse, responses=_ERR)
+    async def plan_delete_cancel(series_id: int, body: PlanDeleteBody):
+        """The command «Удалить» that waits is taken back."""
+        command = _contract(PlanDelete, series_id=series_id, **body.model_dump())
+        try:
+            await gw.request("planner.delete.cancel", command.model_dump(mode="json"))
+        except BusRequestError as exc:
+            return refusal(exc)
+        return {"success": True}
 
     async def restart_dubs(series_id: int, body: DubsActionBody, topic: str):
         scope = _contract(DubsScope, series_id=series_id, **body.model_dump())

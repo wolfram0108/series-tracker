@@ -369,7 +369,7 @@ class DiskWorld(World):
             if way.kind == "download":
                 dub, stream = results[f"dub:{goal.slot}:{way.dub}"].file, 0
             else:
-                dub, stream = self.library(way.container.name), await self.files.stream_of(way.container.name, way.dub, way.own)
+                dub, stream = self.library(way.container.name), await self.files.stream_of(way.container, way.dub, way.own)
             label = f"{label_of(goal.slot)} {way.voice}"
             result = await self._daemon("enqueue", {"ref": video_path, "dubs": [dub], "dub_atracks": [stream],
                                                     "out_dir": os.path.join(self.root, "work"), "label": label})

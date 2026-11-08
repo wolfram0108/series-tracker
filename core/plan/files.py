@@ -32,7 +32,8 @@ def container_json(container: Container) -> dict:
         "episode": list(container.video.episode), "timeline": asdict(container.video.timeline),
         "cut_of": row_json(container.video.cut_of)},
         "tracks": [{"dub": asdict(track.dub), "snapshot": asdict(track.snapshot), "episode": list(track.episode),
-                    "aligned_to": asdict(track.aligned_to)} for track in container.tracks]}
+                    "aligned_to": asdict(track.aligned_to), **({"tag": track.tag} if track.tag else {})}
+                   for track in container.tracks]}
 
 
 def container_of(data: dict) -> Container:
@@ -40,7 +41,8 @@ def container_of(data: dict) -> Container:
     return Container(data["name"], Video(RowId(**video["id"]), Snapshot(**video["snapshot"]), tuple(video["episode"]),
                                          RowId(**video["timeline"]), RowId(**video["cut_of"]) if video["cut_of"] else None),
                      tuple(Track(RowId(**track["dub"]), Snapshot(**track["snapshot"]), tuple(track["episode"]),
-                                 RowId(**track["aligned_to"])) for track in data["tracks"]), data["off"])
+                                 RowId(**track["aligned_to"]), track.get("tag", "")) for track in data["tracks"]),
+                     data["off"])
 
 
 def label_of(slot) -> str:
@@ -50,6 +52,12 @@ def label_of(slot) -> str:
 def dub_key(dub: RowId) -> str:
     """The key of a track in its container's tags: the row it came from."""
     return f"{dub.source_id}:{dub.row_key}:{dub.video}"
+
+
+def key_in(container: Container, dub: RowId) -> str:
+    """The key a track of a container has in the file's tags."""
+    track = next((each for each in container.tracks if each.dub == dub), None)
+    return track.tag if track is not None and track.tag else dub_key(dub)
 
 
 class Library:
@@ -68,13 +76,14 @@ class Library:
     def staging(self, name: str) -> str:
         return os.path.join(self.root, STAGING, name.replace("/", "_") + ".building.mkv")
 
-    async def stream_of(self, name: str, dub: RowId, own: bool) -> int:
+    async def stream_of(self, container: Container, dub: RowId, own: bool) -> int:
         """The index of the audio stream of a track in a container, told by the container's own tags."""
-        held = await mkv.contents(self.path(name))
-        for track in held.audio:
-            if (own and track.own) or (not own and track.key == dub_key(dub)):
+        held = await mkv.contents(self.path(container.name))
+        key = key_in(container, dub)
+        for track in held.audio if held is not None else ():
+            if (own and track.own) or (not own and track.key == key):
                 return track.index
-        raise FileNotFoundError(f"{name} holds no track {dub} (own={own})")
+        raise FileNotFoundError(f"{container.name} holds no track {dub} (own={own})")
 
     def video_path(self, goal: Goal, results: dict[str, Made]) -> str:
         if goal.video.kind == "asset":
@@ -89,13 +98,13 @@ class Library:
             video = video_of(goal, results)
             video_path = self.video_path(goal, results)
             identity = mkv.identity(video.timeline.source_id, video.timeline.row_key)
-            own_stream = await self.stream_of(goal.video.container.name, video.id, True) if goal.video.kind == "asset" else 0
+            own_stream = await self.stream_of(goal.video.container, video.id, True) if goal.video.kind == "asset" else 0
             tracks = [mkv.AudioIn(video.snapshot.group or "—", video_path, own_stream, identity, own=True)]
             made_tracks = []
             for way in goal.tracks:
                 if way.kind == "reuse":
                     path = self.path(way.container.name)
-                    stream = await self.stream_of(way.container.name, way.dub, way.own)
+                    stream = await self.stream_of(way.container, way.dub, way.own)
                     made_tracks.append(Track(way.dub, way.snapshot, slot, video.timeline))
                 else:
                     aligned = results[f"align:{slot}:{way.voice}"]

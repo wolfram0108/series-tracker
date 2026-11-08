@@ -112,6 +112,9 @@ class Track:
     snapshot: Snapshot
     episode: Slot
     aligned_to: RowId
+    # The key of the track in its file's tags when it is not the key of its row (a file made before the planner keys its
+    # tracks by the voice-over); not a part of what the track is.
+    tag: str = field(default="", compare=False)
 
     @property
     def group(self) -> str | None:

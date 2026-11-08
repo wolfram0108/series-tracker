@@ -44,6 +44,7 @@ from modules.sources import SourcesModule
 from modules.torrents import TorrentsModule
 from modules.trackerauth import TrackerauthModule
 from modules.voices import VoicesModule
+from modules.planner import PlannerModule
 
 configure()
 log = get_logger("run")
@@ -97,6 +98,8 @@ modules = [
     RenamingModule(bus, db),
     SlicingModule(bus, db),
     VoicesModule(bus, db),
+    # The plan of every video series and its sync (stage 12): downloads, cuts, alignments, containers, the journal.
+    PlannerModule(bus, db),
     # composition asks catalog, sources, rules and voices at its start and then publishes composition.changed, so scan
     # and voices must be subscribed by then; a request of voices that comes too early is deferred to that event.
     CompositionModule(bus, db),
