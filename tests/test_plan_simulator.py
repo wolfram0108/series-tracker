@@ -5,7 +5,7 @@ import random
 import pytest
 
 from core.plan.tables import RowId
-from plan_world import World
+from plan_world import Chaos, World
 
 REF = "AniStar"
 
@@ -78,10 +78,10 @@ def test_the_reference_was_another_episode_and_the_rule_is_fixed():
     its own voice-overs to it; its old reference goes once the new container is built; episode 6 chooses another video
     and its voice-overs are aligned anew — the failures against the wrong video do not hold for the new one."""
     world = World()
-    world.put(1, "ref6", 6, group=REF, content=(8,))
+    world.put(1, "ref6", 6, group=REF, content=(1008,))
     world.put(3, "alt6", 6, group=REF, player="cvh")
     for number in range(1, 11):
-        world.put(2, f"g{number}e6", 6, group=f"G{number}", player="kodik", content=(8,) if number == 1 else (6,))
+        world.put(2, f"g{number}e6", 6, group=f"G{number}", player="kodik", content=(1008,) if number == 1 else (1006,))
     world.put(3, "ref8", 8, group=REF, player="cvh")
     for number in (1, 2):
         world.put(2, f"g{number}e8", 8, group=f"G{number}", player="kodik")
@@ -106,7 +106,7 @@ def test_an_episode_renumbered_on_purpose_moves_with_its_voices():
     episode_with_dubs(world, 6, 2)
     for source, key in ((1, "ref6"), (2, "g1e6"), (2, "g2e6")):
         world.renumber(source, key, 8)
-    world.put(2, "g3e8", 8, group="G3", player="kodik", content=(6,))
+    world.put(2, "g3e8", 8, group="G3", player="kodik", content=(1006,))
     step = world.sync("серия 6 стала 8")
     world.check(step)
     assert kinds(step, (1, 8)) == ("asset", {"G1": "reuse", "G2": "reuse", "G3": "download"})
@@ -294,70 +294,120 @@ def test_delete_of_a_track_takes_it_away_and_an_online_one_comes_back():
     assert kinds(step, (1, 1))[1]["G1"] == "download"
 
 
-ACTIONS = ("put_ref", "put_dub", "drop", "renumber", "higher", "delete_video", "delete_track", "off", "on",
-           "off_group", "read_fail", "align_fail", "put_comp", "drop_comp", "download_fail", "reset")
+@pytest.mark.parametrize("seed", range(150))
+def test_random_histories_keep_the_invariants_and_come_to_rest(seed):
+    """Random histories of a small series of two seasons (tests/plan_world.py, Chaos): after every sync nothing goes that
+    the goal does not hold anew or the user did not delete, every file holds one episode, one visible file per episode;
+    when the faults stop the series comes to rest."""
+    Chaos(World(), random.Random(seed)).history(12)
 
 
-@pytest.mark.parametrize("seed", range(120))
-def test_random_histories_keep_the_invariants(seed):
-    """Short random histories of a small series: whatever happens, after every sync nothing goes that the goal does not
-    hold anew or that the user did not delete, failed work changes no file, and a sync that did everything leaves no work."""
-    rng = random.Random(seed)
+# --- faults, one kind at a time --------------------------------------------------------------------------------------
+
+def test_two_videos_numbered_as_one_episode_the_wrong_one_wins_and_the_failures_show_it():
+    """Overlapping numbers: a row truly episode 2 is numbered 1 and stands first by priority. Every voice-over of episode
+    1 fails alignment to it: the file holds the video alone, the failures are recorded, nothing else happens."""
     world = World()
-    keys: list[tuple[int, str]] = []
-    for step_no in range(8):
-        action = rng.choice(ACTIONS)
-        episode = rng.choice((1, 2))
-        world.read_fails.clear()
-        world.align_fails.clear()
-        if action == "put_ref":
-            source = rng.choice((1, 3))
-            key = f"r{source}e{rng.choice((1, 2))}"
-            world.put(source, key, episode, group=REF, player="vk" if source == 1 else "cvh",
-                      height=rng.choice((480, 720, 1080)))
-            keys.append((source, key))
-        elif action == "put_dub":
-            group = rng.choice(("A", "B", "C"))
-            key = f"{group}e{episode}"
-            world.put(2, key, episode, group=group, player="kodik")
-            keys.append((2, key))
-        elif action == "drop" and keys:
-            world.drop(*rng.choice(keys))
-        elif action == "renumber" and keys:
-            source, key = rng.choice(keys)
-            world.renumber(source, key, episode)
-        elif action == "higher" and keys:
-            source, key = rng.choice(keys)
-            for each in world.site.get(source, []):
-                if each.row.id.row_key == key:
-                    world.put(source, key, each.row.start, group=each.row.group, player=each.row.player,
-                              height=each.row.height + 360, video=each.row.id.video, content=each.content)
-        elif action == "delete_video" and world.containers:
-            world.delete("video", rng.choice(sorted(world.containers)))
-        elif action == "delete_track" and world.containers:
-            container = world.containers[rng.choice(sorted(world.containers))]
-            if container.tracks:
-                world.delete("track", container.name, rng.choice(container.tracks).dub)
-        elif action == "off":
-            world.choose(off_episodes=world.choices.off_episodes | {(1, episode)})
-        elif action == "on":
-            world.choose(off_episodes=world.choices.off_episodes - {(1, episode)})
-        elif action == "off_group":
-            world.choose(off_groups=world.choices.off_groups ^ {rng.choice(("A", "B", "C"))})
-        elif action == "read_fail":
-            world.read_fails.add(rng.choice((1, 2, 3)))
-        elif action == "align_fail":
-            world.align_fails.add(((1, episode), rng.choice(("A", "B", "C"))))
-        elif action == "put_comp":
-            world.put(4, "comp", 1, end=2, group=rng.choice((REF, "A")), height=rng.choice((1080, 2160)))
-        elif action == "drop_comp":
-            world.drop(4, "comp")
-        elif action == "download_fail" and keys:
-            source, key = rng.choice(keys)
-            world.download_fails.add(next((each.row.id for each in world.site.get(source, []) if each.row.id.row_key == key),
-                                          RowId(source, key, key)))
-        elif action == "reset":
-            world.download_fails.clear()
-            world.reset_failures()
-        step = world.sync(f"{step_no}: {action}")
+    world.put(3, "true1", 1, group=REF, player="cvh")
+    world.put(1, "wrong1", 1, group=REF, content=(1002,))
+    for number in (1, 2):
+        world.put(2, f"g{number}e1", 1, group=f"G{number}", player="kodik")
+    step = world.sync("пересечение номеров")
+    world.check(step)
+    assert container_of(world, 1).video.id.row_key == "wrong1" and not container_of(world, 1).tracks
+    assert len([key for key in step.failed_rows if key[0] == "align"]) == 2
+
+
+def test_a_season_change_moves_the_file_with_its_tracks():
+    world = World()
+    episode_with_dubs(world, 3, 2)
+    for source, key in ((1, "ref3"), (2, "g1e3"), (2, "g2e3")):
+        world.move(source, key, 2, 3)
+    step = world.sync("серия ушла во второй сезон")
+    world.check(step)
+    assert kinds(step, (2, 3)) == ("asset", {"G1": "reuse", "G2": "reuse"})
+    assert [each.name for each in world.containers.values()] == ["s02e03 [AniStar] 720p.mkv"]
+
+
+def test_a_whole_source_renumbered_by_one_comes_to_rest():
+    """Mass renumbering: every row of the reference's source is one episode further; the voice-overs stay. The videos
+    move, the voice-overs of each episode fail against the video of the episode before and pass against their own."""
+    world = World()
+    for episode in (1, 2, 3):
+        episode_with_dubs(world, episode, 1)
+    for episode in (1, 2, 3):
+        world.renumber(1, f"ref{episode}", episode + 1)
+    step = world.sync("источник сдвинут на одну серию")
+    world.check(step)
+    world.calm()
+    world.settle()
+
+
+def test_a_file_lost_from_disk_is_made_again_and_an_offline_voice_in_it_is_gone():
+    world = World()
+    episode_with_dubs(world, 1, 2)
+    world.drop(2, "g2e1")  # G2 is offline now: its only copy is the track in the file
+    world.lose_file(container_of(world, 1).name)
+    step = world.sync("файл пропал с диска")
+    world.check(step)
+    assert kinds(step, (1, 1)) == ("download", {"G1": "download"})
+    assert [track.group for track in container_of(world, 1).tracks] == ["G1"]
+
+
+@pytest.mark.parametrize("answer", ["suspect", "critical", "mismatch", "lost"])
+def test_every_answer_of_the_alignment(answer):
+    """suspect is taken; critical and mismatch are recorded and the voice-over is left out (the old file keeps its track);
+    a lost answer is tried again at the next sync."""
+    world = World()
+    episode_with_dubs(world, 1, 2)
+    world.put(1, "ref1hd", 1, group=REF, height=1080, video="ref1hd")
+    world.answers[((1, 1), "G2")] = answer
+    step = world.sync(f"ответ сервиса: {answer}")
+    world.check(step)
+    shown = [track.group for track in container_of(world, 1).tracks]
+    if answer == "suspect":
+        assert shown == ["G1", "G2"] and len(world.containers) == 1
+    elif answer == "lost":
+        assert container_of(world, 1).video.snapshot.height == 720  # nothing applied: the group waits for the answer
+        world.answers.clear()
+        world.check(world.sync("ответ пришёл"))
+        assert [track.group for track in container_of(world, 1).tracks] == ["G1", "G2"]
+    else:
+        assert shown == ["G1"] and any(each.off and len(each.tracks) == 2 for each in world.containers.values())
+
+
+def test_the_order_of_voices_changed_again_and_again_only_repacks():
+    world = World()
+    episode_with_dubs(world, 1, 3)
+    for order in (("G3", "G2", "G1"), ("G2", "G3", "G1"), ("G1", "G2", "G3"), ("G3", "G1", "G2")):
+        world.choose(groups=order)
+        step = world.sync(f"порядок озвучек {order}")
         world.check(step)
+        assert {op.kind for op in step.plan.ops} == {"build"}
+        assert [track.group for track in container_of(world, 1).tracks] == list(order)
+
+
+def test_switching_on_and_off_back_and_forth_does_no_work():
+    world = World()
+    episode_with_dubs(world, 1, 2)
+    for _ in range(3):
+        for off in (frozenset({(1, 1)}), frozenset()):
+            world.choose(off_episodes=off)
+            step = world.sync("вкл/выкл серии")
+            world.check(step)
+            assert not step.plan.ops
+        for groups in (frozenset({"G1"}), frozenset()):
+            world.choose(off_groups=groups)
+            step = world.sync("вкл/выкл группы")
+            world.check(step)
+            assert not step.plan.ops
+
+
+def test_a_cut_whose_service_finds_something_critical_takes_the_single_video():
+    world = World()
+    world.put(1, "single3", 3, group=REF, player="cvh")
+    world.put(4, "comp", 1, end=5, group=REF, height=2160)
+    world.cut_answers[(1, 3)] = "critical"
+    step = world.sync("разбор: критичная находка")
+    world.check(step)
+    assert container_of(world, 3).video.cut_of is None and step.replanned[0][0] == "cut"

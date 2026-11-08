@@ -23,7 +23,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "tests"))
 
 import plan_real  # noqa: E402
-from plan_world import SiteRow, World  # noqa: E402
+from plan_world import SiteRow, World, truth_of  # noqa: E402
 
 from core.plan.tables import Inputs, OnlineRow, RowId  # noqa: E402
 
@@ -32,11 +32,12 @@ def world_of(inputs: Inputs) -> World:
     """The world of a real series: the sources as read now, the asset, the truth of every video = its number now."""
     world = World(choices=inputs.choices)
     for row in inputs.online:
-        world.site.setdefault(row.id.source_id, []).append(SiteRow(row, tuple(range(row.start, row.end + 1))))
-        world.content[("site", row.id)] = tuple(range(row.start, row.end + 1))
+        truth = tuple(truth_of(row.season, number) for number in range(row.start, row.end + 1))
+        world.site.setdefault(row.id.source_id, []).append(SiteRow(row, truth))
+        world.content[("site", row.id)] = truth
     world.online = {source: tuple(each.row for each in rows) for source, rows in world.site.items()}
     for container in inputs.containers:
-        truth = (container.video.episode[1],)
+        truth = (truth_of(*container.video.episode),)
         world.containers[container.name] = container
         world.content[container.video.key] = truth
         for track in container.tracks:
@@ -49,8 +50,8 @@ def renumbered(world: World, rows: list[OnlineRow]) -> World:
     truth = {row.id: each.content for source in world.site.values() for each in source for row in [each.row]}
     world.site = {}
     for row in rows:
-        world.site.setdefault(row.id.source_id, []).append(
-            SiteRow(row, truth.get(row.id, tuple(range(row.start, row.end + 1)))))
+        made = tuple(truth_of(row.season, number) for number in range(row.start, row.end + 1))
+        world.site.setdefault(row.id.source_id, []).append(SiteRow(row, truth.get(row.id, made)))
     for source in list(world.online):
         world.site.setdefault(source, [])
     return world
@@ -127,7 +128,7 @@ async def situations(real: plan_real.RealSeries, series_id: int) -> tuple[list[d
             world = copy.deepcopy(base)
             higher = replace(reference, id=RowId(reference.id.source_id, reference.id.row_key + "-hd", "hd"),
                              height=reference.height * 2)
-            world.site[reference.id.source_id].append(SiteRow(higher, (slot[1],)))
+            world.site[reference.id.source_id].append(SiteRow(higher, (truth_of(*slot),)))
             found.append(outcome(world, f"вышел референс выше у серии {slot[1]} ({higher.height}p)"))
     for group in sorted({track.group for each in inputs.containers for track in each.tracks if track.group}):
         world = copy.deepcopy(base)

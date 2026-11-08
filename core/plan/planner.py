@@ -134,28 +134,60 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
         row = online.get(track.dub)
         return row.slot if row is not None and not row.compilation else track.episode
 
+    players = {player: place for place, player in enumerate(choices.players)}
+    sources = {source_id: place for place, source_id in enumerate(choices.sources)}
+    voices_order = {voice: place for place, voice in enumerate(choices.groups)}
+
     def player_rank(player: str) -> int:
-        return choices.players.index(player) if player in choices.players else len(choices.players)
+        return players.get(player, len(players))
 
     def source_rank(source_id: int) -> int:
-        return choices.sources.index(source_id) if source_id in choices.sources else len(choices.sources)
+        return sources.get(source_id, len(sources))
 
     def group_rank(voice: str) -> tuple:
-        return (choices.groups.index(voice) if voice in choices.groups else len(choices.groups), voice)
+        return (voices_order.get(voice, len(voices_order)), voice)
 
-    slots = sorted({row.slot for row in singles} | {video_slot(each.video) for each in containers
-                                                    if each.name not in deleted_videos})
+    # Everything laid out by episode once: a goal reads its own episode's rows, files and tracks.
+    by_slot = Index()
+    for row in singles:
+        by_slot.rows.setdefault(row.slot, []).append(row)
+    by_slot.compilations = [row for row in inputs.online if row.compilation]
+    # Of several files of one video the best one stands for it: the highest, then a file of an episode before one nothing
+    # carries any more, then one not switched off.
+    for container in sorted(containers, key=lambda each: (-each.video.snapshot.height, HIDDEN in each.name, each.off,
+                                                          each.name)):
+        if container.name in deleted_videos:
+            continue
+        here = video_slot(container.video)
+        by_slot.files.setdefault(here, []).append(container)
+        by_slot.tracks.setdefault(here, [])
+    for container in containers:
+        if container.name not in deleted_videos:
+            by_slot.tracks.setdefault(video_slot(container.video), []).append((container, own_track(container), True))
+        for track in container.tracks:
+            if (container.name, track.dub) not in deleted_tracks:
+                by_slot.tracks.setdefault(track_slot(track), []).append((container, track, False))
+
+    slots = sorted(set(by_slot.rows) | set(by_slot.files))
     namer = namer or (lambda slot, video, off: name_of(slot, video.snapshot, off))
-    goals = [goal for slot in slots if (goal := _goal(slot, inputs, namer, containers, singles, online, deleted_videos,
-                                                      deleted_tracks, video_slot, track_slot, player_rank, source_rank,
+    goals = [goal for slot in slots if (goal := _goal(slot, inputs, namer, by_slot, player_rank, source_rank,
                                                       group_rank)) is not None]
     ops = _ops(goals, containers)
     groups = _groups(goals, ops, containers, deleted_videos, deleted_tracks, video_slot, track_slot)
     return Plan(tuple(goals), tuple(ops), tuple(groups))
 
 
-def _goal(slot, inputs, namer, containers, singles, online, deleted_videos, deleted_tracks, video_slot, track_slot,
-          player_rank, source_rank, group_rank) -> Goal | None:
+class Index:
+    """The rows, files and tracks of a series by episode."""
+
+    def __init__(self) -> None:
+        self.rows: dict[Slot, list[OnlineRow]] = {}
+        self.files: dict[Slot, list[Container]] = {}
+        self.tracks: dict[Slot, list[tuple[Container, Track, bool]]] = {}
+        self.compilations: list[OnlineRow] = []
+
+
+def _goal(slot, inputs, namer, by_slot: Index, player_rank, source_rank, group_rank) -> Goal | None:
     choices = inputs.choices
     off = slot in choices.off_episodes
     order = choices.reference.get(slot, ())
@@ -165,12 +197,10 @@ def _goal(slot, inputs, namer, containers, singles, online, deleted_videos, dele
 
     candidates: list[tuple[tuple, VideoWay]] = []
     seen: set[tuple] = set()
-    # Of several files of one video the best one stands for it: the highest, then a file of an episode before one nothing
-    # carries any more, then one not switched off.
-    for container in sorted(containers, key=lambda each: (-each.video.snapshot.height, HIDDEN in each.name, each.off,
-                                                          each.name)):
+    singles = by_slot.rows.get(slot, [])
+    for container in by_slot.files.get(slot, []):
         video = container.video
-        if container.name in deleted_videos or video_slot(video) != slot or video.key in seen:
+        if video.key in seen:
             continue
         seen.add(video.key)
         way = VideoWay("asset", video.key, video.timeline, video.snapshot, container=container)
@@ -179,7 +209,7 @@ def _goal(slot, inputs, namer, containers, singles, online, deleted_videos, dele
                             player_rank(video.snapshot.player), source_rank(source_id), 0, repr(video.key)), way))
     if not off:
         for row in singles:
-            if row.slot != slot or ("download", row.id) in inputs.failed:
+            if ("download", row.id) in inputs.failed:
                 continue
             held = next((way for _, way in candidates if way.key == ("row", row.id)), None)
             if held is not None and held.snapshot.height >= row.height:
@@ -187,7 +217,7 @@ def _goal(slot, inputs, namer, containers, singles, online, deleted_videos, dele
             way = VideoWay("download", ("row", row.id), row.id, row.snapshot(), row=row)
             candidates.append(((user_rank(row.id.source_id, row.player), -row.height, player_rank(row.player),
                                 source_rank(row.id.source_id), 1, repr(way.key)), way))
-        cut = _cut(slot, inputs, candidates, player_rank, source_rank, user_rank)
+        cut = _cut(slot, inputs, by_slot.compilations, candidates, player_rank, source_rank, user_rank)
         if cut is not None:
             candidates.append(cut)
     if not candidates:
@@ -198,13 +228,9 @@ def _goal(slot, inputs, namer, containers, singles, online, deleted_videos, dele
     voices: dict[str, list] = {}
     if not off:
         for row in singles:
-            if row.slot == slot and row.group is not None and row.group not in choices.off_groups and row.group != own:
+            if row.group is not None and row.group not in choices.off_groups and row.group != own:
                 voices.setdefault(row.group, [])
-    held_tracks = [(container, track, False) for container in containers for track in container.tracks
-                   if track_slot(track) == slot and (container.name, track.dub) not in deleted_tracks]
-    held_tracks += [(container, own_track(container), True) for container in containers
-                    if container.name not in deleted_videos and video_slot(container.video) == slot
-                    and container is not video.container]
+    held_tracks = [each for each in by_slot.tracks.get(slot, []) if not (each[2] and each[0] is video.container)]
     for container, track, _ in held_tracks:
         voice = voice_of(track.group, track.dub)
         if voice != own:
@@ -219,7 +245,7 @@ def _goal(slot, inputs, namer, containers, singles, online, deleted_videos, dele
             container, track, is_own = reuse[0]
             tracks.append(TrackWay(voice, track.dub, track.snapshot, "reuse", container=container, own=is_own))
             continue
-        rows = sorted((row for row in singles if row.slot == slot and row.group == voice and not off
+        rows = sorted((row for row in singles if row.group == voice and not off
                        and ("download", row.id) not in inputs.failed and ("align", row.id, video.timeline) not in inputs.failed
                        and voice not in choices.off_groups),
                       key=lambda row: (player_rank(row.player), source_rank(row.id.source_id), -row.height, row.id))
@@ -233,7 +259,7 @@ def _goal(slot, inputs, namer, containers, singles, online, deleted_videos, dele
     return Goal(slot, video, tuple(tracks), namer(slot, video, off), off)
 
 
-def _cut(slot, inputs, candidates, player_rank, source_rank, user_rank):
+def _cut(slot, inputs, compilations, candidates, player_rank, source_rank, user_rank):
     """The cut out of the shortest switched-on compilation that covers the episode and is higher than its best single
     video, by that single video (REF 2); none when the episode has no single video."""
     singles = [(rank, way) for rank, way in candidates if way.key[0] == "row"]
@@ -241,7 +267,7 @@ def _cut(slot, inputs, candidates, player_rank, source_rank, user_rank):
         return None
     rank2, ref2 = min(singles, key=lambda each: each[0])
     best = max(way.snapshot.height for _, way in singles)
-    covering = [row for row in inputs.online if row.compilation and ("download", row.id) not in inputs.failed
+    covering = [row for row in compilations if ("download", row.id) not in inputs.failed
                 and ("cut", row.id, ref2.timeline) not in inputs.failed
                 and row.season == slot[0] and row.start <= slot[1] <= row.end
                 and row.group is not None and row.id not in inputs.choices.off_compilations and row.height > best]
@@ -346,13 +372,16 @@ def _groups(goals, ops, containers, deleted_videos, deleted_tracks, video_slot, 
             join(here, at(track_slot(track)))
 
     kept = {goal.slot: container for goal in goals if (container := _satisfied_by(goal)) is not None}
+    kept_names = {container.name for container in kept.values()}
+    used_tracks = {(way.container.name, way.dub, way.own) for goal in goals for way in goal.tracks if way.container is not None}
+    used_videos = {goal.video.container.name for goal in goals if goal.video.container is not None}
     remove, hide, lost = set(), set(), []
     for container in containers:
-        if container in kept.values():
+        if container.name in kept_names:
             continue
         video_deleted = container.name in deleted_videos
         video_ok = video_deleted or video_slot(container.video) in by_slot
-        video_used = any(goal.video.container is container for goal in goals)
+        video_used = container.name in used_videos
         tracks_ok, gone_with_video = True, []
         sounds = [(track, False) for track in container.tracks]
         if not video_deleted and not video_used:
@@ -360,8 +389,7 @@ def _groups(goals, ops, containers, deleted_videos, deleted_tracks, video_slot, 
         for track, is_own in sounds:
             voice = voice_of(track.group, track.dub)
             goal = by_slot.get(video_slot(container.video) if is_own else track_slot(track))
-            used = any(way.container is container and way.dub == track.dub and way.own == is_own
-                       for each in goals for way in each.tracks)
+            used = (container.name, track.dub, is_own) in used_tracks
             # Replaced: the goal of its episode has the voice-over otherwise — as another track or as the own sound.
             replaced = goal is not None and (voice_of(goal.video.snapshot.group, goal.video.timeline) == voice or any(
                 way.voice == voice and not (way.container is container and way.dub == track.dub and way.own == is_own)
