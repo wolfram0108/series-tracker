@@ -46,9 +46,19 @@ async def test_the_source_forgot_the_reference_the_file_stays_and_its_video_is_m
     await ui.press_sync(series_id)
     assert ui.files() == files and made(ui) == before  # nothing goes, nothing is made
     await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(2)
+    card = ui.page.locator(".episode-card[data-episode='1']")
+    # The corner of presence: grey on the mark of the reference and on the cell of its track, green on the voice-over;
+    # the marks of the legend stand for sources, not rows of a file, and carry none.
+    await expect(card.locator(".card-ref-shown .figure-mark.presence.is-offline")).to_have_count(1)
+    await expect(card.locator(".track-cell.is-reference.presence.is-offline")).to_have_count(1)
+    await expect(card.locator(".track-cell:not(.is-reference).presence.is-online")).to_have_count(1)
+    await expect(ui.page.locator(".episode-card[data-episode='2'] .presence.is-offline")).to_have_count(0)
+    await expect(ui.page.locator(".output-legend .presence")).to_have_count(0)
     await opened(ui, 1)
     await expect(row(ui, 1, "AniStar").locator(".track-offline")).to_have_text(text("output.plan.offline"))
+    await expect(row(ui, 1, "AniStar").locator(".figure-mark.presence.is-offline")).to_have_count(1)
     await expect(row(ui, 1, "AnimeVost").locator(".track-offline")).to_have_count(0)
+    await expect(row(ui, 1, "AnimeVost").locator(".figure-mark.presence.is-online")).to_have_count(1)
     await ui.shot("s1-reference-offline")
     await ui.check(series_id)
 
@@ -63,6 +73,7 @@ async def test_a_source_that_cut_its_list_short_leaves_the_files_whole_and_marks
     assert ui.files() == files and made(ui) == before
     await expect(ui.page.locator(".episode-card.is-ready")).to_have_count(4)
     for episode, offline in ((2, 0), (3, 1), (4, 1)):
+        await expect(ui.page.locator(f".episode-card[data-episode='{episode}'] .track-cell.presence.is-offline")).to_have_count(offline)
         await opened(ui, episode)
         await expect(row(ui, episode, "AnimeVost").locator(".pill")).to_have_text(text("output.track.state.done"))
         await expect(row(ui, episode, "AnimeVost").locator(".track-offline")).to_have_count(offline)

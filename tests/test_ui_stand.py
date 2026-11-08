@@ -190,6 +190,7 @@ async def test_a_higher_compilation_is_cut_into_its_episodes_and_shown_as_their_
     page = ui.page
     cards = page.locator(".episode-card")
     await expect(cards.locator(".card-ref-shown .ref-letter")).to_have_count(3)  # the letter of the compilation, its height
+    await expect(cards.locator(".card-ref-shown .ref-letter.presence.is-online")).to_have_count(3)  # the source gives it
     await expect(cards.locator(".card-ref-shown")).to_contain_text(["2160p"] * 3)
     view = await ui.check(series_id)
     assert sorted(asset["episode"][1] for asset in view["assets"] if asset["video"]["cut_of"]) == [1, 2, 3]

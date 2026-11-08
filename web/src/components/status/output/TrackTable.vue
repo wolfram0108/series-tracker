@@ -49,6 +49,7 @@ const rows = computed(() => {
       note: detail ? reasonText(detail) : "", action, pill,
       // The source forgot the row the video or the track came from: the file keeps it, with where it came from (an offline row).
       offline: line?.online === false,
+      online: cell.state === "none" || cell.state === "absent" || cell.state === "off" ? null : line?.online ?? null,
     }
   })
 })
@@ -79,7 +80,7 @@ function act(row: (typeof rows.value)[number]): void {
           <span v-if="row.cell.isReference" class="pill pill-primary track-ref">{{ t("output.tracks.reference") }}</span>
         </td>
         <td>
-          <span v-if="row.where" class="track-from"><SourceMark :mark="row.sourceId === null ? null : marks[row.sourceId]" />{{ row.where }}</span>
+          <span v-if="row.where" class="track-from"><SourceMark :mark="row.sourceId === null ? null : marks[row.sourceId]" :online="row.online" />{{ row.where }}</span>
           <span v-else class="muted">—</span>
         </td>
         <td>

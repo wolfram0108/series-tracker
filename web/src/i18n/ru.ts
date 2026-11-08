@@ -178,6 +178,8 @@ export const ru = {
   "output.plan.cancel": "Отменить",
   "output.plan.failures": "Неудачных попыток: {count}",
   "output.plan.offline": "офлайн",
+  "output.presence.online": "онлайн: источник даёт эту строку",
+  "output.presence.offline": "офлайн: строку больше не даёт ни один источник, она есть только в файле",
   "rules.block.or.label": "или",
   "rules.block.or.title": "Любой из соседних текстов: ставится между двумя блоками «Текст»",
   "rules.block.or.dangling": "«или» должен стоять между двумя блоками «Текст»",

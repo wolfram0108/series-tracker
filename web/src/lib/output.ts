@@ -400,8 +400,8 @@ export function cutPictureOf(view: EpisodeView): CutPicture | null {
 
 /** A part of the line of where the picture of an episode is from. */
 export type RefPart =
-  | { kind: "mark"; sourceId: number }
-  | { kind: "letter"; sourceId: number }
+  | { kind: "mark"; sourceId: number; online?: boolean | null }
+  | { kind: "letter"; sourceId: number; online?: boolean | null }
   | { kind: "place"; text: string }
   | { kind: "player"; text: string }
   | { kind: "height"; height: number }
@@ -421,14 +421,18 @@ export function refVariants(view: EpisodeView, marks: Record<number, SourceMark>
     ...(detail >= 1 && player ? [{ kind: "player" as const, text: player }] : []),
     ...(height === null ? [] : [{ kind: "height" as const, height }]),
   ]
-  const reference = (detail: number): RefPart[] =>
-    [{ kind: "mark", sourceId }, ...words(sourceId, line.playerLabel ?? line.player, line.height, detail)]
   const picture = cutPictureOf(view)
-  const variants = picture === null ? [0, 1, 2].map(reference) : [
-    [{ kind: "mark", sourceId } as RefPart, { kind: "letter", sourceId: picture.sourceId } as RefPart,
-      ...words(picture.sourceId, null, picture.height, 0)],
-    ...[0, 1, 2].map((detail) => [...reference(detail), { kind: "letter", sourceId: picture.sourceId } as RefPart,
-      ...words(picture.sourceId, picture.playerLabel, picture.height, detail)]),
+  // The presence of each: the video the file holds is the reference's, or the compilation's for a cut episode; the single
+  // video a cut episode was cut by is online while the layout has its row.
+  const head = view.references.find((each) => each.source_id != null)
+  const single = picture === null ? line.online
+    : view.rows.some((row) => row.source_id === head?.source_id && row.row_key === head?.row_key)
+  const mark: RefPart = { kind: "mark", sourceId, online: single }
+  const letter: RefPart | null = picture === null ? null : { kind: "letter", sourceId: picture.sourceId, online: line.online }
+  const reference = (detail: number): RefPart[] => [mark, ...words(sourceId, line.playerLabel ?? line.player, line.height, detail)]
+  const variants = picture === null || letter === null ? [0, 1, 2].map(reference) : [
+    [mark, letter, ...words(picture.sourceId, null, picture.height, 0)],
+    ...[0, 1, 2].map((detail) => [...reference(detail), letter, ...words(picture.sourceId, picture.playerLabel, picture.height, detail)]),
   ]
   // A detail the episode has not (no place, no player) makes a variant like the one before it: it is not repeated.
   return variants.filter((each, index) => index === 0 || JSON.stringify(each) !== JSON.stringify(variants[index - 1]))
@@ -482,6 +486,8 @@ export interface TrackCell {
   group: string
   state: TrackState
   isReference: boolean
+  /** Whether a source gives the row of the track now (of the video, for the track of the reference); null: not known. */
+  online?: boolean | null
 }
 
 /** The tracks of an episode in the order of the container of its season (`order`). */
@@ -489,9 +495,12 @@ export function trackCells(view: EpisodeView, order: readonly string[]): TrackCe
   const lines = outputLines(view)
   return order.map((group, index) => {
     const reference = lines.find((line) => line.kind === "reference" && line.group === group)
-    if (reference) return { pos: index + 1, group, state: FILE_STATE[reference.file ?? ""] ?? "wait", isReference: true }
+    if (reference) return { pos: index + 1, group, state: FILE_STATE[reference.file ?? ""] ?? "wait", isReference: true,
+                            online: reference.online }
     const dub = lines.find((line) => line.kind === "dub" && line.group === group)
-    return { pos: index + 1, group, state: dub?.dub ? DUB_STATE[dub.dub.state] : "none", isReference: false }
+    const state = dub?.dub ? DUB_STATE[dub.dub.state] : "none"
+    // Presence is a fact of a track of the file: a voice-over the file has not (absent, off, none) has none.
+    return { pos: index + 1, group, state, isReference: false, online: state === "done" ? dub?.online ?? null : null }
   })
 }
 

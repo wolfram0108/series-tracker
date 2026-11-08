@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import { t } from "../../../i18n"
 import type { components } from "../../../api/schema"
-import { refVariants, widestFitting, type EpisodeView, type TrackCell } from "../../../lib/output"
+import { refVariants, trackCells, widestFitting, type EpisodeView, type TrackCell } from "../../../lib/output"
+import type { VoiceDub } from "../../../lib/plan"
+import SourceMark from "./SourceMark.vue"
+import TrackStrip from "./TrackStrip.vue"
 import EpisodeCard from "./EpisodeCard.vue"
 
 type Reference = components["schemas"]["Reference"]
@@ -62,3 +65,44 @@ describe("the line of where the picture of an episode is from", () => {
     expect(w.find(".card-badge").text()).toBe("A")
   })
 })
+
+describe("the corner of presence on the marks", () => {
+  // The file of the episode keeps a video its source gives (`fileOnline`); the layout has the single row of the reference
+  // or has not (`single`).
+  const presenceView = (cut: boolean, fileOnline: boolean, single: boolean): EpisodeView => ({
+    ...viewOf(cut),
+    files: [{ unique_id: "u", source_id: 7, row_key: "s1", status: "completed", online: fileOnline }],
+    rows: single ? [{ source_id: 7, row_key: "s1" } as EpisodeView["rows"][number]] : [],
+  })
+  const presenceOf = (parts: ReturnType<typeof refVariants>[number]) =>
+    parts.filter((part) => part.kind === "mark" || part.kind === "letter").map((part) => [part.kind, part.online])
+
+  it("tells of the video of the file on the mark of the reference of an episode that is not cut", () => {
+    expect(presenceOf(refVariants(presenceView(false, false, true), marks)[0])).toEqual([["mark", false]])
+    expect(presenceOf(refVariants(presenceView(false, true, false), marks)[0])).toEqual([["mark", true]])
+  })
+
+  it("tells of the compilation on its letter and of the single video it was cut by on the mark of a cut episode", () => {
+    expect(presenceOf(refVariants(presenceView(true, true, false), marks)[0])).toEqual([["mark", false], ["letter", true]])
+    expect(presenceOf(refVariants(presenceView(true, false, true), marks)[0])).toEqual([["mark", true], ["letter", false]])
+  })
+
+  it("gives a cell of a track of the file its presence, and none to a voice-over the file has not", () => {
+    const dub = (voice: string, state: VoiceDub["state"], online: boolean | null): VoiceDub =>
+      ({ season: 1, episode: 1, part: null, voice_key: voice, voice_label: voice, state, source_id: 9, player: null, online })
+    const view = { ...presenceView(false, false, true), dubs: [dub("B", "done", true), dub("C", "absent", null), dub("D", "done", false)] }
+    expect(trackCells(view, ["Ruchime", "B", "C", "D"]).map((cell) => [cell.group, cell.online]))
+      .toEqual([["Ruchime", false], ["B", true], ["C", null], ["D", false]])
+  })
+
+  it("draws the corner on a mark and on a cell, and says it in the title", () => {
+    const mark = mount(SourceMark, { props: { mark: marks[7], online: false } })
+    expect(mark.find(".figure-mark").classes()).toEqual(expect.arrayContaining(["presence", "is-offline"]))
+    expect(mark.find(".figure-mark").attributes("title")).toContain(t("output.presence.offline"))
+    expect(mount(SourceMark, { props: { mark: marks[7] } }).find(".presence").exists()).toBe(false)
+    const strip = mount(TrackStrip, { props: { cells: [{ ...cells[0], online: true }, { pos: 2, group: "C", state: "absent", isReference: false, online: null }] } })
+    expect(strip.findAll(".track-cell").map((cell) => cell.classes().filter((name) => ["presence", "is-online", "is-offline"].includes(name))))
+      .toEqual([["presence", "is-online"], []])
+  })
+})
+

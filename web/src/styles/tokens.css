@@ -61,6 +61,11 @@
   --figure-size: 1.25rem;
   --track-size: 1rem;
   --card-row: 1.75rem;
+  /* The corner of presence on a mark, a gradient each: online, offline (styles/pills.css .presence). */
+  --presence-online-from: #4fb87a;
+  --presence-online-to: #2f8a57;
+  --presence-offline-from: #c9cfd5;
+  --presence-offline-to: #98a1aa;
   --card-pad: 0.5rem;
 }
 

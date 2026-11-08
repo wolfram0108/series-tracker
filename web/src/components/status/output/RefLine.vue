@@ -11,12 +11,15 @@ defineProps<{ parts: RefPart[]; marks: Record<number, Mark>; badge?: Badge }>()
 
 <template>
   <template v-for="(part, index) in parts" :key="index">
-    <SourceMark v-if="part.kind === 'mark'" :mark="marks[part.sourceId]" />
+    <SourceMark v-if="part.kind === 'mark'" :mark="marks[part.sourceId]" :online="part.online" />
     <span
-      v-else-if="part.kind === 'letter' && badge" class="figure-mark ref-letter" :style="{ background: `var(--compilation-${badge.color})` }"
-      :title="t('output.compilation.badge', { letter: badge.letter })"
+      v-else-if="part.kind === 'letter' && badge" class="figure-mark ref-letter"
+      :class="part.online == null ? null : ['presence', part.online ? 'is-online' : 'is-offline']"
+      :style="{ background: `var(--compilation-${badge.color})` }"
+      :title="[t('output.compilation.badge', { letter: badge.letter }),
+               ...(part.online == null ? [] : [t(part.online ? 'output.presence.online' : 'output.presence.offline')])].join(' · ')"
     >{{ badge.letter }}</span>
-    <SourceMark v-else-if="part.kind === 'letter'" :mark="marks[part.sourceId]" />
+    <SourceMark v-else-if="part.kind === 'letter'" :mark="marks[part.sourceId]" :online="part.online" />
     <span v-else class="ref-text" :class="`is-${part.kind}`">{{ part.kind === "height" ? t("output.height", { height: part.height }) : part.text }}</span>
   </template>
 </template>

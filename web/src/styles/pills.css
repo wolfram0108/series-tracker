@@ -57,6 +57,7 @@
   background-color: rgba(255, 255, 255, 0.3); color: inherit;
 }
 
+
 /* A figure in a small box (the place of a track, the number of a source): the line is the box itself, so the figure stands
    in its middle whatever the line height around it. */
 .figure-mark {
@@ -66,3 +67,16 @@
   background: var(--color-gray-600); color: #fff; font-size: 0.75rem; font-weight: 700; line-height: 1;
   font-variant-numeric: tabular-nums;
 }
+
+/* The presence of the row a mark stands for: a corner of the mark in a gradient, parted from its colour by a thin white
+   line — online (a source gives the row now) or offline (no source gives it, only the file holds it). A mark of no row of
+   a file carries none. */
+.presence { position: relative; overflow: hidden; }
+.presence::after {
+  content: ""; position: absolute; inset-inline-end: 0; inset-block-end: 0; inline-size: 0.62rem; block-size: 0.62rem;
+  background: linear-gradient(to bottom right, transparent calc(50% - 0.04rem), rgba(255, 255, 255, 0.95) calc(50% - 0.04rem),
+    rgba(255, 255, 255, 0.95) calc(50% + 0.05rem), var(--presence-from) calc(50% + 0.05rem), var(--presence-to) 100%);
+}
+.presence.is-online { --presence-from: var(--presence-online-from); --presence-to: var(--presence-online-to); }
+.presence.is-offline { --presence-from: var(--presence-offline-from); --presence-to: var(--presence-offline-to); }
+.track-cell.presence::after { inline-size: 0.52rem; block-size: 0.52rem; }

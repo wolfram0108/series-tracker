@@ -6,14 +6,16 @@ import type { TrackCell } from "../../../lib/output"
 // track of the reference (the voice of the video itself) is outlined. Cells narrow when a strip has no room, never wrap.
 defineProps<{ cells: TrackCell[] }>()
 
-const title = (cell: TrackCell): string => t(cell.isReference ? "output.track.cellReference" : "output.track.cell",
-  { group: cell.group, state: t(`output.track.state.${cell.state}`) })
+const title = (cell: TrackCell): string => [t(cell.isReference ? "output.track.cellReference" : "output.track.cell",
+  { group: cell.group, state: t(`output.track.state.${cell.state}`) }),
+  ...(cell.online == null ? [] : [t(cell.online ? "output.presence.online" : "output.presence.offline")])].join(" · ")
 </script>
 
 <template>
   <span class="track-strip">
     <span
-      v-for="cell in cells" :key="cell.pos" class="track-cell" :class="[`is-${cell.state}`, { 'is-reference': cell.isReference }]"
+      v-for="cell in cells" :key="cell.pos" class="track-cell"
+      :class="[`is-${cell.state}`, { 'is-reference': cell.isReference }, cell.online == null ? null : ['presence', cell.online ? 'is-online' : 'is-offline']]"
       :title="title(cell)" :aria-label="title(cell)"
     >{{ cell.pos }}</span>
   </span>
