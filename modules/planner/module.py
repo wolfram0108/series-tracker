@@ -219,8 +219,11 @@ class BusSync(SeriesSync):
                                             "ytdlp": row.id.source_id in self.vk_sources})
         if not finished.get("ok"):
             if finished.get("transient"):
+                self.m.log.warning("сериал %d: загрузка %s не удалась, повторится при следующей синхронизации: %s",
+                                   self.series["id"], op.id, finished.get("error"))
                 raise Passing
-            self.m.log.warning("сериал %d: загрузка %s не удалась: %s", self.series["id"], op.id, finished.get("error"))
+            self.m.log.warning("сериал %d: загрузка %s не удалась, записано как неудача: %s", self.series["id"], op.id,
+                               finished.get("error"))
             return None
         if op.kind == "download_video":
             return Made(Video(row.id, row.snapshot(), row.slot, row.id), path)
@@ -491,7 +494,18 @@ class PlannerModule(BaseModule):
 
     async def job(self, key: str, topic: str, body: dict) -> str | None:
         """A job at the alignment service: the path of its one result, None when the service judged it a failure;
-        `Passing` when it could not be asked or its answer never came."""
+        `Passing` when it could not be asked or its answer never came. Every end but a success is written to the log with
+        its reason: the service keeps the reason of a crash, and nobody else here tells it."""
+        label = body.get("label") or key
+        try:
+            return await self._job(key, topic, body)
+        except Passing as passing:
+            self.log.warning("%s: выравнивание не сделано, повторится при следующей синхронизации: %s", label,
+                             passing.args[0] if passing.args else "ответа сервиса нет")
+            raise
+
+    async def _job(self, key: str, topic: str, body: dict) -> str | None:
+        label = body.get("label") or key
         try:
             if topic == "conform.submit":
                 reply = SubmitReply.model_validate(await self.request(topic, body))
@@ -508,11 +522,11 @@ class PlannerModule(BaseModule):
             found = await self.request("conform.job.find", {"key": key})
             job_id = found.get("job_id")
             if not job_id:
-                raise Passing
+                raise Passing(f"задачу не удалось ни поставить, ни найти: {reason}")
         elif outcome is SubmitOutcome.UNAVAILABLE:
-            raise Passing
+            raise Passing(f"сервис недоступен: {reason}")
         elif outcome is SubmitOutcome.REJECTED:
-            self.log.warning("задача %s отклонена сервисом выравнивания: %s", key, reason)
+            self.log.warning("%s: задача отклонена сервисом выравнивания, записано как неудача: %s", label, reason)
             return None
         ended = self._ended.pop(job_id, None)
         if ended is None:
@@ -522,9 +536,18 @@ class PlannerModule(BaseModule):
             finally:
                 self._jobs.pop(job_id, None)
         if ended.get("removed"):
-            raise Passing
+            raise Passing(f"задача {job_id} снята в сервисе")
         results = ended.get("results") or []
-        return judged(results[0] if results else None, cut=topic == "conform.reverse")
+        result = results[0] if results else None
+        why = (result or {}).get("error") or ended.get("error") or "сервис не дал результата"
+        try:
+            made = judged(result, cut=topic == "conform.reverse")
+        except Passing:
+            raise Passing(f"сбой сервиса в задаче {job_id}: {why}") from None
+        if made is None:
+            what = "критичные замечания" if result and result.get("ok") else why
+            self.log.warning("%s: сервис выравнивания отказал в задаче %s, записано как неудача: %s", label, job_id, what)
+        return made
 
     async def on_job_finished(self, env: Envelope) -> None:
         job_id = env.payload.get("job_id")

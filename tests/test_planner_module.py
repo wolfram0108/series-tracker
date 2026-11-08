@@ -350,3 +350,15 @@ async def test_the_voice_overs_the_user_switched_off_are_named_by_the_goal_of_th
     await sync(world)
     (goal,) = (await planner.request("planner.series.get", {"series_id": SERIES}))["episodes"]
     assert goal["voices_off"] == ["G2"] and [track["voice"] for track in goal["tracks"]] == ["G1"]
+
+
+async def test_an_alignment_the_service_crashed_in_is_written_to_the_log_with_its_reason(world, caplog):
+    """A crash in the service is no failure of the voice-over, and nobody but the service knows its reason: the log says
+    which episode and voice-over, why, and that the next sync tries again."""
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    neighbours.daemon.answers["Сериал s01e01 G1"] = "crash"
+    with caplog.at_level("WARNING", logger="planner"):
+        await sync(world)
+    said = [record.getMessage() for record in caplog.records if record.name == "planner"]
+    assert any("Сериал s01e01 G1" in each and "сбой сервиса" in each and "повторится" in each for each in said), said
