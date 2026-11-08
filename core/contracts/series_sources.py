@@ -35,10 +35,12 @@ class SeriesSource(BaseModel):
 
 
 class SourceEvent(BaseModel):
-    """`series.source.added`, `.updated` and `.removed`."""
+    """`series.source.added`, `.updated` and `.removed`: with the source as it is stored now, so that whoever keeps the
+    sources of a series takes the change from the packet itself; none for a source that went."""
 
     series_id: int
     source_id: int
+    source: SeriesSource | None = None
 
 
 class SourceChanged(SourceEvent):

@@ -131,6 +131,9 @@ class Release:
     episodes: dict[int, tuple[int, int]] = field(default_factory=dict)
     # The compilations of the release: (first, last) episode → its height. Its entry is numbered apart (1000 + first).
     compilations: dict[tuple[int, int], int] = field(default_factory=dict)
+    down: bool = False  # the page does not open (the site is down): every read of it fails
+    # The episodes whose player stopped giving the video: the row stays on the page, its video does not play.
+    silent: set[int] = field(default_factory=set)
 
     @property
     def url(self) -> str:
@@ -182,6 +185,10 @@ class Site:
     def drop(self, slug: str, number: int) -> None:
         self.releases[slug].episodes.pop(number, None)
 
+    def drop_compilation(self, slug: str, first: int) -> None:
+        release = self.releases[slug]
+        release.compilations = {span: height for span, height in release.compilations.items() if span[0] != first}
+
     def _release_page(self, release: Release) -> str:
         entries = [{"id": 93000 + number, "number": number, "compilation_from": None, "compilation_to": None,
                     "title": f"Серия {number}", "is_vip": False, "is_trailer": False, "date": "09 May 2026"}
@@ -219,6 +226,8 @@ const ALL_EPS = {json.dumps(entries, ensure_ascii=False)};
             return ""
         slug, number = found
         release = self.releases[slug]
+        if number in release.silent:
+            return ""
         if number > 1000:
             span = next((each for each in release.compilations if each[0] == number - 1000), None)
             if span is None:
@@ -244,6 +253,8 @@ const ALL_EPS = {json.dumps(entries, ensure_ascii=False)};
                 release = self.releases.get(parts[1])
                 if release is None:
                     return 404, ""
+                if release.down:
+                    return 503, ""
                 if len(parts) == 2:
                     return 200, self._release_page(release)
                 number = int(parts[2].removeprefix("episode-"))

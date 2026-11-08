@@ -2910,10 +2910,16 @@ export interface components {
             /** Url */
             url: string;
             source_type: components["schemas"]["SourceType"];
-            /** Parser Profile Id */
-            parser_profile_id?: number | null;
-            /** Vibix Season */
-            vibix_season?: number | null;
+            /**
+             * Parser Profile Id
+             * @default null
+             */
+            parser_profile_id: number | null;
+            /**
+             * Vibix Season
+             * @default null
+             */
+            vibix_season: number | null;
             /** Players Off */
             players_off?: string[];
             /**
@@ -3268,6 +3274,8 @@ export interface components {
             series_id: number;
             /** Source Id */
             source_id: number;
+            /** @default null */
+            source: components["schemas"]["SeriesSource"] | null;
             /** What */
             what: string;
         };

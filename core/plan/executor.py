@@ -113,16 +113,20 @@ def table_after(containers: dict[str, Container], made: Plan, group: Group, resu
 
 def commands_after(commands: frozenset, made: Plan, group: Group) -> frozenset:
     """A command «Удалить» goes with its file. A deleted video waits for another video of its episode: its command follows
-    the video to the file's new name, or to the file built anew around it; a track's command goes once the file is built
-    anew (the track it named is gone from it)."""
+    the video to the file's new name, or to the file built anew around it; a file that stays hidden (a sound in it is still
+    needed) keeps the commands on it under its hidden name; a track's command goes once the file is built anew (the track
+    it named is gone from it)."""
     renamed = {name: made.goal(slot).name for slot, name in group.kept}
     rebuilt = {goal.video.container.name: goal.name for slot in group.built
                if (goal := made.goal(slot)).video.kind == "asset"}
-    changed = set(group.remove) | {name for name, _ in group.hide}
+    hidden = dict(group.hide)
+    changed = set(group.remove) | set(hidden)
     kept = set()
     for each in commands:
         name = each[1]
-        if each[0] == "video" and (name in renamed or name in rebuilt):
+        if name in hidden:
+            kept.add((each[0], hidden[name], *each[2:]))
+        elif each[0] == "video" and (name in renamed or name in rebuilt):
             kept.add(("video", renamed.get(name) or rebuilt[name]))
         elif each[0] == "track" and name in renamed:
             kept.add(("track", renamed[name], *each[2:]))

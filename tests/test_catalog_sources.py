@@ -205,8 +205,10 @@ async def test_creating_a_series_tells_of_it_and_then_of_each_source(system):
     events = drain(sub)
     assert [topic for topic, _ in events] == ["series.added", "series.source.added", "series.source.added"]
     assert events[0][1]["id"] == made.series_id
-    assert [e[1] for e in events[1:]] == [SourceEvent(series_id=made.series_id, source_id=i).model_dump()
-                                          for i in made.source_ids]
+    # each source event carries the source as it is stored: who keeps the sources of a series needs no second request
+    assert [(e[1]["series_id"], e[1]["source_id"], e[1]["source"]["url"]) for e in events[1:]] == \
+        [(made.series_id, i, url) for i, url in zip(made.source_ids, [VK, RUCHIME])]
+    assert all(SourceEvent.model_validate(e[1]).source.id == e[1]["source_id"] for e in events[1:])
     # the event carries the series whole, sources and kind included
     assert [s["url"] for s in events[0][1]["sources"]] == [VK, RUCHIME]
     assert events[0][1]["kind"] == "video"
@@ -309,9 +311,9 @@ async def test_a_source_is_added_at_the_end_and_announced(system):
         "source": {"url": RUCHIME, "source_type": "web_video", "parser_profile_id": 2, "players_off": ["vk", "vk"]}},
         timeout=5)
     assert set(reply) == {"id"}
-    assert drain(sub) == [("series.source.added", SourceEvent(series_id=made.series_id,
-                                                              source_id=reply["id"]).model_dump())]
+    told = drain(sub)
     added = (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[-1]
+    assert told == [("series.source.added", {"series_id": made.series_id, "source_id": reply["id"], "source": added})]
     assert added == {"id": reply["id"], "series_id": made.series_id, "position": 1, "url": RUCHIME,
                      "source_type": "web_video", "parser_profile_id": 2,
                      "vibix_season": None, "players_off": ["vk"], "color": 1}
@@ -364,9 +366,9 @@ async def test_update_applies_what_changed_and_announces_it_once(system):
         timeout=5)
     # the name of the voice-over was already empty: it is not an applied change
     assert reply == {"applied": {"parser_profile_id": 2, "vibix_season": 3, "players_off": ["vibix"]}}
-    assert drain(sub) == [("series.source.updated", SourceEvent(series_id=made.series_id,
-                                                                source_id=made.source_id).model_dump())]
+    told = drain(sub)
     stored = (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[0]
+    assert told == [("series.source.updated", {"series_id": made.series_id, "source_id": made.source_id, "source": stored})]
     assert (stored["parser_profile_id"], stored["vibix_season"], stored["players_off"]) == (2, 3, ["vibix"])
 
 

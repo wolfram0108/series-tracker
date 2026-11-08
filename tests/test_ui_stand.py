@@ -8,31 +8,9 @@ from playwright.async_api import expect
 
 from app_stand import STAND_LIMIT_S
 from plan_world import truth_of
-from ui_stand import UiStand, text
+from ui_stand import SERIES, text, ui  # noqa: F401 - the fixture
 
 pytestmark = pytest.mark.ui
-
-SERIES, SERIES_EN = "Сериал", "Serial"
-SINGLE = [{"type": "text", "value": "Серия"}, {"type": "whitespace"}, {"type": "number"}]
-SPAN = [{"type": "text", "value": "Серии"}, {"type": "whitespace"}, {"type": "number"}, {"type": "text", "value": "-"},
-        {"type": "number"}]
-
-
-def lines_of(voice: str) -> list[dict]:
-    """The rules a user makes for a source of one voice-over: an episode and a compilation, each of its own form."""
-    return [{"name": "компиляция", "if": SPAN, "then": [("extract_range", SPAN), ("assign_voiceover", voice)]},
-            {"name": "серия", "if": SINGLE, "then": [("extract_single", SINGLE), ("assign_voiceover", voice)]}]
-
-
-@pytest.fixture
-async def ui(tmp_path):
-    made = UiStand(str(tmp_path))
-    await made.start()
-    await made.open()
-    yield made
-    await made.shut()
-    await made.stop()
-    made.close()
 
 
 async def series_in_browser(ui, episodes=(1, 2)) -> int:
@@ -43,12 +21,7 @@ async def series_in_browser(ui, episodes=(1, 2)) -> int:
     for number in episodes:
         ui.site.episode("ref", number, height=720)
         ui.site.episode("dub", number, height=480)
-    await ui.first_run()
-    await ui.set_up(["AniStar", "AnimeVost"])
-    for voice in ("AniStar", "AnimeVost"):
-        await ui.profile(f"серии {voice}", lines_of(voice))
-    return await ui.add_series(SERIES, SERIES_EN, [(ui.site.releases["ref"].url, "серии AniStar"),
-                                                  (ui.site.releases["dub"].url, "серии AnimeVost")])
+    return await ui.make_series(["ref", "dub"])
 
 
 async def test_a_series_made_in_the_browser_is_synced_by_its_button_and_its_files_are_shown(ui):

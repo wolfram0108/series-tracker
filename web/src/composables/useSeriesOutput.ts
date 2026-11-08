@@ -8,7 +8,7 @@ import { reasonText } from "../lib/reason"
 import { useCompositionStore } from "../stores/composition"
 import { useSeriesStore } from "../stores/series"
 import { usePlanStore } from "../stores/plan"
-import { fileOf, planCuts, planDubs, planFiles, planNames, trackOf, type CompilationKey } from "../lib/plan"
+import { fileOf, planCuts, planDubs, planFiles, planNames, seasonVoiceOrders, trackOf, type CompilationKey } from "../lib/plan"
 import {
   deleteFromPlan, fetchComposition, fetchPlan, fetchQueues, resetFailures,
   resetLever, setLever, setVoiceOrder, switchOutput, syncSeries, type Composition, type MediaFile,
@@ -38,8 +38,10 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     return (row) => keys.get(`${row.source_id}:${row.row_key}`) ?? JSON.stringify(row)
   })
   // The order of the voice-overs of every season: a voice-over of it the plan cannot get for an episode is absent there.
+  // The order of the tracks of every season: the layout's, and the voice-overs the files hold that no source gives any more.
+  const voiceOrders = computed(() => seasonVoiceOrders(composition.value?.voice_orders ?? [], plan.forSeries(seriesId)))
   const seasonVoices = computed<Record<number, string[]>>(() => Object.fromEntries(
-    (composition.value?.voice_orders ?? []).map((each) => [each.season, (each.voices ?? []).map((voice) => voice.label)] as const)))
+    voiceOrders.value.map((each) => [each.season, (each.voices ?? []).map((voice) => voice.label)] as const)))
   // A video series has not been read yet when it is shown first: the window must not say "nothing here" for that moment.
   const loading = ref(kind === "video")
   const failure = ref<string | null>(null)
@@ -118,7 +120,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const retryFailed = (): Promise<string | null> => act(() => resetFailures(seriesId), busy)
 
   // The order of the voice-overs of a season (the tracks of its containers); the new order comes back as an event.
-  const voiceOrders = computed(() => composition.value?.voice_orders ?? [])
   const order = (season: number, labels: string[]): Promise<string | null> =>
     act(() => setVoiceOrder(seriesId, { season, labels }), busy)
 

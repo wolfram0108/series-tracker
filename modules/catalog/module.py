@@ -240,7 +240,7 @@ class CatalogModule(BaseModule):
         self.publish_event("series.added", row)
         # The first sources are sources that appeared like any added later, so consumers need no second rule.
         for source in row["sources"]:
-            self._publish_source("added", series_id, source["id"])
+            await self._publish_source("added", series_id, source["id"])
         return row
 
     def _require_free(self, series_id: int) -> None:
@@ -302,7 +302,7 @@ class CatalogModule(BaseModule):
                            + [draft["source_type"]])
         source_id = await self.repo.add_source(series_id, draft)
         self.log.info("сериал %d: добавлен источник %d", series_id, source_id)
-        self._publish_source("added", series_id, source_id)
+        await self._publish_source("added", series_id, source_id)
         return {"id": source_id}
 
     async def on_source_update(self, env: Envelope) -> dict:
@@ -319,7 +319,7 @@ class CatalogModule(BaseModule):
         applied = {name: value for name, value in values.items() if value != stored[name]}
         if applied:
             await self.repo.update_source(source_id, applied)
-            self._publish_source("updated", stored["series_id"], source_id)
+            await self._publish_source("updated", stored["series_id"], source_id)
         return {"applied": applied}
 
     async def on_source_remove(self, env: Envelope) -> dict:
@@ -332,7 +332,7 @@ class CatalogModule(BaseModule):
             await self._require_source(source_id)
             raise ValueError(reason("last_source", series_id=stored["series_id"], source_id=source_id))
         self.log.info("сериал %d: удалён источник %d", stored["series_id"], source_id)
-        self._publish_source("removed", stored["series_id"], source_id)
+        await self._publish_source("removed", stored["series_id"], source_id)
         return {"ok": True}
 
     async def _require_series(self, series_id: int) -> None:
@@ -350,9 +350,11 @@ class CatalogModule(BaseModule):
             raise LookupError(f"источник {source_id} не найден")
         return source
 
-    def _publish_source(self, what: str, series_id: int, source_id: int) -> None:
+    async def _publish_source(self, what: str, series_id: int, source_id: int) -> None:
+        """After the write: the source as it is stored now travels with the event (none for one that went)."""
+        source = None if what == "removed" else await self.repo.get_source(source_id)
         self.publish_event(f"series.source.{what}",
-                           SourceEvent(series_id=series_id, source_id=source_id).model_dump())
+                           SourceEvent(series_id=series_id, source_id=source_id, source=source).model_dump(mode="json"))
 
     def on_series_purged(self, env: Envelope) -> None:
         """Отчёт владельца: его таблицы вычищены; последний отчёт будит ожидающего каскад."""

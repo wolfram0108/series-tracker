@@ -1,9 +1,11 @@
 import type { components } from "../api/schema"
 import type { MediaFile } from "../composables/outputCalls"
+import { spansOf } from "./output"
 
 type Schemas = components["schemas"]
 export type PlannerView = Schemas["PlannerView"]
 export type PlanRowRef = Schemas["PlanRowRef"]
+export type SeasonVoiceOrder = Schemas["SeasonVoiceOrder"]
 
 /** The state of a voice-over of an episode as the strip of the episode shows it. */
 export type DubState = "done" | "downloading" | "download_queued" | "align_queued" | "running" | "planned" | "error" | "absent" | "off"
@@ -42,6 +44,29 @@ const partOf = (slot: number[]): number | null => (slot.length > 2 ? slot[2] : n
 /** The slot of a row and the slot of an episode name the same video: the same episode and the same part, or no part. */
 const sameSlot = (row: number[], episode: number[]): boolean =>
   row[0] === episode[0] && row[1] === episode[1] && partOf(row) === partOf(episode)
+
+/** The order of the voice-overs of every season as the window shows it: the layout's, then the voice-overs the files of the
+ *  season hold by the plan that no source gives any more (a source taken out, a compilation gone), in the order the plan
+ *  meets them, each with the episodes that hold it: no track of a file is left out of the window. */
+export function seasonVoiceOrders(orders: readonly SeasonVoiceOrder[], view: PlannerView | undefined): SeasonVoiceOrder[] {
+  const held = new Map<number, Map<string, number[]>>()
+  for (const goal of view?.episodes ?? []) {
+    const [season, episode] = goal.slot
+    const voices = held.get(season) ?? new Map<string, number[]>()
+    held.set(season, voices)
+    for (const voice of [goal.video.group ?? "", ...(goal.tracks ?? []).map((track) => track.voice)]) {
+      if (voice) voices.set(voice, [...(voices.get(voice) ?? []), episode])
+    }
+  }
+  const seasons = [...new Set([...orders.map((each) => each.season), ...held.keys()])].sort((a, b) => a - b)
+  return seasons.map((season) => {
+    const known = orders.find((each) => each.season === season)?.voices ?? []
+    const named = new Set(known.map((voice) => voice.label))
+    const more = [...(held.get(season) ?? new Map<string, number[]>()).entries()]
+      .filter(([voice]) => !named.has(voice)).map(([label, episodes]) => ({ label, episodes: spansOf(episodes) }))
+    return { season, voices: [...known, ...more] }
+  })
+}
 
 /** The file of an episode as the plan makes it: the name its goal has, by the slot of the episode. */
 export interface PlanName {
@@ -115,7 +140,7 @@ export function planFiles(view: PlannerView | undefined, keyOf: CompilationKey =
     const cut = held?.video.cut_of ? { key: keyOf(held.video.cut_of) } : null
     const pending = goal.video.kind === "cut" && goal.video.cut_of ? { key: keyOf(goal.video.cut_of) } : null
     return { unique_id: `${goal.slot.join(":")}`, source_id: row.source_id, row_key: row.row_key, status, cut,
-             pending_cut: pending }
+             pending_cut: pending, online: goal.video.kind === "asset" ? held?.video.online ?? null : true }
   })
 }
 

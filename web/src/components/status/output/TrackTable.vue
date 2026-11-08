@@ -47,8 +47,8 @@ const rows = computed(() => {
       cell, sourceId, part: line?.part ?? null,
       where: line && (line.playerLabel ?? line.player) ? `${line.playerLabel ?? line.player}${height}` : "",
       note: detail ? reasonText(detail) : "", action, pill,
-      // The source forgot the row the track came from: the file keeps it, with where it came from (an offline row).
-      offline: !cell.isReference && line?.dub?.online === false,
+      // The source forgot the row the video or the track came from: the file keeps it, with where it came from (an offline row).
+      offline: line?.online === false,
     }
   })
 })

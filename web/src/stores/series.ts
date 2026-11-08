@@ -3,6 +3,8 @@ import { ref } from "vue"
 import { api } from "../api/client"
 import type { components } from "../api/schema"
 
+type SeriesSource = components["schemas"]["SeriesSource"]
+
 /** Серия. Контракт бэка — extra="allow", поэтому помимо явных полей могут
  *  приходить и другие (tmdb_info, tracker_info, …) — отсюда index-signature. */
 export interface Series {
@@ -49,6 +51,16 @@ export const useSeriesStore = defineStore("series", () => {
     if ("is_busy" in delta && !delta.is_busy) savingIds.value.delete(delta.id)
   }
 
+  /** A source of a series added, changed or taken out (series_sources_changed): the packet carries the source as it is
+   *  stored now, none for one that went; the list stays in the order of the series. */
+  function applySource(packet: { series_id: number; source_id: number; source?: SeriesSource | null }): void {
+    const s = byId(packet.series_id)
+    if (!s) return
+    const others = (s.sources ?? []).filter((each) => each.id !== packet.source_id)
+    s.sources = packet.source
+      ? [...others, packet.source].sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.id - b.id) : others
+  }
+
   /** series_added: полный объект (вставка или замена по id). */
   function upsert(s: Series): void {
     const i = list.value.findIndex((x) => x.id === s.id)
@@ -71,5 +83,5 @@ export const useSeriesStore = defineStore("series", () => {
     return savingIds.value.has(id)
   }
 
-  return { list, savingIds, byId, load, applyDelta, upsert, remove, markSaving, isSaving }
+  return { list, savingIds, byId, load, applyDelta, applySource, upsert, remove, markSaving, isSaving }
 })

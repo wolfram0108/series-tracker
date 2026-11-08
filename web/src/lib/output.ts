@@ -345,6 +345,8 @@ export interface OutputLine {
   height: number | null
   file: string | null
   dub: VoiceDub | null
+  /** Whether a source gives the row now; false: the file keeps what its source forgot (an offline row). */
+  online: boolean | null
 }
 
 /** The reference of each part of the episode first, then its voice-overs: each with the player it comes from and the best
@@ -363,7 +365,7 @@ export function outputLines(view: EpisodeView): OutputLine[] {
     lines.push({
       key: `reference:${reference.part ?? 0}`, kind: "reference", group: reference.voice_group ?? "", part: reference.part ?? null,
       player, playerLabel: labelOf(reference.source_id ?? null, player), height: reference.height ?? null,
-      file: file?.status ?? null, dub: null,
+      file: file?.status ?? null, dub: null, online: file?.online ?? null,
     })
   }
   for (const dub of view.dubs) {
@@ -372,7 +374,7 @@ export function outputLines(view: EpisodeView): OutputLine[] {
     const variant = variants.find((each) => each.group === dub.voice_label && each.sourceId === sourceId && each.player === player)
     lines.push({
       key: `dub:${dub.part ?? 0}:${dub.voice_key}`, kind: "dub", group: dub.voice_label, part: dub.part ?? null,
-      player, playerLabel: labelOf(sourceId, player), height: variant?.height ?? null, file: null, dub,
+      player, playerLabel: labelOf(sourceId, player), height: variant?.height ?? null, file: null, dub, online: dub.online,
     })
   }
   return lines

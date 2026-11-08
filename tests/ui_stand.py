@@ -10,12 +10,35 @@ import re
 import socket
 from pathlib import Path
 
+import pytest
 import uvicorn
 from playwright.async_api import Page, async_playwright, expect
 
 from app_stand import AppStand
 
 CATALOG = Path(__file__).resolve().parent.parent / "web" / "src" / "i18n" / "ru.ts"
+SERIES, SERIES_EN = "Сериал", "Serial"
+SINGLE = [{"type": "text", "value": "Серия"}, {"type": "whitespace"}, {"type": "number"}]
+SPAN = [{"type": "text", "value": "Серии"}, {"type": "whitespace"}, {"type": "number"}, {"type": "text", "value": "-"},
+        {"type": "number"}]
+
+
+def lines_of(voice: str) -> list[dict]:
+    """The rules a user makes for a source of one voice-over: an episode and a compilation, each of its own form."""
+    return [{"name": "компиляция", "if": SPAN, "then": [("extract_range", SPAN), ("assign_voiceover", voice)]},
+            {"name": "серия", "if": SINGLE, "then": [("extract_single", SINGLE), ("assign_voiceover", voice)]}]
+
+
+@pytest.fixture
+async def ui(tmp_path):
+    """The stand with its interface and a browser; a test module takes it by importing it."""
+    made = UiStand(str(tmp_path))
+    await made.start()
+    await made.open()
+    yield made
+    await made.shut()
+    await made.stop()
+    made.close()
 SHOTS = os.environ.get("ST_UI_SHOTS")  # a folder for a picture of the screen at every step a scenario names, when given
 
 
@@ -199,9 +222,49 @@ class UiStand(AppStand):
         listed = await self.call("GET", "/api/series")
         return next(each["id"] for each in listed if each["name"] == name)
 
-    async def open_output(self, name: str) -> None:
+    async def make_series(self, slugs: list[str], also: tuple[str, ...] = ()) -> int:
+        """The user's way to a series of the releases of these slugs: first start, the service, the groups of their
+        voice-overs (and of `also`: voice-overs of sources added later), a profile of each in the constructor, the series
+        in its window with a source per release."""
+        voices = list(dict.fromkeys([self.site.releases[slug].voice for slug in slugs] + list(also)))
+        await self.first_run()
+        await self.set_up(voices)
+        for voice in voices:
+            await self.profile(f"серии {voice}", lines_of(voice))
+        return await self.add_series(SERIES, SERIES_EN, [(self.site.releases[slug].url, f"серии {self.site.releases[slug].voice}")
+                                                        for slug in slugs])
+
+    async def tab(self, title: str) -> None:
+        await self.page.locator(f".st-tab[title='{title}']").click()
+
+    async def add_source(self, slug: str) -> None:
+        """A source added to the series in its properties: its address, then the profile of its voice-over; the table is
+        read before the source counts."""
+        page = self.page
+        release = self.site.releases[slug]
+        await self.tab("Свойства")
+        cards = page.locator(".source-card")
+        before = await cards.count()
+        await page.get_by_label(text("sources.add.label")).fill(release.url)
+        await page.locator(".source-add button.btn-add", has_text=text("sources.add.button")).click()
+        await expect(cards).to_have_count(before + 1)
+        card = cards.nth(before)
+        await _pick(page, card.locator(".item-select").first, f"серии {release.voice}")
+        await expect(card.locator(".source-state")).to_have_text(text("sources.state.ready"), timeout=60_000)
+
+    async def remove_source(self, slug: str) -> None:
+        """A source taken out of the series in its properties («Удалить» on its card): at once, by its own request."""
+        page = self.page
+        await self.tab("Свойства")
+        cards = page.locator(".source-card")
+        before = await cards.count()
+        card = cards.filter(has=page.locator(f"input[value='{self.site.releases[slug].url}']"))
+        await card.locator(".source-remove").click()
+        await expect(cards).to_have_count(before - 1)
+
+    async def open_output(self, name: str = SERIES) -> None:
         await self.page.locator(".series-card", has_text=name).first.locator("[title='Статус']").click()
-        await self.page.locator(f".st-tab[title='{text('output.tab')}']").click()
+        await self.tab(text("output.tab"))
 
     async def press_sync(self, series_id: int) -> None:
         """«Синхронизировать» in the section «Выход», to the end of the run the service tells (the world's signal: the

@@ -91,7 +91,7 @@ describe("useSeriesOutput", () => {
       season: 1, episode: 2, references: [reference()], rows: [row()],
       levers: [{ lever: "voice.take", target: groupTarget("Ruchime"), value: true, level: "episode" }],
       dubs: [expect.objectContaining({ voice_label: "AniStar", state: "running", source_id: 8, player: "kodik" })],
-      files: [{ unique_id: "1:2", source_id: 7, row_key: "row", status: "completed", cut: null, pending_cut: null }],
+      files: [{ unique_id: "1:2", source_id: 7, row_key: "row", status: "completed", cut: null, pending_cut: null, online: true }],
       labels: { "7:vk": "VK" },
       availability: composition().availability,
     }])

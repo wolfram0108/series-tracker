@@ -73,3 +73,21 @@ describe("seriesStore merge-логика", () => {
     expect(store.isSaving(1)).toBe(false)
   })
 })
+
+describe("the sources of a series in the store", () => {
+  beforeEach(() => setActivePinia(createPinia()))
+  const source = (id: number, position: number) =>
+    ({ id, series_id: 1, position, url: `https://a/${id}`, source_type: "web_video" as const, color: id, parser_profile_id: null, vibix_season: null })
+
+  it("takes a source added or changed from the packet, in the order of the series, and drops one that went", () => {
+    const store = useSeriesStore()
+    store.list = [mk(1, { sources: [source(1, 0), source(2, 1)] })]
+    store.applySource({ series_id: 1, source_id: 3, source: source(3, 2) })
+    store.applySource({ series_id: 1, source_id: 1, source: { ...source(1, 5), url: "https://a/moved" } })
+    expect(store.list[0].sources!.map((each) => [each.id, each.url])).toEqual([[2, "https://a/2"], [3, "https://a/3"], [1, "https://a/moved"]])
+    store.applySource({ series_id: 1, source_id: 2, source: null })
+    expect(store.list[0].sources!.map((each) => each.id)).toEqual([3, 1])
+    store.applySource({ series_id: 9, source_id: 3, source: null })
+  })
+})
+

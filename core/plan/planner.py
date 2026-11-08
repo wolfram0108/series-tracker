@@ -14,7 +14,13 @@ The work comes in two phases. The operations run first, beside the old files. On
 episodes that share files has succeeded is the group applied: new containers take their names, what the goal holds anew
 goes, what nothing carries stays hidden (`.off`). A file goes only when everything in it lives on in the goal or the user
 said so: «Удалить», or a voice-over taken off the episode (a track cannot be hidden: switched off, it is removed). A video
-the user deleted goes only for another video of its episode: with none, nothing changes."""
+the user deleted goes only for another video of its episode: with none, nothing changes.
+
+«Удалить» names what goes and nothing more: a deleted video is no longer the picture of its episode, a deleted track is not
+taken as it is while it can be made anew. What the file holds stays a source to align from: a voice-over with no other way —
+the own sound of the deleted video, a track no source gives any more — is aligned out of it, and the file goes only when
+nothing in it is needed (a voice-over is lost only when the user switches it off). What cannot be made anew yet stays as it
+is, and the command waits."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -96,8 +102,7 @@ class Op:
 class Group:
     """Episodes and files that share work: applied together once every operation of theirs has succeeded. `kept` are
     goals an existing file already is (renamed if its name differs), `built` the goals built anew, `remove` the files
-    that go, `hide` the files nothing carries (they stay, hidden: old name, new name), `lost` the tracks that go with a video the user
-    deleted for another one, having no way onto it."""
+    that go, `hide` the files nothing carries (they stay, hidden: old name, new name)."""
 
     slots: tuple[Slot, ...]
     ops: tuple[str, ...]
@@ -105,7 +110,6 @@ class Group:
     built: tuple[Slot, ...]
     remove: tuple[str, ...]
     hide: tuple[tuple[str, str], ...]
-    lost: tuple[tuple[str, RowId], ...]
 
 
 @dataclass(frozen=True)
@@ -196,19 +200,21 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
         here = video_slot(container.video)
         by_slot.files.setdefault(here, []).append(container)
         by_slot.tracks.setdefault(here, [])
+    # Every sound of every file, with whether it may be taken as it is: not the own sound of a deleted video, not a deleted
+    # track. Those stay sources to align from (the module docstring: «Удалить»).
     for container in containers:
-        if container.name not in deleted_videos:
-            by_slot.tracks.setdefault(video_slot(container.video), []).append((container, own_track(container), True))
+        by_slot.tracks.setdefault(video_slot(container.video), []).append(
+            (container, own_track(container), True, container.name in deleted_videos))
         for track in container.tracks:
-            if (container.name, track.dub) not in deleted_tracks:
-                by_slot.tracks.setdefault(track_slot(track), []).append((container, track, False))
+            by_slot.tracks.setdefault(track_slot(track), []).append(
+                (container, track, False, (container.name, track.dub) in deleted_tracks))
 
     slots = sorted(set(by_slot.rows) | set(by_slot.files))
     namer = namer or (lambda slot, video, off: name_of(slot, video.snapshot, off))
     goals = [goal for slot in slots if (goal := _goal(slot, inputs, namer, by_slot, criteria, position,
                                                       group_rank)) is not None]
     ops = _ops(goals, containers)
-    groups = _groups(goals, ops, containers, deleted_videos, deleted_tracks, video_slot, track_slot,
+    groups = _groups(goals, ops, containers, deleted_videos, video_slot, track_slot,
                      lambda track, slot: switched_off(choices, track, slot))
     return Plan(tuple(goals), tuple(ops), tuple(groups))
 
@@ -219,7 +225,8 @@ class Index:
     def __init__(self) -> None:
         self.rows: dict[Slot, list[OnlineRow]] = {}
         self.files: dict[Slot, list[Container]] = {}
-        self.tracks: dict[Slot, list[tuple[Container, Track, bool]]] = {}
+        # (file, track, the own sound of its video, deleted: not to be taken as it is)
+        self.tracks: dict[Slot, list[tuple[Container, Track, bool, bool]]] = {}
         self.compilations: list[OnlineRow] = []
         self.deleted: set[str] = set()  # the files of the videos the user deleted
 
@@ -296,7 +303,7 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank) -
                 voices.setdefault(row.group, [])
     held_tracks = [each for each in by_slot.tracks.get(slot, []) if not (each[2] and each[0] is video.container)
                    and not switched_off(choices, each[1], slot)]
-    for container, track, _ in held_tracks:
+    for container, track, _, _ in held_tracks:
         voice = voice_of(track.group, track.dub)
         if voice != own:
             voices.setdefault(voice, [])
@@ -304,10 +311,10 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank) -
     tracks: list[TrackWay] = []
     for voice in sorted(voices, key=group_rank):
         mine = [each for each in held_tracks if voice_of(each[1].group, each[1].dub) == voice]
-        reuse = sorted((each for each in mine if each[1].aligned_to == video.timeline),
+        reuse = sorted((each for each in mine if each[1].aligned_to == video.timeline and not each[3]),
                        key=lambda each: (each[0] is not video.container, each[2], each[0].name))
         if reuse:
-            container, track, is_own = reuse[0]
+            container, track, is_own, _ = reuse[0]
             tracks.append(TrackWay(voice, track.dub, track.snapshot, "reuse", container=container, own=is_own))
             continue
         preferred = choices.voice_order.get((episode, voice), ())
@@ -321,10 +328,17 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank) -
         if rows:
             tracks.append(TrackWay(voice, rows[0].id, rows[0].snapshot(), "download", row=rows[0]))
             continue
-        mine = [each for each in mine if ("align", each[1].dub, video.timeline) not in inputs.failed]
-        if mine and not idle:
-            container, track, is_own = sorted(mine, key=lambda each: (each[2], each[0].name, each[1].dub))[0]
+        sources = [each for each in mine if ("align", each[1].dub, video.timeline) not in inputs.failed]
+        if sources and not idle:
+            container, track, is_own, _ = sorted(sources, key=lambda each: (each[2], each[0].name, each[1].dub))[0]
             tracks.append(TrackWay(voice, track.dub, track.snapshot, "realign", container=container, own=is_own))
+            continue
+        # «Удалить» waits while what it names cannot be made anew: the deleted track stays as it is.
+        waiting = sorted((each for each in mine if each[1].aligned_to == video.timeline),
+                         key=lambda each: (each[0] is not video.container, each[2], each[0].name))
+        if waiting:
+            container, track, is_own, _ = waiting[0]
+            tracks.append(TrackWay(voice, track.dub, track.snapshot, "reuse", container=container, own=is_own))
     return Goal(slot, video, tuple(tracks), namer(slot, video, off), off, frozenset(taken_off))
 
 
@@ -408,7 +422,7 @@ def _ops(goals: Iterable[Goal], containers) -> list[Op]:
     return list(ops.values())
 
 
-def _groups(goals, ops, containers, deleted_videos, deleted_tracks, video_slot, track_slot, taken_off) -> list[Group]:
+def _groups(goals, ops, containers, deleted_videos, video_slot, track_slot, taken_off) -> list[Group]:
     parent: dict[str, str] = {}
     slot_of: dict[str, Slot] = {}
 
@@ -450,16 +464,14 @@ def _groups(goals, ops, containers, deleted_videos, deleted_tracks, video_slot, 
     kept_names = {container.name for container in kept.values()}
     used_tracks = {(way.container.name, way.dub, way.own) for goal in goals for way in goal.tracks if way.container is not None}
     used_videos = {goal.video.container.name for goal in goals if goal.video.container is not None}
-    remove, hide, lost = set(), set(), []
+    remove, hide = set(), set()
     for container in containers:
         if container.name in kept_names:
             continue
-        video_deleted = container.name in deleted_videos
-        video_ok = video_deleted or video_slot(container.video) in by_slot
-        video_used = container.name in used_videos
-        tracks_ok, gone_with_video = True, []
+        video_ok = container.name in deleted_videos or video_slot(container.video) in by_slot
+        tracks_ok = True
         sounds = [(track, False) for track in container.tracks]
-        if not video_deleted and not video_used:
+        if container.name not in used_videos:
             sounds.append((own_track(container), True))
         for track, is_own in sounds:
             voice = voice_of(track.group, track.dub)
@@ -470,15 +482,11 @@ def _groups(goals, ops, containers, deleted_videos, deleted_tracks, video_slot, 
             replaced = goal is not None and (voice_of(goal.video.snapshot.group, goal.video.timeline) == voice or any(
                 way.voice == voice and not (way.container is container and way.dub == track.dub and way.own == is_own)
                 for way in goal.tracks))
-            deleted = (container.name, track.dub) in deleted_tracks or taken_off(track, here)
-            if not (used or replaced or deleted):
-                if video_deleted:
-                    gone_with_video.append((container.name, track.dub))
-                else:
-                    tracks_ok = False
+            # Only a voice-over the user took off goes with nothing in its place; «Удалить» does not take a sound away.
+            if not (used or replaced or taken_off(track, here)):
+                tracks_ok = False
         if video_ok and tracks_ok:
             remove.add(container.name)
-            lost += gone_with_video
         elif HIDDEN not in container.name:
             hide.add(container.name)
 
@@ -506,6 +514,5 @@ def _groups(goals, ops, containers, deleted_videos, deleted_tracks, video_slot, 
             slots=tuple(slots), ops=mine,
             kept=tuple((slot, kept[slot].name) for slot in slots if slot in kept),
             built=tuple(slot for slot in slots if slot in by_slot and slot not in kept),
-            remove=tuple(sorted(files & remove)), hide=tuple((name, hidden[name]) for name in sorted(files & hide)),
-            lost=tuple(sorted((name, dub) for name, dub in lost if name in files))))
+            remove=tuple(sorted(files & remove)), hide=tuple((name, hidden[name]) for name in sorted(files & hide))))
     return sorted(groups, key=lambda each: each.slots)

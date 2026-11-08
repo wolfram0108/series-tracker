@@ -86,7 +86,7 @@ class FakeCatalog(BaseModule):
             name: value for name, value in fields.items() if name != "position"})}
         made["position"] = fields.get("position", made["position"])
         sources.append(made)
-        self.publish_event("series.source.added", {"series_id": series_id, "source_id": made["id"]})
+        self.publish_event("series.source.added", {"series_id": series_id, "source_id": made["id"], "source": dict(made)})
         return made["id"]
 
     def find(self, source_id: int) -> dict:
@@ -95,12 +95,14 @@ class FakeCatalog(BaseModule):
     def update_source(self, source_id: int, **fields) -> None:
         found = self.find(source_id)
         found.update(fields)
-        self.publish_event("series.source.updated", {"series_id": found["series_id"], "source_id": source_id})
+        self.publish_event("series.source.updated", {"series_id": found["series_id"], "source_id": source_id,
+                                                     "source": dict(found)})
 
     def remove_source(self, source_id: int) -> None:
         found = self.find(source_id)
         self.series[found["series_id"]]["sources"].remove(found)
-        self.publish_event("series.source.removed", {"series_id": found["series_id"], "source_id": source_id})
+        self.publish_event("series.source.removed", {"series_id": found["series_id"], "source_id": source_id,
+                                                     "source": None})
 
     def set_season(self, series_id: int, season) -> None:
         self.series[series_id]["season"] = season

@@ -256,7 +256,8 @@ class World(SeriesSync):
             assert own not in voices, f"{container.name}: the own sound is also a track"
             for track in container.tracks:
                 assert track.aligned_to == container.video.timeline, f"{container.name}: a track out of sync"
-        # Nothing goes but what the goal holds anew or what the user deleted or took off the episode.
+        # Nothing goes but what the goal holds anew or what the user took off the episode: «Удалить» takes the video it
+        # names away, never a sound — a voice-over of a deleted file or a deleted track lives on, made anew.
         standing = {_slot_of_video(each.video, online) for each in step.after}
         deleted = step.choices.delete
         for container in step.before:
@@ -266,7 +267,7 @@ class World(SeriesSync):
                     f"the video of {container.name} went with nothing in its place"
             for track in container.tracks:
                 voice, here = voice_of(track.group, track.dub), slot_of_track(track)
-                if commanded or ("track", container.name, track.dub) in deleted or switched_off(step.choices, track, here):
+                if switched_off(step.choices, track, here):
                     continue
                 # It lives on: the same track anywhere, or its voice-over in the container of its episode — as a track
                 # or as the own sound of the video.
@@ -276,10 +277,10 @@ class World(SeriesSync):
                     voice_of(other.video.snapshot.group, other.video.timeline) == voice
                     and _slot_of_video(other.video, online) == here for other in step.after)
                 assert lives, f"the track {voice} of {container.name} went with nothing in its place"
-        # The own sound of a video that went lives on: the same video elsewhere, or its voice-over in the container of its
-        # episode (as the own sound or as a track).
+        # The own sound of a video that went lives on — a deleted one's too: the same video elsewhere, or its voice-over in
+        # the container of its episode (as the own sound or as a track).
         for container in step.before:
-            if ("video", container.name) in deleted or any(each.video.key == container.video.key for each in step.after):
+            if any(each.video.key == container.video.key for each in step.after):
                 continue
             voice = voice_of(container.video.snapshot.group, container.video.timeline)
             here = _slot_of_video(container.video, online)

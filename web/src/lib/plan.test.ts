@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { fileOf, planCuts, planDubs, planFiles, trackOf } from "./plan"
+import { fileOf, planCuts, planDubs, planFiles, seasonVoiceOrders, trackOf } from "./plan"
 import { asset, assetTrack, goal, goalTrack, goalVideo, planView, rowRef } from "./plan.fixtures"
 
 describe("planDubs", () => {
@@ -86,8 +86,16 @@ describe("planFiles", () => {
       episodes: [goal([1, 2], goalVideo("asset", rowRef(7, "r2"), "S01E02.mp4"))],
     })
     expect(planFiles(view)).toEqual([{
-      unique_id: "1:2", source_id: 7, row_key: "r2", status: "completed", cut: null, pending_cut: null,
+      unique_id: "1:2", source_id: 7, row_key: "r2", status: "completed", cut: null, pending_cut: null, online: true,
     }])
+  })
+
+  it("tells a held video whose row the source forgot as offline, and a video to download as online", () => {
+    const view = planView({
+      assets: [{ ...asset("S01E01.mp4", rowRef(7, "r1")), video: { ...asset("S01E01.mp4", rowRef(7, "r1")).video, online: false } }],
+      episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "S01E01.mp4")), goal([1, 2], goalVideo("download", rowRef(7, "r2"), null))],
+    })
+    expect(planFiles(view).map((file) => file.online)).toEqual([false, true])
   })
 
   it("makes a download that failed an error, one under way downloading while the sync runs, and one not reached pending", () => {
@@ -182,5 +190,21 @@ describe("fileOf and trackOf", () => {
     expect(trackOf(view, "S01E02.mp4", "Nobody")).toBeNull()
     expect(trackOf(view, "S01E09.mp4", "AniStar")).toBeNull()
     expect(trackOf(undefined, "S01E02.mp4", "AniStar")).toBeNull()
+  })
+})
+
+describe("seasonVoiceOrders", () => {
+  it("keeps the order of the layout and puts after it the voice-overs the files hold that no source gives any more", () => {
+    const view = planView({ episodes: [
+      goal([1, 1], { ...goalVideo("asset", rowRef(1, "r1"), "a.mkv"), group: "Gone" }, [goalTrack("B", "reuse", rowRef(2, "b1"))]),
+      goal([1, 2], { ...goalVideo("asset", rowRef(1, "r2"), "b.mkv"), group: "Gone" }, [goalTrack("Old", "reuse", rowRef(3, "o2"))]),
+      goal([2, 1], goalVideo("download", rowRef(4, "n1"), null), [goalTrack("B", "download", rowRef(2, "b9"))]),
+    ] })
+    expect(seasonVoiceOrders([{ season: 1, voices: [{ label: "B", episodes: "1–2" }] }], view)).toEqual([
+      { season: 1, voices: [{ label: "B", episodes: "1–2" }, { label: "Gone", episodes: "1–2" }, { label: "Old", episodes: "2" }] },
+      { season: 2, voices: [{ label: "B", episodes: "1" }] },
+    ])
+    expect(seasonVoiceOrders([{ season: 1, voices: [{ label: "B", episodes: "1" }] }], undefined))
+      .toEqual([{ season: 1, voices: [{ label: "B", episodes: "1" }] }])
   })
 })

@@ -26,6 +26,8 @@ export interface MediaFile {
   /** The video of the container in place, and the one the next build puts in, when cut out of a compilation. */
   cut?: CutOf | null
   pending_cut?: CutOf | null
+  /** Whether a source gives the row of the video now; false: the file keeps a video its source forgot. */
+  online?: boolean | null
 }
 
 

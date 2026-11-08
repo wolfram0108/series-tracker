@@ -177,7 +177,58 @@ def test_delete_of_an_offline_reference_takes_the_next_video_and_keeps_the_voice
     world.check(step)
     video, tracks = kinds(step, (1, 1))
     assert video == "download" and tracks == {"G1": "download", "G2": "realign"}
-    assert not any(group.lost for group in step.plan.groups)
+
+
+def test_delete_of_a_reference_whose_sound_no_source_gives_aligns_that_sound_out_of_the_old_file():
+    """«Удалить» names the video, not its sound: the own sound of the deleted video, which no source gives any more, is
+    aligned out of the old file onto the new video; only then the old file goes."""
+    world = World()
+    episode_with_dubs(world, 1, 1)
+    world.put(3, "other1", 1, group="Other", player="cvh")
+    world.drop(1, "ref1")
+    old = container_of(world, 1).name
+    world.delete("video", old)
+    step = world.sync("удалить референс, звук которого есть только в файле")
+    world.check(step)
+    video, tracks = kinds(step, (1, 1))
+    assert video == "download" and tracks == {REF: "realign", "G1": "download"}
+    (container,) = world.containers.values()
+    assert container.video.id.row_key == "other1" and sorted(track.group for track in container.tracks) == [REF, "G1"]
+
+
+def test_a_track_its_source_forgot_remade_by_the_user_is_aligned_anew_out_of_its_file():
+    world = World()
+    episode_with_dubs(world, 1, 1)
+    world.drop(2, "g1e1")
+    world.delete("track", container_of(world, 1).name, RowId(2, "g1e1", "g1e1"))
+    step = world.sync("пересоздать офлайн-дорожку")
+    world.check(step)
+    assert kinds(step, (1, 1))[1] == {"G1": "realign"}
+    assert [track.group for track in container_of(world, 1).tracks] == ["G1"]
+
+
+def test_a_sound_that_could_not_be_aligned_out_of_a_deleted_file_keeps_the_file():
+    """The file of a deleted video is needed while a sound in it has no other way: the alignment out of it failed, so the
+    new video comes in and the old file stays, hidden, holding the sound until the failures are reset."""
+    world = World()
+    episode_with_dubs(world, 1, 1)
+    world.put(3, "other1", 1, group="Other", player="cvh")
+    world.drop(1, "ref1")
+    world.delete("video", container_of(world, 1).name)
+    world.answers[((1, 1), REF)] = "mismatch"
+    step = world.sync("выравнивание из удаляемого файла не удалось")
+    world.check(step)
+    step = world.sync("следующая синхронизация")
+    world.check(step)
+    assert any(REF in (container.video.snapshot.group, *(t.group for t in container.tracks))
+               for container in world.containers.values())
+    world.reset_failures()
+    world.answers.clear()
+    step = world.settle()
+    world.check(step)
+    assert len(world.containers) == 1
+    (container,) = world.containers.values()
+    assert sorted(track.group for track in container.tracks) == [REF, "G1"]
 
 
 def test_delete_of_the_reference_with_no_other_video_changes_nothing():
@@ -193,7 +244,7 @@ def test_delete_of_the_reference_with_no_other_video_changes_nothing():
     step = world.sync("удалить единственный референс")
     world.check(step)
     assert step.plan.goal((1, 1)).video.kind == "asset" and not step.plan.ops
-    assert not any(group.lost or group.remove for group in step.plan.groups)
+    assert not any(group.remove for group in step.plan.groups)
     assert world.containers == before and world.choices.delete  # the command waits
     world.put(3, "other1", 1, group=REF, player="cvh")
     step = world.sync("появилось другое видео")
