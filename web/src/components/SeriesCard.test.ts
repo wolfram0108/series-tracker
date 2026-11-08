@@ -6,6 +6,8 @@ import SeriesCard from "./SeriesCard.vue"
 import { useSeriesReadsStore } from "../stores/seriesReads"
 import type { Series } from "../stores/series"
 
+const frame = () => new Promise<void>((done) => requestAnimationFrame(() => done()))  // the reads of the layout (lib/layout.ts)
+
 // The pills of the row the user sees (a hidden row measures their widths).
 const visible = (w: { findAll: (selector: string) => { element: Element; text: () => string }[] }) =>
   w.findAll(".status-pill").filter((each) => !each.element.closest(".status-pills-measure")).map((each) => each.text())
@@ -41,10 +43,12 @@ describe("SeriesCard", () => {
     const four = { ...series, statuses: ["scanning", "aligning", "downloading", "ready"] } as unknown as Series
     const wide = mount(SeriesCard, { props: { series: four } })
     await flushPromises()
+    await frame()
     expect(visible(wide)).toEqual(["Готов", "Загрузка", "Выравнивание", "Обработка"])
     room = 300  // four pills of 100 do not fit: two and the counter of the other two do
     const narrow = mount(SeriesCard, { props: { series: four } })
     await flushPromises()
+    await frame()
     expect(visible(narrow)).toEqual(["Выравнивание", "Обработка", "+2"])
     widths.mockRestore()
     rooms.mockRestore()

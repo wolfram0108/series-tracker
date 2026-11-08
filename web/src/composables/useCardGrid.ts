@@ -1,4 +1,5 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from "vue"
+import { inFrame } from "../lib/layout"
 import { perRowOf } from "../lib/output"
 
 /**
@@ -14,13 +15,19 @@ export function useCardGrid(mode: () => "cards" | "tiles", tracks: () => number,
   const layout = ref(0)
   let observer: ResizeObserver | null = null
 
+  // Read with the reads of every other block of the frame (lib/layout.ts), written after them all.
   function measure(): void {
-    if (!grid.value || !ruler.value) return
-    const unit = ruler.value.getBoundingClientRect().width
-    const gap = parseFloat(getComputedStyle(grid.value).columnGap) || 0
-    const width = grid.value.getBoundingClientRect().width
-    places.value = unit > 0 ? Math.max(1, Math.floor((width + gap) / (unit + gap))) : 1
-    layout.value += 1
+    inFrame(() => {
+      if (!grid.value || !ruler.value) return null
+      const unit = ruler.value.getBoundingClientRect().width
+      const gap = parseFloat(getComputedStyle(grid.value).columnGap) || 0
+      const width = grid.value.getBoundingClientRect().width
+      return unit > 0 ? Math.max(1, Math.floor((width + gap) / (unit + gap))) : 1
+    }, (found) => {
+      if (found === null) return
+      places.value = found
+      layout.value += 1
+    })
   }
   onMounted(() => {
     measure()

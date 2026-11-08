@@ -18,6 +18,8 @@ import type { Reference, Row } from "../../lib/output"
 import type { PlannerView } from "../../lib/plan"
 import { asset, assetTrack, goal, goalTrack, goalVideo, planView, rowRef } from "../../lib/plan.fixtures"
 
+const frame = () => new Promise<void>((done) => requestAnimationFrame(() => done()))  // the reads of the layout (lib/layout.ts)
+
 vi.mock("../../composables/outputCalls")
 
 const ok = <T>(data: T): Answer<T> => ({ ok: true, data })
@@ -105,6 +107,8 @@ describe("StatusOutput", () => {
   it("shows the seasons and their episodes as cards, each with the source and the resolution of its reference", async () => {
     const w = mountOutput()
     expect(w.text()).toContain(t("output.loading"))
+    await flushPromises()
+    await frame()
     await flushPromises()
     expect(w.findAll(".season-title").map((each) => each.text())).toEqual([t("output.season", { n: 1 }), t("output.season", { n: 2 })])
     expect(cards(w)).toEqual([["1", "1"], ["1", "2"], ["2", "1"]])
@@ -274,6 +278,8 @@ describe("StatusOutput", () => {
       ...planView({ episodes: [{ ...goal([1, 2], goalVideo("asset", rowRef(8, "v"), "a.mkv")), name: "Show s01e02.mp4" }] }),
       references: windowReferences() }))
     const w = mountOutput()
+    await flushPromises()
+    await frame()
     await flushPromises()
     expect(w.findAll(".episode-card").map((each) => each.find(".card-name").exists())).toEqual([false, true, false])
     expect(w.find(".card-name").text()).toBe("Show s01e02.mp4")

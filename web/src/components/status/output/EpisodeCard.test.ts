@@ -9,6 +9,8 @@ import SourceMark from "./SourceMark.vue"
 import TrackStrip from "./TrackStrip.vue"
 import EpisodeCard from "./EpisodeCard.vue"
 
+const frame = () => new Promise<void>((done) => requestAnimationFrame(() => done()))  // the reads of the layout (lib/layout.ts)
+
 type Reference = components["schemas"]["Reference"]
 
 // Episode 1, its reference the single video of source 7 (Vibix, 720p); cut out of compilation A of source 8 (Kodik, 2160p)
@@ -51,7 +53,8 @@ describe("the line of where the picture of an episode is from", () => {
 
   it("is shown on the card with the letter of the compilation in its colour, and no letter in the corner", async () => {
     const w = mount(EpisodeCard, { props: { view: viewOf(true), cells, status: "ready", marks, badge } })
-    await flushPromises()  // the card has measured its room (jsdom: no width, every variant fits) and drawn the line again
+    await frame()  // the card has measured its room (jsdom: no width, every variant fits)
+    await flushPromises()  // and drawn the line again
     const line = w.find(".card-ref-shown")
     expect(line.find(".ref-letter").text()).toBe("A")
     expect(line.findAll(".ref-text").map((each) => each.text()))

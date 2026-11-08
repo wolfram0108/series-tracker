@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { inFrame } from "../../../lib/layout"
 import { t } from "../../../i18n"
 import type { Badge } from "../../../lib/compilations"
 import {
@@ -37,22 +38,35 @@ const own = computed(() => props.view.references.some((each) => each.mark === "o
 const cut = computed(() => cutPictureOf(props.view))
 
 // Priority+: the line of the source is the most detailed variant the card has room for. The widths come from a hidden copy of
-// every variant, the room from the inside of the card; both are measured again when the card or the variants change.
+// every variant, the room from the inside of the card (its content box: what the observer of its size tells); both are read
+// with the reads of every other card of the frame (lib/layout.ts), when the card or the variants change.
 const variants = computed(() => refVariants(props.view, props.marks))
 const inner = ref<HTMLElement | null>(null)
 const measure = ref<HTMLElement | null>(null)
 const chosen = ref(0)
+let room: number | null = null
+function contentWidth(element: HTMLElement): number {
+  const style = getComputedStyle(element)
+  return element.clientWidth - (parseFloat(style.paddingInlineStart) || 0) - (parseFloat(style.paddingInlineEnd) || 0)
+}
 function fit(): void {
-  if (!inner.value || !measure.value) return
-  const style = getComputedStyle(inner.value)
-  const room = inner.value.clientWidth - (parseFloat(style.paddingInlineStart) || 0) - (parseFloat(style.paddingInlineEnd) || 0)
-  chosen.value = widestFitting([...measure.value.children].map((each) => (each as HTMLElement).offsetWidth), room)
+  inFrame(() => {
+    if (!inner.value || !measure.value) return null
+    const widths = [...measure.value.children].map((each) => (each as HTMLElement).offsetWidth)
+    return widestFitting(widths, room ?? contentWidth(inner.value))
+  }, (found) => {
+    if (found !== null) chosen.value = found
+  })
 }
 let observer: ResizeObserver | null = null
 onMounted(() => {
   fit()
   if (typeof ResizeObserver !== "undefined" && inner.value) {
-    observer = new ResizeObserver(() => fit())
+    // The observer tells the size of the card: the room needs no read of it from then on.
+    observer = new ResizeObserver((entries) => {
+      room = entries[entries.length - 1].contentRect.width
+      fit()
+    })
     observer.observe(inner.value)
   }
 })

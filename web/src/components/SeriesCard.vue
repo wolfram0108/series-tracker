@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { inFrame } from "../lib/layout"
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import type { Series } from "../stores/series"
 import { useSeriesReadsStore } from "../stores/seriesReads"
@@ -70,24 +71,28 @@ const pillsRow = ref<HTMLElement | null>(null)
 const measureRow = ref<HTMLElement | null>(null)
 const fitting = ref(Number.POSITIVE_INFINITY)
 
-function fit(): void {
+// The sizes are read with the reads of every other card of the frame (lib/layout.ts), the count written after them all.
+function count(): number | null {
   const row = pillsRow.value
   const measure = measureRow.value
-  if (!row || !measure) return
+  if (!row || !measure) return null
   const gap = parseFloat(getComputedStyle(row).columnGap) || 0
   const width = (key: string) => (measure.querySelector(`[data-key="${key}"]`) as HTMLElement | null)?.offsetWidth ?? 0
   const others = [...row.children].filter((each) => each.classList.contains("status-pill-other"))
   const room = row.clientWidth - others.reduce((sum, each) => sum + (each as HTMLElement).offsetWidth + gap, 0)
   const widths = states.value.map(width)
   const all = widths.reduce((sum, each) => sum + each + gap, 0) - gap
-  if (all <= room) {
-    fitting.value = widths.length
-    return
-  }
+  if (all <= room) return widths.length
   let used = width("overflow")
-  let count = 0
-  while (count < widths.length && used + gap + widths[count] <= room) used += gap + widths[count++]
-  fitting.value = count
+  let shown = 0
+  while (shown < widths.length && used + gap + widths[shown] <= room) used += gap + widths[shown++]
+  return shown
+}
+
+function fit(): void {
+  inFrame(count, (shown) => {
+    if (shown !== null) fitting.value = shown
+  })
 }
 
 let observer: ResizeObserver | null = null
