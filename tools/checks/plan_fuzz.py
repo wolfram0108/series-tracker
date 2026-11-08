@@ -2,11 +2,13 @@
 simulator (tests/plan_world.py, Chaos): after every sync the invariants of the model are checked, and when the faults stop
 the series must come to rest.
 
-Two worlds: a small one of two seasons (`--toy N`: N histories), and the world of a real series (`--series ID...`): read by
-plan_real (a copy of the database, the real constructor), its waiting work done first, then histories of changes and
-faults on its own rows, files, sources, seasons, episodes and groups.
+Three worlds: a small one of two seasons in tables (`--toy N`: N histories); the same on a disk (`--disk N`,
+tests/plan_disk.py: real files, the service's downloader, container builder and client of the alignment service against a
+model of it, the journal) with crashes at random moments and a restart after each; and the world of a real series
+(`--series ID...`): read by plan_real (a copy of the database, the real constructor), its waiting work done first, then
+histories of changes and faults on its own rows, files, sources, seasons, episodes and groups.
 
-Usage: plan_fuzz.py [--toy N] [--series ID ...] [--histories H] [--steps K] [--seed S]
+Usage: plan_fuzz.py [--toy N] [--disk N] [--jobs J] [--series ID ...] [--histories H] [--steps K] [--seed S]
 Prints a line per kind of violation with its first seeds, then `PLAN_FUZZ_DONE`."""
 from __future__ import annotations
 
@@ -39,9 +41,47 @@ def run(histories, make, steps: int, first_seed: int) -> dict[str, list[int]]:
     return found
 
 
+def disk_history(task: tuple[int, int]) -> str:
+    """One history on a disk with crashes; the violation, or "" when none."""
+    import logging
+    import tempfile
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    from plan_disk import Crash, DiskWorld
+    seed, steps = task
+    rng = random.Random(seed)
+    with tempfile.TemporaryDirectory(prefix="plan-disk-") as root:
+        world = DiskWorld(root)
+        try:
+            chaos = Chaos(world, rng, seasons=(1, 2), episodes=(1, 2, 3))
+            for number in range(steps):
+                action = chaos.step()
+                if rng.random() < 0.3:
+                    world.crash_at = rng.choice((-1, 0, 1, 2, 3, 4, 5, 6))
+                try:
+                    step = world.sync(f"{number}: {action}")
+                except Crash:
+                    world.recover()
+                    world.check_disk()
+                    continue
+                finally:
+                    world.crash_at = None
+                world.check(step)
+                world.read_fails.clear()
+                world.transient.clear()
+            world.calm()
+            world.settle()
+        except AssertionError as exc:
+            return str(exc).split(":")[0][:90]
+        finally:
+            world.close()
+    return ""
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--toy", type=int, default=0)
+    parser.add_argument("--disk", type=int, default=0)
+    parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--series", type=int, nargs="*", default=[])
     parser.add_argument("--histories", type=int, default=5)
     parser.add_argument("--steps", type=int, default=12)
@@ -52,6 +92,18 @@ def main() -> None:
         began = time.monotonic()
         found = run(args.toy, lambda seed: Chaos(World(), random.Random(seed)), args.steps, args.seed)
         print(f"TOY histories={args.toy} steps={args.steps} seconds={time.monotonic() - began:.0f} violations={len(found)}")
+        for kind, seeds in found.items():
+            print(f"  VIOLATION {len(seeds)} {kind} seeds={seeds[:6]}")
+    if args.disk:
+        from multiprocessing import Pool
+        began = time.monotonic()
+        with Pool(args.jobs) as pool:
+            outcomes = pool.map(disk_history, [(seed, args.steps) for seed in range(args.seed, args.seed + args.disk)])
+        found: dict[str, list[int]] = {}
+        for seed, kind in zip(range(args.seed, args.seed + args.disk), outcomes):
+            if kind:
+                found.setdefault(kind, []).append(seed)
+        print(f"DISK histories={args.disk} steps={args.steps} seconds={time.monotonic() - began:.0f} violations={len(found)}")
         for kind, seeds in found.items():
             print(f"  VIOLATION {len(seeds)} {kind} seeds={seeds[:6]}")
     if args.series:

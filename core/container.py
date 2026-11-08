@@ -13,6 +13,7 @@ build is done is told by reading the result back (`contents`), never by the code
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from dataclasses import dataclass, field
 from typing import Sequence
@@ -88,8 +89,11 @@ class Contents:
         return next((track.index for track in self.audio if track.own), 0)
 
 
+PROVENANCE = "provenance.json"  # the attachment that says where what the container holds came from (stage 12)
+
+
 async def build(output: str, video: str, video_identity: str, tracks: Sequence[AudioIn], *, publication: str = "",
-                timeout: float = BUILD_TIMEOUT_S) -> str | None:
+                timeout: float = BUILD_TIMEOUT_S, provenance: dict | None = None) -> str | None:
     """Write the container at `output` (an .mkv the caller puts in place); None when it was built and reads back as asked,
     else the reason. The video is the film of `video` (core.ffprobe.film_stream); a track of the same file is taken
     from it."""
@@ -116,11 +120,21 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
                 f"-metadata:s:a:{number}", f"ST_ALIGNED_TO={track.aligned_to}",
                 f"-metadata:s:a:{number}", f"ST_OWN={1 if track.own else 0}",
                 f"-disposition:a:{number}", "default" if number == 0 else "0"]
+    attached = None
+    if provenance is not None:
+        # The table of what the container holds travels inside it: the library can be told again from its files alone.
+        attached = output + "." + PROVENANCE
+        with open(attached, "w", encoding="utf-8") as out:
+            json.dump(provenance, out, ensure_ascii=False, sort_keys=True)
+        cmd += ["-attach", attached, "-metadata:s:t", "mimetype=application/json", "-metadata:s:t", f"filename={PROVENANCE}"]
     cmd += ["-f", "matroska", output]
     try:
         code, _, err = await run_capture(cmd, timeout=timeout)
     except (OSError, TimeoutError) as exc:
         return f"ffmpeg_failed: {type(exc).__name__}"
+    finally:
+        if attached is not None and os.path.exists(attached):
+            os.remove(attached)
     if code != 0:
         return f"ffmpeg_failed: {err.decode(errors='replace').strip()[-300:]}"
     made = await contents(output)
@@ -128,6 +142,26 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     if made is not None and made.publication != publication:
         return "container_publication_wrong"
     return problem_of(made, video_identity, signature_of(tracks), expected.duration if expected is not None else None)
+
+
+async def provenance_of(path: str, *, timeout: float = READ_TIMEOUT_S) -> dict | None:
+    """The provenance a container carries (`build(provenance=...)`); None when it carries none or cannot be read."""
+    executable = shutil.which("ffmpeg")
+    if executable is None:
+        return None
+    dumped = path + ".provenance.read"
+    try:
+        await run_capture([executable, "-v", "error", "-y", f"-dump_attachment:m:filename:{PROVENANCE}", dumped,
+                           "-i", path], timeout=timeout)
+        if not os.path.exists(dumped):
+            return None
+        with open(dumped, encoding="utf-8") as found:
+            return json.load(found)
+    except (OSError, TimeoutError, ValueError):
+        return None
+    finally:
+        if os.path.exists(dumped):
+            os.remove(dumped)
 
 
 def signature_of(tracks: Sequence[AudioIn]) -> list[tuple[str, str, bool]]:

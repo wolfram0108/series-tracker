@@ -2,6 +2,7 @@
 again, the order and the default track are those given, a container is rebuilt from itself, and a build that is not
 what was asked says why."""
 import asyncio
+import os
 import shutil
 import subprocess
 
@@ -98,3 +99,21 @@ def test_a_file_not_built_here_reads_with_no_identity_and_its_tracks_by_title(me
     found = asyncio.run(container.contents(video))
     assert found.has_video and found.video == "" and len(found.audio) == 1 and found.duration > 2.5
     assert asyncio.run(container.contents(str(video) + ".missing")) is None
+
+
+def test_a_container_carries_its_provenance_and_gives_it_back(media):
+    """Stage 12: the table of what the container holds travels inside it, through a rebuild too."""
+    tmp, video, dubs, _ = media
+    table = {"video": {"source": "сайт", "row": "1"}, "tracks": [{"voice": "ruchime", "aligned_to": "1:a"}]}
+    first = str(tmp / "first.mkv")
+    assert asyncio.run(container.build(first, video, "1:a", [AudioIn("ПВА ШОУ", video, 0, "1:a", own=True),
+                                                            AudioIn("ruchime", dubs["ruchime"], 0, "1:a")],
+                                       provenance=table)) is None
+    assert asyncio.run(container.provenance_of(first)) == table
+    again = str(tmp / "again.mkv")
+    newer = {**table, "rev": 2}
+    assert asyncio.run(container.build(again, first, "1:a", [AudioIn("ПВА ШОУ", first, 0, "1:a", own=True)],
+                                       provenance=newer)) is None
+    assert asyncio.run(container.provenance_of(again)) == newer
+    assert asyncio.run(container.provenance_of(video)) is None  # a file not built here carries none
+    assert sorted(os.listdir(tmp)) == sorted(set(os.listdir(tmp)) - {"first.mkv.provenance.json"})

@@ -164,11 +164,15 @@ class World:
                 continue
             self._apply(made, group, results)
             applied.append(group.slots)
+        self._commit()
         step = Step(title, inputs.online, before, made, tuple(failed), tuple(applied),
                     tuple(sorted(self.containers.values(), key=lambda each: each.name)), inputs.choices, self.choices,
                     inputs.failed, tuple(replanned))
         self.history.append(step)
         return step
+
+    def _commit(self) -> None:
+        """The end of the application of a sync; a world of files applies its journal here."""
 
     def _failures(self, made: Plan, results, failed) -> list[tuple]:
         """The attempts that failed in a run, as the planner reads them; a step that failed because a step before it did
