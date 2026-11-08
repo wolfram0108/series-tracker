@@ -364,7 +364,6 @@ class PlannerModule(BaseModule):
             self.log.info("сериал %d: синхронизация плана — операций %d, применено групп %d из %d, новых неудач %d",
                           series_id, len(synced.plan.ops), len(synced.applied), len(synced.plan.groups),
                           len(synced.replanned))
-            await self._publish_view(series_id, sync, synced.plan, synced.inputs)
             counts = (await self.on_downloaded_counts(env=None))["counts"]
             self.publish_event("series.downloaded.changed", {"series_id": series_id, "count": counts.get(series_id, 0)})
             if sync.conform_dir:
@@ -381,6 +380,12 @@ class PlannerModule(BaseModule):
         self._runs.pop(series_id, None)
         self.contribute(series_id, {"downloading": False, "aligning": False, "packing": False})
         self._announce_work(series_id, False)
+        # The end is told with the view the tables give now: a window holds the last packet it got, and the one of the
+        # run is the frozen plan the sync worked by.
+        try:
+            await self._publish_view(series_id)
+        except Exception:  # noqa: BLE001 - the sync is over either way; the window reads the view when it opens again
+            self.log.exception("сериал %d: вид плана после синхронизации не разослан", series_id)
 
     async def _load(self, series_id: int, sync: SeriesSync) -> None:
         """The asset of the series as the table holds it; a file the disk has not any more is gone from the table."""
@@ -598,7 +603,8 @@ class PlannerModule(BaseModule):
         online = frozenset(row.id for row in inputs.online) if inputs is not None else None
         references = references_of(inputs, made, self._members.get(series_id, {})) \
             if inputs is not None and made is not None else []
-        return {**view_of(series_id, sync, made, running=running, online=online),
+        return {**view_of(series_id, sync, made, running=running, online=online,
+                          rows=inputs.online if inputs is not None else ()),
                 "references": [each.model_dump(mode="json") for each in references]}
 
     async def on_references_get(self, env: Envelope) -> list[dict]:

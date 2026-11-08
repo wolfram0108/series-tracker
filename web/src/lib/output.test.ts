@@ -217,9 +217,9 @@ describe("isOff", () => {
 describe("fileNamesOf", () => {
   it("gives the names of the files of one episode, the whole one first, each once, and none for another episode", () => {
     const rows = [
-      { season: 1, episode: 2, part: 2, new_filename_preview: "b" }, { season: 1, episode: 2, part: null, new_filename_preview: "a" },
-      { season: 1, episode: 2, part: 1, new_filename_preview: "b" }, { season: 1, episode: 3, part: null, new_filename_preview: "c" },
-      { season: 2, episode: 2, part: null, new_filename_preview: "d" }, { season: 1, episode: 2, part: null, new_filename_preview: null },
+      { season: 1, episode: 2, part: 2, name: "b" }, { season: 1, episode: 2, part: null, name: "a" },
+      { season: 1, episode: 2, part: 1, name: "b" }, { season: 1, episode: 3, part: null, name: "c" },
+      { season: 2, episode: 2, part: null, name: "d" }, { season: 1, episode: 2, part: null, name: null },
     ]
     expect(fileNamesOf(rows, 1, 2)).toEqual(["a", "b"])
     expect(fileNamesOf(rows, 9, 9)).toEqual([])
@@ -346,6 +346,8 @@ describe("the strip and the state of an episode", () => {
     // A voice-over no source has is no error: the episode is put together in part.
     expect(status(view("completed", dubOf("B", "absent"), dubOf("C", "done")), ["A", "B", "C"])).toBe("partial")
     expect(status(view("completed", dubOf("B", "absent"), dubOf("C", "planned")), ["A", "B", "C"])).toBe("wait")
+    // A voice-over the user switched off is no part of the episode: it is ready without it, not partial.
+    expect(status(view("completed", dubOf("B", "off"), dubOf("C", "done")), ["A", "B", "C"])).toBe("ready")
     expect(status(episodeOf({ references: [ref(1, 1, { mark: "none" })] }), [])).toBe("error")
     expect(status(episodeOf({ references: [ref(1, 1, { mark: "off" })] }), [])).toBe("off")
   })

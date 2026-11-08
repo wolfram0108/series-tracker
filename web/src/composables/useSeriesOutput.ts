@@ -8,11 +8,11 @@ import { reasonText } from "../lib/reason"
 import { useCompositionStore } from "../stores/composition"
 import { useSeriesStore } from "../stores/series"
 import { usePlanStore } from "../stores/plan"
-import { fileOf, planCuts, planDubs, planFiles, trackOf, type CompilationKey } from "../lib/plan"
+import { fileOf, planCuts, planDubs, planFiles, planNames, trackOf, type CompilationKey } from "../lib/plan"
 import {
-  deleteFromPlan, fetchComposition, fetchPlan, fetchQueues, fetchRenames, resetFailures,
+  deleteFromPlan, fetchComposition, fetchPlan, fetchQueues, resetFailures,
   resetLever, setLever, setVoiceOrder, switchOutput, syncSeries, type Composition, type MediaFile,
-  type Queues, type RenameRow,
+  type Queues,
 } from "./outputCalls"
 import type { Answer } from "./sourceCalls"
 import { useSSE } from "./useSSE"
@@ -46,8 +46,8 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   // A lever is on its way to the core / a pass over the series is running: the controls that start them wait.
   const busy = ref(false)
   const syncing = ref(false)
-  // The names the files get, counted by the rules as they are now: read with the layout, and again with every new one.
-  const names = ref<RenameRow[]>([])
+  // The name of the file of every episode is the plan's: it comes with every packet of the plan of the series.
+  const names = computed(() => planNames(plan.forSeries(seriesId)))
 
   // The label of a player is a fact of the table of its source, so a voice-over of a player the episode has no line for is named too.
   const labels = computed<Record<string, string>>(() => Object.fromEntries(
@@ -86,16 +86,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     if (planned.ok) plan.apply(planned.data)
     const broken = [layout, planned].find((answer) => !answer.ok)
     failure.value = broken && !broken.ok ? broken.text : null
-    void loadNames()
-  }
-
-  let namesAsked = 0
-  async function loadNames(): Promise<void> {
-    const ask = ++namesAsked
-    const answer = await fetchRenames(seriesId)
-    if (ask !== namesAsked) return
-    if (answer.ok) names.value = answer.data.preview ?? []
-    else failure.value = answer.text
   }
 
   // A refusal stays in `failure` until the next action; the words are also returned for the caller.

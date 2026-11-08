@@ -76,8 +76,6 @@ beforeEach(() => {
   vi.mocked(calls.syncSeries).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.resetFailures).mockReset().mockResolvedValue(ok({ success: true, reset: 1 }))
   vi.mocked(calls.switchOutput).mockReset().mockResolvedValue(ok({ success: true }))
-  vi.mocked(calls.fetchRenames).mockReset().mockResolvedValue(ok({
-    preview: [{ unique_id: "u1", season: 1, episode: 2, part: null, new_filename_preview: "Show s01e02.mp4" }] }))
 })
 
 afterEach(() => mounted.splice(0).forEach((wrapper) => wrapper.unmount()))
@@ -235,23 +233,14 @@ describe("useSeriesOutput", () => {
     expect(output.failure.value).toBe("Сериал не найден")
   })
 
-  it("reads the names of the files with the layout, and again with every new layout", async () => {
+  it("names the file of every episode as the plan makes it, and follows every packet of the plan", async () => {
+    givePlan(planView({ episodes: [{ ...goal([1, 2], goalVideo("asset", rowRef(8, "v"), "a.mkv")), name: "Show s01e02.mkv" }] }))
     const output = setup()
     await flushPromises()
-    expect(output.names.value.map((row) => row.new_filename_preview)).toEqual(["Show s01e02.mp4"])
-    useCompositionStore().applyChanged({ series_id: 1, rev: 9, episodes: [], summary_only: false })
+    expect(output.names.value).toEqual([{ season: 1, episode: 2, part: null, name: "Show s01e02.mkv" }])
+    usePlanStore().apply({ ...planView({ episodes: [{ ...goal([1, 2, 1], goalVideo("asset", rowRef(8, "v"), "b.mkv")), name: "Show s01e02 part1.mkv" }] }), references: [] })
     await flushPromises()
-    expect(calls.fetchRenames).toHaveBeenCalledTimes(2)
-  })
-
-  it("shows the words of a refusal of the names and keeps the ones it had", async () => {
-    const output = setup()
-    await flushPromises()
-    vi.mocked(calls.fetchRenames).mockResolvedValueOnce({ ok: false, text: "Нет связи с сервером" })
-    useCompositionStore().applyChanged({ series_id: 1, rev: 9, episodes: [], summary_only: false })
-    await flushPromises()
-    expect(output.failure.value).toBe("Нет связи с сервером")
-    expect(output.names.value).toHaveLength(1)
+    expect(output.names.value).toEqual([{ season: 1, episode: 2, part: 1, name: "Show s01e02 part1.mkv" }])
   })
 
   it("reads the plan again when the connection comes back", async () => {

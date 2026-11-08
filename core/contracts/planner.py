@@ -76,6 +76,8 @@ class PlanEpisode(BaseModel):
     off: bool = False
     video: PlanGoalVideo
     tracks: list[PlanGoalTrack] = Field(default_factory=list)
+    # The voice-over groups the user switched off for the episode: the plan takes no track of theirs.
+    voices_off: list[str] = Field(default_factory=list)
 
 
 class PlanFailure(BaseModel):
@@ -85,6 +87,11 @@ class PlanFailure(BaseModel):
     kind: Literal["download", "align", "cut"]
     row: PlanRowRef
     video: PlanRowRef | None = None
+    # Where the attempt belongs, as the layout the view is counted by has its row: the episodes the row gives (a compilation:
+    # every one it holds; [season, episode] or [season, episode, part]) and its voice-over group. Empty when the row is
+    # offline: the failure is still counted, only not placed.
+    episodes: list[list[int]] = Field(default_factory=list)
+    voice: str | None = None
 
 
 class PlanCommand(BaseModel):

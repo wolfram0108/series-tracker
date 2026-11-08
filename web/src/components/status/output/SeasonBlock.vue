@@ -25,7 +25,7 @@ const props = withDefaults(defineProps<{
   total: number
   voices: components["schemas"]["VoiceSpan"][]
   marks: Record<number, Mark>
-  names?: { season?: number | null; episode?: number | null; part?: number | null; new_filename_preview?: string | null }[]
+  names?: { season?: number | null; episode?: number | null; part?: number | null; name?: string | null }[]
   mode?: "cards" | "tiles"
   opened?: number | null
   queues?: Queues
@@ -69,7 +69,7 @@ const off = computed(() => allOff(props.episodes))
 // The state of the videos (the files of the references) and of the voice-overs of the season, counted as the cards are.
 const meters = computed(() => {
   const video = { loaded: 0, pending: 0, error: 0 }
-  const voices = { done: 0, down: 0, align: 0, wait: 0, absent: 0, error: 0 }
+  const voices = { done: 0, down: 0, align: 0, wait: 0, absent: 0, off: 0, error: 0 }
   for (const item of items.value) {
     for (const cell of item.cells) {
       if (cell.isReference) {

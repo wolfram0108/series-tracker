@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const client = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() }))
 vi.mock("../api/client", () => ({ api: client }))
 
-import { fetchComposition, fetchRenames, resetFailures, resetLever, setLever, switchOutput, syncSeries } from "./outputCalls"
+import { fetchComposition, resetFailures, resetLever, setLever, switchOutput, syncSeries } from "./outputCalls"
 
 beforeEach(() => Object.values(client).forEach((fn) => fn.mockReset()))
 
@@ -36,12 +36,6 @@ describe("the calls to the output of the core", () => {
     expect(client.PUT).toHaveBeenCalledWith("/api/series/{series_id}/output/switch", { params: { path: { series_id: 1 } }, body })
   })
 
-  it("reads the names the files would get by the path of the series", async () => {
-    const reply = { preview: [{ unique_id: "u1", season: 1, episode: 2, part: null, new_filename_preview: "Show s01e02.mp4" }] }
-    client.GET.mockResolvedValueOnce({ data: reply })
-    expect(await fetchRenames(1)).toEqual({ ok: true, data: reply })
-    expect(client.GET).toHaveBeenCalledWith("/api/series/{series_id}/rename_preview", { params: { path: { series_id: 1 } } })
-  })
 
   it("asks for the sync of the series by its path, the same run as the series card: with the download", async () => {
     client.POST.mockResolvedValueOnce({ data: { success: true } })

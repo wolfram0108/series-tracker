@@ -94,8 +94,6 @@ beforeEach(() => {
   for (const each of [calls.switchOutput, calls.syncSeries, calls.setLever, calls.resetLever, calls.deleteFromPlan])
     vi.mocked(each).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.resetFailures).mockReset().mockResolvedValue(ok({ success: true, reset: 1 }))
-  vi.mocked(calls.fetchRenames).mockReset().mockResolvedValue(ok({
-    preview: [{ unique_id: "u2", season: 1, episode: 2, part: null, new_filename_preview: "Show s01e02.mp4" }] }))
 })
 afterEach(() => {
   mounted.splice(0).forEach((wrapper) => wrapper.unmount())
@@ -182,7 +180,7 @@ describe("StatusOutput", () => {
       assets: [fileOfEpisodeOne()],
       episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1-1"), "S01E01.mp4"),
         [goalTrack("AniStar", "download", rowRef(8, "k1"), { player: "kodik" })])],
-      failures: [{ kind: "download", row: rowRef(8, "k1"), video: null }],
+      failures: [{ kind: "download", row: rowRef(8, "k1"), video: null, voice: null }],
     }))
     const w = mountOutput()
     await flushPromises()
@@ -271,6 +269,9 @@ describe("StatusOutput", () => {
   })
 
   it("shows the name the file gets in the first line of a card wider than the smallest, always", async () => {
+    vi.mocked(calls.fetchPlan).mockResolvedValue(ok({
+      ...planView({ episodes: [{ ...goal([1, 2], goalVideo("asset", rowRef(8, "v"), "a.mkv")), name: "Show s01e02.mp4" }] }),
+      references: windowReferences() }))
     const w = mountOutput()
     await flushPromises()
     expect(w.findAll(".episode-card").map((each) => each.find(".card-name").exists())).toEqual([false, true, false])

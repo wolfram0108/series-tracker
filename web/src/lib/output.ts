@@ -316,13 +316,13 @@ export function isDeviation(view: EpisodeView): boolean {
 
 /** The names the files of one episode get, in the order of their parts (the whole episode first), each once. */
 export function fileNamesOf(
-  rows: { season?: number | null; episode?: number | null; part?: number | null; new_filename_preview?: string | null }[],
+  rows: { season?: number | null; episode?: number | null; part?: number | null; name?: string | null }[],
   season: number,
   episode: number,
 ): string[] {
-  const own = rows.filter((row) => row.season === season && row.episode === episode && row.new_filename_preview)
+  const own = rows.filter((row) => row.season === season && row.episode === episode && row.name)
   own.sort((a, b) => Number(a.part != null) - Number(b.part != null) || (a.part ?? 0) - (b.part ?? 0))
-  return [...new Set(own.map((row) => row.new_filename_preview as string))]
+  return [...new Set(own.map((row) => row.name as string))]
 }
 
 /** The reference of one part of the episode; no part names the whole episode, and null when there is none. */
@@ -400,14 +400,14 @@ export function perRowOf(places: number, tracks: number, episodes: number): numb
 
 /** The state of one track of an episode, as a cell of its strip shows it. */
 /** `absent`: no source has the voice-over for the episode, the normal case of an episode put together in part. */
-export type TrackState = "done" | "down" | "align" | "wait" | "error" | "absent" | "none"
+export type TrackState = "done" | "down" | "align" | "wait" | "error" | "absent" | "off" | "none"
 
 const FILE_STATE: Record<string, TrackState> = {
   completed: "done", downloading: "down", processing: "down", publishing: "down", pending: "wait", error: "error",
 }
 const DUB_STATE: Record<DubState, TrackState> = {
   done: "done", downloading: "down", download_queued: "down", align_queued: "align", running: "align", planned: "wait",
-  error: "error", absent: "absent",
+  error: "error", absent: "absent", off: "off",
 }
 
 /** One cell of the strip of an episode: the track at its place in the container. The track of the reference is the
@@ -441,7 +441,8 @@ export function episodeStatus(view: EpisodeView, cells: readonly TrackCell[]): E
   if (marks.includes("none") || marks.includes("unfit") || cells.some((cell) => cell.state === "error")) return "error"
   if (cells.some((cell) => cell.state === "down")) return "down"
   if (cells.some((cell) => cell.state === "align")) return "align"
-  const present = cells.filter((cell) => cell.state !== "none")
+  // A voice-over the user switched off is no part of the episode: it neither waits nor makes it partial.
+  const present = cells.filter((cell) => cell.state !== "none" && cell.state !== "off")
   if (present.length === 0 || !present.every((cell) => cell.state === "done" || cell.state === "absent")) return "wait"
   return present.some((cell) => cell.state === "absent") ? "partial" : "ready"
 }

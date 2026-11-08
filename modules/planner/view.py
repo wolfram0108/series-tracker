@@ -3,18 +3,25 @@ whether its row is online), the goal of every episode as the last plan counted i
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Iterable
 
 from core.plan.executor import SeriesSync
 from core.plan.planner import Plan
-from core.plan.tables import RowId
+from core.plan.tables import OnlineRow, RowId
 
 
 def _row(row: RowId | None) -> dict | None:
     return None if row is None else asdict(row)
 
 
+def _slots(row: OnlineRow) -> list[list[int]]:
+    if row.part is not None:
+        return [[row.season, row.start, row.part]]
+    return [[row.season, episode] for episode in range(row.start, row.end + 1)]
+
+
 def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: bool,
-            online: frozenset[RowId] | None = None) -> dict:
+            online: frozenset[RowId] | None = None, rows: Iterable[OnlineRow] = ()) -> dict:
     assets = []
     for container in sorted(sync.containers.values(), key=lambda each: each.name):
         video = container.video
@@ -28,15 +35,22 @@ def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: boo
     if made is not None:
         for goal in made.goals:
             episodes.append({
-                "slot": list(goal.slot), "name": goal.name, "off": goal.off,
+                "slot": list(goal.slot), "name": goal.name, "off": goal.off, "voices_off": sorted(goal.voices_off),
                 "video": {"kind": goal.video.kind, **asdict(goal.video.snapshot), "row": _row(goal.video.timeline),
                           "file": goal.video.container.name if goal.video.container is not None else None,
                           "cut_of": _row(goal.video.row.id if goal.video.kind == "cut" else
                                          goal.video.container.video.cut_of if goal.video.container is not None else None)},
                 "tracks": [{"voice": way.voice, "kind": way.kind, "row": _row(way.dub), **asdict(way.snapshot),
                             "own": way.own} for way in goal.tracks]})
-    failures = [{"kind": key[0], "row": _row(key[1]), "video": _row(key[2]) if len(key) > 2 else None}
-                for key in sorted(sync.failed, key=repr)]
+    by_id: dict[RowId, list[OnlineRow]] = {}
+    for row in rows:
+        by_id.setdefault(row.id, []).append(row)
+    failures = []
+    for key in sorted(sync.failed, key=repr):
+        found = by_id.get(key[1], [])
+        failures.append({"kind": key[0], "row": _row(key[1]), "video": _row(key[2]) if len(key) > 2 else None,
+                         "episodes": sorted({tuple(slot) for row in found for slot in _slots(row)}),
+                         "voice": next((row.group for row in found if row.group), None)})
     commands = [{"kind": each[0], "name": each[1], "dub": _row(each[2]) if len(each) > 2 else None}
                 for each in sorted(sync.commands, key=repr)]
     return {"series_id": series_id, "running": running, "assets": assets, "episodes": episodes,

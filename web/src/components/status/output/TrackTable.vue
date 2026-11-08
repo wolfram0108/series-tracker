@@ -19,12 +19,12 @@ const emit = defineEmits<{
 const FILE_WORDS: Record<TrackState, MessageKey> = {
   done: "output.file.status.completed", down: "output.file.status.downloading", align: "output.file.status.processing",
   wait: "output.file.status.pending", error: "output.file.status.error", absent: "output.file.status.none",
-  none: "output.file.status.none",
+  off: "output.file.status.none", none: "output.file.status.none",
 }
 const stateText = (cell: TrackCell): string => t(cell.isReference ? FILE_WORDS[cell.state] : `output.track.state.${cell.state}`)
 const PILL: Record<TrackState, string> = {
   done: "pill-success", down: "pill-primary", align: "pill-primary", wait: "pill-secondary", error: "pill-danger",
-  absent: "pill-warning", none: "pill-secondary",
+  absent: "pill-warning", off: "pill-secondary", none: "pill-secondary",
 }
 
 type Action = "refetch" | "retry" | "redo" | null

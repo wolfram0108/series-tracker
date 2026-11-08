@@ -117,6 +117,7 @@ HTTP/SSE-точка; событие шины → SSE по таблице `SSE_MA
 |---|---|
 | Весь набор тестов | `.venv/bin/python -m pytest -q` (параллельно на всех ядрах, ~1,5 мин). Тесты идут на машине прода (4 ГБ, без подкачки): процессы pytest сами ставят себе `oom_score_adj = 1000` (`tests/conftest.py`), при нехватке памяти ядро убивает их, а не сервис |
 | Тесты модуля | `.venv/bin/python -m pytest -q tests/test_<модуль>*.py` |
+| Приёмка в браузере | `cd web && npm run build`, затем `systemd-run --scope -q -p MemoryMax=1800M -p MemorySwapMax=0 .venv/bin/python -m pytest -q -m ui -n 2` (~2,5 мин; два Firefox в 1300 МБ не помещаются) — всё приложение на стенде с моделями сайта, плеера и демона, пользователь — Firefox (`tests/ui_stand.py`, `tests/test_ui_stand.py`); в общий набор не входит |
 | Один тест | `… -n0 -k "имя_теста"` (`-n0` — без параллельных процессов) |
 | Миграции БД | `.venv/bin/alembic upgrade head` |
 | Запуск (dev) | `.venv/bin/uvicorn run:app --port 5000` (без `ST_QBIT_URL` модуль torrents не стартует) |

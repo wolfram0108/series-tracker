@@ -32,6 +32,7 @@ const title = (cell: TrackCell): string => t(cell.isReference ? "output.track.ce
 .track-cell.is-wait { background: #ced4da; color: #343a40; }
 .track-cell.is-error { background: var(--color-red-1); }
 .track-cell.is-absent { background: var(--color-yellow-2); color: #5c4400; }
+.track-cell.is-off { background: transparent; color: var(--color-gray-600); outline: 1px dashed var(--color-gray-600); }
 .track-cell.is-none { background: none; border: 1px dashed #adb5bd; color: #adb5bd; }
 /* An outline is painted above the cells around it, where a shadow lies under the next one. */
 .track-cell.is-reference { position: relative; z-index: 1; overflow: visible; outline: 0.125rem solid #2c3e50; outline-offset: 0.0625rem; }

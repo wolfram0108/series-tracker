@@ -6,7 +6,7 @@ export type PlannerView = Schemas["PlannerView"]
 export type PlanRowRef = Schemas["PlanRowRef"]
 
 /** The state of a voice-over of an episode as the strip of the episode shows it. */
-export type DubState = "done" | "downloading" | "download_queued" | "align_queued" | "running" | "planned" | "error" | "absent"
+export type DubState = "done" | "downloading" | "download_queued" | "align_queued" | "running" | "planned" | "error" | "absent" | "off"
 
 /** A voice-over of an episode as the window reads it, told by the plan of the series: what its track is at. */
 export interface VoiceDub {
@@ -38,6 +38,22 @@ const sameRow = (a: PlanRowRef | null | undefined, b: PlanRowRef | null | undefi
   !!a && !!b && a.source_id === b.source_id && a.row_key === b.row_key && (a.video ?? "") === (b.video ?? "")
 
 const partOf = (slot: number[]): number | null => (slot.length > 2 ? slot[2] : null)
+
+/** The slot of a row and the slot of an episode name the same video: the same episode and the same part, or no part. */
+const sameSlot = (row: number[], episode: number[]): boolean =>
+  row[0] === episode[0] && row[1] === episode[1] && partOf(row) === partOf(episode)
+
+/** The file of an episode as the plan makes it: the name its goal has, by the slot of the episode. */
+export interface PlanName {
+  season: number
+  episode: number
+  part: number | null
+  name: string
+}
+
+export function planNames(view: PlannerView | undefined): PlanName[] {
+  return (view?.episodes ?? []).map((goal) => ({ season: goal.slot[0], episode: goal.slot[1], part: partOf(goal.slot), name: goal.name }))
+}
 
 function failed(view: PlannerView, kind: string, row: PlanRowRef): boolean {
   return (view.failures ?? []).some((each) => each.kind === kind && sameRow(each.row, row))
@@ -73,8 +89,14 @@ export function planDubs(view: PlannerView | undefined, orders: Record<number, r
     const taken = new Set([...(goal.tracks ?? []).map((track) => track.voice), goal.video.group ?? ""])
     for (const voice of orders[season] ?? []) {
       if (taken.has(voice)) continue
-      dubs.push({ season, episode, part: partOf(goal.slot), voice_key: voice, voice_label: voice, state: "absent",
-                  source_id: null, player: null, online: null })
+      // Why the plan has no track of it: the user switched it off; its attempt failed and the plan passes over it (an error
+      // of the episode); else no source gives it.
+      const off = (goal.voices_off ?? []).includes(voice)
+      const failure = off ? undefined
+        : (view.failures ?? []).find((each) => each.voice === voice && (each.episodes ?? []).some((slot) => sameSlot(slot, goal.slot)))
+      dubs.push({ season, episode, part: partOf(goal.slot), voice_key: voice, voice_label: voice,
+                  state: off ? "off" : failure ? "error" : "absent",
+                  source_id: failure ? failure.row.source_id : null, player: null, online: null })
     }
   }
   return dubs

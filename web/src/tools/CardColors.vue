@@ -34,7 +34,7 @@ const episodes: EpisodeView[] = Array.from({ length: EPISODES }, (_, index) => {
 const voices = TRACKS.map((label) => ({ label, episodes: label === "HORIZON" ? `1–${READY}` : `1–${EPISODES}` }))
 const names = episodes.map((view) => ({
   season: 1, episode: view.episode, part: null,
-  new_filename_preview: `Series s01e${String(view.episode).padStart(2, "0")} [${view.references[0].voice_group}] VK-DL 2160p.mkv`,
+  name: `Series s01e${String(view.episode).padStart(2, "0")} [${view.references[0].voice_group}] VK-DL 2160p.mkv`,
 }))
 
 // The colours of the window itself: its states, its source marks, its neutrals; the last ones make sense as stripes.

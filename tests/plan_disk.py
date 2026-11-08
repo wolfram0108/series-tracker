@@ -112,6 +112,7 @@ class Host:
         self.root = root
         self.missing: set[str] = set()
         self.flaky: set[str] = set()
+        self.served: list[str] = []  # the names of the files given out, in order: what was downloaded and how often
         host = self
 
         class Handler(SimpleHTTPRequestHandler):
@@ -130,6 +131,7 @@ class Host:
 
             def do_GET(self) -> None:
                 if not self._refuse():
+                    host.served.append(self.path.lstrip("/"))
                     super().do_GET()
 
             def do_HEAD(self) -> None:

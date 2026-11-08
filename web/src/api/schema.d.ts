@@ -2375,6 +2375,8 @@ export interface components {
             video: components["schemas"]["PlanGoalVideo"];
             /** Tracks */
             tracks?: components["schemas"]["PlanGoalTrack"][];
+            /** Voices Off */
+            voices_off?: string[];
         };
         /**
          * PlanFailure
@@ -2390,6 +2392,13 @@ export interface components {
             row: components["schemas"]["PlanRowRef"];
             /** @default null */
             video: components["schemas"]["PlanRowRef"] | null;
+            /** Episodes */
+            episodes?: number[][];
+            /**
+             * Voice
+             * @default null
+             */
+            voice: string | null;
         };
         /**
          * PlanGoalTrack

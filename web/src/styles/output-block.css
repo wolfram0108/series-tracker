@@ -18,6 +18,7 @@
 .meter-bar .is-wait { background: #ced4da; }
 .meter-bar .is-error { background: var(--color-red-1); }
 .meter-bar .is-absent { background: var(--color-yellow-1); }
+.meter-bar .is-off { background: var(--color-gray-600); }
 .meter-text { font-size: 0.75rem; color: var(--color-gray-600); white-space: nowrap; }
 .season-settings { min-block-size: 2rem; padding-block: 0.25rem; font-size: 0.85rem; }
 .season-body { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.75rem 1.25rem; }

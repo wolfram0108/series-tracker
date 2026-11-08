@@ -77,6 +77,8 @@ class Goal:
     tracks: tuple[TrackWay, ...]
     name: str
     off: bool
+    # The voice-over groups the user switched off for the episode: no track of theirs is taken, by the user's word.
+    voices_off: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -323,7 +325,7 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank) -
         if mine and not idle:
             container, track, is_own = sorted(mine, key=lambda each: (each[2], each[0].name, each[1].dub))[0]
             tracks.append(TrackWay(voice, track.dub, track.snapshot, "realign", container=container, own=is_own))
-    return Goal(slot, video, tuple(tracks), namer(slot, video, off), off)
+    return Goal(slot, video, tuple(tracks), namer(slot, video, off), off, frozenset(taken_off))
 
 
 def _cut(slot, inputs, compilations, candidates, video_rank, denied=frozenset()):

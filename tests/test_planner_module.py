@@ -19,6 +19,7 @@ from core.contracts import (VOICE_TAKE, CompositionReply, CompositionRow, Effect
 from core.db import Database
 from core.envelope import Envelope
 from core.plan.files import container_json, container_of
+from modules.conform.module import finished_view
 from modules.downloads import ytdlp
 from modules.planner import PlannerModule
 from plan_disk import Codec, Daemon, Host
@@ -90,8 +91,9 @@ class Neighbours(BaseModule):
             job = await client.job(job["id"])
         finally:
             await client.close()
+        # Told as the conform module tells it: the service's results read by its own view.
         self.publish_event("conform.job.finished", {"job_id": job["id"], "kind": job["kind"], "status": job["status"],
-                                                    "error": None, "results": job["results"]})
+                                                    "error": None, "results": finished_view(job, {})["results"]})
 
     async def on_submit(self, env: Envelope) -> dict:
         body = {key: env.payload[key] for key in ("ref", "dubs", "dub_atracks", "out_dir", "label")
@@ -315,3 +317,36 @@ async def test_a_sync_written_down_is_work_of_the_series_before_the_start_takes_
     assert state["owner"] == "planner" and state["active"]
     await planner.repo.end_run(SERIES)
     assert not (await planner.request("planner.work.get", {"series_id": SERIES}))["active"]
+
+
+async def test_the_window_is_told_the_end_of_a_sync_with_the_view_the_tables_give_after_it(world):
+    """A window lives by the packets it is pushed: the last one of a sync is the view after it, not the plan it ran."""
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    told = planner.bus.subscribe("planner.series.changed")
+    await sync(world)
+    last = None
+    while not told.queue.empty():
+        last = (await told.queue.get()).payload
+    assert last is not None and not last["running"]
+    assert {each["video"]["kind"] for each in last["episodes"]} == {"asset"}
+    assert {track["kind"] for each in last["episodes"] for track in each["tracks"]} == {"reuse"}
+
+
+async def test_a_failure_is_told_with_the_episodes_and_the_voice_over_of_its_row(world):
+    """The plan passes over a failed attempt, so the window learns where it belongs from the failure itself."""
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    neighbours.daemon.answers["Сериал s01e01 G1"] = "mismatch"
+    await sync(world)
+    (failure,) = (await planner.request("planner.series.get", {"series_id": SERIES}))["failures"]
+    assert (failure["kind"], failure["episodes"], failure["voice"]) == ("align", [[1, 1]], "G1")
+
+
+async def test_the_voice_overs_the_user_switched_off_are_named_by_the_goal_of_the_episode(world):
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 2)
+    neighbours.take_off("G2", [1])
+    await sync(world)
+    (goal,) = (await planner.request("planner.series.get", {"series_id": SERIES}))["episodes"]
+    assert goal["voices_off"] == ["G2"] and [track["voice"] for track in goal["tracks"]] == ["G1"]
