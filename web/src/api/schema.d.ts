@@ -2514,6 +2514,8 @@ export interface components {
              * @default false
              */
             running: boolean;
+            /** References */
+            references?: components["schemas"]["Reference"][];
             /** Assets */
             assets?: components["schemas"]["PlanAsset"][];
             /** Episodes */
@@ -2658,22 +2660,44 @@ export interface components {
             season: number;
             /** Episode */
             episode: number;
-            /** Part */
-            part?: number | null;
+            /**
+             * Part
+             * @default null
+             */
+            part: number | null;
             mark: components["schemas"]["ReferenceMark"];
-            /** Source Id */
-            source_id?: number | null;
-            /** Row Key */
-            row_key?: string | null;
-            /** Player */
-            player?: string | null;
-            /** Voice Group */
-            voice_group?: string | null;
-            /** Height */
-            height?: number | null;
-            /** Reason */
-            reason?: string | null;
-            compilation?: components["schemas"]["CompilationRef"] | null;
+            /**
+             * Source Id
+             * @default null
+             */
+            source_id: number | null;
+            /**
+             * Row Key
+             * @default null
+             */
+            row_key: string | null;
+            /**
+             * Player
+             * @default null
+             */
+            player: string | null;
+            /**
+             * Voice Group
+             * @default null
+             */
+            voice_group: string | null;
+            /**
+             * Height
+             * @default null
+             */
+            height: number | null;
+            /**
+             * Reason
+             * @default null
+             */
+            reason: string | null;
+            /** @default null */
+            compilation: components["schemas"]["CompilationRef"] | null;
         };
         /**
          * ReferenceMark
@@ -3227,57 +3251,6 @@ export interface components {
             reason: string;
         };
         /**
-         * ReferenceChanged
-         * @description The event `scan.reference.changed`: the reference as it stands now, whole, so that a window needs no second
-         *     request to show it.
-         */
-        ReferenceChanged: {
-            /** Season */
-            season: number;
-            /** Episode */
-            episode: number;
-            /**
-             * Part
-             * @default null
-             */
-            part: number | null;
-            mark: components["schemas"]["ReferenceMark"];
-            /**
-             * Source Id
-             * @default null
-             */
-            source_id: number | null;
-            /**
-             * Row Key
-             * @default null
-             */
-            row_key: string | null;
-            /**
-             * Player
-             * @default null
-             */
-            player: string | null;
-            /**
-             * Voice Group
-             * @default null
-             */
-            voice_group: string | null;
-            /**
-             * Height
-             * @default null
-             */
-            height: number | null;
-            /**
-             * Reason
-             * @default null
-             */
-            reason: string | null;
-            /** @default null */
-            compilation: components["schemas"]["CompilationRef"] | null;
-            /** Series Id */
-            series_id: number;
-        };
-        /**
          * SourceChanged
          * @description The packet of the event stream for the three: what happened to the source (`added`, `updated`, `removed`).
          */
@@ -3330,7 +3303,7 @@ export interface components {
         /** StreamEvent */
         StreamEvent: {
             /** @enum {string} */
-            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "reference_changed" | "series_scan_progress" | "conform_queue_update" | "plan_update" | "voice_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
+            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_scan_progress" | "conform_queue_update" | "plan_update" | "voice_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
             data: unknown;
         };
     };

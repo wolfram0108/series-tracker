@@ -36,6 +36,16 @@ class PlannerRepository:
                        for each in commands]
         await self._db.execute_many(statements)
 
+    async def episodes(self) -> dict[int, set[tuple[int, int]]]:
+        """The episodes every series holds a file of that the media server sees (not switched off)."""
+        found: dict[int, set[tuple[int, int]]] = {}
+        for row in await self._db.fetch_all("SELECT series_id, data FROM plan_assets"):
+            data = json.loads(row["data"])
+            if not data.get("off"):
+                season, episode = data["video"]["episode"][:2]
+                found.setdefault(row["series_id"], set()).add((season, episode))
+        return found
+
     async def failures(self, series_id: int) -> list:
         return [json.loads(row["key"]) for row in await self._db.fetch_all(
             "SELECT key FROM plan_failures WHERE series_id=? ORDER BY key", (series_id,))]

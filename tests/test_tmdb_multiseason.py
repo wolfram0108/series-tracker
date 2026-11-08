@@ -1,5 +1,5 @@
 """Репо-тесты многосезонной фичи TMDB: реальные сезоны из нейминга
-(torrents.seasons / scan.seasons) и счётчик «скачано» без спешелов (сезон 0).
+(torrents.seasons) и счётчик «скачано» без спешелов (сезон 0).
 Сам агрегатор (metadata.seasons.recompute) — в test_settings_metadata_library.
 """
 import sqlite3
@@ -7,7 +7,6 @@ import sqlite3
 import pytest
 
 from core.db import Database
-from modules.scan.repository import ScanRepository
 from modules.torrents.repository import TorrentsRepository
 from series_factory import insert_series
 from schema_db import migrated
@@ -53,12 +52,6 @@ async def test_torrents_seasons_distinct_active_no_null(db_path):
 
 
 @pytest.mark.asyncio
-async def test_scan_seasons_distinct(db_path):
-    repo = ScanRepository(Database(db_path))
-    assert sorted(await repo.seasons_for_series(1)) == [0, 1, 2]
-
-
-@pytest.mark.asyncio
 async def test_torrent_downloaded_count_excludes_specials(db_path):
     repo = TorrentsRepository(Database(db_path))
     # файлы активной раздачи: s9×2, s8×1, s0×1 (спешел), без сезона×1.
@@ -66,9 +59,3 @@ async def test_torrent_downloaded_count_excludes_specials(db_path):
     assert (await repo.downloaded_counts())[1] == 4
     assert await repo.downloaded_count_for_series(1) == 4
 
-
-@pytest.mark.asyncio
-async def test_vk_downloaded_count_excludes_specials(db_path):
-    scan = ScanRepository(Database(db_path))
-    # media_items с final_filename: s1×2, s2×1, s0×1 (спешел) → спешел мимо → 3
-    assert (await scan.downloaded_counts())[1] == 3

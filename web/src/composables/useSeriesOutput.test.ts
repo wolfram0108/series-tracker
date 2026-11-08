@@ -8,7 +8,7 @@ import * as calls from "./outputCalls"
 import type { Composition } from "./outputCalls"
 import type { Answer } from "./sourceCalls"
 import { useSSE } from "./useSSE"
-import { useCompositionStore, type ReferencePacket } from "../stores/composition"
+import { useCompositionStore } from "../stores/composition"
 import { usePlanStore } from "../stores/plan"
 import { groupTarget, resetBody, setBody, type Reference, type Row } from "../lib/output"
 import { SPECS, AVAILABILITY } from "../lib/output.fixtures"
@@ -30,10 +30,6 @@ const reference = (over: Partial<Reference> = {}): Reference => ({
   season: 1, episode: 2, part: null, mark: "by_level", source_id: 7, row_key: "row", player: "vibix",
   voice_group: "Ruchime", height: 1080, reason: null, compilation: null, ...over,
 })
-const packet = (over: Partial<ReferencePacket> = {}): ReferencePacket => ({
-  season: 1, episode: 2, part: null, mark: "own", source_id: 8, row_key: "other", player: "kodik",
-  voice_group: "AniStar", height: 720, reason: null, compilation: null, series_id: 1, ...over,
-})
 const summary: SourceSummary = {
   source_id: 7, url: PAGE, status: "no_profile",
   players: [{ player: "vk", player_label: "VK", rows: 3, groups: 0 }],
@@ -54,10 +50,11 @@ const planned = planView({
     [goalTrack("AniStar", "realign", rowRef(8, "other"), { player: "kodik" })])],
 })
 
-// The plan reaches the window by its read and by the store; a test gives both the same view.
-const givePlan = (view: PlannerView): void => {
-  vi.mocked(calls.fetchPlan).mockResolvedValue(ok(view))
-  usePlanStore().apply(view)
+// The plan reaches the window by its read and by the store; a test gives both the same view, references included.
+const givePlan = (view: PlannerView, references: Reference[] = []): void => {
+  const whole = { ...view, references }
+  vi.mocked(calls.fetchPlan).mockResolvedValue(ok(whole))
+  usePlanStore().apply(whole)
 }
 
 let mounted: VueWrapper[] = []
@@ -72,7 +69,6 @@ beforeEach(() => {
   setActivePinia(createPinia())
   useSSE().connected.value = false
   vi.mocked(calls.fetchComposition).mockReset().mockResolvedValue(ok(composition()))
-  vi.mocked(calls.fetchOutput).mockReset().mockResolvedValue(ok([reference()]))
   vi.mocked(calls.fetchPlan).mockReset().mockResolvedValue(ok(planView()))
   vi.mocked(calls.deleteFromPlan).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.setLever).mockReset().mockResolvedValue(ok({ success: true }))
@@ -87,12 +83,11 @@ beforeEach(() => {
 afterEach(() => mounted.splice(0).forEach((wrapper) => wrapper.unmount()))
 
 describe("useSeriesOutput", () => {
-  it("reads the layout and the references of a video series and joins them into episodes", async () => {
-    givePlan(planned)
+  it("reads the layout and the plan of a video series and joins the references of the plan into episodes", async () => {
+    givePlan(planned, [reference()])
     const output = setup()
     await flushPromises()
     expect(calls.fetchComposition).toHaveBeenCalledWith(1)
-    expect(calls.fetchOutput).toHaveBeenCalledWith(1)
     expect(calls.fetchPlan).toHaveBeenCalledWith(1)
     expect(output.views.value).toEqual([{
       season: 1, episode: 2, references: [reference()], rows: [row()],
@@ -116,68 +111,33 @@ describe("useSeriesOutput", () => {
     useCompositionStore().applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false })
     await flushPromises()
     expect(calls.fetchComposition).not.toHaveBeenCalled()
-    expect(calls.fetchOutput).not.toHaveBeenCalled()
+    expect(calls.fetchPlan).not.toHaveBeenCalled()
     expect(output.composition.value).toBeNull()
     expect(output.references.value).toEqual([])
     expect(output.views.value).toEqual([])
   })
 
-  it("merges a reference packet into the reference of its episode, without a new read and without the series", async () => {
+  it("takes the references of the window from a packet of the plan, without a new read", async () => {
+    givePlan(planned, [reference()])
     const output = setup()
     await flushPromises()
-    const store = useCompositionStore()
-    store.applyReference(packet())
-    await flushPromises()
-    expect(output.references.value).toEqual([
+    const plans = vi.mocked(calls.fetchPlan).mock.calls.length
+    usePlanStore().apply({ ...planned, references: [
       reference({ mark: "own", source_id: 8, row_key: "other", player: "kodik", voice_group: "AniStar", height: 720 }),
-    ])
+      reference({ episode: 3 }),
+    ] })
+    await flushPromises()
+    expect(output.references.value.map((each) => [each.episode, each.mark])).toEqual([[2, "own"], [3, "by_level"]])
     expect(output.views.value[0].references.map((each) => each.mark)).toEqual(["own"])
-    store.applyReference(packet({ episode: 3 }))
-    await flushPromises()
-    expect(output.references.value.map((each) => [each.episode, each.mark])).toEqual([[2, "own"], [3, "own"]])
-    store.applyReference(packet({ series_id: 2 }))
-    await flushPromises()
-    expect(output.references.value).toHaveLength(2)
-    expect(calls.fetchOutput).toHaveBeenCalledTimes(1)
+    expect(calls.fetchPlan).toHaveBeenCalledTimes(plans)
+    expect(calls.fetchComposition).toHaveBeenCalledTimes(1)
   })
 
-  it("merges a packet once, so that a later read is not rolled back by a packet it already took into account", async () => {
-    const store = useCompositionStore()
-    const output = setup()
-    await flushPromises()
-    store.applyReference(packet())
-    await flushPromises()
-    expect(output.references.value.find((each) => each.episode === 2)?.mark).toBe("own")
-    vi.mocked(calls.fetchOutput).mockResolvedValue(ok([reference({ mark: "by_level" })]))
-    store.applyChanged({ series_id: 1, rev: 2, episodes: [], summary_only: false })
-    await flushPromises()
-    store.applyReference(packet({ episode: 3 }))
-    await flushPromises()
-    expect(output.references.value.find((each) => each.episode === 2)?.mark).toBe("by_level")
-    expect(output.references.value.find((each) => each.episode === 3)?.mark).toBe("own")
-  })
-
-  it("reads the output once more when a packet came while a read was in flight, and not otherwise", async () => {
-    let release!: (value: Answer<Reference[]>) => void
-    vi.mocked(calls.fetchOutput).mockReset()
-      .mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
-      .mockResolvedValue(ok([reference({ mark: "own", source_id: 8 })]))
-    setup()
-    await flushPromises()
-    useCompositionStore().applyReference(packet())
-    await flushPromises()
-    release(ok([reference()]))
-    await flushPromises()
-    expect(calls.fetchOutput).toHaveBeenCalledTimes(2)
-    useCompositionStore().applyReference(packet({ episode: 3 }))
-    await flushPromises()
-    expect(calls.fetchOutput).toHaveBeenCalledTimes(2)
-  })
-
-  it("reads the output again when the layout gets a newer revision, and not for the same one or for another series", async () => {
+  it("reads the plan again when the layout gets a newer revision, and not for the same one or for another series", async () => {
     setup()
     await flushPromises()
     const before = vi.mocked(calls.fetchComposition).mock.calls.length
+    const plansBefore = vi.mocked(calls.fetchPlan).mock.calls.length
     const store = useCompositionStore()
     store.applyChanged({ series_id: 1, rev: 1, episodes: [], summary_only: false })
     await flushPromises()
@@ -191,7 +151,7 @@ describe("useSeriesOutput", () => {
     store.applyChanged({ series_id: 1, rev: 2, episodes: [], summary_only: false })
     await flushPromises()
     expect(calls.fetchComposition).toHaveBeenCalledTimes(before + 2)
-    expect(calls.fetchOutput).toHaveBeenCalledTimes(before + 2)
+    expect(calls.fetchPlan).toHaveBeenCalledTimes(plansBefore + 2)
   })
 
   it("keeps the newest reply when an older read arrives late", async () => {
@@ -208,7 +168,8 @@ describe("useSeriesOutput", () => {
     expect(output.composition.value?.rev).toBe(2)
   })
 
-  it("shows the words of a refused read and keeps the reference that did come", async () => {
+  it("shows the words of a refused layout and keeps the references of the plan that did come", async () => {
+    givePlan(planned, [reference()])
     vi.mocked(calls.fetchComposition).mockResolvedValue({ ok: false, text: "Выход не построен" })
     const output = setup()
     await flushPromises()
@@ -293,14 +254,15 @@ describe("useSeriesOutput", () => {
     expect(output.names.value).toHaveLength(1)
   })
 
-  it("reads the output again when the connection comes back", async () => {
+  it("reads the plan again when the connection comes back", async () => {
     setup()
     await flushPromises()
     const before = vi.mocked(calls.fetchComposition).mock.calls.length
+    const plansBefore = vi.mocked(calls.fetchPlan).mock.calls.length
     useSSE().connected.value = true
     await flushPromises()
     expect(calls.fetchComposition).toHaveBeenCalledTimes(before + 1)
-    expect(calls.fetchOutput).toHaveBeenCalledTimes(before + 1)
+    expect(calls.fetchPlan).toHaveBeenCalledTimes(plansBefore + 1)
   })
 
   it("does the action of a track: a failure is reset, a track goes out of its file, the video goes for another", async () => {

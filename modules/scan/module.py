@@ -1,10 +1,10 @@
-"""Module scan — the orchestrator of scans: the schedule, the torrent scan, and, for a series of kind `video`, the
-synchronization of its sources and the choice of the reference of every episode (stage 10).
+"""Module scan — the orchestrator of scans: the schedule, the torrent scan, and, for a series of kind `video`, the run
+of its synchronization.
 
 A video series is not read here. The tables of its pages are read by `sources`, the numbers come from the constructor
-through `composition`; scan only waits for the tables, asks for the layout, chooses the reference of every slot
-(season, episode, part) from it (`reference.py`) and keeps the plan: the rows of media_items (`candidates.py`,
-`planner.py`) and the outcome of the choice in `scan_references`.
+through `composition`; scan waits for the tables, asks for the layout to be counted from them and hands the series to
+the planner (modules/planner), which chooses the reference of every episode, does the work and applies it. The run stays
+open until the planner has no work of the series left.
 
 Queries:
   scan.runs.get → {runs: [{series_id, snapshot}], as_of} — the open runs of syncs as their commands are written (an
@@ -18,36 +18,25 @@ Queries:
       A scan of a series that is being scanned is refused by the table of what is allowed (`not_allowed`, the state
       `scanning`; finding 27) with the code every module refuses by. The steps of a video series
       are tied by signals: sources.table.get for every source at once and the wait for sources.table.ready / .failed
-      of its page, composition.recompute (its answer means the layout is counted from these tables), composition.get
-      with voices.settings.get and the choice of the references, then planner.sync {download}: the planner counts the
-      plan of the series and carries it out (modules/planner). A failed step is the one signal of failure:
+      of its page, composition.recompute (its answer means the layout is counted from these tables), then
+      planner.sync {download}: the planner counts the plan of the series and carries it out. A failed step is the one
+      signal of failure:
       the error carrier (scan_tasks.status='error') holds its reason. The wait for a table has a safeguard
       (`TABLE_WAIT_S`): when it runs out the source counts as failed, reason `table_wait_timeout`.
   scan.series.prepare {series_id} → the summary of a torrent scan without a download: the torrent is added to
       qBittorrent, split into its files (torrent_files) and left paused — the user picks the episodes in the
       composition, the next scan starts the download.
-  scan.output.get {series_id} → [Reference]: every slot of the series; an episode that stands in a compilation carries it
-      (`Reference.compilation`, stage 12), and the plan says it of the winner of the slot (`media_items.want_cut`). One Reference per slot: an episode with
-      parts has one per part. Marks: by_level, own, other_player, none, unfit, and `off` for a slot the user switched
-      off (an episode or a season switched off, or a row of the plan switched off): it takes nothing and plans no
-      voice-over (core/contracts/reference.py).
   scan.output.switch {series_id, season, episode?, off} → {success}: switches an episode (without `episode`, a whole
-      season) off or on. The memory of the series (ignored_seasons, ignored_episodes) and the rows of the plan change
-      together, so the choice holds for the rows that exist and for those a new release brings; switching a season on
-      switches on all of it. What changed goes out as scan.reference.changed. A series the catalog does not have is
-      refused with the catalog's own answer.
+      season) off or on in the memory of the series (ignored_seasons, ignored_episodes), for the rows that exist and for
+      those a new release brings; switching a season on switches on all of it. The plan of the series reads the memory.
+      A series the catalog does not have is refused with the catalog's own answer.
 
 Commands:
   scan.all.start {} — a pass over all series with auto_scan_enabled (what the internal scheduler does by the
       schedule from the settings).
 
 Events (outgoing):
-  scan.plan.updated {series_id} — the references were counted again; it changes nothing on the disk. The disk
-      follows the plan of the series in a sync alone (planner.sync).
-  scan.reference.changed (ReferenceChanged: series_id and the whole Reference) — the reference or the mark of a slot
-      differs from the stored one (a slot whose row left the layout reports `none` with the reason `reference_none`; a
-      slot the user switched off reports `off` with the reason `reference_off`); sent
-      after the write. Voices follow it, a window shows it without a second request.
+  scan.plan.updated {series_id} — a row of a torrent series was switched off or on by the user.
   scan.status.changed {scanner_enabled, scan_interval, is_scanning, is_awaiting_tasks, next_scan_time} — the state
       of the scheduler (the contract of the old scanner_status_update).
   series.status.contribution — the fold of scanning/error (R-11); the carrier of the error is scan_tasks.status='error'.
@@ -61,17 +50,12 @@ Events (outgoing):
       source, with the rate; `active` false ends it (read, failed or given up). The card of the series shows it.
 
 Events (incoming):
-  composition.changed {series_id, rev, episodes, summary_only} — the layout or the levers changed: the references
-      and the plan of the series are counted again (the whole series: the count is a pure function, an episode the
-      change did not touch comes out the same). Never starts a download. `summary_only` is skipped.
-  voices.settings.changed — the order of players is an input of the choice: every video series is counted again.
   sources.table.ready / .failed {url, ...} — the verdicts a synchronization waits for.
   sources.table.progress (TableProgress) — how far a read is; told again as scan.series.progress for the series waiting.
   torrents.queue.changed {count} — the pipeline is empty: after a full pass the next scan is set when count=0.
 
-Neighbours (all over the bus): catalog.series.get / .list (kind, sources), composition.get / .recompute,
-voices.settings.get (the order of players), sources.table.get, downloads.queue.get, planner.sync / .work.get,
-renaming.reprocess (a torrent series). Scan asks nothing of composition at start: its state is its own database.
+Neighbours (all over the bus): catalog.series.get / .list (kind, sources), composition.recompute, sources.table.get,
+planner.sync / .work.get, library.relocation.apply, renaming.reprocess (a torrent series). Scan asks nothing of composition at start: its state is its own database.
 
 Resumability: the plan of replacements of a torrent scan is in scan_tasks BEFORE it is carried out; additions are
 idempotent (local infohash, R-2: adding again = existed); on_start goes on with the unfinished tasks. A video series
@@ -88,15 +72,12 @@ from datetime import datetime, timedelta, timezone
 
 from core import NO_HANDLER, BaseModule, BusRequestError, torrent_source
 from core.deadlines import EDIT_STUCK_S, TABLE_WAIT_S
-from core.contracts import (RUN_CHANGED, WORK_STATE, RunSnapshot, availability, CompositionReply, OutputSwitch, Reference,
-                            ReferenceChanged, RunChanged, SeriesReadProgress, SeriesSource, SourceStatus, TableProgress,
-                            Slot, VoiceSettingsView, WorkState)
+from core.contracts import (RUN_CHANGED, WORK_STATE, RunSnapshot, availability, OutputSwitch, RunChanged, SeriesReadProgress, SeriesSource, TableProgress, Slot, WorkState)
 from core.db import Database
 from core.envelope import Envelope
-from core.voice_names import Groups
 from core.ignored import parse_memory
 from core.reasons import reason
-from . import candidates, output, planner, reference, sync
+from . import sync
 from .errors import ScanAborted, ScanError, SyncFailed
 from .repository import ScanRepository
 from .torrent import TorrentScan
@@ -143,15 +124,6 @@ class _RunWork:
 
 
 
-@dataclass(frozen=True)
-class Refreshed:
-    """What a count of the references and the plan came to."""
-
-    in_plan: int
-    references: list[dict]
-    plan_changed: bool
-
-
 def _sources_of(series: dict) -> list[SeriesSource]:
     return [SeriesSource.model_validate(each) for each in series.get("sources", [])]
 
@@ -180,7 +152,6 @@ class ScanModule(BaseModule):
         self._runs: dict[int, int] = {}
         self._working: dict[int, _RunWork] = {}
         # The containers a run makes as its episodes get ready, before the run ends (each episode is a process of its own).
-        self._owed: set[int] = set()
         self._closing: set[int] = set()
         self._owned: set[int] = set()  # the tasks of scan_tasks that the scans running here keep
         # The changes of a series by the user under way (scan.edit.begin/end) and the signal that none is left: a run
@@ -209,16 +180,11 @@ class ScanModule(BaseModule):
         self.handle("scan.series.prepare", self.on_prepare, concurrent=True)
         self.handle("scan.all.start", self.on_scan_all)
         self.handle("scan.media.list", self.on_media_list)
-        self.handle("scan.media.downloaded_counts", self.on_downloaded_counts)
-        self.handle("scan.seasons", self.on_seasons)
         self.handle("scan.item.set_ignored", self.on_set_ignored)
         self.handle("scan.output.switch", self.on_output_switch)
         self.handle("scan.edit.begin", self.on_edit_begin)
         self.handle("scan.edit.end", self.on_edit_end)
-        self.handle("scan.output.get", self.on_output_get)
         self.handle("scan.status.get", self.on_status_get)
-        self.handle("composition.changed", self.on_composition_changed)
-        self.handle("voices.settings.changed", self.on_voice_settings_changed)
         self.handle("system.started", self.on_system_started)
         self.handle("sources.table.ready", self.on_table_ready)
         self.handle("sources.table.failed", self.on_table_failed)
@@ -279,21 +245,11 @@ class ScanModule(BaseModule):
         return await self.repo.items_for_series(env.payload["series_id"])
 
     async def on_set_ignored(self, env: Envelope) -> None:
-        """is_ignored_by_user is our column; the UI and slicing set it.
-
-        Switching a row off changes the real plan of the download, so scan.plan.updated goes out and downloads
-        counts its tasks and the fold of statuses again (R-21). The row also leaves the output, so the references
-        that changed with it are announced."""
+        """is_ignored_by_user is our column; the UI and slicing set it (a row of a torrent series)."""
         item = await self.repo.get_item(env.payload["unique_id"])
         if item is None:
             return
-        ignored = bool(env.payload["is_ignored"])
-
-        async def apply() -> None:
-            await self.repo.set_ignored(item["unique_id"], ignored)
-            await self._recount(item["series_id"])
-
-        await self._announcing(item["series_id"], apply())
+        await self.repo.set_ignored(item["unique_id"], bool(env.payload["is_ignored"]))
         self.publish_event("scan.plan.updated", {"series_id": item["series_id"]})
 
     # --- the admission of a change by the user (I-60) ------------------------------------------------------------
@@ -359,9 +315,9 @@ class ScanModule(BaseModule):
             await over.wait()
 
     async def on_output_switch(self, env: Envelope) -> dict:
-        """An episode, or a whole season, is switched off or on by the user. The memory of the series and the rows of
-        the plan change together, so that the choice holds for the rows that are there and for those that come with a
-        new release; what the output shows of it goes out as references. Switching a season on switches on all of it."""
+        """An episode, or a whole season, is switched off or on by the user: the memory of the series holds it, for the
+        rows that are there and for those a new release brings; the plan of the series reads it. Switching a season on
+        switches on all of it."""
         request = OutputSwitch.model_validate(env.payload)
         series_id = request.series_id
         self._require_idle(series_id, availability.Action.EDIT, env)
@@ -373,79 +329,18 @@ class ScanModule(BaseModule):
                 seasons = seasons | {request.season} if request.off else seasons - {request.season}
                 if not request.off:
                     memory.pop(request.season, None)
-                    await self.repo.set_ignored_bulk_for_season(series_id, request.season, False)
             else:
                 numbers = memory.get(request.season, set())
                 numbers = numbers | {request.episode} if request.off else numbers - {request.episode}
                 memory[request.season] = numbers
-                await self.repo.set_ignored_for_episode(series_id, request.season, request.episode, request.off)
+            # The memory of the series is the switch: the plan of the series reads it (modules/planner).
             await self.request("catalog.series.update", {"series_id": series_id, "fields": {
                 "ignored_seasons": json.dumps(sorted(seasons)),
                 "ignored_episodes": json.dumps({str(season): sorted(numbers) for season, numbers in memory.items() if numbers}),
             }})
-            await self._recount(series_id)
 
-        await self._announcing(series_id, apply())
-        self.publish_event("scan.plan.updated", {"series_id": series_id})
+        await apply()
         return {"success": True}
-
-    async def on_output_get(self, env: Envelope) -> list[dict]:
-        """The references of the series that are wanted, in the order of season, episode, part."""
-        series_id = int(env.payload["series_id"])
-        series = await self.request("catalog.series.get", {"series_id": series_id})
-        shown = await self._output_of(series)
-        return [output.reference_of(each).model_dump(mode="json") for each in shown]
-
-    async def _output_of(self, series: dict) -> list[dict]:
-        items = {each["unique_id"]: each for each in await self.repo.items_for_series(series["id"])}
-        return output.shown(await self.repo.references(series["id"]), items, self._ignored_episodes(series),
-                            self._ignored_seasons(series))
-
-    async def _recount(self, series_id: int) -> None:
-        """The plan follows the choice of the user: the rows of a video series are counted again, so that the rows
-        that left the plan lose their place in it and downloads drops the tasks that wait for them, and the rows that
-        came back have theirs. A torrent series has no plan of references."""
-        try:
-            series = await self.request("catalog.series.get", {"series_id": series_id})
-        except BusRequestError as exc:
-            if "LookupError" in str(exc):
-                return
-            raise
-        if series.get("kind") == "video":
-            await self._refresh(series, announce=True)
-
-    async def _announcing(self, series_id: int, action):
-        """Awaits `action` (a change of the rows that may switch a reference off) and announces what changed in the
-        output of the series. A series the catalog does not have, or a torrent one, has no output to announce."""
-        try:
-            series = await self.request("catalog.series.get", {"series_id": series_id})
-            before = await self._output_of(series)
-        except (BusRequestError, asyncio.TimeoutError):
-            return await action
-        result = await action
-        # The action may have changed the memory of the series: the output after it is read with the series as it is now.
-        try:
-            series = await self.request("catalog.series.get", {"series_id": series_id})
-            after = await self._output_of(series)
-        except (BusRequestError, asyncio.TimeoutError):
-            return result
-        for each in output.changes(before, after):
-            self._announce(series_id, each)
-        return result
-
-    def _announce(self, series_id: int, changed: Reference) -> None:
-        self.publish_event("scan.reference.changed", ReferenceChanged(
-            series_id=series_id, **changed.model_dump()).model_dump(mode="json"))
-
-    async def on_downloaded_counts(self, env: Envelope) -> dict:
-        """{counts: {series_id: n}} — скачанные VK-эпизоды (Р-19)."""
-        return {"counts": await self.repo.downloaded_counts()}
-
-    async def on_seasons(self, env: Envelope) -> dict:
-        """{seasons: [..]} — реальные сезоны VK-серии (distinct media_items.
-        season) для агрегата TMDB по нескольким сезонам."""
-        return {"seasons": await self.repo.seasons_for_series(
-            env.payload["series_id"])}
 
     async def on_series_deleted(self, env: Envelope) -> None:
         """Каскад Р-19: владелец чистит media_items и scan_tasks; идущий
@@ -459,7 +354,6 @@ class ScanModule(BaseModule):
         self._ended_early.pop(series_id, None)
         if self._runs.pop(series_id, None) is not None:  # its works go with the series: the run is over
             self._working.pop(series_id, None)
-            self._owed.discard(series_id)
             self._announce_run(series_id, False)
         self.publish_event("series.purged",
                            {"series_id": series_id, "owner": self.name})
@@ -516,41 +410,6 @@ class ScanModule(BaseModule):
 
     def _announce_reading(self, packet: SeriesReadProgress) -> None:
         self.publish_event("scan.series.progress", packet.model_dump(mode="json"))
-
-    async def on_composition_changed(self, env: Envelope) -> None:
-        """The layout or the levers changed: the references and the plan follow, nothing is downloaded."""
-        if env.payload.get("summary_only"):
-            return  # no row and no lever moved, only what a window shows
-        await self._follow_layout(int(env.payload["series_id"]))
-
-    async def on_voice_settings_changed(self, env: Envelope) -> None:
-        """The order of players decides ties of the choice, so a new order may change references."""
-        try:
-            listing = await self.request("catalog.series.list", {})
-        except (BusRequestError, asyncio.TimeoutError) as exc:
-            self.log.warning("порядок плееров изменён, список сериалов недоступен: %s", exc)
-            return
-        for series in listing:
-            if series.get("kind") == "video":
-                await self._follow_layout(series["id"])
-
-    async def _follow_layout(self, series_id: int) -> None:
-        """Counts the references of a video series again after an event; a failure is logged, the next event or the
-        next scan counts again. While a run of the series is open its plan is the one the sync found (the snapshot):
-        the recount is owed and done when the run ends."""
-        if series_id in self._runs or series_id in self._running:
-            self._owed.add(series_id)
-            return
-        try:
-            series = await self.request("catalog.series.get", {"series_id": series_id})
-            if series.get("kind") == "video":
-                await self._refresh(series)
-        except ScanAborted as exc:
-            self.log.info("пересчёт референсов прерван: %s", exc)
-        except (BusRequestError, asyncio.TimeoutError, ScanError) as exc:
-            self.log.warning("сериал %d: референсы не пересчитаны: %s", series_id, exc)
-        except Exception:  # noqa: BLE001 — one series must not stop the handling of the events of the others
-            self.log.exception("сериал %d: сбой пересчёта референсов", series_id)
 
     def _lock(self, series_id: int) -> asyncio.Lock:
         return self._locks.setdefault(series_id, asyncio.Lock())
@@ -725,7 +584,6 @@ class ScanModule(BaseModule):
 
         Each step starts on the signal that the one before it ended, and any step that fails fails the scan."""
         series_id = series["id"]
-        before = await self._fingerprint(series_id)
         self._alive(series_id)
         tables = await sync.sync_tables(_sources_of(series), self.request, self._signals, self._table_wait_s)
         for each in tables:
@@ -736,16 +594,13 @@ class ScanModule(BaseModule):
         snapshot = self._snapshots.get(series_id)
         await self._step("composition.recompute", {"series_id": series_id, **(
             {"snapshot": snapshot.model_dump(mode="json")} if snapshot is not None else {})}, units=len(_sources_of(series)))
-        self._alive(series_id)
-        refreshed = await self._refresh(series, announce=True)
         # The disk follows the plan here and nowhere else: the planner counts the plan of the series from its asset and
         # these tables, does its work and applies it once, at its end (modules/planner). Without download it applies only
         # what needs no work.
         self._alive(series_id)
-        await self._step("planner.sync", {"series_id": series_id, "download": download})
-        changed = before != await self._fingerprint(series_id)
-        return {"kind": "video", "changed": changed, "sources": [each.as_dict() for each in tables],
-                "references": output.marks(refreshed.references), "in_plan": refreshed.in_plan}
+        accepted = await self._step("planner.sync", {"series_id": series_id, "download": download})
+        return {"kind": "video", "changed": bool((accepted or {}).get("accepted")),
+                "sources": [each.as_dict() for each in tables]}
 
     def _state(self, series_id: int) -> str:
         return availability.SERIES_SCANNING if series_id in self._running or series_id in self._runs \
@@ -853,133 +708,7 @@ class ScanModule(BaseModule):
             self.log.error("сериал %d: синхронизация завершена с ошибкой: %s", series_id, failure)
         self._announce_run(series_id, False)
         self._contribute(series_id, scanning=series_id in self._running, error=failure is not None)
-        if series_id in self._owed:
-            self._owed.discard(series_id)
-            await self._follow_layout(series_id)
 
-    async def _fingerprint(self, series_id: int) -> tuple:
-        """The references and the rows of the plan as stored: two equal fingerprints mean the run changed nothing."""
-        records = await self.repo.references(series_id)
-        rows = sorted(each["unique_id"] for each in await self.repo.items_for_series(series_id))
-        return tuple(tuple(each.items()) for each in records), tuple(rows)
-
-    async def _refresh(self, series: dict, *, announce: bool = False) -> Refreshed:
-        """Counts the references of the series from the layout as it stands, writes them with the plan in one
-        transaction and announces what changed. Counting twice with the same inputs changes nothing."""
-        series_id = series["id"]
-        async with self._lock(series_id):
-            self._alive(series_id)
-            # The excluded rows too: they tell a video taken out by the configuration from one a read did not bring.
-            layout = CompositionReply.model_validate(await self._step(
-                "composition.get", {"series_id": series_id, "include_excluded": True}))
-            # A run chooses by the settings it took when it started (RunSnapshot); a recount outside a run by the current.
-            snapshot = self._snapshots.get(series_id)
-            voices = VoiceSettingsView.model_validate(await self._step(
-                "voices.settings.get", {"values": snapshot.voices} if snapshot is not None else {}))
-            existing = await self.repo.items_for_series(series_id)
-            stored = await self.repo.references(series_id)
-            chosen = reference.choose(layout.rows, layout.settings, voices.priority,
-                                      self._standing_sources(series, layout),
-                                      previous=[output.reference_of(each) for each in stored],
-                                      player_groups=Groups.of(voices.player_groups),
-                                      on_disk=candidates.on_disk(existing), failed=candidates.failures(existing))
-            memory, seasons = self._ignored_episodes(series), self._ignored_seasons(series)
-            queued = await self._queued(series_id)
-            # When the queue cannot be told, every row that is not fetched is held: none is turned to another video.
-            placements = candidates.place(series_id, chosen, existing, queued if queued is not None else {
-                each["unique_id"] for each in existing if not candidates.is_downloaded(each)})
-            winners = {each.slot: each.unique_id for each in placements}
-            by_id = {each["unique_id"]: each for each in existing}
-            inserts = [candidates.new_row(series_id, each, memory) for each in placements if each.is_new]
-            updates = []
-            for each in placements:
-                if not each.is_new:
-                    changed = {name: value for name, value in each.fields.items() if by_id[each.unique_id].get(name) != value}
-                    if changed:
-                        updates.append((each.unique_id, changed))
-            deletes = self._leftovers(existing, set(winners.values()), queued)
-            rows = candidates.rows_after(existing, inserts, updates, deletes)
-            statuses, superseded = planner.plan_with_supersession(rows, winners, seasons)
-            for unique_id in self._removed_by_configuration(series, layout, rows, set(winners.values()), seasons,
-                                                            statuses):
-                statuses[unique_id] = "removed"
-                superseded.pop(unique_id, None)
-            records = [{**each.reference.model_dump(mode="json"), "unique_id": winners.get(each.slot)}
-                       for each in chosen]
-            shown_before = output.shown(stored, by_id, memory, seasons)
-            shown_after = output.shown(records, {each["unique_id"]: each for each in rows}, memory, seasons)
-            plan_changed = bool(inserts or updates or deletes) or any(
-                (by_id[unique_id].get("plan_status"), by_id[unique_id].get("superseded_by"))
-                != (statuses.get(unique_id, "candidate"), superseded.get(unique_id))
-                for unique_id in by_id if unique_id not in deletes)
-            self._alive(series_id)
-            try:
-                await self.repo.save_outcome(series_id, inserts=inserts, updates=updates, deletes=deletes,
-                                             statuses=statuses, superseded=superseded, references=records)
-            except Exception as exc:
-                if "FOREIGN KEY" in str(exc):
-                    raise ScanAborted(f"сериал {series_id} удалён во время скана") from exc
-                raise
-        self.log.info("сериал %d: раскладка %d, слотов %d, в плане %d, добавлено строк %d, убрано %d", series_id,
-                      layout.rev, len(chosen), sum(1 for each in statuses.values() if each == "in_plan_single"),
-                      len(inserts), len(deletes))
-        if announce or plan_changed:
-            self.publish_event("scan.plan.updated", {"series_id": series_id})
-        for each in output.changes(shown_before, shown_after):
-            self._announce(series_id, each)
-        return Refreshed(sum(1 for each in statuses.values() if each == "in_plan_single"), shown_after, plan_changed)
-
-    @staticmethod
-    def _standing_sources(series: dict, layout: CompositionReply) -> list[int]:
-        """The sources of the series in their order that can bring rows: one taken away, or one without a profile, holds
-        no reference of its own (its rows are gone by the user's choice, not by a read)."""
-        mine = {each.id for each in _sources_of(series)}
-        return [each.source_id for each in layout.sources
-                if each.status != SourceStatus.NO_PROFILE and (not mine or each.source_id in mine)]
-
-    @staticmethod
-    def _removed_by_configuration(series: dict, layout: CompositionReply, rows: list[dict], winners: set[str],
-                                  seasons: set[int], statuses: dict[str, str]) -> list[str]:
-        """The rows the configuration took out of the plan: those of a season the user switched off, of a source they took
-        away, of a source whose profile they took away, and those whose row of the layout the configuration excluded (a
-        rule, a switched-off player) while nothing else holds their slot. This is the one place the reason is told;
-        downloads removes the files of the rows it names and no others, and only in a sync, so that a site that fails is
-        never taken for a choice of the user and a rule being edited removes nothing. A displaced row whose slot has a
-        winner waits for it: its file goes once the winner is on disk. With no source known the rows of a source are not
-        told from a layout that has not been counted yet."""
-        gone = [item["unique_id"] for item in rows if item.get("season") in seasons]
-        left_out = {(row.source_id, row.row_key) for row in layout.rows if row.left_out}
-        gone += [item["unique_id"] for item in rows
-                 if item["unique_id"] not in gone and statuses.get(item["unique_id"]) == "redundant"
-                 and (item.get("source_id"), item.get("row_key")) in left_out]
-        mine = {each.id for each in _sources_of(series)}
-        if not mine:
-            return gone
-        without_profile = {each.source_id for each in layout.sources if each.status == SourceStatus.NO_PROFILE}
-        return gone + [item["unique_id"] for item in rows
-                       if item["unique_id"] not in winners and item.get("source_id") is not None
-                       and item["unique_id"] not in gone
-                       and (item["source_id"] not in mine or item["source_id"] in without_profile)]
-
-    async def _queued(self, series_id: int) -> set[str] | None:
-        """The rows of the series that have a task in the queue of downloads; None when the queue cannot be told."""
-        try:
-            queue = await self.request("downloads.queue.get", {})
-        except BusRequestError as exc:
-            if NO_HANDLER not in str(exc):
-                self.log.warning("сериал %d: очередь загрузок недоступна: %s", series_id, exc)
-                return None
-            return set()
-        except asyncio.TimeoutError:
-            self.log.warning("сериал %d: очередь загрузок не ответила", series_id)
-            return None
-        return {task["task_key"] for task in queue.get("tasks", []) if task.get("series_id") == series_id}
-
-    @staticmethod
-    def _leftovers(existing: list[dict], kept: set[str], queued: set[str] | None) -> list[str]:
-        """The rows to delete: those that stand for nothing and have no task in the queue of downloads. When the
-        queue cannot be told, nothing is deleted this time, so that no task is left without its row."""
-        return [] if queued is None else candidates.obsolete(existing, kept, queued)
 
     @staticmethod
     def _ignored_episodes(series: dict) -> dict[int, set[int]]:

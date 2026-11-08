@@ -26,7 +26,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import BaseModule, BusRequestError
-from core.contracts import (CompositionChanged, CompositionFailed, PlannerView, ReferenceChanged,
+from core.contracts import (CompositionChanged, CompositionFailed, PlannerView,
                             SeriesReadProgress, SourceChanged, TableFailed, TableProgress, TableReady)
 
 
@@ -179,7 +179,6 @@ SSE_MAP: dict[str, Outgoing] = {
     "sources.table.failed": Outgoing("sources_table_failed"),
     "composition.changed": Outgoing("composition_changed"),
     "composition.failed": Outgoing("composition_failed"),
-    "scan.reference.changed": Outgoing("reference_changed"),
     "scan.series.progress": Outgoing("series_scan_progress"),
     "conform.queue.changed": Outgoing("conform_queue_update", latest=_whole),
     "planner.series.changed": Outgoing("plan_update"),
@@ -211,7 +210,7 @@ def latest_only(batch: list) -> list:
 
 # The packets of the event stream that the interface types: their models go into the schema of the API.
 EVENT_PACKETS = (PlannerView, TableProgress, TableReady, TableFailed, CompositionChanged,
-                 CompositionFailed, ReferenceChanged, SourceChanged, SeriesReadProgress)
+                 CompositionFailed, SourceChanged, SeriesReadProgress)
 
 _KEEPALIVE_SECONDS = 15.0
 # Put into a stream's queue to end it: uvicorn waits for open responses before it stops the app.

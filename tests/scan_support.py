@@ -1,8 +1,10 @@
 """Fake neighbours of the scan module for a series of kind `video`, each answering as its contract says.
 
-One module `World` stands for everything scan asks or tells: the tables of the pages (`sources`), the layout
-(`composition`), the order of players (`voices`), the queue of downloads and the planner that does the work of a sync. It records the order in which scan used it, so that a test proves the steps follow one another by signals,
-and it ends a read of a page only when the test says so, so that a test waits for events and never for time.
+One module `World` stands for everything scan asks or tells: the tables of the pages (`sources`), the composition step,
+the rules and voice-overs it snapshots, the folder move, the planner that does the work of a sync, and the torrent queue
+and settings a pass reads. It records the order in which scan used it, so that a test proves the steps follow one
+another by signals, and it ends a read of a page only when the test says so, so that a test waits for events and never
+for time.
 """
 import asyncio
 from dataclasses import dataclass
@@ -10,15 +12,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core import BaseModule
-from core.contracts import (CompositionChanged, CompositionReply, CompositionRow, EffectiveLever, EpisodeRef,
-                            EpisodeSettings, Level, ReleaseTable, RowState, SourceStatus, SourceSummary, TableFailed,
-                            TableGetReply, TableGetRequest, TableReady, TableState, VoiceSettingsView)
+from core.contracts import (CompositionRow, ReleaseTable, RowState, TableFailed, TableGetReply, TableGetRequest,
+                            TableReady, TableState)
 from core.reasons import reason
 from schema_db import migrated
 
-ROOT = Path(__file__).resolve().parent.parent
 READ_AT = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc).isoformat()
-PRIORITY = ["vk", "allvideo", "vibix", "kodik", "cvh"]
 # A test that waits longer than this for an event is stuck; the event is the signal, the number only ends a broken test.
 STUCK_S = 5.0
 
@@ -51,14 +50,6 @@ def row(series_id: int, source_id: int, key: str, season: int | None, start: int
         published=published, link=link if link is not None else f"https://v.test/{player}/{key}")
 
 
-def lever(name: str, value, level: Level = Level.SERIES, target: str | None = None) -> EffectiveLever:
-    return EffectiveLever(lever=name, target=target, value=value, level=level)
-
-
-def episode_settings(season: int, episode: int, *levers: EffectiveLever) -> EpisodeSettings:
-    return EpisodeSettings(season=season, episode=episode, levers=list(levers))
-
-
 @dataclass
 class Page:
     """How the page answers a request that asks for a read.
@@ -78,15 +69,7 @@ class World(BaseModule):
     def __init__(self, bus) -> None:
         self.order: list[str] = []
         self.pages: dict[str, Page] = {}
-        self.rows: list[CompositionRow] = []
-        self.settings: list[EpisodeSettings] = []
-        self.sources: list[tuple[int, str]] = []
-        self.priority = list(PRIORITY)
-        self.rev = 0
         self.recompute_error: str | None = None
-        self.queue_tasks: list[dict] = []
-        self.queue_error = False
-        self.reprocess_calls = 0
         self.settings_values = {"scan_interval_minutes": "60"}
         # Whether each executor has work of the series when a run asks (`<owner>.work.get`); none by default.
         self.work: dict[str, bool] = {}
@@ -111,13 +94,9 @@ class World(BaseModule):
 
     def register(self) -> None:
         h = self.handle
-        h("renaming.reprocess", self.on_reprocess)
         h("library.relocation.apply", self.on_relocation_apply)
         h("planner.sync", self.on_planner_sync)
         h("planner.work.get", self.on_work_get)
-        h("downloads.queue.get", self.on_queue)
-        h("voices.settings.get", self.on_voice_settings)
-        h("composition.get", self.on_layout)
         h("composition.recompute", self.on_recompute)
         h("rules.profiles.export", self.on_profiles_export)
         h("voices.settings.export", self.on_voices_export)
@@ -127,11 +106,6 @@ class World(BaseModule):
         h("settings.value.set", self.on_setting_set)
 
     # --- what scan asks ------------------------------------------------------------------------
-
-    async def on_reprocess(self, env) -> dict:
-        self.reprocess_calls += 1
-        self.order.append("renaming.reprocess")
-        return {"ok": True}
 
     async def on_relocation_apply(self, env) -> dict:
         self.order.append(f"library.relocation.apply {env.payload['series_id']}")
@@ -143,11 +117,6 @@ class World(BaseModule):
                                                             "save_path": self.planned_path})
         self.planned_path = None
         return {"moved": True}
-
-    async def on_queue(self, env) -> dict:
-        if self.queue_error:
-            raise RuntimeError("очередь недоступна")
-        return {"tasks": self.queue_tasks, "count": len(self.queue_tasks)}
 
     async def on_planner_sync(self, env) -> dict:
         """The planner writes the sync down and starts it; its work is told by work.series.state."""
@@ -181,27 +150,12 @@ class World(BaseModule):
     async def on_voices_export(self, env) -> dict:
         return {"values": dict(self.voices_export)}
 
-    async def on_voice_settings(self, env) -> dict:
-        self.payloads.setdefault(env.topic, []).append(dict(env.payload))
-        self.order.append("voices.settings.get")
-        return VoiceSettingsView(priority=self.priority, voice_groups={}, default_priority=PRIORITY,
-                                 rejected=[]).model_dump()
-
-    async def on_layout(self, env) -> dict:
-        self.order.append("composition.get")
-        series_id = env.payload["series_id"]
-        sources = [SourceSummary(source_id=source_id, url=url, status=SourceStatus.READY)
-                   for source_id, url in self.sources]
-        rows = [row for row in self.rows if env.payload.get("include_excluded") or not row.excluded]
-        return CompositionReply(series_id=series_id, rev=self.rev, rows=rows, sources=sources,
-                                settings=self.settings).model_dump(mode="json")
-
     async def on_recompute(self, env) -> dict:
         self.order.append("composition.recompute")
         self.payloads.setdefault(env.topic, []).append(dict(env.payload))
         if self.recompute_error is not None:
             raise ValueError(self.recompute_error)
-        return {"rev": self.rev, "changed": False}
+        return {"changed": False}
 
     async def on_table(self, env) -> dict:
         request = TableGetRequest.model_validate(env.payload)
@@ -236,12 +190,6 @@ class World(BaseModule):
     def fail(self, url: str, why: str) -> None:
         self.order.append(f"table.failed {url}")
         self.publish_event("sources.table.failed", TableFailed(url=url, reason=why).model_dump())
-
-    def changed(self, series_id: int, *episodes: tuple[int, int], summary_only: bool = False) -> None:
-        self.rev += 1
-        self.publish_event("composition.changed", CompositionChanged(
-            series_id=series_id, rev=self.rev, summary_only=summary_only,
-            episodes=[EpisodeRef(season=season, episode=episode) for season, episode in episodes]).model_dump())
 
     def failure(self, topic: str = "sources.table.get") -> str:
         return reason("composition_request_failed", topic=topic)

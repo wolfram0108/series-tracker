@@ -406,38 +406,3 @@ async def test_prepare_refuses_a_series_of_video_sources(db_path):
         await runner.stop()
 
 
-def test_the_rows_of_a_season_a_source_or_a_profile_the_user_took_away_are_named_and_nothing_else():
-    from core.contracts import SourceStatus
-    from modules.scan.module import ScanModule
-    series = {"id": 1, "sources": [{"id": 10, "series_id": 1, "url": "https://a", "source_type": "web_video", "parser_profile_id": 1},
-                                   {"id": 11, "series_id": 1, "url": "https://b", "source_type": "web_video", "parser_profile_id": None}]}
-    rows = [{"unique_id": "gone", "source_id": 99}, {"unique_id": "noprofile", "source_id": 11}, {"unique_id": "kept", "source_id": 10},
-            {"unique_id": "won", "source_id": 99}, {"unique_id": "legacy", "source_id": None},
-            {"unique_id": "off", "source_id": 10, "season": 2}, {"unique_id": "off-and-gone", "source_id": 99, "season": 2}]
-    layout = type("Layout", (), {"rows": [], "sources": [type("S", (), {"source_id": 10, "status": SourceStatus.READY})(),
-                                                          type("S", (), {"source_id": 11, "status": SourceStatus.NO_PROFILE})()]})()
-    removed = lambda series, winners, seasons: ScanModule._removed_by_configuration(  # noqa: E731
-        series, layout, rows, winners, seasons, {})
-    assert removed(series, {"won"}, set()) == ["gone", "noprofile", "off-and-gone"]
-    # A season that is switched off names its rows by itself, whichever source they came from and whether or not a source is known.
-    assert removed(series, {"won"}, {2}) == ["off", "off-and-gone", "gone", "noprofile"]
-    assert removed({"id": 1, "sources": []}, set(), set()) == []
-    assert removed({"id": 1, "sources": []}, set(), {2}) == ["off", "off-and-gone"]
-
-
-@pytest.mark.parametrize("exclusion", ["rule", "source", "no_number", None])
-@pytest.mark.parametrize("status", ["redundant", "replaced", "in_plan_single"])
-def test_a_row_the_configuration_excluded_is_named_only_while_nothing_holds_its_slot(exclusion, status):
-    from core.contracts import Exclusion, SourceStatus
-    from modules.scan.module import ScanModule
-    from scan_support import row
-    series = {"id": 1, "sources": [{"id": 10, "series_id": 1, "url": "https://a", "source_type": "web_video",
-                                    "parser_profile_id": 1}]}
-    layout_row = row(1, 10, "k", 1, 1)
-    if exclusion is not None:
-        layout_row = layout_row.model_copy(update={"excluded": True, "exclusion": Exclusion(exclusion)})
-    layout = type("Layout", (), {"rows": [layout_row],
-                                 "sources": [type("S", (), {"source_id": 10, "status": SourceStatus.READY})()]})()
-    rows = [{"unique_id": "u", "source_id": 10, "row_key": "k"}]
-    named = ScanModule._removed_by_configuration(series, layout, rows, set(), set(), {"u": status})
-    assert named == (["u"] if exclusion in ("rule", "source") and status == "redundant" else [])

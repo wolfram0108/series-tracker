@@ -17,7 +17,8 @@ const row = (over: Partial<Row> = {}): Row => ({
   heights: [1080], state: "playable", link: "", video: "", ...over,
 })
 const ref = (season: number, episode: number, over: Partial<Reference> = {}): Reference =>
-  ({ season, episode, mark: "by_level", ...over })
+  ({ season, episode, part: null, mark: "by_level", source_id: null, row_key: null, player: null, voice_group: null, height: null,
+     reason: null, compilation: null, ...over })
 const lever = (name: string, target: string | null | undefined, value: unknown, level: Schemas["Level"]): Lever =>
   ({ lever: name, target, value, level })
 const settings = (season: number, episode: number, levers: Lever[] = []): Schemas["EpisodeSettings"] =>

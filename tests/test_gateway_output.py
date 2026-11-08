@@ -104,23 +104,23 @@ async def test_the_composition_of_an_unknown_series_is_not_found(tmp_path):
 # --- the references ----------------------------------------------------------------------------------
 
 
-async def test_the_output_is_the_references_of_scan_as_they_are(tmp_path):
+async def test_the_output_is_the_references_of_the_plan_as_they_are(tmp_path):
     references = [
         {"season": 1, "episode": 1, "part": None, "mark": "by_level", "source_id": 4, "row_key": "r1",
          "player": "kodik", "voice_group": "Group", "height": 720, "reason": None, "compilation": None},
         {"season": 1, "episode": 2, "part": None, "mark": "none", "source_id": None, "row_key": None,
          "player": None, "voice_group": None, "height": None, "reason": reason("reference_none"), "compilation": None}]
-    async with serving(tmp_path, {"scan.output.get": references}) as (client, owners, _, spy):
+    async with serving(tmp_path, {"planner.references.get": references}) as (client, owners, _, spy):
         response = await client.get("/api/series/1/output")
     assert response.status_code == 200 and response.json() == references
     assert [Reference.model_validate(each).mark.value for each in response.json()] == ["by_level", "none"]
-    assert owners.asked("scan.output.get") == [{"series_id": 1}]
-    # A mark that reads "other player" or "none" is told by scan alone: no other owner is asked to explain it.
-    assert topics(spy) == ["scan.output.get"]
+    assert owners.asked("planner.references.get") == [{"series_id": 1}]
+    # A mark that reads "other player" or "none" is told by the plan alone: no other owner is asked to explain it.
+    assert topics(spy) == ["planner.references.get"]
 
 
-async def test_an_output_scan_refuses_to_give_is_a_refusal(tmp_path):
-    async with serving(tmp_path, {"scan.output.get": LookupError("сериал 9 не найден")}) as (client, _, _, _):
+async def test_an_output_the_planner_refuses_to_give_is_a_refusal(tmp_path):
+    async with serving(tmp_path, {"planner.references.get": LookupError("сериал 9 не найден")}) as (client, _, _, _):
         response = await client.get("/api/series/9/output")
     assert response.status_code == 404 and "success" not in response.json()
 

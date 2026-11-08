@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from .reference import Reference
+
 
 class PlanRowRef(BaseModel):
     """A row of a source table: the source, the key of the row and the video behind it as its host numbers it."""
@@ -96,6 +98,8 @@ class PlanCommand(BaseModel):
 class PlannerView(BaseModel):
     series_id: int
     running: bool = False
+    # The reference of every episode and why it is that one, told by the plan.
+    references: list[Reference] = Field(default_factory=list)
     assets: list[PlanAsset] = Field(default_factory=list)
     episodes: list[PlanEpisode] = Field(default_factory=list)
     failures: list[PlanFailure] = Field(default_factory=list)

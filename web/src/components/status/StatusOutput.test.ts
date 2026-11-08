@@ -28,7 +28,7 @@ const row = (season: number, episode: number, over: Partial<Row> = {}): Row => (
   group: "", text: "", heights: [1080], state: "playable", link: "", video: "", ...over,
 })
 const reference = (season: number, episode: number, over: Partial<Reference> = {}): Reference => ({
-  season, episode, part: null, mark: "by_level", source_id: 7, row_key: `r${season}-${episode}`, player: "vibix",
+  season, episode, part: null, mark: "by_level", source_id: 7, row_key: `r${season}-${episode}`, player: "vibix", compilation: null,
   voice_group: "Ruchime", height: 1080, reason: null, ...over,
 })
 const composition = (): Composition => ({
@@ -66,10 +66,12 @@ const mountOutput = () => {
 }
 const cards = (w: VueWrapper) => w.findAll(".episode-card").map((each) => [each.attributes("data-season"), each.attributes("data-episode")])
 const button = (w: VueWrapper, text: string) => w.findAll("button").find((each) => each.text().includes(text))
-// The plan reaches the window by its read and by the store; a test gives both the same view before it mounts.
-const givePlan = (view: PlannerView): void => {
-  vi.mocked(calls.fetchPlan).mockResolvedValue(ok(view))
-  usePlanStore().apply(view)
+// The references of the window come with the plan; a test gives both the read and the store the same view before it mounts.
+const windowReferences = (): Reference[] => [reference(1, 1), reference(1, 2, { mark: "own" }), reference(2, 1)]
+const givePlan = (view: PlannerView, references: Reference[] = windowReferences()): void => {
+  const whole = { ...view, references }
+  vi.mocked(calls.fetchPlan).mockResolvedValue(ok(whole))
+  usePlanStore().apply(whole)
 }
 // The file S01E01.mp4 holds the reference of episode 1 (source 7); the test gives the voice-overs it holds.
 const fileOfEpisodeOne = (tracks: components["schemas"]["PlanAssetTrack"][] = []) => asset("S01E01.mp4", rowRef(7, "r1-1"), tracks)
@@ -87,9 +89,7 @@ beforeEach(() => {
   useSSE().connected.value = false
   roomFor(6)
   vi.mocked(calls.fetchComposition).mockReset().mockResolvedValue(ok(composition()))
-  vi.mocked(calls.fetchOutput).mockReset().mockResolvedValue(ok([
-    reference(1, 1), reference(1, 2, { mark: "own" }), reference(2, 1)]))
-  vi.mocked(calls.fetchPlan).mockReset().mockResolvedValue(ok(planView()))
+  vi.mocked(calls.fetchPlan).mockReset().mockResolvedValue(ok({ ...planView(), references: windowReferences() }))
   vi.mocked(calls.fetchQueues).mockReset().mockResolvedValue(ok(queues()))
   for (const each of [calls.switchOutput, calls.syncSeries, calls.setLever, calls.resetLever, calls.deleteFromPlan])
     vi.mocked(each).mockReset().mockResolvedValue(ok({ success: true }))
@@ -136,7 +136,7 @@ describe("StatusOutput", () => {
 
   it("says that there are no episodes yet when the layout has none", async () => {
     vi.mocked(calls.fetchComposition).mockResolvedValue(ok({ ...composition(), rows: [] }))
-    vi.mocked(calls.fetchOutput).mockResolvedValue(ok([]))
+    givePlan(planView(), [])
     const w = mountOutput()
     await flushPromises()
     expect(w.text()).toContain(t("output.empty"))

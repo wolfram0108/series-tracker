@@ -81,7 +81,8 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def output(series_id: int):
         """The reference of every episode of the series and why it is that one (the mark)."""
         try:
-            return await gw.request("scan.output.get", {"series_id": series_id})
+            # The reference a video series has is the one its plan takes (modules/planner).
+            return await gw.request("planner.references.get", {"series_id": series_id})
         except BusRequestError as exc:
             return refusal(exc, with_success=False)
 

@@ -5,30 +5,17 @@ import {
   type QueueName, type QueueRow, type Reference, type Scope,
 } from "../lib/output"
 import { reasonText } from "../lib/reason"
-import { useCompositionStore, type ReferencePacket } from "../stores/composition"
+import { useCompositionStore } from "../stores/composition"
 import { useSeriesStore } from "../stores/series"
 import { usePlanStore } from "../stores/plan"
 import { fileOf, planCuts, planDubs, planFiles, trackOf, type CompilationKey } from "../lib/plan"
 import {
-  deleteFromPlan, fetchComposition, fetchOutput, fetchPlan, fetchQueues, fetchRenames, resetFailures,
+  deleteFromPlan, fetchComposition, fetchPlan, fetchQueues, fetchRenames, resetFailures,
   resetLever, setLever, setVoiceOrder, switchOutput, syncSeries, type Composition, type MediaFile,
   type Queues, type RenameRow,
 } from "./outputCalls"
 import type { Answer } from "./sourceCalls"
 import { useSSE } from "./useSSE"
-
-// A reference is one entry per (season, episode, part); a packet replaces the entry of its own key.
-const keyOf = (reference: Pick<Reference, "season" | "episode" | "part">): string =>
-  JSON.stringify([reference.season, reference.episode, reference.part ?? null])
-
-function mergePackets(current: Reference[], packets: ReferencePacket[]): Reference[] {
-  const byKey = new Map(current.map((reference) => [keyOf(reference), reference] as const))
-  for (const packet of packets) {
-    const { series_id: _seriesId, ...reference } = packet
-    byKey.set(keyOf(reference), reference)
-  }
-  return [...byKey.values()]
-}
 
 /**
  * The output of a video series as its window reads it: episodes joined from the layout, references, levers and
@@ -40,7 +27,8 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const plan = usePlanStore()
   const seriesStore = useSeriesStore()
   const composition = ref<Composition | null>(null)
-  const references = ref<Reference[]>([])
+  // The reference of every episode, and why, is the plan's: it comes with every packet of the plan of the series.
+  const references = computed<Reference[]>(() => plan.forSeries(seriesId)?.references ?? [])
   // The files of the plan: the status of the video of a reference is read from them; the plan comes with every push.
   const files = computed<MediaFile[]>(() => planFiles(plan.forSeries(seriesId), compilationKey.value))
   // The compilations of the layout by their row: the plan names a compilation by its row, the window by its key.
@@ -88,24 +76,16 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
 
   // Of several reads in flight only the one asked last may write: a late reply to an older ask must not roll back.
   let asked = 0
-  // A packet that comes while a read is in flight may be older than that read's reply: the output is read once more.
-  let packetDuringRead = false
-  // A packet is merged once: the packets already in the store when a read answers are older than that answer.
-  const merged = new WeakSet<object>()
   async function load(): Promise<void> {
     const ask = ++asked
     loading.value = true
-    packetDuringRead = false
-    const [layout, output, planned] = await Promise.all([fetchComposition(seriesId), fetchOutput(seriesId), fetchPlan(seriesId)])
+    const [layout, planned] = await Promise.all([fetchComposition(seriesId), fetchPlan(seriesId)])
     if (ask !== asked) return
     loading.value = false
     if (layout.ok) composition.value = layout.data
-    if (output.ok) references.value = output.data
     if (planned.ok) plan.apply(planned.data)
-    Object.values(store.references[seriesId] ?? {}).forEach((packet) => merged.add(packet))
-    const broken = [layout, output].find((answer) => !answer.ok)
+    const broken = [layout, planned].find((answer) => !answer.ok)
     failure.value = broken && !broken.ok ? broken.text : null
-    if (packetDuringRead) void load()
     void loadNames()
   }
 
@@ -237,14 +217,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
       void load()
       reloadQueues()
     })
-    // A packet carries the whole reference of its episode part, so it replaces that entry and needs no read.
-    watch(() => store.references[seriesId], (record) => {
-      const fresh = Object.values(record ?? {}).filter((packet) => !merged.has(packet))
-      if (fresh.length === 0) return
-      if (loading.value) packetDuringRead = true
-      fresh.forEach((packet) => merged.add(packet))
-      references.value = mergePackets(references.value, fresh)
-    }, { deep: true })
     // A connection that came back may have missed events: the output is read again.
     watch(useSSE().connected, (up) => {
       if (up) void load()

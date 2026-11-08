@@ -58,6 +58,7 @@ _QUICK = (
     "torrents.queue.get",
     "trackerauth.credentials.get", "trackerauth.credentials.set",
     "planner.work.get", "planner.delete", "planner.delete.cancel", "planner.failures.forget",
+    "planner.downloaded_counts", "planner.seasons",
 )
 
 _FUSES: dict[str, float] = {
@@ -89,8 +90,10 @@ _NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
     "conform.settings.set": (QUICK_S, ("settings.value.get",) * 3 + ("settings.values.set_many",)),
     "composition.queues.get": (QUICK_S, ("voices.settings.get",)),
     # The view of the plan reads the table of the series; the files of a series also look for a journal in its folder.
-    "planner.series.get": (QUICK_S, ()),
+    "planner.series.get": (STANDARD_S, ("catalog.series.get", "composition.get", "voices.settings.get")),
     "planner.files.get": (QUICK_S + STANDARD_S, ("catalog.series.get",)),
+    # The references are counted from the layout as the view is: the layout, the settings of the voice-overs, the names.
+    "planner.references.get": (STANDARD_S, ("catalog.series.get", "composition.get", "voices.settings.get")),
     "conform.workspace": (QUICK_S, ("settings.value.get",)),
     "rules.profiles.delete": (QUICK_S, ("catalog.sources.by_profile",) * 2),
     "scan.edit.begin": (QUICK_S, ("catalog.series.get",)),

@@ -254,7 +254,7 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank) -
         candidates.append((video_rank(variant, video.snapshot.height, True, source, gone(way)), way))
     if not off:
         for row in singles:
-            if ("download", row.id) in inputs.failed or row.variant in denied:
+            if not row.playable or ("download", row.id) in inputs.failed or row.variant in denied:
                 continue
             held = next((way for _, way in candidates if way.key == ("row", row.id) and not gone(way)), None)
             if held is not None and held.snapshot.height >= row.height:
@@ -284,8 +284,9 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank) -
     left_out = choices.voice_deny.get(episode, frozenset())
     # The voice-overs of an episode are its single rows and the compilations that cover it (Д-19), but the compilation
     # its own video is cut out of: that one is its own sound. A part of an episode takes the rows of that part only.
-    dubbing = singles + [row for row in by_slot.compilations if len(slot) == 2 and row.season == slot[0]
-                         and row.start <= slot[1] <= row.end and row.id != (video.row.id if video.kind == "cut" else None)]
+    dubbing = [row for row in singles if row.playable] + [
+        row for row in by_slot.compilations if len(slot) == 2 and row.season == slot[0] and row.playable
+        and row.start <= slot[1] <= row.end and row.id != (video.row.id if video.kind == "cut" else None)]
     voices: dict[str, list] = {}
     if not idle:
         for row in dubbing:
@@ -337,7 +338,7 @@ def _cut(slot, inputs, compilations, candidates, video_rank, denied=frozenset())
         return None
     rank2, ref2 = min(singles, key=lambda each: each[0])
     best = max(way.snapshot.height for _, way in singles)
-    covering = [row for row in compilations if ("download", row.id) not in inputs.failed
+    covering = [row for row in compilations if row.playable and ("download", row.id) not in inputs.failed
                 and ("cut", row.id, ref2.timeline) not in inputs.failed
                 and row.season == slot[0] and row.start <= slot[1] <= row.end
                 and row.group is not None and row.id not in inputs.choices.off_compilations and row.height > best

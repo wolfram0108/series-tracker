@@ -251,10 +251,6 @@ NEW_PACKETS = [
     ("composition.changed", "composition_changed",
      {"series_id": 1, "rev": 4, "episodes": [{"season": 1, "episode": 2}], "summary_only": True}),
     ("composition.failed", "composition_failed", {"series_id": 1, "reason": "{\"code\":\"composition_error\"}"}),
-    ("scan.reference.changed", "reference_changed",
-     {"series_id": 1, "season": 1, "episode": 2, "part": None, "mark": "other_player", "source_id": 4,
-      "row_key": "r1", "player": "kodik", "voice_group": "Group", "height": 720,
-      "reason": "{\"code\":\"reference_other_player\"}"}),
 ]
 
 

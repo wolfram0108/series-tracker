@@ -39,7 +39,25 @@ def _code(info: os.waitid_result) -> int:
 
 
 async def exited(proc: asyncio.subprocess.Process) -> int:
-    """The exit code of the program once it has ended (negative: the signal that ended it; LOST: ended, status unknown)."""
+    """The exit code of the program once it has ended (negative: the signal that ended it; LOST: ended, status unknown).
+
+    The code is written into the program's own record (the `subprocess.Popen` behind it): a record left without one when
+    it is dropped is taken by the standard library for a child still to be waited for, and its next start of any program
+    waits for that number — which the kernel may have given to another program of ours by then, whose status it takes
+    (the loop then reports LOST for it)."""
+    code = await _ended(proc)
+    _settle(proc, code)
+    return code
+
+
+def _settle(proc: asyncio.subprocess.Process, code: int) -> None:
+    transport = getattr(proc, "_transport", None)
+    record = transport.get_extra_info("subprocess") if transport is not None else None
+    if record is not None and record.returncode is None:
+        record.returncode = code
+
+
+async def _ended(proc: asyncio.subprocess.Process) -> int:
     if proc.returncode is not None:
         return proc.returncode
     reported = asyncio.ensure_future(proc.wait())

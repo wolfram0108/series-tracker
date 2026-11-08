@@ -120,7 +120,7 @@ class Neighbours(BaseModule):
             self.calls.append(("torrents.db.add", env.payload))
             return {"added": len(env.payload["torrents"])}
 
-        self.handle("scan.media.downloaded_counts", counts_vk)
+        self.handle("planner.downloaded_counts", counts_vk)
         self.handle("torrents.db.downloaded_counts", counts_torrent)
         self.handle("sources.tracker.resolve", resolve)
         self.handle("torrents.db.history", history)

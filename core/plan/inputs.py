@@ -7,7 +7,7 @@ from dataclasses import replace
 from typing import Iterable, Mapping, Sequence
 
 from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW,
-                            VOICE_ORDER, VOICE_TAKE, CompositionRow, EffectiveLever, compilation_key,
+                            VOICE_ORDER, VOICE_TAKE, CompositionRow, EffectiveLever, Level, RowState, compilation_key,
                             parse_group_target, parse_variant_target)
 from core.voice_names import Groups
 
@@ -24,7 +24,8 @@ def online_of(rows: Sequence[CompositionRow], places: Mapping[int, str] | None =
             continue
         online.append(OnlineRow(RowId(row.source_id, row.row_key, row.video or ""), row.season, row.episode_start,
                                 row.episode_end or row.episode_start, row.player, row.voice_group, max(row.heights or [0]),
-                                places.get(row.source_id, ""), row.link, row.voice_label, position, row.part))
+                                places.get(row.source_id, ""), row.link, row.voice_label, position, row.part,
+                                row.state == RowState.PLAYABLE))
     return tuple(online)
 
 
@@ -66,9 +67,12 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
     `compilation_levers` those of every compilation (its key, levers)."""
     by_key = compilations_of(rows, online)
     reference, reference_deny, voice_orders, voice_deny, voice_off, member = {}, {}, {}, {}, {}, {}
+    own_reference: set = set()
     for season, episode, levers in episodes:
         slot = (season, episode)
         for lever in levers:
+            if lever.lever in (REFERENCE_ORDER, REFERENCE_ALLOW) and lever.level == Level.EPISODE:
+                own_reference.add(slot)
             if lever.lever == REFERENCE_ORDER and isinstance(lever.value, list):
                 reference[slot] = tuple((each["group"], each["source_id"], each["player"]) for each in lever.value
                                         if isinstance(each, dict) and {"group", "source_id", "player"} <= set(each))
@@ -96,4 +100,4 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
     return Choices(players=tuple(players), sources=tuple(sources), groups=tuple(voice_order), player_groups=player_groups,
                    off_episodes=frozenset(off_episodes), off_compilations=off_compilations, reference=reference,
                    reference_deny=reference_deny, voice_order=voice_orders, voice_deny=voice_deny, voice_off=voice_off,
-                   member=member)
+                   member=member, own_reference=frozenset(own_reference))

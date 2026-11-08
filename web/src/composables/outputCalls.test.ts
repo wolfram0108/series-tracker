@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const client = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() }))
 vi.mock("../api/client", () => ({ api: client }))
 
-import { fetchComposition, fetchOutput, fetchRenames, resetFailures, resetLever, setLever, switchOutput, syncSeries } from "./outputCalls"
+import { fetchComposition, fetchRenames, resetFailures, resetLever, setLever, switchOutput, syncSeries } from "./outputCalls"
 
 beforeEach(() => Object.values(client).forEach((fn) => fn.mockReset()))
 
@@ -13,12 +13,6 @@ describe("the calls to the output of the core", () => {
     client.GET.mockResolvedValueOnce({ data: layout })
     expect(await fetchComposition(1)).toEqual({ ok: true, data: layout })
     expect(client.GET).toHaveBeenCalledWith("/api/series/{series_id}/composition", { params: { path: { series_id: 1 } } })
-  })
-
-  it("reads the references of every episode of a series by its path", async () => {
-    client.GET.mockResolvedValueOnce({ data: [{ season: 1, episode: 2, mark: "by_level" }] })
-    expect(await fetchOutput(1)).toEqual({ ok: true, data: [{ season: 1, episode: 2, mark: "by_level" }] })
-    expect(client.GET).toHaveBeenCalledWith("/api/series/{series_id}/output", { params: { path: { series_id: 1 } } })
   })
 
   it("sends a lever to the settings of the series with its body as it is", async () => {
@@ -73,6 +67,6 @@ describe("the calls to the output of the core", () => {
 
   it("says the connection is lost when the request does not reach the core", async () => {
     client.GET.mockRejectedValueOnce(new TypeError("failed to fetch"))
-    expect(await fetchOutput(1)).toEqual({ ok: false, text: "Нет связи с сервером" })
+    expect(await fetchComposition(1)).toEqual({ ok: false, text: "Нет связи с сервером" })
   })
 })

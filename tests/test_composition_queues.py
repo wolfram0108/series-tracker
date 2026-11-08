@@ -1,5 +1,5 @@
 """The queues a window lists (modules/composition/queues.py) are the queues the core takes: the head of the queue of the
-reference is the reference `scan` chooses, and the head of the queue of a group is the row the planner takes for that
+reference is the reference the planner takes, and the head of the queue of a group is the row the planner takes for that
 voice-over (core/plan), for every order the rows of the layout come in, with and without the levers of the user."""
 import itertools
 
@@ -8,7 +8,6 @@ from core.contracts import (REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE
 from core.variant_queue import Order
 from core.voice_names import NO_GROUPS
 from modules.composition import queues
-from modules.scan import reference
 from planner_choice import goals
 from scan_support import row
 
@@ -50,24 +49,20 @@ LEVERS = {
 SHUFFLED = [EPISODE[i] for i in (0, 2, 4, 5, 6, 7)]
 
 
-def at_eleven(chosen):
-    (found,) = [each for each in chosen if each.reference.episode == 11]
-    return found
-
-
 def build(rows, levers):
     return queues.build(availability.lines_of_level(rows, 4, 11), levers, ORDER, GROUPS, 11)
 
 
-def test_the_head_of_the_queue_of_the_reference_is_the_reference_scan_chooses_in_every_order_of_the_rows():
+def test_the_head_of_the_queue_of_the_reference_is_the_reference_the_planner_takes_in_every_order_of_the_rows():
     for name, levers in LEVERS.items():
         for rows in itertools.permutations(SHUFFLED):
             shown, _ = build(list(rows), levers)
             head = next(each for each in shown.rows if each.allowed)
-            chosen = at_eleven(reference.choose(list(rows), [EpisodeSettings(season=4, episode=11, levers=levers)],
-                                                PRIORITY, SOURCES))
+            goal = goals(list(rows), [EpisodeSettings(season=4, episode=11, levers=levers)], players=PRIORITY,
+                         sources=SOURCES)[(4, 11)]
+            video = goal.video.snapshot
             assert (head.group, head.source_id, head.player) == (
-                chosen.reference.voice_group, chosen.reference.source_id, chosen.reference.player), name
+                video.variant_label, goal.video.timeline.source_id, video.player), name
 
 
 def test_the_head_of_the_queue_of_a_group_is_the_voice_over_the_planner_takes_in_every_order_of_the_rows():

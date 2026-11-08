@@ -1,12 +1,11 @@
 """The order in which the variants of an episode are tried (core/variant_queue.py), and that the choice of the reference
-(scan) and the voice-over the planner takes (core/plan) follow it: checked over every order the rows of an episode can
+and the voice-over the planner takes (core/plan) follow it: checked over every order the rows of an episode can
 come in."""
 import itertools
 
 from core.contracts import Reference, ReferenceMark
 from core.variant_queue import (REFERENCE_RANKING, VOICE_RANKING, Candidate, Order, best, by_player, by_resolution,
                                 by_source, ranked)
-from modules.scan import reference
 from planner_choice import goals
 from scan_support import row
 
@@ -76,8 +75,8 @@ def test_the_keys_are_one_list_each_criterion_named_once():
 
 def test_the_choice_of_the_reference_is_the_head_of_the_queue_in_every_order_of_the_rows():
     for rows in itertools.permutations(ROWS):
-        chosen = reference.choose(list(rows), (), PRIORITY, SOURCES)
-        assert [each.reference.row_key for each in chosen] == [by_hand(rows, "reference")[0]]
+        goal = goals(list(rows), players=PRIORITY, sources=SOURCES)[(1, 1)]
+        assert goal.video.timeline.row_key == by_hand(rows, "reference")[0]
 
 
 def test_the_voice_over_the_planner_takes_is_the_head_of_its_queue_in_every_order_of_the_rows():

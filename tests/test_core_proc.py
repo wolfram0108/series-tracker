@@ -162,3 +162,28 @@ def test_a_hold_attached_to_a_program_ends_with_the_program_though_the_loop_neve
         return storage.busy(path)
 
     assert uvloop.run(scenario()) is False
+
+
+@pytest.mark.asyncio
+async def test_the_code_of_an_ended_program_is_written_into_its_record_so_no_later_start_waits_for_its_number():
+    """A record of a program left with no code is waited for by the standard library at the start of any other program,
+    by its number, which may belong to another program of ours by then: the end the loop knows goes into the record."""
+    child = await proc.spawn("sh", "-c", "exit 3", stdout=asyncio.subprocess.PIPE)
+    record = child._transport.get_extra_info("subprocess")
+    assert await proc.exited(child) == 3 and record.returncode == 3
+    await child.stdout.read()
+
+    class Record:
+        returncode = None
+
+    class Transport:
+        @staticmethod
+        def get_extra_info(name):
+            return lost if name == "subprocess" else None
+
+    class Child:
+        _transport = Transport()
+
+    lost = Record()
+    proc._settle(Child(), proc.LOST)
+    assert lost.returncode == proc.LOST

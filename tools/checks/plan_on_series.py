@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import plan_real  # noqa: E402
 
+from core.plan.marks import references_of  # noqa: E402
 from core.plan.planner import plan  # noqa: E402
 
 
@@ -60,10 +61,32 @@ async def series_report(real: plan_real.RealSeries, series_id: int) -> str:
     inputs, skipped, info = await plan_real.inputs_of(real, series_id)
     diff = plan_real.same_layout(info["rows"], info["stored"].rows)
     same = "да" if not diff else "нет: " + "; ".join(diff)
-    references, voices = plan_real.agreement(real.path, series_id, inputs, plan(inputs))
+    made = plan(inputs)
+    references, voices = plan_real.agreement(real.path, series_id, inputs, made)
+    marks = marks_against(real.path, series_id, inputs, made)
     told = (f"Раскладка настоящего конструктора здесь совпадает с раскладкой сервиса: {same}.\n"
-            f"Выбор планировщика против выбора сервиса — референс: {dict(references)}; озвучки: {dict(voices)}.")
+            f"Выбор планировщика против выбора сервиса — референс: {dict(references)}; озвучки: {dict(voices)}.\n"
+            f"Объяснение выбора (отметка и строка) против записанного сервисом: {dict(marks)}.")
     return report(series_id, inputs, skipped, info["card"]).replace("\n\n", f"\n\n{told}\n\n", 1)
+
+
+def marks_against(path: str, series_id: int, inputs, made) -> Counter:
+    """The reference the plan tells of every episode (core/plan/marks) against the one scan wrote (scan_references): the
+    mark and the row; an episode one of them does not name is counted apart."""
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    stored = {(r[0], r[1]): (r[2], r[3], r[4]) for r in conn.execute(
+        "SELECT season, episode, mark, source_id, row_key FROM scan_references WHERE series_id=? AND part IS NULL",
+        (series_id,))}
+    conn.close()
+    found = Counter()
+    for ref in references_of(inputs, made):
+        if ref.part is not None:
+            continue
+        theirs = stored.get((ref.season, ref.episode))
+        mine = (ref.mark.value, ref.source_id, ref.row_key)
+        found["нет у сервиса" if theirs is None else "то же" if theirs == mine else
+              f"другое: {theirs[0]}→{mine[0]}"] += 1
+    return found
 
 
 def main() -> None:

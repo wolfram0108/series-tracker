@@ -37,13 +37,13 @@ describe("useSSE", () => {
     const { sse, source } = await freshSSE()
     expect(source.url).toBe("/api/stream?frames=batch")
     const got: unknown[] = []
-    sse.on("reference_changed", (data) => got.push(["reference", data]))
+    sse.on("plan_update", (data) => got.push(["reference", data]))
     sse.on("composition_changed", (data) => got.push(["composition", data]))
     source.frame("batch", JSON.stringify([
-      { event: "reference_changed", data: { episode: 1 } },
+      { event: "plan_update", data: { episode: 1 } },
       { event: "an_event_nobody_listens_to", data: {} },
       { event: "composition_changed", data: { rev: 2 } },
-      { event: "reference_changed", data: { episode: 2 } },
+      { event: "plan_update", data: { episode: 2 } },
     ]))
     expect(got).toEqual([["reference", { episode: 1 }], ["composition", { rev: 2 }], ["reference", { episode: 2 }]])
   })
@@ -52,13 +52,13 @@ describe("useSSE", () => {
     const { sse, source } = await freshSSE()
     const errors = vi.spyOn(console, "error").mockImplementation(() => {})
     const got: unknown[] = []
-    sse.on("reference_changed", (data) => {
+    sse.on("plan_update", (data) => {
       if ((data as { episode: number }).episode === 1) throw new Error("broken")
       got.push(data)
     })
     source.frame("batch", JSON.stringify([
-      { event: "reference_changed", data: { episode: 1 } },
-      { event: "reference_changed", data: { episode: 2 } },
+      { event: "plan_update", data: { episode: 1 } },
+      { event: "plan_update", data: { episode: 2 } },
     ]))
     expect(got).toEqual([{ episode: 2 }])
     expect(errors).toHaveBeenCalledOnce()
@@ -67,23 +67,23 @@ describe("useSSE", () => {
   it("skips a broken frame", async () => {
     const { sse, source } = await freshSSE()
     const got: unknown[] = []
-    sse.on("reference_changed", (data) => got.push(data))
+    sse.on("plan_update", (data) => got.push(data))
     source.frame("batch", "{not json")
-    source.frame("batch", JSON.stringify({ event: "reference_changed", data: {} }))
+    source.frame("batch", JSON.stringify({ event: "plan_update", data: {} }))
     expect(got).toEqual([])
   })
 
   it("counts a screen once for a burst of a turn, not once per event", async () => {
     const { sse, source } = await freshSSE()
     const references = ref<number[]>([])
-    sse.on("reference_changed", (data) => {
+    sse.on("plan_update", (data) => {
       references.value = [...references.value, (data as { episode: number }).episode]
     })
     // A screen follows its store as a watcher does: it runs at the flush after the task, once for what changed in it.
     const counted: number[] = []
     watch(references, (now) => counted.push(now.length))
     source.frame("batch", JSON.stringify(Array.from({ length: 215 }, (_, episode) => (
-      { event: "reference_changed", data: { episode } }))))
+      { event: "plan_update", data: { episode } }))))
     await nextTick()
     expect(counted).toEqual([215])
   })

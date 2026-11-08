@@ -1,4 +1,5 @@
-"""Repository of scan: the tables scan_tasks, scan_references and media_items.
+"""Repository of scan: the tables scan_tasks and media_items (scan_references is no longer written: the reference of a
+video series is its plan's, modules/planner).
 
 media_items: the rows and plan_status belong to scan (agreed in place of catalog); status and final_filename belong
 to downloads, slicing_status and chapters* to slicing and are never written here.
@@ -86,23 +87,6 @@ class ScanRepository:
             "SELECT * FROM media_items WHERE series_id=?", (series_id,))
         return self._db.coerce_bools(rows, self._BOOLS)
 
-    async def downloaded_counts(self) -> dict[int, int]:
-        """Скачанные эпизоды по сериям (final_filename есть) — батч для
-        карточек списка (устранение N+1 старого GET /api/series)."""
-        rows = await self._db.fetch_all(
-            "SELECT series_id, COUNT(*) AS n FROM media_items "
-            "WHERE final_filename IS NOT NULL "
-            "AND (season IS NULL OR season != 0) GROUP BY series_id")
-        return {r["series_id"]: r["n"] for r in rows}
-
-    async def seasons_for_series(self, series_id: int) -> list[int]:
-        """Реальные сезоны серии — distinct media_items.season (для агрегата
-        TMDB по нескольким сезонам)."""
-        rows = await self._db.fetch_all(
-            "SELECT DISTINCT season FROM media_items "
-            "WHERE series_id=? AND season IS NOT NULL", (series_id,))
-        return [r["season"] for r in rows if r["season"] is not None]
-
     async def delete_for_series(self, series_id: int) -> None:
         """Каскад Р-19: серия удалена — наши таблицы чистятся."""
         await self._db.execute(
@@ -117,72 +101,6 @@ class ScanRepository:
             "UPDATE media_items SET is_ignored_by_user=? WHERE unique_id=?",
             (1 if ignored else 0, unique_id))
 
-    async def set_ignored_bulk_for_season(self, series_id: int, season: int,
-                                          ignored: bool) -> int:
-        return await self._db.execute(
-            "UPDATE media_items SET is_ignored_by_user=? "
-            "WHERE series_id=? AND season=?",
-            (1 if ignored else 0, series_id, season))
-
-    async def set_ignored_for_episode(self, series_id: int, season: int, episode: int, ignored: bool) -> int:
-        """All rows of one episode of a season (its parts and its versions): the user's choice is about the episode."""
-        return await self._db.execute(
-            "UPDATE media_items SET is_ignored_by_user=? WHERE series_id=? AND season=? AND episode_start=?",
-            (1 if ignored else 0, series_id, season, episode))
-
     async def get_item(self, unique_id: str) -> dict | None:
         return await self._db.fetch_one(
             "SELECT * FROM media_items WHERE unique_id=?", (unique_id,))
-
-    async def references(self, series_id: int) -> list[dict]:
-        """Stored outcome of the choice, one record per slot; the slot with no part sorts first."""
-        found = await self._db.fetch_all(
-            "SELECT season, episode, part, mark, source_id, row_key, unique_id, player, voice_group, height, reason, "
-            "compilation FROM scan_references WHERE series_id=? "
-            "ORDER BY season, episode, part IS NOT NULL, part", (series_id,))
-        return [{**each, "compilation": json.loads(each["compilation"]) if each["compilation"] else None} for each in found]
-
-    async def save_outcome(self, series_id: int, *, inserts: list[dict], updates: list[tuple[str, dict]],
-                           deletes: list[str], statuses: dict[str, str], superseded: dict[str, str],
-                           references: list[dict]) -> None:
-        """Rows, plan and references of the series in one transaction: readers never see a plan that does not
-        match its references. Rows the planner skipped (switched off) fall back to 'candidate'; the columns that
-        belong to other modules (status, final_filename, slicing_*) are never written here."""
-        statements: list[tuple[str, tuple]] = [
-            ("DELETE FROM media_items WHERE unique_id=?", (unique_id,)) for unique_id in deletes]
-        for row in inserts:
-            statements.append((
-                "INSERT INTO media_items (series_id, unique_id, source_title, season, episode_start, episode_end, "
-                "part, plan_status, status, is_ignored_by_user, source_url, publication_date, voiceover_tag, "
-                "slicing_status, is_available, resolution, download_url, source_id, row_key) VALUES "
-                "(?, ?, ?, ?, ?, NULL, ?, 'candidate', 'pending', ?, ?, ?, ?, 'none', 1, ?, NULL, ?, ?)",
-                (series_id, row["unique_id"], row["source_title"], row["season"], row["episode_start"], row["part"],
-                 int(bool(row["is_ignored_by_user"])), row["source_url"], row["publication_date"],
-                 row["voiceover_tag"], row.get("resolution"), row["source_id"], row["row_key"])))
-        for unique_id, fields in updates:
-            columns = sorted(fields)
-            # A video that began to be fetched while the plan was counted keeps its address: the file is of that video.
-            guard = (" AND status != 'downloading' AND final_filename IS NULL AND status != 'completed'"
-                     if "source_url" in fields else "")
-            statements.append((
-                f"UPDATE media_items SET {', '.join(f'{name}=?' for name in columns)} WHERE unique_id=?{guard}",
-                (*(fields[name] for name in columns), unique_id)))
-        statements.append(("UPDATE media_items SET plan_status='candidate', superseded_by=NULL WHERE series_id=?",
-                           (series_id,)))
-        statements.extend((
-            "UPDATE media_items SET plan_status=?, superseded_by=? WHERE unique_id=?",
-            (plan_status, superseded.get(unique_id), unique_id)) for unique_id, plan_status in statuses.items())
-        # The video the plan wants in the slot of each winner: cut out of the compilation its episode stands in (stage 12).
-        statements.append(("UPDATE media_items SET want_cut=NULL WHERE series_id=?", (series_id,)))
-        statements.extend((
-            "UPDATE media_items SET want_cut=? WHERE unique_id=?", (each["compilation"]["key"], each["unique_id"]))
-            for each in references if each.get("compilation") and each.get("unique_id"))
-        statements.append(("DELETE FROM scan_references WHERE series_id=?", (series_id,)))
-        statements.extend((
-            "INSERT INTO scan_references (series_id, season, episode, part, mark, source_id, row_key, unique_id, "
-            "player, voice_group, height, reason, compilation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (series_id, each["season"], each["episode"], each["part"], each["mark"], each["source_id"],
-             each["row_key"], each["unique_id"], each["player"], each["voice_group"], each["height"],
-             each["reason"], json.dumps(each["compilation"], ensure_ascii=False) if each.get("compilation") else None))
-            for each in references)
-        await self._db.execute_many(statements)

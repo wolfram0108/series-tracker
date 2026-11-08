@@ -64,6 +64,9 @@ class OnlineRow:
     label: str = ""  # the name of the voice-over as the layout calls it
     position: int = 0  # the place of the row in the layout: the last tie-break of the service's rule
     part: int | None = None  # the part of the episode the row is (an episode in parts is several videos)
+    # The player answered that it plays the video. A row that is not (no video, an answer that stayed unsure) is online
+    # all the same — the read gave it — but no work is made of it.
+    playable: bool = True
 
     @property
     def source_id(self) -> int:
@@ -156,6 +159,8 @@ class Choices:
     voice_off: Mapping[Slot, frozenset[str]] = field(default_factory=dict)
     member: Mapping[Slot, RowId | None] = field(default_factory=dict)
     delete: frozenset[tuple] = frozenset()
+    # The episodes whose levers of the reference are their own (set on the episode itself, not on a level above it).
+    own_reference: frozenset[Slot] = frozenset()
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,5 @@
 import { api } from "../api/client"
 import type { components } from "../api/schema"
-import type { Reference } from "../lib/output"
 import { call, type Answer, type CallWords } from "./sourceCalls"
 
 type Schemas = components["schemas"]
@@ -29,10 +28,6 @@ export interface MediaFile {
   pending_cut?: CutOf | null
 }
 
-/** The reference of every episode of the series, each with the mark that says why it is that one. */
-export function fetchOutput(seriesId: number): Promise<Answer<Reference[]>> {
-  return call(() => api.GET("/api/series/{series_id}/output", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
-}
 
 /** The sync of the series, the same run the series card starts: tables, plan, download, voice-overs, containers. The core
  * answers when its pass is over; the run goes on with the works it gave out, and what it changes comes as events. */

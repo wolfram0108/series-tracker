@@ -206,7 +206,7 @@ class _Neighbour(BaseModule):
     def register(self):
         self.handle("catalog.series.get", self._get)
         self.handle("torrents.seasons", self._torrent_seasons)
-        self.handle("scan.seasons", self._scan_seasons)
+        self.handle("planner.seasons", self._scan_seasons)
 
     async def _get(self, env):
         return self.series
@@ -216,7 +216,7 @@ class _Neighbour(BaseModule):
         return self.seasons
 
     async def _scan_seasons(self, env):
-        self.asked.append("scan.seasons")
+        self.asked.append("planner.seasons")
         return self.seasons
 
 
@@ -361,4 +361,4 @@ async def test_the_seasons_come_from_the_owner_of_the_kind_of_the_series(agg_sys
     neigh.series = {"id": 1, "kind": "torrent", "season": ""}
     await probe.request("metadata.seasons.recompute", {"series_id": 1}, timeout=10)
 
-    assert neigh.asked == ["scan.seasons", "torrents.seasons"]
+    assert neigh.asked == ["planner.seasons", "torrents.seasons"]

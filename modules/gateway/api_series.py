@@ -69,7 +69,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         reply = await gw.request("metadata.map.list", {})
         mappings = {m["series_id"]: m for m in reply["mappings"]}
         # Each owner counts its own rows and a series has rows with one of them only, so the sum needs no kind.
-        counts = [await _counts("scan.media.downloaded_counts"),
+        counts = [await _counts("planner.downloaded_counts"),
                   await _counts("torrents.db.downloaded_counts")]
         for s in series:
             s["last_scan_time"] = _iso(s.get("last_scan_time"))
