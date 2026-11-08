@@ -13,7 +13,7 @@ from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import Iterable
 
-from core.plan.planner import OFF, Goal, Plan, plan, voice_of
+from core.plan.planner import OFF, Goal, Plan, own_track, plan, switched_off, voice_of
 from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
 
 
@@ -316,8 +316,23 @@ class World:
             self._move_truth(name, new, old)
         self.containers.update(renamed)
         self.containers.update(built)
-        files = set(group.remove) | set(group.hide) | {name for _, name in group.kept}
-        self.choose(delete=frozenset(each for each in self.choices.delete if each[1] not in files))
+        # A command goes with its file. A deleted video waits for another video of its episode: its command follows the
+        # video to the file's new name, or to the file built anew around it; a track's command goes once the file is built
+        # anew (the track it named is gone from it).
+        renamed = {name: made.goal(slot).name for slot, name in group.kept}
+        rebuilt = {goal.video.container.name: goal.name for slot in group.built
+                   if (goal := made.goal(slot)).video.kind == "asset"}
+        changed = set(group.remove) | {name for name, _ in group.hide}
+        commands = set()
+        for each in self.choices.delete:
+            name = each[1]
+            if each[0] == "video" and (name in renamed or name in rebuilt):
+                commands.add(("video", renamed.get(name) or rebuilt[name]))
+            elif each[0] == "track" and name in renamed:
+                commands.add(("track", renamed[name], *each[2:]))
+            elif name not in changed and name not in rebuilt:
+                commands.add(each)
+        self.choose(delete=frozenset(commands))
 
     def _move_truth(self, old: str, new: str, container: Container) -> None:
         for track in container.tracks:
@@ -342,7 +357,7 @@ class World:
             assert own not in voices, f"{container.name}: the own sound is also a track"
             for track in container.tracks:
                 assert track.aligned_to == container.video.timeline, f"{container.name}: a track out of sync"
-        # Nothing goes but what the goal holds anew or what the user deleted.
+        # Nothing goes but what the goal holds anew or what the user deleted or took off the episode.
         standing = {_slot_of_video(each.video, online) for each in step.after}
         deleted = step.choices.delete
         for container in step.before:
@@ -351,9 +366,9 @@ class World:
                 assert _slot_of_video(container.video, online) in standing, \
                     f"the video of {container.name} went with nothing in its place"
             for track in container.tracks:
-                if commanded or ("track", container.name, track.dub) in deleted:
-                    continue
                 voice, here = voice_of(track.group, track.dub), slot_of_track(track)
+                if commanded or ("track", container.name, track.dub) in deleted or switched_off(step.choices, track, here):
+                    continue
                 # It lives on: the same track anywhere, or its voice-over in the container of its episode — as a track
                 # or as the own sound of the video.
                 lives = any(each.dub == track.dub or (voice_of(each.group, each.dub) == voice
@@ -369,6 +384,8 @@ class World:
                 continue
             voice = voice_of(container.video.snapshot.group, container.video.timeline)
             here = _slot_of_video(container.video, online)
+            if switched_off(step.choices, own_track(container), here):
+                continue
             lives = any(_slot_of_video(other.video, online) == here and (
                 voice_of(other.video.snapshot.group, other.video.timeline) == voice
                 or any(voice_of(each.group, each.dub) == voice for each in other.tracks)) for other in step.after)

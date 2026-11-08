@@ -27,6 +27,12 @@ def report(series_id: int, inputs, skipped: Counter, series: dict) -> str:
     lines = [f"# Сериал {series_id}", "",
              f"Онлайн-строк: {len(inputs.online)}; файлов серий: {len(inputs.containers)}; "
              f"дорожек: {sum(len(each.tracks) for each in inputs.containers)}; целей: {len(made.goals)}.", ""]
+    online = {row.id for row in inputs.online}
+    keys = {(row.id.source_id, row.id.row_key) for row in inputs.online}
+    swapped = [each.name for each in inputs.containers if each.video.id not in online
+               and (each.video.id.source_id, each.video.id.row_key) in keys]
+    lines += [f"Файлов, за строкой которых теперь другое видео (номер хоста сменился): {len(swapped)}"
+              + (" — " + ", ".join(swapped[:10]) if swapped else "") + ".", ""]
     if skipped:
         lines += ["Не учтено моделью симулятора: " + ", ".join(f"{name} — {count}" for name, count in skipped.items()), ""]
     lines += ["## Операции плана", "", "| Вид | Число |", "|---|---|"]

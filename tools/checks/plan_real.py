@@ -31,6 +31,13 @@ from modules.rules.module import result_of  # noqa: E402
 from modules.rules.numbering import settle_parts  # noqa: E402
 from modules.rules.repository import RulesRepository  # noqa: E402
 from modules.settings.repository import SettingsRepository  # noqa: E402
+from modules.sources.players.alloha import AllohaPlayer  # noqa: E402
+from modules.sources.players.allvideo import AllVideoPlayer  # noqa: E402
+from modules.sources.players.animakima import AnimakimaPlayer  # noqa: E402
+from modules.sources.players.cdnvideohub import CdnVideoHubPlayer  # noqa: E402
+from modules.sources.players.kodik import KodikPlayer  # noqa: E402
+from modules.sources.players.vibix import VibixPlayer  # noqa: E402
+from modules.sources.players.vk import VkPlayer  # noqa: E402
 from modules.sources.repository import SourcesRepository  # noqa: E402
 from modules.voices.settings import PREFIX, parse  # noqa: E402
 
@@ -104,15 +111,35 @@ def online_of(rows: list[CompositionRow], places: dict[int, str], skipped: Count
     return online
 
 
+PLAYERS = (VkPlayer, AllVideoPlayer, CdnVideoHubPlayer, KodikPlayer, AnimakimaPlayer, AllohaPlayer, VibixPlayer)
+
+
+def number_of(player: str | None, link: str) -> str:
+    """The video a link names, as its host numbers it (the players' own `video_of`); '' when the link names none."""
+    if not link:
+        return ""
+    named = [each for each in PLAYERS if each.name == player]
+    for each in named or PLAYERS:
+        found = each.video_of(link)
+        if found:
+            return found
+    return ""
+
+
 def asset_of(path: str, series_id: int, online: list[OnlineRow], places: dict[int, str], order: list[str],
              skipped: Counter) -> list[Container]:
     """The files of the episodes and their tracks, as the database of the service records them."""
     by_key = {(row.id.source_id, row.id.row_key): row for row in online}
     by_link = {row.link: row for row in online if row.link}
 
-    def row_id(source_id, row_key, link: str = "") -> RowId:
+    def row_id(source_id, row_key, link: str = "", player: str | None = None) -> RowId:
+        """The row of a file: the online row while it names the same video; another video behind it (both numbers
+        known and different) is another row, offline (В-6)."""
         found = by_key.get((source_id, row_key)) if row_key else by_link.get(link)
-        return found.id if found is not None else RowId(source_id if source_id is not None else -1, row_key or link, "")
+        number = number_of(player or (found.player if found is not None else None), link)
+        if found is not None and not (number and found.id.video and number != found.id.video):
+            return found.id
+        return RowId(source_id if source_id is not None else -1, row_key or link, number)
 
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
@@ -134,11 +161,12 @@ def asset_of(path: str, series_id: int, online: list[OnlineRow], places: dict[in
                             candidate.get("url", ""))
         place = (dub["season"], dub["episode"]) + ((dub["part"],) if dub["part"] else ())
         tracks_of.setdefault(place, []).append(
-            Track(row_id(source_id, candidate.get("row_key"), candidate.get("url", "")), snapshot, place, aligned_to))
+            Track(row_id(source_id, candidate.get("row_key"), candidate.get("url", ""), candidate.get("player")),
+                  snapshot, place, aligned_to))
     containers = []
     for item in items:
         slot = (item["season"], item["episode_start"]) + ((item["part"],) if item["part"] is not None else ())
-        own = row_id(item["source_id"], item["row_key"])
+        own = row_id(item["source_id"], item["row_key"], item["source_url"] or "")
         found = by_key.get((item["source_id"], item["row_key"]))
         snapshot = Snapshot(places.get(item["source_id"], ""), found.player if found is not None else "?",
                             item["voiceover_tag"], item["resolution"] or 0, item["source_url"] or "")
@@ -151,7 +179,10 @@ def asset_of(path: str, series_id: int, online: list[OnlineRow], places: dict[in
                                                 cut.get("voice_group"), cut.get("height") or 0), slot, own, cut_of=compilation)
         else:
             video = Video(own, snapshot, slot, own)
-        mine = tuple(sorted(tracks_of.get(slot, ()), key=lambda track: (
+        # A track is aligned to the video of its file: to the video the file holds, whatever is behind its row now.
+        held = [Track(each.dub, each.snapshot, each.episode, own) if (each.aligned_to.source_id, each.aligned_to.row_key)
+                == (own.source_id, own.row_key) else each for each in tracks_of.get(slot, ())]
+        mine = tuple(sorted(held, key=lambda track: (
             order.index(track.group) if track.group in order else len(order), track.group or "")))
         containers.append(Container(item["final_filename"], video, mine, bool(item["is_ignored_by_user"])))
     return containers

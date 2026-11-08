@@ -180,19 +180,27 @@ def test_delete_of_an_offline_reference_takes_the_next_video_and_keeps_the_voice
     assert not any(group.lost for group in step.plan.groups)
 
 
-def test_delete_of_the_reference_with_no_other_video_says_which_voices_go_with_it():
-    """В-9: nothing to align the voices to — the plan names the tracks that go with the video. «No other video» means no
-    row of the episode online at all: the video of a voice-over's row is a video of the episode too."""
+def test_delete_of_the_reference_with_no_other_video_changes_nothing():
+    """В-9: the sources give no other video of the episode — nothing to put in its place, so nothing is done; the
+    command waits and is carried out once another video comes. «No other video» means no row of the episode online at
+    all: the video of a voice-over's row is a video of the episode too."""
     world = World()
     episode_with_dubs(world, 1, 2)
+    before = dict(world.containers)
     for key in ("ref1", "g1e1", "g2e1"):
         world.drop(1 if key == "ref1" else 2, key)
     world.delete("video", container_of(world, 1).name)
     step = world.sync("удалить единственный референс")
     world.check(step)
-    assert step.plan.goal((1, 1)) is None
-    assert [dub.row_key for group in step.plan.groups for _, dub in group.lost] == ["g1e1", "g2e1"]
-    assert world.containers == {}
+    assert step.plan.goal((1, 1)).video.kind == "asset" and not step.plan.ops
+    assert not any(group.lost or group.remove for group in step.plan.groups)
+    assert world.containers == before and world.choices.delete  # the command waits
+    world.put(3, "other1", 1, group=REF, player="cvh")
+    step = world.sync("появилось другое видео")
+    world.check(step)
+    video, tracks = kinds(step, (1, 1))
+    assert video == "download" and tracks == {"G1": "realign", "G2": "realign"}
+    assert container_of(world, 1).video.id.row_key == "other1"
 
 
 def test_an_episode_switched_off_is_hidden_and_switched_on_again_with_no_work():
@@ -208,18 +216,26 @@ def test_an_episode_switched_off_is_hidden_and_switched_on_again_with_no_work():
     assert not step.plan.ops and not container_of(world, 1).off
 
 
-def test_a_group_switched_off_keeps_its_tracks_and_realigns_them_when_the_reference_changes():
-    """В-10: switching a group off stops new work; a track already in the container stays and follows the video."""
+@pytest.mark.parametrize("lever", ["series", "episode", "variant"])
+def test_a_voice_switched_off_is_removed_from_every_container(lever):
+    """В-10: a track cannot be hidden in its container — the voice-over switched off (its group for the series or for an
+    episode, or its variant) is removed from the containers at the next sync; switched on again, it is downloaded anew."""
     world = World()
-    episode_with_dubs(world, 1, 2)
-    world.choose(off_groups=frozenset({"G1"}))
-    step = world.sync("отключить группу")
+    for number in (1, 2):
+        episode_with_dubs(world, number, 2)
+    variant = ("G1", 2, "kodik")
+    taken = {"series": dict(off_groups=frozenset({"G1"})),
+             "episode": dict(voice_off={(1, n): frozenset({"G1"}) for n in (1, 2)}),
+             "variant": dict(voice_deny={(1, n): frozenset({variant}) for n in (1, 2)})}[lever]
+    world.choose(**taken)
+    step = world.sync("озвучка отключена")
     world.check(step)
-    assert not step.plan.ops
-    world.put(1, "ref1hd", 1, group=REF, height=1080, video="ref1hd")
-    step = world.sync("лучший референс при отключённой группе")
+    assert {op.kind for op in step.plan.ops} == {"build"}
+    assert all([track.group for track in container_of(world, n).tracks] == ["G2"] for n in (1, 2))
+    world.choose(off_groups=frozenset(), voice_off={}, voice_deny={})
+    step = world.sync("озвучка включена")
     world.check(step)
-    assert kinds(step, (1, 1))[1] == {"G1": "realign", "G2": "download"}
+    assert kinds(step, (1, 1))[1] == {"G1": "download", "G2": "reuse"}
 
 
 def test_another_video_behind_the_same_row_is_another_row():
@@ -396,11 +412,11 @@ def test_switching_on_and_off_back_and_forth_does_no_work():
             step = world.sync("вкл/выкл серии")
             world.check(step)
             assert not step.plan.ops
-        for groups in (frozenset({"G1"}), frozenset()):
+        for groups in (frozenset({"G1"}), frozenset()):  # a voice-over switched off goes and comes back (В-10)
             world.choose(off_groups=groups)
             step = world.sync("вкл/выкл группы")
             world.check(step)
-            assert not step.plan.ops
+            assert not world.sync("ещё раз").plan.ops
 
 
 def test_a_cut_whose_service_finds_something_critical_takes_the_single_video():
@@ -460,7 +476,7 @@ def test_the_levers_of_a_voice_order_leave_out_and_take_off():
     world.choose(voice_order={}, voice_off={(1, 1): frozenset({"G1"})})
     step = world.sync("озвучка снята")
     world.check(step)
-    assert not step.plan.ops and container_of(world, 1).tracks  # a track in the container stays (О-3)
+    assert not container_of(world, 1).tracks  # a voice-over taken off is removed from the container (В-10)
 
 
 def test_the_users_word_on_a_compilation_holds_while_it_fits():
@@ -506,3 +522,17 @@ def test_an_episode_in_parts_has_a_file_of_each_part_and_the_levers_of_the_episo
     world.choose(off_episodes=frozenset({(1, 1)}))
     world.check(world.sync("серия отключена"))
     assert all(each.off for each in world.containers.values())
+
+
+def test_a_deleted_video_that_waits_for_another_one_takes_no_new_work():
+    """В-9: the deleted video stays only for want of another one — a compilation of another group that covers the episode
+    brings no voice-over to it (nothing changes), and the command keeps waiting."""
+    world = World()
+    world.put(1, "ref2", 2, group=REF)
+    world.check(world.sync("исходно"))
+    world.drop(1, "ref2")
+    world.delete("video", container_of(world, 2).name)
+    world.put(4, "comp", 1, end=3, group="A", height=720, player="kodik")
+    step = world.sync("склейка при удалённом видео")
+    world.check(step)
+    assert not step.plan.ops and not container_of(world, 2).tracks and world.choices.delete

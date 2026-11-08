@@ -149,3 +149,26 @@ def test_an_episode_in_parts_on_the_disk(disk):
     step = disk.sync("части серии")
     disk.check(step)
     assert sorted(disk.containers) == ["s01e01 pt1 [AniStar] 720p.mkv", "s01e01 pt2 [AniStar] 720p.mkv"]
+
+
+def test_a_voice_switched_off_is_removed_from_the_container_on_the_disk(disk):
+    """В-10 on files: the container is built anew without the track; the decoded tracks are still the episode's."""
+    episode(disk, 1, 2)
+    disk.check(disk.sync("исходно"))
+    disk.choose(off_groups=frozenset({"G1"}))
+    step = disk.sync("озвучка отключена")
+    disk.check(step)
+    assert [track.group for track in visible(disk, 1).tracks] == ["G2"] and len(disk.containers) == 1
+
+
+def test_delete_of_the_only_video_leaves_the_file_as_it_is(disk):
+    """В-9 on files: the sources give nothing of the episode any more — the file is not touched."""
+    episode(disk, 1, 1)
+    disk.check(disk.sync("исходно"))
+    disk.drop(1, "ref11")
+    disk.drop(2, "g1s1e1")
+    name = visible(disk, 1).name
+    disk.delete("video", name)
+    step = disk.sync("удалить единственное видео")
+    disk.check(step)
+    assert not step.plan.ops and sorted(disk.containers) == [name]
