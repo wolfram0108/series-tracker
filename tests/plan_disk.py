@@ -237,6 +237,7 @@ class Daemon:
         return job
 
     def _align(self, body: EnqueueBody) -> dict:
+        os.makedirs(body.out_dir, exist_ok=True)  # the service makes the folder it writes in
         answer = self.answers.get(body.label or "")
         picture = self.codec.picture(body.ref)
         tracks = body.dub_atracks or [0] * len(body.dubs)
@@ -258,6 +259,7 @@ class Daemon:
         return self._job("episode", body.label, body.dubs, results)
 
     def _cut(self, body: ReverseBody, episode: str) -> dict:
+        os.makedirs(body.out_dir, exist_ok=True)  # the service makes the folder it writes in
         answer = self.answers.get(body.label or "")
         wanted = self.codec.picture(episode)
         inside = [self.codec.picture(body.compilation, second) for second in range(self.codec.seconds(body.compilation))]

@@ -24,27 +24,10 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 
+from assembly import Options, assemble
 from core import Bus, Envelope, Runner
 from core.db import Database
 from core.logging import configure, get_logger
-from modules.auth import AuthModule
-from modules.catalog import CatalogModule
-from modules.composition import CompositionModule
-from modules.conform import ConformModule
-from modules.downloads import DownloadsModule
-from modules.gateway import GatewayModule
-from modules.library import LibraryModule
-from modules.metadata import MetadataModule
-from modules.renaming import RenamingModule
-from modules.rules import RulesModule
-from modules.scan import ScanModule
-from modules.settings import SettingsModule
-from modules.slicing import SlicingModule
-from modules.sources import SourcesModule
-from modules.torrents import TorrentsModule
-from modules.trackerauth import TrackerauthModule
-from modules.voices import VoicesModule
-from modules.planner import PlannerModule
 
 configure()
 log = get_logger("run")
@@ -76,44 +59,12 @@ docs_enabled = os.environ.get("ST_DOCS_ENABLED", "false").lower() == "true"
 # Проверка Host (Этап 2): домен + loopback. Пусто → проверки нет (dev).
 _hosts = os.environ.get("ST_ALLOWED_HOSTS", "").strip()
 allowed_hosts = [h.strip() for h in _hosts.split(",") if h.strip()] or None
-gateway = GatewayModule(bus, db_path=db_path, secret_key=secret_key,
-                        cookie_secure=cookie_secure,
-                        auth_required=auth_required, docs_enabled=docs_enabled,
-                        allowed_hosts=allowed_hosts)
-
-modules = [
-    gateway,
-    CatalogModule(bus, db),
-    SettingsModule(bus, db),
-    AuthModule(bus, db),
-    RulesModule(bus, db),
-    TrackerauthModule(bus, db),
-    SourcesModule(bus, db, read_recent=read_recent),
-    MetadataModule(bus, db),
-    LibraryModule(bus, db),
-    # scan/downloads/renaming — после catalog/settings/sources/rules:
-    # их reconcile при старте шлёт запросы соседям.
-    ScanModule(bus, db),
-    DownloadsModule(bus, db),
-    RenamingModule(bus, db),
-    SlicingModule(bus, db),
-    VoicesModule(bus, db),
-    # The plan of every video series and its sync (stage 12): downloads, cuts, alignments, containers, the journal.
-    PlannerModule(bus, db),
-    # composition asks catalog, sources, rules and voices at its start and then publishes composition.changed, so scan
-    # and voices must be subscribed by then; a request of voices that comes too early is deferred to that event.
-    CompositionModule(bus, db),
-    # Alignment daemon (track-muxer): mirrored read-only; no address, no bridge.
-    ConformModule(bus, default_url=os.environ.get("ST_CONFORM_URL", "")),
-]
-
-# env имеет приоритет (стенд/тесты); без env torrents возьмёт креды
-# qbittorrent из таблицы auth через шину (Р-22) и переподключится по
-# событию trackerauth.credentials.changed — рестарт не нужен.
-modules.append(TorrentsModule(
-    bus, db, qbt_url=os.environ.get("ST_QBIT_URL", ""),
-    qbt_username=os.environ.get("ST_QBIT_USER", "admin"),
-    qbt_password=os.environ.get("ST_QBIT_PASS", "")))
+gateway, modules = assemble(bus, db, Options(
+    db_path=db_path, secret_key=secret_key, cookie_secure=cookie_secure, auth_required=auth_required,
+    docs_enabled=docs_enabled, allowed_hosts=allowed_hosts, read_recent=read_recent,
+    conform_url=os.environ.get("ST_CONFORM_URL", ""),
+    qbit_url=os.environ.get("ST_QBIT_URL", ""), qbit_username=os.environ.get("ST_QBIT_USER", "admin"),
+    qbit_password=os.environ.get("ST_QBIT_PASS", "")))
 
 runner = Runner(bus, modules)
 
