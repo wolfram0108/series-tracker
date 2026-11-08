@@ -20,9 +20,9 @@ from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot,
 DOWNLOADS = ("download_video", "download_dub", "download_compilation")
 
 
-def truth_of(season: int, episode: int) -> int:
-    """What a video truly is: one number for a season and an episode."""
-    return season * 1000 + episode
+def truth_of(season: int, episode: int, part: int | None = None) -> int:
+    """What a video truly is: one number for a season, an episode and its part."""
+    return season * 1000 + episode + (part or 0) * 100000
 
 
 @dataclass
@@ -74,11 +74,11 @@ class World:
 
     def put(self, source_id: int, key: str, episode: int, *, group: str | None, player: str = "vk", height: int = 720,
             season: int = 1, end: int | None = None, video: str = "", content: Iterable[int] | None = None,
-            name: str = "") -> OnlineRow:
-        """A row of a source: what the rules give it (season, episode or range, group) and what it truly is."""
+            name: str = "", part: int | None = None) -> OnlineRow:
+        """A row of a source: what the rules give it (season, episode or range, part, group) and what it truly is."""
         row = OnlineRow(RowId(source_id, key, video or key), season, episode, end or episode, player, group, height,
-                        source=name or f"источник {source_id}", link=f"https://site/{source_id}/{key}")
-        truth = tuple(content) if content is not None else tuple(truth_of(season, number)
+                        source=name or f"источник {source_id}", link=f"https://site/{source_id}/{key}", part=part)
+        truth = tuple(content) if content is not None else tuple(truth_of(season, number, part)
                                                                  for number in range(episode, (end or episode) + 1))
         table = [each for each in self.site.setdefault(source_id, []) if each.row.id.row_key != key]
         self.site[source_id] = table + [SiteRow(row, truth)]
@@ -133,7 +133,9 @@ class World:
     # --- one synchronization -------------------------------------------------------------------------------------
 
     def inputs(self) -> Inputs:
-        rows = tuple(row for source in sorted(self.online) for row in self.online[source])
+        # The layout lists the rows source by source, as they come: the place of a row is its place in that list.
+        rows = tuple(replace(row, position=place) for place, row in
+                     enumerate(row for source in sorted(self.online) for row in self.online[source]))
         return Inputs(rows, tuple(sorted(self.containers.values(), key=lambda each: each.name)), self.choices,
                       frozenset(self.failed))
 
@@ -143,6 +145,9 @@ class World:
                 self.online[source_id] = tuple(each.row for each in table)
                 for each in table:
                     self.content.setdefault(("site", each.row.id), each.content)
+        # A command «Удалить» is of a file: a file that is gone takes its command with it (a new file under the same name
+        # is another file).
+        self.choose(delete=frozenset(each for each in self.choices.delete if each[1] in self.containers))
         # The snapshot: the plan is counted from what is on disk and the tables now; nothing on disk changes until the end.
         # A download that fails is no failure of the plan: the row is passed over and the plan is counted again from the
         # same snapshot. An alignment or a cut that fails is: its group is not applied.
@@ -262,9 +267,9 @@ class World:
                 self._passing.add(op.id)
                 return None
             if (goal.slot, way.voice) in self.align_fails or answer in ("mismatch", "critical") or \
-                    dub != self.content[video.key]:
-                return None
-            return Track(way.dub, way.snapshot, goal.slot, video.timeline), dub
+                    not set(self.content[video.key]) <= set(dub):
+                return None  # a compilation as a voice-over holds the episode among others (Д-19)
+            return Track(way.dub, way.snapshot, goal.slot, video.timeline), self.content[video.key]
         if op.kind == "build":
             return op.subject
         raise AssertionError(op.kind)
@@ -409,7 +414,8 @@ class Chaos:
     ACTIONS = ("put_ref", "put_ref", "put_dub", "put_dub", "put_comp", "drop", "renumber", "move_season", "mass_shift",
                "wrong_number", "higher", "swap_video", "delete_video", "delete_track", "off", "on", "off_group",
                "off_compilation", "reference_order", "shuffle_voices", "read_fail", "download_fail", "transient",
-               "answer", "cut_answer", "lose_file", "reset")
+               "answer", "cut_answer", "lose_file", "reset", "reference_deny", "voice_order", "voice_deny", "voice_off",
+               "member", "levers_reset", "put_parts")
 
     def __init__(self, world: World, rng, seasons=(1, 2), episodes=(1, 2, 3, 4), reference: str = "AniStar",
                  groups: tuple[str, ...] | None = None, actions: tuple[str, ...] | None = None) -> None:
@@ -489,9 +495,32 @@ class Chaos:
             if compilations:
                 world.choose(off_compilations=world.choices.off_compilations ^ {rng.choice(compilations)})
         elif action == "reference_order":
-            variants = sorted({(each.row.id.source_id, each.row.player) for _, each in rows}) or [(1, "vk")]
+            variants = sorted({each.row.variant for _, each in rows}) or [(self.reference, 1, "vk")]
             order = tuple(rng.sample(variants, min(len(variants), rng.choice((1, 2)))))
             world.choose(reference={**world.choices.reference, (season, episode): order})
+        elif action == "reference_deny" and rows:
+            world.choose(reference_deny={**world.choices.reference_deny,
+                                         (season, episode): frozenset({rng.choice(rows)[1].row.variant})})
+        elif action == "voice_order" and rows:
+            row = rng.choice(rows)[1].row
+            if row.group:
+                world.choose(voice_order={**world.choices.voice_order, ((season, episode), row.group): ((row.id.source_id, row.player),)})
+        elif action == "voice_deny" and rows:
+            world.choose(voice_deny={**world.choices.voice_deny, (season, episode): frozenset({rng.choice(rows)[1].row.variant})})
+        elif action == "voice_off":
+            world.choose(voice_off={**world.choices.voice_off, (season, episode): frozenset({rng.choice(self.groups)})})
+        elif action == "member":
+            compilations = [each.row.id for _, each in rows if each.row.compilation]
+            word = rng.choice(compilations + [None]) if compilations else None
+            world.choose(member={**world.choices.member, (season, episode): word})
+        elif action == "put_parts":
+            # An episode in two parts: a reference and a voice-over of each part.
+            for part in (1, 2):
+                world.put(rng.choice((1, 3)), self._key("p"), episode, season=season, group=self.reference,
+                          player=rng.choice(("vk", "cvh")), part=part)
+                world.put(2, self._key("q"), episode, season=season, group=rng.choice(self.groups), player="kodik", part=part)
+        elif action == "levers_reset":
+            world.choose(reference={}, reference_deny={}, voice_order={}, voice_deny={}, voice_off={}, member={})
         elif action == "shuffle_voices":
             voices = list(self.groups)
             rng.shuffle(voices)

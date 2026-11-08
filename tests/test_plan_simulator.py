@@ -411,3 +411,98 @@ def test_a_cut_whose_service_finds_something_critical_takes_the_single_video():
     step = world.sync("разбор: критичная находка")
     world.check(step)
     assert container_of(world, 3).video.cut_of is None and step.replanned[0][0] == "cut"
+
+
+# --- the service's own rule, the levers, compilations as voice-overs, parts ------------------------------------------
+
+def test_of_two_equal_videos_the_earlier_row_of_the_layout_is_the_reference():
+    """The last tie-break of the service's rule (core/variant_queue) is the place of the row in the layout."""
+    world = World()
+    world.put(1, "early", 1, group=REF)
+    world.put(1, "late", 1, group=REF)
+    step = world.sync("ничья")
+    world.check(step)
+    assert container_of(world, 1).video.id.row_key == "early"
+
+
+def test_the_players_the_user_called_the_same_take_one_place():
+    from core.voice_names import Groups
+    world = World()
+    world.choose(players=("vk", "cvh", "kodik"), player_groups=Groups.of({"vk": ["cvh"]}))
+    world.put(1, "cvh1", 1, group=REF, player="cvh")
+    world.put(1, "vk1", 1, group=REF, player="vk")
+    step = world.sync("группа плееров")
+    world.check(step)
+    assert container_of(world, 1).video.id.row_key == "cvh1"  # one place, one source: the earlier row of the layout wins
+
+
+def test_the_levers_of_the_reference_order_and_leave_out_variants():
+    world = World()
+    world.put(1, "vk1", 1, group=REF)
+    world.put(3, "cvh1", 1, group=REF, player="cvh")
+    world.choose(reference={(1, 1): ((REF, 3, "cvh"),)})
+    world.check(world.sync("порядок РЕФ"))
+    assert container_of(world, 1).video.id.row_key == "cvh1"
+    world.choose(reference={}, reference_deny={(1, 1): frozenset({(REF, 1, "vk")})})
+    world.check(world.sync("запрет варианта"))
+    assert container_of(world, 1).video.id.row_key == "cvh1"
+
+
+def test_the_levers_of_a_voice_order_leave_out_and_take_off():
+    world = World()
+    world.put(1, "ref1", 1, group=REF)
+    world.put(2, "g1kodik", 1, group="G1", player="kodik")
+    world.put(3, "g1cvh", 1, group="G1", player="cvh")
+    world.choose(voice_order={((1, 1), "G1"): ((2, "kodik"),)})
+    step = world.sync("порядок озвучки")
+    world.check(step)
+    assert container_of(world, 1).tracks[0].dub.row_key == "g1kodik"
+    world.choose(voice_order={}, voice_off={(1, 1): frozenset({"G1"})})
+    step = world.sync("озвучка снята")
+    world.check(step)
+    assert not step.plan.ops and container_of(world, 1).tracks  # a track in the container stays (О-3)
+
+
+def test_the_users_word_on_a_compilation_holds_while_it_fits():
+    world = World()
+    world.put(1, "single2", 2, group=REF, player="cvh")
+    world.put(4, "short", 2, end=3, group=REF, height=2160)
+    world.put(4, "long", 1, end=5, group=REF, height=2160)
+    step = world.sync("правило: самая короткая")
+    world.check(step)
+    assert container_of(world, 2).video.cut_of.row_key == "short"
+    world.choose(member={(1, 2): RowId(4, "long", "long")})
+    step = world.sync("слово пользователя: длинная")
+    world.check(step)
+    assert container_of(world, 2).video.cut_of.row_key == "long"
+    world.choose(member={(1, 2): None})
+    step = world.sync("ни в одной")
+    world.check(step)
+    assert container_of(world, 2).video.cut_of is None
+
+
+def test_a_compilation_is_a_voice_over_of_an_episode_it_does_not_cut():
+    """Д-19: a compilation of another group that covers the episode gives it that voice-over."""
+    world = World()
+    world.put(1, "single2", 2, group=REF, height=1080)
+    world.put(4, "comp", 1, end=3, group="A", height=720, player="kodik")
+    step = world.sync("склейка-озвучка")
+    world.check(step)
+    assert [track.group for track in container_of(world, 2).tracks] == ["A"]
+    assert container_of(world, 2).video.cut_of is None
+
+
+def test_an_episode_in_parts_has_a_file_of_each_part_and_the_levers_of_the_episode():
+    world = World()
+    for part in (1, 2):
+        world.put(1, f"ref-p{part}", 1, group=REF, part=part)
+        world.put(2, f"g1-p{part}", 1, group="G1", player="kodik", part=part)
+    world.put(4, "comp", 1, end=3, group=REF, height=2160)  # an episode in parts is not cut out of a compilation
+    step = world.sync("серия в двух частях")
+    world.check(step)
+    parts = sorted(each.name for each in world.containers.values())
+    assert parts == ["s01e01 pt1 [AniStar] 720p.mkv", "s01e01 pt2 [AniStar] 720p.mkv"]
+    assert all([track.group for track in each.tracks] == ["G1"] for each in world.containers.values())
+    world.choose(off_episodes=frozenset({(1, 1)}))
+    world.check(world.sync("серия отключена"))
+    assert all(each.off for each in world.containers.values())

@@ -19,7 +19,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
-from .tables import Container, Inputs, OnlineRow, RowId, Slot, Snapshot, Track, Video
+from core.variant_queue import REFERENCE_RANKING, VOICE_RANKING
+from core.variant_queue import Candidate as Ranked
+from core.variant_queue import Order
+
+from .tables import Container, Inputs, OnlineRow, RowId, Slot, Snapshot, Track, Video, episode_of
+
+RULE = object()  # no word of the user on the compilation of an episode: the rule decides
+
+
+@dataclass(frozen=True)
+class _Row:
+    """What the criteria of the service's rule read of a variant (core/variant_queue)."""
+
+    height: int
+    player: str
+    source_id: int
 
 OFF = ".off"
 HIDDEN = ".hidden-"  # a file nothing carries any more: it stays, out of the media server's sight
@@ -106,7 +121,8 @@ def voice_of(group: str | None, dub: RowId) -> str:
 
 
 def name_of(slot: Slot, snapshot: Snapshot, off: bool) -> str:
-    return f"s{slot[0]:02d}e{slot[1]:02d} [{snapshot.group or '—'}] {snapshot.height}p.mkv" + (OFF if off else "")
+    part = f" pt{slot[2]}" if len(slot) > 2 else ""
+    return f"s{slot[0]:02d}e{slot[1]:02d}{part} [{snapshot.group or '—'}] {snapshot.height}p.mkv" + (OFF if off else "")
 
 
 def own_track(container: Container) -> Track:
@@ -134,15 +150,19 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
         row = online.get(track.dub)
         return row.slot if row is not None and not row.compilation else track.episode
 
-    players = {player: place for place, player in enumerate(choices.players)}
-    sources = {source_id: place for place, source_id in enumerate(choices.sources)}
+    order = Order(tuple(choices.players), {source_id: place for place, source_id in enumerate(choices.sources)},
+                  choices.player_groups)
     voices_order = {voice: place for place, voice in enumerate(choices.groups)}
+    last = len(inputs.online)
 
-    def player_rank(player: str) -> int:
-        return players.get(player, len(players))
+    def criteria(ranking, height: int, player: str, source_id: int) -> tuple:
+        """The service's own criteria (core/variant_queue), the place of the row aside: it is the last tie-break."""
+        item = Ranked(_Row(height, player, source_id), 0)
+        return tuple(each(item, order) for each in ranking)
 
-    def source_rank(source_id: int) -> int:
-        return sources.get(source_id, len(sources))
+    def position(row_id: RowId) -> int:
+        row = online.get(row_id)
+        return row.position if row is not None else last
 
     def group_rank(voice: str) -> tuple:
         return (voices_order.get(voice, len(voices_order)), voice)
@@ -170,7 +190,7 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
 
     slots = sorted(set(by_slot.rows) | set(by_slot.files))
     namer = namer or (lambda slot, video, off: name_of(slot, video.snapshot, off))
-    goals = [goal for slot in slots if (goal := _goal(slot, inputs, namer, by_slot, player_rank, source_rank,
+    goals = [goal for slot in slots if (goal := _goal(slot, inputs, namer, by_slot, criteria, position,
                                                       group_rank)) is not None]
     ops = _ops(goals, containers)
     groups = _groups(goals, ops, containers, deleted_videos, deleted_tracks, video_slot, track_slot)
@@ -187,48 +207,66 @@ class Index:
         self.compilations: list[OnlineRow] = []
 
 
-def _goal(slot, inputs, namer, by_slot: Index, player_rank, source_rank, group_rank) -> Goal | None:
+def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank) -> Goal | None:
     choices = inputs.choices
-    off = slot in choices.off_episodes
-    order = choices.reference.get(slot, ())
+    episode = episode_of(slot)  # the levers are the episode's, for all its parts
+    off = episode in choices.off_episodes
+    wanted = choices.reference.get(episode, ())
+    denied = choices.reference_deny.get(episode, frozenset())
 
-    def user_rank(source_id: int, player: str) -> int:
-        return order.index((source_id, player)) if (source_id, player) in order else len(order)
+    def video_rank(variant: tuple[str, int, str], height: int, held: bool, row_id: RowId) -> tuple:
+        """The service's rule for the reference: the user's order, then its criteria; of equals what the asset holds stays
+        (a video goes only for a better one); then the place of the row in the layout."""
+        named = wanted.index(variant) if variant in wanted else len(wanted)
+        return (named, *criteria(REFERENCE_RANKING, height, variant[2], variant[1]), 0 if held else 1, position(row_id),
+                repr(row_id))
 
     candidates: list[tuple[tuple, VideoWay]] = []
     seen: set[tuple] = set()
     singles = by_slot.rows.get(slot, [])
     for container in by_slot.files.get(slot, []):
         video = container.video
-        if video.key in seen:
+        source = video.cut_of or video.id
+        variant = (video.snapshot.variant_label, source.source_id, video.snapshot.player)
+        if video.key in seen or variant in denied:
             continue
         seen.add(video.key)
         way = VideoWay("asset", video.key, video.timeline, video.snapshot, container=container)
-        source_id = (video.cut_of or video.id).source_id
-        candidates.append(((user_rank(source_id, video.snapshot.player), -video.snapshot.height,
-                            player_rank(video.snapshot.player), source_rank(source_id), 0, repr(video.key)), way))
+        candidates.append((video_rank(variant, video.snapshot.height, True, source), way))
     if not off:
         for row in singles:
-            if ("download", row.id) in inputs.failed:
+            if ("download", row.id) in inputs.failed or row.variant in denied:
                 continue
             held = next((way for _, way in candidates if way.key == ("row", row.id)), None)
             if held is not None and held.snapshot.height >= row.height:
                 continue  # the asset holds this video at least as high: no download of it
             way = VideoWay("download", ("row", row.id), row.id, row.snapshot(), row=row)
-            candidates.append(((user_rank(row.id.source_id, row.player), -row.height, player_rank(row.player),
-                                source_rank(row.id.source_id), 1, repr(way.key)), way))
-        cut = _cut(slot, inputs, by_slot.compilations, candidates, player_rank, source_rank, user_rank)
+            candidates.append((video_rank(row.variant, row.height, False, row.id), way))
+        cut = _cut(slot, inputs, by_slot.compilations, candidates, video_rank, denied)
         if cut is not None:
             candidates.append(cut)
+    # The user's word on the compilation is stronger than what the asset holds: «none» leaves out every cut video; a
+    # compilation that fits leaves out the videos cut out of the others.
+    word = choices.member.get(episode, RULE)
+    if word is None:
+        candidates = [each for each in candidates if each[1].key[0] != "cut"]
+    elif word is not RULE and any(each[1].key[0] == "cut" and each[1].key[1] == word for each in candidates):
+        candidates = [each for each in candidates if each[1].key[0] != "cut" or each[1].key[1] == word]
     if not candidates:
         return None
     video = min(candidates, key=lambda each: each[0])[1]
     own = voice_of(video.snapshot.group, video.timeline)
 
+    taken_off = choices.off_groups | choices.voice_off.get(episode, frozenset())
+    left_out = choices.voice_deny.get(episode, frozenset())
+    # The voice-overs of an episode are its single rows and the compilations that cover it (Д-19), but the compilation
+    # its own video is cut out of: that one is its own sound. A part of an episode takes the rows of that part only.
+    dubbing = singles + [row for row in by_slot.compilations if len(slot) == 2 and row.season == slot[0]
+                         and row.start <= slot[1] <= row.end and row.id != (video.row.id if video.kind == "cut" else None)]
     voices: dict[str, list] = {}
     if not off:
-        for row in singles:
-            if row.group is not None and row.group not in choices.off_groups and row.group != own:
+        for row in dubbing:
+            if row.group is not None and row.group not in taken_off and row.group != own:
                 voices.setdefault(row.group, [])
     held_tracks = [each for each in by_slot.tracks.get(slot, []) if not (each[2] and each[0] is video.container)]
     for container, track, _ in held_tracks:
@@ -245,10 +283,14 @@ def _goal(slot, inputs, namer, by_slot: Index, player_rank, source_rank, group_r
             container, track, is_own = reuse[0]
             tracks.append(TrackWay(voice, track.dub, track.snapshot, "reuse", container=container, own=is_own))
             continue
-        rows = sorted((row for row in singles if row.group == voice and not off
-                       and ("download", row.id) not in inputs.failed and ("align", row.id, video.timeline) not in inputs.failed
-                       and voice not in choices.off_groups),
-                      key=lambda row: (player_rank(row.player), source_rank(row.id.source_id), -row.height, row.id))
+        preferred = choices.voice_order.get((episode, voice), ())
+        rows = sorted((row for row in dubbing if row.group == voice and not off and voice not in taken_off
+                       and row.variant not in left_out
+                       and ("download", row.id) not in inputs.failed and ("align", row.id, video.timeline) not in inputs.failed),
+                      key=lambda row: ((preferred.index((row.id.source_id, row.player)) if (row.id.source_id, row.player)
+                                        in preferred else len(preferred)),
+                                       *criteria(VOICE_RANKING, row.height, row.player, row.id.source_id),
+                                       row.position, repr(row.id)))
         if rows:
             tracks.append(TrackWay(voice, rows[0].id, rows[0].snapshot(), "download", row=rows[0]))
             continue
@@ -259,9 +301,13 @@ def _goal(slot, inputs, namer, by_slot: Index, player_rank, source_rank, group_r
     return Goal(slot, video, tuple(tracks), namer(slot, video, off), off)
 
 
-def _cut(slot, inputs, compilations, candidates, player_rank, source_rank, user_rank):
-    """The cut out of the shortest switched-on compilation that covers the episode and is higher than its best single
-    video, by that single video (REF 2); none when the episode has no single video."""
+def _cut(slot, inputs, compilations, candidates, video_rank, denied=frozenset()):
+    """The cut out of the compilation the episode stands in, by its best single video (REF 2): the one the user named while
+    it still fits, else the shortest switched-on compilation that covers the episode and is higher than its best single
+    video; none when the user said none, or when the episode has no single video."""
+    word = inputs.choices.member.get(episode_of(slot), RULE)
+    if word is None or len(slot) > 2:
+        return None  # the user said none; an episode in parts is not cut out of a compilation
     singles = [(rank, way) for rank, way in candidates if way.key[0] == "row"]
     if not singles:
         return None
@@ -270,17 +316,19 @@ def _cut(slot, inputs, compilations, candidates, player_rank, source_rank, user_
     covering = [row for row in compilations if ("download", row.id) not in inputs.failed
                 and ("cut", row.id, ref2.timeline) not in inputs.failed
                 and row.season == slot[0] and row.start <= slot[1] <= row.end
-                and row.group is not None and row.id not in inputs.choices.off_compilations and row.height > best]
+                and row.group is not None and row.id not in inputs.choices.off_compilations and row.height > best
+                and row.variant not in denied]  # a variant left out is no reference in any form: file, download or cut
+    named = [row for row in covering if row.id == word]
+    covering = named or covering
     if not covering:
         return None
-    compilation = min(covering, key=lambda row: (row.end - row.start, -row.height, source_rank(row.id.source_id), row.id))
+    compilation = min(covering, key=lambda row: (row.end - row.start, -row.height, row.position, repr(row.id)))
     key = ("cut", compilation.id, ref2.timeline)
     if any(way.key == key and way.snapshot.height >= compilation.height for _, way in candidates):
         return None  # the asset holds this cut already, as high as the compilation is now
     snapshot = compilation.snapshot()
     way = VideoWay("cut", key, ref2.timeline, snapshot, row=compilation, ref2=ref2)
-    return ((user_rank(compilation.id.source_id, compilation.player), -compilation.height, player_rank(compilation.player),
-             source_rank(compilation.id.source_id), 1, repr(key)), way)
+    return video_rank(compilation.variant, compilation.height, False, compilation.id), way
 
 
 def _satisfied_by(goal: Goal) -> Container | None:
@@ -338,7 +386,7 @@ def _groups(goals, ops, containers, deleted_videos, deleted_tracks, video_slot, 
     slot_of: dict[str, Slot] = {}
 
     def at(slot: Slot) -> str:
-        node = f"slot:{slot[0]}:{slot[1]}"
+        node = "slot:" + ":".join(map(str, slot))  # the whole place: a part of an episode is a place of its own
         slot_of[node] = slot
         return node
 

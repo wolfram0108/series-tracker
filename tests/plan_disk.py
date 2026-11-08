@@ -238,11 +238,14 @@ class Daemon:
         tracks = body.dub_atracks or [0] * len(body.dubs)
         results = []
         for dub, stream in zip(body.dubs, tracks):
-            ok = self.codec.sound(dub, stream) == picture and answer != "mismatch"
+            # The voice-over is laid onto the video where its sound is the episode of the picture: the whole of an
+            # episode, or its stretch of a compilation (Д-19).
+            sounds = [self.codec.sound(dub, stream, second) for second in range(max(1, self.codec.seconds(dub)))]
+            ok = picture in sounds and answer != "mismatch"
             out = None
             if ok:
                 out = os.path.join(body.out_dir, f"{os.path.basename(dub)}.a{stream}.flac")
-                _run("-i", dub, "-map", f"0:a:{stream}", "-c:a", "flac", out)
+                _run("-ss", str(sounds.index(picture)), "-i", dub, "-t", "1", "-map", f"0:a:{stream}", "-c:a", "flac", out)
             results.append({"dub": dub, "ok": ok, "out_path": out, "suspect": ["подозрительно"] if answer == "suspect" else [],
                             "critical": ["критично"] if answer == "critical" else [],
                             "error": None if ok else "звук озвучки не совпал с картинкой"})
@@ -284,6 +287,10 @@ def container_of(data: dict) -> Container:
                                          RowId(**video["timeline"]), RowId(**video["cut_of"]) if video["cut_of"] else None),
                      tuple(Track(RowId(**track["dub"]), Snapshot(**track["snapshot"]), tuple(track["episode"]),
                                  RowId(**track["aligned_to"])) for track in data["tracks"]), data["off"])
+
+
+def label_of(slot) -> str:
+    return f"s{slot[0]:02d}e{slot[1]:02d}" + (f"pt{slot[2]}" if len(slot) > 2 else "")
 
 
 def dub_key(dub: RowId) -> str:
@@ -345,11 +352,11 @@ class DiskWorld(World):
                            for row in [each.row] if row.id in self.transient}
         self.daemon.answers = {}
         for (slot, voice), answer in self.answers.items():
-            self.daemon.answers[f"s{slot[0]:02d}e{slot[1]:02d} {voice}"] = answer
+            self.daemon.answers[f"{label_of(slot)} {voice}"] = answer
         for slot, voice in self.align_fails:
-            self.daemon.answers[f"s{slot[0]:02d}e{slot[1]:02d} {voice}"] = "mismatch"
+            self.daemon.answers[f"{label_of(slot)} {voice}"] = "mismatch"
         for slot, answer in self.cut_answers.items():
-            self.daemon.answers[f"cut s{slot[0]:02d}e{slot[1]:02d}"] = answer
+            self.daemon.answers[f"cut {label_of(slot)}"] = answer
         return super().sync(title)
 
     def _work(self, op_id: str, extension: str = ".mp4") -> str:
@@ -370,13 +377,15 @@ class DiskWorld(World):
                 self.content[video.key] = (self.codec.picture(path),)
                 return video
             if op.kind == "download_dub":
-                self.content[("dub", row.id)] = (self.codec.sound(path, 0),)
+                # A compilation as a voice-over (Д-19) holds an episode in every second.
+                self.content[("dub", row.id)] = tuple(self.codec.sound(path, 0, second)
+                                                      for second in range(max(1, self.codec.seconds(path))))
                 return row
             return path
         if op.kind == "cut":
             way = op.subject
             ref2 = self.library(way.ref2.container.name) if way.ref2.kind == "asset" else self.paths[f"ref2:{op.slot}"]
-            label = f"cut s{op.slot[0]:02d}e{op.slot[1]:02d}"
+            label = f"cut {label_of(op.slot)}"
             result = self._daemon("reverse", {"compilation": results[f"compilation:{way.row.id}"], "episodes": [ref2],
                                               "out_dir": os.path.join(self.root, "work"), "extend_edges": True,
                                               "label": label}, op)
@@ -393,7 +402,7 @@ class DiskWorld(World):
                 dub, stream = self.paths[f"dub:{goal.slot}:{way.dub}"], 0
             else:
                 dub, stream = self.library(way.container.name), self._stream(way.container.name, way.dub, way.own)
-            label = f"s{goal.slot[0]:02d}e{goal.slot[1]:02d} {way.voice}"
+            label = f"{label_of(goal.slot)} {way.voice}"
             result = self._daemon("enqueue", {"ref": video_path, "dubs": [dub], "dub_atracks": [stream],
                                               "out_dir": os.path.join(self.root, "work"), "label": label}, op)
             if result is None:

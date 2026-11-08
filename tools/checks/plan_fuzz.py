@@ -28,7 +28,8 @@ from plan_world import Chaos, World  # noqa: E402
 # On a real series: changes of what is there, no invented rows of invented sources.
 REAL_ACTIONS = ("drop", "renumber", "move_season", "mass_shift", "wrong_number", "higher", "swap_video", "delete_video",
                 "delete_track", "off", "on", "off_group", "off_compilation", "reference_order", "shuffle_voices",
-                "read_fail", "download_fail", "transient", "answer", "cut_answer", "lose_file", "reset")
+                "read_fail", "download_fail", "transient", "answer", "cut_answer", "lose_file", "reset",
+                "reference_deny", "voice_order", "voice_deny", "voice_off", "member", "levers_reset")
 
 
 def run(histories, make, steps: int, first_seed: int) -> dict[str, list[int]]:

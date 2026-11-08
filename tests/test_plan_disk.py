@@ -131,3 +131,21 @@ def test_chaos_on_the_disk(tmp_path, seed):
         Chaos(world, random.Random(seed), seasons=(1,), episodes=(1, 2, 3)).history(6)
     finally:
         world.close()
+
+
+def test_a_compilation_as_a_voice_over_through_the_model_of_the_service(disk):
+    """Д-19 on files: the model of the service finds the episode's stretch in the compilation by its sound."""
+    disk.put(1, "single2", 2, group=REF, height=1080)
+    disk.put(4, "comp", 1, end=3, group="A", height=720, player="kodik")
+    step = disk.sync("склейка-озвучка")
+    disk.check(step)
+    assert [track.group for track in visible(disk, 2).tracks] == ["A"]
+
+
+def test_an_episode_in_parts_on_the_disk(disk):
+    for part in (1, 2):
+        disk.put(1, f"ref-p{part}", 1, group=REF, part=part)
+        disk.put(2, f"g1-p{part}", 1, group="G1", player="kodik", part=part)
+    step = disk.sync("части серии")
+    disk.check(step)
+    assert sorted(disk.containers) == ["s01e01 pt1 [AniStar] 720p.mkv", "s01e01 pt2 [AniStar] 720p.mkv"]

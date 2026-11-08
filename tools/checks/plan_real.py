@@ -95,15 +95,12 @@ class RealSeries:
 
 def online_of(rows: list[CompositionRow], places: dict[int, str], skipped: Counter) -> list[OnlineRow]:
     online = []
-    for row in rows:
+    for position, row in enumerate(rows):  # the place of a row in the layout, excluded rows counted, as the service does
         if row.excluded or row.season is None or row.episode_start is None:
-            continue
-        if row.part is not None:
-            skipped["строка с частью серии"] += 1
             continue
         online.append(OnlineRow(RowId(row.source_id, row.row_key, row.video or ""), row.season, row.episode_start,
                                 row.episode_end or row.episode_start, row.player, row.voice_group, max(row.heights or [0]),
-                                places.get(row.source_id, ""), row.link))
+                                places.get(row.source_id, ""), row.link, row.voice_label, position, row.part))
     return online
 
 
@@ -125,9 +122,6 @@ def asset_of(path: str, series_id: int, online: list[OnlineRow], places: dict[in
     conn.close()
     tracks_of: dict[tuple, list[Track]] = {}
     for dub in dubs:
-        if dub["part"]:
-            skipped["озвучка с частью серии"] += 1
-            continue
         chain = json.loads(dub["chain"] or "[]")
         if not chain:
             skipped["озвучка без цепочки"] += 1
@@ -138,15 +132,12 @@ def asset_of(path: str, series_id: int, online: list[OnlineRow], places: dict[in
         aligned_to = row_id(int(a_source), a_key) if a_source.isdigit() else RowId(-1, dub["aligned_to"] or "", "")
         snapshot = Snapshot(places.get(source_id, ""), candidate.get("player", "?"), dub["voice_label"], 720,
                             candidate.get("url", ""))
-        tracks_of.setdefault((dub["season"], dub["episode"]), []).append(
-            Track(row_id(source_id, candidate.get("row_key"), candidate.get("url", "")), snapshot,
-                  (dub["season"], dub["episode"]), aligned_to))
+        place = (dub["season"], dub["episode"]) + ((dub["part"],) if dub["part"] else ())
+        tracks_of.setdefault(place, []).append(
+            Track(row_id(source_id, candidate.get("row_key"), candidate.get("url", "")), snapshot, place, aligned_to))
     containers = []
     for item in items:
-        if item["part"] is not None:
-            skipped["файл части серии"] += 1
-            continue
-        slot = (item["season"], item["episode_start"])
+        slot = (item["season"], item["episode_start"]) + ((item["part"],) if item["part"] is not None else ())
         own = row_id(item["source_id"], item["row_key"])
         found = by_key.get((item["source_id"], item["row_key"]))
         snapshot = Snapshot(places.get(item["source_id"], ""), found.player if found is not None else "?",
@@ -166,15 +157,68 @@ def asset_of(path: str, series_id: int, online: list[OnlineRow], places: dict[in
     return containers
 
 
-def choices_of(path: str, series_id: int, info: dict) -> Choices:
+def choices_of(path: str, series_id: int, info: dict, online: list[OnlineRow]) -> Choices:
+    """What the user chose: the orders of the settings, and the levers of every episode as the service's own function
+    (modules/composition/settings.effective) resolves them through its levels, with the compilation it stands in."""
+    from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW,
+                                VOICE_ORDER, VOICE_TAKE, compilation_key, parse_group_target, parse_variant_target)
+    from modules.composition import compilations as membership
+    from modules.composition import settings as levers
+
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     off = {(season, episode) for season, episode in conn.execute(
         "SELECT season, episode FROM scan_references WHERE series_id=? AND mark='off' AND part IS NULL", (series_id,))}
     conn.close()
     stored = info["stored"]
     order = [label for season in sorted(stored.orders) for label in stored.orders[season]]
+    records = stored.records
+    rows = info["rows"]
+    source_order = {each.source_id: place for place, each in enumerate(stored.sources)}
+    members = membership.resolve(rows, records, source_order).members
+    by_key = {}
+    for row in rows:
+        if row.is_compilation and not row.excluded and row.season is not None:
+            key = compilation_key(row.voice_label, row.source_id, row.player, row.season, row.episode_start, row.episode_end)
+            found = next((each for each in online if each.id.source_id == row.source_id and each.id.row_key == row.row_key), None)
+            if found is not None:
+                by_key[key] = found.id
+    reference, reference_deny, voice_order, voice_deny, voice_off, member = {}, {}, {}, {}, {}, {}
+    for slot in sorted({row.slot[:2] for row in online if not row.compilation}):
+        stands = members.get(slot)
+        for lever in levers.effective(records, slot[0], slot[1], stands.key if stands is not None else None):
+            if lever.lever == REFERENCE_ORDER and isinstance(lever.value, list):
+                reference[slot] = tuple((each["group"], each["source_id"], each["player"]) for each in lever.value
+                                        if isinstance(each, dict) and {"group", "source_id", "player"} <= set(each))
+            elif lever.lever == REFERENCE_ALLOW and lever.value is False and lever.target:
+                variant = parse_variant_target(lever.target)
+                if variant is not None:
+                    reference_deny[slot] = reference_deny.get(slot, frozenset()) | {variant}
+            elif lever.lever == VOICE_ORDER and isinstance(lever.value, list) and lever.target:
+                group = parse_group_target(lever.target)
+                if group is not None:
+                    voice_order[(slot, group)] = tuple((each["source_id"], each["player"]) for each in lever.value
+                                                       if isinstance(each, dict) and {"source_id", "player"} <= set(each))
+            elif lever.lever == VOICE_ALLOW and lever.value is False and lever.target:
+                variant = parse_variant_target(lever.target)
+                if variant is not None:
+                    voice_deny[slot] = voice_deny.get(slot, frozenset()) | {variant}
+            elif lever.lever == VOICE_TAKE and lever.value is False and lever.target:
+                group = parse_group_target(lever.target)
+                if group is not None:
+                    voice_off[slot] = voice_off.get(slot, frozenset()) | {group}
+            elif lever.lever == COMPILATION_MEMBER and lever.value is not None:
+                member[slot] = by_key.get(lever.value) if lever.value else None
+    off_compilations = frozenset(row_id for key, row_id in by_key.items() if any(
+        lever.lever == COMPILATION_TAKE and lever.value is False
+        for lever in levers.effective(records, row_id_season(online, row_id), None, key)))
     return Choices(players=tuple(info["voices"].priority), sources=tuple(each.source_id for each in stored.sources),
-                   groups=tuple(order), off_episodes=frozenset(off))
+                   groups=tuple(order), player_groups=info["voices"].players, off_episodes=frozenset(off),
+                   off_compilations=off_compilations, reference=reference, reference_deny=reference_deny,
+                   voice_order=voice_order, voice_deny=voice_deny, voice_off=voice_off, member=member)
+
+
+def row_id_season(online: list[OnlineRow], row_id: RowId) -> int:
+    return next(each.season for each in online if each.id == row_id)
 
 
 def namer_of(series: dict):
@@ -202,7 +246,7 @@ async def inputs_of(real: RealSeries, series_id: int, rules: dict[int, list[dict
     order = list(info["stored"].orders and [l for s in sorted(info["stored"].orders) for l in info["stored"].orders[s]])
     containers = asset_of(real.path, series_id, online, info["places"], order, skipped)
     info["rows"] = rows
-    return Inputs(tuple(online), tuple(containers), choices_of(real.path, series_id, info)), skipped, info
+    return Inputs(tuple(online), tuple(containers), choices_of(real.path, series_id, info, online)), skipped, info
 
 
 def same_layout(rows: list[CompositionRow], stored: list[CompositionRow]) -> list[str]:
@@ -217,3 +261,35 @@ def same_layout(rows: list[CompositionRow], stored: list[CompositionRow]) -> lis
 
 def run(coroutine):
     return asyncio.run(coroutine)
+
+
+def agreement(path: str, series_id: int, inputs: Inputs, made) -> tuple[Counter, Counter]:
+    """The planner's choices against the service's: the reference of every episode (scan_references) and the source of
+    every voice-over the service planned (voice_dubs: the candidate its attempts came to for a placed track, the first
+    of its chain for one to come)."""
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    service = {(r["season"], r["episode"]): (r["source_id"], r["row_key"]) for r in conn.execute(
+        "SELECT season, episode, source_id, row_key FROM scan_references WHERE series_id=? AND part IS NULL", (series_id,))}
+    links = {row.link: row for row in inputs.online}
+    planned = {}
+    for r in conn.execute("SELECT season, episode, voice_label, chain, attempt, status FROM voice_dubs WHERE series_id=? "
+                          "AND part=0", (series_id,)):
+        chain = json.loads(r["chain"] or "[]")
+        if chain:
+            used = chain[min(r["attempt"], len(chain) - 1)] if r["status"] == "placed" else chain[0]
+            found = links.get(used.get("url"))
+            planned[((r["season"], r["episode"]), r["voice_label"])] = (found.id.source_id, found.id.row_key) if found else None
+    conn.close()
+    references, voices = Counter(), Counter()
+    for goal in made.goals:
+        if len(goal.slot) != 2:
+            continue
+        mine = goal.video.timeline if goal.video.kind != "cut" else goal.video.ref2.timeline
+        theirs = service.get(goal.slot)
+        references["тот же" if theirs and (mine.source_id, mine.row_key) == theirs else "другой"] += 1
+        for way in goal.tracks:
+            theirs = planned.get((goal.slot, way.voice))
+            voices["у сервиса нет" if theirs is None else "тот же" if theirs == (way.dub.source_id, way.dub.row_key)
+                   else "другой"] += 1
+    return references, voices

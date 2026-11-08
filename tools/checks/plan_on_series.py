@@ -54,8 +54,10 @@ async def series_report(real: plan_real.RealSeries, series_id: int) -> str:
     inputs, skipped, info = await plan_real.inputs_of(real, series_id)
     diff = plan_real.same_layout(info["rows"], info["stored"].rows)
     same = "да" if not diff else "нет: " + "; ".join(diff)
-    return report(series_id, inputs, skipped, info["card"]).replace(
-        "\n\n", f"\n\nРаскладка настоящего конструктора здесь совпадает с раскладкой сервиса: {same}.\n\n", 1)
+    references, voices = plan_real.agreement(real.path, series_id, inputs, plan(inputs))
+    told = (f"Раскладка настоящего конструктора здесь совпадает с раскладкой сервиса: {same}.\n"
+            f"Выбор планировщика против выбора сервиса — референс: {dict(references)}; озвучки: {dict(voices)}.")
+    return report(series_id, inputs, skipped, info["card"]).replace("\n\n", f"\n\n{told}\n\n", 1)
 
 
 def main() -> None:
