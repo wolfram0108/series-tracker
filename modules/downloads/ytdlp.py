@@ -28,7 +28,7 @@ from urllib.parse import urlsplit
 
 from core import storage
 from core.ffprobe import duration_of, readable_length, video_gaps
-from core.proc import REAP_TIMEOUT_S, exited, run_capture, spawn, stop
+from core.proc import LOST, REAP_TIMEOUT_S, exited, run_capture, spawn, stop
 from core.retry import UNTIMED, Budget, retrying
 
 from . import ranged
@@ -373,7 +373,9 @@ async def _download_direct_ffmpeg(stream_url: str, headers: dict,
     if stopped:
         await storage.discard(tmp_out)
         return False, stopped
-    if code == 0:
+    # An end whose status was lost tells nothing (core/proc.LOST, the code a signal also ends ffmpeg with): unless its
+    # words say a signal stopped it, the file is what is judged, by its length.
+    if code == 0 or (code == LOST and not _interrupted(code, tail)):
         got = await _local_duration(tmp_out)
         if got <= 0 or short_of(got, duration):
             await storage.discard(tmp_out)
@@ -576,7 +578,8 @@ async def _phase_download(video_url: str, full_output_path: str,
         return False, stopped
     if code != 0 and _interrupted(code, tail):
         return False, f"{INTERRUPTED}: yt-dlp завершился с кодом {code}"
-    if code != 0:
+    # A lost status says nothing: the file yt-dlp left is judged by what follows (the remux and the check of its length).
+    if code not in (0, LOST):
         error = _ytdlp_error(
             tail, f"yt-dlp завершился с кодом {code}")
         if "Video unavailable" in tail or "Private video" in tail:
@@ -651,7 +654,8 @@ async def _phase_remux(raw: str, full_output_path: str,
     if stopped:
         await storage.discard(tmp_out)
         return False, stopped
-    if code == 0:
+    if code == 0 or (code == LOST and not _interrupted(code, tail) and duration > 0
+                     and not short_of(await _local_duration(tmp_out), duration)):
         await storage.call(os.replace, tmp_out, full_output_path, owns=(tmp_out, full_output_path))  # atomic publication
         await on_progress({"phase": "remux", "progress": 100, "eta": 0,
                            "speed": 0.0})

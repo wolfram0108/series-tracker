@@ -1,0 +1,130 @@
+import type { components } from "../api/schema"
+import type { MediaFile } from "../composables/outputCalls"
+
+type Schemas = components["schemas"]
+export type PlannerView = Schemas["PlannerView"]
+export type PlanRowRef = Schemas["PlanRowRef"]
+
+/** The state of a voice-over of an episode as the strip of the episode shows it. */
+export type DubState = "done" | "downloading" | "download_queued" | "align_queued" | "running" | "planned" | "error" | "absent"
+
+/** A voice-over of an episode as the window reads it, told by the plan of the series: what its track is at. */
+export interface VoiceDub {
+  season: number
+  episode: number
+  part: number | null
+  voice_key: string
+  voice_label: string
+  state: DubState
+  source_id: number | null
+  player: string | null
+  /** Whether a row of a source gives it now; false: the asset holds it, the source forgot it. */
+  online: boolean | null
+  detail?: { code: string; params?: { [key: string]: string | number } } | null
+}
+
+/** A cut of an episode out of its compilation, told by the plan. */
+export interface PlanCut {
+  season: number
+  episode: number
+  part: number
+  cut_key: string
+  status: "planned" | "aligning" | "done" | "failed"
+  from_ref_s?: number | null
+  from_dub_s?: number | null
+}
+
+const sameRow = (a: PlanRowRef | null | undefined, b: PlanRowRef | null | undefined): boolean =>
+  !!a && !!b && a.source_id === b.source_id && a.row_key === b.row_key && (a.video ?? "") === (b.video ?? "")
+
+const partOf = (slot: number[]): number | null => (slot.length > 2 ? slot[2] : null)
+
+function failed(view: PlannerView, kind: string, row: PlanRowRef): boolean {
+  return (view.failures ?? []).some((each) => each.kind === kind && sameRow(each.row, row))
+}
+
+/** The key of the compilation of a row, as the layout names its compilations; a row it does not name keys itself. */
+export type CompilationKey = (row: PlanRowRef) => string
+const ownKey: CompilationKey = (row) => JSON.stringify(row)
+
+/** The voice-overs of every episode: a track the file holds is done; one the plan gets is planned, or under way while
+ *  the sync runs; one whose download or alignment failed is an error until the failures are reset. A voice-over of the
+ *  order of the season that the plan has no way to get for the episode is absent: the episode is put together in part. */
+export function planDubs(view: PlannerView | undefined, orders: Record<number, readonly string[]> = {}): VoiceDub[] {
+  if (!view) return []
+  const onlineOf = new Map<string, boolean | null>()
+  for (const asset of view.assets ?? []) {
+    for (const track of asset.tracks ?? []) onlineOf.set(JSON.stringify(track.row), track.online ?? null)
+  }
+  const dubs: VoiceDub[] = []
+  for (const goal of view.episodes ?? []) {
+    const [season, episode] = goal.slot
+    for (const track of goal.tracks ?? []) {
+      let state: DubState
+      if (track.kind === "reuse") state = "done"
+      else if (failed(view, "download", track.row) || failed(view, "align", track.row)) state = "error"
+      else state = view.running ? (track.kind === "download" ? "downloading" : "running") : "planned"
+      dubs.push({
+        season, episode, part: partOf(goal.slot), voice_key: track.voice, voice_label: track.voice, state,
+        source_id: track.row.source_id, player: track.player || null,
+        online: onlineOf.get(JSON.stringify(track.row)) ?? (track.kind === "download" ? true : null),
+      })
+    }
+    const taken = new Set([...(goal.tracks ?? []).map((track) => track.voice), goal.video.group ?? ""])
+    for (const voice of orders[season] ?? []) {
+      if (taken.has(voice)) continue
+      dubs.push({ season, episode, part: partOf(goal.slot), voice_key: voice, voice_label: voice, state: "absent",
+                  source_id: null, player: null, online: null })
+    }
+  }
+  return dubs
+}
+
+/** The video of every episode as a file of the plan: ready when the file holds it, else what its work is at. */
+export function planFiles(view: PlannerView | undefined, keyOf: CompilationKey = ownKey): MediaFile[] {
+  if (!view) return []
+  return (view.episodes ?? []).map((goal) => {
+    const row = goal.video.row
+    let status = "pending"
+    if (goal.video.kind === "asset") status = "completed"
+    else if (failed(view, "download", row)) status = "error"
+    else if (view.running) status = "downloading"
+    const held = (view.assets ?? []).find((asset) => asset.name === goal.video.file)
+    const cut = held?.video.cut_of ? { key: keyOf(held.video.cut_of) } : null
+    const pending = goal.video.kind === "cut" && goal.video.cut_of ? { key: keyOf(goal.video.cut_of) } : null
+    return { unique_id: `${goal.slot.join(":")}`, source_id: row.source_id, row_key: row.row_key, status, cut,
+             pending_cut: pending }
+  })
+}
+
+/** The cuts of the episodes out of their compilations: done when the file holds a cut video, planned or under way while
+ *  the plan cuts it, failed when the cut failed. */
+export function planCuts(view: PlannerView | undefined, keyOf: CompilationKey = ownKey): PlanCut[] {
+  if (!view) return []
+  const cuts: PlanCut[] = []
+  for (const goal of view.episodes ?? []) {
+    const [season, episode] = goal.slot
+    const held = (view.assets ?? []).find((asset) => asset.name === goal.video.file)
+    if (goal.video.kind === "cut") {
+      const status = (view.failures ?? []).some((each) => each.kind === "cut" && sameRow(each.video, goal.video.row))
+        ? "failed" : view.running ? "aligning" : "planned"
+      cuts.push({ season, episode, part: partOf(goal.slot) ?? 0,
+                  cut_key: goal.video.cut_of ? keyOf(goal.video.cut_of) : ownKey(goal.video.row), status })
+    } else if (held?.video.cut_of) {
+      cuts.push({ season, episode, part: partOf(goal.slot) ?? 0, cut_key: keyOf(held.video.cut_of), status: "done" })
+    }
+  }
+  return cuts
+}
+
+/** The file of an episode and its track of a voice-over, as the command «Удалить» names them. */
+export function fileOf(view: PlannerView | undefined, season: number, episode: number, part: number | null): string | null {
+  const goal = (view?.episodes ?? []).find((each) => each.slot[0] === season && each.slot[1] === episode
+    && partOf(each.slot) === (part ?? null))
+  return goal?.video.file ?? null
+}
+
+export function trackOf(view: PlannerView | undefined, name: string, voice: string): PlanRowRef | null {
+  const asset = (view?.assets ?? []).find((each) => each.name === name)
+  return asset?.tracks?.find((track) => track.group === voice || track.label === voice)?.row ?? null
+}

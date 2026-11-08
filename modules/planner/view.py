@@ -30,7 +30,9 @@ def view_of(series_id: int, sync: SeriesSync, made: Plan | None, *, running: boo
             episodes.append({
                 "slot": list(goal.slot), "name": goal.name, "off": goal.off,
                 "video": {"kind": goal.video.kind, **asdict(goal.video.snapshot), "row": _row(goal.video.timeline),
-                          "file": goal.video.container.name if goal.video.container is not None else None},
+                          "file": goal.video.container.name if goal.video.container is not None else None,
+                          "cut_of": _row(goal.video.row.id if goal.video.kind == "cut" else
+                                         goal.video.container.video.cut_of if goal.video.container is not None else None)},
                 "tracks": [{"voice": way.voice, "kind": way.kind, "row": _row(way.dub), **asdict(way.snapshot),
                             "own": way.own} for way in goal.tracks]})
     failures = [{"kind": key[0], "row": _row(key[1]), "video": _row(key[2]) if len(key) > 2 else None}

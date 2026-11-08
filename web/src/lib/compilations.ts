@@ -1,3 +1,4 @@
+import type { PlanCut } from "./plan"
 import type { components } from "../api/schema"
 import type { CutOf } from "../composables/outputCalls"
 import type { EpisodeStatus, EpisodeView } from "./output"
@@ -7,7 +8,7 @@ type Schemas = components["schemas"]
 /** A compilation of a season and the episodes it covers, as `composition` gives it (stage 12). */
 export type CompilationView = Schemas["CompilationView"]
 /** A cut of an episode out of its compilation, as `voices` tells it. */
-export type CutItem = Schemas["CutItem"]
+export type CutItem = PlanCut
 
 /** How many colours compilations take before they come round again (tokens --compilation-1…16). */
 export const COMPILATION_COLORS = 16

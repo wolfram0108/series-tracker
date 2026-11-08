@@ -1,15 +1,15 @@
 import { watch } from "vue"
 import { useSSE } from "./useSSE"
 import { useSeriesStore, type Series, type SeriesDelta } from "../stores/series"
-import { useQueuesStore, type ConformPicture, type PackTask, type QueueTask } from "../stores/queues"
+import { useQueuesStore, type ConformPicture, type QueueTask } from "../stores/queues"
 import { useScannerStore, type ScannerStatus } from "../stores/scanner"
 import { useSourceTablesStore } from "../stores/sourceTables"
 import { useSeriesReadsStore } from "../stores/seriesReads"
 import { useCompositionStore } from "../stores/composition"
 import type { components } from "../api/schema"
 import { useConformStore, type ConformSettingsView } from "../stores/conform"
-import { useVoicesStore, type VoiceDubEvent, type VoiceDubsSnapshot, type VoiceSettingsView } from "../stores/voices"
-import { useCutsStore, type CutEvent, type CutsSnapshot } from "../stores/cuts"
+import { useVoicesStore, type VoiceSettingsView } from "../stores/voices"
+import { usePlanStore } from "../stores/plan"
 
 type Schemas = components["schemas"]
 
@@ -25,7 +25,7 @@ export function setupRealtime(): void {
   const reads = useSeriesReadsStore()
   const composition = useCompositionStore()
   const voices = useVoicesStore()
-  const cuts = useCutsStore()
+  const plan = usePlanStore()
   const conform = useConformStore()
 
   sse.on("series_updated", (d) => series.applyDelta(d as SeriesDelta))
@@ -37,11 +37,7 @@ export function setupRealtime(): void {
   sse.on("download_queue_update", (d) => queues.setDownloads(d as QueueTask[]))
   sse.on("slicing_queue_update", (d) => queues.setSlicing(d as QueueTask[]))
   sse.on("conform_queue_update", (d) => queues.setConform(d as ConformPicture))
-  sse.on("pack_queue_update", (d) => queues.setPack(d as PackTask[]))
-  sse.on("voice_dub_update", (d) => voices.apply(d as VoiceDubEvent))
-  sse.on("voice_dubs_snapshot", (d) => voices.snapshot(d as VoiceDubsSnapshot))
-  sse.on("voice_cut_update", (d) => cuts.apply(d as CutEvent))
-  sse.on("voice_cuts_snapshot", (d) => cuts.snapshot(d as CutsSnapshot))
+  sse.on("plan_update", (d) => plan.apply(d as Schemas["PlannerView"]))
   sse.on("voice_settings_update", (d) => voices.applySettings(d as VoiceSettingsView))
   sse.on("conform_settings_update", (d) => conform.applySettings(d as ConformSettingsView))
 

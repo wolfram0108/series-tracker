@@ -3,7 +3,7 @@
 import { compareNames } from "./collate"
 import { placeOf } from "./sources"
 import type { components } from "../api/schema"
-import type { VoiceDub } from "../stores/voices"
+import type { DubState, VoiceDub } from "./plan"
 import type { MediaFile } from "../composables/outputCalls"
 
 type Schemas = components["schemas"]
@@ -405,7 +405,7 @@ export type TrackState = "done" | "down" | "align" | "wait" | "error" | "absent"
 const FILE_STATE: Record<string, TrackState> = {
   completed: "done", downloading: "down", processing: "down", publishing: "down", pending: "wait", error: "error",
 }
-const DUB_STATE: Record<Schemas["DubState"], TrackState> = {
+const DUB_STATE: Record<DubState, TrackState> = {
   done: "done", downloading: "down", download_queued: "down", align_queued: "align", running: "align", planned: "wait",
   error: "error", absent: "absent",
 }

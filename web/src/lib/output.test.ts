@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { components } from "../api/schema"
-import type { VoiceDub } from "../stores/voices"
+import type { VoiceDub } from "./plan"
 import {
   allOff, bySeason, episodeStatus, fileNamesOf, groupTarget, isDeviation, isOff, joinEpisodes, orderValue, outputLines,
   parseGroupTarget, parseVariantTarget, perRowOf, queueLevers, referenceOf, resetBody, setBody, sourceMarks, spansOf,
@@ -23,7 +23,8 @@ const lever = (name: string, target: string | null | undefined, value: unknown, 
 const settings = (season: number, episode: number, levers: Lever[] = []): Schemas["EpisodeSettings"] =>
   ({ season, episode, levers })
 const dub = (season: number, episode: number, state: VoiceDub["state"] = "done"): VoiceDub => ({
-  season, episode, part: null, voice_key: "ruchime", voice_label: "Ruchime", status: "placed", state, hint: null, detail: null,
+  season, episode, part: null, voice_key: "ruchime", voice_label: "Ruchime", state, source_id: null, player: null,
+  online: null, detail: null,
 })
 const episodeOf = (over: Partial<EpisodeView> = {}): EpisodeView => ({
   season: 1, episode: 1, references: [], rows: [], levers: [], dubs: [], files: [], labels: {}, ...over,

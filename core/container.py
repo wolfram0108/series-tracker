@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Sequence
 
 from .ffprobe import film_stream, streams_of
-from .proc import run_capture
+from .proc import LOST, run_capture
 
 LANGUAGE = "rus"
 
@@ -135,7 +135,8 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     finally:
         if attached is not None and os.path.exists(attached):
             os.remove(attached)
-    if code != 0:
+    # An end whose status was lost tells nothing: the container that was written is what is judged.
+    if code not in (0, LOST):
         return f"ffmpeg_failed: {err.decode(errors='replace').strip()[-300:]}"
     made = await contents(output)
     expected = await contents(video)
@@ -195,7 +196,7 @@ async def contents(path: str, *, timeout: float = READ_TIMEOUT_S) -> Contents | 
     cmd = [executable, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path]
     try:
         code, out, _ = await run_capture(cmd, timeout=timeout)
-        if code != 0:
+        if code not in (0, LOST):  # a lost status says nothing: the whole answer read to its end is judged
             return None
         info = json.loads(out.decode() or "{}")
     except (OSError, TimeoutError, ValueError):

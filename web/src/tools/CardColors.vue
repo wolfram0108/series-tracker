@@ -26,8 +26,8 @@ const episodes: EpisodeView[] = Array.from({ length: EPISODES }, (_, index) => {
       voice_group: group, height: 2160, reason: null }],
     files: [{ unique_id: rowKey, source_id: source, row_key: rowKey, status: "completed" }],
     dubs: TRACKS.filter((label) => label !== group).map((label) => ({
-      season: 1, episode, part: null, voice_key: label, voice_label: label, hint: null, detail: null, source_id: 3, player: "vk",
-      ...(label === "HORIZON" ? { status: "absent", state: "absent" } : { status: "packed", state: "done" }),
+      season: 1, episode, part: null, voice_key: label, voice_label: label, detail: null, source_id: 3, player: "vk",
+      online: true, state: label === "HORIZON" ? "absent" : "done",
     }) as EpisodeView["dubs"][number]),
   }
 })

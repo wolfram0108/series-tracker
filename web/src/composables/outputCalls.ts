@@ -14,11 +14,11 @@ export function fetchComposition(seriesId: number): Promise<Answer<Composition>>
   return call(() => api.GET("/api/series/{series_id}/composition", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
 }
 
-/** The file of a row of the plan as the downloads keep it: the status of the video of a reference is read from it. */
 /** What the video of a container is cut of (stage 12): the key of its compilation and the seconds taken from it and from
  *  the episode itself. */
 export interface CutOf { key: string; from_ref_s?: number | null; from_dub_s?: number | null }
 
+/** The video of an episode as a file of its plan: the status of the video of a reference is read from it. */
 export interface MediaFile {
   unique_id: string
   source_id: number | null
@@ -27,34 +27,6 @@ export interface MediaFile {
   /** The video of the container in place, and the one the next build puts in, when cut out of a compilation. */
   cut?: CutOf | null
   pending_cut?: CutOf | null
-}
-
-const cutOfStored = (value: unknown): CutOf | null => {
-  if (typeof value !== "string" || !value) return null
-  try {
-    const parsed = JSON.parse(value) as CutOf
-    return typeof parsed?.key === "string" ? parsed : null
-  } catch {
-    return null
-  }
-}
-
-/** The files of the plan of the series (the rows of its plan with their status). */
-export async function fetchMedia(seriesId: number): Promise<Answer<MediaFile[]>> {
-  const answer = await call<unknown>(
-    () => api.GET("/api/series/{series_id}/media-items", { params: { path: { series_id: seriesId } } } as never),
-    OUTPUT_WORDS,
-  )
-  if (!answer.ok) return answer
-  const items = Array.isArray(answer.data) ? (answer.data as Record<string, unknown>[]) : []
-  return {
-    ok: true,
-    data: items.map((item) => ({
-      unique_id: String(item.unique_id ?? ""), source_id: (item.source_id as number | null) ?? null,
-      row_key: (item.row_key as string | null) ?? null, status: String(item.status ?? ""),
-      cut: cutOfStored(item.cut), pending_cut: cutOfStored(item.pending_cut),
-    })),
-  }
 }
 
 /** The reference of every episode of the series, each with the mark that says why it is that one. */
@@ -125,35 +97,21 @@ export function fetchQueues(seriesId: number, season: number | null, episode: nu
   }), OUTPUT_WORDS)
 }
 
-/** The retry of a track: the voice-overs of the scope that failed start over and go to download now. */
-export function retryDubs(seriesId: number, body: Schemas["DubsActionBody"]): Promise<Answer<unknown>> {
-  return call(() => api.POST("/api/series/{series_id}/output/dubs/retry", {
+/** The plan of a video series: the asset, the goal of every episode, the failures and the commands that wait. */
+export function fetchPlan(seriesId: number): Promise<Answer<Schemas["PlannerView"]>> {
+  return call(() => api.GET("/api/series/{series_id}/plan", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
+}
+
+/** «Удалить» of a file or of a track in it: the next sync carries it out (a video goes only for another video). */
+export function deleteFromPlan(seriesId: number, body: Schemas["PlanDeleteBody"]): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/series/{series_id}/plan/delete", {
     params: { path: { series_id: seriesId } }, body,
   }), OUTPUT_WORDS)
 }
 
-/** The redo of a track: the voice-overs of the scope whose track is placed are made anew now. */
-export function redoDubs(seriesId: number, body: Schemas["DubsActionBody"]): Promise<Answer<unknown>> {
-  return call(() => api.POST("/api/series/{series_id}/output/dubs/redo", {
-    params: { path: { series_id: seriesId } }, body,
-  }), OUTPUT_WORDS)
-}
-
-/** The cuts of the episodes of the series out of their compilations (stage 12). */
-export function fetchCuts(seriesId: number): Promise<Answer<Schemas["CutsReply"]>> {
-  return call(() => api.GET("/api/series/{series_id}/output/cuts", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
-}
-
-/** The retry of a cut: the episodes of the scope whose cut failed are cut again now. */
-export function retryCuts(seriesId: number, body: Schemas["CutsActionBody"]): Promise<Answer<unknown>> {
-  return call(() => api.POST("/api/series/{series_id}/output/cuts/retry", {
-    params: { path: { series_id: seriesId } }, body,
-  }), OUTPUT_WORDS)
-}
-
-/** The refetch of a reference: the reference video of the episode is downloaded again now. */
-export function refetchReference(seriesId: number, body: Schemas["RefetchBody"]): Promise<Answer<unknown>> {
-  return call(() => api.POST("/api/series/{series_id}/output/reference/refetch", {
+/** The command «Удалить» that waits is taken back. */
+export function cancelDelete(seriesId: number, body: Schemas["PlanDeleteBody"]): Promise<Answer<unknown>> {
+  return call(() => api.POST("/api/series/{series_id}/plan/delete/cancel", {
     params: { path: { series_id: seriesId } }, body,
   }), OUTPUT_WORDS)
 }

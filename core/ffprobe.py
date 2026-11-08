@@ -9,7 +9,7 @@ import shutil
 import statistics
 from dataclasses import dataclass
 
-from .proc import run_capture
+from .proc import LOST, run_capture
 
 DEFAULT_TIMEOUT_S = 30.0
 # A pause is a hole only when it is also long against the pace of the video: a video of a frame in two seconds has no hole.
@@ -54,7 +54,10 @@ async def streams_of(target: str, *, input_args: list[str] | None = None,
     try:
         code, out, _ = await run_capture([executable, "-v", "error", *(input_args or []), "-show_entries", STREAM_ENTRIES,
                                           "-of", "json", target], timeout=timeout)
-        return json.loads(out.decode() or "{}").get("streams") or [] if code == 0 else None
+        # A lost status says nothing: the whole answer read to its end is judged (an empty one is no answer).
+        if code == LOST and not out.strip():
+            return None
+        return json.loads(out.decode() or "{}").get("streams") or [] if code in (0, LOST) else None
     except (OSError, TimeoutError, ValueError):
         return None
 

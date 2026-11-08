@@ -378,3 +378,21 @@ async def test_the_cap_reaches_both_phases_of_the_page_download(tmp_path, monkey
     monkeypatch.setattr(ytdlp, "_probe_duration", length)
     await ytdlp.download("https://vk.com/video-1_2", str(tmp_path / "v.mp4"), noop, max_height=720)
     assert asked == [ytdlp.capped(ytdlp.HLS_FORMAT, 720), ytdlp.capped(ytdlp.DASH_FALLBACK_FORMAT, 720)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("local, whole", [(1200, True), (300, False)])
+async def test_a_download_whose_exit_status_was_lost_is_judged_by_its_file(fake, tmp_path, monkeypatch, local, whole):
+    """The loop may not report the status of a program that ended (core/proc.LOST): the status says nothing, and the
+    downloaded file, by its length, decides — a whole one is a download, a short one is not."""
+    _, set_durations = fake
+    set_durations(1200, local)
+
+    async def lost(proc):
+        await proc.wait()
+        return ytdlp.LOST
+    monkeypatch.setattr(ytdlp, "exited", lost)
+    target = str(tmp_path / "e.mp4")
+    ok, error = await ytdlp._download_direct_ffmpeg("https://cdn.test/v.m3u8", {"Referer": "x"}, target, noop)
+    assert ok is whole and os.path.exists(target) is whole
+    assert whole or "обрыв" in error

@@ -6,19 +6,15 @@ import {
 } from "../lib/output"
 import { reasonText } from "../lib/reason"
 import { useCompositionStore, type ReferencePacket } from "../stores/composition"
-import { useQueuesStore } from "../stores/queues"
 import { useSeriesStore } from "../stores/series"
-import { useVoicesStore } from "../stores/voices"
-import { useCutsStore } from "../stores/cuts"
+import { usePlanStore } from "../stores/plan"
+import { fileOf, planCuts, planDubs, planFiles, trackOf, type CompilationKey } from "../lib/plan"
 import {
-  fetchComposition, fetchCuts, fetchMedia, fetchOutput, fetchQueues, fetchRenames, redoDubs, refetchReference, resetFailures,
-  resetLever, retryCuts, retryDubs, setLever, setVoiceOrder, switchOutput, syncSeries, type Composition, type MediaFile,
+  deleteFromPlan, fetchComposition, fetchOutput, fetchPlan, fetchQueues, fetchRenames, resetFailures,
+  resetLever, setLever, setVoiceOrder, switchOutput, syncSeries, type Composition, type MediaFile,
   type Queues, type RenameRow,
 } from "./outputCalls"
-import type { components } from "../api/schema"
 import type { Answer } from "./sourceCalls"
-
-type Schemas = components["schemas"]
 import { useSSE } from "./useSSE"
 
 // A reference is one entry per (season, episode, part); a packet replaces the entry of its own key.
@@ -41,14 +37,21 @@ function mergePackets(current: Reference[], packets: ReferencePacket[]): Referen
  */
 export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const store = useCompositionStore()
-  const voices = useVoicesStore()
-  const queues = useQueuesStore()
+  const plan = usePlanStore()
   const seriesStore = useSeriesStore()
-  const cutsStore = useCutsStore()
   const composition = ref<Composition | null>(null)
   const references = ref<Reference[]>([])
-  // The files of the plan: the status of the video of a reference is read from them.
-  const files = ref<MediaFile[]>([])
+  // The files of the plan: the status of the video of a reference is read from them; the plan comes with every push.
+  const files = computed<MediaFile[]>(() => planFiles(plan.forSeries(seriesId), compilationKey.value))
+  // The compilations of the layout by their row: the plan names a compilation by its row, the window by its key.
+  const compilationKey = computed<CompilationKey>(() => {
+    const keys = new Map((composition.value?.compilations ?? []).map((each) =>
+      [`${each.ref.source_id}:${each.ref.row_key}`, each.ref.key] as const))
+    return (row) => keys.get(`${row.source_id}:${row.row_key}`) ?? JSON.stringify(row)
+  })
+  // The order of the voice-overs of every season: a voice-over of it the plan cannot get for an episode is absent there.
+  const seasonVoices = computed<Record<number, string[]>>(() => Object.fromEntries(
+    (composition.value?.voice_orders ?? []).map((each) => [each.season, (each.voices ?? []).map((voice) => voice.label)] as const)))
   // A video series has not been read yet when it is shown first: the window must not say "nothing here" for that moment.
   const loading = ref(kind === "video")
   const failure = ref<string | null>(null)
@@ -68,7 +71,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     composition.value?.rows ?? [],
     references.value,
     composition.value?.settings ?? [],
-    voices.forSeries(seriesId),
+    planDubs(plan.forSeries(seriesId), seasonVoices.value),
     composition.value?.availability ?? {},
     files.value,
     labels.value,
@@ -93,26 +96,17 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     const ask = ++asked
     loading.value = true
     packetDuringRead = false
-    const [layout, output, cutList] = await Promise.all([fetchComposition(seriesId), fetchOutput(seriesId), fetchCuts(seriesId)])
+    const [layout, output, planned] = await Promise.all([fetchComposition(seriesId), fetchOutput(seriesId), fetchPlan(seriesId)])
     if (ask !== asked) return
     loading.value = false
     if (layout.ok) composition.value = layout.data
     if (output.ok) references.value = output.data
-    if (cutList.ok) readCuts.value = cutList.data.items ?? []
-    void loadFiles()
+    if (planned.ok) plan.apply(planned.data)
     Object.values(store.references[seriesId] ?? {}).forEach((packet) => merged.add(packet))
     const broken = [layout, output].find((answer) => !answer.ok)
     failure.value = broken && !broken.ok ? broken.text : null
     if (packetDuringRead) void load()
     void loadNames()
-  }
-
-  // The files change with the downloads, not with the layout: they are read on their own, the newest ask writing.
-  let filesAsked = 0
-  async function loadFiles(): Promise<void> {
-    const ask = ++filesAsked
-    const answer = await fetchMedia(seriesId)
-    if (ask === filesAsked && answer.ok) files.value = answer.data
   }
 
   let namesAsked = 0
@@ -187,18 +181,14 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   // Stage 12: the compilations of every season, the cuts of the episodes (read once, then the pushes of the core), the
   // compilation an episode stands in (the user's word, or "" for none) and the switch of a whole compilation.
   const compilations = computed(() => composition.value?.compilations ?? [])
-  const readCuts = ref<Schemas["CutItem"][]>([])
-  const cuts = computed(() => {
-    const pushed = cutsStore.forSeries(seriesId)
-    const known = new Set(pushed.map((cut) => `${cut.season}:${cut.episode}:${cut.part ?? 0}`))
-    return [...pushed, ...readCuts.value.filter((cut) => !known.has(`${cut.season}:${cut.episode}:${cut.part ?? 0}`))]
-  })
+  const cuts = computed(() => planCuts(plan.forSeries(seriesId), compilationKey.value))
   const member = (season: number, episode: number, key: string): Promise<string | null> =>
     set({ season, episode }, "compilation.member", null, key)
   const takeCompilation = (season: number, key: string, taken: boolean): Promise<string | null> =>
     taken ? reset({ season, compilation: key }, "compilation.take", null) : set({ season, compilation: key }, "compilation.take", null, false)
-  const retryCut = (season: number, episode: number | null): Promise<string | null> =>
-    act(() => retryCuts(seriesId, { season, ...(episode === null ? {} : { episode }) }), busy)
+  // A cut that failed is tried again once the failures of the series are reset (the plan passes over a failure until then).
+  const retryCut = (_season: number, _episode: number | null): Promise<string | null> =>
+    act(() => resetFailures(seriesId), busy)
 
   // A queue of a level takes the order the user dragged its rows into, leaves a variant out, or takes a voice-over at all.
   const leversOf = (queue: QueueName) => queueLevers(composition.value?.levers ?? [], queue)
@@ -224,12 +214,21 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   }
 
   // The actions on tracks: each is the one command it names, and what it changes comes as events.
-  const retry = (season: number, episode: number | null, voiceLabel: string | null): Promise<string | null> =>
-    act(() => retryDubs(seriesId, { season, episode, voice_label: voiceLabel }), busy)
-  const redo = (season: number, episode: number | null, voiceLabel: string | null): Promise<string | null> =>
-    act(() => redoDubs(seriesId, { season, episode, voice_label: voiceLabel }), busy)
-  const refetch = (season: number, episode: number, part: number | null): Promise<string | null> =>
-    act(() => refetchReference(seriesId, { season, episode, part }), busy)
+  // A failed voice-over is tried again once the failures are reset; «Удалить» of a track or of the video takes it out of
+  // the file at the next sync, and a row a source still gives is downloaded again.
+  const retry = (_season: number, _episode: number | null, _voiceLabel: string | null): Promise<string | null> =>
+    act(() => resetFailures(seriesId), busy)
+  const redo = async (season: number, episode: number | null, voiceLabel: string | null): Promise<string | null> => {
+    const view = plan.forSeries(seriesId)
+    const name = episode === null ? null : fileOf(view, season, episode, null)
+    const dub = name && voiceLabel ? trackOf(view, name, voiceLabel) : null
+    if (!name || !dub) return null
+    return act(() => deleteFromPlan(seriesId, { kind: "track", name, dub }), busy)
+  }
+  const refetch = async (season: number, episode: number, part: number | null): Promise<string | null> => {
+    const name = fileOf(plan.forSeries(seriesId), season, episode, part)
+    return name ? act(() => deleteFromPlan(seriesId, { kind: "video", name }), busy) : null
+  }
 
   if (kind === "video") {
     onMounted(() => void load())
@@ -246,9 +245,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
       fresh.forEach((packet) => merged.add(packet))
       references.value = mergePackets(references.value, fresh)
     }, { deep: true })
-    // A download began or ended, or the number of downloaded episodes changed: the status of the videos is read again.
-    // The progress of a download does not change the length of the queue, so it does not ask.
-    watch(() => [queues.downloads.length, seriesStore.byId(seriesId)?.downloaded_episodes_count], () => void loadFiles())
     // A connection that came back may have missed events: the output is read again.
     watch(useSSE().connected, (up) => {
       if (up) void load()

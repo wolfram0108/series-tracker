@@ -54,6 +54,8 @@ class PlanGoalVideo(PlanSnapshot):
     kind: Literal["asset", "download", "cut"]
     row: PlanRowRef
     file: str | None = None
+    # The compilation the video is cut out of (a cut, or a file that holds a cut video).
+    cut_of: PlanRowRef | None = None
 
 
 class PlanGoalTrack(PlanSnapshot):

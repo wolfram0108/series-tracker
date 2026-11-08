@@ -183,27 +183,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/series/{series_id}/voices": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Series Voices
-         * @description The voice-overs of a series by episode, each with its state; later changes come as the
-         *     voice_dub_update event.
-         */
-        get: operations["series_voices_api_series__series_id__voices_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/series/{series_id}": {
         parameters: {
             query?: never;
@@ -551,48 +530,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/series/{series_id}/output/dubs/retry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Retry Dubs
-         * @description The retry of the window: the voice-overs of the scope that failed or were rejected start over and go to download now.
-         */
-        post: operations["retry_dubs_api_series__series_id__output_dubs_retry_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/series/{series_id}/output/dubs/redo": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Redo Dubs
-         * @description The redo of the window: the voice-overs of the scope whose track is placed are made anew, now; the container of the
-         *     episode takes the new tracks at the next sync.
-         */
-        post: operations["redo_dubs_api_series__series_id__output_dubs_redo_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/series/{series_id}/output/cuts": {
+    "/api/series/{series_id}/plan": {
         parameters: {
             query?: never;
             header?: never;
@@ -600,10 +538,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Output Cuts
-         * @description The cuts of the episodes of the series out of their compilations (stage 12) and where each is.
+         * Plan
+         * @description The plan of a video series (modules/planner): the asset with the provenance of every file and whether its row is
+         *     online, the goal of every episode as the last sync counted it, the failures and the commands «Удалить» that wait.
          */
-        get: operations["output_cuts_api_series__series_id__output_cuts_get"];
+        get: operations["plan_api_series__series_id__plan_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -612,7 +551,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/series/{series_id}/output/cuts/retry": {
+    "/api/series/{series_id}/plan/delete": {
         parameters: {
             query?: never;
             header?: never;
@@ -622,17 +561,18 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Retry Cuts
-         * @description The retry of the window: the episodes of the scope whose cut failed are cut again, now.
+         * Plan Delete
+         * @description «Удалить» of a file or of a track in it: carried out by the next sync. A video goes only for another video of its
+         *     episode; with none the file stays and the command waits.
          */
-        post: operations["retry_cuts_api_series__series_id__output_cuts_retry_post"];
+        post: operations["plan_delete_api_series__series_id__plan_delete_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/series/{series_id}/output/reference/refetch": {
+    "/api/series/{series_id}/plan/delete/cancel": {
         parameters: {
             query?: never;
             header?: never;
@@ -642,11 +582,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Refetch Reference
-         * @description The refetch of the window: the reference video of the episode is downloaded again now; its file is replaced when the new
-         *     one is whole, and the voice-overs of the episode are aligned to it again.
+         * Plan Delete Cancel
+         * @description The command «Удалить» that waits is taken back.
          */
-        post: operations["refetch_reference_api_series__series_id__output_reference_refetch_post"];
+        post: operations["plan_delete_cancel_api_series__series_id__plan_delete_cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2044,130 +1983,6 @@ export interface components {
             [key: string]: unknown;
         };
         /**
-         * CutItem
-         * @description A cut of an episode out of its compilation (stage 12), as voices tells it.
-         */
-        CutItem: {
-            /** Series Id */
-            series_id: number;
-            /** Season */
-            season: number;
-            /** Episode */
-            episode: number;
-            /**
-             * Part
-             * @default 0
-             */
-            part: number;
-            /** Cut Key */
-            cut_key: string;
-            /** Status */
-            status: string;
-            /** From Ref S */
-            from_ref_s?: number | null;
-            /** From Dub S */
-            from_dub_s?: number | null;
-            /** Detail */
-            detail?: {
-                [key: string]: unknown;
-            } | null;
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * CutsActionBody
-         * @description The cuts out of compilations an action of the user is about, without the series: a season, an episode of it.
-         */
-        CutsActionBody: {
-            /** Season */
-            season: number;
-            /** Episode */
-            episode?: number | null;
-            /** Part */
-            part?: number | null;
-        };
-        /** CutsReply */
-        CutsReply: {
-            /**
-             * Items
-             * @default []
-             */
-            items: components["schemas"]["CutItem"][];
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * DubHint
-         * @description Which sentence explains a state when there is no reason to show (several steps share a state).
-         * @enum {string}
-         */
-        DubHint: "planned" | "download_queued" | "downloading" | "ready" | "awaiting_answer" | "aligning_wait" | "aligning_run" | "aligned" | "done" | "packed" | "absent";
-        /**
-         * DubItem
-         * @description `part` is None for an episode without parts: a voice-over belongs to one part of an episode.
-         */
-        DubItem: {
-            /** Season */
-            season: number;
-            /** Episode */
-            episode: number;
-            /** Part */
-            part?: number | null;
-            /** Voice Key */
-            voice_key: string;
-            /** Voice Label */
-            voice_label: string;
-            status: components["schemas"]["DubStatus"];
-            state: components["schemas"]["DubState"];
-            hint: components["schemas"]["DubHint"] | null;
-            detail: components["schemas"]["Reason"] | null;
-            /** Source Id */
-            source_id?: number | null;
-            /** Player */
-            player?: string | null;
-        };
-        /**
-         * DubState
-         * @description What the user sees of a voice-over.
-         * @enum {string}
-         */
-        DubState: "planned" | "download_queued" | "downloading" | "align_queued" | "running" | "done" | "error" | "absent";
-        /**
-         * DubStatus
-         * @description The step a voice-over of an episode is at; the row in the database holds exactly one of these.
-         * @enum {string}
-         */
-        DubStatus: "pending" | "downloading" | "ready" | "aligning" | "aligned" | "placed" | "rejected" | "failed" | "absent";
-        /**
-         * DubsActionBody
-         * @description The voice-overs an action of the user is about, without the series: a season, an episode of it (and a part), a group.
-         */
-        DubsActionBody: {
-            /** Season */
-            season: number;
-            /** Episode */
-            episode?: number | null;
-            /** Part */
-            part?: number | null;
-            /** Voice Label */
-            voice_label?: string | null;
-        };
-        /**
-         * DubsRestarted
-         * @description How many voice-overs of the scope were started over and admitted to download now.
-         */
-        DubsRestarted: {
-            /** Success */
-            success: boolean;
-            /**
-             * Restarted
-             * @default 0
-             */
-            restarted: number;
-        } & {
-            [key: string]: unknown;
-        };
-        /**
          * DynamicObject
          * @description Динамический ответ (форма зависит от данных/типа серии): главы,
          *     композиция, медиа-элементы, превью. extra='allow' пропускает всё —
@@ -2423,6 +2238,292 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * PlanAsset
+         * @description A file of the library: one video and the tracks aligned to it; `off` is hidden from the media server (`.off`).
+         */
+        PlanAsset: {
+            /** Name */
+            name: string;
+            /**
+             * Off
+             * @default false
+             */
+            off: boolean;
+            /** Episode */
+            episode: number[];
+            video: components["schemas"]["PlanAssetVideo"];
+            /** Tracks */
+            tracks?: components["schemas"]["PlanAssetTrack"][];
+        };
+        /** PlanAssetTrack */
+        PlanAssetTrack: {
+            /**
+             * Source
+             * @default
+             */
+            source: string;
+            /**
+             * Player
+             * @default
+             */
+            player: string;
+            /**
+             * Group
+             * @default null
+             */
+            group: string | null;
+            /**
+             * Height
+             * @default 0
+             */
+            height: number;
+            /**
+             * Link
+             * @default
+             */
+            link: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            row: components["schemas"]["PlanRowRef"];
+            /**
+             * Online
+             * @default null
+             */
+            online: boolean | null;
+        };
+        /** PlanAssetVideo */
+        PlanAssetVideo: {
+            /**
+             * Source
+             * @default
+             */
+            source: string;
+            /**
+             * Player
+             * @default
+             */
+            player: string;
+            /**
+             * Group
+             * @default null
+             */
+            group: string | null;
+            /**
+             * Height
+             * @default 0
+             */
+            height: number;
+            /**
+             * Link
+             * @default
+             */
+            link: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            row: components["schemas"]["PlanRowRef"];
+            /** @default null */
+            cut_of: components["schemas"]["PlanRowRef"] | null;
+            /**
+             * Online
+             * @default null
+             */
+            online: boolean | null;
+        };
+        /**
+         * PlanCommand
+         * @description A command «Удалить» that waits for the next sync: of a file (`video`) or of a track in it (`track`, `dub`).
+         */
+        PlanCommand: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "video" | "track";
+            /** Name */
+            name: string;
+            /** @default null */
+            dub: components["schemas"]["PlanRowRef"] | null;
+        };
+        /** PlanDeleteBody */
+        PlanDeleteBody: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "video" | "track";
+            /** Name */
+            name: string;
+            dub?: components["schemas"]["PlanRowRef"] | null;
+        };
+        /** PlanEpisode */
+        PlanEpisode: {
+            /** Slot */
+            slot: number[];
+            /** Name */
+            name: string;
+            /**
+             * Off
+             * @default false
+             */
+            off: boolean;
+            video: components["schemas"]["PlanGoalVideo"];
+            /** Tracks */
+            tracks?: components["schemas"]["PlanGoalTrack"][];
+        };
+        /**
+         * PlanFailure
+         * @description An attempt that failed: a download of a row, an alignment of a voice-over to a video, a cut of an episode out of a
+         *     compilation by its single video. The plan passes over it until the user resets the failures.
+         */
+        PlanFailure: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "download" | "align" | "cut";
+            row: components["schemas"]["PlanRowRef"];
+            /** @default null */
+            video: components["schemas"]["PlanRowRef"] | null;
+        };
+        /**
+         * PlanGoalTrack
+         * @description How a voice-over of an episode is obtained: `reuse` (the file holds it aligned), `download`, `realign` (out of the
+         *     file it lies in, aligned to the new video). `own` is the own sound of a video the episode no longer has.
+         */
+        PlanGoalTrack: {
+            /**
+             * Source
+             * @default
+             */
+            source: string;
+            /**
+             * Player
+             * @default
+             */
+            player: string;
+            /**
+             * Group
+             * @default null
+             */
+            group: string | null;
+            /**
+             * Height
+             * @default 0
+             */
+            height: number;
+            /**
+             * Link
+             * @default
+             */
+            link: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /** Voice */
+            voice: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "reuse" | "download" | "realign";
+            row: components["schemas"]["PlanRowRef"];
+            /**
+             * Own
+             * @default false
+             */
+            own: boolean;
+        };
+        /**
+         * PlanGoalVideo
+         * @description How the video of an episode is obtained: `asset` (the file holds it), `download`, `cut` (out of a compilation).
+         */
+        PlanGoalVideo: {
+            /**
+             * Source
+             * @default
+             */
+            source: string;
+            /**
+             * Player
+             * @default
+             */
+            player: string;
+            /**
+             * Group
+             * @default null
+             */
+            group: string | null;
+            /**
+             * Height
+             * @default 0
+             */
+            height: number;
+            /**
+             * Link
+             * @default
+             */
+            link: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "asset" | "download" | "cut";
+            row: components["schemas"]["PlanRowRef"];
+            /**
+             * File
+             * @default null
+             */
+            file: string | null;
+            /** @default null */
+            cut_of: components["schemas"]["PlanRowRef"] | null;
+        };
+        /**
+         * PlanRowRef
+         * @description A row of a source table: the source, the key of the row and the video behind it as its host numbers it.
+         */
+        PlanRowRef: {
+            /** Source Id */
+            source_id: number;
+            /** Row Key */
+            row_key: string;
+            /**
+             * Video
+             * @default
+             */
+            video: string;
+        };
+        /** PlannerView */
+        PlannerView: {
+            /** Series Id */
+            series_id: number;
+            /**
+             * Running
+             * @default false
+             */
+            running: boolean;
+            /** Assets */
+            assets?: components["schemas"]["PlanAsset"][];
+            /** Episodes */
+            episodes?: components["schemas"]["PlanEpisode"][];
+            /** Failures */
+            failures?: components["schemas"]["PlanFailure"][];
+            /** Commands */
+            commands?: components["schemas"]["PlanCommand"][];
+        };
+        /**
          * PlayerSummary
          * @description What a window may show of a player before any rule has read its rows: how many rows it has and how a catalog
          *     splits them. Episodes, voice-overs and resolutions of a player are the constructor's answer: the rows of the layout.
@@ -2581,33 +2682,6 @@ export interface components {
          * @enum {string}
          */
         ReferenceMark: "by_level" | "own" | "other_player" | "none" | "unfit" | "off";
-        /**
-         * RefetchBody
-         * @description The episode whose reference video is downloaded again, without the series.
-         */
-        RefetchBody: {
-            /** Season */
-            season: number;
-            /** Episode */
-            episode: number;
-            /** Part */
-            part?: number | null;
-        };
-        /**
-         * RefetchQueued
-         * @description Whether a download that replaces the file went to the queue (false: one is in the queue already).
-         */
-        RefetchQueued: {
-            /** Success */
-            success: boolean;
-            /**
-             * Queued
-             * @default false
-             */
-            queued: boolean;
-        } & {
-            [key: string]: unknown;
-        };
         /**
          * RowState
          * @description `not_obtained` is not `absent`: the answer stayed unsure to the end, the player may still have the video.
@@ -3020,16 +3094,6 @@ export interface components {
          */
         ValueShape: "flag" | "variant_order" | "compilation";
         /**
-         * VoiceDubs
-         * @description The voice-overs of a series; the shape of a record is the contract model core.contracts.DubItem.
-         */
-        VoiceDubs: {
-            /** Items */
-            items: components["schemas"]["DubItem"][];
-        } & {
-            [key: string]: unknown;
-        };
-        /**
          * VoiceOrderBody
          * @description The body of the command `composition.voice_order.set` without the series: a season and its voice-overs in order.
          */
@@ -3093,112 +3157,6 @@ export interface components {
             label: string;
             /** Episodes */
             episodes: string;
-        };
-        /**
-         * DubEventStatus
-         * @description The status an event carries: a step, or a change that is not a step of its own.
-         * @enum {string}
-         */
-        DubEventStatus: "pending" | "downloading" | "ready" | "aligning" | "aligned" | "placed" | "rejected" | "failed" | "absent" | "moved" | "stale" | "removed";
-        /**
-         * DubEvent
-         * @description One voice-over, whole, so the interface asks nothing back; the newest (`epoch`, `rev`) wins.
-         */
-        DubEvent: {
-            /** Series Id */
-            series_id: number;
-            /** Season */
-            season: number;
-            /** Episode */
-            episode: number;
-            /**
-             * Part
-             * @default null
-             */
-            part: number | null;
-            /** Voice Key */
-            voice_key: string;
-            /** Voice Label */
-            voice_label: string;
-            status: components["schemas"]["DubEventStatus"];
-            state: components["schemas"]["DubState"];
-            hint: components["schemas"]["DubHint"] | null;
-            detail: components["schemas"]["Reason"] | null;
-            /** Epoch */
-            epoch: number;
-            /** Rev */
-            rev: number;
-            /**
-             * Job Id
-             * @default null
-             */
-            job_id: string | null;
-            /**
-             * File
-             * @default null
-             */
-            file: string | null;
-            /**
-             * Source Id
-             * @default null
-             */
-            source_id: number | null;
-            /**
-             * Player
-             * @default null
-             */
-            player: string | null;
-        };
-        /** SnapshotItem */
-        SnapshotItem: {
-            /** Season */
-            season: number;
-            /** Episode */
-            episode: number;
-            /**
-             * Part
-             * @default null
-             */
-            part: number | null;
-            /** Voice Key */
-            voice_key: string;
-            /** Voice Label */
-            voice_label: string;
-            status: components["schemas"]["DubStatus"];
-            state: components["schemas"]["DubState"];
-            hint: components["schemas"]["DubHint"] | null;
-            detail: components["schemas"]["Reason"] | null;
-            /**
-             * Source Id
-             * @default null
-             */
-            source_id: number | null;
-            /**
-             * Player
-             * @default null
-             */
-            player: string | null;
-            /** Series Id */
-            series_id: number;
-            /**
-             * Job Id
-             * @default null
-             */
-            job_id: string | null;
-            /**
-             * File
-             * @default null
-             */
-            file: string | null;
-        };
-        /** DubsSnapshot */
-        DubsSnapshot: {
-            /** Epoch */
-            epoch: number;
-            /** Rev */
-            rev: number;
-            /** Items */
-            items: components["schemas"]["SnapshotItem"][];
         };
         /**
          * TableProgress
@@ -3372,7 +3330,7 @@ export interface components {
         /** StreamEvent */
         StreamEvent: {
             /** @enum {string} */
-            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "pack_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "reference_changed" | "series_scan_progress" | "conform_queue_update" | "voice_dub_update" | "voice_dubs_snapshot" | "voice_cut_update" | "voice_cuts_snapshot" | "voice_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
+            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "reference_changed" | "series_scan_progress" | "conform_queue_update" | "plan_update" | "voice_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
             data: unknown;
         };
     };
@@ -3640,37 +3598,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QueueTask"][];
-                };
-            };
-        };
-    };
-    series_voices_api_series__series_id__voices_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                series_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VoiceDubs"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4936,149 +4863,7 @@ export interface operations {
             };
         };
     };
-    retry_dubs_api_series__series_id__output_dubs_retry_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                series_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DubsActionBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DubsRestarted"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    redo_dubs_api_series__series_id__output_dubs_redo_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                series_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DubsActionBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DubsRestarted"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    output_cuts_api_series__series_id__output_cuts_get: {
+    plan_api_series__series_id__plan_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -5095,7 +4880,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CutsReply"];
+                    "application/json": components["schemas"]["PlannerView"];
                 };
             };
             /** @description Not Found */
@@ -5127,7 +4912,7 @@ export interface operations {
             };
         };
     };
-    retry_cuts_api_series__series_id__output_cuts_retry_post: {
+    plan_delete_api_series__series_id__plan_delete_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -5138,7 +4923,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CutsActionBody"];
+                "application/json": components["schemas"]["PlanDeleteBody"];
             };
         };
         responses: {
@@ -5148,7 +4933,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DubsRestarted"];
+                    "application/json": components["schemas"]["OkResponse"];
                 };
             };
             /** @description Bad Request */
@@ -5198,7 +4983,7 @@ export interface operations {
             };
         };
     };
-    refetch_reference_api_series__series_id__output_reference_refetch_post: {
+    plan_delete_cancel_api_series__series_id__plan_delete_cancel_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -5209,7 +4994,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RefetchBody"];
+                "application/json": components["schemas"]["PlanDeleteBody"];
             };
         };
         responses: {
@@ -5219,7 +5004,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RefetchQueued"];
+                    "application/json": components["schemas"]["OkResponse"];
                 };
             };
             /** @description Bad Request */

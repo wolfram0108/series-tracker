@@ -13,6 +13,7 @@ import { useSeriesReadsStore } from "../../stores/seriesReads"
 import { badgeOf, cardStatus, cutOf, cutOverride, cutsBySlot, heldCut, takes, type CompilationView, type CutState } from "../../lib/compilations"
 import CompilationBlock from "./output/CompilationBlock.vue"
 import LevelSettings from "./output/LevelSettings.vue"
+import PlanPending from "./output/PlanPending.vue"
 import SeasonBlock from "./output/SeasonBlock.vue"
 import SourceMark from "./output/SourceMark.vue"
 
@@ -149,6 +150,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
       </div>
     </div>
 
+    <PlanPending :series-id="props.seriesId" />
     <p v-for="read in reading" :key="read.key" class="output-reading"><i class="pi pi-spin pi-spinner" /><span>{{ read.text }}</span></p>
     <p v-if="output.failure.value" class="output-failure" role="alert">{{ output.failure.value }}</p>
     <p v-if="output.layoutFailure.value" class="output-failure output-layout-failure" role="alert">{{ output.layoutFailure.value }}</p>

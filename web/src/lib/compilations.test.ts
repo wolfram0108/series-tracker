@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { badgeOf, cardStatus, letterOf, membersOf, outlinePieces, shareOf, takes, type CompilationView, type Geometry } from "./compilations"
+import type { PlanCut } from "./plan"
 
 const GEOMETRY: Geometry = { x0: 0, y0: 0, pitchX: 110, pitchY: 60, w: 100, h: 50, radius: 8, rows: 3, cols: 3 }
 
@@ -34,7 +35,7 @@ describe("compilations", () => {
   })
 
   it("colours a card by its cut and turns off an episode that is not in the compilation", () => {
-    const cut = { series_id: 1, season: 1, episode: 1, part: 0, cut_key: "k", status: "aligning" }
+    const cut: PlanCut = { season: 1, episode: 1, part: 0, cut_key: "k", status: "aligning" }
     expect(cardStatus(false, cut)).toBe("off")
     expect(cardStatus(true, cut)).toBe("align")
     expect(cardStatus(true, undefined)).toBe("wait")

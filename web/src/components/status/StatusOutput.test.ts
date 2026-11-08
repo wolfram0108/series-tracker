@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import StatusOutput from "./StatusOutput.vue"
+import type { components } from "../../api/schema"
 import { AVAILABILITY, SPECS } from "../../lib/output.fixtures"
 import * as calls from "../../composables/outputCalls"
 import type { Composition, Queues } from "../../composables/outputCalls"
@@ -11,9 +12,11 @@ import { useSSE } from "../../composables/useSSE"
 import { useCompositionStore } from "../../stores/composition"
 import { useSeriesStore } from "../../stores/series"
 import { useSeriesReadsStore } from "../../stores/seriesReads"
-import { useVoicesStore } from "../../stores/voices"
+import { usePlanStore } from "../../stores/plan"
 import { t } from "../../i18n"
 import type { Reference, Row } from "../../lib/output"
+import type { PlannerView } from "../../lib/plan"
+import { asset, assetTrack, goal, goalTrack, goalVideo, planView, rowRef } from "../../lib/plan.fixtures"
 
 vi.mock("../../composables/outputCalls")
 
@@ -63,6 +66,13 @@ const mountOutput = () => {
 }
 const cards = (w: VueWrapper) => w.findAll(".episode-card").map((each) => [each.attributes("data-season"), each.attributes("data-episode")])
 const button = (w: VueWrapper, text: string) => w.findAll("button").find((each) => each.text().includes(text))
+// The plan reaches the window by its read and by the store; a test gives both the same view before it mounts.
+const givePlan = (view: PlannerView): void => {
+  vi.mocked(calls.fetchPlan).mockResolvedValue(ok(view))
+  usePlanStore().apply(view)
+}
+// The file S01E01.mp4 holds the reference of episode 1 (source 7); the test gives the voice-overs it holds.
+const fileOfEpisodeOne = (tracks: components["schemas"]["PlanAssetTrack"][] = []) => asset("S01E01.mp4", rowRef(7, "r1-1"), tracks)
 
 // The settings window measures its tabs; the test has no layout, so the measuring is a stand-in that sees nothing.
 class NoLayout {
@@ -79,11 +89,10 @@ beforeEach(() => {
   vi.mocked(calls.fetchComposition).mockReset().mockResolvedValue(ok(composition()))
   vi.mocked(calls.fetchOutput).mockReset().mockResolvedValue(ok([
     reference(1, 1), reference(1, 2, { mark: "own" }), reference(2, 1)]))
-  vi.mocked(calls.fetchMedia).mockReset().mockResolvedValue(ok([]))
-  vi.mocked(calls.fetchCuts).mockReset().mockResolvedValue(ok({ items: [] }))
+  vi.mocked(calls.fetchPlan).mockReset().mockResolvedValue(ok(planView()))
   vi.mocked(calls.fetchQueues).mockReset().mockResolvedValue(ok(queues()))
-  for (const each of [calls.switchOutput, calls.syncSeries, calls.setLever, calls.resetLever, calls.retryDubs, calls.redoDubs,
-    calls.refetchReference]) vi.mocked(each).mockReset().mockResolvedValue(ok({ success: true }))
+  for (const each of [calls.switchOutput, calls.syncSeries, calls.setLever, calls.resetLever, calls.deleteFromPlan])
+    vi.mocked(each).mockReset().mockResolvedValue(ok({ success: true }))
   vi.mocked(calls.resetFailures).mockReset().mockResolvedValue(ok({ success: true, reset: 1 }))
   vi.mocked(calls.fetchRenames).mockReset().mockResolvedValue(ok({
     preview: [{ unique_id: "u2", season: 1, episode: 2, part: null, new_filename_preview: "Show s01e02.mp4" }] }))
@@ -146,20 +155,6 @@ describe("StatusOutput", () => {
     expect(w.findAll(".episode-card")).toHaveLength(3)
   })
 
-  it("counts as partial an episode done but for a voice-over no source has, and keeps it under its own filter", async () => {
-    useVoicesStore().snapshot({ items: [
-      { series_id: 1, season: 1, episode: 1, part: null, voice_key: "AniStar", voice_label: "AniStar", status: "absent",
-        state: "absent", hint: "absent", detail: null, source_id: null, player: null },
-    ], epoch: 1, rev: 1 } as never)
-    vi.mocked(calls.fetchMedia).mockResolvedValue(ok([{ unique_id: "u1", source_id: 7, row_key: "r1-1", status: "completed" }]))
-    const w = mountOutput()
-    await flushPromises()
-    expect(w.find(".output-filter.is-partial strong").text()).toBe("1")
-    await w.find(".output-filter.is-partial").trigger("click")
-    expect(cards(w)).toEqual([["1", "1"]])
-    expect(w.find(".episode-card").classes()).toContain("is-partial")
-  })
-
   it("turns an episode off with the switch in the corner of its card, without opening it", async () => {
     const w = mountOutput()
     await flushPromises()
@@ -182,20 +177,50 @@ describe("StatusOutput", () => {
     expect(w.find(".episode-detail").exists()).toBe(false)
   })
 
-  it("does the action a track asks for: a failed voice-over again, a placed one anew, the reference downloaded again", async () => {
-    useVoicesStore().snapshot({ items: [
-      { series_id: 1, season: 1, episode: 1, part: null, voice_key: "AniStar", voice_label: "AniStar", status: "failed",
-        state: "error", hint: null, detail: { code: "download_failed", params: {} }, source_id: 8, player: "kodik" },
-    ], epoch: 1, rev: 1 } as never)
-    vi.mocked(calls.fetchMedia).mockResolvedValue(ok([{ unique_id: "u1", source_id: 7, row_key: "r1-1", status: "completed" }]))
+  it("resets the failed attempts by the action of a failed voice-over", async () => {
+    givePlan(planView({
+      assets: [fileOfEpisodeOne()],
+      episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1-1"), "S01E01.mp4"),
+        [goalTrack("AniStar", "download", rowRef(8, "k1"), { player: "kodik" })])],
+      failures: [{ kind: "download", row: rowRef(8, "k1"), video: null }],
+    }))
     const w = mountOutput()
     await flushPromises()
     await w.findAll(".episode-card")[0].trigger("click")
     await flushPromises()
     await w.find(".track-action.do-retry").trigger("click")
+    await flushPromises()
+    expect(calls.resetFailures).toHaveBeenCalledWith(1)
+    expect(calls.deleteFromPlan).not.toHaveBeenCalled()
+  })
+
+  it("takes a placed voice-over out of its file by the action of the track", async () => {
+    givePlan(planView({
+      assets: [fileOfEpisodeOne([assetTrack("AniStar", rowRef(8, "k1"), true, { player: "kodik" })])],
+      episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1-1"), "S01E01.mp4"),
+        [goalTrack("AniStar", "reuse", rowRef(8, "k1"), { player: "kodik" })])],
+    }))
+    const w = mountOutput()
+    await flushPromises()
+    await w.findAll(".episode-card")[0].trigger("click")
+    await flushPromises()
+    await w.find(".track-action.do-redo").trigger("click")
+    await flushPromises()
+    expect(calls.deleteFromPlan).toHaveBeenCalledWith(1, { kind: "track", name: "S01E01.mp4", dub: rowRef(8, "k1") })
+  })
+
+  it("takes the video out of the plan by the action of the reference, so that the next sync downloads it again", async () => {
+    givePlan(planView({
+      assets: [fileOfEpisodeOne()],
+      episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1-1"), "S01E01.mp4"))],
+    }))
+    const w = mountOutput()
+    await flushPromises()
+    await w.findAll(".episode-card")[0].trigger("click")
+    await flushPromises()
     await w.find(".track-action.do-refetch").trigger("click")
-    expect(calls.retryDubs).toHaveBeenCalledWith(1, { season: 1, episode: 1, voice_label: "AniStar" })
-    expect(calls.refetchReference).toHaveBeenCalledWith(1, { season: 1, episode: 1, part: null })
+    await flushPromises()
+    expect(calls.deleteFromPlan).toHaveBeenCalledWith(1, { kind: "video", name: "S01E01.mp4" })
   })
 
   it("sends the order the user dragged a queue into, and a variant left out, as levers of the episode", async () => {
@@ -351,10 +376,12 @@ describe("StatusOutput", () => {
     expect(badges).toEqual(["A", "", ""])
   })
 
+  // The plan cuts episode 1 out of the compilation while the sync runs: its cut is aligning.
+  const cutting = planView({ running: true, episodes: [goal([1, 1], goalVideo("cut", rowRef(9, "c"), null))] })
+
   it("shows an episode being cut out of its compilation as at work, not ready, and counts it under its filter", async () => {
     vi.mocked(calls.fetchComposition).mockResolvedValue(ok(withCompilation([true, false])))
-    vi.mocked(calls.fetchCuts).mockResolvedValue(ok({ items: [
-      { series_id: 1, season: 1, episode: 1, part: 0, cut_key: KEY, status: "aligning" }] }))
+    givePlan(cutting)
     const w = mountOutput()
     await flushPromises()
     expect(w.find(".episode-card[data-episode='1']").classes()).toContain("is-align")
@@ -363,8 +390,7 @@ describe("StatusOutput", () => {
 
   it("shows a compilation as a block of its episodes and takes an episode in or out by the switch of its card", async () => {
     vi.mocked(calls.fetchComposition).mockResolvedValue(ok(withCompilation([true, false])))
-    vi.mocked(calls.fetchCuts).mockResolvedValue(ok({ items: [
-      { series_id: 1, season: 1, episode: 1, part: 0, cut_key: KEY, status: "aligning" }] }))
+    givePlan(cutting)
     const w = mountOutput()
     await flushPromises()
     await w.find(".output-view-compilations").trigger("click")
