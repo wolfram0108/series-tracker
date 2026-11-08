@@ -15,7 +15,7 @@ defineProps<{ parts: RefPart[]; marks: Record<number, Mark>; badge?: Badge }>()
     <span
       v-else-if="part.kind === 'letter' && badge" class="figure-mark ref-letter"
       :class="part.online == null ? null : ['presence', part.online ? 'is-online' : 'is-offline']"
-      :style="{ background: `var(--compilation-${badge.color})` }"
+      :style="{ backgroundColor: `var(--compilation-${badge.color})` }"
       :title="[t('output.compilation.badge', { letter: badge.letter }),
                ...(part.online == null ? [] : [t(part.online ? 'output.presence.online' : 'output.presence.offline')])].join(' · ')"
     >{{ badge.letter }}</span>

@@ -10,7 +10,8 @@ const props = withDefaults(defineProps<{ mark: SourceMark | null | undefined; on
 const presence = computed(() => props.online == null ? null : props.online ? "is-online" : "is-offline")
 const title = computed(() => [props.mark ? t("output.source.mark", { n: props.mark.n }) : null,
   presence.value ? t(props.online ? "output.presence.online" : "output.presence.offline") : null].filter(Boolean).join(" · ") || undefined)
-const style = computed(() => ({ background: props.mark ? `var(--source-${props.mark.color % 16})` : "var(--text-muted)" }))
+// The colour alone: the corner of presence is the image of the same background.
+const style = computed(() => ({ backgroundColor: props.mark ? `var(--source-${props.mark.color % 16})` : "var(--text-muted)" }))
 </script>
 
 <template>

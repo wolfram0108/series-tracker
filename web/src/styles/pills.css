@@ -68,15 +68,23 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The presence of the row a mark stands for: a corner of the mark in a gradient, parted from its colour by a thin white
-   line — online (a source gives the row now) or offline (no source gives it, only the file holds it). A mark of no row of
-   a file carries none. */
-.presence { position: relative; overflow: hidden; }
-.presence::after {
-  content: ""; position: absolute; inset-inline-end: 0; inset-block-end: 0; inline-size: 0.62rem; block-size: 0.62rem;
-  background: linear-gradient(to bottom right, transparent calc(50% - 0.04rem), rgba(255, 255, 255, 0.95) calc(50% - 0.04rem),
-    rgba(255, 255, 255, 0.95) calc(50% + 0.05rem), var(--presence-from) calc(50% + 0.05rem), var(--presence-to) 100%);
+/* The presence of the row a mark stands for: a corner of the mark — online (a source gives the row now) or offline (no
+   source gives it, only the file holds it). The corner is a layer of the mark's own background, so the rounding of the
+   mark clips it and it lies under the figure and over nothing else; its edge is a narrow lightening of its own colour.
+   The depth is measured along the diagonal from the corner: the same corner on a square mark and on a wide one. A mark of
+   no row of a file carries none. */
+.presence {
+  --presence-corner: 0.4rem;
+  background-image: linear-gradient(135deg, transparent calc(100% - var(--presence-corner) - 0.03rem),
+    var(--presence-edge) calc(100% - var(--presence-corner)), var(--presence-from) calc(100% - var(--presence-corner) + 0.13rem),
+    var(--presence-to) 100%);
 }
-.presence.is-online { --presence-from: var(--presence-online-from); --presence-to: var(--presence-online-to); }
-.presence.is-offline { --presence-from: var(--presence-offline-from); --presence-to: var(--presence-offline-to); }
-.track-cell.presence::after { inline-size: 0.52rem; block-size: 0.52rem; }
+.presence.is-online {
+  --presence-from: var(--presence-online-from); --presence-to: var(--presence-online-to);
+  --presence-edge: color-mix(in srgb, var(--presence-online-from) 45%, #fff);
+}
+.presence.is-offline {
+  --presence-from: var(--presence-offline-from); --presence-to: var(--presence-offline-to);
+  --presence-edge: color-mix(in srgb, var(--presence-offline-from) 45%, #fff);
+}
+.track-cell.presence { --presence-corner: 0.32rem; }

@@ -28,12 +28,13 @@ const title = (cell: TrackCell): string => [t(cell.isReference ? "output.track.c
   flex: 0 1 auto; inline-size: var(--figure-size); min-inline-size: 0.25rem; block-size: var(--track-size); overflow: hidden;
   display: grid; place-items: center; border-radius: calc(var(--track-size) * var(--round)); color: #fff; font-size: 0.625rem; font-weight: 700; line-height: 1;
 }
-.track-cell.is-done { background: #409444; }
-.track-cell.is-down { background: #009688; }
-.track-cell.is-align { background: var(--color-blue); }
-.track-cell.is-wait { background: #ced4da; color: #343a40; }
-.track-cell.is-error { background: var(--color-red-1); }
-.track-cell.is-absent { background: var(--color-yellow-2); color: #5c4400; }
+/* The colour alone: the corner of presence is the image of the same background (styles/pills.css). */
+.track-cell.is-done { background-color: #409444; }
+.track-cell.is-down { background-color: #009688; }
+.track-cell.is-align { background-color: var(--color-blue); }
+.track-cell.is-wait { background-color: #ced4da; color: #343a40; }
+.track-cell.is-error { background-color: var(--color-red-1); }
+.track-cell.is-absent { background-color: var(--color-yellow-2); color: #5c4400; }
 .track-cell.is-off { background: transparent; color: var(--color-gray-600); outline: 1px dashed var(--color-gray-600); }
 .track-cell.is-none { background: none; border: 1px dashed #adb5bd; color: #adb5bd; }
 /* An outline is painted above the cells around it, where a shadow lies under the next one. */
