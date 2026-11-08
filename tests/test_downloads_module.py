@@ -1726,3 +1726,24 @@ async def test_a_refetch_of_an_episode_without_a_downloaded_reference_is_refused
     with pytest.raises(BusRequestError, match="refetch_no_file"):
         await probe.request("downloads.reference.refetch", {"series_id": 2, "season": 1, "episode": 1}, timeout=5)
     assert _tasks(db_path) == []
+
+
+@pytest.mark.asyncio
+async def test_a_download_cancelled_in_the_middle_of_its_watch_leaves_no_task_behind(db_path):
+    """The watch of silence waits on a beat of the download beside it: a cancel of the download in the middle of that
+    wait takes the beat away too, or it would hang until the collector of garbage finds it."""
+    held = asyncio.Event()
+    entered = asyncio.Event()
+
+    async def blocked(url, path, on_progress, **kw):
+        entered.set()
+        await held.wait()
+        return True, ""
+
+    module = DownloadsModule(Bus(), Database(db_path), downloader=blocked)
+    watch = asyncio.ensure_future(module._watched("k", "https://x", "/tmp/x.mp4", None))
+    await entered.wait()
+    watch.cancel()
+    await asyncio.gather(watch, return_exceptions=True)
+    left = [task for task in asyncio.all_tasks() if task is not asyncio.current_task() and not task.done()]
+    assert left == []

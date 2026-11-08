@@ -1037,6 +1037,7 @@ class DownloadsModule(BaseModule):
             await on_progress(data)
 
         run = asyncio.ensure_future(self._download(url, path, told, **kw))
+        beat: asyncio.Future | None = None
         try:
             while True:
                 alive.clear()
@@ -1052,6 +1053,8 @@ class DownloadsModule(BaseModule):
                     await asyncio.gather(run, return_exceptions=True)
                     return False, f"нет признаков жизни {SILENCE_FUSE_S:.0f} с (timeout)"
         finally:
+            if beat is not None:
+                beat.cancel()  # a download cancelled in the middle of the wait leaves no watch behind
             if not run.done():
                 run.cancel()
                 await asyncio.gather(run, return_exceptions=True)
