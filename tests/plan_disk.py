@@ -26,7 +26,7 @@ import os
 import shutil
 import subprocess
 import threading
-from dataclasses import asdict, replace
+from dataclasses import replace
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
@@ -36,10 +36,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from core import container as mkv
-from core.plan.tables import Container, RowId, Snapshot, Track, Video
+from core.plan.executor import DOWNLOADS, Made, Passing, video_of
+from core.plan.files import Library, container_json, container_of, dub_key, label_of  # noqa: F401
+from core.plan.tables import Track, Video
 from modules.conform.client import DaemonClient, Unconfirmed
 from modules.downloads import ytdlp
-from plan_world import DOWNLOADS, World
+from plan_world import World
 
 RATE = 16000
 
@@ -266,61 +268,29 @@ class Daemon:
         return self._job("reverse", body.label, [episode], [result])
 
 
-# --- the table of the asset as JSON: in the database of the service, and attached to every container -----------------
-
-def row_json(row: RowId | None):
-    return None if row is None else asdict(row)
-
-
-def container_json(container: Container) -> dict:
-    return {"name": container.name, "off": container.off, "video": {
-        "id": asdict(container.video.id), "snapshot": asdict(container.video.snapshot),
-        "episode": list(container.video.episode), "timeline": asdict(container.video.timeline),
-        "cut_of": row_json(container.video.cut_of)},
-        "tracks": [{"dub": asdict(track.dub), "snapshot": asdict(track.snapshot), "episode": list(track.episode),
-                    "aligned_to": asdict(track.aligned_to)} for track in container.tracks]}
-
-
-def container_of(data: dict) -> Container:
-    video = data["video"]
-    return Container(data["name"], Video(RowId(**video["id"]), Snapshot(**video["snapshot"]), tuple(video["episode"]),
-                                         RowId(**video["timeline"]), RowId(**video["cut_of"]) if video["cut_of"] else None),
-                     tuple(Track(RowId(**track["dub"]), Snapshot(**track["snapshot"]), tuple(track["episode"]),
-                                 RowId(**track["aligned_to"])) for track in data["tracks"]), data["off"])
-
-
-def label_of(slot) -> str:
-    return f"s{slot[0]:02d}e{slot[1]:02d}" + (f"pt{slot[2]}" if len(slot) > 2 else "")
-
-
-def dub_key(dub: RowId) -> str:
-    return f"{dub.source_id}:{dub.row_key}:{dub.video}"
-
-
 class Crash(Exception):
     """The process stops here (power, a kill): what is on disk stays as it is."""
 
 
 class DiskWorld(World):
-    """The world of the plan with real files (see the module)."""
+    """The world of the plan with real files (see the module): the service's own sync, files and journal."""
 
     def __init__(self, root: str, **kwargs) -> None:
         super().__init__(**kwargs)
         self.root = root
-        for name in ("site", "library", "work", "staging"):
+        for name in ("site", "library", "work"):
             os.makedirs(os.path.join(root, name), exist_ok=True)
         self.codec = Codec()
         self.host = Host(os.path.join(root, "site"))
         self.daemon = Daemon(self.codec)
-        self.paths: dict[str, str] = {}  # step of the graph -> the file it made
+        self.files = Library(os.path.join(root, "library"))
         self.pending: list[tuple] = []  # the steps of the journal of this sync
         self.crash_at: int | None = None  # the step of the journal the process stops before (-1: before the journal)
-        self.journal = os.path.join(root, "library", ".journal.json")
         self.table = os.path.join(root, "assets.json")
         self._write_table()
 
     def library(self, name: str) -> str:
-        return os.path.join(self.root, "library", name)
+        return self.files.path(name)
 
     # --- the site ------------------------------------------------------------------------------------------------
 
@@ -362,199 +332,115 @@ class DiskWorld(World):
     def _work(self, op_id: str, extension: str = ".mp4") -> str:
         return os.path.join(self.root, "work", hashlib.md5(op_id.encode()).hexdigest()[:12] + extension)
 
-    def _do(self, op, results):
+    async def do(self, op, results):
         if op.kind in DOWNLOADS:
             row = op.subject
             path = self._work(op.id)
-            done, _ = asyncio.run(ytdlp.download(row.link, path, _quiet))
+            done, _ = await ytdlp.download(row.link, path, _quiet)
             if not done:
                 if row.id in self.transient:
-                    self._passing.add(op.id)
+                    raise Passing
                 return None
-            self.paths[op.id] = path
             if op.kind == "download_video":
                 video = Video(row.id, row.snapshot(), row.slot, row.id)
                 self.content[video.key] = (self.codec.picture(path),)
-                return video
+                return Made(video, path)
             if op.kind == "download_dub":
                 # A compilation as a voice-over (Д-19) holds an episode in every second.
                 self.content[("dub", row.id)] = tuple(self.codec.sound(path, 0, second)
                                                       for second in range(max(1, self.codec.seconds(path))))
-                return row
-            return path
+                return Made(row, path)
+            return Made(None, path)
         if op.kind == "cut":
             way = op.subject
-            ref2 = self.library(way.ref2.container.name) if way.ref2.kind == "asset" else self.paths[f"ref2:{op.slot}"]
+            ref2 = self.library(way.ref2.container.name) if way.ref2.kind == "asset" else results[f"ref2:{op.slot}"].file
             label = f"cut {label_of(op.slot)}"
-            result = self._daemon("reverse", {"compilation": results[f"compilation:{way.row.id}"], "episodes": [ref2],
-                                              "out_dir": os.path.join(self.root, "work"), "extend_edges": True,
-                                              "label": label}, op)
+            result = await self._daemon("reverse", {"compilation": results[f"compilation:{way.row.id}"].file,
+                                                    "episodes": [ref2], "out_dir": os.path.join(self.root, "work"),
+                                                    "extend_edges": True, "label": label})
             if result is None:
                 return None
-            self.paths[op.id] = result
             video = Video(way.row.id, way.snapshot, op.slot, way.timeline, cut_of=way.row.id)
             self.content[video.key] = (self.codec.picture(result),)
-            return video
+            return Made(video, result)
         if op.kind == "align":
             goal, way = op.subject
-            video_path = self._video_path(goal)
+            video_path = self.files.video_path(goal, results)
             if way.kind == "download":
-                dub, stream = self.paths[f"dub:{goal.slot}:{way.dub}"], 0
+                dub, stream = results[f"dub:{goal.slot}:{way.dub}"].file, 0
             else:
-                dub, stream = self.library(way.container.name), self._stream(way.container.name, way.dub, way.own)
+                dub, stream = self.library(way.container.name), await self.files.stream_of(way.container.name, way.dub, way.own)
             label = f"{label_of(goal.slot)} {way.voice}"
-            result = self._daemon("enqueue", {"ref": video_path, "dubs": [dub], "dub_atracks": [stream],
-                                              "out_dir": os.path.join(self.root, "work"), "label": label}, op)
+            result = await self._daemon("enqueue", {"ref": video_path, "dubs": [dub], "dub_atracks": [stream],
+                                                    "out_dir": os.path.join(self.root, "work"), "label": label})
             if result is None:
                 return None
-            self.paths[op.id] = result
-            return Track(way.dub, way.snapshot, goal.slot, self._video_of(goal, results).timeline), (self.codec.sound(result, 0),)
+            return Made(Track(way.dub, way.snapshot, goal.slot, video_of(goal, results).timeline), result)
         if op.kind == "build":
-            return op.subject
+            return Made(op.subject)
         raise AssertionError(op.kind)
 
-    def _daemon(self, route: str, body: dict, op) -> str | None:
+    async def _daemon(self, route: str, body: dict) -> str | None:
         """The service's own client to the model of the service; the path of the result, or None when it failed."""
-        async def ask():
-            client = self.daemon.client()
-            try:
-                answer = await (client.enqueue(body) if route == "enqueue" else client.reverse(body))
-                job = answer if isinstance(answer, dict) else answer[0]
-                return await client.job(job["id"])
-            finally:
-                await client.close()
+        client = self.daemon.client()
         try:
-            job = asyncio.run(ask())
+            answer = await (client.enqueue(body) if route == "enqueue" else client.reverse(body))
+            job = answer if isinstance(answer, dict) else answer[0]
+            job = await client.job(job["id"])
         except Unconfirmed:
-            self._passing.add(op.id)  # the answer never came: the job is looked at again at the next sync
-            return None
+            raise Passing from None  # the answer never came: the job is looked at again at the next sync
+        finally:
+            await client.close()
         result = job["results"][0]
         # The contract of the service: a result is taken by `ok` and an empty `critical`.
         return result["out_path"] if result["ok"] and not result["critical"] else None
 
-    def _video_path(self, goal) -> str:
-        if goal.video.kind == "asset":
-            return self.library(goal.video.container.name)
-        return self.paths[f"video:{goal.slot}" if goal.video.kind == "download" else f"cut:{goal.slot}"]
+    def aligned_truth(self, aligned: Made) -> tuple[int, ...]:
+        return (self.codec.sound(aligned.file, 0),)
 
-    def _stream(self, name: str, dub: RowId, own: bool) -> int:
-        """The index of the audio stream of a track in a container, told by the container's own tags."""
-        held = asyncio.run(mkv.contents(self.library(name)))
-        for track in held.audio:
-            if (own and track.own) or (not own and track.key == dub_key(dub)):
-                return track.index
-        raise AssertionError(f"{name} holds no track {dub} (own={own})")
+    async def stage(self, made, group, results) -> None:
+        await World.stage(self, made, group, results)
+        self.pending += await self.files.build(made, group, results)
 
-    def _apply(self, made, group, results) -> None:
-        for slot in group.built:
-            goal = made.goal(slot)
-            video = self._video_of(goal, results)
-            video_path = self._video_path(goal)
-            identity = mkv.identity(video.timeline.source_id, video.timeline.row_key)
-            own_stream = self._stream(goal.video.container.name, video.id, True) if goal.video.kind == "asset" else 0
-            tracks = [mkv.AudioIn(video.snapshot.group or "—", video_path, own_stream, identity, own=True)]
-            made_tracks = []
-            for way in goal.tracks:
-                if way.kind == "reuse":
-                    path = self.library(way.container.name)
-                    stream = self._stream(way.container.name, way.dub, way.own)
-                else:
-                    path, stream = self.paths[f"align:{slot}:{way.voice}"], 0
-                tracks.append(mkv.AudioIn(way.snapshot.group or way.voice, path, stream, identity, key=dub_key(way.dub)))
-                made_tracks.append(Track(way.dub, way.snapshot, slot, video.timeline))
-            built = Container(goal.name, replace(video, episode=slot), tuple(made_tracks), goal.off)
-            staging = os.path.join(self.root, "staging", hashlib.md5(goal.name.encode()).hexdigest()[:12] + ".mkv")
-            problem = asyncio.run(mkv.build(staging, video_path, identity, tracks, provenance=container_json(built)))
-            assert problem is None, f"{goal.name}: {problem}"
-            self.pending.append(("publish", staging, goal.name))
-        for slot, name in group.kept:
-            goal = made.goal(slot)
-            if goal.name != name:
-                self.pending.append(("move", name, goal.name))
-        for name in group.remove:
-            self.pending.append(("remove", name))
-        for name, hidden in group.hide:
-            self.pending.append(("move", name, hidden))
-        super()._apply(made, group, results)
-        # A kept file whose name changed carries the provenance of its new name: it is built anew under it.
-        for slot, name in group.kept:
-            goal = made.goal(slot)
-            if goal.name != name:
-                self.pending.append(("retag", goal.name))
-        for _, hidden in group.hide:
-            self.pending.append(("retag", hidden))
-
-    def _commit(self) -> None:
+    async def commit(self, before) -> None:
         if self.crash_at == -1:
+            self.pending = []
             raise Crash("before the journal")
         if not self.pending:
             self._clean()
             return
-        moves = [step for step in self.pending if step[0] == "move"]
-        # Out of the way first, then into place: two moves may swap names.
-        steps = [("move", old, old + ".moving") for _, old, _ in moves]
-        steps += [step for step in self.pending if step[0] == "remove"]
-        steps += [("move", old + ".moving", new) for _, old, new in moves]
-        steps += [step for step in self.pending if step[0] == "publish"]
-        steps += [step for step in self.pending if step[0] == "retag"]
         table = [container_json(each) for each in sorted(self.containers.values(), key=lambda each: each.name)]
-        with open(self.journal, "w") as out:
-            json.dump({"steps": steps, "table": table}, out)
+        steps = self.files.write_journal(self.pending, table)
         self.pending = []
-        self._carry_out(steps, table)
+        await self._carry_out(steps, table)
 
-    def _carry_out(self, steps: list, table: list) -> None:
+    async def _carry_out(self, steps: list, table: list) -> None:
+        by_name = {each["name"]: each for each in table}
         for number, step in enumerate(steps):
             if self.crash_at == number:
                 raise Crash(f"at step {number}: {step}")
-            self._step(step, {each["name"]: each for each in table})
+            await self.files.step(step, by_name)
         with open(self.table, "w") as out:
             json.dump(table, out)
-        os.remove(self.journal)
+        self.files.finish()
         self._clean()
-
-    def _step(self, step, table: dict) -> None:
-        """One step of the journal; carried out again after a crash, it does what is left of it."""
-        if step[0] == "move":
-            source, target = self.library(step[1]), self.library(step[2])
-            if os.path.exists(source):
-                os.replace(source, target)
-        elif step[0] == "remove":
-            if os.path.exists(self.library(step[1])):
-                os.remove(self.library(step[1]))
-        elif step[0] == "publish":
-            if os.path.exists(step[1]):
-                os.replace(step[1], self.library(step[2]))
-        elif step[0] == "retag":
-            # The file keeps its streams; its provenance follows its new name and state.
-            path = self.library(step[1])
-            if asyncio.run(mkv.provenance_of(path)) != table[step[1]]:
-                again = path + ".retag"
-                held = asyncio.run(mkv.contents(path))
-                tracks = [mkv.AudioIn(each.label, path, each.index, each.aligned_to, own=each.own, key=each.key)
-                          for each in held.audio]
-                problem = asyncio.run(mkv.build(again, path, held.video, tracks, provenance=table[step[1]]))
-                assert problem is None, problem
-                os.replace(again, path)
 
     def recover(self) -> None:
         """The restart after a crash: a journal is carried out to the end; with no journal the snapshot stands."""
         self.crash_at = None
         self.pending = []
-        if os.path.exists(self.journal):
-            with open(self.journal) as found:
-                journal = json.load(found)
-            self._carry_out([tuple(step) for step in journal["steps"]], journal["table"])
+        journal = self.files.read_journal()
+        if journal is not None:
+            asyncio.run(self._carry_out(journal["steps"], journal["table"]))
         else:
+            self.files.finish()
             self._clean()
         with open(self.table) as found:
             self.containers = {each["name"]: container_of(each) for each in json.load(found)}
 
     def _clean(self) -> None:
-        for name in ("work", "staging"):
-            shutil.rmtree(os.path.join(self.root, name), ignore_errors=True)
-            os.makedirs(os.path.join(self.root, name), exist_ok=True)
-        self.paths = {}
+        shutil.rmtree(os.path.join(self.root, "work"), ignore_errors=True)
+        os.makedirs(os.path.join(self.root, "work"), exist_ok=True)
 
     def _write_table(self) -> None:
         with open(self.table, "w") as out:
@@ -568,7 +454,7 @@ class DiskWorld(World):
 
     def check_disk(self) -> None:
         """The disk alone: the files are the table, each holds one episode and carries its provenance; adoption."""
-        files = sorted(name for name in os.listdir(os.path.join(self.root, "library")) if not name.startswith("."))
+        files = self.files.files()
         assert files == sorted(self.containers), f"the library is not the table: {files} != {sorted(self.containers)}"
         with open(self.table) as found:
             stored = sorted(json.load(found), key=lambda each: each["name"])

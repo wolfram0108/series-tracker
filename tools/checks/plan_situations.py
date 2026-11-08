@@ -92,7 +92,7 @@ async def situations(real: plan_real.RealSeries, series_id: int) -> tuple[list[d
     # shows what the situation changes and nothing else.
     base = world_of(inputs)
     found = [outcome(base, "как есть (работа, которая ждёт сейчас)")]
-    inputs = base.inputs()
+    inputs = base.inputs(base.history[-1].online, base.choices)
     sources = sorted({row.id.source_id for row in inputs.online})
     for source in sources:
         world = copy.deepcopy(base)

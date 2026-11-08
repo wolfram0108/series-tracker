@@ -9,15 +9,14 @@ downloads and alignments are set by a scenario.
 apply every group whose operations all succeeded. After each sync `check()` holds the invariants of the model."""
 from __future__ import annotations
 
+import asyncio
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import Iterable
 
+from core.plan.executor import DOWNLOADS, Made, Passing, SeriesSync, video_of
 from core.plan.planner import OFF, Goal, Plan, own_track, plan, switched_off, voice_of
 from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
-
-
-DOWNLOADS = ("download_video", "download_dub", "download_compilation")
 
 
 def truth_of(season: int, episode: int, part: int | None = None) -> int:
@@ -53,7 +52,7 @@ class Step:
 
 
 @dataclass
-class World:
+class World(SeriesSync):
     choices: Choices = field(default_factory=lambda: Choices(players=("vk", "cvh", "kodik"), sources=(1, 2, 3)))
     site: dict[int, list[SiteRow]] = field(default_factory=dict)  # source id -> its table now
     read_fails: set[int] = field(default_factory=set)  # sources whose next reads fail
@@ -69,6 +68,10 @@ class World:
     online: dict[int, tuple[OnlineRow, ...]] = field(default_factory=dict)  # source id -> last complete read
     content: dict[tuple, tuple[int, ...]] = field(default_factory=dict)  # video key or ("dub", row) -> true episodes
     history: list[Step] = field(default_factory=list)
+    # The state of the service's own sync (core/plan/executor.SeriesSync) the world runs.
+    namer: object = None
+    commands: frozenset = frozenset()
+    passing: set = field(default_factory=set)
 
     # --- the sources -------------------------------------------------------------------------------------------
 
@@ -132,211 +135,106 @@ class World:
 
     # --- one synchronization -------------------------------------------------------------------------------------
 
-    def inputs(self) -> Inputs:
-        # The layout lists the rows source by source, as they come: the place of a row is its place in that list.
-        rows = tuple(replace(row, position=place) for place, row in
-                     enumerate(row for source in sorted(self.online) for row in self.online[source]))
-        return Inputs(rows, tuple(sorted(self.containers.values(), key=lambda each: each.name)), self.choices,
-                      frozenset(self.failed))
-
     def sync(self, title: str = "") -> Step:
         for source_id, table in self.site.items():
             if source_id not in self.read_fails:
                 self.online[source_id] = tuple(each.row for each in table)
                 for each in table:
                     self.content.setdefault(("site", each.row.id), each.content)
-        # A command «Удалить» is of a file: a file that is gone takes its command with it (a new file under the same name
-        # is another file).
-        self.choose(delete=frozenset(each for each in self.choices.delete if each[1] in self.containers))
-        # The snapshot: the plan is counted from what is on disk and the tables now; nothing on disk changes until the end.
-        # A download that fails is no failure of the plan: the row is passed over and the plan is counted again from the
-        # same snapshot. An alignment or a cut that fails is: its group is not applied.
-        inputs = self.inputs()
-        before = inputs.containers
-        replanned: list[tuple] = []
-        while True:
-            made = plan(inputs)
-            results, failed = self._run(made)
-            new = [key for key in self._failures(made, results, failed) if key not in self.failed]
-            if not new:
-                break
-            self.failed |= set(new)
-            replanned += new
-            inputs = self.inputs()
-        applied = []
-        for group in made.groups:
-            if any(op not in results for op in group.ops):
-                continue
-            self._apply(made, group, results)
-            applied.append(group.slots)
-        self._commit()
-        step = Step(title, inputs.online, before, made, tuple(failed), tuple(applied),
+        # The layout lists the rows source by source, as they come: the place of a row is its place in that list.
+        rows = tuple(replace(row, position=place) for place, row in
+                     enumerate(row for source in sorted(self.online) for row in self.online[source]))
+        self.commands = self.choices.delete
+        synced = asyncio.run(SeriesSync.sync(self, rows, self.choices))
+        inputs = synced.inputs
+        self.choose(delete=self.commands)
+        step = Step(title, inputs.online, synced.before, synced.plan, tuple(sorted(synced.failed)), synced.applied,
                     tuple(sorted(self.containers.values(), key=lambda each: each.name)), inputs.choices, self.choices,
-                    inputs.failed, tuple(replanned))
+                    inputs.failed, synced.replanned)
         self.history.append(step)
         return step
-
-    def _commit(self) -> None:
-        """The end of the application of a sync; a world of files applies its journal here."""
-
-    def _failures(self, made: Plan, results, failed) -> list[tuple]:
-        """The attempts that failed in a run, as the planner reads them; a step that failed because a step before it did
-        is no attempt of its own."""
-        found = []
-        for op in made.ops:
-            if op.id not in failed or op.id in self._passing or any(need in failed for need in op.needs):
-                continue
-            if op.kind in DOWNLOADS:
-                found.append(("download", op.subject.id))
-            elif op.kind == "align":
-                goal, way = op.subject
-                found.append(("align", way.dub, self._video_of(goal, results).timeline))
-            elif op.kind == "cut":
-                found.append(("cut", op.subject.row.id, op.subject.timeline))
-        return found
 
     def reset_failures(self) -> None:
         """The user's word: the failed attempts are tried again."""
         self.failed.clear()
 
-    def _run(self, made: Plan) -> tuple[dict[str, object], list[str]]:
-        self._passing: set[str] = set()  # steps that failed for this sync only: no record, tried again next time
-        results: dict[str, object] = {}
-        failed: list[str] = []
-        pending = list(made.ops)
-        while pending:
-            ready = [op for op in pending if all(need in results or need in failed for need in op.needs)]
-            for op in ready:
-                pending.remove(op)
-                if any(need in failed for need in op.needs):
-                    failed.append(op.id)
-                    continue
-                outcome = self._do(op, results)
-                if outcome is None:
-                    failed.append(op.id)
-                else:
-                    results[op.id] = outcome
-            if not ready:
-                raise AssertionError(f"the graph has a cycle or a missing step: {[op.id for op in pending]}")
-        return results, failed
-
     def _truth(self, key: tuple) -> tuple[int, ...]:
         return self.content[key]
 
-    def _do(self, op, results):
+    async def do(self, op, results):
         if op.kind in DOWNLOADS and op.subject.id in self.transient:
-            self._passing.add(op.id)
-            return None
+            raise Passing
         if op.kind == "download_video":
             row = op.subject
             if row.id in self.download_fails:
                 return None
             video = Video(row.id, row.snapshot(), row.slot, row.id)
             self.content[video.key] = self._truth(("site", row.id))
-            return video
+            return Made(video)
         if op.kind == "download_compilation":
-            return None if op.subject.id in self.download_fails else self._truth(("site", op.subject.id))
+            return None if op.subject.id in self.download_fails else Made(None, self._truth(("site", op.subject.id)))
         if op.kind == "cut":
             way = op.subject
-            ref2 = way.ref2.container.video if way.ref2.kind == "asset" else results[f"ref2:{op.slot}"]
-            inside = results[f"compilation:{way.row.id}"]
+            ref2 = way.ref2.container.video if way.ref2.kind == "asset" else results[f"ref2:{op.slot}"].value
+            inside = results[f"compilation:{way.row.id}"].file
             truth = self.content[ref2.key]
             answer = self.cut_answers.get(op.slot)
             if answer == "lost":
-                self._passing.add(op.id)
-                return None
+                raise Passing
             if answer == "critical" or not set(truth) <= set(inside):
                 return None  # the single episode is not in the compilation: nothing matches
             video = Video(way.row.id, way.snapshot, op.slot, ref2.timeline, cut_of=way.row.id)
             self.content[video.key] = truth
-            return video
+            return Made(video)
         if op.kind == "download_dub":
             row = op.subject
             if row.id in self.download_fails:
                 return None
             self.content[("dub", row.id)] = self._truth(("site", row.id))
-            return row
+            return Made(row)
         if op.kind == "align":
             goal, way = op.subject
-            video = self._video_of(goal, results)
+            video = video_of(goal, results)
             dub = (self.content[("dub", way.dub)] if way.kind == "download"
                    else self.content[way.container.video.key] if way.own
                    else self.content[("track", way.container.name, way.dub)])
             answer = self.answers.get((goal.slot, way.voice))
             if answer == "lost":
-                self._passing.add(op.id)
-                return None
+                raise Passing
             if (goal.slot, way.voice) in self.align_fails or answer in ("mismatch", "critical") or \
                     not set(self.content[video.key]) <= set(dub):
                 return None  # a compilation as a voice-over holds the episode among others (Д-19)
-            return Track(way.dub, way.snapshot, goal.slot, video.timeline), self.content[video.key]
+            return Made(Track(way.dub, way.snapshot, goal.slot, video.timeline), self.content[video.key])
         if op.kind == "build":
-            return op.subject
+            return Made(op.subject)
         raise AssertionError(op.kind)
 
-    def _video_of(self, goal: Goal, results) -> Video:
-        if goal.video.kind == "asset":
-            return goal.video.container.video
-        return results[f"video:{goal.slot}" if goal.video.kind == "download" else f"cut:{goal.slot}"]
+    def aligned_truth(self, aligned: Made) -> tuple[int, ...]:
+        """What an aligned track truly is: the world keeps it in the result itself."""
+        return aligned.file
 
-    def _apply(self, made: Plan, group, results) -> None:
-        built: dict[str, Container] = {}
+    async def stage(self, made: Plan, group, results) -> None:
+        """What every file of the group truly holds once it is applied (the world's own knowledge)."""
+        moved: dict[tuple, tuple[int, ...]] = {}
         for slot in group.built:
             goal = made.goal(slot)
-            video = replace(self._video_of(goal, results), episode=slot)
-            tracks, truths = [], {}
             for way in goal.tracks:
                 if way.kind == "reuse" and way.own:
-                    tracks.append(Track(way.dub, way.snapshot, slot, way.container.video.timeline))
-                    truths[way.dub] = self.content[way.container.video.key]
+                    truth = self.content[way.container.video.key]
                 elif way.kind == "reuse":
-                    track = next(each for each in way.container.tracks if each.dub == way.dub)
-                    tracks.append(replace(track, episode=slot))
-                    truths[way.dub] = self.content[("track", way.container.name, way.dub)]
+                    truth = self.content[("track", way.container.name, way.dub)]
                 else:
-                    track, truth = results[f"align:{slot}:{way.voice}"]
-                    tracks.append(track)
-                    truths[way.dub] = truth
-            built[goal.name] = Container(goal.name, video, tuple(tracks), goal.off)
-            for dub, truth in truths.items():
-                self.content[("track", goal.name, dub)] = truth
-        renamed: dict[str, Container] = {}
+                    truth = self.aligned_truth(results[f"align:{slot}:{way.voice}"])
+                moved[("track", goal.name, way.dub)] = truth
         for slot, name in group.kept:
             goal = made.goal(slot)
             if goal.name != name:
-                old = self.containers.pop(name)
-                renamed[goal.name] = replace(old, name=goal.name, off=goal.off, video=replace(old.video, episode=slot),
-                                             tracks=tuple(replace(each, episode=slot) for each in old.tracks))
-                self._move_truth(name, goal.name, old)
-        for name in group.remove:
-            self.containers.pop(name, None)
+                for track in self.containers[name].tracks:
+                    moved[("track", goal.name, track.dub)] = self.content[("track", name, track.dub)]
         for name, new in group.hide:
-            old = self.containers.pop(name)
-            self.containers[new] = replace(old, name=new, off=True)
-            self._move_truth(name, new, old)
-        self.containers.update(renamed)
-        self.containers.update(built)
-        # A command goes with its file. A deleted video waits for another video of its episode: its command follows the
-        # video to the file's new name, or to the file built anew around it; a track's command goes once the file is built
-        # anew (the track it named is gone from it).
-        renamed = {name: made.goal(slot).name for slot, name in group.kept}
-        rebuilt = {goal.video.container.name: goal.name for slot in group.built
-                   if (goal := made.goal(slot)).video.kind == "asset"}
-        changed = set(group.remove) | {name for name, _ in group.hide}
-        commands = set()
-        for each in self.choices.delete:
-            name = each[1]
-            if each[0] == "video" and (name in renamed or name in rebuilt):
-                commands.add(("video", renamed.get(name) or rebuilt[name]))
-            elif each[0] == "track" and name in renamed:
-                commands.add(("track", renamed[name], *each[2:]))
-            elif name not in changed and name not in rebuilt:
-                commands.add(each)
-        self.choose(delete=frozenset(commands))
-
-    def _move_truth(self, old: str, new: str, container: Container) -> None:
-        for track in container.tracks:
-            self.content[("track", new, track.dub)] = self.content[("track", old, track.dub)]
+            for track in self.containers[name].tracks:
+                moved[("track", new, track.dub)] = self.content[("track", name, track.dub)]
+        self.content.update(moved)
 
     # --- the invariants of the model -----------------------------------------------------------------------------
 
