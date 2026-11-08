@@ -120,8 +120,12 @@ class Choices:
 
 @dataclass(frozen=True)
 class Inputs:
-    """Everything the planner reads."""
+    """Everything the planner reads. `failed` are the attempts that failed: ("download", row), ("align", voice-over row,
+    timeline of the video) and ("cut", compilation row, timeline of the single video). The planner passes over them and
+    takes the next way; an alignment that failed holds only for that video — another video is tried afresh. They are
+    tried again when the user resets them."""
 
     online: tuple[OnlineRow, ...]
     containers: tuple[Container, ...]
     choices: Choices
+    failed: frozenset[tuple] = frozenset()

@@ -179,7 +179,7 @@ def _goal(slot, inputs, namer, containers, singles, online, deleted_videos, dele
                             player_rank(video.snapshot.player), source_rank(source_id), 0, repr(video.key)), way))
     if not off:
         for row in singles:
-            if row.slot != slot:
+            if row.slot != slot or ("download", row.id) in inputs.failed:
                 continue
             held = next((way for _, way in candidates if way.key == ("row", row.id)), None)
             if held is not None and held.snapshot.height >= row.height:
@@ -220,11 +220,13 @@ def _goal(slot, inputs, namer, containers, singles, online, deleted_videos, dele
             tracks.append(TrackWay(voice, track.dub, track.snapshot, "reuse", container=container, own=is_own))
             continue
         rows = sorted((row for row in singles if row.slot == slot and row.group == voice and not off
+                       and ("download", row.id) not in inputs.failed and ("align", row.id, video.timeline) not in inputs.failed
                        and voice not in choices.off_groups),
                       key=lambda row: (player_rank(row.player), source_rank(row.id.source_id), -row.height, row.id))
         if rows:
             tracks.append(TrackWay(voice, rows[0].id, rows[0].snapshot(), "download", row=rows[0]))
             continue
+        mine = [each for each in mine if ("align", each[1].dub, video.timeline) not in inputs.failed]
         if mine and not off:
             container, track, is_own = sorted(mine, key=lambda each: (each[2], each[0].name, each[1].dub))[0]
             tracks.append(TrackWay(voice, track.dub, track.snapshot, "realign", container=container, own=is_own))
@@ -239,7 +241,9 @@ def _cut(slot, inputs, candidates, player_rank, source_rank, user_rank):
         return None
     rank2, ref2 = min(singles, key=lambda each: each[0])
     best = max(way.snapshot.height for _, way in singles)
-    covering = [row for row in inputs.online if row.compilation and row.season == slot[0] and row.start <= slot[1] <= row.end
+    covering = [row for row in inputs.online if row.compilation and ("download", row.id) not in inputs.failed
+                and ("cut", row.id, ref2.timeline) not in inputs.failed
+                and row.season == slot[0] and row.start <= slot[1] <= row.end
                 and row.group is not None and row.id not in inputs.choices.off_compilations and row.height > best]
     if not covering:
         return None

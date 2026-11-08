@@ -16,6 +16,9 @@ from core.plan.planner import OFF, Goal, Plan, plan, voice_of
 from core.plan.tables import Choices, Container, Inputs, OnlineRow, RowId, Slot, Track, Video
 
 
+DOWNLOADS = ("download_video", "download_dub", "download_compilation")
+
+
 @dataclass
 class SiteRow:
     """A row as a source has it, with the true episode behind its video (a compilation holds a range of them)."""
@@ -38,6 +41,9 @@ class Step:
     choices: Choices
     # The choices after the sync: an applied «Удалить» is spent.
     choices_after: Choices | None = None
+    # The downloads that failed, as the final plan of the sync knew them, and the rows passed over by replanning.
+    failed_rows: frozenset[tuple] = frozenset()
+    replanned: tuple[tuple, ...] = ()
 
 
 @dataclass
@@ -46,6 +52,7 @@ class World:
     site: dict[int, list[SiteRow]] = field(default_factory=dict)  # source id -> its table now
     read_fails: set[int] = field(default_factory=set)  # sources whose next reads fail
     download_fails: set[RowId] = field(default_factory=set)
+    failed: set[tuple] = field(default_factory=set)  # attempts that failed: the planner passes over them
     align_fails: set[tuple[Slot, str]] = field(default_factory=set)
     containers: dict[str, Container] = field(default_factory=dict)
     online: dict[int, tuple[OnlineRow, ...]] = field(default_factory=dict)  # source id -> last complete read
@@ -85,7 +92,8 @@ class World:
 
     def inputs(self) -> Inputs:
         rows = tuple(row for source in sorted(self.online) for row in self.online[source])
-        return Inputs(rows, tuple(sorted(self.containers.values(), key=lambda each: each.name)), self.choices)
+        return Inputs(rows, tuple(sorted(self.containers.values(), key=lambda each: each.name)), self.choices,
+                      frozenset(self.failed))
 
     def sync(self, title: str = "") -> Step:
         for source_id, table in self.site.items():
@@ -93,10 +101,21 @@ class World:
                 self.online[source_id] = tuple(each.row for each in table)
                 for each in table:
                     self.content.setdefault(("site", each.row.id), each.content)
+        # The snapshot: the plan is counted from what is on disk and the tables now; nothing on disk changes until the end.
+        # A download that fails is no failure of the plan: the row is passed over and the plan is counted again from the
+        # same snapshot. An alignment or a cut that fails is: its group is not applied.
         inputs = self.inputs()
         before = inputs.containers
-        made = plan(inputs)
-        results, failed = self._run(made)
+        replanned: list[tuple] = []
+        while True:
+            made = plan(inputs)
+            results, failed = self._run(made)
+            new = [key for key in self._failures(made, results, failed) if key not in self.failed]
+            if not new:
+                break
+            self.failed |= set(new)
+            replanned += new
+            inputs = self.inputs()
         applied = []
         for group in made.groups:
             if any(op not in results for op in group.ops):
@@ -104,9 +123,30 @@ class World:
             self._apply(made, group, results)
             applied.append(group.slots)
         step = Step(title, inputs.online, before, made, tuple(failed), tuple(applied),
-                    tuple(sorted(self.containers.values(), key=lambda each: each.name)), inputs.choices, self.choices)
+                    tuple(sorted(self.containers.values(), key=lambda each: each.name)), inputs.choices, self.choices,
+                    inputs.failed, tuple(replanned))
         self.history.append(step)
         return step
+
+    def _failures(self, made: Plan, results, failed) -> list[tuple]:
+        """The attempts that failed in a run, as the planner reads them; a step that failed because a step before it did
+        is no attempt of its own."""
+        found = []
+        for op in made.ops:
+            if op.id not in failed or any(need in failed for need in op.needs):
+                continue
+            if op.kind in DOWNLOADS:
+                found.append(("download", op.subject.id))
+            elif op.kind == "align":
+                goal, way = op.subject
+                found.append(("align", way.dub, self._video_of(goal, results).timeline))
+            elif op.kind == "cut":
+                found.append(("cut", op.subject.row.id, op.subject.timeline))
+        return found
+
+    def reset_failures(self) -> None:
+        """The user's word: the failed attempts are tried again."""
+        self.failed.clear()
 
     def _run(self, made: Plan) -> tuple[dict[str, object], list[str]]:
         results: dict[str, object] = {}
@@ -223,7 +263,7 @@ class World:
 
     def check(self, step: Step | None = None) -> None:
         step = step or self.history[-1]
-        again = plan(Inputs(step.online, step.before, step.choices))
+        again = plan(Inputs(step.online, step.before, step.choices, step.failed_rows))
         assert repr(again) == repr(step.plan), "the plan is not a function of its inputs"
         online = {row.id: row for row in step.online}
 
@@ -280,7 +320,7 @@ class World:
             shown = {each.name for each in step.after if not each.off}
             assert shown == {goal.name for goal in step.plan.goals if not goal.off}, shown
         if not step.failed:
-            fixpoint = plan(Inputs(step.online, step.after, step.choices_after or step.choices))
+            fixpoint = plan(Inputs(step.online, step.after, step.choices_after or step.choices, step.failed_rows))
             assert not fixpoint.ops, f"after a sync that did everything the plan still has work: {[op.id for op in fixpoint.ops]}"
             assert not any(group.remove or group.hide for group in fixpoint.groups), "after a sync files still move"
 

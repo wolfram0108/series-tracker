@@ -57,19 +57,71 @@ def test_the_example_of_the_owner_renumbered_reference_and_three_voices_go_to_ep
     assert len(world.containers) == 2  # the old file went: everything in it lives on
 
 
-def test_the_example_with_voices_of_episode_6_that_cannot_match_the_video_blocks_both_episodes():
+def test_the_example_with_a_voice_of_episode_6_that_cannot_match_the_video_leaves_that_voice_out():
     """The same, but episode 6 has its own voice-over online: the video moved there is truly episode 5, so it fails
-    alignment. Episodes 5 and 6 share the old file, so neither is applied: nothing is lost, the window shows the failure."""
+    alignment. The failure is recorded for that voice-over and that video; the plan is counted again without it, and the
+    rest is applied: nothing that was on disk is lost."""
     world = World()
     episode_with_dubs(world, 5, 4)
     world.put(3, "other5", 5, group=REF, player="cvh")
     world.renumber(1, "ref5", 6)
     world.put(2, "x6", 6, group="X", player="kodik")  # truly episode 6
-    before = dict(world.containers)
     step = world.sync("перенумерация с чужой озвучкой")
     world.check(step)
-    assert any(op.startswith("align:(1, 6)") for op in step.failed)
-    assert world.containers == before
+    assert ("align", RowId(2, "x6", "x6"), RowId(1, "ref5", "ref5")) in step.failed_rows
+    assert not step.failed and "X" not in {track.group for track in container_of(world, 6).tracks}
+
+
+def test_the_reference_was_another_episode_and_the_rule_is_fixed():
+    """The owner's case 1. The reference of episode 6 is truly episode 8: of its ten voice-overs nine fail alignment, one
+    (also truly 8) passes. The rule is fixed: the row is episode 8. Episode 8 takes that video (VK before CVH) and aligns
+    its own voice-overs to it; its old reference goes once the new container is built; episode 6 chooses another video
+    and its voice-overs are aligned anew — the failures against the wrong video do not hold for the new one."""
+    world = World()
+    world.put(1, "ref6", 6, group=REF, content=(8,))
+    world.put(3, "alt6", 6, group=REF, player="cvh")
+    for number in range(1, 11):
+        world.put(2, f"g{number}e6", 6, group=f"G{number}", player="kodik", content=(8,) if number == 1 else (6,))
+    world.put(3, "ref8", 8, group=REF, player="cvh")
+    for number in (1, 2):
+        world.put(2, f"g{number}e8", 8, group=f"G{number}", player="kodik")
+    step = world.sync("референс серии 6 — на деле серия 8")
+    world.check(step)
+    assert len([key for key in step.failed_rows if key[0] == "align"]) == 9
+    assert [track.group for track in container_of(world, 6).tracks] == ["G1"]
+    world.renumber(1, "ref6", 8)
+    step = world.sync("конструктор исправлен")
+    world.check(step)
+    assert container_of(world, 8).video.id.row_key == "ref6"
+    assert {track.group for track in container_of(world, 8).tracks} == {"G1", "G2"}
+    assert container_of(world, 6).video.id.row_key == "alt6"
+    assert {track.group for track in container_of(world, 6).tracks} == {f"G{number}" for number in range(2, 11)}
+    assert not any(each.video.id.row_key == "ref8" for each in world.containers.values())
+
+
+def test_an_episode_renumbered_on_purpose_moves_with_its_voices():
+    """The owner's case 2: episode 6 is to be episode 8, its reference and voice-overs with it. The file moves under the
+    new name with its tracks as they are; a voice-over episode 8 has besides is aligned to that video, nothing else."""
+    world = World()
+    episode_with_dubs(world, 6, 2)
+    for source, key in ((1, "ref6"), (2, "g1e6"), (2, "g2e6")):
+        world.renumber(source, key, 8)
+    world.put(2, "g3e8", 8, group="G3", player="kodik", content=(6,))
+    step = world.sync("серия 6 стала 8")
+    world.check(step)
+    assert kinds(step, (1, 8)) == ("asset", {"G1": "reuse", "G2": "reuse", "G3": "download"})
+    assert list(world.containers) == [container_of(world, 8).name]
+
+
+def test_a_download_that_fails_takes_the_next_source_in_the_same_sync():
+    world = World()
+    world.put(1, "ref1", 1, group=REF)
+    world.put(3, "alt1", 1, group=REF, player="cvh")
+    world.download_fails.add(RowId(1, "ref1", "ref1"))
+    step = world.sync("загрузка не удалась")
+    world.check(step)
+    assert step.replanned == (("download", RowId(1, "ref1", "ref1")),)
+    assert container_of(world, 1).video.id.row_key == "alt1"
 
 
 def test_a_source_that_forgets_the_reference_changes_nothing():
@@ -184,19 +236,24 @@ def test_another_video_behind_the_same_row_is_another_row():
     assert kinds(step, (1, 1)) == ("download", {"G1": "download"})
 
 
-def test_a_failed_alignment_applies_nothing_and_the_next_sync_finishes():
+def test_a_voice_that_cannot_be_aligned_to_the_new_video_keeps_its_old_file_until_it_can():
+    """A better reference comes; G2 fails alignment to it both ways (fresh download and out of the old container). The
+    new container is built without G2; the old one, which alone holds G2, stays hidden. Reset, the next sync aligns G2,
+    and the old file goes."""
     world = World()
     episode_with_dubs(world, 1, 2)
     world.put(1, "ref1hd", 1, group=REF, height=1080, video="ref1hd")
     world.align_fails.add(((1, 1), "G2"))
-    before = dict(world.containers)
     step = world.sync("сбой выравнивания")
     world.check(step)
-    assert step.failed and world.containers == before
+    assert not step.failed and [track.group for track in container_of(world, 1).tracks] == ["G1"]
+    hidden = [each for each in world.containers.values() if each.off]
+    assert len(hidden) == 1 and [track.group for track in hidden[0].tracks] == ["G1", "G2"]
     world.align_fails.clear()
-    step = world.sync("повтор")
+    world.reset_failures()
+    step = world.sync("сброс неудачных попыток")
     world.check(step)
-    assert not step.failed and container_of(world, 1).video.snapshot.height == 1080
+    assert [track.group for track in container_of(world, 1).tracks] == ["G1", "G2"] and len(world.containers) == 1
 
 
 def test_a_read_that_failed_changes_nothing():
@@ -238,7 +295,7 @@ def test_delete_of_a_track_takes_it_away_and_an_online_one_comes_back():
 
 
 ACTIONS = ("put_ref", "put_dub", "drop", "renumber", "higher", "delete_video", "delete_track", "off", "on",
-           "off_group", "read_fail", "align_fail", "put_comp", "drop_comp")
+           "off_group", "read_fail", "align_fail", "put_comp", "drop_comp", "download_fail", "reset")
 
 
 @pytest.mark.parametrize("seed", range(120))
@@ -295,5 +352,12 @@ def test_random_histories_keep_the_invariants(seed):
             world.put(4, "comp", 1, end=2, group=rng.choice((REF, "A")), height=rng.choice((1080, 2160)))
         elif action == "drop_comp":
             world.drop(4, "comp")
+        elif action == "download_fail" and keys:
+            source, key = rng.choice(keys)
+            world.download_fails.add(next((each.row.id for each in world.site.get(source, []) if each.row.id.row_key == key),
+                                          RowId(source, key, key)))
+        elif action == "reset":
+            world.download_fails.clear()
+            world.reset_failures()
         step = world.sync(f"{step_no}: {action}")
         world.check(step)
