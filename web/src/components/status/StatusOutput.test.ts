@@ -108,7 +108,8 @@ describe("StatusOutput", () => {
     await flushPromises()
     expect(w.findAll(".season-title").map((each) => each.text())).toEqual([t("output.season", { n: 1 }), t("output.season", { n: 2 })])
     expect(cards(w)).toEqual([["1", "1"], ["1", "2"], ["2", "1"]])
-    expect(w.find(".episode-card .card-ref").text()).toContain(`Vibix ${t("output.height", { height: 1080 })}`)
+    expect(w.find(".episode-card .card-ref-shown").findAll(".ref-text").map((each) => each.text()))
+      .toEqual(expect.arrayContaining(["Vibix", t("output.height", { height: 1080 })]))
     expect(w.findAll(".episode-card")[0].findAll(".track-cell").map((cell) => cell.text())).toEqual(["1", "2"])
   })
 

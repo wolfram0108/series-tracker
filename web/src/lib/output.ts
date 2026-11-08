@@ -378,6 +378,69 @@ export function outputLines(view: EpisodeView): OutputLine[] {
   return lines
 }
 
+/** The picture of a cut episode: its compilation, by player and height. The single video of its reference only showed the
+ *  service where to cut; the file holds the compilation's picture. None for an episode that is not cut. */
+export interface CutPicture {
+  sourceId: number
+  player: string
+  playerLabel: string
+  height: number | null
+}
+
+export function cutPictureOf(view: EpisodeView): CutPicture | null {
+  const compilation = view.references.find((each) => each.compilation)?.compilation
+  if (!compilation) return null
+  return {
+    sourceId: compilation.source_id, player: compilation.player,
+    playerLabel: view.labels?.[`${compilation.source_id}:${compilation.player}`] ?? compilation.player, height: compilation.height ?? null,
+  }
+}
+
+/** A part of the line of where the picture of an episode is from. */
+export type RefPart =
+  | { kind: "mark"; sourceId: number }
+  | { kind: "letter"; sourceId: number }
+  | { kind: "place"; text: string }
+  | { kind: "player"; text: string }
+  | { kind: "height"; height: number }
+
+/**
+ * The line of where the picture of an episode is from, from the least detailed to the most (priority+: a card shows the
+ * most detailed one it has room for). First the source of the reference, and for a cut episode the compilation and the
+ * height of the picture; then the height of the single video it was cut by; then the players; then the places of the
+ * sources. Empty for an episode with no reference.
+ */
+export function refVariants(view: EpisodeView, marks: Record<number, SourceMark>): RefPart[][] {
+  const line = outputLines(view).find((each) => each.kind === "reference")
+  const sourceId = view.references.find((each) => each.source_id != null)?.source_id ?? null
+  if (!line || sourceId === null) return []
+  const words = (source: number, player: string | null, height: number | null, detail: number): RefPart[] => [
+    ...(detail >= 2 && marks[source]?.place ? [{ kind: "place" as const, text: marks[source].place }] : []),
+    ...(detail >= 1 && player ? [{ kind: "player" as const, text: player }] : []),
+    ...(height === null ? [] : [{ kind: "height" as const, height }]),
+  ]
+  const reference = (detail: number): RefPart[] =>
+    [{ kind: "mark", sourceId }, ...words(sourceId, line.playerLabel ?? line.player, line.height, detail)]
+  const picture = cutPictureOf(view)
+  const variants = picture === null ? [0, 1, 2].map(reference) : [
+    [{ kind: "mark", sourceId } as RefPart, { kind: "letter", sourceId: picture.sourceId } as RefPart,
+      ...words(picture.sourceId, null, picture.height, 0)],
+    ...[0, 1, 2].map((detail) => [...reference(detail), { kind: "letter", sourceId: picture.sourceId } as RefPart,
+      ...words(picture.sourceId, picture.playerLabel, picture.height, detail)]),
+  ]
+  // A detail the episode has not (no place, no player) makes a variant like the one before it: it is not repeated.
+  return variants.filter((each, index) => index === 0 || JSON.stringify(each) !== JSON.stringify(variants[index - 1]))
+}
+
+/** Priority+: the most detailed of the variants (least detailed first) whose width fits the room; the first when none does. */
+export function widestFitting(widths: readonly number[], room: number): number {
+  let chosen = 0
+  widths.forEach((width, index) => {
+    if (width <= room) chosen = index
+  })
+  return chosen
+}
+
 // --- the window of the output: the grid, the card and the marks of the sources ----------------------------------------------
 
 /** The most cards a row of a season holds: the smallest card has room for six tracks. */

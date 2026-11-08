@@ -1,0 +1,64 @@
+// @vitest-environment jsdom
+import { describe, expect, it } from "vitest"
+import { flushPromises, mount } from "@vue/test-utils"
+import { t } from "../../../i18n"
+import type { components } from "../../../api/schema"
+import { refVariants, widestFitting, type EpisodeView, type TrackCell } from "../../../lib/output"
+import EpisodeCard from "./EpisodeCard.vue"
+
+type Reference = components["schemas"]["Reference"]
+
+// Episode 1, its reference the single video of source 7 (Vibix, 720p); cut out of compilation A of source 8 (Kodik, 2160p)
+// when `cut` is given.
+const viewOf = (cut: boolean): EpisodeView => ({
+  season: 1, episode: 1, rows: [], levers: [], dubs: [], files: [{ unique_id: "u", source_id: 7, row_key: "s1", status: "completed" }],
+  labels: { "7:vibix": "Vibix", "8:kodik": "Kodik" },
+  references: [{
+    season: 1, episode: 1, part: null, mark: "by_level", source_id: 7, row_key: "s1", player: "vibix", voice_group: "Ruchime",
+    height: 720, reason: null,
+    compilation: cut ? { key: "k", source_id: 8, row_key: "c", player: "kodik", voice_group: "Ruchime", height: 2160, start: 1, end: 3 } : null,
+  } as Reference],
+})
+const cells: TrackCell[] = [{ pos: 1, group: "Ruchime", state: "done", isReference: true }]
+const marks = { 7: { n: 1, color: 0, place: "ruchime.org" }, 8: { n: 2, color: 1, place: "vkvideo.ru @mir" } }
+const badge = { key: "k", letter: "A", color: 3 }
+const words = (parts: ReturnType<typeof refVariants>[number]) =>
+  parts.map((part) => part.kind === "mark" ? `[${part.sourceId}]` : part.kind === "letter" ? "[A]"
+    : part.kind === "height" ? `${part.height}p` : part.text).join(" ")
+
+describe("the line of where the picture of an episode is from", () => {
+  it("for a cut episode grows from the source, the compilation and the height of the picture to the players and the places", () => {
+    expect(refVariants(viewOf(true), marks).map(words)).toEqual([
+      "[7] [A] 2160p",
+      "[7] 720p [A] 2160p",
+      "[7] Vibix 720p [A] Kodik 2160p",
+      "[7] ruchime.org Vibix 720p [A] vkvideo.ru @mir Kodik 2160p",
+    ])
+  })
+
+  it("for an episode that is not cut grows from its source and height to its player and its place", () => {
+    expect(refVariants(viewOf(false), marks).map(words)).toEqual(["[7] 720p", "[7] Vibix 720p", "[7] ruchime.org Vibix 720p"])
+  })
+
+  it("takes the most detailed variant that fits the room, and the first when none does", () => {
+    expect(widestFitting([40, 80, 120, 200], 130)).toBe(2)
+    expect(widestFitting([40, 80, 120, 200], 300)).toBe(3)
+    expect(widestFitting([40, 80, 120, 200], 10)).toBe(0)
+  })
+
+  it("is shown on the card with the letter of the compilation in its colour, and no letter in the corner", async () => {
+    const w = mount(EpisodeCard, { props: { view: viewOf(true), cells, status: "ready", marks, badge } })
+    await flushPromises()  // the card has measured its room (jsdom: no width, every variant fits) and drawn the line again
+    const line = w.find(".card-ref-shown")
+    expect(line.find(".ref-letter").text()).toBe("A")
+    expect(line.findAll(".ref-text").map((each) => each.text()))
+      .toEqual(["ruchime.org", "Vibix", t("output.height", { height: 720 }), "vkvideo.ru @mir", "Kodik", t("output.height", { height: 2160 })])
+    expect(w.find(".card-badge").exists()).toBe(false)
+  })
+
+  it("keeps the letter in the corner for an episode of a compilation that is not cut", () => {
+    const w = mount(EpisodeCard, { props: { view: viewOf(false), cells, status: "ready", marks, badge } })
+    expect(w.find(".card-ref-shown .ref-letter").exists()).toBe(false)
+    expect(w.find(".card-badge").text()).toBe("A")
+  })
+})

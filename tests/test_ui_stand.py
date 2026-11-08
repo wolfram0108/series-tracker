@@ -216,7 +216,8 @@ async def test_a_higher_compilation_is_cut_into_its_episodes_and_shown_as_their_
     series_id = await synced_in_browser(ui, (1, 2, 3))
     page = ui.page
     cards = page.locator(".episode-card")
-    await expect(cards.locator(".card-badge")).to_have_count(3)
+    await expect(cards.locator(".card-ref-shown .ref-letter")).to_have_count(3)  # the letter of the compilation, its height
+    await expect(cards.locator(".card-ref-shown")).to_contain_text(["2160p"] * 3)
     view = await ui.check(series_id)
     assert sorted(asset["episode"][1] for asset in view["assets"] if asset["video"]["cut_of"]) == [1, 2, 3]
     await cards.first.click()
@@ -237,7 +238,7 @@ async def test_a_better_reference_takes_the_place_and_the_voice_over_gone_from_i
     ui.later()
     await ui.press_sync(series_id)
     first = page.locator(".episode-card[data-episode='1']")
-    await expect(first.locator(".card-where")).to_have_text(re.compile("1080"))
+    await expect(first.locator(".card-ref-shown")).to_contain_text("1080p")
     await expect(page.locator(".episode-card.is-ready")).to_have_count(2)
     await first.click()
     row = page.locator(".episode-detail tr[data-group='AnimeVost']")

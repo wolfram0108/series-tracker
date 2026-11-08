@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { t } from "../../../i18n"
 import type { Badge } from "../../../lib/compilations"
-import { outputLines, type EpisodeStatus, type EpisodeView, type SourceMark as Mark, type TrackCell } from "../../../lib/output"
+import {
+  cutPictureOf, refVariants, widestFitting, type EpisodeStatus, type EpisodeView, type SourceMark as Mark, type TrackCell,
+} from "../../../lib/output"
 import PowerSwitch from "./PowerSwitch.vue"
+import RefLine from "./RefLine.vue"
 import SourceMark from "./SourceMark.vue"
 import TrackStrip from "./TrackStrip.vue"
 
@@ -28,16 +31,33 @@ const props = defineProps<{
 }>()
 defineEmits<{ (e: "open"): void; (e: "switch", off: boolean): void }>()
 
-const references = computed(() => outputLines(props.view).filter((line) => line.kind === "reference"))
-const reference = computed(() => references.value[0] ?? null)
+const references = computed(() => props.view.references.filter((each) => each.source_id != null))
 const own = computed(() => props.view.references.some((each) => each.mark === "own" || each.mark === "other_player"))
-const where = computed(() => {
-  const line = reference.value
-  if (!line) return t("output.reference.none")
-  const height = line.height === null ? "" : ` ${t("output.height", { height: line.height })}`
-  return `${line.playerLabel ?? line.player ?? ""}${height}`
+// A cut episode names its compilation in the line of its source: the letter is not repeated in the corner.
+const cut = computed(() => cutPictureOf(props.view))
+
+// Priority+: the line of the source is the most detailed variant the card has room for. The widths come from a hidden copy of
+// every variant, the room from the inside of the card; both are measured again when the card or the variants change.
+const variants = computed(() => refVariants(props.view, props.marks))
+const inner = ref<HTMLElement | null>(null)
+const measure = ref<HTMLElement | null>(null)
+const chosen = ref(0)
+function fit(): void {
+  if (!inner.value || !measure.value) return
+  const style = getComputedStyle(inner.value)
+  const room = inner.value.clientWidth - (parseFloat(style.paddingInlineStart) || 0) - (parseFloat(style.paddingInlineEnd) || 0)
+  chosen.value = widestFitting([...measure.value.children].map((each) => (each as HTMLElement).offsetWidth), room)
+}
+let observer: ResizeObserver | null = null
+onMounted(() => {
+  fit()
+  if (typeof ResizeObserver !== "undefined" && inner.value) {
+    observer = new ResizeObserver(() => fit())
+    observer.observe(inner.value)
+  }
 })
-const sourceId = computed(() => props.view.references.find((each) => each.source_id != null)?.source_id ?? null)
+onBeforeUnmount(() => observer?.disconnect())
+watch(variants, () => void nextTick(fit))
 const label = computed(() => t("output.episode.card", { n: props.view.episode, status: t(`output.status.${props.status}`) }))
 </script>
 
@@ -48,12 +68,12 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
   >
     <!-- The whole card is the button: a press of it (or of Enter on it) comes up to the card as one click. -->
     <button type="button" class="card-hit" :aria-expanded="open" :aria-label="label" />
-    <span class="card-in">
+    <span ref="inner" class="card-in">
       <span class="card-top">
         <span class="glass card-num">{{ view.episode }}</span>
         <span v-if="file" class="glass card-name" :title="file">{{ file }}</span>
         <span class="card-corner">
-          <span v-if="badge" class="glass card-flag card-badge" :style="{ '--tone': `var(--compilation-${badge.color})` }"
+          <span v-if="badge && !cut" class="glass card-flag card-badge" :style="{ '--tone': `var(--compilation-${badge.color})` }"
                 :title="t('output.compilation.badge', { letter: badge.letter })">{{ badge.letter }}</span>
           <span v-if="status === 'error' || own" class="glass card-flag" aria-hidden="true">
             <i class="pi" :class="status === 'error' ? 'pi-exclamation-triangle' : 'pi-sliders-h'" />
@@ -67,10 +87,16 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
           </span>
         </span>
       </span>
-      <span class="glass card-ref">
-        <SourceMark :mark="sourceId === null ? null : marks[sourceId]" />
-        <span class="card-where">{{ where }}</span>
+      <span v-if="variants.length" class="glass card-ref card-ref-shown">
+        <RefLine :parts="variants[Math.min(chosen, variants.length - 1)]" :marks="marks" :badge="badge" />
         <span v-if="references.length > 1" class="card-parts">+{{ references.length - 1 }}</span>
+      </span>
+      <span v-else class="glass card-ref card-ref-shown"><SourceMark :mark="null" /><span>{{ t("output.reference.none") }}</span></span>
+      <span ref="measure" class="card-ref-measure" aria-hidden="true">
+        <span v-for="(parts, index) in variants" :key="index" class="glass card-ref">
+          <RefLine :parts="parts" :marks="marks" :badge="badge" />
+          <span v-if="references.length > 1" class="card-parts">+{{ references.length - 1 }}</span>
+        </span>
       </span>
       <span v-if="note" class="glass card-note">{{ note }}</span>
       <TrackStrip v-else class="glass card-strip" :cells="cells" />
@@ -137,7 +163,12 @@ const label = computed(() => t("output.episode.card", { n: props.view.episode, s
   padding-inline: calc((var(--card-row) - var(--figure-size)) / 2) 0.5rem; font-size: 0.8rem; font-weight: 600; white-space: nowrap;
 }
 .card-ref > .figure-mark { flex: none; }
-.card-where { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.card-ref-shown { overflow: hidden; }
+/* Every variant of the line, unseen, at its own width: what the card measures to choose the one it has room for. */
+.card-ref-measure {
+  position: absolute; inset-inline-start: 0; inset-block-start: 0; visibility: hidden; pointer-events: none;
+  display: flex; flex-direction: column; align-items: flex-start;
+}
 .card-parts { flex: none; color: var(--text-muted); font-weight: 500; }
 .card-strip { align-self: flex-start; }
 </style>
