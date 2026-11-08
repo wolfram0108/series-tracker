@@ -318,6 +318,9 @@ class PlannerModule(BaseModule):
         self._forgot: set[int] = set()  # series whose failures the user reset while their sync ran
         self._seq = 0
         super().__init__(bus)
+        # The flags of the status of each series: what its sync is at, and what it stands at (contribute, _stand).
+        self._activity: dict[int, dict[str, bool]] = {}
+        self._standing: dict[int, dict[str, bool]] = {}
 
     def register(self) -> None:
         self.handle("planner.sync", self.on_sync)
@@ -364,6 +367,12 @@ class PlannerModule(BaseModule):
             sync.containers = {each.name: each for each in assets_against(sync.containers.values(), online)}
             await sync.prepare()
             synced = await sync.sync(online, choices)
+            await self.repo.save_outcome(series_id, [
+                {"slot": list(slot) if slot else None, "kind": kind, "voice": voice, "reason": reason}
+                for slot, kind, voice, reason in synced.problems])
+            # A new file of the series: the card shows when the series last got one (catalog: last_scan_time).
+            if any(group.built for group in synced.plan.groups if group.slots in synced.applied):
+                self.send_command("catalog.series.touch_scan_time", {"series_id": series_id})
             self.log.info("сериал %d: синхронизация плана — операций %d, применено групп %d из %d, новых неудач %d",
                           series_id, len(synced.plan.ops), len(synced.applied), len(synced.plan.groups),
                           len(synced.replanned))
@@ -465,9 +474,18 @@ class PlannerModule(BaseModule):
         await storage.call(files.finish)
 
     async def on_system_started(self, env: Envelope) -> None:
+        resumed = set()
         for run in await self.repo.runs():
             self.log.info("сериал %d: синхронизация плана, прерванная остановкой, продолжается", run["series_id"])
             self._start(run["series_id"], bool(run["download"]))
+            resumed.add(run["series_id"])
+        # The status of a series lives in memory (catalog): every series with files tells it again at the start.
+        for series_id in await self.repo.series_with_assets():
+            if series_id not in resumed:
+                try:
+                    await self._publish_view(series_id)
+                except Exception:  # noqa: BLE001 - one series must not keep the others from telling theirs
+                    self.log.exception("сериал %d: статус при старте не посчитан", series_id)
 
     async def on_series_deleted(self, env: Envelope) -> None:
         series_id = int(env.payload["series_id"])
@@ -566,6 +584,21 @@ class PlannerModule(BaseModule):
     # --- the work of the run ---------------------------------------------------------------------------------
 
     def contribute(self, series_id: int, flags: dict[str, bool]) -> None:
+        """What the sync is at (downloading, aligning, packing); the card is told it with what the series stands at."""
+        self._activity.setdefault(series_id, {}).update(flags)
+        self._tell_status(series_id)
+
+    def _stand(self, series_id: int, view: dict) -> None:
+        """What the series stands at, told by its view: ready — a file of it is in the library; waiting — the plan has
+        work for the next sync; error — an attempt failed (recorded), or work of the last sync failed for the moment."""
+        work = any(goal["video"]["kind"] != "asset" or any(track["kind"] != "reuse" for track in goal["tracks"])
+                   for goal in view["episodes"]) or bool(view["commands"])
+        self._standing[series_id] = {"ready": bool(view["assets"]), "waiting": work and not view["running"],
+                                     "error": bool(view["failures"] or view["problems"])}
+        self._tell_status(series_id)
+
+    def _tell_status(self, series_id: int) -> None:
+        flags = {**self._standing.get(series_id, {}), **self._activity.get(series_id, {})}
         self.publish_event("series.status.contribution", {"source": PLANNER, "series_id": series_id, "flags": flags})
 
     def _state(self, series_id: int) -> WorkState:
@@ -594,6 +627,7 @@ class PlannerModule(BaseModule):
                             inputs=None) -> dict:
         view = PlannerView.model_validate(await self._view(series_id, sync, made, inputs)).model_dump(mode="json")
         self.publish_event("planner.series.changed", view)
+        self._stand(series_id, view)
         return view
 
     async def _view(self, series_id: int, sync: SeriesSync | None = None, made: Plan | None = None, inputs=None) -> dict:
@@ -628,6 +662,7 @@ class PlannerModule(BaseModule):
             if inputs is not None and made is not None else []
         return {**view_of(series_id, sync, made, running=running, online=online,
                           rows=inputs.online if inputs is not None else ()),
+                "problems": await self.repo.outcome(series_id),
                 "references": [each.model_dump(mode="json") for each in references]}
 
     async def on_references_get(self, env: Envelope) -> list[dict]:

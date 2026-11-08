@@ -38,6 +38,8 @@ class Synced:
     failed: tuple[str, ...]  # the steps that failed in the final run
     applied: tuple[tuple[Slot, ...], ...]
     replanned: tuple[tuple, ...]  # the attempts recorded in this sync
+    # The steps of the final run that failed for the moment, with why: (slot, kind, voice-over, reason).
+    problems: tuple[tuple, ...] = ()
 
 
 def judged(result: dict | None, *, cut: bool) -> str | None:
@@ -58,6 +60,18 @@ def video_of(goal: Goal, results: dict[str, Made]) -> Video:
     if goal.video.kind == "asset":
         return goal.video.container.video
     return results[f"video:{goal.slot}" if goal.video.kind == "download" else f"cut:{goal.slot}"].value
+
+
+def problems_of(made: Plan, passing: set[str], reasons: dict[str, str]) -> tuple[tuple, ...]:
+    """The steps that failed for the moment, as the window is told them: the episode, the kind of the step, the voice-over
+    it was for (an alignment, a download of a voice-over) and the reason."""
+    found = []
+    for op in made.ops:
+        if op.id not in passing:
+            continue
+        voice = op.subject[1].voice if isinstance(op.subject, tuple) else getattr(op.subject, "group", None)
+        found.append((op.slot, op.kind, voice, reasons.get(op.id, "")))
+    return tuple(found)
 
 
 def failures(made: Plan, results: dict[str, Made], failed: set[str], passing: set[str]) -> list[tuple]:
@@ -146,6 +160,7 @@ class SeriesSync:
         self.failed: set[tuple] = set()
         self.commands: frozenset = frozenset()
         self.passing: set[str] = set()
+        self.reasons: dict[str, str] = {}  # why a step failed for the moment, by its id
 
     # --- the steps: the subclass's ------------------------------------------------------------------------------
 
@@ -199,11 +214,12 @@ class SeriesSync:
             applied.append(group.slots)
         await self.commit(before)
         return Synced(inputs, tuple(sorted(before.values(), key=lambda each: each.name)), made, tuple(failed),
-                      tuple(applied), tuple(replanned))
+                      tuple(applied), tuple(replanned), problems_of(made, self.passing, self.reasons))
 
     async def run(self, made: Plan) -> tuple[dict[str, Made], set[str]]:
         """The graph: a step starts on the signal that every step before it ended, so independent work runs at once."""
         self.passing = set()
+        self.reasons = {}
         results: dict[str, Made] = {}
         failed: set[str] = set()
         ended = {op.id: asyncio.Event() for op in made.ops}
@@ -220,8 +236,9 @@ class SeriesSync:
                     return
                 try:
                     outcome = await self.do(op, results)
-                except Passing:
+                except Passing as passing:
                     self.passing.add(op.id)
+                    self.reasons[op.id] = str(passing.args[0]) if passing.args else ""
                     outcome = None
                 if outcome is None:
                     failed.add(op.id)

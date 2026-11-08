@@ -208,3 +208,24 @@ describe("seasonVoiceOrders", () => {
       .toEqual([{ season: 1, voices: [{ label: "B", episodes: "1" }] }])
   })
 })
+
+describe("the work that failed for the moment in the last sync", () => {
+  it("makes the voice-over of its alignment an error of its episode, with the reason, and the video of a failed download one too", () => {
+    const view = planView({
+      problems: [{ slot: [1, 1], kind: "align", voice: "B", reason: "CUDA out of memory" },
+        { slot: [1, 2], kind: "download_video", voice: null, reason: "обрыв" }],
+      episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "a.mkv"), [goalTrack("B", "download", rowRef(8, "b"))]),
+        goal([1, 2], goalVideo("download", rowRef(7, "r2"), null), [goalTrack("B", "download", rowRef(8, "c"))])],
+    })
+    const dubs = planDubs(view)
+    expect(dubs.map((dub) => [dub.episode, dub.state])).toEqual([[1, "error"], [2, "planned"]])
+    expect(dubs[0].detail).toEqual({ code: "plan_passing", params: { reason: "CUDA out of memory" } })
+    expect(planFiles(view).map((file) => file.status)).toEqual(["completed", "error"])
+  })
+
+  it("is work under way again while a sync runs", () => {
+    const view = planView({ running: true, problems: [{ slot: [1, 1], kind: "align", voice: "B", reason: "x" }],
+      episodes: [goal([1, 1], goalVideo("asset", rowRef(7, "r1"), "a.mkv"), [goalTrack("B", "realign", rowRef(8, "b"))])] })
+    expect(planDubs(view).map((dub) => dub.state)).toEqual(["running"])
+  })
+})

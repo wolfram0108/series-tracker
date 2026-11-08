@@ -41,6 +41,16 @@ const sameRow = (a: PlanRowRef | null | undefined, b: PlanRowRef | null | undefi
 
 const partOf = (slot: number[]): number | null => (slot.length > 2 ? slot[2] : null)
 
+/** The work of an episode that failed for the moment in the last sync (a crash of the service, a download cut short):
+ *  an error of the episode until the next sync makes it; no failure, it is tried again. `voice` names the voice-over of
+ *  an alignment or of a download of a voice-over, `video` the work on the video. */
+function problemOf(view: PlannerView, slot: number[], match: { voice?: string; video?: boolean }) {
+  const VIDEO = ["download_video", "cut", "ref2", "compilation"]
+  return (view.problems ?? []).find((each) => each.slot != null && each.slot.join(":") === slot.join(":")
+    && (match.video ? VIDEO.includes(each.kind) : !VIDEO.includes(each.kind) && each.voice === match.voice)) ?? null
+}
+const passing = (reason: string) => ({ code: "plan_passing", params: { reason } })
+
 /** The slot of a row and the slot of an episode name the same video: the same episode and the same part, or no part. */
 const sameSlot = (row: number[], episode: number[]): boolean =>
   row[0] === episode[0] && row[1] === episode[1] && partOf(row) === partOf(episode)
@@ -102,13 +112,15 @@ export function planDubs(view: PlannerView | undefined, orders: Record<number, r
     const [season, episode] = goal.slot
     for (const track of goal.tracks ?? []) {
       let state: DubState
+      const problem = track.kind === "reuse" || view.running ? null : problemOf(view, goal.slot, { voice: track.voice })
       if (track.kind === "reuse") state = "done"
-      else if (failed(view, "download", track.row) || failed(view, "align", track.row)) state = "error"
+      else if (failed(view, "download", track.row) || failed(view, "align", track.row) || problem) state = "error"
       else state = view.running ? (track.kind === "download" ? "downloading" : "running") : "planned"
       dubs.push({
         season, episode, part: partOf(goal.slot), voice_key: track.voice, voice_label: track.voice, state,
         source_id: track.row.source_id, player: track.player || null,
         online: onlineOf.get(JSON.stringify(track.row)) ?? (track.kind === "download" ? true : null),
+        ...(problem ? { detail: passing(problem.reason) } : {}),
       })
     }
     const taken = new Set([...(goal.tracks ?? []).map((track) => track.voice), goal.video.group ?? ""])
@@ -134,7 +146,7 @@ export function planFiles(view: PlannerView | undefined, keyOf: CompilationKey =
     const row = goal.video.row
     let status = "pending"
     if (goal.video.kind === "asset") status = "completed"
-    else if (failed(view, "download", row)) status = "error"
+    else if (failed(view, "download", row) || (!view.running && problemOf(view, goal.slot, { video: true }))) status = "error"
     else if (view.running) status = "downloading"
     const held = (view.assets ?? []).find((asset) => asset.name === goal.video.file)
     const cut = held?.video.cut_of ? { key: keyOf(held.video.cut_of) } : null

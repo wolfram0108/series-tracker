@@ -94,6 +94,17 @@ class PlanFailure(BaseModel):
     voice: str | None = None
 
 
+class PlanProblem(BaseModel):
+    """A step of the last sync that failed for the moment (a crash of the service, a download cut short): no failure, the
+    next sync tries again. `slot` is the episode (none for the download of a compilation), `voice` the voice-over of an
+    alignment or of a download of a voice-over."""
+
+    slot: list[int] | None = None
+    kind: str
+    voice: str | None = None
+    reason: str = ""
+
+
 class PlanCommand(BaseModel):
     """A command «Удалить» that waits for the next sync: of a file (`video`) or of a track in it (`track`, `dub`)."""
 
@@ -110,6 +121,8 @@ class PlannerView(BaseModel):
     assets: list[PlanAsset] = Field(default_factory=list)
     episodes: list[PlanEpisode] = Field(default_factory=list)
     failures: list[PlanFailure] = Field(default_factory=list)
+    # The steps of the last sync that failed for the moment, with why (PlanProblem).
+    problems: list[PlanProblem] = Field(default_factory=list)
     commands: list[PlanCommand] = Field(default_factory=list)
 
 

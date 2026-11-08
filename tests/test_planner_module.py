@@ -304,8 +304,10 @@ async def test_the_card_of_the_series_hears_what_the_sync_is_at_and_its_end(worl
         assert payload["source"] == "planner" and payload["series_id"] == SERIES
         flags.append(payload["flags"])
     on = {name for each in flags for name, value in each.items() if value}
-    assert on == {"downloading", "aligning", "packing"}
-    assert flags[-1] == {"downloading": False, "aligning": False, "packing": False}
+    assert on == {"downloading", "aligning", "packing", "ready"}
+    # The end: nothing under way, a file of the series in the library, no work and no error.
+    assert flags[-1] == {"downloading": False, "aligning": False, "packing": False, "ready": True, "waiting": False,
+                         "error": False}
 
 
 async def test_a_sync_written_down_is_work_of_the_series_before_the_start_takes_it_up(world):
@@ -362,3 +364,38 @@ async def test_an_alignment_the_service_crashed_in_is_written_to_the_log_with_it
         await sync(world)
     said = [record.getMessage() for record in caplog.records if record.name == "planner"]
     assert any("Сериал s01e01 G1" in each and "сбой сервиса" in each and "повторится" in each for each in said), said
+
+
+async def test_work_that_failed_for_the_moment_is_the_outcome_of_the_sync_and_an_error_of_the_series_until_it_comes_off(world):
+    """The service crashed in the alignment: no failure (the next sync tries again), but the outcome of the sync says what
+    and why, and the card of the series shows an error and the work waiting; the next sync that makes it clears both."""
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    neighbours.daemon.answers["Сериал s01e01 G1"] = "crash"
+    told = planner.bus.subscribe("series.status.contribution")
+    await sync(world)
+    view = await planner.request("planner.series.get", {"series_id": SERIES})
+    (problem,) = view["problems"]
+    assert (problem["slot"], problem["kind"], problem["voice"]) == ([1, 1], "align", "G1") and "сбой" in problem["reason"]
+    assert view["failures"] == []
+    last = None
+    while not told.queue.empty():
+        last = (await told.queue.get()).payload["flags"]
+    assert last["error"] and last["waiting"] and not last["ready"]  # the file waits for its voice-over: nothing built
+    neighbours.daemon.answers.clear()
+    await sync(world)
+    view = await planner.request("planner.series.get", {"series_id": SERIES})
+    assert view["problems"] == [] and len(view["assets"]) == 1
+    while not told.queue.empty():
+        last = (await told.queue.get()).payload["flags"]
+    assert not last["error"] and not last["waiting"] and last["ready"]
+
+
+async def test_a_sync_that_builds_a_file_tells_the_card_of_the_series_its_date(world):
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    touched = planner.bus.subscribe("catalog.series.touch_scan_time")
+    await sync(world)
+    assert (await touched.queue.get()).payload == {"series_id": SERIES}
+    await sync(world)  # nothing new: the date stays
+    assert touched.queue.empty()

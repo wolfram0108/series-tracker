@@ -237,3 +237,49 @@ async def test_the_window_open_through_a_restart_in_the_middle_of_a_sync_shows_i
     await expect(page.locator(".episode-card.is-ready")).to_have_count(2, timeout=30_000)
     await ui.shot("60-after-restart")
     await ui.check(series_id)
+
+
+async def pills(card) -> list[str]:
+    """The statuses the card of a series shows (a hidden row of every pill only measures them)."""
+    return await card.locator(".status-pill").evaluate_all(
+        "els => els.filter(e => !e.closest('.status-pills-measure')).map(e => e.innerText.trim())")
+
+
+async def test_the_card_of_the_series_tells_ready_error_and_the_date_of_its_new_files(ui):
+    """The list of series is what the user sees first: a series with files is «Готов», with the date of its new files; a
+    crash of the alignment service is «Ошибка» there and an error of the episode with its reason in the window; the sync
+    that makes the episode clears the error."""
+    ui.site.release("ref", "AniStar")
+    ui.site.release("dub", "AnimeVost")
+    for number in (1, 2):
+        ui.site.episode("ref", number, height=720)
+        ui.site.episode("dub", number, height=480)
+    ui.daemon.answers["Сериал s01e02 AnimeVost"] = "crash"
+    series_id = await ui.make_series(["ref", "dub"])
+    page = ui.page
+    card = page.locator(".series-card", has_text=SERIES)
+    assert await card.locator(".scan-time").inner_text() == "Никогда"
+    await ui.open_output()
+    await ui.press_sync(series_id)
+    await expect(page.locator(".episode-card.is-error")).to_have_count(1)
+    await expect(page.locator(".plan-problems")).to_have_text(text("output.plan.problems", count=1))
+    await page.locator(".episode-card[data-episode='2']").click()
+    row = page.locator(".episode-detail tr[data-group='AnimeVost']")
+    await expect(row.locator(".pill")).to_have_text(text("output.track.state.error"))
+    await expect(row.locator(".track-note")).to_contain_text("сбой")
+    await ui.shot("70-crash-in-window")
+    await page.get_by_role("button", name="Закрыть").last.click()
+    await expect(card.locator(".scan-time")).not_to_have_text("Никогда")  # episode 1 was built: the card has its date
+    shown = await pills(card)
+    assert text("series.status.error") in shown and text("series.status.ready") in shown, shown
+    await ui.shot("71-crash-on-the-card")
+    ui.daemon.answers.clear()
+    await ui.open_output()
+    await ui.press_sync(series_id)
+    await expect(page.locator(".episode-card.is-ready")).to_have_count(2)
+    await expect(page.locator(".plan-problems")).to_have_count(0)
+    await page.get_by_role("button", name="Закрыть").last.click()
+    await expect(card.locator(".status-pill", has_text=text("series.status.error"))).to_have_count(0)
+    shown = await pills(card)
+    assert text("series.status.ready") in shown and text("series.status.error") not in shown, shown
+    await ui.check(series_id)

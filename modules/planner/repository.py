@@ -80,6 +80,18 @@ class PlannerRepository:
     async def runs(self) -> list[dict]:
         return await self._db.fetch_all("SELECT series_id, download FROM plan_runs ORDER BY series_id")
 
+    async def save_outcome(self, series_id: int, problems: list[dict]) -> None:
+        """The outcome of the last sync: the work that failed for the moment; a sync that left none clears it."""
+        if problems:
+            await self._db.execute("INSERT INTO plan_outcomes (series_id, data) VALUES (?, ?) ON CONFLICT (series_id) "
+                                   "DO UPDATE SET data=excluded.data", (series_id, json.dumps(problems, ensure_ascii=False)))
+        else:
+            await self._db.execute("DELETE FROM plan_outcomes WHERE series_id=?", (series_id,))
+
+    async def outcome(self, series_id: int) -> list[dict]:
+        row = await self._db.fetch_one("SELECT data FROM plan_outcomes WHERE series_id=?", (series_id,))
+        return json.loads(row["data"]) if row else []
+
     async def purge(self, series_id: int) -> None:
-        await self._db.execute_many([(f"DELETE FROM {table} WHERE series_id=?", (series_id,))
-                                     for table in ("plan_assets", "plan_failures", "plan_commands", "plan_runs")])
+        await self._db.execute_many([(f"DELETE FROM {table} WHERE series_id=?", (series_id,)) for table in
+                                     ("plan_assets", "plan_failures", "plan_commands", "plan_runs", "plan_outcomes")])

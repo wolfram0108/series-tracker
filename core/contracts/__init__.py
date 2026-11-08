@@ -46,7 +46,8 @@ __all__ = ["Absence", "CompilationEpisode", "CompilationRef", "CompilationView",
            "GroupsResolveReply", "GroupsResolveRequest"]
 
 from .planner import (PlanAsset, PlanAssetTrack, PlanAssetVideo, PlanCommand, PlanDelete, PlanEpisode,  # noqa: E402
-                      PlanFailure, PlanGoalTrack, PlanGoalVideo, PlannerView, PlanRowRef, PlanSnapshot)
+                      PlanFailure, PlanGoalTrack, PlanGoalVideo, PlannerView, PlanProblem, PlanRowRef, PlanSnapshot)
 
 __all__ += ["PlanAsset", "PlanAssetTrack", "PlanAssetVideo", "PlanCommand", "PlanDelete", "PlanEpisode", "PlanFailure",
+            "PlanProblem",
             "PlanGoalTrack", "PlanGoalVideo", "PlannerView", "PlanRowRef", "PlanSnapshot"]

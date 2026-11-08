@@ -2500,6 +2500,31 @@ export interface components {
             cut_of: components["schemas"]["PlanRowRef"] | null;
         };
         /**
+         * PlanProblem
+         * @description A step of the last sync that failed for the moment (a crash of the service, a download cut short): no failure, the
+         *     next sync tries again. `slot` is the episode (none for the download of a compilation), `voice` the voice-over of an
+         *     alignment or of a download of a voice-over.
+         */
+        PlanProblem: {
+            /**
+             * Slot
+             * @default null
+             */
+            slot: number[] | null;
+            /** Kind */
+            kind: string;
+            /**
+             * Voice
+             * @default null
+             */
+            voice: string | null;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
          * PlanRowRef
          * @description A row of a source table: the source, the key of the row and the video behind it as its host numbers it.
          */
@@ -2531,6 +2556,8 @@ export interface components {
             episodes?: components["schemas"]["PlanEpisode"][];
             /** Failures */
             failures?: components["schemas"]["PlanFailure"][];
+            /** Problems */
+            problems?: components["schemas"]["PlanProblem"][];
             /** Commands */
             commands?: components["schemas"]["PlanCommand"][];
         };

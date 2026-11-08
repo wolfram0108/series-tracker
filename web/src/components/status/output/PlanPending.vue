@@ -16,6 +16,7 @@ const plan = usePlanStore()
 const view = computed(() => plan.forSeries(props.seriesId))
 const commands = computed(() => view.value?.commands ?? [])
 const failures = computed(() => view.value?.failures?.length ?? 0)
+const problems = computed(() => view.value?.problems?.length ?? 0)
 const busy = ref(false)
 
 function voiceOf(command: Command): string {
@@ -42,8 +43,9 @@ async function takeBack(command: Command): Promise<void> {
 </script>
 
 <template>
-  <div v-if="commands.length || failures" class="output-bar plan-pending">
+  <div v-if="commands.length || failures || problems" class="output-bar plan-pending">
     <span v-if="failures" class="plan-failures">{{ t("output.plan.failures", { count: failures }) }}</span>
+    <span v-if="problems" class="plan-problems">{{ t("output.plan.problems", { count: problems }) }}</span>
     <template v-if="commands.length">
       <span class="plan-pending-name">{{ t("output.plan.pending") }}</span>
       <span v-for="command in commands" :key="JSON.stringify(command)" class="plan-command">
