@@ -12,13 +12,10 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from core import BusRequestError
-from core.contracts import DubItem
-
 from .routing import admitted
 
 from .schemas import (CreatedSeries, DynamicObject, ErrorResponse, FailuresReset, OkResponse,
-                      QueueTask, SeriesCreate, SeriesObject, SeriesUpdate,
-                      VoiceDubs)
+                      QueueTask, SeriesCreate, SeriesObject, SeriesUpdate)
 
 # Общая документация веток ошибок (отдаются через JSONResponse, на них
 # response_model не распространяется).
@@ -111,18 +108,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError:
             return []
         return reply["tasks"]
-
-    @r.get("/api/series/{series_id}/voices", response_model=VoiceDubs)
-    async def series_voices(series_id: int):
-        """The voice-overs of a series by episode, each with its state; later changes come as the
-        voice_dub_update event."""
-        try:
-            reply = await gw.request("voices.dubs.get",
-                                     {"series_id": series_id})
-        except BusRequestError:
-            return {"items": []}
-        return {"items": [DubItem.model_validate(item).model_dump(mode="json")
-                          for item in reply["items"]]}
 
     @r.get("/api/series/{series_id}", response_model=SeriesObject,
            responses=_ERRORS)

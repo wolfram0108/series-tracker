@@ -169,33 +169,28 @@ async def test_the_steps_of_a_synchronization_follow_one_another_by_signals(rig)
     rig.world.rows = [rig.row("a", 1, 1)]
     await rig.run()
     await rig.world.dispatched.get()
-    await rig.world.dispatched.get()
-    # The publications a stop cut short are finished in their folder before it moves.
+    # The planner is the last step of the pass; its work is asked once it has the series.
     assert rig.world.order == [
-        f"downloads.publications.finish {rig.series_id}", f"library.relocation.apply {rig.series_id}", "downloads.fs.sync", f"sources.table.get {URL1}", "composition.recompute",
-        "composition.get", "voices.settings.get", "renaming.reprocess", f"downloads.dispatch {rig.series_id}",
-        f"voices.dispatch {rig.series_id}", f"downloads.work.get {rig.series_id}", f"voices.work.get {rig.series_id}"]
+        f"library.relocation.apply {rig.series_id}", f"sources.table.get {URL1}", "composition.recompute",
+        "composition.get", "voices.settings.get", f"planner.sync {rig.series_id}", f"planner.work.get {rig.series_id}"]
 
 
 async def test_a_synchronization_without_download_brings_the_disk_to_the_plan_and_fetches_nothing(rig):
-    """The disk follows the plan in a sync alone (И-59): the names after the plan of the same pass, then the files and the
-    voice-overs; without download nothing is dispatched to fetch."""
+    """The disk follows the plan in a sync alone (И-59): the planner is told without download, so it applies what needs
+    no work and fetches nothing."""
     rig.world.rows = [rig.row("a", 1, 1)]
     await rig.run(download=False)
     await rig.world.dispatched.get()
-    await rig.world.dispatched.get()
     order = rig.world.order
     assert order[order.index("voices.settings.get"):] == [
-        "voices.settings.get", "renaming.reprocess", f"downloads.settle {rig.series_id}", f"voices.settle {rig.series_id}",
-        f"downloads.work.get {rig.series_id}", f"voices.work.get {rig.series_id}"]
-    assert not any(each.startswith(("downloads.dispatch", "voices.dispatch")) for each in order)
+        "voices.settings.get", f"planner.sync {rig.series_id}", f"planner.work.get {rig.series_id}"]
+    assert rig.world.payloads["planner.sync"] == [{"series_id": rig.series_id, "download": False}]
 
 
 async def test_a_recount_on_an_event_changes_the_plan_alone(rig):
-    """A rule saved, an episode switched off: the plan is counted again, nothing is renamed, settled or dispatched."""
+    """A rule saved, an episode switched off: the plan is counted again, nothing is renamed and the planner is not asked."""
     rig.world.rows = [rig.row("a", 1, 1)]
     await rig.run()
-    await rig.world.dispatched.get()
     await rig.world.dispatched.get()
     rig.world.order.clear()
     rig.world.rows = [rig.row("a", 1, 2)]
@@ -203,8 +198,7 @@ async def test_a_recount_on_an_event_changes_the_plan_alone(rig):
     rig.probe.publish_event("composition.changed", {"series_id": rig.series_id, "rev": 2, "episodes": []})
     await next_event(updates)
     assert "composition.get" in rig.world.order
-    assert not any(each.startswith(("renaming", "downloads.dispatch", "downloads.settle", "voices.dispatch", "voices.settle"))
-                   for each in rig.world.order)
+    assert not any(each.startswith(("renaming", "planner.sync")) for each in rig.world.order)
 
 
 async def test_a_synchronization_waits_for_the_verdict_of_a_page_that_is_being_read(rig):
@@ -265,8 +259,7 @@ async def test_a_restart_in_the_middle_of_a_synchronization_runs_it_again_from_i
         again.world.rows = [again.row("a", 1, 1)]
         again.bus.publish(Envelope(topic="system.started", kind="event"))
         assert await asyncio.wait_for(again.world.dispatched.get(), STUCK_S)
-        assert await asyncio.wait_for(again.world.dispatched.get(), STUCK_S)
-        assert f"downloads.dispatch {again.series_id}" in again.world.order
+        assert f"planner.sync {again.series_id}" in again.world.order
         await no_task_left(again)
         assert [each.mark for each in await again.output()] == [MARK.BY_LEVEL]
     finally:
@@ -283,7 +276,7 @@ async def test_a_command_found_at_a_restart_without_the_wish_to_download_does_no
         again.world.rows = [again.row("a", 1, 1)]
         again.bus.publish(Envelope(topic="system.started", kind="event"))
         await no_task_left(again)
-        assert "downloads.dispatch" not in " ".join(again.world.order)
+        assert [each["download"] for each in again.world.payloads["planner.sync"]] == [False]
     finally:
         await again.runner.stop()
 
@@ -417,7 +410,7 @@ async def test_the_folder_a_save_planned_is_moved_first_and_the_sync_works_in_it
     rig.world.rows = [rig.row("a", 1, 1)]
     rig.world.planned_path = "/media/moved"
     await rig.run(download=False)
-    assert rig.world.order[:2] == [f"downloads.publications.finish {rig.series_id}", f"library.relocation.apply {rig.series_id}"]
+    assert rig.world.order[0] == f"library.relocation.apply {rig.series_id}"
     assert rig.query("SELECT save_path FROM series WHERE id=?", (rig.series_id,)) == [{"save_path": "/media/moved"}]
 
 
@@ -426,7 +419,7 @@ async def test_a_move_that_fails_fails_the_sync_before_anything_else_is_done(rig
     rig.world.move_error = "перемещение между разными дисками не поддерживается"
     with pytest.raises(BusRequestError, match="разными дисками"):
         await rig.run()
-    assert rig.world.order == [f"downloads.publications.finish {rig.series_id}", f"library.relocation.apply {rig.series_id}"]
+    assert rig.world.order == [f"library.relocation.apply {rig.series_id}"]
     carrier = rig.query("SELECT status FROM scan_tasks WHERE series_id=?", (rig.series_id,))
     assert [each["status"] for each in carrier] == ["error"]
 
@@ -452,22 +445,21 @@ async def test_a_scan_of_a_series_that_is_being_scanned_is_refused(rig):
     await asyncio.wait_for(run, STUCK_S)
 
 
-async def test_without_a_download_nothing_is_dispatched(rig):
+async def test_without_a_download_the_planner_is_told_not_to_download(rig):
+    """Without download the planner is told so and fetches nothing; with download the sync asks for it."""
     rig.world.rows = [rig.row("a", 1, 1)]
-    downloads, voices = rig.bus.subscribe("downloads.dispatch"), rig.bus.subscribe("voices.dispatch")
     await rig.run(download=False)
-    assert downloads.queue.empty() and voices.queue.empty()
+    assert rig.world.payloads["planner.sync"] == [{"series_id": rig.series_id, "download": False}]
     await rig.run()
-    assert (await next_event(downloads)) == {"series_id": rig.series_id}
-    assert (await next_event(voices)) == {"series_id": rig.series_id, "settings": {}}  # the settings the run took
+    assert rig.world.payloads["planner.sync"][1] == {"series_id": rig.series_id, "download": True}
 
 
-async def test_the_scheduled_pass_over_all_series_asks_for_voice_overs_too(rig):
+async def test_the_scheduled_pass_over_all_series_hands_the_sync_to_the_planner(rig):
     rig.sql("UPDATE series SET auto_scan_enabled=1 WHERE id=?", (rig.series_id,))
     rig.world.rows = [rig.row("a", 1, 1)]
-    voices = rig.bus.subscribe("voices.dispatch")
     await rig.probe.request("scan.all.start", {}, timeout=STUCK_S)
-    assert await next_event(voices) == {"series_id": rig.series_id, "settings": {}}
+    assert await asyncio.wait_for(rig.world.dispatched.get(), STUCK_S) == "planner.sync"
+    assert rig.world.payloads["planner.sync"] == [{"series_id": rig.series_id, "download": True}]
 
 
 async def test_a_restart_runs_again_a_scan_whose_command_carries_a_choice_of_an_earlier_version(rig):
@@ -489,9 +481,9 @@ async def test_a_restart_runs_again_a_scan_whose_command_carries_a_choice_of_an_
 async def test_a_pass_over_all_series_that_the_stop_of_the_module_cancels_asks_nobody_on_its_way_out(rig):
     rig.sql("UPDATE series SET auto_scan_enabled=1 WHERE id=?", (rig.series_id,))
     rig.world.rows = [rig.row("a", 1, 1)]
-    voices = rig.bus.subscribe("voices.dispatch")  # nobody answers it: the pass waits for the receiver of the work
+    planner = rig.bus.subscribe("planner.sync")  # the pass is under way when the module is stopped
     await rig.probe.request("scan.all.start", {}, timeout=STUCK_S)
-    await next_event(voices)
+    await next_event(planner)
     spy = rig.bus.subscribe("#")
     await asyncio.wait_for(rig.scan.stop(), STUCK_S)  # a stop that asks a neighbour waits for the fuse of the answer
     left = []
@@ -763,13 +755,13 @@ async def test_a_reset_of_the_setting_of_an_episode_recounts_its_reference_and_d
     await rig.run()
     assert (await rig.output())[0].mark == MARK.OWN and list(rig.media()) == ["own"]
     changes, plan = rig.bus.subscribe("scan.reference.changed"), rig.bus.subscribe("scan.plan.updated")
-    downloads, voices = rig.bus.subscribe("downloads.dispatch"), rig.bus.subscribe("voices.dispatch")
+    planner = rig.bus.subscribe("planner.sync")
     rig.world.settings = []
     rig.world.changed(rig.series_id, (1, 1))
     assert await next_change(changes) == change(rig, "auto", 1, 1)
     assert drain(plan) == [{"series_id": rig.series_id}]
     assert list(rig.media()) == ["auto"]
-    assert downloads.queue.empty() and voices.queue.empty()
+    assert planner.queue.empty()
 
 
 async def test_a_change_that_only_touches_the_summaries_is_not_acted_on(rig):
@@ -1023,7 +1015,7 @@ async def test_the_row_of_a_reference_follows_the_word_of_the_configuration_and_
 
 # --- a sync is one run: the series is busy until every work of it ends, and works by the snapshot (stage 11) ----------
 
-from core.contracts import RUN_CHANGED, WORK_STATE  # noqa: E402
+from core.contracts import RUN_CHANGED  # noqa: E402
 
 
 def runs_of(events: list[dict]) -> list[bool]:
@@ -1036,7 +1028,7 @@ def work_state(rig: "Rig", owner: str, active: bool, busy: list[list] | None = N
 
 async def test_a_sync_is_one_run_and_the_series_is_busy_until_every_work_it_gave_out_has_ended(rig):
     rig.world.rows = [rig.row("a", 1, 1)]
-    rig.world.work = {"downloads": True, "voices": True}
+    rig.world.work = {"planner": True}
     runs = rig.bus.subscribe(RUN_CHANGED)
     await rig.run()
     assert runs_of(drain(runs)) == [True]
@@ -1046,10 +1038,7 @@ async def test_a_sync_is_one_run_and_the_series_is_busy_until_every_work_it_gave
     with pytest.raises(BusRequestError, match="not_allowed"):
         await rig.run()  # a second sync of a busy series is refused too
 
-    work_state(rig, "downloads", False)
-    await rig.bus.settled()
-    assert drain(runs) == [] and rig.query("SELECT id FROM scan_tasks") != []  # voices still works
-    work_state(rig, "voices", False)
+    work_state(rig, "planner", False)
     assert runs_of([await next_event(runs)]) == [False]
     assert rig.query("SELECT id FROM scan_tasks") == []
     assert await switch(rig, 1, 1, True) == {"success": True}  # free again
@@ -1064,7 +1053,7 @@ async def test_a_run_whose_executors_have_no_work_ends_with_its_pass(rig):
 
 async def test_a_recount_an_event_asks_for_while_the_run_is_open_is_done_when_the_run_ends(rig):
     rig.world.rows = [rig.row("a", 1, 1)]
-    rig.world.work = {"downloads": True}
+    rig.world.work = {"planner": True}
     runs = rig.bus.subscribe(RUN_CHANGED)
     await rig.run()
     drain(runs)
@@ -1075,7 +1064,7 @@ async def test_a_recount_an_event_asks_for_while_the_run_is_open_is_done_when_th
     assert "composition.get" not in rig.world.order  # the plan stays the one the sync found
     assert [(each.season, each.episode) for each in await rig.output()] == [(1, 1)]
     updates = rig.bus.subscribe("scan.plan.updated")
-    work_state(rig, "downloads", False)
+    work_state(rig, "planner", False)
     await next_event(updates)
     assert [(each.season, each.episode) for each in await rig.output()] == [(1, 2)]
 
@@ -1083,206 +1072,62 @@ async def test_a_recount_an_event_asks_for_while_the_run_is_open_is_done_when_th
 async def test_a_run_found_open_after_a_restart_waits_for_its_works_again(db_path):
     first = await build(db_path)
     first.world.rows = [first.row("a", 1, 1)]
-    first.world.work = {"voices": True}
+    first.world.work = {"planner": True}
     await first.run()
     series_id, source_ids = first.series_id, first.source_ids
     await first.runner.stop()
 
     again = await build(db_path, series_id=series_id, source_ids=source_ids)
     try:
-        again.world.work = {"voices": True}
+        again.world.work = {"planner": True}
         runs = again.bus.subscribe(RUN_CHANGED)
         again.probe.publish_event("system.started", {})
         assert runs_of([await next_event(runs)]) == [True]
         with pytest.raises(BusRequestError, match="not_allowed"):
             await switch(again, 1, 1, True)
         assert "composition.get" not in again.world.order  # the pass is not done again: only the works are waited for
-        work_state(again, "voices", False)
+        work_state(again, "planner", False)
         assert runs_of([await next_event(runs)]) == [False]
         assert again.query("SELECT id FROM scan_tasks") == []
     finally:
         await again.runner.stop()
 
 
-async def test_a_run_is_not_closed_while_an_executor_has_not_answered_however_the_events_of_another_come(rig):
-    """Н-4: downloads answers «working», voices' answer is on its way; downloads ends meanwhile. The run stays open until
-    voices has answered, and its «working» keeps it open."""
+async def test_a_run_is_not_closed_while_its_executor_has_not_answered_however_its_events_come(rig):
+    """Н-4: the planner's «done» comes while its answer to the request is held: the run stays open until the answer is
+    in, and the event, counted later, is what closes it."""
     rig.world.rows = [rig.row("a", 1, 1)]
-    rig.world.work = {"downloads": True, "voices": True}
-    gate = rig.world.work_gates["voices"] = asyncio.Event()
+    rig.world.work = {"planner": True}
+    gate = rig.world.work_gates["planner"] = asyncio.Event()
     runs = rig.bus.subscribe(RUN_CHANGED)
     running = rig.start_run()
-    assert await wait_until(lambda: f"voices.work.get {rig.series_id}" in rig.world.order, rig.bus, *rig.runner.modules)
-    work_state(rig, "downloads", False)
-    # The event is taken in (the bus cannot go quiet: voices' answer is held), and still nothing closes.
-    assert await wait_until(lambda: rig.scan._working[rig.series_id].seen.get("downloads") == rig.world.seq,
+    assert await wait_until(lambda: f"planner.work.get {rig.series_id}" in rig.world.order, rig.bus, *rig.runner.modules)
+    assert runs_of(drain(runs)) == [True]
+    work_state(rig, "planner", False)
+    # The event is taken in (the bus cannot go quiet: the answer is held), and still nothing closes.
+    assert await wait_until(lambda: rig.scan._working[rig.series_id].seen.get("planner") == rig.world.seq,
                             rig.bus, *rig.runner.modules)
-    assert runs_of(drain(runs)) == [True] and rig.world.packs == 0  # voices has not answered: nothing closes
+    assert drain(runs) == [] and not running.done()
     gate.set()
     await running
-    await rig.bus.settled()
-    # Voices works: the run stays open; the episodes no work is about are packed at once, not at its end.
-    assert drain(runs) == [] and rig.world.payloads["downloads.pack"] == [{"skip": []}]
-    work_state(rig, "voices", False)
-    # Nothing was left owed: the close asks for no packing of its own.
-    assert runs_of([await next_event(runs)]) == [False] and rig.world.payloads["downloads.pack"] == [{"skip": []}]
-
-
-async def test_an_episode_whose_video_did_not_download_is_fetched_from_the_next_source_by_the_order_in_the_same_run(rig):
-    """ЭТАП_10: «если скачивание не удаётся, то выбирается плеер по следующему приоритету». The reference of the episode
-    is VK; its download fails for good; when the work ends the run does not close: it counts the references again, which
-    passes that video over, and hands the work over once more (Kodik); then it closes."""
-    import sqlite3
-    rig.world.rows = [rig.row("a", 1, 1, player="vk", height=1080), rig.row("b", 1, 1, player="kodik", height=720)]
-    rig.world.work = {"downloads": True}
-    runs = rig.bus.subscribe(RUN_CHANGED)
-    await rig.run()
-    assert [each["row_key"] for each in rig.query("SELECT row_key FROM scan_references")] == ["a"]
-    dispatched = len(rig.world.payloads["downloads.dispatch"])
-
-    with sqlite3.connect(rig.db_path) as conn:  # downloads gave up on the video: the row of the plan says so
-        conn.execute("UPDATE media_items SET status='error' WHERE row_key='a'")
-        conn.commit()
-    work_state(rig, "downloads", False)
-    assert await wait_until(lambda: len(rig.world.payloads["downloads.dispatch"]) > dispatched, rig.bus,
-                            *rig.runner.modules)
-    reference = rig.query("SELECT row_key, mark, reason FROM scan_references")[0]
-    assert reference["row_key"] == "b" and reference["mark"] == "other_player"
-    assert parse(reference["reason"])["code"] == "reference_download_failed"
-    assert runs_of(drain(runs)) == [True]  # the run goes on with the work it gave out again
-    # The failed row stays as the record of the failure; the next source has a row of its own.
-    rows = {each["row_key"]: each["status"] for each in rig.query("SELECT row_key, status FROM media_items")}
-    assert rows["a"] == "error" and "b" in rows
-
-    work_state(rig, "downloads", False)  # the next source ended its work: no new failure, the run closes
     assert runs_of([await next_event(runs)]) == [False]
-
-
-async def test_a_run_whose_failed_episode_has_no_next_source_closes_and_leaves_it_to_the_next_sync(rig):
-    import sqlite3
-    rig.world.rows = [rig.row("a", 1, 1, player="vk")]
-    rig.world.work = {"downloads": True}
-    runs = rig.bus.subscribe(RUN_CHANGED)
-    await rig.run()
-    assert runs_of(drain(runs)) == [True]
-    dispatched = len(rig.world.payloads["downloads.dispatch"])
-    with sqlite3.connect(rig.db_path) as conn:
-        conn.execute("UPDATE media_items SET status='error'")
-        conn.commit()
-    work_state(rig, "downloads", False)
-    assert runs_of([await next_event(runs)]) == [False]
-    assert len(rig.world.payloads["downloads.dispatch"]) == dispatched  # the failed source is not tried again at once
-
-
-async def test_each_episode_is_packed_as_soon_as_no_executor_holds_work_of_it_and_the_whole_series_at_the_end(rig):
-    """Each episode is a process of its own: its container is made when its last work ends, not when the last work of
-    the series does. The episodes with no work are packed once the run has heard every executor."""
-    rig.world.rows = [rig.row("a", 1, 1)]
-    rig.world.work = {"downloads": True, "voices": True}
-    rig.world.busy = {"downloads": [[1, 2, 0], [1, 3, 0]], "voices": [[1, 1, 0], [1, 2, 0]]}
-    runs = rig.bus.subscribe(RUN_CHANGED)
-    packs = lambda: rig.world.payloads.get("downloads.pack", [])  # noqa: E731
-    await rig.run()
-    assert await wait_until(lambda: len(packs()) == 1, rig.bus, *rig.runner.modules)
-    assert packs() == [{"skip": [[1, 1, 0], [1, 2, 0], [1, 3, 0]]}]
-
-    work_state(rig, "voices", True, [[1, 2, 0]])  # the voice-over of episode 1 is placed: no work of it is left
-    assert await wait_until(lambda: len(packs()) == 2, rig.bus, *rig.runner.modules)
-    assert packs()[1] == {"only": [[1, 1, 0]]}
-
-    work_state(rig, "downloads", True, [[1, 3, 0]])  # episode 2 is downloaded, its voice-over still goes: no packing
-    await rig.bus.settled()
-    assert len(packs()) == 2
-
-    work_state(rig, "voices", False)  # the voice-over of episode 2 ends: the episode is ready
-    assert await wait_until(lambda: len(packs()) == 3, rig.bus, *rig.runner.modules)
-    assert packs()[2] == {"only": [[1, 2, 0]]} and runs_of(drain(runs)) == [True]
-
-    work_state(rig, "downloads", False)  # the last work of the run ends: the episode it freed is packed by the close
-    assert runs_of([await next_event(runs)]) == [False] and packs()[3:] == [{"only": [[1, 3, 0]]}]
-
-
-async def test_a_run_with_no_work_packs_the_whole_series_once_and_a_failed_episode_is_asked_again_at_the_close(rig):
-    rig.world.rows = [rig.row("a", 1, 1)]
-    packs = lambda: rig.world.payloads.get("downloads.pack", [])  # noqa: E731
-    await rig.run()
-    await rig.bus.settled()
-    assert packs() == [{}]  # nothing was worked on: the one packing looks at every episode
-
-    rig.world.payloads.clear()
-    rig.world.work = {"voices": True}
-    rig.world.busy = {"voices": [[1, 1, 0]]}
-    rig.world.pack_reply = {"packed": 0, "failed": 1, "unchanged": 0, "waiting": 0, "failed_slots": [[1, 1, 0]]}
-    runs = rig.bus.subscribe(RUN_CHANGED)
-    await rig.run()
-    assert await wait_until(lambda: len(packs()) == 1, rig.bus, *rig.runner.modules)
-    work_state(rig, "voices", True, [])  # the episode is ready, its packing fails
-    assert await wait_until(lambda: len(packs()) == 2, rig.bus, *rig.runner.modules)
-    rig.world.pack_reply = {"packed": 1, "failed": 0, "unchanged": 0, "waiting": 0, "failed_slots": []}
-    work_state(rig, "voices", False)
-    assert False in runs_of([await next_event(runs) for _ in range(2)])
-    assert packs() == [{"skip": [[1, 1, 0]]}, {"only": [[1, 1, 0]]}, {"only": [[1, 1, 0]]}]  # asked again at the close
-
-
-async def test_an_episode_that_got_work_again_before_its_packing_waits_for_the_end_of_it(rig):
-    rig.world.rows = [rig.row("a", 1, 1)]
-    rig.world.work = {"voices": True}
-    rig.world.busy = {"voices": [[1, 1, 0]]}
-    gate = rig.world.pack_gate = asyncio.Event()  # the first packing goes on while the states below come
-    packs = lambda: rig.world.payloads.get("downloads.pack", [])  # noqa: E731
-    await rig.run()
-    assert await wait_until(lambda: len(packs()) == 1, rig.bus, *rig.runner.modules)
-    work_state(rig, "voices", True, [[1, 2, 0]])        # episode 1 freed while a packing goes: owed
-    work_state(rig, "voices", True, [[1, 1, 0], [1, 2, 0]])  # and taken again before its turn
-    # The held packing keeps the bus from going quiet: the run is waited for until it took the last state in.
-    assert await wait_until(lambda: rig.scan._working[rig.series_id].seen.get("voices") == rig.world.seq,
-                            rig.bus, *rig.runner.modules)
-    gate.set()
-    await rig.bus.settled()
-    assert packs() == [{"skip": [[1, 1, 0]]}]  # nothing of a busy episode is packed
-    work_state(rig, "voices", False)
-    assert await wait_until(lambda: len(packs()) == 2, rig.bus, *rig.runner.modules)
-    assert packs()[1] == {"only": [[1, 1, 0], [1, 2, 0]]}  # the close packs the episodes the last state freed
 
 
 async def test_an_answer_counted_before_an_event_does_not_undo_it(rig):
     """A reply and an event of one executor that cross: the state counted later is in force, so «working» counted before
     «done» does not leave the run open for ever."""
     rig.world.rows = [rig.row("a", 1, 1)]
-    rig.world.work = {"voices": True}
-    gate = rig.world.work_gates["voices"] = asyncio.Event()
+    rig.world.work = {"planner": True}
+    gate = rig.world.work_gates["planner"] = asyncio.Event()
     runs = rig.bus.subscribe(RUN_CHANGED)
     running = rig.start_run()
-    assert await wait_until(lambda: f"voices.work.get {rig.series_id}" in rig.world.order, rig.bus, *rig.runner.modules)
-    work_state(rig, "voices", False)  # counted after the reply that is on its way
+    assert await wait_until(lambda: f"planner.work.get {rig.series_id}" in rig.world.order, rig.bus, *rig.runner.modules)
+    work_state(rig, "planner", False)  # counted after the reply that is on its way
     gate.set()
     await running
     await rig.bus.settled()
     assert runs_of(drain(runs)) == [True, False]
-    assert rig.query("SELECT id FROM scan_tasks") == [] and rig.world.packs == 1
-
-
-@pytest.mark.parametrize("failure", ["failed", "error"])
-async def test_a_packing_that_fails_ends_the_run_as_failed_with_its_reason(rig, failure):
-    """Н-6: the last step of the run failing is no success: the series is free, and the error of the series says why
-    until the next sync."""
-    rig.world.rows = [rig.row("a", 1, 1)]
-    if failure == "failed":
-        rig.world.pack_reply = {"packed": 2, "failed": 1, "unchanged": 0, "waiting": 0}
-    else:
-        rig.world.pack_error = "диск недоступен"
-    runs = rig.bus.subscribe(RUN_CHANGED)
-    flags = rig.bus.subscribe("series.status.contribution")
-    await rig.run(download=False)
-    assert runs_of(drain(runs)) == [True, False]
-    carrier = rig.query("SELECT status, results_data FROM scan_tasks WHERE series_id=?", (rig.series_id,))
-    assert [each["status"] for each in carrier] == ["error"]
-    code = "sync_pack_failed" if failure == "failed" else "scan_step_failed"
-    assert parse(json.loads(carrier[0]["results_data"])["error"])["code"] == code
-    assert [each["flags"]["error"] for each in drain(flags) if each["source"] == "scan"][-1] is True
-    rig.world.pack_reply, rig.world.pack_error = {"packed": 0, "failed": 0, "unchanged": 0, "waiting": 0}, None
-    await rig.run(download=False)
-    assert rig.query("SELECT * FROM scan_tasks WHERE series_id=?", (rig.series_id,)) == []
+    assert rig.query("SELECT id FROM scan_tasks") == []
 
 
 async def test_a_change_admitted_before_a_sync_holds_its_opening_and_none_is_admitted_after(rig):
@@ -1311,7 +1156,7 @@ async def test_a_run_works_by_the_configuration_it_took_when_it_started(rig):
     rig.world.rows = [rig.row("a", 1, 1)]
     rig.world.profiles_export = {1: [{"id": 1, "name": "серия", "conditions": []}]}
     rig.world.voices_export = {"voices.groups": '{"ПВА": ["ПВА ШОУ"]}'}
-    rig.world.work = {"downloads": True}
+    rig.world.work = {"planner": True}
     await rig.run()
     stored = json.loads(rig.query("SELECT results_data FROM scan_tasks")[0]["results_data"])["snapshot"]
     assert stored == {"profiles": {"1": [{"id": 1, "name": "серия", "conditions": []}]},
@@ -1321,10 +1166,9 @@ async def test_a_run_works_by_the_configuration_it_took_when_it_started(rig):
     [recount] = rig.world.payloads["composition.recompute"]
     assert recount["snapshot"] == stored
     assert rig.world.payloads["voices.settings.get"][-1] == {"values": stored["voices"]}
-    assert rig.world.payloads["voices.dispatch"][-1]["settings"] == stored["voices"]
-    work_state(rig, "downloads", False)
+    work_state(rig, "planner", False)
     await rig.bus.settled()
-    rig.world.work["downloads"] = True
+    rig.world.work["planner"] = True
     await rig.run()
     again = json.loads(rig.query("SELECT results_data FROM scan_tasks")[0]["results_data"])["snapshot"]
     assert again["profiles"] == {"1": [{"id": 1, "name": "другое", "conditions": []}]} and again["voices"] == {}
@@ -1336,7 +1180,7 @@ async def test_the_run_is_told_with_its_snapshot_and_the_open_runs_are_given_wit
     their snapshots from the commands, before its works."""
     rig.world.rows = [rig.row("a", 1, 1)]
     rig.world.voices_export = {"voices.source_priority": '["cvh", "kodik"]'}
-    rig.world.work = {"downloads": True}
+    rig.world.work = {"planner": True}
     runs = rig.bus.subscribe(RUN_CHANGED)
     await rig.run()
     told = []
@@ -1351,7 +1195,7 @@ async def test_the_run_is_told_with_its_snapshot_and_the_open_runs_are_given_wit
     # The announcements are numbered in order, and the reading is as of the last of them.
     assert [each["seq"] for each in told] == sorted({each["seq"] for each in told}) and told[0]["seq"] > 0
     assert (await rig.probe.request("scan.runs.get", {}, timeout=5))["as_of"] == told[-1]["seq"]
-    work_state(rig, "downloads", False)
+    work_state(rig, "planner", False)
     await rig.bus.settled()
     closed = (await rig.probe.request("scan.runs.get", {}, timeout=5))
     assert closed["runs"] == [] and closed["as_of"] > told[-1]["seq"]
@@ -1504,7 +1348,7 @@ async def test_a_write_nested_under_the_handler_of_an_admitted_request_holds_the
     monkeypatch.setattr(catalog.repo, "update_series", held_update)
     monkeypatch.setattr(rig.scan, "request", short_fuse)
     rig.world.rows = [rig.row("a", 1, 1)]
-    rig.world.work = {"downloads": True}
+    rig.world.work = {"planner": True}
 
     async def edit():
         async with admitted(rig.probe, rig.series_id):

@@ -57,14 +57,14 @@ _QUICK = (
     "torrents.db.add", "torrents.db.files.for_series", "torrents.db.history",
     "torrents.queue.get",
     "trackerauth.credentials.get", "trackerauth.credentials.set",
-    "voices.dubs.get",
+    "planner.work.get", "planner.delete", "planner.delete.cancel", "planner.failures.forget",
 )
 
 _FUSES: dict[str, float] = {
     **dict.fromkeys(_QUICK, QUICK_S),
     **dict.fromkeys(("conform.submit", "rules.format_torrent_file", "slicing.chapters.mark", "slicing.source.delete",
                      "slicing.task.create", "torrents.db.active", "sources.table.get"), SERVICE_S),
-    **dict.fromkeys(("downloads.fs.sync", "downloads.items.rename", "slicing.verify", "sources.video.stream", "torrents.add",
+    **dict.fromkeys(("slicing.verify", "sources.video.stream", "torrents.add",
                      "torrents.db.deactivate_all", "torrents.drive_incomplete", "torrents.fs.verify"), HEAVY_S),
     "sources.torrent_file.get": FETCH_S,
     **dict.fromkeys(("renaming.preview", "renaming.process_torrent", "rules.apply", "slicing.chapters.filtered",
@@ -73,11 +73,8 @@ _FUSES: dict[str, float] = {
     "torrents.composition": 900.0,
     # The fetch of a page of a service with credentials; it covers an anti-bot challenge solved by a browser (up to 45 s).
     "trackerauth.fetch": 150.0,
-    **dict.fromkeys(("downloads.dispatch", "voices.dispatch", "downloads.settle", "voices.settle"), HANDOVER_S),
-    # The user's word to do voice-overs again: records reset, and their downloads admitted.
-    **dict.fromkeys(("voices.dubs.retry", "voices.dubs.redo"), STANDARD_S),
-    # What an executor has of a series, and the tracks of a series and their packing: reads and writes of records.
-    **dict.fromkeys(("downloads.work.get", "voices.work.get", "voices.tracks.get", "voices.tracks.packed"), QUICK_S),
+    # The sync of the plan of a series is written down and started: its work is told by work.series.state.
+    "planner.sync": QUICK_S,
     # A recount asks the rules once for each source of the series: the fuse of the table is for one source.
     "composition.recompute": RULES_S,
     # A preview reads the table, applies the profile to its lines and asks for the groups of the names, one after another.
@@ -91,7 +88,9 @@ _NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
     "conform.settings.get": (QUICK_S, ("settings.value.get",) * 3),
     "conform.settings.set": (QUICK_S, ("settings.value.get",) * 3 + ("settings.values.set_many",)),
     "composition.queues.get": (QUICK_S, ("voices.settings.get",)),
-    "downloads.reference.refetch": (QUICK_S, ("catalog.series.get",)),
+    # The view of the plan reads the table of the series; the files of a series also look for a journal in its folder.
+    "planner.series.get": (QUICK_S, ()),
+    "planner.files.get": (QUICK_S + STANDARD_S, ("catalog.series.get",)),
     "conform.workspace": (QUICK_S, ("settings.value.get",)),
     "rules.profiles.delete": (QUICK_S, ("catalog.sources.by_profile",) * 2),
     "scan.edit.begin": (QUICK_S, ("catalog.series.get",)),
@@ -103,11 +102,8 @@ _NESTED: dict[str, tuple[float, tuple[str, ...]]] = {
 }
 
 # The topics whose request has no fuse of its own (see the top).
-# The packing of a series is one build for each episode, each with a fuse of its own (core.container.BUILD_TIMEOUT_S);
-# the move of a series is one move for each file, each with its own (core.storage.MOVE_TIMEOUT_S); the finish of the
-# publications a stop cut short is a move and a removal of each of their files, each with the fuse of the storage.
-_UNBOUNDED = frozenset({"scan.series.run", "scan.series.prepare", "downloads.pack", "library.relocation.apply",
-                        "downloads.publications.finish"})
+# The move of a series is one move for each file, each with its own (core.storage.MOVE_TIMEOUT_S).
+_UNBOUNDED = frozenset({"scan.series.run", "scan.series.prepare", "library.relocation.apply"})
 
 UNBOUNDED = None
 

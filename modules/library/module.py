@@ -194,11 +194,8 @@ class LibraryModule(BaseModule):
 
     async def _move_vk_files(self, series_id: int, old_base: str,
                              new_base: str) -> None:
-        items = await self.request("scan.media.list",
-                                   {"series_id": series_id})
-        paths = [i["final_filename"] for i in items if i.get("final_filename")]
-        for child in await self._sliced_files(series_id):
-            paths.append(child["file_path"])
+        # The files of a video series are the asset of its plan (modules/planner).
+        paths = list((await self.request("planner.files.get", {"series_id": series_id}))["names"])
         for rel in paths:
             await storage.call(self._move_one, old_base, new_base, rel, timeout=storage.MOVE_TIMEOUT_S,
                                owns=(os.path.join(old_base, rel), os.path.join(new_base, rel)))

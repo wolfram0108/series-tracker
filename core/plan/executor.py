@@ -40,6 +40,20 @@ class Synced:
     replanned: tuple[tuple, ...]  # the attempts recorded in this sync
 
 
+def judged(result: dict | None, *, cut: bool) -> str | None:
+    """The file a job of the alignment service made, by the service's own verdict: an aligned track is taken by `ok` (what
+    it found critical is a mark, the track is in step); a cut needs `ok` and nothing critical. A pair the service looked at
+    and turned down (`refused`) is a failure (None, recorded); any other end — a crash in the service, no result — said
+    nothing of the pair and is a failure of the moment (`Passing`)."""
+    if result is None:
+        raise Passing
+    if result.get("ok") and result.get("out_path"):
+        return None if cut and result.get("critical") else result["out_path"]
+    if result.get("refused"):
+        return None
+    raise Passing
+
+
 def video_of(goal: Goal, results: dict[str, Made]) -> Video:
     if goal.video.kind == "asset":
         return goal.video.container.video

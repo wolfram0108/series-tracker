@@ -173,9 +173,16 @@ async def world(tmp_path):
 
 
 async def sync(world, download: bool = True) -> dict:
+    """One sync; the view it answers is the plan the sync froze, as the window is told when the sync starts (a sync
+    without download tells nothing: the view is the plan as the tables give it)."""
     neighbours, planner, _ = world
+    told = planner.bus.subscribe("planner.series.changed")
     assert (await planner.request("planner.sync", {"series_id": SERIES, "download": download}))["accepted"]
     await settle(planner.bus, planner, neighbours, seconds=120)
+    while not told.queue.empty():
+        view = (await told.queue.get()).payload
+        if view["running"]:
+            return view
     return await planner.request("planner.series.get", {"series_id": SERIES})
 
 
@@ -214,8 +221,9 @@ async def test_an_episode_is_downloaded_aligned_and_built_by_the_service(world):
     view = await sync(world)
     stored = await check(world)
     assert len(stored) == 1 and [track["snapshot"]["group"] for track in next(iter(stored.values()))["tracks"]] == ["G1", "G2"]
-    assert not view["failures"] and not view["running"]
-    assert {each["kind"] for each in view["episodes"][0]["tracks"]} == {"download"}
+    assert not view["failures"] and {each["kind"] for each in view["episodes"][0]["tracks"]} == {"download"}
+    now = await world[1].request("planner.series.get", {"series_id": SERIES})
+    assert not now["running"] and {each["kind"] for each in now["episodes"][0]["tracks"]} == {"reuse"}
 
 
 async def test_a_better_reference_realigns_the_offline_voice_out_of_the_old_file(world):

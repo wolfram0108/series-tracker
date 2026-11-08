@@ -17,10 +17,10 @@ Queries:
       `stale` — the read of the page failed and the last complete table stays in force; `skipped` — it failed and there is no table.
       A scan of a series that is being scanned is refused by the table of what is allowed (`not_allowed`, the state
       `scanning`; finding 27) with the code every module refuses by. The steps of a video series
-      are tied by signals: downloads.fs.sync, sources.table.get for every source at once and
-      the wait for sources.table.ready / .failed of its page, composition.recompute (its answer means the layout is
-      counted from these tables), composition.get with voices.settings.get, the choice and the plan, and with
-      download (the default) downloads.dispatch and voices.dispatch. A failed step is the one signal of failure:
+      are tied by signals: sources.table.get for every source at once and the wait for sources.table.ready / .failed
+      of its page, composition.recompute (its answer means the layout is counted from these tables), composition.get
+      with voices.settings.get and the choice of the references, then planner.sync {download}: the planner counts the
+      plan of the series and carries it out (modules/planner). A failed step is the one signal of failure:
       the error carrier (scan_tasks.status='error') holds its reason. The wait for a table has a safeguard
       (`TABLE_WAIT_S`): when it runs out the source counts as failed, reason `table_wait_timeout`.
   scan.series.prepare {series_id} → the summary of a torrent scan without a download: the torrent is added to
@@ -42,9 +42,8 @@ Commands:
       schedule from the settings).
 
 Events (outgoing):
-  scan.plan.updated {series_id} — the plan was counted again; it changes nothing on the disk (downloads counts the
-      statuses of the series on it). The disk follows the plan in a sync alone: renaming.reprocess, then
-      downloads.dispatch / voices.dispatch (with download) or downloads.settle / voices.settle (without).
+  scan.plan.updated {series_id} — the references were counted again; it changes nothing on the disk. The disk
+      follows the plan of the series in a sync alone (planner.sync).
   scan.reference.changed (ReferenceChanged: series_id and the whole Reference) — the reference or the mark of a slot
       differs from the stored one (a slot whose row left the layout reports `none` with the reason `reference_none`; a
       slot the user switched off reports `off` with the reason `reference_off`); sent
@@ -54,13 +53,10 @@ Events (outgoing):
   series.status.contribution — the fold of scanning/error (R-11); the carrier of the error is scan_tasks.status='error'.
   series.purged {series_id, owner} — report: the tables of the series are cleaned.
   scan.run.changed (RunChanged) — a sync of the series opened or closed its run: open from the start of the sync until
-      every executor (downloads, voices) has no work of the series left (events work.series.state, queries
-      <owner>.work.get). While it is open the series is busy (Action.EDIT and SYNC are refused, series.busy.contribution
-      {source: sync}) and its plan stays as the sync found it: a recount an event asks for is done when the run closes.
-      An open run is kept in scan_tasks (phase=working) and taken up again after a restart. Each episode is a process of its
-      own: the run asks downloads.pack for the episodes no work is about once it has heard every executor, then for each
-      episode as soon as no executor holds work of it (WorkState.busy); when it closes, for what is still owed (the episodes
-      whose packing failed, or the whole series when the run packed nothing).
+      the planner has no work of the series left (events work.series.state, query planner.work.get). While it is open
+      the series is busy (Action.EDIT and SYNC are refused, series.busy.contribution {source: sync}) and its plan stays
+      as the sync found it: a recount an event asks for is done when the run closes. An open run is kept in scan_tasks
+      (phase=working) and taken up again after a restart.
   scan.series.progress (SeriesReadProgress) — how far the read of a page is that a scan of the series waits for, per
       source, with the rate; `active` false ends it (read, failed or given up). The card of the series shows it.
 
@@ -74,8 +70,8 @@ Events (incoming):
   torrents.queue.changed {count} — the pipeline is empty: after a full pass the next scan is set when count=0.
 
 Neighbours (all over the bus): catalog.series.get / .list (kind, sources), composition.get / .recompute,
-voices.settings.get (the order of players), sources.table.get, downloads.dispatch / .settle / .fs.sync / .queue.get,
-voices.dispatch / .settle, renaming.reprocess. Scan asks nothing of composition at start: its state is its own database.
+voices.settings.get (the order of players), sources.table.get, downloads.queue.get, planner.sync / .work.get,
+renaming.reprocess (a torrent series). Scan asks nothing of composition at start: its state is its own database.
 
 Resumability: the plan of replacements of a torrent scan is in scan_tasks BEFORE it is carried out; additions are
 idempotent (local infohash, R-2: adding again = existed); on_start goes on with the unfinished tasks. A video series
@@ -145,6 +141,27 @@ class _RunWork:
     def done(self) -> bool:
         return not self.polling and not self.working
 
+
+
+@dataclass(frozen=True)
+class Refreshed:
+    """What a count of the references and the plan came to."""
+
+    in_plan: int
+    references: list[dict]
+    plan_changed: bool
+
+
+def _sources_of(series: dict) -> list[SeriesSource]:
+    return [SeriesSource.model_validate(each) for each in series.get("sources", [])]
+
+
+def _torrent_source(series: dict) -> SeriesSource:
+    """The source of a torrent series: the address and the profile of a torrent live in the source (Д-38)."""
+    found = torrent_source(series)
+    if found is None:
+        raise ScanError(f"у сериала «{series.get('name')}» нет торрент-источника")
+    return SeriesSource.model_validate(found)
 
 
 class ScanModule(BaseModule):
@@ -678,15 +695,7 @@ class ScanModule(BaseModule):
 
     async def _relocate(self, series: dict) -> dict:
         """The first step of a sync: the move of the folder a save planned (И-59); everything after it works in the new
-        folder. A failed move fails the sync, and its plan waits for the next one. Before it the publications of
-        containers a stop cut short are finished in their folder: a move takes only the files the rows hold, so a journal
-        left for later would look for its leftovers in the wrong one."""
-        if series.get("kind") == "video":
-            try:
-                await self.request("downloads.publications.finish", {"series_id": series["id"]})
-            except BusRequestError as exc:
-                if NO_HANDLER not in str(exc):
-                    raise
+        folder. A failed move fails the sync, and its plan waits for the next one."""
         try:
             reply = await self.request("library.relocation.apply", {"series_id": series["id"]})
         except BusRequestError as exc:
@@ -716,12 +725,6 @@ class ScanModule(BaseModule):
 
         Each step starts on the signal that the one before it ended, and any step that fails fails the scan."""
         series_id = series["id"]
-        # Disk check before the scan: a downloaded file that is gone is reset from completed to pending so that dispatch
-        # fetches it again; an unreachable path is absorbed inside downloads.on_fs_sync.
-        try:
-            await self.request("downloads.fs.sync", {"series_id": series_id})
-        except BusRequestError as exc:
-            self.log.warning("сверка диска перед видео-сканом пропущена: %s", exc)
         before = await self._fingerprint(series_id)
         self._alive(series_id)
         tables = await sync.sync_tables(_sources_of(series), self.request, self._signals, self._table_wait_s)

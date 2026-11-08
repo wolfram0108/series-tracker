@@ -31,6 +31,7 @@ class FakeNeighbours(BaseModule):
 
     def register(self):
         self.handle("scan.media.list", self.on_media)
+        self.handle("planner.files.get", self.on_files)
         self.handle("slicing.files.list", self.on_sliced)
         self.handle("torrents.db.active", self.on_active)
         self.handle("torrents.set_location", self.on_set_location)
@@ -38,6 +39,11 @@ class FakeNeighbours(BaseModule):
 
     async def on_media(self, env):
         return self.media_items
+
+    async def on_files(self, env):
+        # The asset of the plan of a video series: its files, as the planner holds them.
+        return {"names": [each["final_filename"] for each in self.media_items if each.get("final_filename")]
+                + [each["file_path"] for each in self.sliced]}
 
     async def on_sliced(self, env):
         return self.sliced

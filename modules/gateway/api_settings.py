@@ -40,6 +40,7 @@ LOGGING_MODULES = {
         {"name": "scan", "description": "Синхронизация и скан: планировщик, референсы, план загрузки."},
         {"name": "torrents", "description": "qBittorrent и торрент-конвейер (стадии обработки)."},
         {"name": "downloads", "description": "Загрузка видео (yt-dlp), очередь и прогресс."},
+        {"name": "planner", "description": "План видео-сериала: актив, загрузки, выравнивание, сборка контейнеров."},
         {"name": "slicing", "description": "Нарезка компиляций ffmpeg по главам."},
         {"name": "renaming", "description": "Переименование файлов и переобработка имён."},
         {"name": "library", "description": "Медиатека: каталоги и перемещение сериалов."},

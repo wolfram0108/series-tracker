@@ -59,8 +59,9 @@ class World(SeriesSync):
     download_fails: set[RowId] = field(default_factory=set)
     failed: set[tuple] = field(default_factory=set)  # attempts that failed: the planner passes over them
     align_fails: set[tuple[Slot, str]] = field(default_factory=set)
-    # The answers of the service by (episode, voice-over): "mismatch" and "critical" fail and are recorded, "suspect" is
-    # taken, "lost" (the answer never came) fails for this sync only. A cut by episode: "critical" or "lost".
+    # The answers of the service by (episode, voice-over): "mismatch" fails and is recorded; "suspect" and "critical" are
+    # taken (marks of the track); "crash" (the service judged nothing) and "lost" (the answer never came) fail for this sync
+    # only. A cut by episode: "critical" (no cut: recorded) or "lost".
     answers: dict[tuple[Slot, str], str] = field(default_factory=dict)
     cut_answers: dict[Slot, str] = field(default_factory=dict)
     transient: set[RowId] = field(default_factory=set)  # downloads that fail for this sync only (a network error)
@@ -199,9 +200,9 @@ class World(SeriesSync):
                    else self.content[way.container.video.key] if way.own
                    else self.content[("track", way.container.name, way.dub)])
             answer = self.answers.get((goal.slot, way.voice))
-            if answer == "lost":
+            if answer in ("lost", "crash"):
                 raise Passing
-            if (goal.slot, way.voice) in self.align_fails or answer in ("mismatch", "critical") or \
+            if (goal.slot, way.voice) in self.align_fails or answer == "mismatch" or \
                     not set(self.content[video.key]) <= set(dub):
                 return None  # a compilation as a voice-over holds the episode among others (Д-19)
             return Made(Track(way.dub, way.snapshot, goal.slot, video.timeline), self.content[video.key])
@@ -447,7 +448,7 @@ class Chaos:
         elif action == "transient" and rows:
             world.transient = {rng.choice(rows)[1].row.id}
         elif action == "answer":
-            world.answers[((season, episode), rng.choice(self.groups))] = rng.choice(("mismatch", "critical", "suspect", "lost"))
+            world.answers[((season, episode), rng.choice(self.groups))] = rng.choice(("mismatch", "critical", "suspect", "crash", "lost"))
         elif action == "cut_answer":
             world.cut_answers[(season, episode)] = rng.choice(("critical", "lost"))
         elif action == "lose_file" and world.containers:

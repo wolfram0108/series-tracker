@@ -7,7 +7,6 @@ import sqlite3
 import pytest
 
 from core.db import Database
-from modules.downloads.repository import DownloadsRepository
 from modules.scan.repository import ScanRepository
 from modules.torrents.repository import TorrentsRepository
 from series_factory import insert_series
@@ -71,7 +70,5 @@ async def test_torrent_downloaded_count_excludes_specials(db_path):
 @pytest.mark.asyncio
 async def test_vk_downloaded_count_excludes_specials(db_path):
     scan = ScanRepository(Database(db_path))
-    downloads = DownloadsRepository(Database(db_path))
     # media_items с final_filename: s1×2, s2×1, s0×1 (спешел) → спешел мимо → 3
     assert (await scan.downloaded_counts())[1] == 3
-    assert await downloads.downloaded_count(1) == 3

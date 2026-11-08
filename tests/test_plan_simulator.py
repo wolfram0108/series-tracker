@@ -370,10 +370,11 @@ def test_a_file_lost_from_disk_is_made_again_and_an_offline_voice_in_it_is_gone(
     assert [track.group for track in container_of(world, 1).tracks] == ["G1"]
 
 
-@pytest.mark.parametrize("answer", ["suspect", "critical", "mismatch", "lost"])
+@pytest.mark.parametrize("answer", ["suspect", "critical", "mismatch", "crash", "lost"])
 def test_every_answer_of_the_alignment(answer):
-    """suspect is taken; critical and mismatch are recorded and the voice-over is left out (the old file keeps its track);
-    a lost answer is tried again at the next sync."""
+    """suspect and critical are taken (marks of the track: it is in step); mismatch, the service's verdict, is recorded and
+    the voice-over is left out (the old file keeps its track); a crash of the service and a lost answer judged nothing and
+    are tried again at the next sync."""
     world = World()
     episode_with_dubs(world, 1, 2)
     world.put(1, "ref1hd", 1, group=REF, height=1080, video="ref1hd")
@@ -381,10 +382,11 @@ def test_every_answer_of_the_alignment(answer):
     step = world.sync(f"ответ сервиса: {answer}")
     world.check(step)
     shown = [track.group for track in container_of(world, 1).tracks]
-    if answer == "suspect":
+    if answer in ("suspect", "critical"):
         assert shown == ["G1", "G2"] and len(world.containers) == 1
-    elif answer == "lost":
+    elif answer in ("lost", "crash"):
         assert container_of(world, 1).video.snapshot.height == 720  # nothing applied: the group waits for the answer
+        assert not step.replanned
         world.answers.clear()
         world.check(world.sync("ответ пришёл"))
         assert [track.group for track in container_of(world, 1).tracks] == ["G1", "G2"]

@@ -1,8 +1,7 @@
 """Fake neighbours of the scan module for a series of kind `video`, each answering as its contract says.
 
 One module `World` stands for everything scan asks or tells: the tables of the pages (`sources`), the layout
-(`composition`), the order of players (`voices`), the queue of downloads and the commands to the downloads and the
-voice-overs. It records the order in which scan used it, so that a test proves the steps follow one another by signals,
+(`composition`), the order of players (`voices`), the queue of downloads and the planner that does the work of a sync. It records the order in which scan used it, so that a test proves the steps follow one another by signals,
 and it ends a read of a page only when the test says so, so that a test waits for events and never for time.
 """
 import asyncio
@@ -87,7 +86,6 @@ class World(BaseModule):
         self.recompute_error: str | None = None
         self.queue_tasks: list[dict] = []
         self.queue_error = False
-        self.fs_sync_calls = 0
         self.reprocess_calls = 0
         self.settings_values = {"scan_interval_minutes": "60"}
         # Whether each executor has work of the series when a run asks (`<owner>.work.get`); none by default.
@@ -98,12 +96,6 @@ class World(BaseModule):
         self.seq = 0
         # An executor whose reply to `<owner>.work.get` waits for this gate (the answer is counted when it was asked).
         self.work_gates: dict[str, asyncio.Event] = {}
-        # What a packing of a run answers, or its failure; every request is noted with its scope (`payloads`).
-        self.pack_reply: dict = {"packed": 0, "failed": 0, "unchanged": 0, "waiting": 0}
-        self.pack_error: str | None = None
-        self.packs = 0
-        # A packing that waits for this gate after it is noted (a test holds one while states come).
-        self.pack_gate: asyncio.Event | None = None
         # The stored configuration the owners give a run (RunSnapshot), and what every step of the run was given.
         self.profiles_export: dict = {}
         self.voices_export: dict = {}
@@ -113,7 +105,7 @@ class World(BaseModule):
         self.move_error: str | None = None
         # One token per request for a table: the signal that scan has asked.
         self.asked: asyncio.Queue[str] = asyncio.Queue()
-        # One token per command to download or to take the voice-overs: the signal that scan has sent it.
+        # One token per sync handed to the planner: the signal that scan has sent it.
         self.dispatched: asyncio.Queue[str] = asyncio.Queue()
         super().__init__(bus)
 
@@ -121,19 +113,12 @@ class World(BaseModule):
         h = self.handle
         h("renaming.reprocess", self.on_reprocess)
         h("library.relocation.apply", self.on_relocation_apply)
-        h("downloads.publications.finish", self.on_publications_finish)
-        h("downloads.fs.sync", self.on_fs_sync)
+        h("planner.sync", self.on_planner_sync)
+        h("planner.work.get", self.on_work_get)
         h("downloads.queue.get", self.on_queue)
-        h("downloads.dispatch", self.on_dispatch)
-        h("voices.dispatch", self.on_dispatch)
-        h("downloads.settle", self.on_dispatch)
-        h("voices.settle", self.on_dispatch)
-        h("downloads.work.get", self.on_work_get)
-        h("voices.work.get", self.on_work_get)
         h("voices.settings.get", self.on_voice_settings)
         h("composition.get", self.on_layout)
         h("composition.recompute", self.on_recompute)
-        h("downloads.pack", self.on_pack)
         h("rules.profiles.export", self.on_profiles_export)
         h("voices.settings.export", self.on_voices_export)
         h("sources.table.get", self.on_table)
@@ -148,10 +133,6 @@ class World(BaseModule):
         self.order.append("renaming.reprocess")
         return {"ok": True}
 
-    async def on_publications_finish(self, env) -> dict:
-        self.order.append(f"downloads.publications.finish {env.payload['series_id']}")
-        return {"owed": False}
-
     async def on_relocation_apply(self, env) -> dict:
         self.order.append(f"library.relocation.apply {env.payload['series_id']}")
         if self.move_error:
@@ -163,20 +144,17 @@ class World(BaseModule):
         self.planned_path = None
         return {"moved": True}
 
-    async def on_fs_sync(self, env) -> dict:
-        self.fs_sync_calls += 1
-        self.order.append("downloads.fs.sync")
-        return {"adopted": 0, "lost": 0}
-
     async def on_queue(self, env) -> dict:
         if self.queue_error:
             raise RuntimeError("очередь недоступна")
         return {"tasks": self.queue_tasks, "count": len(self.queue_tasks)}
 
-    async def on_dispatch(self, env) -> None:
+    async def on_planner_sync(self, env) -> dict:
+        """The planner writes the sync down and starts it; its work is told by work.series.state."""
         self.order.append(f"{env.topic} {env.payload['series_id']}")
         self.payloads.setdefault(env.topic, []).append(dict(env.payload))
         self.dispatched.put_nowait(env.topic)
+        return {"accepted": True}
 
     async def on_work_get(self, env) -> dict:
         owner = env.topic.split(".")[0]
@@ -195,15 +173,6 @@ class World(BaseModule):
         self.busy[owner] = busy if busy is not None else []
         self.publish_event("work.series.state", {"owner": owner, "series_id": series_id, "active": active,
                                                  "busy": self.busy[owner], "seq": self.seq})
-
-    async def on_pack(self, env) -> dict:
-        self.packs += 1
-        self.payloads.setdefault(env.topic, []).append({key: value for key, value in env.payload.items() if key != "series_id"})
-        if self.pack_gate is not None:
-            await self.pack_gate.wait()
-        if self.pack_error is not None:
-            raise RuntimeError(self.pack_error)
-        return dict(self.pack_reply)
 
     async def on_profiles_export(self, env) -> dict:
         return {"profiles": {key: value for key, value in self.profiles_export.items()

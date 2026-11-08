@@ -234,26 +234,13 @@ async def test_docs_disabled_by_default(system):
 
 
 @pytest.mark.asyncio
-async def test_voice_dub_events_reach_the_interface_whole(system):
-    """Этап 8б: пакет озвучки самодостаточен, интерфейс ничего не доспрашивает."""
+async def test_the_plan_of_a_series_reaches_the_interface_whole(system):
+    """The packet of the plan is whole: the interface asks nothing back."""
     bus, _, gateway = system
-    payload = {"series_id": 2, "season": 1, "episode": 3, "voice_key": "blackcat",
-               "voice_label": "BlackCat", "status": "rejected", "state": "error",
-               "detail": "критично: нет общего звука", "epoch": 3, "rev": 1}
+    payload = {"series_id": 2, "running": False, "assets": [], "episodes": [], "failures": [], "commands": []}
     events = await _collect_sse_events(gateway, bus, [
-        Envelope(topic="voices.dub.changed", kind="event", payload=payload)], 1)
-    assert events == [("voice_dub_update", payload)]
-
-
-@pytest.mark.asyncio
-async def test_voice_dubs_snapshot_reaches_the_interface_whole(system):
-    bus, _, gateway = system
-    item = {"series_id": 2, "season": 1, "episode": 3, "voice_key": "blackcat", "voice_label": "BlackCat",
-            "status": "placed", "state": "done", "detail": None}
-    payload = {"epoch": 3, "rev": 2, "items": [item]}
-    events = await _collect_sse_events(gateway, bus, [
-        Envelope(topic="voices.dubs.snapshot", kind="event", payload=payload)], 1)
-    assert events == [("voice_dubs_snapshot", payload)]
+        Envelope(topic="planner.series.changed", kind="event", payload=payload)], 1)
+    assert events == [("plan_update", payload)]
 
 
 NEW_PACKETS = [

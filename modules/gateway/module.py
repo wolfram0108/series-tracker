@@ -26,7 +26,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import BaseModule, BusRequestError
-from core.contracts import (CompositionChanged, CompositionFailed, DubEvent, DubsSnapshot, ReferenceChanged,
+from core.contracts import (CompositionChanged, CompositionFailed, PlannerView, ReferenceChanged,
                             SeriesReadProgress, SourceChanged, TableFailed, TableProgress, TableReady)
 
 
@@ -170,7 +170,6 @@ SSE_MAP: dict[str, Outgoing] = {
     "torrents.preview.failed": Outgoing("preview_naming_failed"),
     "downloads.queue.changed": Outgoing("download_queue_update", _bare_tasks, latest=_whole),
     "slicing.queue.changed": Outgoing("slicing_queue_update", _bare_tasks, latest=_whole),
-    "downloads.pack.queue.changed": Outgoing("pack_queue_update", _bare_tasks, latest=_whole),
     "scan.status.changed": Outgoing("scanner_status_update"),
     "series.source.added": Outgoing("series_sources_changed", lambda payload: {**payload, "what": "added"}),
     "series.source.updated": Outgoing("series_sources_changed", lambda payload: {**payload, "what": "updated"}),
@@ -184,10 +183,6 @@ SSE_MAP: dict[str, Outgoing] = {
     "scan.series.progress": Outgoing("series_scan_progress"),
     "conform.queue.changed": Outgoing("conform_queue_update", latest=_whole),
     "planner.series.changed": Outgoing("plan_update"),
-    "voices.dub.changed": Outgoing("voice_dub_update"),
-    "voices.dubs.snapshot": Outgoing("voice_dubs_snapshot"),
-    "voices.cut.changed": Outgoing("voice_cut_update"),
-    "voices.cuts.snapshot": Outgoing("voice_cuts_snapshot"),
     "voices.settings.changed": Outgoing("voice_settings_update"),
     "conform.settings.changed": Outgoing("conform_settings_update"),
     "renaming.finished": Outgoing("renaming_complete"),
@@ -215,7 +210,7 @@ def latest_only(batch: list) -> list:
 
 
 # The packets of the event stream that the interface types: their models go into the schema of the API.
-EVENT_PACKETS = (DubEvent, DubsSnapshot, TableProgress, TableReady, TableFailed, CompositionChanged,
+EVENT_PACKETS = (PlannerView, TableProgress, TableReady, TableFailed, CompositionChanged,
                  CompositionFailed, ReferenceChanged, SourceChanged, SeriesReadProgress)
 
 _KEEPALIVE_SECONDS = 15.0

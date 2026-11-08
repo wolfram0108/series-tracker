@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -36,7 +37,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from core import container as mkv
-from core.plan.executor import DOWNLOADS, Made, Passing, video_of
+from core.plan.executor import DOWNLOADS, Made, Passing, judged, video_of
 from core.plan.files import Library, container_json, container_of, dub_key, label_of  # noqa: F401
 from core.plan.tables import Track, Video
 from modules.conform.client import DaemonClient, Unconfirmed
@@ -175,7 +176,8 @@ class ReverseBody(BaseModel):
 
 class Daemon:
     """A model of the alignment service on the protocol of the real one. `answers` by the label of a job: "mismatch",
-    "critical", "suspect" or "lost" (the job is made, the answer never comes)."""
+    "critical", "suspect", "crash" (the service failed and judged nothing) or "lost" (the job is made, the answer never
+    comes)."""
 
     def __init__(self, codec: Codec) -> None:
         self.codec = codec
@@ -243,21 +245,24 @@ class Daemon:
             # The voice-over is laid onto the video where its sound is the episode of the picture: the whole of an
             # episode, or its stretch of a compilation (Д-19).
             sounds = [self.codec.sound(dub, stream, second) for second in range(max(1, self.codec.seconds(dub)))]
-            ok = picture in sounds and answer != "mismatch"
+            ok = picture in sounds and answer not in ("mismatch", "crash")
             out = None
             if ok:
                 out = os.path.join(body.out_dir, f"{os.path.basename(dub)}.a{stream}.flac")
                 _run("-ss", str(sounds.index(picture)), "-i", dub, "-t", "1", "-map", f"0:a:{stream}", "-c:a", "flac", out)
             results.append({"dub": dub, "ok": ok, "out_path": out, "suspect": ["подозрительно"] if answer == "suspect" else [],
                             "critical": ["критично"] if answer == "critical" else [],
-                            "error": None if ok else "звук озвучки не совпал с картинкой"})
+                            # A crash in the service judged nothing; a pair it looked at and did not bring together is refused.
+                            "refused": not ok and answer != "crash",
+                            "error": None if ok else "сбой сервиса" if answer == "crash" else "звук озвучки не совпал с картинкой"})
         return self._job("episode", body.label, body.dubs, results)
 
     def _cut(self, body: ReverseBody, episode: str) -> dict:
         answer = self.answers.get(body.label or "")
         wanted = self.codec.picture(episode)
         inside = [self.codec.picture(body.compilation, second) for second in range(self.codec.seconds(body.compilation))]
-        result = {"dub": episode, "ok": False, "out_path": None, "suspect": [], "critical": [], "error": "кадры не сопоставлены"}
+        result = {"dub": episode, "ok": False, "out_path": None, "suspect": [], "critical": [], "refused": True,
+                  "error": "кадры не сопоставлены"}
         if wanted in inside:
             out = os.path.join(body.out_dir, f"{os.path.basename(episode)}.cut.mkv")
             second = inside.index(wanted)
@@ -273,7 +278,8 @@ class Crash(Exception):
 
 
 class DiskWorld(World):
-    """The world of the plan with real files (see the module): the service's own sync, files and journal."""
+    """The world of the plan with real files (see the module): the service's own sync, files and journal. What the world
+    reads of a file to know its truth runs in a thread, as every blocking call of the service does: the loop is free."""
 
     def __init__(self, root: str, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -329,6 +335,9 @@ class DiskWorld(World):
             self.daemon.answers[f"cut {label_of(slot)}"] = answer
         return super().sync(title)
 
+    def _sounds(self, path: str) -> tuple[int, ...]:
+        return tuple(self.codec.sound(path, 0, second) for second in range(max(1, self.codec.seconds(path))))
+
     def _work(self, op_id: str, extension: str = ".mp4") -> str:
         return os.path.join(self.root, "work", hashlib.md5(op_id.encode()).hexdigest()[:12] + extension)
 
@@ -336,19 +345,20 @@ class DiskWorld(World):
         if op.kind in DOWNLOADS:
             row = op.subject
             path = self._work(op.id)
-            done, _ = await ytdlp.download(row.link, path, _quiet)
+            done, failure = await ytdlp.download(row.link, path, _quiet)
+            if not done:
+                logging.getLogger("plan_disk").warning("загрузка %s не удалась: %s", op.id, failure)
             if not done:
                 if row.id in self.transient:
                     raise Passing
                 return None
             if op.kind == "download_video":
                 video = Video(row.id, row.snapshot(), row.slot, row.id)
-                self.content[video.key] = (self.codec.picture(path),)
+                self.content[video.key] = (await asyncio.to_thread(self.codec.picture, path),)
                 return Made(video, path)
             if op.kind == "download_dub":
                 # A compilation as a voice-over (Д-19) holds an episode in every second.
-                self.content[("dub", row.id)] = tuple(self.codec.sound(path, 0, second)
-                                                      for second in range(max(1, self.codec.seconds(path))))
+                self.content[("dub", row.id)] = await asyncio.to_thread(self._sounds, path)
                 return Made(row, path)
             return Made(None, path)
         if op.kind == "cut":
@@ -361,7 +371,7 @@ class DiskWorld(World):
             if result is None:
                 return None
             video = Video(way.row.id, way.snapshot, op.slot, way.timeline, cut_of=way.row.id)
-            self.content[video.key] = (self.codec.picture(result),)
+            self.content[video.key] = (await asyncio.to_thread(self.codec.picture, result),)
             return Made(video, result)
         if op.kind == "align":
             goal, way = op.subject
@@ -391,9 +401,7 @@ class DiskWorld(World):
             raise Passing from None  # the answer never came: the job is looked at again at the next sync
         finally:
             await client.close()
-        result = job["results"][0]
-        # The contract of the service: a result is taken by `ok` and an empty `critical`.
-        return result["out_path"] if result["ok"] and not result["critical"] else None
+        return judged(job["results"][0] if job["results"] else None, cut=route == "reverse")
 
     def aligned_truth(self, aligned: Made) -> tuple[int, ...]:
         return (self.codec.sound(aligned.file, 0),)

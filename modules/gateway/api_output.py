@@ -14,13 +14,13 @@ from typing import Literal
 from pydantic import BaseModel, ValidationError
 
 from core import BusRequestError
-from core.contracts import (CompositionGetRequest, CompositionReply, DubsScope, OutputSwitch, PlanDelete, PlannerView,
+from core.contracts import (CompositionGetRequest, CompositionReply, OutputSwitch, PlanDelete, PlannerView,
                             PlanRowRef, QueuesGet, QueuesReply, Reference, SeriesKind, SettingsReset, SettingsSet,
                             VoiceOrderSet)
 
 from .routing import admitted, refusal
-from .schemas import (CutsActionBody, CutsReply, DubsActionBody, DubsRestarted, DynamicObject, ErrorOnly, ErrorResponse, OkResponse,
-                      OutputSettingsReset, OutputSettingsSet, OutputSwitchBody, RefetchBody, RefetchQueued, VoiceOrderBody)
+from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, OkResponse, OutputSettingsReset, OutputSettingsSet,
+                      OutputSwitchBody, VoiceOrderBody)
 
 _ERR = {code: {"model": ErrorResponse} for code in (400, 404, 500, 503)}
 _ERR1 = {code: {"model": ErrorOnly} for code in (404, 500)}
@@ -126,55 +126,6 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}
-
-    async def restart_dubs(series_id: int, body: DubsActionBody, topic: str):
-        scope = _contract(DubsScope, series_id=series_id, **body.model_dump())
-        try:
-            async with admitted(gw, series_id):
-                done = await gw.request(topic, scope.model_dump(mode="json"))
-        except BusRequestError as exc:
-            return refusal(exc)
-        return {"success": True, "restarted": int((done or {}).get("restarted") or 0)}
-
-    @r.post("/api/series/{series_id}/output/dubs/retry", response_model=DubsRestarted, responses=_ERR)
-    async def retry_dubs(series_id: int, body: DubsActionBody):
-        """The retry of the window: the voice-overs of the scope that failed or were rejected start over and go to download now."""
-        return await restart_dubs(series_id, body, "voices.dubs.retry")
-
-    @r.post("/api/series/{series_id}/output/dubs/redo", response_model=DubsRestarted, responses=_ERR)
-    async def redo_dubs(series_id: int, body: DubsActionBody):
-        """The redo of the window: the voice-overs of the scope whose track is placed are made anew, now; the container of the
-        episode takes the new tracks at the next sync."""
-        return await restart_dubs(series_id, body, "voices.dubs.redo")
-
-    @r.get("/api/series/{series_id}/output/cuts", response_model=CutsReply, responses=_ERR1)
-    async def output_cuts(series_id: int):
-        """The cuts of the episodes of the series out of their compilations (stage 12) and where each is."""
-        try:
-            return await gw.request("voices.cuts.get", {"series_id": series_id})
-        except BusRequestError as exc:
-            return refusal(exc, with_success=False)
-
-    @r.post("/api/series/{series_id}/output/cuts/retry", response_model=DubsRestarted, responses=_ERR)
-    async def retry_cuts(series_id: int, body: CutsActionBody):
-        """The retry of the window: the episodes of the scope whose cut failed are cut again, now."""
-        try:
-            async with admitted(gw, series_id):
-                done = await gw.request("voices.cuts.retry", {"series_id": series_id, **body.model_dump()})
-        except BusRequestError as exc:
-            return refusal(exc)
-        return {"success": True, "restarted": int((done or {}).get("restarted") or 0)}
-
-    @r.post("/api/series/{series_id}/output/reference/refetch", response_model=RefetchQueued, responses=_ERR)
-    async def refetch_reference(series_id: int, body: RefetchBody):
-        """The refetch of the window: the reference video of the episode is downloaded again now; its file is replaced when the new
-        one is whole, and the voice-overs of the episode are aligned to it again."""
-        try:
-            async with admitted(gw, series_id):
-                done = await gw.request("downloads.reference.refetch", {"series_id": series_id, **body.model_dump()})
-        except BusRequestError as exc:
-            return refusal(exc)
-        return {"success": True, "queued": bool((done or {}).get("queued"))}
 
     @r.put("/api/series/{series_id}/output/switch", response_model=OkResponse, response_model_exclude_none=True,
            responses=_ERR)

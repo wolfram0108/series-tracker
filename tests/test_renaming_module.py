@@ -185,63 +185,6 @@ def _renaming_tasks(db_path):
 
 
 @pytest.mark.asyncio
-async def test_vk_reprocess_renames_on_disk(system):
-    bus, fake, probe, db_path, media = system
-    fake.media_items = [_item("u1", 1, "старое имя 1.mp4"),
-                        _item("u2", 2, "Show s01e02.mp4")]  # уже правильное
-    for f in ("старое имя 1.mp4", "Show s01e02.mp4"):
-        open(os.path.join(media, f), "wb").close()
-    sub = bus.subscribe("renaming.finished")
-
-    reply = await probe.request("renaming.reprocess", {"series_id": 2},
-                                timeout=10)
-    assert reply == {"renamed": 1}
-    # the files of a video series are moved by their owner (downloads): here the names of all the ready files are counted and
-    # asked for, the unchanged ones too (a name a file has cancels an earlier wish), and the disk is not touched
-    assert fake.rename_calls == [{"series_id": 2, "names": {"u1": "Show s01e01.mp4", "u2": "Show s01e02.mp4"}}]
-    assert os.path.exists(os.path.join(media, "старое имя 1.mp4")) and not os.path.exists(os.path.join(media, "Show s01e01.mp4"))
-    assert fake.set_filename_calls == []
-    env = await asyncio.wait_for(sub.queue.get(), 2)
-    assert env.payload == {"series_id": 2}
-    assert _renaming_tasks(db_path) == []  # запись подчищена
-
-
-@pytest.mark.asyncio
-async def test_sliced_children_renamed_with_episode_override(system):
-    _, fake, probe, _, media = system
-    fake.media_items = [_item("parent", 1, "Show s01e01.mp4")]
-    fake.media_items[0]["episode_end"] = 3
-    fake.sliced = [{"id": 5, "source_media_item_unique_id": "parent",
-                    "episode_number": 2, "file_path": "кусок 2.mp4"}]
-    open(os.path.join(media, "кусок 2.mp4"), "wb").close()
-
-    reply = await probe.request("renaming.reprocess", {"series_id": 2},
-                                timeout=10)
-    assert reply == {"renamed": 1}
-    assert os.path.exists(os.path.join(media, "Show s01e02.mp4"))
-    assert fake.set_path_calls == [{"id": 5, "path": "Show s01e02.mp4"}]
-
-
-@pytest.mark.asyncio
-async def test_error_carrier_and_reset(system):
-    _, fake, probe, db_path, media = system
-    fake.media_items = [_item("u1", 1, "x.mp4")]
-    open(os.path.join(media, "x.mp4"), "wb").close()
-    fake.fail_format = True
-
-    with pytest.raises(BusRequestError, match="профиль сломан"):
-        await probe.request("renaming.reprocess", {"series_id": 2},
-                            timeout=10)
-    tasks = _renaming_tasks(db_path)
-    assert tasks[0]["status"] == "error"
-    assert "профиль сломан" in tasks[0]["error_message"]
-
-    fake.fail_format = False
-    await probe.request("renaming.reprocess", {"series_id": 2}, timeout=10)
-    assert _renaming_tasks(db_path) == []
-
-
-@pytest.mark.asyncio
 async def test_process_torrent_renames_in_qbit(system):
     _, fake, probe, _, _ = system
     fake.series = _torrent(fake.series)
@@ -447,49 +390,6 @@ async def test_a_torrent_series_without_a_profile_is_skipped_by_the_reprocess(sy
 
 
 @pytest.mark.asyncio
-async def test_a_video_series_is_renamed_by_its_numbers_without_any_profile(system):
-    """The rows carry the numbers of the constructor already; the profile of a source is not asked."""
-    _, fake, probe, _, media = system
-    fake.series = {**fake.series, "sources": [_source("vk_video", profile_id=None)]}
-    fake.media_items = [_item("u1", 1, "старое имя 1.mp4")]
-    open(os.path.join(media, "старое имя 1.mp4"), "wb").close()
-
-    reply = await probe.request("renaming.reprocess", {"series_id": 2}, timeout=10)
-
-    assert reply == {"renamed": 1}
-    assert fake.rename_calls[0]["names"] == {"u1": "Show s01e01.mp4"}
-    assert fake.format_series[0]["kind"] == "video"
-
-
-@pytest.mark.asyncio
-async def test_a_plan_that_was_counted_renames_nothing_the_names_follow_it_in_a_sync(system):
-    """A recount of the plan is a plan (И-59): the files move when the sync asks renaming.reprocess."""
-    bus, fake, probe, _, media = system
-    finished = bus.subscribe("renaming.finished")
-    fake.media_items = [_item("u1", 2, "Show s01e01.mp4")]
-    open(os.path.join(media, "Show s01e01.mp4"), "wb").close()
-    probe.publish_event("scan.plan.updated", {"series_id": 2})
-    await bus.settled()
-    assert fake.rename_calls == [] and finished.queue.empty()
-    await probe.request("renaming.reprocess", {"series_id": 2}, timeout=10)
-    assert fake.rename_calls[-1]["names"] == {"u1": "Show s01e02.mp4"}
-
-
-@pytest.mark.asyncio
-async def test_the_name_of_a_file_is_the_function_of_its_row_whatever_the_rows_were_before_and_however_they_moved(system):
-    """Every placing of the rows of four episodes, from every earlier placing: the names are those of the rows as they are."""
-    _, fake, probe, _, media = system
-    slots = (1, 2, 3, 4)
-    for before in itertools.permutations(slots):
-        for after in itertools.permutations(slots):
-            fake.media_items = [_item(f"u{row}", slot, f"Show s01e{earlier:02d}.mp4")
-                                for row, slot, earlier in zip(slots, after, before)]
-            reply = await probe.request("renaming.reprocess", {"series_id": 2}, timeout=10)
-            assert fake.rename_calls[-1]["names"] == {f"u{row}": f"Show s01e{slot:02d}.mp4" for row, slot in zip(slots, after)}
-            assert reply["renamed"] == sum(1 for slot, earlier in zip(after, before) if slot != earlier)
-
-
-@pytest.mark.asyncio
 async def test_preview_names_the_rows_of_a_video_series(system):
     _, fake, probe, _, _ = system
     fake.media_items = [_item("u1", 1, "старое имя 1.mp4"), _item("u2", 2, "Show s01e02.mp4")]
@@ -526,7 +426,8 @@ async def test_a_reprocess_a_restart_interrupted_is_run_again_when_the_system_ha
     bus.publish(Envelope(topic="system.started", kind="event"))
     env = await asyncio.wait_for(sub.queue.get(), 5)
     assert env.payload == {"series_id": 2}
-    assert fake.rename_calls and _renaming_tasks(db_path) == []
+    # The files of a video series take their names from its plan: the task ends and renames nothing.
+    assert not fake.rename_calls and _renaming_tasks(db_path) == []
 
 
 @pytest.mark.asyncio

@@ -188,7 +188,7 @@ class RenamingModule(BaseModule):
             self._busy(series_id, True)
             try:
                 if video:
-                    renamed = await self._reprocess_vk(series)
+                    renamed = 0  # the files of a video series take their names from its plan (modules/planner)
                 else:
                     renamed = await self._reprocess_torrents(series)
                 await self.repo.delete(task_id)
@@ -205,48 +205,6 @@ class RenamingModule(BaseModule):
     def _busy(self, series_id: int, busy: bool) -> None:
         self.publish_event("series.busy.contribution", {
             "source": "renaming", "series_id": series_id, "busy": busy})
-
-    # --- VK: файлы на диске --------------------------------------------------------------
-
-    async def _reprocess_vk(self, series: dict) -> int:
-        series_id, base = series["id"], series["save_path"]
-        items = await self.request("scan.media.list",
-                                   {"series_id": series_id})
-        items_map = {i["unique_id"]: i for i in items}
-        names: dict[str, str] = {}
-
-        for item in items:
-            if item.get("status") != "completed" \
-                    or not item.get("final_filename"):
-                continue
-            reply = await self.request("rules.format_filename", {
-                "series": series, "media_item": item,
-                "original_filename": item["final_filename"]})
-            names[item["unique_id"]] = reply["filename"]
-        renamed = 0
-        if names:  # all of them: a name that is the one a file has cancels an earlier wish
-            answer = await self.request("downloads.items.rename", {"series_id": series_id, "names": names})
-            renamed = int(answer.get("renamed") or 0)
-
-        for child in await self._sliced_files(series_id):
-            parent = items_map.get(child["source_media_item_unique_id"])
-            if not parent:
-                continue
-            old_rel = child["file_path"]
-            reply = await self.request("rules.format_filename", {
-                "series": series, "media_item": parent,
-                "episode_override": child["episode_number"],
-                "original_filename": old_rel})
-            new_rel = reply["filename"]
-            if new_rel == old_rel:
-                continue
-            outcome = await self._rename_on_disk(base, old_rel, new_rel)
-            if outcome == MOVED:
-                renamed += 1
-            if outcome != BLOCKED:  # the path is told when the file lies there, or when there is no file to move
-                self.send_command("slicing.file.set_path", {
-                    "id": child["id"], "path": new_rel})
-        return renamed
 
     async def _sliced_files(self, series_id: int) -> list[dict]:
         try:
@@ -280,6 +238,7 @@ class RenamingModule(BaseModule):
         await storage.call(_do, owns=(old_abs, new_abs))
         self.log.info("переименован: %s -> %s", old_rel, new_rel)
         return MOVED
+
 
     # --- торренты: файлы внутри qBittorrent ------------------------------------------------
 

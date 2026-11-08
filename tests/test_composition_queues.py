@@ -1,6 +1,6 @@
 """The queues a window lists (modules/composition/queues.py) are the queues the core takes: the head of the queue of the
-reference is the reference `scan` chooses, and the queue of a group is the chain `voices` plans, for every order the
-rows of the layout come in, with and without the levers of the user."""
+reference is the reference `scan` chooses, and the head of the queue of a group is the row the planner takes for that
+voice-over (core/plan), for every order the rows of the layout come in, with and without the levers of the user."""
 import itertools
 
 from core.contracts import (REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, EffectiveLever,
@@ -9,7 +9,7 @@ from core.variant_queue import Order
 from core.voice_names import NO_GROUPS
 from modules.composition import queues
 from modules.scan import reference
-from modules.voices import planning
+from planner_choice import goals
 from scan_support import row
 
 PRIORITY = ("alloha", "vk", "cvh", "allvideo", "vibix", "kodik")
@@ -70,18 +70,16 @@ def test_the_head_of_the_queue_of_the_reference_is_the_reference_scan_chooses_in
                 chosen.reference.voice_group, chosen.reference.source_id, chosen.reference.player), name
 
 
-def test_the_queue_of_a_group_is_the_chain_voices_plans_in_every_order_of_the_rows():
+def test_the_head_of_the_queue_of_a_group_is_the_voice_over_the_planner_takes_in_every_order_of_the_rows():
     for name, levers in LEVERS.items():
         for rows in itertools.permutations(SHUFFLED):
             rows = list(rows)
             settings = [EpisodeSettings(season=4, episode=11, levers=levers)]
-            chosen = at_eleven(reference.choose(rows, settings, PRIORITY, SOURCES))
-            plan = planning.plan(rows, [chosen.reference], settings, PRIORITY, NO_GROUPS)
+            goal = goals(rows, settings, players=PRIORITY, sources=SOURCES)[(4, 11)]
             _, by_group = build(rows, levers)
             shown = {queue.group: [(each.source_id, each.player) for each in queue.rows if each.allowed] for queue in by_group}
-            for dub in plan.dubs:
-                taken = list(dict.fromkeys((each.source_id, each.player) for each in dub.chain))
-                assert shown[dub.voice_label] == taken, (name, dub.voice_label)
+            for way in goal.tracks:
+                assert shown[way.voice][0] == (way.dub.source_id, way.row.player), (name, way.voice)
 
 
 def test_a_queue_lists_what_the_level_has_with_the_values_of_its_levers():

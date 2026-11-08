@@ -126,26 +126,6 @@ def test_one_result_is_not_counted_for_two_voice_overs_sent_as_one_file(library)
     assert any("уже засчитан" in each for each in problems)
 
 
-def test_the_evidence_is_read_from_the_database_by_the_key_of_each_voice_over_and_a_part_is_not_its_label(tmp_path):
-    import sqlite3
-    from live_sync import evidence_of
-    (tmp_path / "work").mkdir()
-    with sqlite3.connect(tmp_path / "work" / "app.db") as conn:
-        conn.execute("CREATE TABLE voice_dubs (series_id INT, season INT, episode INT, part INT, voice_key TEXT, "
-                     "voice_label TEXT, chain TEXT, attempt INT, temp_path TEXT, status TEXT, output_path TEXT)")
-        kodik = '[{"player": "kodik", "place": ["dunhuatv.ru"]}]'
-        conn.executemany("INSERT INTO voice_dubs VALUES (?,?,?,?,?,?,?,?,?,?,?)", [
-            (7, 1, 1, 0, "BlackCat", "BlackCat", kodik, 0, None, "placed", "/lib/a.flac"),
-            (7, 1, 1, 0, "RedHead", "RedHead", kodik, 0, "/w/7/s01e01/7_s01e01_RedHead_old.mp4", "rejected", None),
-            (7, 1, 1, 2, "BlackCat", "BlackCat", kodik, 0, None, "placed", "/lib/b.flac"),
-            (7, 1, 2, 0, "BlackCat", "BlackCat", kodik, 0, None, "placed", "/lib/other.flac")])
-    tracks, inputs = evidence_of(str(tmp_path / "work"), 1)
-    assert tracks == {"1/1/0/BlackCat": "/lib/a.flac", "1/1/2/BlackCat": "/lib/b.flac"}
-    # The name each was sent as is the module's: the file a row keeps, else the name its source gives it now.
-    assert inputs == {"1/1/0/BlackCat": "7_s01e01_BlackCat_kodik_dunhuatv.ru.mp4", "1/1/0/RedHead": "7_s01e01_RedHead_old.mp4",
-                      "1/1/2/BlackCat": "7_s01e01p2_BlackCat_kodik_dunhuatv.ru.mp4"}
-
-
 def test_one_track_is_not_counted_for_two_voice_overs(library):
     reference, tracks = library
     both = dubs_of("BlackCat", "RedHead")

@@ -1,12 +1,13 @@
 """The order in which the variants of an episode are tried (core/variant_queue.py), and that the choice of the reference
-(scan) and the chain of a voice-over (voices) follow it: checked over every order the rows of an episode can come in."""
+(scan) and the voice-over the planner takes (core/plan) follow it: checked over every order the rows of an episode can
+come in."""
 import itertools
 
 from core.contracts import Reference, ReferenceMark
 from core.variant_queue import (REFERENCE_RANKING, VOICE_RANKING, Candidate, Order, best, by_player, by_resolution,
                                 by_source, ranked)
 from modules.scan import reference
-from modules.voices import planning
+from planner_choice import goals
 from scan_support import row
 
 PRIORITY = ("vk", "cvh", "kodik")
@@ -79,13 +80,11 @@ def test_the_choice_of_the_reference_is_the_head_of_the_queue_in_every_order_of_
         assert [each.reference.row_key for each in chosen] == [by_hand(rows, "reference")[0]]
 
 
-def test_the_chain_of_a_voice_over_is_its_queue_in_every_order_of_the_rows():
-    # The reference is a video of the voice-over B, so A is planned; its chain is its rows by the rule of voice-overs.
-    ref_row = row(1, 7, "ref", 1, 1, player="vk", height=2160, voice="B")
-    ref = Reference(season=1, episode=1, mark=ReferenceMark.BY_LEVEL, source_id=7, row_key="ref", player="vk",
-                    voice_group="B")
+def test_the_voice_over_the_planner_takes_is_the_head_of_its_queue_in_every_order_of_the_rows():
+    # The reference is a video of the voice-over B, so A is a voice-over; the planner takes its first row by the rule.
+    ref_row = row(1, 7, "ref", 1, 1, player="vk", height=4320, voice="B")
     voice_a = [each for each in ROWS if each.voice_label == "A"]
     for rows in itertools.permutations(voice_a):
-        plan = planning.plan([ref_row, *rows], [ref], (), PRIORITY, reference.NO_GROUPS)
-        (dub,) = [each for each in plan.dubs if each.voice_label == "A"]
-        assert [each.row_key for each in dub.chain] == by_hand(rows, "voice")
+        goal = goals([ref_row, *rows], players=PRIORITY, sources=SOURCES)[(1, 1)]
+        (way,) = [each for each in goal.tracks if each.voice == "A"]
+        assert way.dub.row_key == by_hand(rows, "voice")[0]

@@ -521,19 +521,6 @@ async def test_create_and_update_store_fs_safe_names(system):
 
 
 @pytest.mark.asyncio
-async def test_voices_of_a_series_show_state_and_reason_only(system):
-    _, _, client, _ = system
-    resp = await client.get("/api/series/2/voices")
-    assert resp.status_code == 200
-    assert resp.json() == {"items": [
-        {"season": 1, "episode": 2, "part": None, "voice_key": "blackcat", "voice_label": "BlackCat",
-         "status": "rejected", "state": "error", "hint": None, "detail": {"code": "suspect_residual", "params": {}},
-         "source_id": None, "player": None},
-        {"season": 1, "episode": 2, "part": None, "voice_key": "red", "voice_label": "RedHeadSound",
-         "status": "placed", "state": "done", "hint": "done", "detail": None, "source_id": None, "player": None}]}
-
-
-@pytest.mark.asyncio
 async def test_a_save_of_the_card_is_one_admitted_change_and_is_refused_whole_while_a_sync_runs(system):
     """The owner of the runs admits the save before its first write and hears its end after its last: a sync does not open
     between the card and the plan of its folder (И-60). Refused, nothing of the save is written."""

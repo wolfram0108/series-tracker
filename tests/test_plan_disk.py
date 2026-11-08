@@ -62,7 +62,7 @@ def test_a_cut_out_of_a_compilation_through_the_model_of_the_service(disk):
     assert visible(disk, 2).video.cut_of == RowId(4, "comp", "comp")
 
 
-@pytest.mark.parametrize("answer", ["suspect", "critical", "mismatch", "lost"])
+@pytest.mark.parametrize("answer", ["suspect", "critical", "mismatch", "crash", "lost"])
 def test_every_answer_of_the_service_through_its_protocol(disk, answer):
     episode(disk, 1, 2)
     disk.check(disk.sync("исходно"))

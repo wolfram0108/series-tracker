@@ -31,7 +31,6 @@ def test_fuses_nest_the_outer_one_never_fires_before_an_inner_one():
     assert deadline_of("composition.preview") >= sum(deadline_of(step) for step in steps)
     assert TABLE_WAIT_S >= 2 * TABLE_READ_S
     assert deadline_of("sources.table.get") < TABLE_READ_S  # the request only starts a read or answers from the store
-    assert deadline_of("downloads.dispatch") == deadline_of("voices.dispatch") == HANDOVER_S
 
 
 def test_a_topic_that_asks_others_in_turn_lives_longer_than_all_of_them_together():

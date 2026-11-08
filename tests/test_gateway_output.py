@@ -65,16 +65,15 @@ async def test_a_scan_of_a_series_downloads_unless_the_window_asks_for_the_statu
 
 
 async def test_the_reset_of_failed_attempts_is_a_change_of_the_series_and_starts_no_sync(tmp_path):
-    """The button «Сбросить неудачные попытки»: the voice-overs forget what failed, inside the admission of a change of
-    the series; no sync is asked for (the work goes on with the next one)."""
-    answers = {"voices.failures.forget": {"reset": 2}, "downloads.failures.forget": {"reset": 1}}
+    """The button «Сбросить неудачные попытки»: the plan forgets what failed, inside the admission of a change of the
+    series; no sync is asked for (the work goes on with the next one)."""
+    answers = {"planner.failures.forget": {"reset": 3}}
     async with serving(tmp_path, answers) as (client, owners, _, spy):
         response = await client.post("/api/series/1/failures/reset")
     assert response.status_code == 200 and response.json() == {"success": True, "reset": 3}
-    # The voice-overs and the videos whose download failed both forget it; no sync is asked for.
-    assert owners.asked("voices.failures.forget") == [{"series_id": 1}] == owners.asked("downloads.failures.forget")
+    assert owners.asked("planner.failures.forget") == [{"series_id": 1}]
     assert owners.asked("scan.series.run") == []
-    assert topics(spy) == ["scan.edit.begin", "voices.failures.forget", "downloads.failures.forget", "scan.edit.end"]
+    assert topics(spy) == ["scan.edit.begin", "planner.failures.forget", "scan.edit.end"]
 
 
 async def test_the_composition_of_a_torrent_series_is_the_torrent_plan_with_iso_dates(tmp_path):
@@ -250,30 +249,26 @@ async def test_the_queues_of_a_level_are_the_answer_of_composition(tmp_path):
     assert alone.status_code == 422  # an episode is told within its season
 
 
-async def test_the_actions_on_a_track_go_to_their_owners_inside_the_admission_and_start_no_sync(tmp_path):
-    """Retry, redo and refetch: each is one command of the owner of the work, under the admission
-    of a change of the series."""
-    answers = {"voices.dubs.retry": {"restarted": 1}, "voices.dubs.redo": {"restarted": 2},
-               "downloads.reference.refetch": {"queued": True}}
+async def test_the_command_delete_goes_to_the_planner_and_starts_no_sync(tmp_path):
+    """«Удалить» of a file or of a track in it, and the command taken back: each is one command of the planner, carried
+    out by the next sync."""
+    answers = {"planner.delete": {"recorded": True}, "planner.delete.cancel": {"dropped": True}}
+    dub = {"source_id": 2, "row_key": "g1", "video": "v1"}
     async with serving(tmp_path, answers) as (client, owners, _, spy):
-        retry = await client.post("/api/series/1/output/dubs/retry", json={"season": 4, "episode": 11, "voice_label": "A"})
-        redo = await client.post("/api/series/1/output/dubs/redo", json={"season": 4})
-        refetch = await client.post("/api/series/1/output/reference/refetch", json={"season": 4, "episode": 11})
-    assert [each.json() for each in (retry, redo, refetch)] == [
-        {"success": True, "restarted": 1}, {"success": True, "restarted": 2}, {"success": True, "queued": True}]
-    assert owners.asked("voices.dubs.retry") == [
-        {"series_id": 1, "season": 4, "episode": 11, "part": None, "voice_label": "A"}]
-    assert owners.asked("voices.dubs.redo") == [
-        {"series_id": 1, "season": 4, "episode": None, "part": None, "voice_label": None}]
-    assert owners.asked("downloads.reference.refetch") == [{"series_id": 1, "season": 4, "episode": 11, "part": None}]
+        video = await client.post("/api/series/1/plan/delete", json={"kind": "video", "name": "s01e01.mkv"})
+        track = await client.post("/api/series/1/plan/delete", json={"kind": "track", "name": "s01e01.mkv", "dub": dub})
+        back = await client.post("/api/series/1/plan/delete/cancel", json={"kind": "video", "name": "s01e01.mkv"})
+    assert all(each.status_code == 200 and each.json()["success"] for each in (video, track, back))
+    assert owners.asked("planner.delete") == [
+        {"series_id": 1, "kind": "video", "name": "s01e01.mkv", "dub": None},
+        {"series_id": 1, "kind": "track", "name": "s01e01.mkv", "dub": dub}]
+    assert owners.asked("planner.delete.cancel") == [{"series_id": 1, "kind": "video", "name": "s01e01.mkv", "dub": None}]
     assert owners.asked("scan.series.run") == []
-    assert topics(spy) == ["scan.edit.begin", "voices.dubs.retry", "scan.edit.end", "scan.edit.begin", "voices.dubs.redo",
-                           "scan.edit.end", "scan.edit.begin", "downloads.reference.refetch", "scan.edit.end"]
 
 
-async def test_a_refusal_of_a_refetch_is_the_owners_answer(tmp_path):
+async def test_a_refusal_of_the_planner_is_its_answer(tmp_path):
     def refuse(payload):
-        raise ValueError(reason("refetch_no_file", season=4, episode=11))
-    async with serving(tmp_path, {"downloads.reference.refetch": refuse}) as (client, owners, _, spy):
-        response = await client.post("/api/series/1/output/reference/refetch", json={"season": 4, "episode": 11})
-    assert response.status_code == 400 and parse(response.json()["error"])["code"] == "refetch_no_file"
+        raise ValueError("planner_delete_no_file")
+    async with serving(tmp_path, {"planner.delete": refuse}) as (client, owners, _, spy):
+        response = await client.post("/api/series/1/plan/delete", json={"kind": "video", "name": "gone.mkv"})
+    assert response.status_code == 400 and "planner_delete_no_file" in response.json()["error"]
