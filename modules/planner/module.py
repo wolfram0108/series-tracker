@@ -350,7 +350,7 @@ class PlannerModule(BaseModule):
         for data in await self.repo.assets(series_id):
             container = container_of(data)
             if await storage.call(os.path.exists, os.path.join(sync.files.root, container.name)):
-                containers[container.name] = container
+                containers[container.name] = await self._as_in_file(sync.files, container)
             else:
                 self.log.warning("сериал %d: файла %s нет на диске — он уходит из таблицы актива", series_id, container.name)
         sync.containers = containers
@@ -358,6 +358,18 @@ class PlannerModule(BaseModule):
         sync.commands = frozenset(_decoded(each) for each in await self.repo.commands(series_id))
         self._loaded[series_id] = (frozenset(sync.failed), sync.commands)
         self._forgot.discard(series_id)
+
+    async def _as_in_file(self, files: Library, container):
+        """A file made before the planner (its tracks keyed by the voice-over, `tag`) is told by the table in an order of
+        its own: the order of its tracks is the order of the file, read from its tags, so that the table is the file."""
+        if not any(track.tag for track in container.tracks):
+            return container
+        held = await mkv.contents(files.path(container.name))
+        if held is None:
+            return container
+        place = {each.key: number for number, each in enumerate(held.audio) if each.key}
+        ordered = sorted(container.tracks, key=lambda track: place.get(track.tag or "", len(place)))
+        return replace(container, tracks=tuple(ordered))
 
     async def save(self, series_id: int, sync: SeriesSync) -> None:
         """The table, the failures and the commands after a sync. What the user said while it ran is kept: a command

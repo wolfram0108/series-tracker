@@ -269,3 +269,23 @@ async def test_a_sync_without_download_does_no_work(world):
     episode(neighbours, 1, 1)
     view = await sync(world, download=False)
     assert table(world[2]) == {} and not os.listdir(neighbours.library) and view["episodes"]
+
+
+async def test_a_file_made_before_the_planner_is_read_in_the_order_of_its_tracks_and_not_built_again(world):
+    """A file the migration carried over keys its tracks by its own tags and was put in the table in an order of the
+    records: the order of the file is the order of the table, so a file that already is its goal stays as it is."""
+    neighbours, _, db_path = world
+    episode(neighbours, 1, 2)
+    await sync(world)
+    (name, data), = table(db_path).items()
+    path = os.path.join(neighbours.library, name)
+    made = os.stat(path).st_mtime_ns
+    for track in data["tracks"]:
+        dub = track["dub"]
+        track["tag"] = f"{dub['source_id']}:{dub['row_key']}:{dub['video']}"  # the key the file's tags hold
+    data["tracks"].reverse()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE plan_assets SET data=? WHERE series_id=? AND name=?", (json.dumps(data), SERIES, name))
+    await sync(world)
+    assert os.stat(path).st_mtime_ns == made
+    assert [track["snapshot"]["group"] for track in table(db_path)[name]["tracks"]] == ["G1", "G2"]
