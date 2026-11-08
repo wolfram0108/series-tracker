@@ -17,7 +17,7 @@ said «Удалить»."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Callable, Iterable
 
 from .tables import Container, Inputs, OnlineRow, RowId, Slot, Snapshot, Track, Video
 
@@ -116,7 +116,9 @@ def own_track(container: Container) -> Track:
     return Track(video.cut_of or video.id, video.snapshot, video.episode, video.timeline)
 
 
-def plan(inputs: Inputs) -> Plan:
+def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = None) -> Plan:
+    """The goal, the graph and the groups of a series. `namer` is the rule of the name of a file (the series' own rule of
+    names in the service); without it a plain name of the episode, the group and the height."""
     choices = inputs.choices
     online = {row.id: row for row in inputs.online}
     singles = [row for row in inputs.online if not row.compilation]
@@ -143,7 +145,8 @@ def plan(inputs: Inputs) -> Plan:
 
     slots = sorted({row.slot for row in singles} | {video_slot(each.video) for each in containers
                                                     if each.name not in deleted_videos})
-    goals = [goal for slot in slots if (goal := _goal(slot, inputs, containers, singles, online, deleted_videos,
+    namer = namer or (lambda slot, video, off: name_of(slot, video.snapshot, off))
+    goals = [goal for slot in slots if (goal := _goal(slot, inputs, namer, containers, singles, online, deleted_videos,
                                                       deleted_tracks, video_slot, track_slot, player_rank, source_rank,
                                                       group_rank)) is not None]
     ops = _ops(goals, containers)
@@ -151,7 +154,7 @@ def plan(inputs: Inputs) -> Plan:
     return Plan(tuple(goals), tuple(ops), tuple(groups))
 
 
-def _goal(slot, inputs, containers, singles, online, deleted_videos, deleted_tracks, video_slot, track_slot,
+def _goal(slot, inputs, namer, containers, singles, online, deleted_videos, deleted_tracks, video_slot, track_slot,
           player_rank, source_rank, group_rank) -> Goal | None:
     choices = inputs.choices
     off = slot in choices.off_episodes
@@ -225,7 +228,7 @@ def _goal(slot, inputs, containers, singles, online, deleted_videos, deleted_tra
         if mine and not off:
             container, track, is_own = sorted(mine, key=lambda each: (each[2], each[0].name, each[1].dub))[0]
             tracks.append(TrackWay(voice, track.dub, track.snapshot, "realign", container=container, own=is_own))
-    return Goal(slot, video, tuple(tracks), name_of(slot, video.snapshot, off), off)
+    return Goal(slot, video, tuple(tracks), namer(slot, video, off), off)
 
 
 def _cut(slot, inputs, candidates, player_rank, source_rank, user_rank):
