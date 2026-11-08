@@ -304,3 +304,14 @@ async def test_the_card_of_the_series_hears_what_the_sync_is_at_and_its_end(worl
     on = {name for each in flags for name, value in each.items() if value}
     assert on == {"downloading", "aligning", "packing"}
     assert flags[-1] == {"downloading": False, "aligning": False, "packing": False}
+
+
+async def test_a_sync_written_down_is_work_of_the_series_before_the_start_takes_it_up(world):
+    """`system.started` reaches the modules in no set order: a run that asks before the planner took its written sync
+    up again hears it as work, not as an end."""
+    _, planner, _ = world
+    await planner.repo.begin_run(SERIES, True)
+    state = await planner.request("planner.work.get", {"series_id": SERIES})
+    assert state["owner"] == "planner" and state["active"]
+    await planner.repo.end_run(SERIES)
+    assert not (await planner.request("planner.work.get", {"series_id": SERIES}))["active"]

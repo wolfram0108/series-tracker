@@ -401,3 +401,32 @@ async def test_a_change_whose_caller_stopped_waiting_is_told_and_its_late_end_to
         assert not released and any("ждут ещё 1" in r.getMessage() and r.levelname == "WARNING" for r in caplog.records)
         admission.answered("r1")
     assert released == [True] and any("поздние ответы пришли" in r.getMessage() for r in caplog.records)
+
+
+
+async def test_a_module_that_stops_stops_the_work_its_cancelled_tasks_start_on_their_way_out():
+    """A queue that moves on when its job is cancelled starts the next job while the module stops: that job is stopped
+    before its first step and never runs, and nothing of the module is left to the end of the loop."""
+    ran, made = [], []
+    started = asyncio.Event()
+
+    class Queue(BaseModule):
+        name = "queue"
+
+        def take(self, job: int) -> None:
+            made.append(self.spawn(self.work(job)))
+
+        async def work(self, job: int) -> None:
+            ran.append(job)
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                self.take(job + 1)
+
+    module = Queue(Bus())
+    await module.start()
+    module.take(1)
+    await started.wait()
+    await module.stop()
+    assert ran == [1] and len(made) == 2 and all(task.cancelled() for task in made)

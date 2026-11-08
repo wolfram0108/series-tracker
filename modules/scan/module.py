@@ -224,7 +224,7 @@ class ScanModule(BaseModule):
             self._spawn(self._resume(task))
 
     def _spawn(self, coro) -> None:
-        self._tasks.append(asyncio.create_task(coro))
+        self.spawn(coro)
 
     # --- запуск сканов ---------------------------------------------------------
 

@@ -348,10 +348,7 @@ class PlannerModule(BaseModule):
         return {"accepted": True}
 
     def _start(self, series_id: int, download: bool) -> None:
-        task = asyncio.create_task(self._sync(series_id, download), name=f"planner.sync:{series_id}")
-        self._runs[series_id] = task
-        self._bg.add(task)
-        task.add_done_callback(self._bg.discard)
+        self._runs[series_id] = self.spawn(self._sync(series_id, download), name=f"planner.sync:{series_id}")
         self._announce_work(series_id, True)
 
     async def _sync(self, series_id: int, download: bool) -> None:
@@ -375,14 +372,15 @@ class PlannerModule(BaseModule):
             if sync.downloads_dir:
                 await storage.call(shutil.rmtree, sync.downloads_dir, True)
         except asyncio.CancelledError:
+            # The process stops: the sync stays written down and is taken up again at the start (system.started).
+            self._runs.pop(series_id, None)
             raise
         except Exception:  # noqa: BLE001 - the run ends either way: the error is in the log, the sync can be asked again
             self.log.exception("сериал %d: синхронизация плана прервана", series_id)
-        finally:
-            await self.repo.end_run(series_id)
-            self._runs.pop(series_id, None)
-            self.contribute(series_id, {"downloading": False, "aligning": False, "packing": False})
-            self._announce_work(series_id, False)
+        await self.repo.end_run(series_id)
+        self._runs.pop(series_id, None)
+        self.contribute(series_id, {"downloading": False, "aligning": False, "packing": False})
+        self._announce_work(series_id, False)
 
     async def _load(self, series_id: int, sync: SeriesSync) -> None:
         """The asset of the series as the table holds it; a file the disk has not any more is gone from the table."""
@@ -553,7 +551,14 @@ class PlannerModule(BaseModule):
                                                  seq=self._seq).model_dump())
 
     async def on_work_get(self, env: Envelope) -> dict:
-        return self._state(int(env.payload["series_id"])).model_dump()
+        """Whether the series has work: a sync written down is work even before this process takes it up again at its
+        start (`system.started` reaches the modules in no set order); the table is the truth, the task follows it. The
+        state is counted before the table is read: an end announced meanwhile is later and stays in force."""
+        series_id = int(env.payload["series_id"])
+        state = self._state(series_id)
+        if not state.active and await self.repo.running(series_id):
+            state = state.model_copy(update={"active": True})
+        return state.model_dump()
 
     # --- the view and the user's words ----------------------------------------------------------------------------
 

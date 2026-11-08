@@ -234,8 +234,8 @@ class TorrentsModule(BaseModule):
         await self._reconcile_with_qbt()
         await self._sweep_preview_orphans()
         await self._recover_tasks()
-        self._tasks.append(asyncio.create_task(self._pipeline_loop()))
-        self._tasks.append(asyncio.create_task(self._monitor_loop()))
+        self.spawn(self._pipeline_loop(), lasting=True)
+        self.spawn(self._monitor_loop(), lasting=True)
 
     async def _reconcile_with_qbt(self) -> None:
         """Сверка БД с реальным qBit при старте (crash-tolerance): если
@@ -385,8 +385,7 @@ class TorrentsModule(BaseModule):
         if ih in self._preview_inflight:
             return  # a fetch is already going: its outcome is the event
         self._preview_inflight.add(ih)
-        task = asyncio.create_task(
-            self._preview_magnet_task(tid, magnet, ih))
+        task = self.spawn(self._preview_magnet_task(tid, magnet, ih))
         self._preview_tasks.add(task)
         task.add_done_callback(self._preview_tasks.discard)
 

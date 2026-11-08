@@ -380,7 +380,7 @@ class CatalogModule(BaseModule):
                              series_id, ", ".join(sorted(missing)))
 
     def _spawn(self, coro) -> None:
-        self._tasks.append(asyncio.create_task(coro))
+        self.spawn(coro)
 
     async def on_touch(self, env: Envelope) -> None:
         """Обновление last_scan_time («время жизни» карточки) после

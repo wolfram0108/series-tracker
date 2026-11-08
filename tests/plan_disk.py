@@ -24,6 +24,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -41,6 +42,7 @@ from core.plan.executor import DOWNLOADS, Made, Passing, judged, video_of
 from core.plan.files import Library, container_json, container_of, dub_key, label_of  # noqa: F401
 from core.plan.tables import Track, Video
 from modules.conform.client import DaemonClient, Unconfirmed
+from modules.conform.module import ABORT, finished_view
 from modules.downloads import ytdlp
 from plan_world import World
 
@@ -174,6 +176,10 @@ class ReverseBody(BaseModel):
     dub_atracks: list[int] | None = None
 
 
+# The trace of a pair the service turned down: a decision that went the way of `abort` (modules/conform/module.py).
+REFUSED = [{"kind": "decision", "verdict": ABORT}]
+
+
 class Daemon:
     """A model of the alignment service on the protocol of the real one. `answers` by the label of a job: "mismatch",
     "critical", "suspect", "crash" (the service failed and judged nothing) or "lost" (the job is made, the answer never
@@ -201,7 +207,7 @@ class Daemon:
         @app.post("/conform/reverse")
         def reverse(body: ReverseBody) -> list[dict]:
             jobs = [self._cut(body, episode) for episode in body.episodes]
-            if self.answers.get(body.label or "") == "lost":
+            if self._answer_of(body.label) == "lost":
                 raise HTTPException(status_code=502, detail="no answer")
             return jobs
 
@@ -221,6 +227,11 @@ class Daemon:
                 raise HTTPException(status_code=404)
             return {"cancelled": job_id}
 
+    def _answer_of(self, label: str | None) -> str | None:
+        """The answer told for a job by its label; the caller's key at its end (` #key`) is not part of the name."""
+        label = label or ""
+        return self.answers.get(label, self.answers.get(re.sub(r"\s+#\S+$", "", label)))
+
     def client(self) -> DaemonClient:
         return DaemonClient("http://daemon.model", httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app)))
 
@@ -232,13 +243,13 @@ class Daemon:
         return job
 
     def _answer(self, job: dict, label: str | None) -> dict:
-        if self.answers.get(label or "") == "lost":
+        if self._answer_of(label) == "lost":
             raise HTTPException(status_code=502, detail="no answer")
         return job
 
     def _align(self, body: EnqueueBody) -> dict:
         os.makedirs(body.out_dir, exist_ok=True)  # the service makes the folder it writes in
-        answer = self.answers.get(body.label or "")
+        answer = self._answer_of(body.label)
         picture = self.codec.picture(body.ref)
         tracks = body.dub_atracks or [0] * len(body.dubs)
         results = []
@@ -253,17 +264,18 @@ class Daemon:
                 _run("-ss", str(sounds.index(picture)), "-i", dub, "-t", "1", "-map", f"0:a:{stream}", "-c:a", "flac", out)
             results.append({"dub": dub, "ok": ok, "out_path": out, "suspect": ["подозрительно"] if answer == "suspect" else [],
                             "critical": ["критично"] if answer == "critical" else [],
-                            # A crash in the service judged nothing; a pair it looked at and did not bring together is refused.
-                            "refused": not ok and answer != "crash",
+                            # A crash in the service judged nothing; a pair it looked at and did not bring together is
+                            # refused: its trace holds the decision `abort`, as the real service writes it.
+                            "trace": REFUSED if not ok and answer != "crash" else [],
                             "error": None if ok else "сбой сервиса" if answer == "crash" else "звук озвучки не совпал с картинкой"})
         return self._job("episode", body.label, body.dubs, results)
 
     def _cut(self, body: ReverseBody, episode: str) -> dict:
         os.makedirs(body.out_dir, exist_ok=True)  # the service makes the folder it writes in
-        answer = self.answers.get(body.label or "")
+        answer = self._answer_of(body.label)
         wanted = self.codec.picture(episode)
         inside = [self.codec.picture(body.compilation, second) for second in range(self.codec.seconds(body.compilation))]
-        result = {"dub": episode, "ok": False, "out_path": None, "suspect": [], "critical": [], "refused": True,
+        result = {"dub": episode, "ok": False, "out_path": None, "suspect": [], "critical": [], "trace": REFUSED,
                   "error": "кадры не сопоставлены"}
         if wanted in inside:
             out = os.path.join(body.out_dir, f"{os.path.basename(episode)}.cut.mkv")
@@ -272,7 +284,8 @@ class Daemon:
             result = {"dub": episode, "ok": True, "out_path": out, "suspect": [],
                       "critical": ["критично"] if answer == "critical" else [], "error": None,
                       "from_ref_s": 1.0, "from_dub_s": 0.0}
-        return self._job("reverse", body.label, [episode], [result])
+        # The service labels the job of each episode by the folder of the episode: the key the caller finds it by.
+        return self._job("reverse", os.path.basename(os.path.dirname(episode)), [episode], [result])
 
 
 class Crash(Exception):
@@ -403,7 +416,9 @@ class DiskWorld(World):
             raise Passing from None  # the answer never came: the job is looked at again at the next sync
         finally:
             await client.close()
-        return judged(job["results"][0] if job["results"] else None, cut=route == "reverse")
+        # The service's answer as the conform module reads it: the verdict is the product's own reading of it.
+        results = finished_view(job, {})["results"]
+        return judged(results[0] if results else None, cut=route == "reverse")
 
     def aligned_truth(self, aligned: Made) -> tuple[int, ...]:
         return (self.codec.sound(aligned.file, 0),)

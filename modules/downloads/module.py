@@ -265,10 +265,9 @@ class DownloadsModule(BaseModule):
     def _fetch_pump(self) -> None:
         while self._fetch_queue and len(self._fetch_active) < self._fetch_limit:
             job = self._fetch_queue.pop(0)
-            runner = asyncio.create_task(self._fetch_one(job))
+            runner = self.spawn(self._fetch_one(job))
             self._fetch_active[job["key"]] = (runner, job["series_id"])
             self._fetch_jobs[job["key"]] = job
-            self._tasks.append(runner)
             self.publish_event("downloads.fetch.started", {
                 "key": job["key"], "series_id": job["series_id"], "path": job["path"]})
 

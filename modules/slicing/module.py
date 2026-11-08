@@ -133,7 +133,7 @@ class SlicingModule(BaseModule):
                           requeued)
         for series_id in await self.repo.series_with_activity():
             await self._contribute(series_id)
-        self._tasks.append(asyncio.create_task(self._worker_loop()))
+        self.spawn(self._worker_loop(), lasting=True)
         self._wake.set()
 
     # --- главы ---------------------------------------------------------------------

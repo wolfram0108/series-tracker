@@ -105,8 +105,7 @@ class RenamingModule(BaseModule):
             self.log.info("перевыполнение незавершённой переобработки "
                           "(задача %d, сериал %d)", task["id"],
                           task["series_id"])
-            self._tasks.append(asyncio.create_task(
-                self._safe_reprocess(task["series_id"], resume_of=task["id"])))
+            self.spawn(self._safe_reprocess(task["series_id"], resume_of=task["id"]))
 
     async def on_preview(self, env: Envelope) -> dict:
         """Контракт GET rename_preview (Р-21): тот же обход, что

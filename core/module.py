@@ -54,6 +54,7 @@ class BaseModule:
         self._handlers: list[tuple[str, Handler, bool]] = []
         self._tasks: list[asyncio.Task] = []
         self._bg: set[asyncio.Task] = set()
+        self._stopping = False
         self._subs: list[Subscription] = []
         self._pending: dict[str, asyncio.Future] = {}
         # Requests sent under an admission whose answer has not come yet (it is counted however late it comes).
@@ -100,12 +101,29 @@ class BaseModule:
         await self.on_start()
         self.log.info("модуль запущен (подписок: %d)", len(self._subs))
 
-    async def stop(self) -> None:
-        await self.on_stop()
-        for task in (*self._tasks, *self._bg):
+    def spawn(self, coro, *, name: str | None = None, lasting: bool = False) -> asyncio.Task:
+        """The one way a module starts work of its own beside its handlers: the module stops it with itself. Work started
+        once the module is stopping — a cancelled task's way out that moves a queue on — is cancelled before its first
+        step, so nothing of it runs and nothing outlives the module. Work ends and is waited for by whoever waits for
+        quiet (`background`); a `lasting` task is a loop as long as the module's life (a feed, a worker) and is not."""
+        task = asyncio.create_task(coro, name=name)
+        if lasting:
+            self._tasks.append(task)
+        else:
+            self._bg.add(task)
+            task.add_done_callback(self._bg.discard)
+        if self._stopping:
             task.cancel()
-        await asyncio.gather(*self._tasks, *self._bg,
-                             return_exceptions=True)
+        return task
+
+    async def stop(self) -> None:
+        self._stopping = True
+        await self.on_stop()
+        # What a cancelled task spawns on its way out is cancelled already and only has to end: at most one more round.
+        while pending := [task for task in (*self._tasks, *self._bg) if not task.done()]:
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
         self._bg.clear()
         for sub in self._subs:
             self.bus.unsubscribe(sub)

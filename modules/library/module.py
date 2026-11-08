@@ -139,11 +139,10 @@ class LibraryModule(BaseModule):
         return {"moved": True}
 
     def _start(self, task: dict) -> asyncio.Task:
-        t = asyncio.create_task(self._execute(task))
+        t = self.spawn(self._execute(task))
         # A move taken up at the start has no one waiting: its failure is in the log and on its plan.
         t.add_done_callback(lambda done: done.cancelled() or done.exception())
         self._relocations[task["series_id"]] = t
-        self._tasks.append(t)
         return t
 
     @staticmethod

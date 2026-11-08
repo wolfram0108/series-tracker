@@ -1,8 +1,10 @@
 """The whole application on its stand (tests/app_stand.py): the user's way through the API, every module real, the site,
 the player and the alignment service as models — the full circle of the plan of a series."""
+import asyncio
+
 import pytest
 
-from app_stand import AppStand
+from app_stand import STAND_LIMIT_S, AppStand
 from plan_world import truth_of
 
 
@@ -70,3 +72,107 @@ async def test_a_voice_over_switched_off_for_the_series_goes_from_the_files(stan
     await stand.sync(series_id)
     view = await stand.check(series_id)
     assert view["assets"][0]["tracks"] == []
+
+
+async def test_an_episode_switched_off_hides_its_file_and_switched_on_shows_it_with_no_work(stand):
+    series_id = await series_of(stand, (1, 2))
+    await stand.sync(series_id)
+    await stand.call("PUT", f"/api/series/{series_id}/output/switch", {"season": 1, "episode": 2, "off": True})
+    view = await stand.sync(series_id)
+    await stand.check(series_id)
+    assert [name.endswith(".mkv.off") for name in stand.files()] == [False, True]
+    assert {each["mark"] for each in view["references"] if each["episode"] == 2} == {"off"}
+    await stand.call("PUT", f"/api/series/{series_id}/output/switch", {"season": 1, "episode": 2, "off": False})
+    view = await stand.sync(series_id)
+    await stand.check(series_id)
+    assert not any(name.endswith(".off") for name in stand.files())
+    assert {track["kind"] for episode in view["episodes"] for track in episode["tracks"]} == {"reuse"}
+
+
+async def test_a_stop_of_the_process_in_the_middle_of_a_sync_is_carried_to_the_end_after_the_start(stand):
+    """The service stops while the planner works (a download, an alignment under way): after the start the run of the
+    sync and the sync of the plan are taken up again from what is written, and end with the files whole."""
+    series_id = await series_of(stand, (1, 2))
+    working = stand.bus.subscribe("planner.series.changed")
+    await stand.call("POST", f"/api/series/{series_id}/scan")
+    while not (await asyncio.wait_for(working.queue.get(), STAND_LIMIT_S)).payload["running"]:
+        pass
+    await stand.restart()
+    await stand.until_run_ends(series_id)
+    view = await stand.check(series_id)
+    assert len(view["assets"]) == 2 and not view["running"]
+
+
+async def test_episodes_a_higher_compilation_holds_are_cut_out_of_it_by_the_service(stand):
+    """A compilation of episodes 1–3 in 2160p over single episodes in 720p: the planner downloads it and the alignment
+    service (its model, through the real conform) cuts each episode out of it by the single video of the episode."""
+    stand.site.release("ref", "AniStar")
+    for number in (1, 2, 3):
+        stand.site.episode("ref", number, height=720)
+    stand.site.compilation("ref", 1, 3, height=2160)
+    await stand.configure(["AniStar"])
+    series_id = await stand.series("Сериал", ["ref"])
+    await stand.sync(series_id)
+    view = await stand.check(series_id)
+    assert sorted(asset["episode"][1] for asset in view["assets"] if asset["video"]["cut_of"]) == [1, 2, 3]
+    assert all(asset["video"]["height"] == 2160 for asset in view["assets"])
+
+
+async def test_a_video_deleted_is_downloaded_anew_while_its_row_is_online(stand):
+    """«Удалить» the video of a file whose row is online: «скачать заново» — the file goes for a fresh download of it."""
+    series_id = await series_of(stand, (1,))
+    (asset,) = (await stand.sync(series_id))["assets"]
+    await stand.call("POST", f"/api/series/{series_id}/plan/delete", {"kind": "video", "name": asset["name"]})
+    (planned,) = (await stand.call("GET", f"/api/series/{series_id}/plan"))["episodes"]
+    assert planned["video"]["kind"] == "download" and planned["video"]["row"] == asset["video"]["row"]
+    await stand.sync(series_id)
+    view = await stand.check(series_id)
+    assert view["assets"][0]["video"]["row"] == asset["video"]["row"] and not view["commands"]
+
+
+async def test_a_video_deleted_whose_row_the_source_forgot_gives_its_place_to_another_source(stand):
+    """The source forgot the row of the video (a page read whole, with episode 2 on it), «Удалить» the video: the deleted
+    video is the last candidate, the video of the other source gives the picture, every sound on the new picture."""
+    series_id = await series_of(stand, (1, 2))
+    await stand.sync(series_id)
+    stand.site.drop("ref", 1)
+    stand.later()
+    await stand.sync(series_id)
+    (asset,) = [each for each in (await stand.check(series_id))["assets"] if each["episode"] == [1, 1]]
+    first = asset["video"]["row"]
+    await stand.call("POST", f"/api/series/{series_id}/plan/delete", {"kind": "video", "name": asset["name"]})
+    await stand.sync(series_id)
+    view = await stand.check(series_id)
+    (asset,) = [each for each in view["assets"] if each["episode"] == [1, 1]]
+    assert asset["video"]["row"] != first and asset["video"]["height"] == 480 and not view["commands"]
+
+
+async def test_a_download_that_failed_is_passed_over_until_the_failures_are_reset(stand):
+    series_id = await series_of(stand, (1,))
+    stand.site.gone("dub", 1)
+    view = await stand.sync(series_id)
+    await stand.check(series_id)
+    assert view["assets"][0]["tracks"] == [] and [each["kind"] for each in view["failures"]] == ["download"]
+    again = await stand.sync(series_id)
+    assert again["failures"] == view["failures"] and again["assets"] == view["assets"]
+    stand.site.gone("dub", 1, False)
+    assert (await stand.call("POST", f"/api/series/{series_id}/failures/reset"))["reset"] == 1
+    view = await stand.sync(series_id)
+    await stand.check(series_id)
+    assert [track["group"] for track in view["assets"][0]["tracks"]] == ["AnimeVost"] and not view["failures"]
+
+
+async def test_a_voice_over_the_service_refused_to_align_is_passed_over_until_the_failures_are_reset(stand):
+    series_id = await series_of(stand, (1,))
+    stand.daemon.answers["Сериал s01e01 AnimeVost"] = "mismatch"
+    view = await stand.sync(series_id)
+    await stand.check(series_id)
+    assert view["assets"][0]["tracks"] == [] and [each["kind"] for each in view["failures"]] == ["align"]
+    jobs = len(stand.daemon.jobs)
+    await stand.sync(series_id)
+    assert len(stand.daemon.jobs) == jobs  # nothing is asked of the service again
+    del stand.daemon.answers["Сериал s01e01 AnimeVost"]
+    await stand.call("POST", f"/api/series/{series_id}/failures/reset")
+    view = await stand.sync(series_id)
+    await stand.check(series_id)
+    assert [track["group"] for track in view["assets"][0]["tracks"]] == ["AnimeVost"] and not view["failures"]

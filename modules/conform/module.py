@@ -396,7 +396,7 @@ class ConformModule(BaseModule):
 
     def _start_feed(self) -> None:
         if self._client is not None:
-            self._runner = asyncio.create_task(self._run(), name="conform:feed")
+            self._runner = self.spawn(self._run(), name="conform:feed", lasting=True)
 
     async def _stop_feed(self) -> None:
         if self._runner is not None:

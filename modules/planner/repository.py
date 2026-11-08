@@ -74,6 +74,9 @@ class PlannerRepository:
     async def end_run(self, series_id: int) -> None:
         await self._db.execute("DELETE FROM plan_runs WHERE series_id=?", (series_id,))
 
+    async def running(self, series_id: int) -> bool:
+        return await self._db.fetch_one("SELECT 1 FROM plan_runs WHERE series_id=?", (series_id,)) is not None
+
     async def runs(self) -> list[dict]:
         return await self._db.fetch_all("SELECT series_id, download FROM plan_runs ORDER BY series_id")
 

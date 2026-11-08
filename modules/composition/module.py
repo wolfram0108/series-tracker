@@ -508,9 +508,7 @@ class CompositionModule(BaseModule):
             return
         flight = _Flight(refresh=set(refresh))
         self._flights[series_id] = flight
-        flight.task = asyncio.create_task(self._run(series_id, flight), name=f"composition:{series_id}")
-        self._bg.add(flight.task)
-        flight.task.add_done_callback(self._bg.discard)
+        flight.task = self.spawn(self._run(series_id, flight), name=f"composition:{series_id}")
 
     async def _run(self, series_id: int, flight: _Flight) -> None:
         try:

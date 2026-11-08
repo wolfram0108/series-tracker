@@ -35,7 +35,11 @@ from plan_world import truth_of
 from schema_db import migrated
 from sources_support import Web
 
-STAND_LIMIT_S = 170.0  # a stand whose sync does not end within this waits for what no model gives
+STAND_LIMIT_S = 120.0  # a stand whose sync does not end within this waits for what no model gives
+
+
+# The real service sends a keep-alive comment this often (modules/conform/client.py reads silence as a dead link).
+KEEP_ALIVE_S = 15.0
 
 
 class StreamingDaemon(Daemon):
@@ -58,7 +62,11 @@ class StreamingDaemon(Daemon):
                 yield _event("conform.snapshot", {"items": list(self.jobs.values())})
                 seen = self.version
                 while True:
-                    await self.changed.wait()
+                    try:
+                        await asyncio.wait_for(self.changed.wait(), KEEP_ALIVE_S)
+                    except asyncio.TimeoutError:
+                        yield ": keep-alive\n\n"  # the service's heartbeat: a silent stream is a dead one to the client
+                        continue
                     self.changed.clear()
                     items = [job for job in self.jobs.values() if self.sent.get(job["id"], 0) > seen]
                     seen = self.version
@@ -79,6 +87,18 @@ def _event(name: str, payload: dict) -> str:
     return f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+class _Server(uvicorn.Server):
+    """The server tells that it listens: its start is the signal, not a pause."""
+
+    def __init__(self, config) -> None:
+        super().__init__(config)
+        self.ready = threading.Event()
+
+    async def startup(self, sockets=None) -> None:
+        await super().startup(sockets=sockets)
+        self.ready.set()
+
+
 class Served:
     """An ASGI app on real HTTP in a thread of its own: the address is known once the server says it started."""
 
@@ -86,17 +106,11 @@ class Served:
         self.socket = socket.socket()
         self.socket.bind(("127.0.0.1", 0))
         self.port = self.socket.getsockname()[1]
-        started = threading.Event()
-
-        @app.on_event("startup")
-        async def _started():
-            started.set()
-
         # The loop of asyncio, not uvloop: uvicorn would set its policy for the whole process, the tests' too.
-        self.server = uvicorn.Server(uvicorn.Config(app, log_level="warning", lifespan="on", loop="asyncio"))
+        self.server = _Server(uvicorn.Config(app, log_level="warning", lifespan="on", loop="asyncio", ws="none"))
         self.thread = threading.Thread(target=self.server.run, kwargs={"sockets": [self.socket]}, daemon=True)
         self.thread.start()
-        if not started.wait(30):
+        if not self.server.ready.wait(30):
             raise RuntimeError("the model of the alignment service did not start")
 
     @property
@@ -115,6 +129,8 @@ class Release:
     slug: str
     voice: str
     episodes: dict[int, tuple[int, int]] = field(default_factory=dict)
+    # The compilations of the release: (first, last) episode → its height. Its entry is numbered apart (1000 + first).
+    compilations: dict[tuple[int, int], int] = field(default_factory=dict)
 
     @property
     def url(self) -> str:
@@ -145,6 +161,24 @@ class Site:
         if not os.path.exists(path):
             self.codec.make(path, [truth])
 
+    def compilation(self, slug: str, first: int, last: int, *, height: int = 2160) -> None:
+        """A compilation of episodes `first`…`last` of a release: one video that holds them one after another."""
+        self.releases[slug].compilations[(first, last)] = height
+        self.ids.setdefault((slug, 1000 + first), 700000 + len(self.ids) + 1)
+        path = os.path.join(self.root, self._compilation_file(slug, first, last))
+        if not os.path.exists(path):
+            self.codec.make(path, [truth_of(1, number) for number in range(first, last + 1)])
+
+    @staticmethod
+    def _compilation_file(slug: str, first: int, last: int) -> str:
+        return f"{slug}-from{first}-to{last}-file.mp4"
+
+    def gone(self, slug: str, number: int, gone: bool = True) -> None:
+        """The file of an episode answers 404 (gone for good) — or is back."""
+        truth, _height = self.releases[slug].episodes[number]
+        name = f"{slug}-ep{number}-truth{truth}-file.mp4"
+        (self.host.missing.add if gone else self.host.missing.discard)(name)
+
     def drop(self, slug: str, number: int) -> None:
         self.releases[slug].episodes.pop(number, None)
 
@@ -152,6 +186,9 @@ class Site:
         entries = [{"id": 93000 + number, "number": number, "compilation_from": None, "compilation_to": None,
                     "title": f"Серия {number}", "is_vip": False, "is_trailer": False, "date": "09 May 2026"}
                    for number in sorted(release.episodes)]
+        entries += [{"id": 94000 + first, "number": 1000 + first, "compilation_from": first, "compilation_to": last,
+                     "title": f"Серии {first}-{last}", "is_vip": False, "is_trailer": False, "date": "09 May 2026"}
+                    for first, last in sorted(release.compilations)]
         return f"""<!DOCTYPE html>
 <html lang="ru"><head><meta charset="UTF-8"><title>Сериал {release.slug} — Ruchime</title></head>
 <body>
@@ -178,11 +215,20 @@ const ALL_EPS = {json.dumps(entries, ensure_ascii=False)};
 
     def _embed(self, video: int) -> str:
         found = next(((slug, number) for (slug, number), each in self.ids.items() if each == video), None)
-        if found is None or found[1] not in self.releases[found[0]].episodes:
+        if found is None:
             return ""
         slug, number = found
-        truth, height = self.releases[slug].episodes[number]
-        file = self.host.url(f"{slug}-ep{number}-truth{truth}-file.mp4")
+        release = self.releases[slug]
+        if number > 1000:
+            span = next((each for each in release.compilations if each[0] == number - 1000), None)
+            if span is None:
+                return ""
+            height, file = release.compilations[span], self.host.url(self._compilation_file(slug, *span))
+        elif number in release.episodes:
+            truth, height = release.episodes[number]
+            file = self.host.url(f"{slug}-ep{number}-truth{truth}-file.mp4")
+        else:
+            return ""
         return f"""<!DOCTYPE html><html><head><title>Сериал</title></head><body>
 <script>var player = new Playerjs({{ id: 'Video{video}', file:"[{height}p]{file}" }});</script>
 </body></html>"""
@@ -201,7 +247,8 @@ const ALL_EPS = {json.dumps(entries, ensure_ascii=False)};
                 if len(parts) == 2:
                     return 200, self._release_page(release)
                 number = int(parts[2].removeprefix("episode-"))
-                return (200, self._episode_page(release, number)) if number in release.episodes else (404, "")
+                known = number in release.episodes or any(first == number - 1000 for first, _ in release.compilations)
+                return (200, self._episode_page(release, number)) if known else (404, "")
             return 404, ""
         return Web().route("", answer)
 
@@ -223,7 +270,7 @@ class AppStand:
         # The time of day as the sources tell the age of a table by it: a scenario moves it to let a page be read again.
         self.now = datetime.now(timezone.utc)
 
-    async def start(self) -> None:
+    async def start(self, before_started=None) -> None:
         self.bus = Bus()
         self.db = Database(self.db_path)
         self.gateway, self.modules = assemble(self.bus, self.db, Options(
@@ -232,6 +279,8 @@ class AppStand:
         self.runner = Runner(self.bus, self.modules)
         await self.runner.start()
         self.module("sources")._http = self.site.web().client()
+        if before_started is not None:
+            before_started()
         self.bus.publish(Envelope(topic="system.started", kind="event"))
         self.api = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.gateway.app), base_url="http://stand")
 
@@ -269,12 +318,16 @@ class AppStand:
         """A profile of rules, as the user makes one for a source: «Серия N» numbers the row, and the voice-over of the
         source is the tag the rule gives it (the constructor alone names a voice-over)."""
         made = await self.call("POST", "/api/parser-profiles", {"name": f"серии {voice}"})
-        blocks = json.dumps([{"type": "text", "value": "Серия "}, {"type": "number"}], ensure_ascii=False)
-        actions = [{"action_type": "extract_single", "action_pattern": blocks},
-                   {"action_type": "assign_voiceover", "action_pattern": voice}]
-        await self.call("POST", f"/api/parser-profiles/{made['id']}/rules", {
-            "name": "серия", "action_pattern": json.dumps(actions, ensure_ascii=False),
-            "continue_after_match": False, "conditions": []})
+        single = json.dumps([{"type": "text", "value": "Серия "}, {"type": "number"}], ensure_ascii=False)
+        span = json.dumps([{"type": "text", "value": "Серии "}, {"type": "number"}, {"type": "text", "value": "-"},
+                           {"type": "number"}], ensure_ascii=False)
+        # A rule acts only on the titles of its form: a rule that matched gives the voice-over and stops the others.
+        for name, kind, blocks in (("компиляция", "extract_range", span), ("серия", "extract_single", single)):
+            actions = [{"action_type": kind, "action_pattern": blocks},
+                       {"action_type": "assign_voiceover", "action_pattern": voice}]
+            await self.call("POST", f"/api/parser-profiles/{made['id']}/rules", {
+                "name": name, "action_pattern": json.dumps(actions, ensure_ascii=False), "continue_after_match": False,
+                "conditions": [{"condition_type": "contains", "pattern": blocks, "logical_operator": "AND"}]})
         return made["id"]
 
     async def series(self, name: str, slugs: list[str]) -> int:
@@ -293,11 +346,23 @@ class AppStand:
         """A sync as the window starts it, to its end: the run of the series closes when the planner has no work left."""
         ended = self.bus.subscribe("scan.run.changed")
         await self.call("POST", f"/api/series/{series_id}/scan")
+        await self._run_end(ended, series_id)
+        return await self.call("GET", f"/api/series/{series_id}/plan")
+
+    async def _run_end(self, ended, series_id: int) -> None:
         while True:
             packet = (await asyncio.wait_for(ended.queue.get(), STAND_LIMIT_S)).payload
             if packet["series_id"] == series_id and not packet["active"]:
-                break
-        return await self.call("GET", f"/api/series/{series_id}/plan")
+                return
+
+    async def restart(self) -> None:
+        """The process stops (whatever it is doing) and starts again on the same database and folders. Whoever waits for
+        the end of a run after it subscribes before the start: `until_run_ends` is told the end."""
+        await self.stop()
+        await self.start(before_started=lambda: setattr(self, "_ended", self.bus.subscribe("scan.run.changed")))
+
+    async def until_run_ends(self, series_id: int) -> None:
+        await self._run_end(self._ended, series_id)
 
     # --- what is on disk ------------------------------------------------------------------------------------------
 
