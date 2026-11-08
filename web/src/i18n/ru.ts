@@ -177,6 +177,7 @@ export const ru = {
   "output.plan.deleteTrack": "удалить дорожку {voice} из {name}",
   "output.plan.cancel": "Отменить",
   "output.plan.failures": "Неудачных попыток: {count}",
+  "output.plan.offline": "офлайн",
   "rules.block.or.label": "или",
   "rules.block.or.title": "Любой из соседних текстов: ставится между двумя блоками «Текст»",
   "rules.block.or.dangling": "«или» должен стоять между двумя блоками «Текст»",

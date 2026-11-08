@@ -34,6 +34,8 @@ Queries:
 Events out:
   planner.series.changed PlannerView — the asset, the plan, a failure or a command of a series changed.
   series.purged {series_id, owner} — the tables of a deleted series are cleaned.
+  series.status.contribution {source: planner, series_id, flags: {downloading, aligning, packing}} — what the sync of the
+      series is at (the card of the series), told when it changes; all false when the sync ends.
   work.series.state (owner `planner`).
 Events in: downloads.fetch.finished, conform.job.finished, conform.job.removed, system.started (syncs under way are taken up
   again, a journal a stop cut short is carried out), series.deleted, composition.changed and voices.settings.changed (the
@@ -57,7 +59,7 @@ from core.contracts.work import WORK_STATE, WorkState
 from core.envelope import Envelope
 from core.ignored import parse_memory
 from core.plan.executor import DOWNLOADS, Made, Passing, SeriesSync, judged, video_of
-from core.plan.files import Library, container_json, container_of, label_of
+from core.plan.files import Library, as_in_file, container_json, container_of, label_of
 from core.plan.inputs import assets_against, choices_of, online_of
 from core.plan.planner import Plan, name_of
 from core.plan.tables import RowId, Track, Video
@@ -114,6 +116,7 @@ class BusSync(SeriesSync):
         self.names: dict[tuple, str] = {}
         self.pending: list[tuple] = []  # the steps of the journal of this sync
         self.told = False  # the window was shown the plan this sync froze
+        self.flags: dict[str, int] = {}  # the steps under way by what they are, for the card of the series
         # A VK video whose stream request fails may be handed to the downloader itself (as the service always did).
         self.vk_sources = {each.id for each in map(SeriesSource.model_validate, series.get("sources", []))
                            if each.source_type == SourceType.VK_VIDEO}
@@ -162,9 +165,24 @@ class BusSync(SeriesSync):
 
     # --- the steps -------------------------------------------------------------------------------------------------
 
+    def _flag(self, name: str, step: int) -> None:
+        """What the work of the series is at, for the card of the series: told when it changes."""
+        self.flags[name] = self.flags.get(name, 0) + step
+        self.m.contribute(self.series["id"], {each: count > 0 for each, count in self.flags.items()})
+
     async def do(self, op, results):
         if not self.download or not self.downloads_dir:
             raise Passing  # a sync without download, or no work folder named: nothing is done, nothing recorded
+        flag = "downloading" if op.kind in DOWNLOADS else "aligning" if op.kind in ("align", "cut") else None
+        if flag is None:
+            return await self._step(op, results)
+        self._flag(flag, 1)
+        try:
+            return await self._step(op, results)
+        finally:
+            self._flag(flag, -1)
+
+    async def _step(self, op, results):
         try:
             if op.kind in DOWNLOADS:
                 return await self._download(op)
@@ -256,7 +274,14 @@ class BusSync(SeriesSync):
     # --- the files -------------------------------------------------------------------------------------------------
 
     async def stage(self, made, group, results) -> None:
-        self.pending += await self.files.build(made, group, results)
+        if not group.built:
+            self.pending += await self.files.build(made, group, results)
+            return
+        self._flag("packing", 1)
+        try:
+            self.pending += await self.files.build(made, group, results)
+        finally:
+            self._flag("packing", -1)
 
     async def commit(self, before) -> None:
         table = [container_json(each) for each in sorted(self.containers.values(), key=lambda each: each.name)]
@@ -342,6 +367,7 @@ class PlannerModule(BaseModule):
         finally:
             await self.repo.end_run(series_id)
             self._runs.pop(series_id, None)
+            self.contribute(series_id, {"downloading": False, "aligning": False, "packing": False})
             self._announce_work(series_id, False)
 
     async def _load(self, series_id: int, sync: SeriesSync) -> None:
@@ -350,7 +376,7 @@ class PlannerModule(BaseModule):
         for data in await self.repo.assets(series_id):
             container = container_of(data)
             if await storage.call(os.path.exists, os.path.join(sync.files.root, container.name)):
-                containers[container.name] = await self._as_in_file(sync.files, container)
+                containers[container.name] = await as_in_file(sync.files, container)
             else:
                 self.log.warning("сериал %d: файла %s нет на диске — он уходит из таблицы актива", series_id, container.name)
         sync.containers = containers
@@ -358,18 +384,6 @@ class PlannerModule(BaseModule):
         sync.commands = frozenset(_decoded(each) for each in await self.repo.commands(series_id))
         self._loaded[series_id] = (frozenset(sync.failed), sync.commands)
         self._forgot.discard(series_id)
-
-    async def _as_in_file(self, files: Library, container):
-        """A file made before the planner (its tracks keyed by the voice-over, `tag`) is told by the table in an order of
-        its own: the order of its tracks is the order of the file, read from its tags, so that the table is the file."""
-        if not any(track.tag for track in container.tracks):
-            return container
-        held = await mkv.contents(files.path(container.name))
-        if held is None:
-            return container
-        place = {each.key: number for number, each in enumerate(held.audio) if each.key}
-        ordered = sorted(container.tracks, key=lambda track: place.get(track.tag or "", len(place)))
-        return replace(container, tracks=tuple(ordered))
 
     async def save(self, series_id: int, sync: SeriesSync) -> None:
         """The table, the failures and the commands after a sync. What the user said while it ran is kept: a command
@@ -509,6 +523,9 @@ class PlannerModule(BaseModule):
             future.set_result({"removed": True})
 
     # --- the work of the run ---------------------------------------------------------------------------------
+
+    def contribute(self, series_id: int, flags: dict[str, bool]) -> None:
+        self.publish_event("series.status.contribution", {"source": PLANNER, "series_id": series_id, "flags": flags})
 
     def _state(self, series_id: int) -> WorkState:
         self._seq += 1

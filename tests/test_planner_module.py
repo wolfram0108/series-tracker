@@ -289,3 +289,18 @@ async def test_a_file_made_before_the_planner_is_read_in_the_order_of_its_tracks
     await sync(world)
     assert os.stat(path).st_mtime_ns == made
     assert [track["snapshot"]["group"] for track in table(db_path)[name]["tracks"]] == ["G1", "G2"]
+
+
+async def test_the_card_of_the_series_hears_what_the_sync_is_at_and_its_end(world):
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    told = planner.bus.subscribe("series.status.contribution")
+    await sync(world)
+    flags = []
+    while not told.queue.empty():
+        payload = (await told.queue.get()).payload
+        assert payload["source"] == "planner" and payload["series_id"] == SERIES
+        flags.append(payload["flags"])
+    on = {name for each in flags for name, value in each.items() if value}
+    assert on == {"downloading", "aligning", "packing"}
+    assert flags[-1] == {"downloading": False, "aligning": False, "packing": False}

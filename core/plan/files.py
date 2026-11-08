@@ -60,6 +60,18 @@ def key_in(container: Container, dub: RowId) -> str:
     return track.tag if track is not None and track.tag else dub_key(dub)
 
 
+async def as_in_file(files: "Library", container: Container) -> Container:
+    """A file made before the planner (its tracks keyed by the voice-over, `tag`) is told by the table in an order of its
+    own: the order of its tracks is the order of the file, read from its tags, so that the table is the file."""
+    if not any(track.tag for track in container.tracks):
+        return container
+    held = await mkv.contents(files.path(container.name))
+    if held is None:
+        return container
+    place = {each.key: number for number, each in enumerate(held.audio) if each.key}
+    return replace(container, tracks=tuple(sorted(container.tracks, key=lambda track: place.get(track.tag or "", len(place)))))
+
+
 class Library:
     """The folder of a series: its containers under their names, the staging folder and the journal."""
 

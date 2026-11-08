@@ -47,6 +47,8 @@ const rows = computed(() => {
       cell, sourceId, part: line?.part ?? null,
       where: line && (line.playerLabel ?? line.player) ? `${line.playerLabel ?? line.player}${height}` : "",
       note: detail ? reasonText(detail) : "", action, pill,
+      // The source forgot the row the track came from: the file keeps it, with where it came from (an offline row).
+      offline: !cell.isReference && line?.dub?.online === false,
     }
   })
 })
@@ -82,6 +84,7 @@ function act(row: (typeof rows.value)[number]): void {
         </td>
         <td>
           <span class="pill" :class="row.pill">{{ stateText(row.cell) }}</span>
+          <span v-if="row.offline" class="track-offline">{{ t("output.plan.offline") }}</span>
           <span v-if="row.note" class="track-note">{{ row.note }}</span>
         </td>
         <td class="narrow">
@@ -107,6 +110,7 @@ function act(row: (typeof rows.value)[number]): void {
 .track-ref { margin-inline-start: 0.4rem; }
 .track-from { display: inline-flex; align-items: center; gap: 0.4rem; }
 .track-note { margin-inline-start: 0.4rem; color: var(--text-muted); }
+.track-offline { margin-inline-start: 0.4rem; color: var(--text-muted); font-style: italic; }
 .muted { color: var(--text-muted); }
 .track-action {
   border: 1px solid var(--border-color); background: var(--bg-white); border-radius: 8px; padding: 0.25rem 0.6rem;
