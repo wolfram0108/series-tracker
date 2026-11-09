@@ -4,6 +4,7 @@ import Button from "primevue/button"
 import { api } from "../../api/client"
 import type { components } from "../../api/schema"
 import { useApi } from "../../composables/useApi"
+import { useSSE } from "../../composables/useSSE"
 import { t } from "../../i18n"
 import { CHANGE_ANSWER, nextAnswer } from "../../lib/changeAnswer"
 import { reasonText } from "../../lib/reason"
@@ -52,9 +53,12 @@ async function commit(change: { priority?: string[]; voice_groups?: Groups }): P
   }
 }
 
-// The core announces every save, also one made in another window.
+// The core announces every save, also one made in another window; a connection that came back may have missed one.
 watch(() => voicesStore.settings, (next) => {
   if (next) view.value = next
+})
+watch(useSSE().connected, (up) => {
+  if (up) void load()
 })
 
 const problemsOf = (field: string) => problems.value.filter((problem) => problem.field === field)

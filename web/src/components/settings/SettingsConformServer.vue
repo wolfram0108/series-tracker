@@ -6,6 +6,7 @@ import StInput from "../StInput.vue"
 import { api } from "../../api/client"
 import type { components } from "../../api/schema"
 import { useApi } from "../../composables/useApi"
+import { useSSE } from "../../composables/useSSE"
 import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
 import { useConformStore } from "../../stores/conform"
@@ -55,9 +56,12 @@ async function save(): Promise<boolean> {
   return reply.saved
 }
 
-// The core announces every save, also one made in another window.
+// The core announces every save, also one made in another window; a connection that came back may have missed one.
 watch(() => store.settings, (next) => {
   if (next) adopt(next)
+})
+watch(useSSE().connected, (up) => {
+  if (up) void load()
 })
 
 const daemon = computed(() => queues.conform?.daemon)

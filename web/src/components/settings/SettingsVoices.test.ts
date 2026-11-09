@@ -9,6 +9,7 @@ vi.mock("../../api/client", () => ({ api: client }))
 vi.mock("primevue/usetoast", () => ({ useToast: () => ({ add: vi.fn() }) }))
 
 import SettingsVoices from "./SettingsVoices.vue"
+import { useSSE } from "../../composables/useSSE"
 
 const view = (priority: string[]) => ({
   priority, default_priority: ["kodik", "vibix", "allvideo"], voice_groups: {}, rejected: [], cut_max_height: 720,
@@ -80,5 +81,19 @@ describe("the order of the players in the settings of the voices", () => {
     answer({ error: { error: "network" } })
     await flushPromises()
     expect(shown(w)).toEqual(["kodik", "vibix", "allvideo"])
+  })
+
+  it("reads the settings again when the connection comes back: a save made meanwhile was not announced to it", async () => {
+    const connected = useSSE().connected
+    connected.value = true
+    const w = await opened(["kodik", "vibix", "allvideo"])
+    connected.value = false
+    await flushPromises()
+    client.GET.mockResolvedValueOnce({ data: view(["allvideo", "kodik", "vibix"]) })
+    connected.value = true
+    await flushPromises()
+    expect(client.GET).toHaveBeenCalledTimes(2)
+    expect(shown(w)).toEqual(["allvideo", "kodik", "vibix"])
+    connected.value = false
   })
 })
