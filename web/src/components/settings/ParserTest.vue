@@ -16,12 +16,15 @@ import { progressText } from "../../lib/sources"
 // initialTitles: filled by the add window with the files of the release. initialUrl: the chosen web source, so that
 // the page read is exactly that voice-over's.
 const props = defineProps<{ profileId: number; initialTitles?: string[]; initialUrl?: string }>()
+// The lines in the field as they stand: the quick templates of a rule «Таблица» are made of them.
+const emit = defineEmits<{ lines: [lines: string[]] }>()
 
 const test = useRulesTest(() => props.profileId)
 
 const address = ref("")
 const query = ref("")
 const titles = ref("")
+watch(titles, (text) => emit("lines", text.split("\n").map((row) => row.trim()).filter((row) => row !== "")), { immediate: true })
 const loadedNames = ref<number | null>(null)
 
 if (props.initialTitles?.length) titles.value = props.initialTitles.join("\n")

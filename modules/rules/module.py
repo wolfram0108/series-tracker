@@ -43,6 +43,10 @@ Queries:
   rules.rules.update {rule_id, data} → {ok}
   rules.rules.delete {rule_id} → {ok}
   rules.rules.reorder {ordered_ids} → {ok}
+      — правило вида «Таблица» несёт `rule_table` {action_type, rows: [{if: блоки, then: значение | блоки}]}
+      (у обычного правила null): строки — те же правила «если содержит → действие столбца», движок
+      раскладывает их по порядку на месте таблицы (engine.table_rules); строка без условия или значения —
+      отказ с её номером.
 
 Отказы по профилю: несуществующий profile_id в rules.apply, rules.format_torrent_file,
 rules.profiles.update, rules.rules.list и rules.rules.add — ValueError с кодом

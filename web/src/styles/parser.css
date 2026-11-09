@@ -64,7 +64,7 @@
 }
 
 /* --- Список правил ---------------------------------------------------- */
-.rules-toolbar { display: flex; justify-content: flex-end; margin-bottom: 1rem; }
+.rules-toolbar { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; margin-bottom: 1rem; }
 .rules-list { display: flex; flex-direction: column; }
 
 /* Карточка правила (база старого .list-card + .rule-card) */

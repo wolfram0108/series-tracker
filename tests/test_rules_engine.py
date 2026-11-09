@@ -830,3 +830,74 @@ def test_or_captures_nothing_so_the_number_after_it_is_the_one_extracted():
 def test_or_out_of_place_or_with_an_empty_text_is_refused_on_saving(specs):
     with pytest.raises(ValueError, match="или"):
         validate_rule({"conditions": [_cond(_blocks(*specs))]})
+
+
+# --- правило «Таблица»: строки — те же обычные правила ------------------------------------------
+
+def _table(rule_id, name, action_type, rows, continue_after=True):
+    return {"id": rule_id, "name": name, "priority": rule_id, "continue_after_match": continue_after,
+            "action_pattern": "[]", "conditions": [], "rule_table": {"action_type": action_type, "rows": rows}}
+
+
+def _same_rules(table):
+    """What the table is by the definition of the owner: one ordinary rule per row, «если содержит → действие»."""
+    spec = table["rule_table"]
+    rules = []
+    for number, row in enumerate(spec["rows"], 1):
+        then = row["then"]
+        pattern = "[]" if spec["action_type"] == "exclude" else (
+            then if isinstance(then, str) else json.dumps(then, ensure_ascii=False))
+        rules.append(_rule(table["id"], f"{table['name']} · {number}",
+                           [{"action_type": spec["action_type"], "action_pattern": pattern}],
+                           [_cond(row["if"])], table["continue_after_match"]))
+    return rules
+
+
+VOICES = [{"if": _blocks("V:AniStar"), "then": "AniStar"},
+          {"if": [{"type": "text", "value": "V:HORIZON"}, {"type": "or"}, {"type": "text", "value": "mir.donghua"}],
+           "then": "HORIZON"},
+          {"if": _blocks("PID:animakima.ru", "*", "V:AniSTAR"), "then": "AniStar"}]
+EPISODES = [{"if": _blocks("Серия", "_", "N"), "then": _blocks("Серия", "_", "N")},
+            {"if": _blocks("N", "_", "серия"), "then": _blocks("N", "_", "серия")}]
+TITLES = ["PID:1.ruchime.org | P:Kodik | Вечная воля | Серия 1 | V:AniStar | VT:voice | R:1080",
+          "PID:1.ruchime.org | P:Kodik | Вечная воля | Серия 12 | V:HORIZON | VT:voice | R:720",
+          "PID:mir.donghua.ru | P:VK | Вечная воля | 7 серия | V:Другая | R:2160",
+          "PID:animakima.ru | P:Animakima | Вечная воля | 3 серия | V:AniSTAR | R:1080",
+          "Трейлер без номера"]
+
+
+@pytest.mark.parametrize("continue_after", [True, False])
+@pytest.mark.parametrize("action_type,rows", [("assign_voiceover", VOICES), ("extract_single", EPISODES),
+                                              ("exclude", [{"if": _blocks("Трейлер"), "then": None}])])
+def test_a_table_answers_every_title_as_its_rows_written_as_ordinary_rules_do(action_type, rows, continue_after):
+    episode = _rule(9, "серия", [_extract("extract_single", "Серия", "_", "N")], [_cond(_blocks("Серия", "_", "N"))], True)
+    table = _table(5, "Озвучки", action_type, rows, continue_after)
+    for order in ([table, episode], [episode, table]):
+        as_table = compile_profile(1, order)
+        as_rules = compile_profile(1, [each for rule in order
+                                       for each in (_same_rules(rule) if rule.get("rule_table") else [rule])])
+        assert not as_table.invalid_rules
+        for title in TITLES:
+            assert process_title(as_table, title) == process_title(as_rules, title), title
+
+
+@pytest.mark.parametrize("table,error", [
+    ({"action_type": "assign_voiceover", "rows": []}, "в таблице нет строк"),
+    ({"action_type": "assign_voiceover", "rows": [{"if": _blocks("V:A"), "then": "A"}, {"if": [], "then": "B"}]},
+     "строка 2: пустое условие «ЕСЛИ»"),
+    ({"action_type": "assign_voiceover", "rows": [{"if": _blocks("V:A"), "then": "  "}]}, "строка 1: пустое значение «ТО»"),
+    ({"action_type": "extract_single", "rows": [{"if": _blocks("N"), "then": []}]}, "строка 1: пустой шаблон «ТО»"),
+    ({"action_type": "rename", "rows": [{"if": _blocks("V:A"), "then": "A"}]}, "неизвестный тип действия"),
+    ({"action_type": "assign_range", "rows": [{"if": _blocks("V:A"), "then": "9-3"}]}, "строка 1:"),
+])
+def test_a_table_with_a_row_it_cannot_apply_is_refused_on_saving_with_the_number_of_the_row(table, error):
+    with pytest.raises(ValueError, match=error):
+        validate_rule({"name": "Озвучки", "rule_table": table})
+
+
+def test_a_broken_table_is_disabled_whole_and_the_other_rules_still_work():
+    broken = _table(5, "Озвучки", "assign_voiceover", [{"if": _blocks("V:A"), "then": "A"}, {"if": [], "then": "B"}])
+    episode = _rule(9, "серия", [_extract("extract_single", "Серия", "_", "N")], [_cond(_blocks("Серия", "_", "N"))])
+    profile = compile_profile(1, [broken, episode])
+    assert profile.invalid_rules == [{"rule_id": 5, "name": "Озвучки", "error": "строка 2: пустое условие «ЕСЛИ»"}]
+    assert process_title(profile, "Серия 4 | V:A")["extracted"] == {"episode": 4}

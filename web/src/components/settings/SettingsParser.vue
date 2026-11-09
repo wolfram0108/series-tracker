@@ -6,12 +6,15 @@ import StGroup from "../StGroup.vue"
 import StIcon from "../StIcon.vue"
 import StSelect from "../StSelect.vue"
 import ParserRuleCard, { type EditableRule } from "./ParserRuleCard.vue"
+import ParserTableCard from "./ParserTableCard.vue"
+import { rowsOf, storedOf, type StoredTable } from "../../lib/ruleTable"
 import type { PatternBlock } from "./ParserPatternEditor.vue"
 import ParserTest from "./ParserTest.vue"
 import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { api } from "../../api/client"
 import { t } from "../../i18n"
+import { isExtract } from "../../lib/ruleVocabulary"
 
 // Вкладка «Фильтры VK» окна Настроек — конфигуратор профилей парсера.
 // Аккордеон трёх шагов (профили / правила / тест), как в оригинале
@@ -47,15 +50,17 @@ interface RawRule {
   valid?: boolean
   error?: string | null
   conditions: RawCondition[]
+  rule_table?: StoredTable | null
 }
-
-const EXTRACT_TYPES = ["extract_single", "extract_range", "extract_season"]
 
 const profiles = ref<Profile[]>([])
 const selectedProfileId = ref<number | null>(props.initialProfileId ?? null)
 const newProfileName = ref("")
 const isLoading = ref(false)
 const rules = ref<EditableRule[]>([])
+// The lines of the test (step 3) and the codes of the fields of a line: what the quick templates of a table are made of.
+const testLines = ref<string[]>([])
+const lineFields = ref<string[]>([])
 const openRuleId = ref<number | string | null>(null)
 const openStep = ref<"profiles" | "rules" | "test" | null>("profiles")
 
@@ -205,8 +210,20 @@ async function loadRules(): Promise<void> {
         action_pattern: a.action_pattern ?? "",
         _action_blocks: parsePatternJson(a.action_pattern),
       })),
+      table: rule.rule_table ? { action_type: rule.rule_table.action_type, rows: rowsOf(rule.rule_table) } : null,
     }
   })
+}
+
+// A new rule «Таблица» assigns voice-overs and lets the rules after it work, as the rules of voice-overs do.
+function addTable(): void {
+  const id = "new-" + Date.now()
+  rules.value.push({
+    id, name: t("rules.table.newName"), continue_after_match: true, is_new: true, conditions: [], actions: [],
+    table: { action_type: "assign_voiceover", rows: [] },
+  })
+  openRuleId.value = id
+  openStep.value = "rules"
 }
 
 function addRule(): void {
@@ -226,6 +243,11 @@ function addRule(): void {
 }
 
 function prepareRuleForSave(rule: EditableRule): Record<string, unknown> {
+  if (rule.table) {
+    const { action_type: actionType, rows } = rule.table
+    return { name: rule.name, continue_after_match: !!rule.continue_after_match, action_pattern: "[]", conditions: [],
+             rule_table: storedOf(actionType, rows, isExtract(actionType)) }
+  }
   const conditions = rule.conditions.map((c) => ({
     condition_type: c.condition_type,
     logical_operator: c.logical_operator,
@@ -236,7 +258,7 @@ function prepareRuleForSave(rule: EditableRule): Record<string, unknown> {
       action_type: a.action_type,
       action_pattern: a.action_pattern ?? "",
     }
-    if (EXTRACT_TYPES.includes(a.action_type)) {
+    if (isExtract(a.action_type)) {
       saved.action_pattern = JSON.stringify((a._action_blocks || []).map(({ id, ...rest }) => rest))
     }
     return saved
@@ -330,7 +352,15 @@ watch(
   },
 )
 
-onMounted(loadProfiles)
+async function loadLineFields(): Promise<void> {
+  const codes = await request(api.GET("/api/rules/line-fields"))
+  if (codes) lineFields.value = codes
+}
+
+onMounted(() => {
+  void loadProfiles()
+  void loadLineFields()
+})
 </script>
 
 <template>
@@ -412,22 +442,37 @@ onMounted(loadProfiles)
         <div v-if="openStep === 'rules'" class="accordion-body">
           <div class="rules-toolbar">
             <Button :label="t('rules.rule.add')" icon="pi pi-plus-circle" size="small" @click="addRule" />
+            <Button :label="t('rules.table.add')" icon="pi pi-table" size="small" severity="secondary" @click="addTable" />
           </div>
           <div v-if="isLoading" class="parser-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
           <div v-else-if="rules.length === 0" class="parser-empty">{{ t("rules.rule.none") }}</div>
           <div v-else class="rules-list">
-            <ParserRuleCard
-              v-for="(rule, index) in rules"
-              :key="rule.id"
-              :rule="rule"
-              :index="index"
-              :total="rules.length"
-              :is-open="openRuleId === rule.id"
-              @toggle="toggleRule(rule.id)"
-              @save="saveRule(rule)"
-              @delete="deleteRule(rule)"
-              @move="moveRule(index, $event)"
-            />
+            <template v-for="(rule, index) in rules" :key="rule.id">
+              <ParserTableCard
+                v-if="rule.table"
+                :rule="rule"
+                :index="index"
+                :total="rules.length"
+                :is-open="openRuleId === rule.id"
+                :lines="testLines"
+                :codes="lineFields"
+                @toggle="toggleRule(rule.id)"
+                @save="saveRule(rule)"
+                @delete="deleteRule(rule)"
+                @move="moveRule(index, $event)"
+              />
+              <ParserRuleCard
+                v-else
+                :rule="rule"
+                :index="index"
+                :total="rules.length"
+                :is-open="openRuleId === rule.id"
+                @toggle="toggleRule(rule.id)"
+                @save="saveRule(rule)"
+                @delete="deleteRule(rule)"
+                @move="moveRule(index, $event)"
+              />
+            </template>
           </div>
         </div>
       </div>
@@ -444,6 +489,7 @@ onMounted(loadProfiles)
             :profile-id="selectedProfileId"
             :initial-titles="testInitialTitles"
             :initial-url="testInitialUrl"
+            @lines="testLines = $event"
           />
         </div>
       </div>

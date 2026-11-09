@@ -726,3 +726,44 @@ async def test_a_rule_with_a_wrong_assigned_range_is_not_saved(system):
     profile = await new_profile(probe)
     with pytest.raises(BusRequestError, match="диапазон"):
         await new_rule(probe, profile, "склейка", [assign("assign_range", "110-109")])
+
+
+# --- правило «Таблица» ------------------------------------------------------------------------------
+
+def voices_table(*pairs) -> dict:
+    return {"action_type": "assign_voiceover",
+            "rows": [{"if": [{"type": "text", "value": f"V:{name}"}], "then": name} for name in pairs]}
+
+
+@pytest.mark.asyncio
+async def test_a_table_is_kept_listed_applied_changed_and_taken_by_a_run_like_any_rule(system):
+    probe = system.probe
+    profile = await new_profile(probe)
+    reply = await probe.request("rules.rules.add", {"profile_id": profile, "data": {
+        "name": "Озвучки", "continue_after_match": True, "rule_table": voices_table("AniStar", "HORIZON")}}, timeout=5)
+    listed = await probe.request("rules.rules.list", {"profile_id": profile}, timeout=5)
+    assert [(each["id"], each["valid"], each["rule_table"]) for each in listed] == [
+        (reply["id"], True, voices_table("AniStar", "HORIZON"))]
+    lines = {"a": "Серия 1 | V:AniStar", "b": "Серия 1 | V:HORIZON", "c": "Серия 1 | V:Другая"}
+    answered = (await apply(probe, profile, lines))["results"]
+    assert [answered[key]["voiceover"] for key in "abc"] == ["AniStar", "HORIZON", None]
+
+    taken = (await probe.request("rules.profiles.export", {"profile_ids": [profile]}, timeout=5))["profiles"]
+    await probe.request("rules.rules.update", {"rule_id": reply["id"], "data": {
+        "name": "Озвучки", "rule_table": voices_table("Другая")}}, timeout=5)
+    answered = (await apply(probe, profile, lines))["results"]
+    assert [answered[key]["voiceover"] for key in "abc"] == [None, None, "Другая"]
+    by_run = (await apply(probe, profile, lines, rules=taken.get(str(profile), taken.get(profile))))["results"]
+    assert [by_run[key]["voiceover"] for key in "abc"] == ["AniStar", "HORIZON", None]
+
+
+@pytest.mark.asyncio
+async def test_a_table_with_an_empty_row_is_refused_and_nothing_is_saved(system):
+    probe = system.probe
+    profile = await new_profile(probe)
+    table = voices_table("AniStar")
+    table["rows"].append({"if": [], "then": "HORIZON"})
+    with pytest.raises(BusRequestError, match="строка 2: пустое условие"):
+        await probe.request("rules.rules.add", {"profile_id": profile, "data": {"name": "Озвучки", "rule_table": table}},
+                            timeout=5)
+    assert await probe.request("rules.rules.list", {"profile_id": profile}, timeout=5) == []

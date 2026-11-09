@@ -258,12 +258,68 @@ def compile_profile(profile_id: int, raw_rules: list[dict]) -> CompiledProfile:
     compiled, invalid = [], []
     for rule in raw_rules:
         try:
-            compiled.append(_compile_rule(rule))
+            compiled.extend(_compile_any(rule))
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             invalid.append({"rule_id": rule.get("id"),
                             "name": rule.get("name"), "error": str(exc)})
     return CompiledProfile(profile_id=profile_id, rules=compiled,
                            invalid_rules=invalid)
+
+
+def _compile_any(rule: dict) -> list[CompiledRule]:
+    """A rule «Таблица» is the ordinary rules of its rows; any other rule is itself."""
+    if rule.get("rule_table"):
+        return _compile_table(rule)
+    return [_compile_rule(rule)]
+
+
+def table_rules(rule: dict) -> list[dict]:
+    """The rows of a rule «Таблица» as the ordinary rules they are, in their order, at the place of the table: each row is
+    one condition «содержит» (its template «ЕСЛИ») and one action of the column (its value «ТО»), with the table's own
+    `continue_after_match`. Matching them is the code of every rule; nothing of it is the table's own."""
+    table = rule["rule_table"]
+    if not isinstance(table, dict):
+        raise ValueError("таблица повреждена")
+    a_type = table.get("action_type")
+    if a_type not in ACTION_TYPES:
+        raise ValueError(f"неизвестный тип действия: {a_type!r}")
+    rows = table.get("rows")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("в таблице нет строк")
+    expanded = []
+    for number, row in enumerate(rows, 1):
+        blocks = row.get("if") if isinstance(row, dict) else None
+        if not blocks:
+            raise ValueError(f"строка {number}: пустое условие «ЕСЛИ»")
+        then = row.get("then")
+        if a_type == "exclude":
+            pattern = "[]"
+        elif a_type in ASSIGN_TYPES:
+            pattern = str(then if then is not None else "").strip()
+            if not pattern:
+                raise ValueError(f"строка {number}: пустое значение «ТО»")
+        else:
+            if not then:
+                raise ValueError(f"строка {number}: пустой шаблон «ТО»")
+            pattern = json.dumps(then, ensure_ascii=False)
+        expanded.append({
+            "id": rule["id"], "name": f"{rule['name']} · {number}",
+            "continue_after_match": rule.get("continue_after_match"),
+            "action_pattern": json.dumps([{"action_type": a_type, "action_pattern": pattern}], ensure_ascii=False),
+            "conditions": [{"condition_type": "contains", "logical_operator": "AND",
+                            "pattern": json.dumps(blocks, ensure_ascii=False)}],
+        })
+    return expanded
+
+
+def _compile_table(rule: dict) -> list[CompiledRule]:
+    compiled = []
+    for number, row_rule in enumerate(table_rules(rule), 1):
+        try:
+            compiled.append(_compile_rule(row_rule))
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"строка {number}: {exc}") from exc
+    return compiled
 
 
 def _compile_rule(rule: dict) -> CompiledRule:
@@ -351,9 +407,10 @@ def validate_rule(data: dict) -> None:
         "action_pattern": data.get("action_pattern") or "[]",
         "continue_after_match": data.get("continue_after_match") or 0,
         "conditions": data.get("conditions") or [],
+        "rule_table": data.get("rule_table"),
     }
     try:
-        _compile_rule(rule)
+        _compile_any(rule)
     except json.JSONDecodeError as exc:
         raise ValueError(f"шаблоны правила — некорректный JSON: {exc}") from exc
 

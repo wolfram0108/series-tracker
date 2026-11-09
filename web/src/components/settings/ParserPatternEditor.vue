@@ -1,80 +1,33 @@
 <script setup lang="ts">
-import { computed } from "vue"
 import draggable from "vuedraggable"
 import { t } from "../../i18n"
 import {
-  attachmentBlockCount,
-  canDrop,
+  allowMove,
   carriesAttachment,
-  isAttachmentType,
   isDanglingOr,
   joinsNext,
   joinsPrevious,
   normalizeAttachments,
-  numberBlockCount,
   removeBlockAt,
-  splitsAttachment,
   type PatternBlock,
 } from "../../lib/patternBlocks"
+import { blockLabel } from "../../lib/ruleVocabulary"
+import PatternPalette from "./PatternPalette.vue"
 
 export type { PatternBlock }
 
 // Конструктор паттерна: контейнер блоков (DnD-перестановка) + палитра
-// (клон при перетаскивании). Общий для условий «ЕСЛИ» и действий «ТО».
+// (PatternPalette, клон при перетаскивании). Общий для условий «ЕСЛИ» и действий «ТО».
 // Блоки мутируются на месте (vuedraggable :list по ссылке родителя).
 // Порт логики из static/js/components/settingsParser.js (cloneBlock,
 // isBlockEditable, getBlockDisplayText, updateBlockValue, getBlockClasses).
 
-interface PaletteItem { type: string; label: string; title: string; disabled?: boolean; reason?: string }
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   blocks: PatternBlock[]
   context: "if" | "then"
-}>()
-
-const BLOCK_PALETTE: PaletteItem[] = [
-  { type: "text", label: t("rules.block.text.label"), title: t("rules.block.text.title") },
-  { type: "or", label: t("rules.block.or.label"), title: t("rules.block.or.title") },
-  { type: "number", label: t("rules.block.number.label"), title: t("rules.block.number.title") },
-  { type: "range", label: t("rules.block.range.label"), title: t("rules.block.range.title") },
-  { type: "add", label: t("rules.block.add.label"), title: t("rules.block.add.title") },
-  { type: "subtract", label: t("rules.block.subtract.label"), title: t("rules.block.subtract.title") },
-  { type: "whitespace", label: t("rules.block.whitespace.label"), title: t("rules.block.whitespace.title") },
-  { type: "any_text", label: t("rules.block.any_text.label"), title: t("rules.block.any_text.title") },
-  { type: "start_of_line", label: t("rules.block.start_of_line.label"), title: t("rules.block.start_of_line.title") },
-  { type: "end_of_line", label: t("rules.block.end_of_line.label"), title: t("rules.block.end_of_line.title") },
-]
-
-// 'if' context enables range filtering; 'then' context enables mathematical operations.
-const palette = computed<PaletteItem[]>(() => {
-  const items = props.context === "if"
-    ? BLOCK_PALETTE.filter((b) => !["add", "subtract"].includes(b.type))
-    : BLOCK_PALETTE.filter((b) => b.type !== "range")
-  return items.map((item) => {
-    const reason = disabledReason(item.type)
-    return reason ? { ...item, disabled: true, reason } : item
-  })
-})
-
-// A template holds either several numbers or a single number with an attachment:
-// the attachment belongs to that one number, so the two cannot be combined.
-function disabledReason(type: string): string {
-  const hasAttachment = attachmentBlockCount(props.blocks) > 0
-  if (isAttachmentType(type)) {
-    if (hasAttachment) return t("rules.block.attachmentTaken")
-    if (numberBlockCount(props.blocks) >= 2) return t("rules.block.twoNumbers")
-    return ""
-  }
-  if (type === "number" && hasAttachment) return t("rules.block.attachmentTaken")
-  return ""
-}
-
-function cloneBlock(original: PaletteItem): PatternBlock {
-  const newBlock: PatternBlock = { id: Date.now() + Math.random(), type: original.type }
-  if (original.type === "text") newBlock.value = ""
-  if (original.type === "add" || original.type === "subtract") newBlock.value = "1"
-  if (original.type === "range") newBlock.value = "1, 3-10"
-  return newBlock
-}
+  /** The palette under the blocks; a rule table has one palette of its own for all its cells instead. */
+  showPalette?: boolean
+}>(), { showPalette: true })
 
 function isBlockEditable(block: PatternBlock): boolean {
   return ["text", "add", "subtract", "range"].includes(block.type)
@@ -99,7 +52,7 @@ function getBlockDisplayText(block: PatternBlock): string {
     const captureIndex = numberBlocks.indexOf(block) + 1
     return t("rules.block.numberN", { n: captureIndex })
   }
-  return BLOCK_PALETTE.find((p) => p.type === block.type)?.label || t("rules.block.unknown")
+  return blockLabel(block.type)
 }
 
 function updateBlockValue(block: PatternBlock, newText: string): void {
@@ -120,18 +73,6 @@ function removeBlock(index: number): void {
   removeBlockAt(props.blocks, index)
 }
 
-// Fool-proofing: the template that receives the block is taken from the drop
-// target, not from this editor: the sortable fires the check on the source.
-function checkMove(evt: any): boolean {
-  const dragged = evt.draggedContext?.element as PatternBlock | undefined
-  const source = evt.draggedContext?.list as PatternBlock[] | undefined
-  const target = evt.relatedContext?.list as PatternBlock[] | undefined
-  if (!dragged || !target) return true
-  // A number and its attachment are one unit and are not split apart.
-  if (source && source !== target && splitsAttachment(source, dragged)) return false
-  const targetContext = evt.to?.getAttribute?.("data-context") ?? undefined
-  return canDrop(target, dragged, targetContext)
-}
 </script>
 
 <template>
@@ -145,7 +86,7 @@ function checkMove(evt: any): boolean {
       ghost-class="drag-ghost"
       :animation="200"
       :data-context="context"
-      :move="checkMove"
+      :move="allowMove"
       @change="normalizeAttachments(blocks)"
     >
       <template #item="{ element, index }">
@@ -194,24 +135,8 @@ function checkMove(evt: any): boolean {
         </div>
       </template>
     </draggable>
-    <div class="palette-footer">
-      <draggable
-        :list="palette"
-        class="pattern-palette"
-        :group="{ name: 'blocks', pull: 'clone', put: false }"
-        :clone="cloneBlock"
-        item-key="type"
-        :sort="false"
-        :filter="'.palette-btn.is-disabled'"
-        :move="checkMove"
-      >
-        <template #item="{ element }">
-          <div
-            :class="['palette-btn', 'block-type-' + element.type, { 'is-disabled': element.disabled }]"
-            :title="element.disabled ? element.reason : element.title"
-          >{{ element.label }}</div>
-        </template>
-      </draggable>
+    <div v-if="showPalette" class="palette-footer">
+      <PatternPalette :blocks="blocks" :context="context" />
     </div>
   </div>
 </template>

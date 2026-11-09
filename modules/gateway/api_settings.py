@@ -16,8 +16,8 @@ from fastapi.responses import JSONResponse
 
 from core import BusRequestError
 from core import logging as core_logging
-from core.contracts import (ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView, VoiceSettingsDraft,
-                            VoiceSettingsSaved, VoiceSettingsView)
+from core.contracts import (LINE_FIELDS, ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView,
+                            VoiceSettingsDraft, VoiceSettingsSaved, VoiceSettingsView)
 from core.reasons import reason
 
 from .routing import refusal, route_per_method
@@ -369,6 +369,12 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         except BusRequestError as exc:
             return refusal(exc, 400)
         return {"success": True}
+
+    @r.get("/api/rules/line-fields", response_model=list[str])
+    async def line_fields():
+        """The codes of the fields of a line of the constructor, in its order (LINE_FIELDS): the quick templates of a
+        rule «Таблица» are made of them."""
+        return [code for code, _value in LINE_FIELDS if code]
 
     @r.get("/api/parser-profiles/{profile_id}/rules",
            response_model=list[DynamicObject])

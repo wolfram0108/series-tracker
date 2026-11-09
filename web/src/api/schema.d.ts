@@ -1511,6 +1511,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rules/line-fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Line Fields
+         * @description The codes of the fields of a line of the constructor, in its order (LINE_FIELDS): the quick templates of a
+         *     rule «Таблица» are made of them.
+         */
+        get: operations["line_fields_api_rules_line_fields_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/parser-profiles/{profile_id}/rules": {
         parameters: {
             query?: never;
@@ -7844,6 +7865,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    line_fields_api_rules_line_fields_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
                 };
             };
         };

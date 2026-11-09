@@ -5,6 +5,8 @@ import StGroup from "../StGroup.vue"
 import StSelect from "../StSelect.vue"
 import { t } from "../../i18n"
 import ParserPatternEditor, { type PatternBlock } from "./ParserPatternEditor.vue"
+import type { TableRow } from "../../lib/ruleTable"
+import { actionLabel, actionOptions, conditionOptions, isAssign, isExtract, isNumberAssign } from "../../lib/ruleVocabulary"
 
 // Карточка одного правила профиля парсера. Шапка (имя + управление) и
 // тело (условия «ЕСЛИ» с конструктором паттернов + действия «ТО»).
@@ -31,6 +33,8 @@ export interface EditableRule {
   error?: string | null
   conditions: Condition[]
   actions: Action[]
+  /** A rule «Таблица»: the action of its column and its rows (ParserTableCard); none for an ordinary rule. */
+  table?: { action_type: string; rows: TableRow[] } | null
 }
 
 const props = defineProps<{
@@ -47,12 +51,8 @@ const emit = defineEmits<{
   move: [dir: -1 | 1]
 }>()
 
-const CONDITION_TYPES = (["contains", "not_contains"] as const).map((value) => ({ label: t(`rules.condition.${value}`), value }))
-const EXTRACT_TYPES = ["extract_single", "extract_range", "extract_season"]
-const ASSIGN_TYPES = ["assign_voiceover", "assign_episode", "assign_season", "assign_part", "assign_quality", "assign_resolution", "assign_range"]
-const ACTION_TYPES = (["exclude", ...EXTRACT_TYPES, ...ASSIGN_TYPES] as ActionType[]).map((value) => ({ value, label: t(`rules.action.${value}`) }))
-type ActionType = "exclude" | "extract_single" | "extract_range" | "extract_season" | "assign_voiceover" | "assign_episode"
-  | "assign_season" | "assign_part" | "assign_quality" | "assign_resolution" | "assign_range"
+const CONDITION_TYPES = conditionOptions()
+const ACTION_TYPES = actionOptions()
 
 const toggleIcon = computed(() => (props.isOpen ? "pi-chevron-down" : "pi-chevron-right"))
 
@@ -74,10 +74,10 @@ function removeAction(a_index: number): void {
 }
 function onActionTypeChange(action: Action, value: string): void {
   action.action_type = value
-  if (EXTRACT_TYPES.includes(value)) {
+  if (isExtract(value)) {
     action.action_pattern = "[]"
     action._action_blocks = []
-  } else if (["assign_episode", "assign_season", "assign_part"].includes(value)) {
+  } else if (isNumberAssign(value)) {
     action.action_pattern = "1"
   } else {
     action._action_blocks = []
@@ -85,7 +85,7 @@ function onActionTypeChange(action: Action, value: string): void {
   }
 }
 function getAssignActionLabel(actionType: string): string {
-  return ASSIGN_TYPES.includes(actionType) ? t(`rules.action.${actionType as ActionType}`) : t("rules.action.value")
+  return isAssign(actionType) ? actionLabel(actionType) : t("rules.action.value")
 }
 </script>
 
@@ -198,7 +198,7 @@ function getAssignActionLabel(actionType: string): string {
 
           <div v-if="action.action_type !== 'exclude'" class="action-content mt-2">
             <!-- extract_*: конструктор паттерна -->
-            <StGroup v-if="EXTRACT_TYPES.includes(action.action_type)" class="group-auto-height">
+            <StGroup v-if="isExtract(action.action_type)" class="group-auto-height">
               <div class="constructor-item item-pattern-editor">
                 <ParserPatternEditor :blocks="action._action_blocks" context="then" />
               </div>
@@ -210,11 +210,11 @@ function getAssignActionLabel(actionType: string): string {
             </StGroup>
 
             <!-- assign_*: простое значение -->
-            <StGroup v-else-if="ASSIGN_TYPES.includes(action.action_type)">
+            <StGroup v-else-if="isAssign(action.action_type)">
               <div class="constructor-item item-label">{{ getAssignActionLabel(action.action_type) }}</div>
               <input
                 v-model="action.action_pattern"
-                :type="['assign_episode', 'assign_season', 'assign_part'].includes(action.action_type) ? 'number' : 'text'"
+                :type="isNumberAssign(action.action_type) ? 'number' : 'text'"
                 class="constructor-item item-input"
                 :placeholder="action.action_type === 'assign_range' ? t('rules.action.assign_range.hint') : t('rules.action.valuePlaceholder')"
               />

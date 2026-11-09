@@ -141,3 +141,17 @@ export function removeBlockAt(blocks: PatternBlock[], index: number): void {
   blocks.splice(index, 1)
   normalizeAttachments(blocks)
 }
+
+// The check of a drag between templates: the template that receives the block is taken from the drop target, not from
+// the list the drag starts in (the sortable fires the check on the source).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function allowMove(evt: any): boolean {
+  const dragged = evt.draggedContext?.element as PatternBlock | undefined
+  const source = evt.draggedContext?.list as PatternBlock[] | undefined
+  const target = evt.relatedContext?.list as PatternBlock[] | undefined
+  if (!dragged || !target) return true
+  // A number and its attachment are one unit and are not split apart.
+  if (source && source !== target && splitsAttachment(source, dragged)) return false
+  const targetContext = evt.to?.getAttribute?.("data-context") ?? undefined
+  return canDrop(target, dragged, targetContext)
+}
