@@ -399,3 +399,16 @@ async def test_a_sync_that_builds_a_file_tells_the_card_of_the_series_its_date(w
     assert (await touched.queue.get()).payload == {"series_id": SERIES}
     await sync(world)  # nothing new: the date stays
     assert touched.queue.empty()
+
+
+async def test_the_files_of_the_downloads_are_named_for_people(world):
+    """The queue of the downloads and the queue of the alignment service show the file of a download: it says the series,
+    the episode and what it is, not a key."""
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    asked = planner.bus.subscribe("downloads.fetch")
+    await sync(world)
+    names = set()
+    while not asked.queue.empty():
+        names.add(os.path.basename((await asked.queue.get()).payload["path"]))
+    assert names == {"Сериал s01e01 — видео vk 720p.mp4", "Сериал s01e01 — озвучка G1.mp4"}, names

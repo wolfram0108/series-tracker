@@ -63,6 +63,7 @@ from core.contracts import (CompositionReply, PlanDelete, PlannerView, SeriesSou
                             SubmitReply)
 from core.contracts.work import WORK_STATE, WorkState
 from core.envelope import Envelope
+from core.fsnames import sanitize_name
 from core.ignored import parse_memory
 from core.plan.executor import DOWNLOADS, Made, Passing, SeriesSync, judged, video_of
 from core.plan.files import Library, as_in_file, container_json, container_of, label_of
@@ -120,6 +121,7 @@ class BusSync(SeriesSync):
         self.files = Library(series["save_path"])
         self.downloads_dir = ""
         self.conform_dir = ""
+        self.download_names: dict[str, str] = {}  # the name of the file of a download, by the step that took it
         self.names: dict[tuple, str] = {}
         self.pending: list[tuple] = []  # the steps of the journal of this sync
         self.told = False  # the window was shown the plan this sync froze
@@ -201,18 +203,31 @@ class BusSync(SeriesSync):
                 return Made(op.subject)
         except Passing:
             raise
-        except Exception:  # noqa: BLE001 - one step that breaks is a step of the moment, not the end of the sync
+        except Exception as exc:  # noqa: BLE001 - one step that breaks is a step of the moment, not the end of the sync
             self.m.log.exception("сериал %d: шаг %s не выполнен", self.series["id"], op.id)
-            raise Passing from None
+            raise Passing(f"внутренняя ошибка: {exc}") from None
         raise AssertionError(op.kind)
 
     def _key(self, op_id: str) -> str:
         return f"plan:{self.series['id']}:{hashlib.md5(op_id.encode()).hexdigest()[:12]}"
 
+    def _download_name(self, op, row, key: str) -> str:
+        """The file of a download is named for people — the series, the episode, what it is: the queue of the downloads,
+        the queue of the alignment service and the log show it. A name another step of the sync took gets its key."""
+        series = self.series.get("name_en") or self.series["name"]
+        episode = label_of(op.slot) if op.slot else f"s{row.season:02d}e{row.start:02d}-e{row.end:02d}"
+        what = {"download_video": f"видео {row.player} {row.height}p", "download_dub": f"озвучка {row.group or row.label}",
+                "compilation": f"компиляция {row.player} {row.height}p",
+                "ref2": f"видео для вырезки {row.player} {row.height}p"}.get(op.kind, op.kind)
+        name = sanitize_name(f"{series} {episode} — {what}")
+        if self.download_names.setdefault(name, op.id) != op.id:
+            name = f"{name} {key.split(':')[-1]}"
+        return name + ".mp4"
+
     async def _download(self, op):
         row = op.subject
         key = self._key(op.id)
-        path = os.path.join(self.downloads_dir, key.split(":")[-1] + ".mp4")
+        path = os.path.join(self.downloads_dir, self._download_name(op, row, key))
         await storage.call(os.makedirs, self.downloads_dir, exist_ok=True)
         finished = await self.m.fetch(key, {"key": key, "url": row.link, "path": path, "series_id": self.series["id"],
                                             "whole": op.kind == "download_video",
@@ -221,7 +236,7 @@ class BusSync(SeriesSync):
             if finished.get("transient"):
                 self.m.log.warning("сериал %d: загрузка %s не удалась, повторится при следующей синхронизации: %s",
                                    self.series["id"], op.id, finished.get("error"))
-                raise Passing
+                raise Passing(f"загрузка не удалась: {finished.get('error')}")
             self.m.log.warning("сериал %d: загрузка %s не удалась, записано как неудача: %s", self.series["id"], op.id,
                                finished.get("error"))
             return None
