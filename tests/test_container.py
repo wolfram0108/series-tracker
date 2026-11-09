@@ -80,6 +80,17 @@ def test_the_tracks_of_a_container_go_into_a_new_video_of_the_same_identity(medi
     assert found.labels == ["ПВА ШОУ", "ruchime"] and found.height == 180  # the height of the film the file holds
 
 
+def test_the_title_of_a_track_is_the_users_name_and_its_group_stays_the_tag(media):
+    tmp, video, dubs, _ = media
+    out = str(tmp / "titled.mkv")
+    assert asyncio.run(container.build(out, video, "1:a", [AudioIn("ПВА ШОУ", video, 0, "1:a", own=True),
+                                                         AudioIn("ruchime", dubs["ruchime"], 0, "1:a", title="ПМ_ruchime")])) is None
+    found = asyncio.run(container.contents(out))
+    assert [(track.label, track.title) for track in found.audio] == [("ПВА ШОУ", "ПВА ШОУ"), ("ruchime", "ПМ_ruchime")]
+    assert container.problem_of(found, "1:a", [("ПВА ШОУ", "ПВА ШОУ", "", True), ("ruchime", "ruchime", "", False)],
+                                None) == "container_tracks_wrong"  # a file with another title is not the one asked for
+
+
 @pytest.mark.parametrize("case, expected", [
     ("unreadable", "container_unreadable"), ("video", "container_video_wrong"), ("tracks", "container_tracks_wrong"),
     ("length", "container_length_wrong"), ("good", None)])
@@ -89,7 +100,7 @@ def test_a_build_that_is_not_what_was_asked_says_why(media, case, expected):
     asyncio.run(container.build(out, video, "1:a", [AudioIn("ПВА ШОУ", video, 0, "1:a")]))
     made = None if case == "unreadable" else asyncio.run(container.contents(out))
     identity = "2:b" if case == "video" else "1:a"
-    signature = [("ruchime", "", False)] if case == "tracks" else [("ПВА ШОУ", "", False)]
+    signature = [("ruchime", "ruchime", "", False)] if case == "tracks" else [("ПВА ШОУ", "ПВА ШОУ", "", False)]
     duration = 5.0 if case == "length" else 3.0
     assert container.problem_of(made, identity, signature, duration) == expected
 

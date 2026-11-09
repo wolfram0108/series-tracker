@@ -216,6 +216,16 @@ describe("seasonVoiceOrders", () => {
       { label: "Kept", episodes: "1", online: false }] }])
     expect(seasonVoiceOrders([{ season: 2, voices: [{ label: "Never", episodes: "" }] }], undefined)).toEqual([])
   })
+
+  it("gives each voice-over the user's name of its track, in every season, the offline ones too", () => {
+    const view = planView({ episodes: [goal([2, 1], goalVideo("asset", rowRef(1, "r1"), "a.mkv"), [goalTrack("Kept", "reuse", rowRef(2, "k1"))])] })
+    const titles = { A: "ПМ_A", Kept: "Старая" }
+    expect(seasonVoiceOrders([{ season: 1, voices: [{ label: "A", episodes: "1" }, { label: "B", episodes: "1" }] }], view, titles))
+      .toEqual([
+        { season: 1, voices: [{ label: "A", episodes: "1", online: true, title: "ПМ_A" }, { label: "B", episodes: "1", online: true }] },
+        { season: 2, voices: [{ label: "Kept", episodes: "1", online: false, title: "Старая" }] },
+      ])
+  })
 })
 
 describe("the work that failed for the moment in the last sync", () => {

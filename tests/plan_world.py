@@ -323,6 +323,11 @@ class World(SeriesSync):
                 sounds.insert(container.own_at, voice_of(container.video.snapshot.group, container.video.timeline))
                 ranks = [places[voice] for voice in sounds if voice in places]
                 assert ranks == sorted(ranks), f"{container.name}: the sounds {sounds} are out of the order of the season"
+                # Every sound of a visible file bears the name the user gave its group, and only that one.
+                labels = {track.group or "—" for track in container.tracks} | {container.video.snapshot.group or "—"}
+                titles = (step.choices_after or step.choices).titles
+                assert dict(container.titles) == {label: title for label, title in titles.items() if label in labels}, \
+                    f"{container.name}: the titles {container.titles} are not the user's {titles}"
 
 
 def _slot_of_video(video: Video, online: dict[RowId, OnlineRow]) -> Slot:
@@ -340,7 +345,7 @@ class Chaos:
     GROUPS = ("A", "B", "C", "D")
     ACTIONS = ("put_ref", "put_ref", "put_dub", "put_dub", "put_comp", "drop", "renumber", "move_season", "mass_shift",
                "wrong_number", "higher", "swap_video", "delete_video", "delete_track", "off", "on", "off_group",
-               "off_compilation", "reference_order", "shuffle_voices", "read_fail", "download_fail", "transient",
+               "off_compilation", "reference_order", "shuffle_voices", "title", "read_fail", "download_fail", "transient",
                "answer", "cut_answer", "lose_file", "reset", "reference_deny", "voice_order", "voice_deny", "voice_off",
                "member", "levers_reset", "put_parts")
 
@@ -452,6 +457,12 @@ class Chaos:
             voices = [self.reference, *self.groups]
             rng.shuffle(voices)
             world.choose(groups={**world.choices.groups, season: tuple(voices)})
+        elif action == "title":
+            group = rng.choice([self.reference, *self.groups])
+            titles = dict(world.choices.titles)
+            if titles.pop(group, None) is None:
+                titles[group] = f"ПМ_{group}"
+            world.choose(titles=titles)
         elif action == "read_fail":
             world.read_fails = {rng.choice((1, 2, 3, 4))}
         elif action == "download_fail" and rows:

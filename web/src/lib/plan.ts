@@ -59,10 +59,17 @@ const sameSlot = (row: number[], episode: number[]): boolean =>
  *  it), of which the voice-overs the rows give or the files of the season hold by the plan; a voice-over in the files the
  *  order does not know yet comes last. Each has the episodes that give it, online, else those whose files hold it, offline:
  *  no track of a file is left out of the window, and every one is in the place it takes in the containers. */
-export interface ShownVoice { label: string; episodes: string; online: boolean }
+export interface ShownVoice {
+  label: string
+  episodes: string
+  online: boolean
+  /** The user's name of the track in the containers; none: the track bears the name of the group. */
+  title?: string
+}
 export interface ShownOrder { season: number; voices: ShownVoice[] }
 
-export function seasonVoiceOrders(orders: readonly SeasonVoiceOrder[], view: PlannerView | undefined): ShownOrder[] {
+export function seasonVoiceOrders(orders: readonly SeasonVoiceOrder[], view: PlannerView | undefined,
+                                  titles: Readonly<Record<string, string>> = {}): ShownOrder[] {
   const held = new Map<number, Map<string, number[]>>()
   for (const goal of view?.episodes ?? []) {
     const [season, episode] = goal.slot
@@ -81,7 +88,7 @@ export function seasonVoiceOrders(orders: readonly SeasonVoiceOrder[], view: Pla
       : here.has(voice.label) ? [{ label: voice.label, episodes: spansOf(here.get(voice.label) ?? []), online: false }] : [])
     const more = [...here.entries()]
       .filter(([voice]) => !named.has(voice)).map(([label, episodes]) => ({ label, episodes: spansOf(episodes), online: false }))
-    return { season, voices: [...shown, ...more] }
+    return { season, voices: [...shown, ...more].map((voice) => titles[voice.label] ? { ...voice, title: titles[voice.label] } : voice) }
   }).filter((each) => each.voices.length > 0)
 }
 

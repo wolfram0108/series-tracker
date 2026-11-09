@@ -619,7 +619,7 @@ class PlannerModule(BaseModule):
         choices = choices_of(layout.rows, online, [(each.season, each.episode, each.levers) for each in layout.settings],
                              [(each.compilation, each.levers) for each in layout.levels if each.compilation],
                              players=voices.get("priority") or [], player_groups=Groups.of(voices.get("player_groups") or {}),
-                             sources=sources, voice_order=order, off_episodes=off)
+                             sources=sources, voice_order=order, off_episodes=off, titles=layout.voice_titles)
         return online, choices
 
     # --- the journal ---------------------------------------------------------------------------------------------

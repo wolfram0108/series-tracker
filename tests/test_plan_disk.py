@@ -199,6 +199,27 @@ def test_a_voice_switched_off_is_removed_from_the_container_on_the_disk(disk):
     assert [track.group for track in visible(disk, 1).tracks] == ["G2"] and len(disk.containers) == 1
 
 
+def test_the_names_of_the_tracks_are_written_into_the_file_and_kept_by_a_retag(disk):
+    """The user's names of the tracks are the titles of the sounds of the file, the groups stay its tags; a file switched
+    off is moved and tagged anew and keeps them."""
+    episode(disk, 1, 2)
+    disk.check(disk.sync("исходно"))
+    disk.choose(titles={"G1": "ПМ_G1", REF: "Оригинал"})
+    step = disk.sync("имена дорожек")
+    disk.check(step)
+    assert {op.kind for op in step.plan.ops} == {"build"}
+    name = visible(disk, 1).name
+    held = asyncio.run(mkv.contents(disk.library(name)))
+    assert [(track.label, track.title) for track in held.audio] == [
+        (REF, "Оригинал"), ("G1", "ПМ_G1"), ("G2", "G2")]
+    disk.choose(off_episodes=frozenset({(1, 1)}))
+    step = disk.sync("серия выключена")
+    disk.check(step)
+    (hidden,) = disk.containers.values()
+    held = asyncio.run(mkv.contents(disk.library(hidden.name)))
+    assert hidden.off and [track.title for track in held.audio] == ["Оригинал", "ПМ_G1", "G2"]
+
+
 def test_delete_of_the_only_video_leaves_the_file_as_it_is(disk):
     """В-9 on files: the sources give nothing of the episode any more — the file is not touched."""
     episode(disk, 1, 1)

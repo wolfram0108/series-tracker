@@ -96,7 +96,7 @@ from core.contracts import (COMPILATION_MEMBER, REFERENCE_ORDER, RUN_CHANGED, pa
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
                             RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
                             QueuesGet, QueuesReply, SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState,
-                            VoiceOrderSet, VoiceSettingsView)
+                            VoiceOrderSet, VoiceSettingsView, VoiceTitleSet)
 from core.db import Database
 from core.envelope import Envelope
 from core.reasons import reason
@@ -181,6 +181,7 @@ class CompositionModule(BaseModule):
         self.handle("voices.settings.changed", self.on_groups_changed)
         self.handle(RUN_CHANGED, self.on_run_changed)
         self.handle("composition.voice_order.set", self.on_voice_order_set)
+        self.handle("composition.voice_title.set", self.on_voice_title_set)
 
     # --- start ------------------------------------------------------------------------------
 
@@ -230,7 +231,8 @@ class CompositionModule(BaseModule):
             compilations=outcome.views,
             levers=levers.specs(), availability=availability.table(),
             # A series counted before the orders were kept shows its default order until its next count writes it.
-            voice_orders=project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows))
+            voice_orders=project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows),
+            voice_titles=stored.titles)
         return reply.model_dump(mode="json")
 
     async def on_queues_get(self, env: Envelope) -> dict:
@@ -283,6 +285,26 @@ class CompositionModule(BaseModule):
             episodes = sorted(number for season, number in project.layout_episodes(stored.rows) if season == command.season)
             self._publish_changed(command.series_id, rev, {(command.season, number) for number in episodes},
                                   summary_only=False)
+        return {"ok": True}
+
+    async def on_voice_title_set(self, env: Envelope) -> dict:
+        """The user's name of the track of a voice-over group in every container of the series. It is a plan: the
+        containers take it at the next sync (their tracks are copied into a file that bears the name)."""
+        command = VoiceTitleSet.model_validate(env.payload)
+        self._require_editable(command.series_id)
+        await self.request("catalog.series.get", {"series_id": command.series_id})
+        async with self._lock(command.series_id):
+            stored = await self.repo.stored(command.series_id)
+            titles = dict(stored.titles)
+            if command.title and command.title != command.label:
+                titles[command.label] = command.title
+            else:
+                titles.pop(command.label, None)
+            if titles == stored.titles:
+                return {"ok": True}
+            rev = stored.rev + 1
+            await self.repo.write(command.series_id, titles=titles, rev=rev)
+            self._publish_changed(command.series_id, rev, set(project.layout_episodes(stored.rows)), summary_only=False)
         return {"ok": True}
 
     async def on_preview(self, env: Envelope) -> dict:

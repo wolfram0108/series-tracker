@@ -198,6 +198,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
       @switch-season="output.switchTo(season.season, null, $event)"
       @switch-episode="(episode, off) => output.switchTo(season.season, episode, off)"
       @voice-order="output.order(season.season, $event)"
+      @voice-title="(label, title) => output.rename(label, title)"
       @refetch="(episode, part) => output.refetch(season.season, episode, part)"
       @retry="(episode, group) => output.retry(season.season, episode, group)"
       @redo="(episode, group) => output.redo(season.season, episode, group)"

@@ -549,6 +549,10 @@ class DiskWorld(World):
             picture = self.codec.picture(path)
             for track in held.audio:
                 assert self.codec.sound(path, track.index) == picture, f"{name}: a sound of another episode"
+            # Every sound bears the name its table gives its group (the user's name, else the group's own).
+            titles = dict(self.containers[name].titles)
+            assert [track.title for track in held.audio] == [titles.get(track.label, track.label) for track in held.audio], \
+                f"{name}: the titles of its sounds are not the table's"
             provenance = asyncio.run(mkv.provenance_of(path))
             assert provenance == container_json(self.containers[name]), f"{name}: its provenance is not the table"
             adopted.append(container_of(provenance))

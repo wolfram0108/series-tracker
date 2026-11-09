@@ -88,6 +88,8 @@ class Goal:
     # The place of the video's own sound among the tracks, by the order of the season the user set: the voice-over of the
     # reference is first only when it stands first there (ЭТАП_11). A voice-over the order does not name keeps it first.
     own_at: int = 0
+    # The user's names of the sounds of the file (voice-over group, title), as the container is to bear them.
+    titles: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -351,8 +353,13 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
         if waiting:
             container, track, is_own, _ = waiting[0]
             tracks.append(TrackWay(voice, track.dub, track.snapshot, "reuse", container=container, own=is_own))
+    # The names of the sounds the user gave; an idle file keeps the names it was written under (no new work).
+    sounds = {video.snapshot.group or "—"} | {way.snapshot.group or way.voice for way in tracks}
+    titles = tuple(sorted((label, title) for label, title in choices.titles.items() if label in sounds))
+    if idle and video.container is not None:
+        titles = video.container.titles
     return Goal(slot, video, tuple(tracks), namer(slot, video, off), off, frozenset(taken_off),
-                own_place(slot[0], own, (way.voice for way in tracks)))
+                own_place(slot[0], own, (way.voice for way in tracks)), titles)
 
 
 def _cut(slot, inputs, compilations, candidates, video_rank, denied=frozenset()):
@@ -396,7 +403,7 @@ def _satisfied_by(goal: Goal) -> Container | None:
         return None
     if tuple(track.dub for track in container.tracks) != tuple(way.dub for way in goal.tracks):
         return None
-    return container if container.own_at == goal.own_at else None
+    return container if (container.own_at, container.titles) == (goal.own_at, goal.titles) else None
 
 
 def _ops(goals: Iterable[Goal], containers) -> list[Op]:

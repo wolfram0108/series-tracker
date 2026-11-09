@@ -16,11 +16,11 @@ from pydantic import BaseModel, ValidationError
 from core import BusRequestError
 from core.contracts import (CompositionGetRequest, CompositionReply, OutputSwitch, PlanDelete, PlannerView,
                             PlanRowRef, QueuesGet, QueuesReply, Reference, SeriesKind, SettingsReset, SettingsSet,
-                            VoiceOrderSet)
+                            VoiceOrderSet, VoiceTitleSet)
 
 from .routing import admitted, refusal
 from .schemas import (DynamicObject, ErrorOnly, ErrorResponse, OkResponse, OutputSettingsReset, OutputSettingsSet,
-                      OutputSwitchBody, VoiceOrderBody)
+                      OutputSwitchBody, VoiceOrderBody, VoiceTitleBody)
 
 _ERR = {code: {"model": ErrorResponse} for code in (400, 404, 500, 503)}
 _ERR1 = {code: {"model": ErrorOnly} for code in (404, 500)}
@@ -163,6 +163,19 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
         try:
             async with admitted(gw, series_id):
                 await gw.request("composition.voice_order.set", command.model_dump(mode="json"))
+        except BusRequestError as exc:
+            return refusal(exc)
+        return {"success": True}
+
+    @r.put("/api/series/{series_id}/output/voice-title", response_model=OkResponse, response_model_exclude_none=True,
+           responses=_ERR)
+    async def set_voice_title(series_id: int, body: VoiceTitleBody):
+        """The user's name of the track of a voice-over group in the containers of the series. A plan: the containers
+        take it at the next sync; refused while a sync of the series is under way."""
+        command = _contract(VoiceTitleSet, series_id=series_id, **body.model_dump())
+        try:
+            async with admitted(gw, series_id):
+                await gw.request("composition.voice_title.set", command.model_dump(mode="json"))
         except BusRequestError as exc:
             return refusal(exc)
         return {"success": True}

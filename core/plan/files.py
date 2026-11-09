@@ -34,7 +34,8 @@ def container_json(container: Container) -> dict:
         "tracks": [{"dub": asdict(track.dub), "snapshot": asdict(track.snapshot), "episode": list(track.episode),
                     "aligned_to": asdict(track.aligned_to), **({"tag": track.tag} if track.tag else {}),
                     **({"file": track.file} if track.file else {})}
-                   for track in container.tracks], **({"own_at": container.own_at} if container.own_at else {})}
+                   for track in container.tracks], **({"own_at": container.own_at} if container.own_at else {}),
+        **({"titles": dict(container.titles)} if container.titles else {})}
 
 
 def container_of(data: dict) -> Container:
@@ -44,7 +45,7 @@ def container_of(data: dict) -> Container:
                      tuple(Track(RowId(**track["dub"]), Snapshot(**track["snapshot"]), tuple(track["episode"]),
                                  RowId(**track["aligned_to"]), track.get("tag", ""), track.get("file", ""))
                            for track in data["tracks"]),
-                     data["off"], data.get("own_at", 0))
+                     data["off"], data.get("own_at", 0), tuple(sorted((data.get("titles") or {}).items())))
 
 
 def label_of(slot) -> str:
@@ -124,7 +125,9 @@ class Library:
             video_path = self.video_path(goal, results)
             identity = mkv.identity(video.timeline.source_id, video.timeline.row_key)
             own_stream = await self.stream_of(goal.video.container, video.id, True) if goal.video.kind == "asset" else 0
-            sound = mkv.AudioIn(video.snapshot.group or "—", video_path, own_stream, identity, own=True)
+            titles = dict(goal.titles)
+            label = video.snapshot.group or "—"
+            sound = mkv.AudioIn(label, video_path, own_stream, identity, own=True, title=titles.get(label, ""))
             tracks, made_tracks, packed = [], [], []
             for way in goal.tracks:
                 if way.kind == "reuse":
@@ -136,9 +139,11 @@ class Library:
                     aligned = results[f"align:{slot}:{way.voice}"]
                     path, stream = aligned.file, 0
                     made_tracks.append(aligned.value)
-                tracks.append(mkv.AudioIn(way.snapshot.group or way.voice, path, stream, identity, key=dub_key(way.dub)))
+                label = way.snapshot.group or way.voice
+                tracks.append(mkv.AudioIn(label, path, stream, identity, key=dub_key(way.dub), title=titles.get(label, "")))
             tracks.insert(goal.own_at, sound)  # the own sound of the video in the place the order of the season gives it
-            built = Container(goal.name, replace(video, episode=slot), tuple(made_tracks), goal.off, goal.own_at)
+            built = Container(goal.name, replace(video, episode=slot), tuple(made_tracks), goal.off, goal.own_at,
+                              goal.titles)
             staging = self.staging(goal.name)
             os.makedirs(os.path.dirname(staging), exist_ok=True)
             problem = await mkv.build(staging, video_path, identity, tracks, provenance=container_json(built))
@@ -197,7 +202,8 @@ class Library:
             if os.path.exists(path) and await mkv.provenance_of(path) != table.get(step[1]):
                 again = path + ".retag"
                 held = await mkv.contents(path)
-                tracks = [mkv.AudioIn(each.label, path, each.index, each.aligned_to, own=each.own, key=each.key)
+                tracks = [mkv.AudioIn(each.label, path, each.index, each.aligned_to, own=each.own, key=each.key,
+                                      title=each.title if each.title != each.label else "")
                           for each in held.audio]
                 problem = await mkv.build(again, path, held.video, tracks, provenance=table[step[1]])
                 if problem is not None:

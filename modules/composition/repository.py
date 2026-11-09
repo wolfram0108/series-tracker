@@ -39,6 +39,8 @@ class Stored:
     records: list[SettingRecord] = field(default_factory=list)
     # season -> the voice-over groups in the order of the tracks of the container (stage 11)
     orders: dict[int, list[str]] = field(default_factory=dict)
+    # voice-over group -> the user's name of its track in the containers
+    titles: dict[str, str] = field(default_factory=dict)
 
 
 class CompositionRepository:
@@ -66,9 +68,10 @@ class CompositionRepository:
     async def write(self, series_id: int, *, rows: list[CompositionRow] | None = None,
                     sources: list[StoredSource] | None = None, numbering: dict[str, int] | None = None,
                     records: list[SettingRecord] | None = None, rev: int | None = None,
-                    orders: dict[int, list[str]] | None = None) -> None:
+                    orders: dict[int, list[str]] | None = None, titles: dict[str, str] | None = None) -> None:
         """Replaces the parts given, in one transaction; a part left out stays as it is."""
-        await self._db.transaction(lambda conn: _write(conn, series_id, rows, sources, numbering, records, rev, orders))
+        await self._db.transaction(lambda conn: _write(conn, series_id, rows, sources, numbering, records, rev, orders,
+                                                       titles))
 
     async def purge(self, series_id: int) -> list[int]:
         """Takes everything the module keeps of a series; returns the sources it had."""
@@ -86,8 +89,10 @@ def _read(conn: sqlite3.Connection, series_id: int) -> Stored:
         "SELECT * FROM output_settings WHERE series_id = ?"
         " ORDER BY IFNULL(season, -1), IFNULL(episode, -1), lever, IFNULL(target, '')", (series_id,)).fetchall()
     orders = conn.execute("SELECT season, labels FROM voice_orders WHERE series_id = ? ORDER BY season", (series_id,)).fetchall()
+    titles = conn.execute("SELECT label, title FROM voice_titles WHERE series_id = ? ORDER BY label", (series_id,)).fetchall()
     return Stored(
         orders={row["season"]: json.loads(row["labels"]) for row in orders},
+        titles={row["label"]: row["title"] for row in titles},
         rev=state["rev"] if state is not None else 0,
         rows=[_row_of(row) for row in rows],
         sources=[StoredSource(row["source_id"], row["position"], row["table_url"],
@@ -105,7 +110,12 @@ def _row_of(row: sqlite3.Row) -> CompositionRow:
                           heights=json.loads(row["heights"]))
 
 
-def _write(conn: sqlite3.Connection, series_id: int, rows, sources, numbering, records, rev, orders=None) -> None:
+def _write(conn: sqlite3.Connection, series_id: int, rows, sources, numbering, records, rev, orders=None,
+           titles=None) -> None:
+    if titles is not None:
+        conn.execute("DELETE FROM voice_titles WHERE series_id = ?", (series_id,))
+        conn.executemany("INSERT INTO voice_titles (series_id, label, title) VALUES (?, ?, ?)",
+                         [(series_id, label, title) for label, title in titles.items()])
     if orders is not None:
         conn.execute("DELETE FROM voice_orders WHERE series_id = ?", (series_id,))
         conn.executemany("INSERT INTO voice_orders (series_id, season, labels) VALUES (?, ?, ?)",
@@ -148,6 +158,6 @@ def _purge(conn: sqlite3.Connection, series_id: int) -> list[int]:
     sources = [row["source_id"] for row in conn.execute(
         "SELECT source_id FROM composition_sources WHERE series_id = ?", (series_id,))]
     for table in ("composition_rows", "composition_sources", "composition_state", "unknown_voices", "output_settings",
-                  "voice_orders"):
+                  "voice_orders", "voice_titles"):
         conn.execute(f"DELETE FROM {table} WHERE series_id = ?", (series_id,))
     return sources

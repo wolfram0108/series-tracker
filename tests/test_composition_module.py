@@ -1511,6 +1511,34 @@ async def test_the_order_of_the_voices_of_a_season_is_shown_kept_and_set_by_the_
                               timeout=STUCK_S)
 
 
+@pytest.mark.asyncio
+async def test_the_name_of_the_track_of_a_voice_is_kept_for_the_series_taken_back_and_set_by_the_user_only(system):
+    from core.contracts import RUN_CHANGED
+    s = system
+    series_id = await laid_out(s, page(*season_rows(1, range(1, 3), player="kodik", voice="AniStar")))
+    assert (await s.get(series_id)).voice_titles == {}
+    changed = s.bus.subscribe("composition.changed")
+    await s.probe.request("composition.voice_title.set", {"series_id": series_id, "label": "AniStar", "title": "ПМ_AniStar"},
+                          timeout=STUCK_S)
+    assert (await s.get(series_id)).voice_titles == {"AniStar": "ПМ_AniStar"}
+    assert s.taken(changed)  # the containers take the name at the next sync: consumers hear of it
+    # A voice-over no source gives may still be in the files: it is named too.
+    await s.probe.request("composition.voice_title.set", {"series_id": series_id, "label": "Held", "title": "Старая"},
+                          timeout=STUCK_S)
+    for back in ("", "AniStar"):  # an empty name, or the name of the group, takes the user's name back
+        await s.probe.request("composition.voice_title.set", {"series_id": series_id, "label": "AniStar", "title": back},
+                              timeout=STUCK_S)
+        assert (await s.get(series_id)).voice_titles == {"Held": "Старая"}
+    with pytest.raises(BusRequestError, match="one line"):
+        await s.probe.request("composition.voice_title.set", {"series_id": series_id, "label": "AniStar",
+                                                               "title": "две\nстроки"}, timeout=STUCK_S)
+    s.probe.publish_event(RUN_CHANGED, {"series_id": series_id, "active": True})
+    await s.bus.settled()
+    with pytest.raises(BusRequestError, match="not_allowed"):
+        await s.probe.request("composition.voice_title.set", {"series_id": series_id, "label": "AniStar", "title": "x"},
+                              timeout=STUCK_S)
+
+
 # --- the queues of a level, as the window lists them -------------------------------------------------------------
 
 @pytest.mark.asyncio

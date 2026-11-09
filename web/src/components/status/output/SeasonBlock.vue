@@ -42,6 +42,7 @@ const emit = defineEmits<{
   (e: "switch-season", off: boolean): void
   (e: "switch-episode", episode: number, off: boolean): void
   (e: "voice-order", labels: string[]): void
+  (e: "voice-title", label: string, title: string): void
   (e: "refetch", episode: number, part: number | null): void
   (e: "retry", episode: number, group: string): void
   (e: "redo", episode: number, group: string): void
@@ -142,7 +143,10 @@ function step(by: number): void {
       />
     </header>
     <div class="season-body">
-      <VoiceOrder v-if="voices.length > 1" :voices="voices" :busy="busy" @order="emit('voice-order', $event)" />
+      <VoiceOrder
+        v-if="voices.length" :voices="voices" :busy="busy" @order="emit('voice-order', $event)"
+        @title="(label, title) => emit('voice-title', label, title)"
+      />
       <div ref="grid" class="season-grid" :class="`is-${mode}`" :style="columns">
         <span ref="ruler" class="grid-ruler" aria-hidden="true" />
         <CompilationOutline :grid="grid" :layout="layout + episodes.length + (opened ? 1 : 0)" :groups="outline" />

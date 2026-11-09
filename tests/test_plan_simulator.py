@@ -456,6 +456,28 @@ def test_the_order_of_voices_changed_again_and_again_only_repacks():
         assert [track.group for track in container_of(world, 1).tracks] == list(order)
 
 
+def test_the_name_of_a_track_given_and_taken_back_only_repacks_and_a_file_switched_off_keeps_its_names():
+    world = World()
+    episode_with_dubs(world, 1, 2)
+    episode_with_dubs(world, 2, 2)
+    world.choose(off_episodes=frozenset({(1, 2)}))
+    world.check(world.sync("серия 2 выключена"))
+    for titles in ({"G1": "ПМ_G1"}, {"G1": "ПМ_G1", REF: "Оригинал"}, {}):
+        world.choose(titles=titles)
+        step = world.sync(f"имена дорожек {titles}")
+        world.check(step)
+        assert {op.kind for op in step.plan.ops} == {"build"}  # the tracks are copied: nothing downloaded, nothing aligned
+        assert dict(container_of(world, 1).titles) == titles
+        hidden = next(each for each in world.containers.values() if each.off)
+        assert hidden.titles == ()  # a file switched off takes no new work
+    world.choose(titles={"G2": "ПМ_G2"})
+    world.check(world.sync("имя G2"))
+    world.choose(off_episodes=frozenset())
+    step = world.sync("серия 2 включена")
+    world.check(step)
+    assert dict(container_of(world, 2).titles) == {"G2": "ПМ_G2"}
+
+
 def test_every_season_orders_its_tracks_by_its_own_order():
     world = World()
     for season in (1, 2):

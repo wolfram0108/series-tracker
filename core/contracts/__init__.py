@@ -6,7 +6,7 @@ so the two cannot drift apart unnoticed. Modules import their contracts from her
 from .alignment import (AlignmentJob, DubResult, JobKind, JobStatus, ReverseEpisode, ReverseReply, ReverseSubmit, SubmitOutcome,
                         SubmitReply)
 from .composition import (CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
-                          CompositionPreviewRequest, CompositionReply, PreviewLine, SeasonVoiceOrder, VoiceOrderSet, VoiceSpan,
+                          CompositionPreviewRequest, CompositionReply, PreviewLine, SeasonVoiceOrder, VoiceOrderSet, VoiceSpan, VoiceTitleSet,
                           CompositionRow, EpisodeRef, Exclusion, PlayerSummary, SourceStatus, SourceSummary)
 from .compilation import (Absence, CompilationEpisode, CompilationRef, CompilationView, compilation_key,
                           parse_compilation_key)
@@ -37,7 +37,7 @@ __all__ = ["Absence", "CompilationEpisode", "CompilationRef", "CompilationView",
            "RuleLine", "RuleResult", "RulesApplyReply", "RulesApplyRequest", "RulesProfileChanged",
            "SeriesKind", "SeriesSource", "SourceChanged", "SourceEvent", "SourceType",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
-           "CompositionReply", "CompositionRow", "PreviewLine", "SeasonVoiceOrder", "VoiceOrderSet", "VoiceSpan",
+           "CompositionReply", "CompositionRow", "PreviewLine", "SeasonVoiceOrder", "VoiceOrderSet", "VoiceSpan", "VoiceTitleSet",
            "EpisodeRef", "Exclusion", "PlayerSummary", "SourceStatus", "SourceSummary",
            "REFERENCE_ALLOW", "REFERENCE_ORDER", "VOICE_ALLOW", "VOICE_ORDER", "VOICE_TAKE", "GroupQueue", "GroupVariant", "PlayerVariant", "Queue", "QueueRow", "QueueView", "QueuesGet", "QueuesReply", "EffectiveLever", "EpisodeSettings", "LeverSpec", "Level", "LevelSettings", "SettingRecord", "SettingsReset", "SettingsSet",
            "TargetKind", "ValueShape",

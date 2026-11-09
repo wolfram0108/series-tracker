@@ -1,12 +1,14 @@
 """The whole application in a browser (tests/ui_stand.py): the user's way through the screens on a stand whose site,
 player and alignment service are models."""
 import asyncio
+import os
 import re
 
 import pytest
 from playwright.async_api import expect
 
 from app_stand import STAND_LIMIT_S
+from core import container as mkv
 from plan_world import truth_of
 from ui_stand import SERIES, text, ui  # noqa: F401 - the fixture
 
@@ -403,3 +405,43 @@ async def test_a_queue_dragged_by_its_handle_holds_the_new_order_until_the_core_
     await expect(groups).to_have_text(dragged)  # the core's order again
     assert [[each["group"] for each in body["value"]] for body in refusals] == [before]
     await ui.shot("41-queue-refused")
+
+
+async def test_the_name_of_a_track_given_on_its_chip_is_its_title_in_the_file_after_a_sync_with_nothing_fetched(ui):
+    """A press on the name of a chip of «Дорожки в контейнере» makes it a field; the name is kept for the series and, at the next
+    sync, the tracks are copied into a file whose track bears it (the group stays its tag): nothing is downloaded or
+    aligned. An empty name gives the track back the name of its group."""
+    series_id = await synced_in_browser(ui, (1,))
+    page = ui.page
+    chips = page.locator(".voice-order-item")
+    names = chips.locator(".voice-order-name")
+    await expect(names).to_have_text(["AniStar", "AnimeVost"])
+    work = (len(ui.daemon.jobs), len(ui.host.served))
+
+    async def rename(chip: int, title: str) -> None:
+        await chips.nth(chip).locator(".voice-order-name").click()
+        field = chips.nth(chip).locator(".voice-title-input")
+        await field.fill(title)
+        await field.press("Enter")
+
+    await rename(1, "ПМ_AnimeVost")
+    await expect(names).to_have_text(["AniStar", "ПМ_AnimeVost"])
+    await ui.shot("50-track-renamed")
+    await page.reload()
+    await ui.open_output(SERIES)
+    await expect(names).to_have_text(["AniStar", "ПМ_AnimeVost"])  # the core holds the name
+    await ui.press_sync(series_id)
+    view = await ui.check(series_id)
+    (asset,) = view["assets"]
+    held = await mkv.contents(os.path.join(ui.library, asset["name"]))
+    assert [(track.label, track.title) for track in held.audio] == [("AniStar", "AniStar"), ("AnimeVost", "ПМ_AnimeVost")]
+    assert (len(ui.daemon.jobs), len(ui.host.served)) == work  # the tracks were copied, not fetched or aligned again
+
+    await rename(1, "")
+    await expect(names).to_have_text(["AniStar", "AnimeVost"])
+    await ui.press_sync(series_id)
+    view = await ui.check(series_id)
+    (asset,) = view["assets"]
+    held = await mkv.contents(os.path.join(ui.library, asset["name"]))
+    assert [track.title for track in held.audio] == ["AniStar", "AnimeVost"]
+    await expect(page.locator(".output-failure")).to_have_count(0)

@@ -12,7 +12,7 @@ import { usePlanStore } from "../stores/plan"
 import { fileOf, planCuts, planDubs, planFiles, planNames, seasonVoiceOrders, trackOf, type CompilationKey } from "../lib/plan"
 import {
   deleteFromPlan, fetchComposition, fetchPlan, fetchQueues, resetFailures,
-  cancelSync, resetLever, setLever, setVoiceOrder, switchOutput, syncSeries, type Composition, type MediaFile,
+  cancelSync, resetLever, setLever, setVoiceOrder, setVoiceTitle, switchOutput, syncSeries, type Composition, type MediaFile,
   type Queues,
 } from "./outputCalls"
 import type { Answer } from "./sourceCalls"
@@ -40,7 +40,8 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   })
   // The order of the voice-overs of every season: a voice-over of it the plan cannot get for an episode is absent there.
   // The order of the tracks of every season: the layout's, and the voice-overs the files hold that no source gives any more.
-  const voiceOrders = computed(() => seasonVoiceOrders(composition.value?.voice_orders ?? [], plan.forSeries(seriesId)))
+  const voiceOrders = computed(() => seasonVoiceOrders(composition.value?.voice_orders ?? [], plan.forSeries(seriesId),
+    composition.value?.voice_titles ?? {}))
   const seasonVoices = computed<Record<number, string[]>>(() => Object.fromEntries(
     voiceOrders.value.map((each) => [each.season, (each.voices ?? []).map((voice) => voice.label)] as const)))
   // A video series has not been read yet when it is shown first: the window must not say "nothing here" for that moment.
@@ -130,6 +131,10 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   // The order of the voice-overs of a season (the tracks of its containers); the new order comes back as an event.
   const order = (season: number, labels: string[]): Promise<string | null> =>
     act(() => setVoiceOrder(seriesId, { season, labels }), busy)
+
+  // The user's name of the track of a voice-over in every container of the series ("": the name of its group).
+  const rename = (label: string, title: string): Promise<string | null> =>
+    act(() => setVoiceTitle(seriesId, { label, title }), busy)
 
   // The number and the colour of each source of the series, as the catalog keeps them (the same on every tab).
   const marks = computed(() => sourceMarks(seriesStore.byId(seriesId)?.sources ?? []))
@@ -223,6 +228,6 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   }
 
   return { composition, references, loading, failure, busy, answer, syncing, stopping, stop, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
-    sync, retryFailed, voiceOrders, order, marks, loadQueues, queuesOf, setOrder, setAllowed, setTaken, resetOrder,
+    sync, retryFailed, voiceOrders, order, rename, marks, loadQueues, queuesOf, setOrder, setAllowed, setTaken, resetOrder,
     retry, redo, refetch, compilations, cuts, member, takeCompilation, retryCut, labels }
 }

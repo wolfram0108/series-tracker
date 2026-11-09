@@ -130,6 +130,10 @@ class CompositionGetRequest(BaseModel):
     sources_only: bool = False
 
 
+# The longest name of a track the user may give: a title a player shows on one line.
+TITLE_MAX = 100
+
+
 class VoiceSpan(BaseModel):
     """A voice-over group of a season and the episodes it has, as the window words them (`1–50, 52`)."""
 
@@ -160,6 +164,24 @@ class VoiceOrderSet(BaseModel):
         return labels
 
 
+class VoiceTitleSet(BaseModel):
+    """The command `composition.voice_title.set`: the user's name of the track of a voice-over group in every container of
+    the series (its title there; the group stays what the track is known by). An empty title, or the name of the group,
+    takes the user's name back."""
+
+    series_id: int
+    label: str
+    title: str
+
+    @field_validator("title")
+    @classmethod
+    def _plain(cls, title: str) -> str:
+        title = title.strip()
+        if len(title) > TITLE_MAX or any(ord(char) < 32 for char in title):
+            raise ValueError("a title is one line of at most %d characters" % TITLE_MAX)
+        return title
+
+
 class CompositionReply(BaseModel):
     series_id: int
     rev: int
@@ -174,6 +196,8 @@ class CompositionReply(BaseModel):
     availability: dict[str, list[str]] = Field(default_factory=dict)
     # The order of the voice-overs of each season (stage 11): the order of the tracks in the container.
     voice_orders: list[SeasonVoiceOrder] = Field(default_factory=list)
+    # The user's names of the tracks of the voice-over groups in the containers (group -> title).
+    voice_titles: dict[str, str] = Field(default_factory=dict)
     # The compilations of every season and the episodes each holds (stage 12): the blocks of the view «Компиляции».
     compilations: list[CompilationView] = Field(default_factory=list)
 

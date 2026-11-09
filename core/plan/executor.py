@@ -122,7 +122,7 @@ def table_after(containers: dict[str, Container], made: Plan, group: Group, resu
                 tracks.append(replace(track, episode=slot, tag="", file=""))  # a new file keys it by its row and holds it
             else:
                 tracks.append(results[f"align:{slot}:{way.voice}"].value)
-        built[goal.name] = Container(goal.name, video, tuple(tracks), goal.off, goal.own_at)
+        built[goal.name] = Container(goal.name, video, tuple(tracks), goal.off, goal.own_at, goal.titles)
     renamed: dict[str, Container] = {}
     for slot, name in group.kept:
         goal = made.goal(slot)

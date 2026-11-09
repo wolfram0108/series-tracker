@@ -258,6 +258,13 @@ class VoiceOrderBody(RequestModel):
     labels: list[str]
 
 
+class VoiceTitleBody(RequestModel):
+    """The body of the command `composition.voice_title.set` without the series: a voice-over group and the name of its
+    track in the containers (empty: the name of the group)."""
+    label: str
+    title: str
+
+
 class OutputSwitchBody(RequestModel):
     """The body of the command `scan.output.switch` without the series: an episode, or a whole season, off or on."""
     season: int

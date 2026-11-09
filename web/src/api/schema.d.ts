@@ -676,6 +676,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/series/{series_id}/output/voice-title": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Voice Title
+         * @description The user's name of the track of a voice-over group in the containers of the series. A plan: the containers
+         *     take it at the next sync; refused while a sync of the series is under way.
+         */
+        put: operations["set_voice_title_api_series__series_id__output_voice_title_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/series/{series_id}/output/settings/reset": {
         parameters: {
             query?: never;
@@ -1860,6 +1881,10 @@ export interface components {
             };
             /** Voice Orders */
             voice_orders?: components["schemas"]["SeasonVoiceOrder"][];
+            /** Voice Titles */
+            voice_titles?: {
+                [key: string]: string;
+            };
             /** Compilations */
             compilations?: components["schemas"]["CompilationView"][];
         };
@@ -3264,6 +3289,17 @@ export interface components {
             label: string;
             /** Episodes */
             episodes: string;
+        };
+        /**
+         * VoiceTitleBody
+         * @description The body of the command `composition.voice_title.set` without the series: a voice-over group and the name of its
+         *     track in the containers (empty: the name of the group).
+         */
+        VoiceTitleBody: {
+            /** Label */
+            label: string;
+            /** Title */
+            title: string;
         };
         /**
          * TableProgress
@@ -5306,6 +5342,77 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["VoiceOrderBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_voice_title_api_series__series_id__output_voice_title_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoiceTitleBody"];
             };
         };
         responses: {

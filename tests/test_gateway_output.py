@@ -155,6 +155,16 @@ async def test_a_lever_the_registry_refuses_is_a_400_with_the_code(tmp_path, cod
     assert parse(response.json()["error"]) == {"code": code, "params": {"lever": "x"}}
 
 
+async def test_the_name_of_a_track_is_set_with_the_series_of_the_path_on_one_line(tmp_path):
+    async with serving(tmp_path, {"composition.voice_title.set": {"ok": True}}) as (client, owners, _, _):
+        response = await client.put("/api/series/1/output/voice-title", json={"label": "AniLiberty", "title": " ПМ_aniliberty "})
+        assert response.status_code == 200 and response.json() == {"success": True}
+        broken = await client.put("/api/series/1/output/voice-title", json={"label": "AniLiberty", "title": "две\nстроки"})
+        assert broken.status_code == 422
+    assert owners.asked("composition.voice_title.set") == [
+        {"series_id": 1, "label": "AniLiberty", "title": "ПМ_aniliberty"}]
+
+
 async def test_an_episode_without_a_season_is_a_malformed_request_and_asks_nobody(tmp_path):
     async with serving(tmp_path, {"composition.settings.set": {"ok": True}}) as (client, owners, _, spy):
         response = await client.put("/api/series/1/output/settings", json={"episode": 2, "lever": "voice.take"})

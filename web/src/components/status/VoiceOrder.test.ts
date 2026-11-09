@@ -44,4 +44,67 @@ describe("VoiceOrder", () => {
     await w.findAll(".voice-order-item")[1].trigger("keydown", { key: "ArrowLeft" })
     expect(w.emitted("order")).toBeUndefined()
   })
+
+  describe("the name of a track", () => {
+    const opened = async (props: Record<string, unknown> = {}) => {
+      const w = mount(VoiceOrder, { props: { voices, ...props }, attachTo: document.body })
+      await w.findAll(".voice-order-name")[1].trigger("click")
+      return w
+    }
+    const names = (w: ReturnType<typeof mount>) => w.findAll(".voice-order-name").map((each) => each.text())
+
+    it("is shown instead of the group's, the group said on hover", () => {
+      const w = mount(VoiceOrder, { props: { voices: [{ ...voices[0], title: "ПМ_шоу" }, voices[1]] } })
+      expect(names(w)).toEqual(["ПМ_шоу", "ruchime"])
+      expect(w.find(".voice-order-name").attributes("title")).toContain("ПВА ШОУ")
+    })
+
+    it("is typed in the field a press on it makes, kept by Enter and shown until the core answers", async () => {
+      const w = await opened()
+      const field = w.find(".voice-title-input")
+      expect((field.element as HTMLInputElement).value).toBe("ruchime")
+      expect(document.activeElement).toBe(field.element)
+      await field.setValue("  ПМ_ruchime ")
+      await field.trigger("keydown", { key: "ArrowLeft" })  // the arrow keys of the field do not move the voice-over
+      await field.trigger("keydown", { key: "Enter" })
+      expect(w.emitted("order")).toBeUndefined()
+      expect(w.emitted("title")).toEqual([["ruchime", "ПМ_ruchime"]])
+      expect(w.find(".voice-title-input").exists()).toBe(false)
+      expect(names(w)).toEqual(["ПВА ШОУ", "ПМ_ruchime", "AniStar"])
+      w.unmount()
+    })
+
+    it("goes back to the group's when emptied or given the group's name, and Escape drops what was typed", async () => {
+      const w = await opened({ voices: [voices[0], { ...voices[1], title: "ПМ_ruchime" }] })
+      await w.find(".voice-title-input").setValue("")
+      await w.find(".voice-title-input").trigger("blur")
+      await w.findAll(".voice-order-name")[1].trigger("click")
+      await w.find(".voice-title-input").setValue("другое")
+      await w.find(".voice-title-input").trigger("keydown", { key: "Escape" })
+      expect(w.emitted("title")).toEqual([["ruchime", ""]])
+      w.unmount()
+      const again = await opened({ voices: [voices[0], { ...voices[1], title: "ПМ_ruchime" }] })
+      await again.find(".voice-title-input").setValue("ruchime")
+      await again.find(".voice-title-input").trigger("keydown", { key: "Enter" })
+      expect(again.emitted("title")).toEqual([["ruchime", ""]])
+      again.unmount()
+    })
+
+    it("opens by Enter on the chip as well", async () => {
+      const w = mount(VoiceOrder, { props: { voices }, attachTo: document.body })
+      await w.findAll(".voice-order-item")[0].trigger("keydown", { key: "Enter" })
+      expect((w.find(".voice-title-input").element as HTMLInputElement).value).toBe("ПВА ШОУ")
+      w.unmount()
+    })
+
+    it("sends nothing when the name is the same, and is not opened while the series is busy", async () => {
+      const w = await opened()
+      await w.find(".voice-title-input").trigger("keydown", { key: "Enter" })
+      expect(w.emitted("title")).toBeUndefined()
+      w.unmount()
+      const busy = await opened({ busy: true })
+      expect(busy.find(".voice-title-input").exists()).toBe(false)
+      busy.unmount()
+    })
+  })
 })
