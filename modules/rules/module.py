@@ -105,6 +105,11 @@ def answers_of(profile: CompiledProfile, request: RulesApplyRequest) -> dict:
     return settle_parts(request.lines, {line.key: result_of(process_title(profile, line.text), request.series_season)
                                         for line in request.lines})
 
+
+def reply_of(profile: CompiledProfile, request: RulesApplyRequest) -> dict:
+    """`rules.apply` answered: every line by its key, and the rules of the profile that are broken."""
+    return RulesApplyReply(results=answers_of(profile, request), invalid_rules=profile.invalid_rules).model_dump()
+
 class RulesModule(BaseModule):
     name = "rules"
 
@@ -161,7 +166,7 @@ class RulesModule(BaseModule):
     # --- queries -------------------------------------------------------------
 
     async def on_apply(self, env: Envelope) -> dict:
-        request = RulesApplyRequest.model_validate(env.payload)
+        request = await compute.run(RulesApplyRequest.model_validate, env.payload)
         repeated = sorted(key for key, n in Counter(
             line.key for line in request.lines).items() if n > 1)
         if repeated:
@@ -172,9 +177,7 @@ class RulesModule(BaseModule):
             profile = await compute.run(compile_profile, request.profile_id, request.rules)
         # A page holds thousands of lines (3649 at most on 2026-11-10, 0.1–0.2 s of work): the loop of the service, which
         # serves every module and window, does not wait for them.
-        results = await compute.run(answers_of, profile, request)
-        return RulesApplyReply(
-            results=results, invalid_rules=profile.invalid_rules).model_dump()
+        return await compute.run(reply_of, profile, request)
 
     async def on_profiles_export(self, env: Envelope) -> dict:
         """The stored rules of the profiles named, as `rules.apply` takes them back (RunSnapshot.profiles)."""

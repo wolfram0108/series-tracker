@@ -69,7 +69,7 @@ from typing import Callable, Iterable
 
 import httpx
 
-from core import BaseModule, ids
+from core import BaseModule, compute, ids
 from core import storage
 from core.contracts import ParsedDomains, SiteResolveRequest, SourcesSettingsView, TableGetRequest, TrackerMirrors
 from core.deadlines import TABLE_READ_S
@@ -323,7 +323,8 @@ class SourcesModule(BaseModule):
     async def on_table_get(self, env: Envelope) -> dict:
         """payload: TableGetRequest; reply: TableGetReply. Never waits for a read: the end of it comes as an event."""
         reply = await self.tables.get(TableGetRequest.model_validate(env.payload))
-        return reply.model_dump(mode="json")
+        # The table of a page is thousands of rows: it is made into the message off the loop of the service.
+        return await compute.run(reply.model_dump, mode="json")
 
     async def on_table_read(self, env: Envelope) -> None:
         await self.tables.read(TableGetRequest.model_validate(env.payload))

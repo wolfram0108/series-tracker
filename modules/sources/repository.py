@@ -55,6 +55,20 @@ def _row_of(record: dict) -> TableRow:
         site_fields=json.loads(record["site_fields"]), part=record["part"])
 
 
+def _stored(conn, url: str) -> Stored:
+    records = conn.execute(_LAST_TABLE, (url,)).fetchall()
+    if not records:
+        return Stored(None, None, None)
+    head = records[0]
+    table = ReleaseTable(
+        url=url, site=head["site"], names=json.loads(head["names"]), site_voice=head["site_voice"],
+        channel=head["channel"],
+        read_at=head["read_at"], complete=True,
+        rows=[_row_of(record) for record in records if record["seq"] is not None],
+        unread=[UnreadPart.model_validate(each) for each in json.loads(head["unread"] or "[]")]) if head["complete"] else None
+    return Stored(table, head["read_state"], head["read_reason"], parted=head["unread"] is not None)
+
+
 class SourcesRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -87,18 +101,9 @@ class SourcesRepository:
     # --- tables of site pages ----------------------------------------------------------
 
     async def stored(self, url: str) -> Stored:
-        """The last complete table of the page and the end of the last read, from one snapshot of the database."""
-        records = await self._db.fetch_all(_LAST_TABLE, (url,))
-        if not records:
-            return Stored(None, None, None)
-        head = records[0]
-        table = ReleaseTable(
-            url=url, site=head["site"], names=json.loads(head["names"]), site_voice=head["site_voice"],
-            channel=head["channel"],
-            read_at=head["read_at"], complete=True,
-            rows=[_row_of(record) for record in records if record["seq"] is not None],
-            unread=[UnreadPart.model_validate(each) for each in json.loads(head["unread"] or "[]")]) if head["complete"] else None
-        return Stored(table, head["read_state"], head["read_reason"], parted=head["unread"] is not None)
+        """The last complete table of the page and the end of the last read, from one snapshot of the database. The
+        rows are made into the table on the thread of the query: a page holds thousands of them."""
+        return await self._db.transaction(lambda conn: _stored(conn, url))
 
     async def last_table(self, url: str) -> ReleaseTable | None:
         """The last complete table of the page; None while the page has never been read completely."""

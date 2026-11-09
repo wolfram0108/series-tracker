@@ -65,7 +65,7 @@ import os
 import shutil
 from dataclasses import replace
 
-from core import NO_HANDLER, BaseModule, BusRequestError, storage
+from core import NO_HANDLER, BaseModule, BusRequestError, compute, storage
 from core import container as mkv
 from core.contracts import (WORK_WITHDRAWN, CompositionReply, PlanDelete, PlannerView, SeriesSource, SourceType, SubmitOutcome,
                             SubmitReply)
@@ -613,7 +613,8 @@ class PlannerModule(BaseModule):
 
     async def _inputs(self, series: dict):
         series_id = series["id"]
-        layout = CompositionReply.model_validate(await self.request("composition.get", {"series_id": series_id}))
+        layout = await compute.run(CompositionReply.model_validate,
+                                   await self.request("composition.get", {"series_id": series_id}))
         self._members[series_id] = {(each.ref.source_id, each.ref.row_key): each.ref for each in layout.compilations}
         voices = await self.request("voices.settings.get", {})
         places = {each.source_id: " / ".join(each.place) for each in layout.sources}

@@ -95,7 +95,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from core import BaseModule
+from core import BaseModule, compute
 from core.contracts import (COMPILATION_MEMBER, MARKUP_ALLOW, MARKUP_ORDER, REFERENCE_ORDER, SettingRecord, variant_target, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
@@ -222,25 +222,8 @@ class CompositionModule(BaseModule):
     async def on_get(self, env: Envelope) -> dict:
         request = CompositionGetRequest.model_validate(env.payload)
         stored = await self.repo.stored(request.series_id)
-        if request.sources_only:
-            return CompositionReply(series_id=request.series_id, rev=stored.rev,
-                                    sources=[each.summary for each in stored.sources]).model_dump(mode="json")
-        records = settings.canonical(stored.records)
-        episodes = project.layout_episodes(stored.rows)
-        outcome = compilations.resolve(stored.rows, records, _source_order(stored))
-        reply = CompositionReply(
-            series_id=request.series_id, rev=stored.rev,
-            rows=[row for row in stored.rows if request.include_excluded or not row.excluded],
-            sources=[each.summary for each in stored.sources],
-            levels=settings.levels(records, {season for season, _ in episodes},
-                                   [(view.season, view.ref.key) for view in outcome.views]),
-            settings=settings.episode_settings(records, episodes, outcome.members),
-            compilations=outcome.views,
-            levers=levers.specs(), availability=availability.table(),
-            # A series counted before the orders were kept shows its default order until its next count writes it.
-            voice_orders=project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows),
-            voice_titles=stored.titles)
-        return reply.model_dump(mode="json")
+        # The layout of a series is thousands of rows: the reply is made off the loop.
+        return await compute.run(_layout_reply, request, stored)
 
     async def on_queues_get(self, env: Envelope) -> dict:
         """The queues of a level in the order the core tries their variants: the same rule, the same order of players and
@@ -342,16 +325,10 @@ class CompositionModule(BaseModule):
                     answer = await self._answer(source, table, request.series_season)
                 item = SourceInput(source, table, answer, got.reason if got.state == TableState.FAILED else None,
                                    got.url)
-                names = project.voice_names([item])
+                names = await compute.run(project.voice_names, [item])
                 groups = await self._groups(names) if names else {}
-                projection = project.project([item], groups, {})
-                summary = projection.sources[0]
-                rows = [row for row in projection.rows if not row.excluded]
-                results = answer.results if answer is not None else {}
-                heights = {row.key: list(row.heights) for row in table.rows if row.state == RowState.PLAYABLE}
-                lines = [PreviewLine(key=line.key, line=line.text, result=results.get(line.key),
-                                     heights=heights.get(line.key, []))
-                         for line in project.lines_for(source, table)]
+                # The page is thousands of rows: its projection and the reply are made off the loop.
+                return await compute.run(_page_preview, got, table, source, item, answer, groups)
         except _Unavailable as exc:
             raise ValueError(exc.reason) from exc
         return CompositionPreviewReply(url=got.url, state=got.state, reason=got.reason,
@@ -363,17 +340,18 @@ class CompositionModule(BaseModule):
         lines = [RuleLine(key=str(place), text=text) for place, text in enumerate(texts)]
         results = {}
         if request.profile_id is not None and lines:
+            payload = await compute.run(lambda: RulesApplyRequest(
+                profile_id=request.profile_id, lines=lines, series_season=request.series_season).model_dump(mode="json"))
             try:
-                answer = await self._ask("rules.apply", RulesApplyRequest(
-                    profile_id=request.profile_id, lines=lines, series_season=request.series_season,
-                ).model_dump(mode="json"), model=RulesApplyReply)
+                answer = await self._ask("rules.apply", payload, model=RulesApplyReply)
             except _Unavailable as exc:
                 raise ValueError(exc.reason) from exc
             results = answer.results
-        return CompositionPreviewReply(
+        # The lines a window holds can be thousands: the reply is made off the loop.
+        return await compute.run(lambda: CompositionPreviewReply(
             url=request.url, state=TableState.READY,
             lines=[PreviewLine(key=line.key, line=line.text, result=results.get(line.key)) for line in lines],
-        ).model_dump(mode="json")
+        ).model_dump(mode="json"))
 
     async def on_recompute(self, env: Envelope) -> dict:
         series_id = env.payload["series_id"]
@@ -663,12 +641,11 @@ class CompositionModule(BaseModule):
 
     async def _answer(self, source: SeriesSource, table: ReleaseTable, season,
                       snapshot: RunSnapshot | None = None) -> RulesApplyReply:
-        lines = project.lines_for(source, table)
-        if not lines:
-            return RulesApplyReply(results={})
         rules = snapshot.profiles.get(source.parser_profile_id) if snapshot is not None else None
-        request = RulesApplyRequest(profile_id=source.parser_profile_id, lines=lines, series_season=season, rules=rules)
-        return await self._ask("rules.apply", request.model_dump(mode="json"), model=RulesApplyReply)
+        payload = await compute.run(_rules_request, source, table, season, rules)
+        if payload is None:
+            return RulesApplyReply(results={})
+        return await self._ask("rules.apply", payload, model=RulesApplyReply)
 
     async def _groups(self, names: list[str], snapshot: RunSnapshot | None = None) -> dict[str, str | None]:
         values = snapshot.voices if snapshot is not None else None
@@ -684,55 +661,31 @@ class CompositionModule(BaseModule):
             stored = await self.repo.stored(series_id)
             if not inputs and not stored.sources and not stored.rows and not stored.records:
                 return _Outcome(rev=stored.rev)
-            result = project.project(inputs, groups, stored.numbering)
-            gone = [each.source_id for each in stored.sources if each.source_id not in {i.source.id for i in inputs}]
-            before = settings.canonical(stored.records)
-            renames = project.group_renames(stored.rows, result.rows)
-            orders = project.season_orders(stored.orders, result.rows, renames)
-            # What was set for a voice-over group follows the voice-over when the user names it, renames it or dissolves its group.
-            records = settings.retarget(
-                before, renames,
-                lambda group: self.log.info("сериал %d: у слитых групп расходящиеся настройки %s — выбор возвращён уровню выше",
-                                            series_id, group[0].lever))
-            for source_id in gone:
-                records = settings.without_source(records, source_id)
-            layout = project.layout_episodes(result.rows)
-            if any(summary.status == SourceStatus.READY for summary in result.sources):
-                # Without an answered source the layout says nothing of which episodes exist, so nothing is taken away.
-                records = settings.within_episodes(records, layout)
-            records_changed = records != before
-            order = {item.source.id: item.source.position for item in inputs}
-            # The membership of an episode follows the rows as well as the levers: what it changes is a change of the episode.
-            moved = settings.affected(_settings_of(stored.rows, before, layout, order),
-                                      _settings_of(result.rows, records, layout, order))
-            headers_changed = _headers(stored.rows, before, layout, order) != _headers(result.rows, records, layout, order)
-
+            # The projection and its comparison with what is stored are pure work over thousands of rows: off the loop.
+            derived = await compute.run(_derive, series_id, inputs, groups, stored, self.log)
+            result = derived.result
             sources = [StoredSource(item.source.id, item.source.position, self._page_of.get(item.source.id), summary)
                        for item, summary in zip(sorted(inputs, key=lambda i: (i.source.position, i.source.id)),
                                                 result.sources)]
-            for source_id in gone:
+            for source_id in derived.gone:
                 self._unmap(source_id)
-            rows_changed = result.rows != stored.rows
-            # The time of a reading is stored with the summary but is no change of it: a page read again is no news.
-            shown = [summary.model_copy(update={"read_at": None}) for summary in result.sources]
-            summaries_changed = shown != [each.summary.model_copy(update={"read_at": None}) for each in stored.sources]
-            layout_changed = rows_changed or bool(moved)
-            publish = layout_changed or summaries_changed or headers_changed
+            layout_changed = derived.rows_changed or bool(derived.moved)
+            publish = layout_changed or derived.summaries_changed or derived.headers_changed
             rev = stored.rev + 1 if publish else None
             parts = dict(
-                rows=result.rows if rows_changed else None,
+                rows=result.rows if derived.rows_changed else None,
                 sources=sources if sources != stored.sources else None,
                 numbering=result.unknown_voices if result.unknown_voices != stored.numbering else None,
-                records=records if records_changed else None, rev=rev,
-                orders=orders if orders != stored.orders else None)
+                records=derived.records if derived.records_changed else None, rev=rev,
+                orders=derived.orders if derived.orders != stored.orders else None)
             if any(value is not None for value in parts.values()):
                 await self.repo.write(series_id, **parts)
             if not publish:
                 return _Outcome(rev=stored.rev)
             if layout_changed:
-                touched = project.touched_episodes(stored.rows, result.rows) if rows_changed else set()
-                whole = touched is None or not (touched | moved)
-                self._publish_changed(series_id, rev, set() if whole else touched | moved)
+                touched = derived.touched
+                whole = touched is None or not (touched | derived.moved)
+                self._publish_changed(series_id, rev, set() if whole else touched | derived.moved)
             else:
                 self._publish_changed(series_id, rev, set(), summary_only=True)
             return _Outcome(rev=rev, changed=True)
@@ -773,10 +726,104 @@ class CompositionModule(BaseModule):
     async def _ask(self, topic: str, payload, *, model=None):
         try:
             answer = await self.request(topic, payload)
-            return model.model_validate(answer) if model is not None else answer
+            # The tables and the answers of the rules are thousands of rows: their check runs off the loop.
+            return await compute.run(model.model_validate, answer) if model is not None else answer
         except Exception as exc:  # noqa: BLE001 — any failure of a neighbour is one signal: the recount did not happen
             self.log.error("запрос %s не выполнен: %s: %s", topic, type(exc).__name__, exc)
             raise _Unavailable(topic) from exc
+
+
+def _layout_reply(request: CompositionGetRequest, stored) -> dict:
+    """`composition.get` answered from what is stored; pure, it runs in the pool of computation."""
+    if request.sources_only:
+        return CompositionReply(series_id=request.series_id, rev=stored.rev,
+                                sources=[each.summary for each in stored.sources]).model_dump(mode="json")
+    records = settings.canonical(stored.records)
+    episodes = project.layout_episodes(stored.rows)
+    outcome = compilations.resolve(stored.rows, records, _source_order(stored))
+    reply = CompositionReply(
+        series_id=request.series_id, rev=stored.rev,
+        rows=[row for row in stored.rows if request.include_excluded or not row.excluded],
+        sources=[each.summary for each in stored.sources],
+        levels=settings.levels(records, {season for season, _ in episodes},
+                               [(view.season, view.ref.key) for view in outcome.views]),
+        settings=settings.episode_settings(records, episodes, outcome.members),
+        compilations=outcome.views,
+        levers=levers.specs(), availability=availability.table(),
+        # A series counted before the orders were kept shows its default order until its next count writes it.
+        voice_orders=project.season_voices(project.season_orders(stored.orders, stored.rows, {}), stored.rows),
+        voice_titles=stored.titles)
+    return reply.model_dump(mode="json")
+
+
+def _rules_request(source: SeriesSource, table: ReleaseTable, season, rules) -> dict | None:
+    """The request of the rules for the lines of a table; None when the table has none for the source."""
+    lines = project.lines_for(source, table)
+    if not lines:
+        return None
+    return RulesApplyRequest(profile_id=source.parser_profile_id, lines=lines, series_season=season,
+                             rules=rules).model_dump(mode="json")
+
+
+def _page_preview(got: TableGetReply, table: ReleaseTable, source: SeriesSource, item: SourceInput,
+                  answer: RulesApplyReply | None, groups: dict[str, str | None]) -> dict:
+    """The preview of a page with its table: the summary, the lines with their answers and the rows the profile makes;
+    pure, it runs in the pool of computation."""
+    projection = project.project([item], groups, {})
+    results = answer.results if answer is not None else {}
+    heights = {row.key: list(row.heights) for row in table.rows if row.state == RowState.PLAYABLE}
+    lines = [PreviewLine(key=line.key, line=line.text, result=results.get(line.key), heights=heights.get(line.key, []))
+             for line in project.lines_for(source, table)]
+    return CompositionPreviewReply(url=got.url, state=got.state, reason=got.reason, names=list(table.names),
+                                   summary=projection.sources[0], lines=lines,
+                                   rows=[row for row in projection.rows if not row.excluded]).model_dump(mode="json")
+
+
+@dataclass
+class _Derived:
+    """What a recount makes of its inputs and of the stored layout: the rows, the settings and what changed."""
+    result: "project.Projection"
+    gone: list[int]
+    records: list[SettingRecord]
+    records_changed: bool
+    orders: dict[int, list[str]]
+    moved: set[tuple[int, int]]
+    headers_changed: bool
+    rows_changed: bool
+    summaries_changed: bool
+    touched: set[tuple[int, int]] | None
+
+
+def _derive(series_id: int, inputs: list[SourceInput], groups: dict[str, str | None], stored, log) -> _Derived:
+    """The projection of a recount and its comparison with what is stored; pure, it runs in the pool of computation."""
+    result = project.project(inputs, groups, stored.numbering)
+    gone = [each.source_id for each in stored.sources if each.source_id not in {i.source.id for i in inputs}]
+    before = settings.canonical(stored.records)
+    renames = project.group_renames(stored.rows, result.rows)
+    orders = project.season_orders(stored.orders, result.rows, renames)
+    # What was set for a voice-over group follows the voice-over when the user names it, renames it or dissolves its group.
+    records = settings.retarget(
+        before, renames,
+        lambda group: log.info("сериал %d: у слитых групп расходящиеся настройки %s — выбор возвращён уровню выше",
+                               series_id, group[0].lever))
+    for source_id in gone:
+        records = settings.without_source(records, source_id)
+    layout = project.layout_episodes(result.rows)
+    if any(summary.status == SourceStatus.READY for summary in result.sources):
+        # Without an answered source the layout says nothing of which episodes exist, so nothing is taken away.
+        records = settings.within_episodes(records, layout)
+    order = {item.source.id: item.source.position for item in inputs}
+    # The membership of an episode follows the rows as well as the levers: what it changes is a change of the episode.
+    moved = settings.affected(_settings_of(stored.rows, before, layout, order),
+                              _settings_of(result.rows, records, layout, order))
+    headers_changed = _headers(stored.rows, before, layout, order) != _headers(result.rows, records, layout, order)
+    rows_changed = result.rows != stored.rows
+    # The time of a reading is stored with the summary but is no change of it: a page read again is no news.
+    shown = [summary.model_copy(update={"read_at": None}) for summary in result.sources]
+    summaries_changed = shown != [each.summary.model_copy(update={"read_at": None}) for each in stored.sources]
+    touched = project.touched_episodes(stored.rows, result.rows) if rows_changed else set()
+    return _Derived(result, gone, records, records != before, orders, moved, headers_changed, rows_changed,
+                    summaries_changed, touched)
 
 
 def _source_order(stored) -> dict[int, int]:
