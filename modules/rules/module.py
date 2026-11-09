@@ -61,16 +61,13 @@ Events (исходящие):
       пустой профиль ни у какого источника не назначен.
 
 Кэш скомпилированных профилей — внутреннее дело CRUD; снаружи его не сбросить.
-
-Сборка профиля и ответ на строки rules.apply считаются в пуле вычислений (core.compute): страница — это тысячи строк
-и десятые доли секунды работы, а цикл процесса обслуживает все модули и окна.
 """
 from __future__ import annotations
 
 import sqlite3
 from collections import Counter
 
-from core import BaseModule, compute
+from core import BaseModule
 from core.contracts import (RuleResult, RulesApplyReply, RulesApplyRequest,
                             RulesProfileChanged)
 from core.db import Database
@@ -98,12 +95,6 @@ def result_of(outcome: dict, series_season) -> RuleResult:
     return RuleResult(season=season, voiceover=voiceover, events=events,
                       errors=errors, **numbers, **extracted)
 
-
-
-def answers_of(profile: CompiledProfile, request: RulesApplyRequest) -> dict:
-    """The answer of the profile for every line of the request, by its key."""
-    return settle_parts(request.lines, {line.key: result_of(process_title(profile, line.text), request.series_season)
-                                        for line in request.lines})
 
 class RulesModule(BaseModule):
     name = "rules"
@@ -141,7 +132,7 @@ class RulesModule(BaseModule):
         await self._require_profile(profile_id)
         version = self._version.get(profile_id, 0)
         raw_rules = await self.repo.get_rules(profile_id)
-        profile = await compute.run(compile_profile, profile_id, raw_rules)
+        profile = compile_profile(profile_id, raw_rules)
         for bad in profile.invalid_rules:
             self.log.error(
                 "профиль %d: правило «%s» (id=%s) неисправно и "
@@ -169,10 +160,10 @@ class RulesModule(BaseModule):
         if request.rules is None:
             profile = await self._profile(request.profile_id)
         else:  # the profile as a run took it: what was saved since does not count for that run
-            profile = await compute.run(compile_profile, request.profile_id, request.rules)
-        # A page holds thousands of lines (3649 at most on 2026-11-10, 0.1–0.2 s of work): the loop of the service, which
-        # serves every module and window, does not wait for them.
-        results = await compute.run(answers_of, profile, request)
+            profile = compile_profile(request.profile_id, request.rules)
+        results = settle_parts(request.lines, {line.key: result_of(process_title(profile, line.text),
+                                                                     request.series_season)
+                                               for line in request.lines})
         return RulesApplyReply(
             results=results, invalid_rules=profile.invalid_rules).model_dump()
 
