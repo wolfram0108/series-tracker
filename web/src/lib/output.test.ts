@@ -12,7 +12,7 @@ type Schemas = components["schemas"]
 
 // Samples have the shape of the schema: a row is one line of the layout, a reference is the answer for one episode.
 const row = (over: Partial<Row> = {}): Row => ({
-  series_id: 1, source_id: 7, row_key: "row", excluded: false, season: 1, episode_start: 1, episode_end: 1,
+  series_id: 1, source_id: 7, in_output: true, row_key: "row", excluded: false, season: 1, episode_start: 1, episode_end: 1,
   voice_label: "Ruchime", voice_name: "Ruchime", player: "vibix", player_label: "", group: "", text: "",
   heights: [1080], state: "playable", link: "", video: "", ...over,
 })
@@ -36,10 +36,12 @@ describe("joinEpisodes", () => {
   // a line with no season and a line with no number: only the first three lines make episodes.
   const compilation = row({ episode_start: 1, episode_end: 3 })
   const single = row({ source_id: 8, player: "kodik", player_label: "Kodik", episode_start: 2, episode_end: 2 })
-  const excluded = row({ excluded: true, episode_start: 9, episode_end: 9 })
-  const noSeason = row({ season: null, episode_start: 20, episode_end: 20 })
-  const noNumber = row({ episode_start: null, episode_end: null })
-  const lines = [compilation, single, excluded, noSeason, noNumber]
+  // What the core says of each: an excluded line, one with no season or no number, one no group took is no row of the output.
+  const excluded = row({ excluded: true, episode_start: 9, episode_end: 9, in_output: false })
+  const noSeason = row({ season: null, episode_start: 20, episode_end: 20, in_output: false })
+  const noNumber = row({ episode_start: null, episode_end: null, in_output: false })
+  const unknown = row({ episode_start: 30, episode_end: 30, voice_label: "Неизвестная озвучка 1", in_output: false })
+  const lines = [compilation, single, excluded, noSeason, noNumber, unknown]
 
   it("joins a compilation to each of its episodes and a single line to its own", () => {
     const views = joinEpisodes(lines, [], [], [])
@@ -49,10 +51,9 @@ describe("joinEpisodes", () => {
     expect(views[2].rows).toEqual([compilation])
   })
 
-  it("leaves out excluded lines and lines with no season or no number", () => {
+  it("leaves out every line that is no row of the output, a line no voice-over group took among them", () => {
     const numbers = joinEpisodes(lines, [], [], []).map((view) => view.episode)
-    expect(numbers).not.toContain(9)
-    expect(numbers).not.toContain(20)
+    expect(numbers).toEqual([1, 2, 3])
   })
 
   it("keeps an episode that only the settings name, with its levers and no rows", () => {

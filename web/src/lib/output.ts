@@ -97,9 +97,10 @@ interface Span {
   end: number
 }
 
-// Excluded lines and lines with no season or no number are out of the layout; a missing end is one episode.
+// Only a row of the output (the core says it: numbered by the rules and taken by a voice-over group) has a place here; a
+// missing end is one episode.
 function spanOf(row: Row): Span | null {
-  if (row.excluded || typeof row.season !== "number" || typeof row.episode_start !== "number") return null
+  if (!row.in_output || typeof row.season !== "number" || typeof row.episode_start !== "number") return null
   const end = typeof row.episode_end === "number" ? row.episode_end : row.episode_start
   return { season: row.season, start: row.episode_start, end }
 }

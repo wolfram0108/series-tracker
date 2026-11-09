@@ -89,13 +89,14 @@ def test_a_queue_lists_what_the_level_has_with_the_values_of_its_levers():
     assert (fumo.take, fumo.take_level, [each.episodes for each in fumo.rows]) == (False, Level.EPISODE, ["11"])
 
 
-def test_a_voice_over_in_no_group_has_no_queue_and_stays_a_variant_of_the_reference():
-    """An unknown voice-over is taken into no work, so the window lists no queue of it; its single row may still be the
-    reference, as scan chooses it."""
+def test_a_voice_over_in_no_group_is_in_no_queue_not_even_of_the_reference_however_high_it_is():
+    """A row no group took is no row of the output: the window lists it in no queue — no voice-over, no reference — just
+    as the planner takes it into no work."""
     unknown = row(1, 38, "u-vk", 4, 11, player="vk", height=2160, voice="Неизвестная озвучка 1")
     shown, by_group = build(EPISODE + [unknown], [])
     assert "Неизвестная озвучка 1" not in [queue.group for queue in by_group]
-    assert ("Неизвестная озвучка 1", 38, "vk") in [(each.group, each.source_id, each.player) for each in shown.rows]
+    assert "Неизвестная озвучка 1" not in [each.group for each in shown.rows]
+    assert shown.rows == build(EPISODE, [])[0].rows
 
 
 def test_a_season_queue_names_the_episodes_each_variant_plays_in_and_its_best_height():

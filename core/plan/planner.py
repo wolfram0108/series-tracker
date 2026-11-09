@@ -184,7 +184,8 @@ def switched_off(choices: Choices, track: Track, slot: Slot) -> bool:
 
 def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = None) -> Plan:
     """The goal, the graph and the groups of a series. `namer` is the rule of the name of a file (the series' own rule of
-    names in the service); without it a plain name of the episode, the group and the height."""
+    names in the service); without it a plain name of the episode, the group and the height. Its rows are rows of the
+    output only (`online_of`): a file made before of a row no group took stays as it is and takes no new work."""
     choices = inputs.choices
     online = {row.id: row for row in inputs.online}
     singles = [row for row in inputs.online if not row.compilation]
@@ -348,7 +349,7 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
     voices: dict[str, list] = {}
     if not idle:
         for row in dubbing:
-            if row.group is not None and row.group not in taken_off and row.group != own:
+            if row.group not in taken_off and row.group != own:
                 voices.setdefault(row.group, [])
     held_tracks = [each for each in by_slot.tracks.get(slot, []) if not (each[2] and each[0] is video.container)
                    and not switched_off(choices, each[1], slot)]
@@ -425,7 +426,7 @@ def _markup_of(inputs: Inputs, episode, singles: list[OnlineRow], files: list[Co
 
     found: list[tuple[tuple, Markup]] = []
     for row in singles:
-        if row.playable and row.group is not None and row.variant not in denied and ("download", row.id) not in inputs.failed:
+        if row.playable and row.variant not in denied and ("download", row.id) not in inputs.failed:
             found.append((rank(row.variant, row.height, row.player, row.id, False), Markup(row.id, row.group, row.height, row)))
     online = {row.id: row for row in singles}
     for container in files:
@@ -467,7 +468,7 @@ def _cuts(slot, inputs, compilations, singles, candidates, video_rank, denied, m
 
     def fits(row: OnlineRow) -> bool:
         # A variant left out is no reference in any form: file, download or cut.
-        return (row.playable and row.group is not None and row.height > floor and row.variant not in denied
+        return (row.playable and row.height > floor and row.variant not in denied
                 and ("download", row.id) not in failed and ("cut", row.id, timeline) not in failed)
 
     pictures = [row for row in singles if markup is not None and row.id != timeline and fits(row)]

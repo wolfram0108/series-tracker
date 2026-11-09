@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from .compilation import CompilationView
 from .output_settings import EpisodeSettings, LeverSpec, LevelSettings
@@ -60,9 +60,18 @@ class CompositionRow(BaseModel):
 
     @property
     def grouped(self) -> bool:
-        """The voice-over of the row is one of the user's groups. Only such a row is taken into work as a voice-over or a
-        compilation; a row of an unknown voice-over waits for its group (it may still be the reference of an episode)."""
+        """The voice-over of the row is one of the user's groups."""
         return self.voice_group is not None
+
+    @computed_field
+    @property
+    def in_output(self) -> bool:
+        """The row is a row of the output (the window «Выход», its plan and the planner): the rules gave it its numbers and
+        the voice-over groups took it. The one way into the output: table, rules, groups (ЭТАП_10:107); a row of an
+        unknown voice-over is in none of it — no reference, no markup reference, no voice-over — until its group takes
+        it."""
+        return (not self.excluded and self.season is not None and self.episode_start is not None
+                and self.voice_group is not None)
 
     @property
     def is_compilation(self) -> bool:

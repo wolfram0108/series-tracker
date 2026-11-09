@@ -25,7 +25,7 @@ vi.mock("../../composables/outputCalls")
 const ok = <T>(data: T): Answer<T> => ({ ok: true, data })
 
 const row = (season: number, episode: number, over: Partial<Row> = {}): Row => ({
-  series_id: 1, source_id: 7, row_key: `r${season}-${episode}`, excluded: false, season, episode_start: episode,
+  series_id: 1, source_id: 7, in_output: true, row_key: `r${season}-${episode}`, excluded: false, season, episode_start: episode,
   episode_end: episode, voice_label: "Ruchime", voice_name: "Ruchime", player: "vibix", player_label: "Vibix",
   group: "", text: "", heights: [1080], state: "playable", link: "", video: "", ...over,
 })

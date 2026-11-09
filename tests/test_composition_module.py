@@ -102,6 +102,8 @@ async def system(db_path):
     composition = CompositionModule(bus, Database(str(db_path)))
     probe = Probe(bus)
     runner = Runner(bus, [catalog, sources, rules, voices, composition, probe])
+    # The voice-over of the pages of these tests is a group's: only a row a group took is a row of the output.
+    voices.set_groups({"Ruchime": ["Ruchime"]})
     await runner.start()
     made = System(bus, probe, catalog, sources, rules, voices, composition, db_path,
                   bus.subscribe("composition.changed"), bus.subscribe("composition.failed"),
@@ -175,8 +177,7 @@ async def test_a_new_series_is_counted_waiting_and_laid_out_when_its_table_is_re
     ready = await s.get(series_id)
     assert ready.rev == 2 and ready.sources[0].status == SourceStatus.READY
     assert [(r.season, r.episode_start, r.episode_end, r.voice_label) for r in ready.rows] == [
-        *[(1, n, n, "Неизвестная озвучка 1") for n in range(1, 6)],
-        (2, 1, 1, "Неизвестная озвучка 1"), (2, 2, 2, "Неизвестная озвучка 1")]
+        *[(1, n, n, "Ruchime") for n in range(1, 6)], (2, 1, 1, "Ruchime"), (2, 2, 2, "Ruchime")]
     assert [request.refresh for request in s.sources.requests] == [True, False]
 
 
@@ -422,26 +423,25 @@ def records_of(s: System, series_id: int) -> list[tuple]:
 @pytest.mark.asyncio
 async def test_what_was_set_for_a_voice_over_follows_it_into_the_group_the_user_makes_and_back_out_of_it(system):
     s = system
+    s.voices.groups = {"Стар": ["AniStar"]}
     series_id = await laid_out(s, page(row("a", "Серия 1", voice="AniStar"), row("b", "Серия 2", voice="Animy")))
-    unknown = "Неизвестная озвучка 1"
+    unknown = "Неизвестная озвучка 2"  # Animy took number 1 first, and a number is kept for good (П-7)
     source_id = only_source(s, series_id)
-    await s.set(series_id, "voice.take", False, season=1, target=group_target(unknown))
-    await s.set(series_id, "reference.allow", False, season=1, target=variant_target(unknown, source_id, "vk"))
-    await s.set(series_id, "reference.order", [{"group": unknown, "source_id": source_id, "player": "vk"}])
-    await s.set(series_id, "voice.take", False, season=1, target=group_target("Неизвестная озвучка 2"))
-
-    await s.counted(lambda: s.voices.set_groups({"Стар": ["AniStar"]}))
-    made = {(lever, target) for lever, target, _ in records_of(s, series_id)}
-    assert ("voice.take", group_target("Стар")) in made and ("reference.allow", variant_target("Стар", source_id, "vk")) in made
-    assert ("voice.take", group_target("Неизвестная озвучка 2")) in made  # another voice-over keeps its own
-    assert not any(unknown in (target or "") for _, target in made)
-    assert [value for lever, _, value in records_of(s, series_id) if lever == "reference.order"] == [
-        [{"group": "Стар", "source_id": source_id, "player": "vk"}]]
+    await s.set(series_id, "voice.take", False, season=1, target=group_target("Стар"))
+    await s.set(series_id, "reference.allow", False, season=1, target=variant_target("Стар", source_id, "vk"))
+    await s.set(series_id, "reference.order", [{"group": "Стар", "source_id": source_id, "player": "vk"}])
 
     await s.counted(lambda: s.voices.set_groups({}))
-    back = {(lever, target) for lever, target, _ in records_of(s, series_id)}
-    assert ("voice.take", group_target(unknown)) in back and ("reference.allow", variant_target(unknown, source_id, "vk")) in back
+    out = {(lever, target) for lever, target, _ in records_of(s, series_id)}
+    assert ("voice.take", group_target(unknown)) in out and ("reference.allow", variant_target(unknown, source_id, "vk")) in out
     assert [value[0]["group"] for lever, _, value in records_of(s, series_id) if lever == "reference.order"] == [unknown]
+
+    await s.counted(lambda: s.voices.set_groups({"Стар": ["AniStar"]}))
+    back = {(lever, target) for lever, target, _ in records_of(s, series_id)}
+    assert ("voice.take", group_target("Стар")) in back and ("reference.allow", variant_target("Стар", source_id, "vk")) in back
+    assert not any(unknown in (target or "") for _, target in back)
+    assert [value for lever, _, value in records_of(s, series_id) if lever == "reference.order"] == [
+        [{"group": "Стар", "source_id": source_id, "player": "vk"}]]
 
 
 @pytest.mark.asyncio
@@ -469,7 +469,7 @@ async def test_a_series_whose_names_are_all_empty_asks_the_groups_nothing(system
 
 def choice(source_id: int, player: str = "vk") -> list:
     """An order of one variant the layouts of these tests have: the voice-over of the standard page, at a player of the source."""
-    return [{"group": "Неизвестная озвучка 1", "source_id": source_id, "player": player}]
+    return [{"group": "Ruchime", "source_id": source_id, "player": player}]
 
 
 def rich_standard(url: str = PAGE) -> ReleaseTable:
@@ -1483,6 +1483,7 @@ async def test_the_count_a_sync_asks_for_reads_the_rules_and_the_groups_of_its_s
 async def test_the_order_of_the_voices_of_a_season_is_shown_kept_and_set_by_the_user_only(system):
     from core.contracts import RUN_CHANGED
     s = system
+    s.voices.groups = {"Ruchime": ["Ruchime"], "AniStar": ["AniStar"]}
     series_id = await laid_out(s, page(*season_rows(1, range(1, 4)),
                                        *season_rows(1, range(1, 3), player="kodik", voice="AniStar")))
     [order] = (await s.get(series_id)).voice_orders

@@ -63,11 +63,11 @@ def table() -> dict[str, list[str]]:
 
 
 def lines_of_level(rows: Iterable[CompositionRow], season: int | None = None, episode: int | None = None) -> list[CompositionRow]:
-    """The lines a level of the window shows: those that cover an episode of the level (the whole series, a season, or one
-    episode). An excluded line, or one with no number, covers no episode and is on no level."""
+    """The lines a level of the window shows: those of the output (`CompositionRow.in_output`) that cover an episode of the
+    level (the whole series, a season, or one episode)."""
     found = []
     for row in rows:
-        if row.excluded or row.season is None or row.episode_start is None:
+        if not row.in_output:
             continue
         end = row.episode_end if row.episode_end is not None else row.episode_start
         if (season is None or row.season == season) and (episode is None or row.episode_start <= episode <= end):

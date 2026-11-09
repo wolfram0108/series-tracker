@@ -5,6 +5,7 @@ comes from the constructor's answer to the line of that row; this module never c
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Iterable, Iterator, Mapping, Sequence
 
@@ -14,6 +15,7 @@ from core.voice_names import fold_name
 
 # One template for the name of a voice-over that belongs to no user group.
 UNKNOWN_VOICE_LABEL = "Неизвестная озвучка {number}"
+_UNKNOWN = re.compile("^" + re.escape(UNKNOWN_VOICE_LABEL).replace(re.escape("{number}"), r"\d+") + "$")
 
 # The only player whose list holds several seasons of a catalog, one of which the user may pick for the source.
 CATALOG_PLAYER = "vibix"
@@ -258,7 +260,7 @@ def season_orders(previous: Mapping[int, Sequence[str]], rows: Sequence[Composit
     user moves the others."""
     present: dict[int, list[str]] = {}
     for row in rows:
-        if row.excluded or row.season is None or not row.voice_label:
+        if not row.in_output:
             continue
         labels = present.setdefault(row.season, [])
         if row.voice_label not in labels:
@@ -268,7 +270,8 @@ def season_orders(previous: Mapping[int, Sequence[str]], rows: Sequence[Composit
         kept: list[str] = []
         for label in previous.get(season, ()):
             label = renames.get(label, label)
-            if label not in kept:
+            # An unknown voice-over is no voice-over of the output: its name is no place in the order of the tracks.
+            if label not in kept and not _UNKNOWN.match(label):
                 kept.append(label)
         kept += [label for label in present.get(season, []) if label not in kept]
         orders[season] = kept
@@ -281,7 +284,7 @@ def season_voices(orders: Mapping[int, Sequence[str]], rows: Sequence[Compositio
     it there)."""
     episodes: dict[tuple[int, str], set[int]] = {}
     for row in rows:
-        if row.excluded or row.season is None or not row.voice_label:
+        if not row.in_output:
             continue
         episodes.setdefault((row.season, row.voice_label), set()).update(number for _, number in _covered(row))
     return [SeasonVoiceOrder(season=season, voices=[

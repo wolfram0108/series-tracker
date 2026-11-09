@@ -80,7 +80,7 @@ class World(SeriesSync):
 
     # --- the sources -------------------------------------------------------------------------------------------
 
-    def put(self, source_id: int, key: str, episode: int, *, group: str | None, player: str = "vk", height: int = 720,
+    def put(self, source_id: int, key: str, episode: int, *, group: str, player: str = "vk", height: int = 720,
             season: int = 1, end: int | None = None, video: str = "", content: Iterable[int] | None = None,
             name: str = "", part: int | None = None) -> OnlineRow:
         """A row of a source: what the rules give it (season, episode or range, part, group) and what it truly is."""

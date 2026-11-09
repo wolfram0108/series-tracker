@@ -96,14 +96,6 @@ def test_marked_when_the_markup_is_the_best_video_it_is_the_video_and_its_sound_
     assert sounds_of(container)[-1] == ORIGINAL and container.own_at == len(container.tracks)
 
 
-def test_a_markup_row_of_an_unknown_voice_over_is_passed_over_for_the_next_of_the_queue():
-    world = world_of()
-    world.put(MARKUP, "orig1", 1, group=None, player="cvh", height=1080)
-    step = synced(world, "озвучка эталона без группы")
-    assert step.plan.goal((1, 1)).markup.id == row(PICTURE, "pva1")  # the queue goes on by the rule: the highest
-    assert file_of(world).video.id == row(PICTURE, "pva1")
-
-
 # --- С-3, Э-6: another picture on the same timeline --------------------------------------------------------------
 
 def test_a_higher_picture_on_the_same_timeline_only_repacks():

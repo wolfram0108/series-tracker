@@ -49,15 +49,15 @@ class Snapshot:
 
 @dataclass(frozen=True)
 class OnlineRow:
-    """A row the rules gave to an episode (or to a range of them: a compilation). `group` is the voice-over group; None is
-    an unknown voice-over, which no new work takes (Р-77)."""
+    """A row of the output (`core/plan/inputs.online_of`): the rules gave it an episode (or a range of them: a compilation)
+    and `group`, the voice-over group, took it."""
 
     id: RowId
     season: int
     start: int
     end: int
     player: str
-    group: str | None
+    group: str
     height: int
     source: str = ""
     link: str = ""

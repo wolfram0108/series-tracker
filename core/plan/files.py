@@ -128,6 +128,7 @@ class Library:
             identity = mkv.identity(video.timeline.source_id, video.timeline.row_key)
             own_stream = await self.stream_of(goal.video.container, video.id, True) if goal.video.kind == "asset" else 0
             titles, languages = dict(goal.titles), dict(goal.languages)
+            # A video without a group is only that of a file made of a row of no group, which the plan takes no more.
             label = video.snapshot.group or "—"
             sound = mkv.AudioIn(label, video_path, own_stream, identity, own=True, title=titles.get(label, ""),
                                 language=languages.get(label, ""))

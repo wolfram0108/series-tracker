@@ -670,9 +670,10 @@ def test_a_player_switched_off_or_on_renames_no_group():
 
 
 def voiced(*pairs, season=1) -> list[CompositionRow]:
-    """Rows of one season: (voice label, episode) in the order of the layout."""
+    """Rows of one season, each of a voice-over group: (group, episode) in the order of the layout."""
     return [CompositionRow(series_id=5, source_id=1, row_key=f"r{i}", season=season, episode_start=episode,
-                           episode_end=episode, voice_label=label, voice_name=label, player="vk", state=RowState.PLAYABLE)
+                           episode_end=episode, voice_group=label, voice_label=label, voice_name=label, player="vk",
+                           state=RowState.PLAYABLE)
             for i, (label, episode) in enumerate(pairs)]
 
 

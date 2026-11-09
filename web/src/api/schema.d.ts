@@ -1962,6 +1962,14 @@ export interface components {
              * @default
              */
             video: string;
+            /**
+             * In Output
+             * @description The row is a row of the output (the window «Выход», its plan and the planner): the rules gave it its numbers and
+             *     the voice-over groups took it. The one way into the output: table, rules, groups (ЭТАП_10:107); a row of an
+             *     unknown voice-over is in none of it — no reference, no markup reference, no voice-over — until its group takes
+             *     it.
+             */
+            readonly in_output: boolean;
         };
         /**
          * ConformJobChange

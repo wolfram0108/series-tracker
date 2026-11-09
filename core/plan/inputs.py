@@ -16,12 +16,12 @@ from .tables import Choices, Container, OnlineRow, RowId
 
 
 def online_of(rows: Sequence[CompositionRow], places: Mapping[int, str] | None = None) -> tuple[OnlineRow, ...]:
-    """The rows of the layout the rules gave an episode (or a range: a compilation). The place of a row is its place in the
-    layout, excluded rows counted, as the service's rule breaks a tie."""
+    """The rows of the output (`CompositionRow.in_output`: the rules gave them an episode or a range, the voice-over groups
+    took them). The place of a row is its place in the layout, every row counted, as the service's rule breaks a tie."""
     places = places or {}
     online = []
     for position, row in enumerate(rows):
-        if row.excluded or row.season is None or row.episode_start is None:
+        if not row.in_output:
             continue
         online.append(OnlineRow(RowId(row.source_id, row.row_key, row.video or ""), row.season, row.episode_start,
                                 row.episode_end or row.episode_start, row.player, row.voice_group, max(row.heights or [0]),
