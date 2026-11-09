@@ -166,6 +166,22 @@ class SiteResolveRequest(BaseModel):
     url: str
 
 
+class ParsedDomains(BaseModel):
+    """The domains a reader of pages takes addresses of: a tracker (its domain and mirrors, as the settings hold them) or
+    a site of the registry (its own domains)."""
+
+    name: str
+    kind: str  # "tracker" | "site"
+    domains: list[str] = Field(default_factory=list)
+
+
+class DomainsReply(BaseModel):
+    """`sources.domains.list`: every reader of pages the service has now, trackers first, then the sites in the order of
+    their registry."""
+
+    readers: list[ParsedDomains] = Field(default_factory=list)
+
+
 class SiteResolveReply(BaseModel):
     """Which site reads an address and the canonical form of it; both None when no site does."""
 

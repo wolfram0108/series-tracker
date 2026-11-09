@@ -15,7 +15,8 @@ from .output_settings import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS,
                               Level, LevelSettings, SettingRecord, SettingsReset, SettingsSet,
                               TargetKind, ValueShape, group_target, parse_group_target, parse_variant_target, variant_target)
 from .reference import CutPicture, OutputSwitch, Reference, ReferenceChanged, ReferenceMark
-from .release_table import (LINE_FIELDS, LINE_SEPARATOR, ReleaseTable, RowState, RowVoice, SiteResolveReply, SiteResolveRequest,
+from .release_table import (LINE_FIELDS, LINE_SEPARATOR, DomainsReply, ParsedDomains, ReleaseTable, RowState, RowVoice,
+                            SiteResolveReply, SiteResolveRequest,
                             SeriesReadProgress, TableFailed, TableGetReply, TableGetRequest, TableProgress, TableReady, TableRow,
                             TableState, UnreadPart, line_of, place_of)
 from .rules import RuleLine, RuleResult, RulesApplyReply, RulesApplyRequest, RulesProfileChanged
@@ -32,7 +33,7 @@ __all__ = ["Absence", "CompilationEpisode", "CompilationRef", "CompilationView",
            "DubEventStatus", "DubHint", "DubItem", "DubRecord", "DubsSnapshot", "DubState", "DubStatus", "Reason", "SnapshotItem", "SettingProblem", "VoiceSettingsDraft",
            "VoiceSettingsSaved", "VoiceSettingsView", "DubsScope", "ConformSettingsDraft", "ConformSettingsSaved",
            "ConformSettingsView",
-           "LINE_SEPARATOR", "ReleaseTable", "RowState", "RowVoice", "SiteResolveReply", "SiteResolveRequest", "TableFailed", "TableGetReply", "TableGetRequest",
+           "LINE_SEPARATOR", "DomainsReply", "ParsedDomains", "ReleaseTable", "RowState", "RowVoice", "SiteResolveReply", "SiteResolveRequest", "TableFailed", "TableGetReply", "TableGetRequest",
            "SeriesReadProgress", "TableProgress", "TableReady", "TableRow", "TableState", "UnreadPart", "line_of", "place_of", "LINE_FIELDS",
            "RuleLine", "RuleResult", "RulesApplyReply", "RulesApplyRequest", "RulesProfileChanged",
            "SeriesKind", "SeriesSource", "SourceChanged", "SourceEvent", "SourceType",

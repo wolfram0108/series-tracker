@@ -5,7 +5,9 @@ import StGroup from "../StGroup.vue"
 import StInput from "../StInput.vue"
 import StBtn from "../StBtn.vue"
 import { api } from "../../api/client"
+import type { components } from "../../api/schema"
 import { useApi } from "../../composables/useApi"
+import { t } from "../../i18n"
 
 // Вкладка «Трекеры»: зеркала доменов по каждому трекеру (mirror-pill +
 // добавление/удаление). GET /api/trackers, PUT /api/trackers/{id} {mirrors}.
@@ -17,7 +19,14 @@ interface Tracker {
   saving: boolean
 }
 const trackers = ref<Tracker[]>([])
+// Every domain the service reads pages of now, as its registries of trackers and sites give it: for reference only.
+const readers = ref<components["schemas"]["ParsedDomains"][]>([])
 const { request } = useApi()
+
+async function loadDomains() {
+  const data = await request(api.GET("/api/sources/domains"))
+  if (data) readers.value = data.readers ?? []
+}
 
 async function load() {
   const data = (await request(api.GET("/api/trackers"))) as unknown
@@ -60,7 +69,10 @@ async function saveMirrors(t: Tracker) {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadDomains()
+})
 </script>
 
 <template>
@@ -92,10 +104,24 @@ onMounted(load)
         </StGroup>
       </div>
     </div>
+    <div v-if="readers.length" class="modern-fieldset parsed-domains">
+      <div class="fieldset-header"><i class="pi pi-globe"></i> {{ t("settings.trackers.domains.title") }}</div>
+      <div class="fieldset-content">
+        <div v-for="reader in readers" :key="`${reader.kind}:${reader.name}`" class="domains-row">
+          <span class="domains-name">{{ reader.name }}</span>
+          <span class="domains-kind">{{ t(`settings.trackers.domains.kind.${reader.kind === "tracker" ? "tracker" : "site"}`) }}</span>
+          <span v-for="domain in reader.domains ?? []" :key="domain" class="mirror-pill">{{ domain }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .fieldset-save { margin-left: auto; }
 .mirrors-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.domains-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; }
+.domains-row + .domains-row { border-top: 1px solid var(--border-color); }
+.domains-name { font-weight: 600; }
+.domains-kind { color: var(--text-muted); margin-right: 4px; }
 </style>

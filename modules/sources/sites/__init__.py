@@ -114,6 +114,9 @@ class SiteRegistry:
             raise ValueError(f"site {site.name!r} repeats a registered name or domain: {sorted(clash)}")
         self._sites.append(site)
 
+    def __iter__(self):
+        return iter(self._sites)
+
     def find(self, url: str) -> Site | None:
         return next((site for site in self._sites if on_domain(url, site.domains) and site.match_url(url)), None)
 

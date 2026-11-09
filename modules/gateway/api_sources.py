@@ -9,8 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from core import BusRequestError
-from core.contracts import (CompositionPreviewReply, CompositionPreviewRequest, SeriesSource, SiteResolveReply,
-                            SiteResolveRequest)
+from core.contracts import (CompositionPreviewReply, CompositionPreviewRequest, DomainsReply, SeriesSource,
+                            SiteResolveReply, SiteResolveRequest)
 
 from .routing import admitted, refusal
 from .schemas import (ChangedSource, CreatedSource, ErrorOnly, ErrorResponse, OkResponse, RulesTestRequest,
@@ -75,6 +75,14 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     async def preview_source(body: CompositionPreviewRequest):
         """What a window shows of an address before it is a source: the summary of its table and its lines."""
         return await _preview(body)
+
+    @r.get("/api/sources/domains", response_model=DomainsReply, responses=_ERR1)
+    async def parsed_domains():
+        """The domains the service reads pages of now: the trackers with their mirrors, the sites of the registry."""
+        try:
+            return await gw.request("sources.domains.list", {})
+        except BusRequestError as exc:
+            return refusal(exc, with_success=False)
 
     @r.post("/api/sources/resolve", response_model=SiteResolveReply, responses=_ERR1)
     async def resolve_source(body: SiteResolveRequest):

@@ -27,6 +27,9 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    last complete table still serves. False when no read of it goes.
   sources.site.resolve {url} → {site, canonical_url}: which site reads the address and the canonical
                                    form of it (no network); both null when no site does
+  sources.domains.list {} → DomainsReply {readers: [{name, kind: tracker | site, domains}]}: the domains the service
+                                   reads pages of now — every tracker with its domains and mirrors as the settings hold
+                                   them, every site of the registry with its own (no network)
   sources.video.stream {url, max_height?} → {handled, stream_url, headers, progressive} | {handled, error,
                                    transient}: the stream of a candidate link, asked for right before the download.
                                    The player that owns the link (a VK player link with its key, an AllVideo embed,
@@ -65,7 +68,7 @@ import httpx
 
 from core import BaseModule, ids
 from core import storage
-from core.contracts import SiteResolveRequest, TableGetRequest
+from core.contracts import DomainsReply, ParsedDomains, SiteResolveRequest, TableGetRequest
 from core.deadlines import TABLE_READ_S
 from core.db import Database
 from core.envelope import Envelope
@@ -139,6 +142,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.table.read", self.on_table_read)
         self.handle("sources.table.cancel", self.on_table_cancel)
         self.handle("sources.site.resolve", self.on_site_resolve)
+        self.handle("sources.domains.list", self.on_domains_list)
 
     async def on_start(self) -> None:
         self._http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
@@ -323,6 +327,12 @@ class SourcesModule(BaseModule):
     async def on_table_cancel(self, env: Envelope) -> dict:
         """The read of a page stopped by the user (a sync stopped): it ends failed, the last table serves."""
         return {"cancelled": await self.tables.cancel(str(env.payload["url"]))}
+
+    async def on_domains_list(self, env: Envelope) -> dict:
+        trackers = [ParsedDomains(name=each["display_name"], kind="tracker", domains=list(each.get("mirrors") or []))
+                    for each in await self.repo.all_trackers()]
+        sites = [ParsedDomains(name=site.name, kind="site", domains=list(site.domains)) for site in self.sites]
+        return DomainsReply(readers=trackers + sites).model_dump(mode="json")
 
     async def on_site_resolve(self, env: Envelope) -> dict:
         """payload: SiteResolveRequest; reply: SiteResolveReply. No network."""

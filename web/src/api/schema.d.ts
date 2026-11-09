@@ -425,6 +425,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sources/domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Parsed Domains
+         * @description The domains the service reads pages of now: the trackers with their mirrors, the sites of the registry.
+         */
+        get: operations["parsed_domains_api_sources_domains_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sources/resolve": {
         parameters: {
             query?: never;
@@ -2058,6 +2078,15 @@ export interface components {
             voice_group: string | null;
         };
         /**
+         * DomainsReply
+         * @description `sources.domains.list`: every reader of pages the service has now, trackers first, then the sites in the order of
+         *     their registry.
+         */
+        DomainsReply: {
+            /** Readers */
+            readers?: components["schemas"]["ParsedDomains"][];
+        };
+        /**
          * DynamicObject
          * @description Динамический ответ (форма зависит от данных/типа серии): главы,
          *     композиция, медиа-элементы, превью. extra='allow' пропускает всё —
@@ -2288,6 +2317,19 @@ export interface components {
         ParseUrlRequest: {
             /** Url */
             url: string;
+        };
+        /**
+         * ParsedDomains
+         * @description The domains a reader of pages takes addresses of: a tracker (its domain and mirrors, as the settings hold them) or
+         *     a site of the registry (its own domains).
+         */
+        ParsedDomains: {
+            /** Name */
+            name: string;
+            /** Kind */
+            kind: string;
+            /** Domains */
+            domains?: string[];
         };
         /**
          * ParsedUrl
@@ -4702,6 +4744,53 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
+                };
+            };
+        };
+    };
+    parsed_domains_api_sources_domains_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainsReply"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOnly"];
                 };
             };
             /** @description Internal Server Error */

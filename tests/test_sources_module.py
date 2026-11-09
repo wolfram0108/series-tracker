@@ -50,6 +50,24 @@ def test_a_module_given_no_sites_reads_the_builtin_ones_and_each_module_has_its_
     assert ruchime.players is channel.players is first.sites.find(DOLLS).players is first.players
 
 
+async def test_the_domains_read_now_are_every_tracker_with_its_mirrors_and_every_site_of_the_registry(stand):
+    sources, probe = stand
+    await sources.repo._db.execute(
+        "INSERT INTO trackers (id, canonical_name, display_name, mirrors, parser_class, auth_type, ui_features) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (3, "kinozal", "Kinozal.me", '["kinozal.me"]', "KinozalParser", "kinozal", "{}"))
+    await probe.request("sources.tracker.set_mirrors", {"tracker_id": 3, "mirrors": ["kinozal.me", "kinozal.new"]}, timeout=5)
+    readers = (await probe.request("sources.domains.list", {}, timeout=5))["readers"]
+
+    trackers = [each for each in readers if each["kind"] == "tracker"]
+    assert {each["name"]: each["domains"] for each in trackers}["Kinozal.me"] == ["kinozal.me", "kinozal.new"]
+    assert len(trackers) == len(await sources.repo.all_trackers())
+    # The sites follow the registry: a site registered is listed with no change here.
+    assert [(each["name"], each["domains"]) for each in readers if each["kind"] == "site"] == [
+        (site.name, list(site.domains)) for site in sources.sites]
+    assert ("maccms", ["jszyapi.com", "xinlangapi.com", "lziapi.com", "subocaiji.com"]) in [
+        (each["name"], each["domains"]) for each in readers]
+
+
 # --- the stream of a candidate ------------------------------------------------------------------------------------------------
 
 async def test_the_module_resolves_the_stream_of_a_link_a_player_owns_and_leaves_any_other_address(stand):
