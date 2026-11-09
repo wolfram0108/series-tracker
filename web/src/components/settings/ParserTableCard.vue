@@ -117,6 +117,7 @@ function setAction(value: string): void {
     <div v-if="isOpen" class="rule-body table-body">
       <PatternPalette class="table-palette" :blocks="target?.blocks ?? null" :context="target?.context ?? 'if'" @pick="pick" />
 
+      <div class="table-scroll">
       <table class="rule-table">
         <thead>
           <tr>
@@ -179,6 +180,7 @@ function setAction(value: string): void {
           </template>
         </draggable>
       </table>
+      </div>
     </div>
   </div>
 </template>
@@ -193,8 +195,11 @@ function setAction(value: string): void {
 .table-body { display: flex; flex-direction: column; gap: 0.625rem; }
 
 /* One grid with one frame: the columns line up through the whole table, a row is one line. */
+/* The table keeps its columns at any width: on a card narrower than the table can be, it scrolls in its own box, and
+   the window around it does not. */
+.table-scroll { overflow-x: auto; }
 .rule-table {
-  width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0;
+  width: 100%; min-width: 34rem; table-layout: fixed; border-collapse: separate; border-spacing: 0;
   border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;
 }
 .rule-table th, .rule-table td { padding: 0.5rem 0.625rem; text-align: left; vertical-align: middle; border-top: 1px solid #e9ecef; }

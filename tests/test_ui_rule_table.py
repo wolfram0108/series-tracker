@@ -58,6 +58,14 @@ async def test_a_table_filled_from_the_pages_by_a_template_names_the_voice_overs
                 ".map(([c, d]) => [c.x + c.width / 2 - d.x - d.width / 2, c.y + c.height / 2 - d.y - d.height / 2])"):
             assert all(abs(each) <= 1 for each in shift), (mark, shift)
     await ui.shot("t1-table-of-voice-overs")
+    # On a phone the table keeps its columns and scrolls in its own box: the window does not, the choice of the action
+    # stays whole (it once fell apart into a letter a line).
+    await page.set_viewport_size({"width": 390, "height": 900})
+    assert await page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth") <= 0
+    assert (await card.locator(".col-then .item-select").bounding_box())["height"] < 60
+    assert await card.locator(".table-scroll").evaluate("box => box.scrollWidth > box.clientWidth")
+    await ui.shot("t1-table-on-a-phone")
+    await page.set_viewport_size({"width": 1440, "height": 1000})
     # The table lets the rule of the episodes after it work; the switch saves it, as it does an ordinary rule.
     async with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/rules")) as saved, \
             page.expect_response(lambda r: r.request.method == "GET" and r.url.endswith("/rules")):
