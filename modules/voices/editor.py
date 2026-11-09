@@ -109,4 +109,5 @@ def view(settings: VoiceSettings) -> VoiceSettingsView:
         voice_groups={name: list(triggers) for name, triggers in settings.voice_groups.items()},
         default_priority=list(DEFAULT_PRIORITY),
         player_groups={name: list(triggers) for name, triggers in settings.player_groups.items()},
-        rejected=[_FIELD_OF_KEY[key] for key in settings.rejected if key in _FIELD_OF_KEY])
+        rejected=[_FIELD_OF_KEY[key] for key in settings.rejected if key in _FIELD_OF_KEY],
+        cut_max_height=settings.cut_max_height)

@@ -412,3 +412,17 @@ async def test_the_files_of_the_downloads_are_named_for_people(world):
     while not asked.queue.empty():
         names.add(os.path.basename((await asked.queue.get()).payload["path"]))
     assert names == {"Сериал s01e01 — видео vk 720p.mp4", "Сериал s01e01 — озвучка G1.mp4"}, names
+
+
+async def test_only_the_video_of_the_reference_is_downloaded_whole_the_rest_not_above_720p(world):
+    """The owner's rule (stage 10): everything but the reference is downloaded not above 720p — a voice-over gives only its
+    sound."""
+    neighbours, planner, _ = world
+    episode(neighbours, 1, 1)
+    asked = planner.bus.subscribe("downloads.fetch")
+    await sync(world)
+    caps = {}
+    while not asked.queue.empty():
+        job = (await asked.queue.get()).payload
+        caps["dub" if "озвучка" in job["path"] else "video"] = job.get("max_height")
+    assert caps == {"video": None, "dub": 720}, caps

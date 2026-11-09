@@ -36,7 +36,8 @@ def by_hand(rows, rule):
     if rule == "reference":
         return [r.row_key for _, r in sorted(indexed, key=lambda item: (
             -(item[1].height or 0), player(item[1].player), place.get(item[1].source_id, len(place)), item[0]))]
-    return [r.row_key for _, r in sorted(indexed, key=lambda item: (player(item[1].player), item[0]))]
+    # A voice-over: the resolution decides, the player after it (the owner's rule, stage 10), then the place of the row.
+    return [r.row_key for _, r in sorted(indexed, key=lambda item: (-(item[1].height or 0), player(item[1].player), item[0]))]
 
 
 def test_the_rule_of_the_reference_is_resolution_then_player_then_source_then_place():
@@ -46,7 +47,7 @@ def test_the_rule_of_the_reference_is_resolution_then_player_then_source_then_pl
         assert best(candidates, ORDER, REFERENCE_RANKING).row.row_key == by_hand(rows, "reference")[0]
 
 
-def test_the_rule_of_a_voice_over_is_player_then_place():
+def test_the_rule_of_a_voice_over_is_resolution_then_player_then_place():
     for rows in itertools.permutations(ROWS):
         candidates = [Candidate(each, place) for place, each in enumerate(rows)]
         assert keys(ranked(candidates, ORDER, VOICE_RANKING)) == by_hand(rows, "voice")
@@ -70,7 +71,7 @@ def test_a_variant_named_twice_keeps_its_first_place():
 
 def test_the_keys_are_one_list_each_criterion_named_once():
     assert REFERENCE_RANKING == (by_resolution, by_player, by_source)
-    assert VOICE_RANKING == (by_player,)
+    assert VOICE_RANKING == (by_resolution, by_player)
 
 
 def test_the_choice_of_the_reference_is_the_head_of_the_queue_in_every_order_of_the_rows():

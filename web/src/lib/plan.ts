@@ -45,7 +45,7 @@ const partOf = (slot: number[]): number | null => (slot.length > 2 ? slot[2] : n
  *  an error of the episode until the next sync makes it; no failure, it is tried again. `voice` names the voice-over of
  *  an alignment or of a download of a voice-over, `video` the work on the video. */
 function problemOf(view: PlannerView, slot: number[], match: { voice?: string; video?: boolean }) {
-  const VIDEO = ["download_video", "cut", "ref2", "compilation"]
+  const VIDEO = ["download_video", "cut", "download_compilation"]
   return (view.problems ?? []).find((each) => each.slot != null && each.slot.join(":") === slot.join(":")
     && (match.video ? VIDEO.includes(each.kind) : !VIDEO.includes(each.kind) && each.voice === match.voice)) ?? null
 }

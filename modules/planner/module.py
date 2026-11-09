@@ -110,6 +110,9 @@ def _failure_encoded(key: tuple) -> list:
     return [key[0], *(_row_key(each) for each in key[1:])]
 
 
+# Every download but the video of the reference is taken not above this height (the owner's rule, stage 10).
+OTHER_MAX_HEIGHT = 720
+
 class BusSync(SeriesSync):
     """The sync of one series with the service's workers (see the module)."""
 
@@ -216,22 +219,35 @@ class BusSync(SeriesSync):
         the queue of the alignment service and the log show it. A name another step of the sync took gets its key."""
         series = self.series.get("name_en") or self.series["name"]
         episode = label_of(op.slot) if op.slot else f"s{row.season:02d}e{row.start:02d}-e{row.end:02d}"
-        what = {"download_video": f"видео {row.player} {row.height}p", "download_dub": f"озвучка {row.group or row.label}",
-                "compilation": f"компиляция {row.player} {row.height}p",
-                "ref2": f"видео для вырезки {row.player} {row.height}p"}.get(op.kind, op.kind)
+        what = (f"видео для вырезки {row.player} {row.height}p" if op.id.startswith("ref2:") else
+                {"download_video": f"видео {row.player} {row.height}p", "download_dub": f"озвучка {row.group or row.label}",
+                 "download_compilation": f"компиляция {row.player} {row.height}p"}.get(op.kind, op.kind))
         name = sanitize_name(f"{series} {episode} — {what}")
         if self.download_names.setdefault(name, op.id) != op.id:
             name = f"{name} {key.split(':')[-1]}"
         return name + ".mp4"
+
+    async def _height_cap(self, op) -> int | None:
+        """The highest a download may be: the video of the reference is taken whole; everything else not above 720p (the
+        owner's rule, stage 10) — a voice-over only gives its sound, the single video a compilation is cut by only shows
+        where to cut; the compilation itself at the height of the setting `voices.cut_max_height` (none: the best)."""
+        if op.kind == "download_compilation":
+            height = int((await self.m.request("voices.settings.get", {})).get("cut_max_height") or 0)
+            return height or None
+        if op.kind == "download_dub" or op.id.startswith("ref2:"):
+            return OTHER_MAX_HEIGHT
+        return None
 
     async def _download(self, op):
         row = op.subject
         key = self._key(op.id)
         path = os.path.join(self.downloads_dir, self._download_name(op, row, key))
         await storage.call(os.makedirs, self.downloads_dir, exist_ok=True)
+        cap = await self._height_cap(op)
         finished = await self.m.fetch(key, {"key": key, "url": row.link, "path": path, "series_id": self.series["id"],
                                             "whole": op.kind == "download_video",
-                                            "ytdlp": row.id.source_id in self.vk_sources})
+                                            "ytdlp": row.id.source_id in self.vk_sources,
+                                            **({"max_height": cap} if cap else {})})
         if not finished.get("ok"):
             if finished.get("transient"):
                 self.m.log.warning("сериал %d: загрузка %s не удалась, повторится при следующей синхронизации: %s",

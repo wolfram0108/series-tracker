@@ -164,6 +164,8 @@ class VoiceSettingsView(VoiceSettingsDraft):
     rejected: list[str]
     # Players the user put into one group take one place in the order; no screen edits them yet.
     player_groups: dict[str, list[str]] = Field(default_factory=dict)
+    # The height the file of a compilation is downloaded at for its cuts (0: the best it has).
+    cut_max_height: int = 0
 
 
 class VoiceSettingsSaved(BaseModel):

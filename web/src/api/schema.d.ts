@@ -3213,6 +3213,11 @@ export interface components {
             player_groups?: {
                 [key: string]: string[];
             };
+            /**
+             * Cut Max Height
+             * @default 0
+             */
+            cut_max_height: number;
         };
         /**
          * VoiceSpan

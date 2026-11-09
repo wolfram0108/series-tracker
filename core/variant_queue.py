@@ -4,9 +4,10 @@ One rule for every reader — the choice of the reference (scan), the plan of vo
 the queues — so that the queue a window shows is the one the core takes. Pure functions over rows of the layout.
 
 The reference: the best resolution, then the place of the player in the order of players of the settings, then the place
-of the source in the series, then the place of the row in the layout. A voice-over: the place of the player, then the
-place of the row in the layout (the layout lists the rows source by source, so the place of a row holds the order of the
-sources). The user's own queue goes first: the variants it names, in its order, then the others by the rule.
+of the source in the series, then the place of the row in the layout. A voice-over: the best resolution, then the place of
+the player, then the place of the row in the layout (the layout lists the rows source by source, so the place of a row
+holds the order of the sources) — the owner's rule (stage 10): the resolution decides, the player after it. The user's own
+queue goes first: the variants it names, in its order, then the others by the rule.
 """
 from __future__ import annotations
 
@@ -58,7 +59,7 @@ def by_source(candidate: Candidate, order: Order) -> int:
 
 # The criteria, the strongest first; a new criterion is one more entry of a list.
 REFERENCE_RANKING: tuple[RankKey, ...] = (by_resolution, by_player, by_source)
-VOICE_RANKING: tuple[RankKey, ...] = (by_player,)
+VOICE_RANKING: tuple[RankKey, ...] = (by_resolution, by_player)
 
 
 def ranked(candidates: Iterable[Candidate], order: Order, ranking: Sequence[RankKey],
