@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import subprocess
+import zlib
 import threading
 from dataclasses import replace
 from functools import partial
@@ -70,13 +71,21 @@ class Codec:
     def tone(k: int) -> int:
         return 200 + 37 * k
 
+    @staticmethod
+    def mark(path: str) -> int:
+        """A quiet tone of the file itself, under the tone of its truth: two files are two recordings, as two voice-overs
+        of one episode are in life, and the loud tone still tells the truth."""
+        return 3000 + zlib.crc32(os.path.basename(path).encode()) % 3000
+
     def make(self, path: str, truths: list[int]) -> None:
-        """A file of one second per truth: its colour and its tone."""
+        """A file of one second per truth: its colour and its tone, and the quiet tone of the file."""
         inputs, links = [], ""
+        mark = self.mark(path)
         for number, truth in enumerate(truths):
             r, g, b = self.colour(self.k(truth))
+            sound = f"0.125*sin(2*PI*{self.tone(self.k(truth))}*t)+0.01*sin(2*PI*{mark}*t)"
             inputs += ["-f", "lavfi", "-i", f"color=c=0x{r:02x}{g:02x}{b:02x}:s=32x18:d=1:r=4",
-                       "-f", "lavfi", "-i", f"sine=frequency={self.tone(self.k(truth))}:sample_rate={RATE}:duration=1"]
+                       "-f", "lavfi", "-i", f"aevalsrc={sound}:s={RATE}:d=1"]
             links += f"[{2 * number}:v][{2 * number + 1}:a]"
         _run(*inputs, "-filter_complex", f"{links}concat=n={len(truths)}:v=1:a=1[v][a]", "-map", "[v]", "-map", "[a]",
              "-c:v", "mpeg4", "-q:v", "2", "-c:a", "aac", "-b:a", "96k", path)
