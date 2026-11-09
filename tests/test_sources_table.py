@@ -53,6 +53,7 @@ class FakeSite:
         self.source_type = "web_video"
         self.reads: list[str] = []
         self.fresh: list[bool] = []  # whether each read was one the user asked for
+        self.last: list[list[str]] = []  # the texts of the rows of the last complete table each read was given
         self.entered: asyncio.Queue[str] = asyncio.Queue()
         self.go = asyncio.Event()
         self.go.set()
@@ -71,6 +72,7 @@ class FakeSite:
     async def read(self, url: str, ctx: ReadContext) -> TableDraft:
         self.reads.append(url)
         self.fresh.append(ctx.fresh)
+        self.last.append([each.text for each in ctx.last_rows])
         self.entered.put_nowait(url)
         for step in self.steps:
             ctx.progress(*step)
@@ -300,6 +302,21 @@ async def test_the_command_to_read_reads_a_page_whose_table_is_still_good_and_ta
     assert len(system.site.reads) == 2
     # The read the term began may take what an earlier read left for sharing; the one the user asked for may not.
     assert system.site.fresh == [False, True]
+
+
+async def test_a_read_is_given_the_rows_of_the_last_complete_table_of_its_page_and_a_failed_read_leaves_them(system):
+    """What a player measured of a link that names its video for good is taken from the last table, not asked again."""
+    await system.warm()
+    system.site.failure = SiteError(reason("site_unreachable", site="fake", error="x"))
+    system.probe.send_command("sources.table.read", {"url": PAGE})
+    await entry(system.site)
+    await system.next(system.failed)
+    system.site.failure = None
+    system.probe.send_command("sources.table.read", {"url": PAGE})
+    await entry(system.site)
+    await system.next(system.ready)
+
+    assert system.site.last == [[], ["Серия 1 (чтение 1)", "Серия 2 (чтение 1)"], ["Серия 1 (чтение 1)", "Серия 2 (чтение 1)"]]
 
 
 # --- a failed read keeps the previous table (M-4, S-10, I-13) ---------------------------------------------------------

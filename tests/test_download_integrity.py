@@ -181,7 +181,7 @@ async def test_a_file_whose_packets_carry_side_data_is_looked_at_and_a_file_with
 
     def answer(text):
         """ffprobe as it answers: the streams of the file (one video) when asked for them, the packets otherwise."""
-        async def run(cmd, timeout):
+        async def run(cmd, timeout, data=None):
             if ffprobe.STREAM_ENTRIES in cmd:
                 return 0, json.dumps({"streams": [{"index": 0, "codec_type": "video", "disposition": {}}]}).encode(), b""
             return 0, text.encode(), b""

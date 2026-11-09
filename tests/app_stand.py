@@ -5,6 +5,9 @@ database made by the migrations; what is outside the service is a model.
   episode with the button of its player) and the AllVideo player, served to the real parser and the real player over the
   in-process web of `sources` (tests/sources_support.Web). The file the player names lies on a host on real HTTP (`Host`):
   a small file made by ffmpeg whose picture and sound are the episode it truly is (`Codec`).
+- A MacCMS collection site of the form of Jisu (`Title`): the record of a title in its API, and the HLS of every episode
+  on the host, encrypted with AES-128, its frame the height it is given; the player reads the head of a segment through the
+  in-process web, the downloader the whole playlist over real HTTP.
 - The alignment service is the model on the protocol of the real one (tests/plan_disk.Daemon) on real HTTP, with the
   stream of its events: the real `conform` module connects to it by the address of its settings, as on the server.
 - The user is the HTTP API of the gateway: the voice-over groups, the profile of rules, the series and its sources, the
@@ -30,7 +33,7 @@ from assembly import Options, assemble
 from core import Bus, Envelope, Runner
 from core import container as mkv
 from core.db import Database
-from plan_disk import Codec, Daemon, Host
+from plan_disk import Codec, Daemon, Host, _run
 from plan_world import truth_of
 from schema_db import migrated
 from sources_support import Web
@@ -150,6 +153,21 @@ class Release:
         return f"https://1.ruchime.org/release/{self.slug}"
 
 
+@dataclass
+class Title:
+    """A title of a MacCMS collection site (Jisu): its HLS list, an episode by number → what it truly is."""
+
+    number: int
+    episodes: dict[int, int] = field(default_factory=dict)
+
+    @property
+    def url(self) -> str:
+        return f"https://jszyapi.com/index.php/vod/detail/id/{self.number}.html"
+
+
+HLS_KEY = bytes(range(16))
+
+
 class Site:
     """The site and the player as the real parser and the real player read them; the files on the host."""
 
@@ -159,6 +177,60 @@ class Site:
         self.host = host
         self.releases: dict[str, Release] = {}
         self.ids: dict[tuple[str, int], int] = {}
+        self.titles: dict[int, Title] = {}
+        self.heads: list[str] = []  # the heads of segments the player asked for: what measuring a frame cost
+
+    def title(self, number: int) -> Title:
+        return self.titles.setdefault(number, Title(number))
+
+    def hls_episode(self, number: int, episode: int, *, height: int = 1080) -> None:
+        """An episode of a title: its video in a picture of this height, cut into encrypted segments on the host."""
+        truth = truth_of(1, episode)
+        self.titles[number].episodes[episode] = truth
+        folder = os.path.join(self.root, self._hls_folder(number, episode))
+        if os.path.exists(os.path.join(folder, "index.m3u8")):
+            return
+        os.makedirs(folder)
+        source = os.path.join(folder, "source.mp4")
+        self.codec.make(source, [truth])
+        with open(os.path.join(folder, "enc.key"), "wb") as key:
+            key.write(HLS_KEY)
+        info = os.path.join(folder, "key.info")
+        with open(info, "w") as written:
+            written.write(f"enc.key\n{os.path.join(folder, 'enc.key')}\n")
+        # H.264, as the sites give it: its parameters ride in every segment, which the player reads the frame from.
+        _run("-i", source, "-vf", f"scale={height * 16 // 9 // 2 * 2}:{height}", "-c:v", "libx264", "-preset", "ultrafast",
+             "-c:a", "copy",
+             "-f", "hls", "-hls_time", "1", "-hls_playlist_type", "vod", "-hls_key_info_file", info,
+             "-hls_segment_filename", os.path.join(folder, "seg%d.ts"), os.path.join(folder, "index.m3u8"))
+        os.remove(source)
+
+    @staticmethod
+    def _hls_folder(number: int, episode: int) -> str:
+        return f"jisu-{number}-ep{episode}"
+
+    def _title_record(self, title: Title) -> str:
+        items = [(f"第{episode}集", episode) for episode in sorted(title.episodes)]
+        lists = {"jsyun": "#".join(f"{label}$https://vv.jisuzyv.com/play/{title.number}-{episode}" for label, episode in items),
+                 "jsm3u8": "#".join(f"{label}${self.host.url(self._hls_folder(title.number, episode) + '/index.m3u8')}"
+                                    for label, episode in items)}
+        return json.dumps({"code": 1, "msg": "数据列表", "list": [{
+            "vod_id": title.number, "vod_name": f"师兄{title.number}", "vod_play_from": "$$$".join(lists),
+            "vod_play_url": "$$$".join(lists.values())}]}, ensure_ascii=False)
+
+    def _host_file(self, request: httpx.Request) -> httpx.Response:
+        """A file of the host as the in-process web gives it to the player: the part a range asks for, or all of it."""
+        name = request.url.path.lstrip("/")
+        path = os.path.join(self.root, name)
+        if name in self.host.missing or not os.path.isfile(path):
+            return httpx.Response(404)
+        with open(path, "rb") as file:
+            body = file.read()
+        asked = request.headers.get("Range", "")
+        if asked.startswith("bytes=0-"):
+            self.heads.append(name)
+            return httpx.Response(206, content=body[: int(asked.removeprefix("bytes=0-")) + 1])
+        return httpx.Response(200, content=body)
 
     def release(self, slug: str, voice: str) -> Release:
         return self.releases.setdefault(slug, Release(slug, voice))
@@ -255,6 +327,11 @@ const ALL_EPS = {json.dumps(entries, ensure_ascii=False)};
     def web(self) -> Web:
         def answer(request: httpx.Request):
             path = request.url.path.strip("/")
+            if request.url.host == "127.0.0.1":
+                return self._host_file(request)
+            if request.url.host == "jszyapi.com" and path == "api.php/provide/vod":
+                title = self.titles.get(int(request.url.params.get("ids") or 0))
+                return (200, self._title_record(title)) if title is not None else (200, json.dumps({"code": 1, "list": []}))
             if request.url.host == "fsst.online" and path.startswith("embed/"):
                 text = self._embed(int(path.split("/")[1]))
                 return (200, text) if text else (404, "")

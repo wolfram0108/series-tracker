@@ -72,7 +72,8 @@ A_PAGE_OF = {"ruchime": "https://1.ruchime.org/release/x/episode-3?off=vk#top",
              "vk_channel": "https://vk.com/@chan/videos|запрос",
              "animesss": "https://animesss.com/aniserials/video/action/1171-x.html?a=1#top",
              "pvashow": "https://anime.pvashow.com/4-boevoj-master.html?a=1",
-             "yummyani": "https://ru.yummyani.me/catalog/item/lyubov-pod-gipnozom/?a=1"}
+             "yummyani": "https://ru.yummyani.me/catalog/item/lyubov-pod-gipnozom/?a=1",
+             "maccms": "https://jszyapi.com/index.php/vod/detail/id/4794.html?ac=detail"}
 
 
 def test_every_registered_site_declares_what_the_contract_asks():

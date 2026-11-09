@@ -15,6 +15,7 @@ from .animakima import AnimakimaPlayer
 from .cdnvideohub import CdnVideoHubPlayer, Measure
 from .contract import Player
 from .kodik import KodikPlayer
+from .maccms import MaccmsPlayer
 from .vibix import VibixPlayer
 from .vk import VkPlayer
 
@@ -34,10 +35,10 @@ class PlayerRegistry:
     def standard(cls, browser_getter: Callable | None = None, key_path: str | Path | None = None,
                  manifest_dir: str | Path | None = None, measure: Measure | None = None) -> "PlayerRegistry":
         """All the players: VK, AllVideo, Vibix (which needs the browser pool and the cache paths), CDN VideoHub (which
-        measures the frame height of a stream the labels do not state), Kodik, the own player of animakima.ru and Alloha
-        (which is opened in the browser pool)."""
+        measures the frame height of a stream the labels do not state), Kodik, the own player of animakima.ru, Alloha
+        (which is opened in the browser pool) and the HLS of the MacCMS sites."""
         return cls([VkPlayer(), AllVideoPlayer(), VibixPlayer(browser_getter, key_path, manifest_dir),
-                    CdnVideoHubPlayer(measure), KodikPlayer(), AnimakimaPlayer(), AllohaPlayer(browser_getter)])
+                    CdnVideoHubPlayer(measure), KodikPlayer(), AnimakimaPlayer(), AllohaPlayer(browser_getter), MaccmsPlayer()])
 
     def register(self, player: Player) -> None:
         if player.name in self._players:

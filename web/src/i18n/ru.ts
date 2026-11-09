@@ -105,6 +105,7 @@ export const ru = {
   "reason.site_unreachable": "{site} недоступен: {error}",
   "reason.site_status": "{site}: страница вернула {status}: {url}",
   "reason.site_refused": "{site} отказал: {message}",
+  "reason.title_absent": "{site}: тайтла нет по адресу {url}",
   "reason.page_no_player": "на странице нет плеера {player}",
   "reason.season_clash": "в плеере {player} несколько сезонов с одинаковыми номерами серий ({episodes}): сезоны не различаются",
   "reason.title_no_videos": "у тайтла нет видео {player}",

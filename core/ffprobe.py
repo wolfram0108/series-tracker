@@ -44,15 +44,16 @@ def film_stream(streams: list[dict]) -> dict | None:
 
 
 async def streams_of(target: str, *, input_args: list[str] | None = None,
-                     timeout: float = DEFAULT_TIMEOUT_S) -> list[dict] | None:
+                     timeout: float = DEFAULT_TIMEOUT_S, data: bytes | None = None) -> list[dict] | None:
     """The streams of a file or a stream, with their kinds, heights and dispositions; None when they cannot be read.
-    `input_args` go before the target (the headers of a stream)."""
+    `input_args` go before the target (the headers of a stream); `data` is what target `pipe:0` reads (the head of a
+    stream fetched by the caller)."""
     executable = program("ffprobe")
     if not executable:
         return None
     try:
         code, out, _ = await run_capture([executable, "-v", "error", *(input_args or []), "-show_entries", STREAM_ENTRIES,
-                                          "-of", "json", target], timeout=timeout)
+                                          "-of", "json", target], timeout=timeout, data=data)
         # A lost status says nothing: the whole answer read to its end is judged (an empty one is no answer).
         if code == LOST and not out.strip():
             return None

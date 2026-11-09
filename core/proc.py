@@ -120,12 +120,25 @@ async def stop(proc: asyncio.subprocess.Process) -> int:
     return await exited(proc)
 
 
-async def run_capture(cmd: list[str], *, timeout: float) -> tuple[int, bytes, bytes]:
-    """(return code, stdout, stderr) of a finished program; raises TimeoutError at the deadline."""
-    proc = await spawn(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+async def run_capture(cmd: list[str], *, timeout: float, data: bytes | None = None) -> tuple[int, bytes, bytes]:
+    """(return code, stdout, stderr) of a finished program; raises TimeoutError at the deadline. `data` is given to it
+    as its standard input."""
+    proc = await spawn(*cmd, stdin=asyncio.subprocess.PIPE if data is not None else None,
+                       stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+
+    async def feed() -> None:
+        if data is None:
+            return
+        # A program may stop reading once it has what it needs (ffprobe with the head of a stream): that is no failure.
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+            proc.stdin.write(data)
+            await proc.stdin.drain()
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+            proc.stdin.close()
+
     try:
-        out, err, code = await asyncio.wait_for(
-            asyncio.gather(proc.stdout.read(), proc.stderr.read(), exited(proc)), timeout)
+        _, out, err, code = await asyncio.wait_for(
+            asyncio.gather(feed(), proc.stdout.read(), proc.stderr.read(), exited(proc)), timeout)
     except BaseException:
         await _reap(proc)
         raise

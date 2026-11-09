@@ -209,7 +209,9 @@ class TableReader:
             self._publish(PROGRESS_TOPIC, TableProgress(url=key, phase=phase, current=current, total=total,
                                                         rate=pace.rate(phase, current)).model_dump(mode="json"))
 
-        context = ReadContext(http=self._http(), progress=progress, recent=self._recent, fresh=fresh)
+        stored = (await self._repo.stored(key)).table
+        context = ReadContext(http=self._http(), progress=progress, recent=self._recent, fresh=fresh,
+                              last_rows=tuple(stored.rows) if stored is not None else ())
         limit = asyncio.timeout(self._safeguard_s)
         try:
             async with limit:

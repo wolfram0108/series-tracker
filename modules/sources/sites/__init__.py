@@ -46,6 +46,9 @@ class ReadContext:
     recent: int | None = None
     # The user asked for this read now: raw data that an earlier read of another page left for sharing is not taken.
     fresh: bool = False
+    # The rows of the last complete table of the page: what a player said of a link that names its video for good (the
+    # frame of a playlist) is taken from here instead of being asked again.
+    last_rows: tuple[TableRow, ...] = ()
 
 
 class TableDraft(BaseModel):

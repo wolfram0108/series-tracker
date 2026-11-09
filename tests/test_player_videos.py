@@ -4,6 +4,7 @@ from modules.sources.players.allvideo import AllVideoPlayer
 from modules.sources.players.animakima import AnimakimaPlayer
 from modules.sources.players.cdnvideohub import CdnVideoHubPlayer
 from modules.sources.players.kodik import KodikPlayer
+from modules.sources.players.maccms import MaccmsPlayer
 from modules.sources.players.registry import PlayerRegistry
 from modules.sources.players.vibix import VibixPlayer
 from modules.sources.players.vk import VkPlayer
@@ -20,6 +21,9 @@ def test_a_video_is_the_same_whatever_page_shows_it():
         (VkPlayer, "https://vk.com/video-170515668_456255738",
          "https://vkvideo.ru/video_ext.php?oid=-170515668&id=456255738&hash=abc", "-170515668_456255738"),
         (AllVideoPlayer, "https://fsst.online/embed/1025515/", "https://incvideo1.online/embed/1025515", "1025515"),
+        (MaccmsPlayer, "https://jszyapi.com/api.php/provide/vod/?ac=detail&ids=1#maccms=https%3A%2F%2Fvv.test%2Fp%2Fi.m3u8",
+         "https://api.xinlangapi.com/xinlangapi.php/provide/vod/?ac=detail&ids=9#maccms=https%3A%2F%2Fvv.test%2Fp%2Fi.m3u8",
+         "https://vv.test/p/i.m3u8"),
     ]:
         assert player.video_of(one) == player.video_of(other) == video, player
 
