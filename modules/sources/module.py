@@ -27,9 +27,10 @@ Tables of site pages (the one way to read a site page; sites are registered in `
                                    last complete table still serves. False when no read of it goes.
   sources.site.resolve {url} → {site, canonical_url}: which site reads the address and the canonical
                                    form of it (no network); both null when no site does
-  sources.domains.list {} → DomainsReply {readers: [{name, kind: tracker | site, domains}]}: the domains the service
-                                   reads pages of now — every tracker with its domains and mirrors as the settings hold
-                                   them, every site of the registry with its own (no network)
+  sources.settings.get {} → SourcesSettingsView {trackers: [{id, display_name, mirrors}], readers: [{name, kind:
+                                   tracker | site, domains}]}: the settings screen of the sources whole — the mirrors of
+                                   each tracker, and the domains the service reads pages of now: every tracker with its
+                                   domains and mirrors, every site of the registry with its own (no network)
   sources.video.stream {url, max_height?} → {handled, stream_url, headers, progressive} | {handled, error,
                                    transient}: the stream of a candidate link, asked for right before the download.
                                    The player that owns the link (a VK player link with its key, an AllVideo embed,
@@ -38,6 +39,8 @@ Tables of site pages (the one way to read a site page; sites are registered in `
 Events (owner: sources):
   sources.table.progress {url, phase, current, total}   how far a read is
   sources.table.ready {url, read_at}                    a complete table is stored and served
+  sources.settings.changed SourcesSettingsView          the mirrors of a tracker were saved: every open settings
+                                                        screen shows them without asking back
   sources.table.failed {url, reason}                    the read failed; the last complete table still serves
 A failed read is not retried by itself and a consumer does not ask again on `failed`: the next request after a
 failure begins a new read. Only a complete table is ever published. A stop in the middle of a read is no verdict:
@@ -68,7 +71,7 @@ import httpx
 
 from core import BaseModule, ids
 from core import storage
-from core.contracts import DomainsReply, ParsedDomains, SiteResolveRequest, TableGetRequest
+from core.contracts import ParsedDomains, SiteResolveRequest, SourcesSettingsView, TableGetRequest, TrackerMirrors
 from core.deadlines import TABLE_READ_S
 from core.db import Database
 from core.envelope import Envelope
@@ -142,7 +145,7 @@ class SourcesModule(BaseModule):
         self.handle("sources.table.read", self.on_table_read)
         self.handle("sources.table.cancel", self.on_table_cancel)
         self.handle("sources.site.resolve", self.on_site_resolve)
-        self.handle("sources.domains.list", self.on_domains_list)
+        self.handle("sources.settings.get", self.on_settings_get)
 
     async def on_start(self) -> None:
         self._http = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
@@ -186,6 +189,7 @@ class SourcesModule(BaseModule):
         """Зеркала трекера (вкладка настроек, Р-22)."""
         await self.repo.set_mirrors(env.payload["tracker_id"],
                                     env.payload["mirrors"])
+        self.publish_event("sources.settings.changed", await self._settings())
         return {"ok": True}
 
     async def on_torrent_file_drop(self, env: Envelope) -> None:
@@ -328,11 +332,16 @@ class SourcesModule(BaseModule):
         """The read of a page stopped by the user (a sync stopped): it ends failed, the last table serves."""
         return {"cancelled": await self.tables.cancel(str(env.payload["url"]))}
 
-    async def on_domains_list(self, env: Envelope) -> dict:
-        trackers = [ParsedDomains(name=each["display_name"], kind="tracker", domains=list(each.get("mirrors") or []))
-                    for each in await self.repo.all_trackers()]
-        sites = [ParsedDomains(name=site.name, kind="site", domains=list(site.domains)) for site in self.sites]
-        return DomainsReply(readers=trackers + sites).model_dump(mode="json")
+    async def on_settings_get(self, env: Envelope) -> dict:
+        return await self._settings()
+
+    async def _settings(self) -> dict:
+        stored = await self.repo.all_trackers()
+        trackers = [TrackerMirrors(id=each["id"], display_name=each["display_name"], mirrors=list(each.get("mirrors") or []))
+                    for each in stored]
+        readers = [ParsedDomains(name=each.display_name, kind="tracker", domains=each.mirrors) for each in trackers]
+        readers += [ParsedDomains(name=site.name, kind="site", domains=list(site.domains)) for site in self.sites]
+        return SourcesSettingsView(trackers=trackers, readers=readers).model_dump(mode="json")
 
     async def on_site_resolve(self, env: Envelope) -> dict:
         """payload: SiteResolveRequest; reply: SiteResolveReply. No network."""

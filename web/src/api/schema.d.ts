@@ -425,7 +425,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/sources/domains": {
+    "/api/sources/settings": {
         parameters: {
             query?: never;
             header?: never;
@@ -433,10 +433,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Parsed Domains
-         * @description The domains the service reads pages of now: the trackers with their mirrors, the sites of the registry.
+         * Sources Settings
+         * @description The settings screen of the sources: the mirrors of each tracker, and the domains the service reads pages of
+         *     now — the trackers with their mirrors, the sites of the registry.
          */
-        get: operations["parsed_domains_api_sources_domains_get"];
+        get: operations["sources_settings_api_sources_settings_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2078,15 +2079,6 @@ export interface components {
             voice_group: string | null;
         };
         /**
-         * DomainsReply
-         * @description `sources.domains.list`: every reader of pages the service has now, trackers first, then the sites in the order of
-         *     their registry.
-         */
-        DomainsReply: {
-            /** Readers */
-            readers?: components["schemas"]["ParsedDomains"][];
-        };
-        /**
          * DynamicObject
          * @description Динамический ответ (форма зависит от данных/типа серии): главы,
          *     композиция, медиа-элементы, превью. extra='allow' пропускает всё —
@@ -3238,6 +3230,18 @@ export interface components {
          */
         SourceType: "torrent" | "vk_video" | "web_video";
         /**
+         * SourcesSettingsView
+         * @description `sources.settings.get` and the event `sources.settings.changed`: the settings screen of the sources whole — the
+         *     trackers with their mirrors, and every reader of pages the service has now (trackers first, then the sites in the
+         *     order of their registry).
+         */
+        SourcesSettingsView: {
+            /** Trackers */
+            trackers?: components["schemas"]["TrackerMirrors"][];
+            /** Readers */
+            readers?: components["schemas"]["ParsedDomains"][];
+        };
+        /**
          * SyncCancelled
          * @description Синхронизация сериала остановлена: всё, что она делала, прервано, ничего не применено; false — она не шла.
          */
@@ -3279,6 +3283,18 @@ export interface components {
          */
         TmdbInfo: {
             [key: string]: unknown;
+        };
+        /**
+         * TrackerMirrors
+         * @description A tracker as the settings of the sources show it: the domain and the mirrors its pages are read on.
+         */
+        TrackerMirrors: {
+            /** Id */
+            id: number;
+            /** Display Name */
+            display_name: string;
+            /** Mirrors */
+            mirrors?: string[];
         };
         /**
          * UnreadPart
@@ -3528,7 +3544,7 @@ export interface components {
         /** StreamEvent */
         StreamEvent: {
             /** @enum {string} */
-            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_scan_progress" | "conform_queue_update" | "plan_update" | "voice_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
+            event: "series_updated" | "series_added" | "series_deleted" | "agent_queue_update" | "torrent_progress_update" | "preview_naming_ready" | "preview_naming_failed" | "download_queue_update" | "slicing_queue_update" | "scanner_status_update" | "series_sources_changed" | "sources_table_progress" | "sources_table_ready" | "sources_table_failed" | "composition_changed" | "composition_failed" | "series_scan_progress" | "conform_queue_update" | "plan_update" | "voice_settings_update" | "sources_settings_update" | "conform_settings_update" | "renaming_complete" | "relocation_started" | "relocation_finished";
             data: unknown;
         };
     };
@@ -4766,7 +4782,7 @@ export interface operations {
             };
         };
     };
-    parsed_domains_api_sources_domains_get: {
+    sources_settings_api_sources_settings_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -4781,7 +4797,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DomainsReply"];
+                    "application/json": components["schemas"]["SourcesSettingsView"];
                 };
             };
             /** @description Bad Request */

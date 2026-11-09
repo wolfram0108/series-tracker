@@ -47,35 +47,12 @@ const emit = defineEmits<{
   move: [dir: -1 | 1]
 }>()
 
-const CONDITION_TYPES = [
-  { label: "Содержит", value: "contains" },
-  { label: "Не содержит", value: "not_contains" },
-]
-const ACTION_TYPES = [
-  { value: "exclude", label: "Исключить видео" },
-  { value: "extract_single", label: "Извлечь номер серии" },
-  { value: "extract_range", label: "Извлечь диапазон серий" },
-  { value: "extract_season", label: "Установить номер сезона" },
-  { value: "assign_voiceover", label: "Назначить озвучку/тег" },
-  { value: "assign_episode", label: "Назначить номер серии" },
-  { value: "assign_season", label: "Назначить номер сезона" },
-  { value: "assign_part", label: "Назначить часть серии" },
-  { value: "assign_quality", label: "Назначить качество" },
-  { value: "assign_resolution", label: "Назначить разрешение" },
-  { value: "assign_range", label: t("rules.action.assign_range") },
-]
+const CONDITION_TYPES = (["contains", "not_contains"] as const).map((value) => ({ label: t(`rules.condition.${value}`), value }))
 const EXTRACT_TYPES = ["extract_single", "extract_range", "extract_season"]
 const ASSIGN_TYPES = ["assign_voiceover", "assign_episode", "assign_season", "assign_part", "assign_quality", "assign_resolution", "assign_range"]
-
-const ASSIGN_LABELS: Record<string, string> = {
-  assign_voiceover: "Назначить озвучку/тег",
-  assign_episode: "Назначить номер серии",
-  assign_season: "Назначить номер сезона",
-  assign_part: "Назначить часть серии",
-  assign_quality: "Назначить качество",
-  assign_resolution: "Назначить разрешение",
-  assign_range: t("rules.action.assign_range"),
-}
+const ACTION_TYPES = (["exclude", ...EXTRACT_TYPES, ...ASSIGN_TYPES] as ActionType[]).map((value) => ({ value, label: t(`rules.action.${value}`) }))
+type ActionType = "exclude" | "extract_single" | "extract_range" | "extract_season" | "assign_voiceover" | "assign_episode"
+  | "assign_season" | "assign_part" | "assign_quality" | "assign_resolution" | "assign_range"
 
 const toggleIcon = computed(() => (props.isOpen ? "pi-chevron-down" : "pi-chevron-right"))
 
@@ -108,7 +85,7 @@ function onActionTypeChange(action: Action, value: string): void {
   }
 }
 function getAssignActionLabel(actionType: string): string {
-  return ASSIGN_LABELS[actionType] || "Значение"
+  return ASSIGN_TYPES.includes(actionType) ? t(`rules.action.${actionType as ActionType}`) : t("rules.action.value")
 }
 </script>
 
@@ -117,30 +94,30 @@ function getAssignActionLabel(actionType: string): string {
     <div class="rule-header">
       <div class="rule-title" @click="emit('toggle')">
         <i class="pi rule-toggle-icon" :class="toggleIcon" />
-        <input v-model="rule.name" type="text" class="rule-name-input" placeholder="Имя правила..." @click.stop />
+        <input v-model="rule.name" type="text" class="rule-name-input" :placeholder="t('rules.rule.namePlaceholder')" @click.stop />
         <span
           v-if="rule.valid === false"
           class="rule-invalid-badge"
-          :title="rule.error || 'Правило отключено'"
-        >правило отключено</span>
+          :title="rule.error || t('rules.rule.disabled.title')"
+        >{{ t("rules.rule.disabled.label") }}</span>
       </div>
       <div class="rule-controls">
-        <button class="control-btn" :disabled="index === 0" title="Поднять приоритет" @click="emit('move', -1)">
+        <button class="control-btn" :disabled="index === 0" :title="t('rules.rule.up')" @click="emit('move', -1)">
           <i class="pi pi-arrow-up" />
         </button>
-        <button class="control-btn" :disabled="index === total - 1" title="Понизить приоритет" @click="emit('move', 1)">
+        <button class="control-btn" :disabled="index === total - 1" :title="t('rules.rule.down')" @click="emit('move', 1)">
           <i class="pi pi-arrow-down" />
         </button>
         <ToggleSwitch
           v-model="rule.continue_after_match"
           class="mx-2"
-          title="Разрешить обработку следующими правилами после этого"
+          :title="t('rules.rule.continue')"
           @change="emit('save')"
         />
-        <button class="control-btn text-success" title="Сохранить правило" @click="emit('save')">
+        <button class="control-btn text-success" :title="t('rules.rule.save')" @click="emit('save')">
           <i class="pi pi-save" />
         </button>
-        <button class="control-btn text-danger" title="Удалить правило" @click="emit('delete')">
+        <button class="control-btn text-danger" :title="t('rules.rule.delete')" @click="emit('delete')">
           <i class="pi pi-trash" />
         </button>
       </div>
@@ -152,7 +129,7 @@ function getAssignActionLabel(actionType: string): string {
         <template v-for="(cond, c_index) in rule.conditions" :key="c_index">
           <div class="condition-group">
             <StGroup>
-              <div class="constructor-item item-label label-if">ЕСЛИ</div>
+              <div class="constructor-item item-label label-if">{{ t("rules.label.if") }}</div>
               <StSelect
                 :model-value="cond.condition_type"
                 :options="CONDITION_TYPES"
@@ -161,7 +138,7 @@ function getAssignActionLabel(actionType: string): string {
               <div class="constructor-item item-button-group">
                 <button
                   class="btn-icon btn-delete"
-                  title="Удалить условие"
+                  :title="t('rules.condition.remove')"
                   :disabled="rule.conditions.length <= 1"
                   @click="removeCondition(c_index)"
                 >
@@ -175,7 +152,7 @@ function getAssignActionLabel(actionType: string): string {
                 <ParserPatternEditor :blocks="cond._blocks" context="if" />
               </div>
               <div class="constructor-item item-button-group">
-                <button class="btn-icon btn-add" title="Добавить условие" @click="addCondition(c_index)">
+                <button class="btn-icon btn-add" :title="t('rules.condition.add')" @click="addCondition(c_index)">
                   <i class="pi pi-plus" />
                 </button>
               </div>
@@ -187,8 +164,8 @@ function getAssignActionLabel(actionType: string): string {
               <div class="circuit-body">
                 <div class="circuit-line" />
                 <div class="circuit-switch">
-                  <button :class="{ active: cond.logical_operator === 'AND' }" @click="cond.logical_operator = 'AND'">И</button>
-                  <button :class="{ active: cond.logical_operator === 'OR' }" @click="cond.logical_operator = 'OR'">ИЛИ</button>
+                  <button :class="{ active: cond.logical_operator === 'AND' }" @click="cond.logical_operator = 'AND'">{{ t("rules.operator.and") }}</button>
+                  <button :class="{ active: cond.logical_operator === 'OR' }" @click="cond.logical_operator = 'OR'">{{ t("rules.operator.or") }}</button>
                 </div>
                 <div class="circuit-line" />
               </div>
@@ -201,7 +178,7 @@ function getAssignActionLabel(actionType: string): string {
       <div class="rule-block then-block">
         <div v-for="(action, a_index) in rule.actions" :key="a_index" class="condition-group">
           <StGroup>
-            <div class="constructor-item item-label label-then">ТО</div>
+            <div class="constructor-item item-label label-then">{{ t("rules.label.then") }}</div>
             <StSelect
               :model-value="action.action_type"
               :options="ACTION_TYPES"
@@ -210,7 +187,7 @@ function getAssignActionLabel(actionType: string): string {
             <div class="constructor-item item-button-group">
               <button
                 class="btn-icon btn-delete"
-                title="Удалить действие"
+                :title="t('rules.action.remove')"
                 :disabled="rule.actions.length <= 1"
                 @click="removeAction(a_index)"
               >
@@ -226,7 +203,7 @@ function getAssignActionLabel(actionType: string): string {
                 <ParserPatternEditor :blocks="action._action_blocks" context="then" />
               </div>
               <div v-if="a_index === rule.actions.length - 1" class="constructor-item item-button-group">
-                <button class="btn-icon btn-add" title="Добавить действие" @click="addAction">
+                <button class="btn-icon btn-add" :title="t('rules.action.add')" @click="addAction">
                   <i class="pi pi-plus" />
                 </button>
               </div>
@@ -239,10 +216,10 @@ function getAssignActionLabel(actionType: string): string {
                 v-model="action.action_pattern"
                 :type="['assign_episode', 'assign_season', 'assign_part'].includes(action.action_type) ? 'number' : 'text'"
                 class="constructor-item item-input"
-                :placeholder="action.action_type === 'assign_range' ? t('rules.action.assign_range.hint') : 'Введите значение...'"
+                :placeholder="action.action_type === 'assign_range' ? t('rules.action.assign_range.hint') : t('rules.action.valuePlaceholder')"
               />
               <div v-if="a_index === rule.actions.length - 1" class="constructor-item item-button-group">
-                <button class="btn-icon btn-add" title="Добавить действие" @click="addAction">
+                <button class="btn-icon btn-add" :title="t('rules.action.add')" @click="addAction">
                   <i class="pi pi-plus" />
                 </button>
               </div>

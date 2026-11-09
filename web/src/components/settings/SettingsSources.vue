@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 import StGroup from "../StGroup.vue"
 import StIcon from "../StIcon.vue"
 import StInput from "../StInput.vue"
@@ -8,45 +8,51 @@ import StSelect from "../StSelect.vue"
 import { api } from "../../api/client"
 import type { components } from "../../api/schema"
 import { useApi } from "../../composables/useApi"
+import { useSSE } from "../../composables/useSSE"
 import { t } from "../../i18n"
+import { useSourcesStore, type SourcesSettingsView } from "../../stores/sources"
 
 // The tab «Источники». The top row (like the groups of voice-overs) chooses a tracker; under it lie the mirrors of the
 // chosen one, each change handed to the core at once. The tab ends with every domain the service reads pages of now.
-interface Tracker { id: number; display_name: string; mirrors: string[] }
+// The screen shows what the core holds: the core announces every save, also one made in another window.
+type Tracker = components["schemas"]["TrackerMirrors"]
 
 const { request } = useApi()
-const trackers = ref<Tracker[]>([])
+const sourcesStore = useSourcesStore()
+const view = ref<SourcesSettingsView | null>(null)
 const selected = ref<number | null>(null)
 const newMirror = ref("")
 const busy = ref(false)
-// Every domain the service reads pages of now, as its registries of trackers and sites give it: for reference only.
-const readers = ref<components["schemas"]["ParsedDomains"][]>([])
 
+const trackers = computed(() => view.value?.trackers ?? [])
+// Every domain the service reads pages of now, as its registries of trackers and sites give it: for reference only.
+const readers = computed(() => view.value?.readers ?? [])
 const chosen = computed(() => trackers.value.find((each) => each.id === selected.value) ?? null)
+const mirrorsOf = (tracker: Tracker) => tracker.mirrors ?? []
 const options = computed(() => [
   { label: t("settings.sources.select"), value: null as number | null },
   ...trackers.value.map((each) => ({ label: each.display_name, value: each.id as number | null })),
 ])
 
-async function loadDomains() {
-  const data = await request(api.GET("/api/sources/domains"))
-  if (data) readers.value = data.readers ?? []
+async function load() {
+  const next = await request(api.GET("/api/sources/settings"))
+  if (next) view.value = next
 }
 
-async function load() {
-  const data = (await request(api.GET("/api/trackers"))) as unknown
-  if (!Array.isArray(data)) return
-  trackers.value = (data as Array<{ id: number; display_name: string; mirrors?: string[] }>).map((each) => ({
-    id: each.id, display_name: each.display_name, mirrors: each.mirrors ?? [],
-  }))
-}
+watch(() => sourcesStore.settings, (next) => {
+  if (next) view.value = next
+})
+// A connection that came back may have missed a save.
+watch(useSSE().connected, (up) => {
+  if (up) void load()
+})
 
 function choose(id: number | null) {
   selected.value = id
   newMirror.value = ""
 }
 
-// The core keeps what it took; a refused change is read back, so the screen shows what the core holds.
+// What the core took comes back by its announcement; a refused change is read back, so the screen shows what it holds.
 async function keep(tracker: Tracker, mirrors: string[]): Promise<boolean> {
   busy.value = true
   try {
@@ -54,9 +60,7 @@ async function keep(tracker: Tracker, mirrors: string[]): Promise<boolean> {
       api.PUT("/api/trackers/{tracker_id}", { params: { path: { tracker_id: tracker.id } }, body: { mirrors } } as never),
       { errorMessage: t("settings.sources.saveFailed") },
     )
-    if (ok) tracker.mirrors = mirrors
-    else await load()
-    void loadDomains()
+    if (!ok) await load()
     return !!ok
   } finally {
     busy.value = false
@@ -75,18 +79,15 @@ async function addMirror() {
   const tracker = chosen.value
   const host = hostOf(newMirror.value.trim())
   if (!tracker || !host) return
-  if (tracker.mirrors.includes(host) || (await keep(tracker, [...tracker.mirrors, host]))) newMirror.value = ""
+  if (mirrorsOf(tracker).includes(host) || (await keep(tracker, [...mirrorsOf(tracker), host]))) newMirror.value = ""
 }
 
 async function removeMirror(index: number) {
   const tracker = chosen.value
-  if (tracker) await keep(tracker, tracker.mirrors.filter((_, at) => at !== index))
+  if (tracker) await keep(tracker, mirrorsOf(tracker).filter((_, at) => at !== index))
 }
 
-onMounted(() => {
-  void load()
-  void loadDomains()
-})
+onMounted(load)
 </script>
 
 <template>
@@ -99,8 +100,8 @@ onMounted(() => {
           <StSelect :model-value="selected" :options="options" :placeholder="t('settings.sources.select')" @update:model-value="choose($event as number | null)" />
         </StGroup>
         <template v-if="chosen">
-          <div v-if="chosen.mirrors.length" class="mirrors-row">
-            <span v-for="(mirror, index) in chosen.mirrors" :key="mirror" class="mirror-pill">
+          <div v-if="mirrorsOf(chosen).length" class="mirrors-row">
+            <span v-for="(mirror, index) in mirrorsOf(chosen)" :key="mirror" class="mirror-pill">
               {{ mirror }}
               <button class="mirror-pill-remove" :disabled="busy" :title="t('settings.sources.mirror.remove')" :aria-label="t('settings.sources.mirror.remove')" @click="removeMirror(index)" />
             </span>

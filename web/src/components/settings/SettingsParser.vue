@@ -11,6 +11,7 @@ import ParserTest from "./ParserTest.vue"
 import { useApi } from "../../composables/useApi"
 import { useConfirm } from "../../composables/useConfirm"
 import { api } from "../../api/client"
+import { t } from "../../i18n"
 
 // Вкладка «Фильтры VK» окна Настроек — конфигуратор профилей парсера.
 // Аккордеон трёх шагов (профили / правила / тест), как в оригинале
@@ -63,7 +64,7 @@ const editingProfileName = ref("")
 const editInput = ref<HTMLInputElement | null>(null)
 
 const profileOptions = computed(() => [
-  { label: "-- Выберите профиль --", value: null as number | null },
+  { label: t("rules.profile.select"), value: null as number | null },
   ...profiles.value.map((p) => ({ label: p.name, value: p.id as number | null })),
 ])
 const selectedProfileName = computed(
@@ -79,7 +80,7 @@ async function loadProfiles(): Promise<void> {
   isLoading.value = true
   const data = (await request(
     api.GET("/api/parser-profiles") as never,
-    { errorMessage: "Ошибка загрузки профилей" },
+    { errorMessage: t("rules.profile.loadFailed") },
   )) as Profile[] | null
   if (data) profiles.value = data
   isLoading.value = false
@@ -90,7 +91,7 @@ async function createProfile(): Promise<void> {
   isLoading.value = true
   const data = (await request(
     api.POST("/api/parser-profiles", { body: { name: newProfileName.value } } as never),
-    { errorMessage: "Ошибка создания профиля" },
+    { errorMessage: t("rules.profile.createFailed") },
   )) as { success: boolean; id: number } | null
   isLoading.value = false
   if (data?.id) {
@@ -121,11 +122,11 @@ async function saveProfileName(): Promise<void> {
       params: { path: { profile_id: editingProfileId.value } },
       body: { name },
     } as never),
-    { errorMessage: "Ошибка переименования" },
+    { errorMessage: t("rules.profile.renameFailed") },
   )
   isLoading.value = false
   if (ok) {
-    toast.add({ severity: "success", summary: "Профиль", detail: "Переименован", life: 2500 })
+    toast.add({ severity: "success", summary: t("rules.profile.toast"), detail: t("rules.profile.renamed"), life: 2500 })
     const keep = selectedProfileId.value
     await loadProfiles()
     selectedProfileId.value = keep
@@ -135,8 +136,8 @@ async function saveProfileName(): Promise<void> {
 async function deleteProfile(): Promise<void> {
   if (!selectedProfileId.value) return
   const r = await confirm.open({
-    title: "Удаление профиля",
-    message: `Удалить профиль «${selectedProfileName.value}» и все его правила?`,
+    title: t("rules.profile.deleteTitle"),
+    message: t("rules.profile.deleteMessage", { profile: selectedProfileName.value }),
   })
   if (!r.confirmed) return
   isLoading.value = true
@@ -144,7 +145,7 @@ async function deleteProfile(): Promise<void> {
     api.DELETE("/api/parser-profiles/{profile_id}", {
       params: { path: { profile_id: selectedProfileId.value } },
     } as never),
-    { errorMessage: "Ошибка удаления профиля" },
+    { errorMessage: t("rules.profile.deleteFailed") },
   )
   isLoading.value = false
   if (ok) {
@@ -175,7 +176,7 @@ async function loadRules(): Promise<void> {
     api.GET("/api/parser-profiles/{profile_id}/rules", {
       params: { path: { profile_id: selectedProfileId.value } },
     } as never),
-    { errorMessage: "Ошибка загрузки правил" },
+    { errorMessage: t("rules.rule.loadFailed") },
   )) as RawRule[] | null
   isLoading.value = false
   if (!raw) return
@@ -212,7 +213,7 @@ function addRule(): void {
   const id = "new-" + Date.now()
   rules.value.push({
     id,
-    name: "Новое правило",
+    name: t("rules.rule.newName"),
     continue_after_match: false,
     is_new: true,
     conditions: [
@@ -257,10 +258,10 @@ async function saveRule(rule: EditableRule): Promise<void> {
         params: { path: { profile_id: selectedProfileId.value } },
         body: payload,
       } as never),
-      { errorMessage: "Ошибка сохранения правила" },
+      { errorMessage: t("rules.rule.saveFailed") },
     )) as { success: boolean; id: number } | null
     if (data?.id) {
-      toast.add({ severity: "success", summary: "Правило", detail: "Сохранено", life: 2000 })
+      toast.add({ severity: "success", summary: t("rules.rule.toast"), detail: t("rules.rule.saved"), life: 2000 })
       await loadRules()
       openRuleId.value = data.id
     }
@@ -270,9 +271,9 @@ async function saveRule(rule: EditableRule): Promise<void> {
         params: { path: { rule_id: rule.id } },
         body: payload,
       } as never),
-      { errorMessage: "Ошибка сохранения правила" },
+      { errorMessage: t("rules.rule.saveFailed") },
     )
-    if (ok) toast.add({ severity: "success", summary: "Правило", detail: "Сохранено", life: 2000 })
+    if (ok) toast.add({ severity: "success", summary: t("rules.rule.toast"), detail: t("rules.rule.saved"), life: 2000 })
   }
 }
 
@@ -281,13 +282,13 @@ async function deleteRule(rule: EditableRule): Promise<void> {
     rules.value = rules.value.filter((r) => r.id !== rule.id)
     return
   }
-  const r = await confirm.open({ title: "Удаление правила", message: "Удалить это правило?" })
+  const r = await confirm.open({ title: t("rules.rule.deleteTitle"), message: t("rules.rule.deleteMessage") })
   if (!r.confirmed) return
   const ok = await request(
     api.DELETE("/api/parser-rules/{rule_id}", {
       params: { path: { rule_id: rule.id } },
     } as never),
-    { errorMessage: "Ошибка удаления правила" },
+    { errorMessage: t("rules.rule.deleteFailed") },
   )
   if (ok) loadRules()
 }
@@ -302,7 +303,7 @@ async function moveRule(index: number, dir: -1 | 1): Promise<void> {
   if (orderedIds.length < 2) return
   const ok = await request(
     api.POST("/api/parser-rules/reorder", { body: orderedIds } as never),
-    { errorMessage: "Ошибка изменения порядка" },
+    { errorMessage: t("rules.rule.reorderFailed") },
   )
   if (!ok) loadRules()
 }
@@ -337,13 +338,11 @@ onMounted(loadProfiles)
     <!-- Шаг 1: профили -->
     <div class="accordion-item">
       <button class="accordion-button" :class="{ active: openStep === 'profiles' }" @click="toggleStep('profiles')">
-        <span>Шаг 1: Управление профилями парсера</span>
+        <span>{{ t("rules.step.profiles") }}</span>
         <i class="pi pi-chevron-down acc-chevron" />
       </button>
       <div v-if="openStep === 'profiles'" class="accordion-body">
-        <p class="parser-hint">
-          Выберите профиль для редактирования или создайте новый. Правила и тестирование появятся ниже после выбора профиля.
-        </p>
+        <p class="parser-hint">{{ t("rules.step.profiles.hint") }}</p>
         <div class="field-group">
           <StGroup>
             <template v-if="!editingProfileId">
@@ -351,7 +350,7 @@ onMounted(loadProfiles)
               <StSelect
                 v-model="selectedProfileId"
                 :options="profileOptions"
-                placeholder="-- Выберите профиль --"
+                :placeholder="t('rules.profile.select')"
               />
               <div class="constructor-item item-floating-label">
                 <input
@@ -362,16 +361,16 @@ onMounted(loadProfiles)
                   placeholder=" "
                   @keyup.enter="createProfile"
                 />
-                <label for="new-profile-name">Имя нового профиля...</label>
+                <label for="new-profile-name">{{ t("rules.profile.new") }}</label>
               </div>
               <div class="constructor-item item-button-group">
-                <button class="btn-icon btn-add" :disabled="!newProfileName || isLoading" title="Создать" @click="createProfile">
+                <button class="btn-icon btn-add" :disabled="!newProfileName || isLoading" :title="t('rules.profile.create')" @click="createProfile">
                   <i class="pi pi-plus" />
                 </button>
-                <button class="btn-icon btn-edit" :disabled="!selectedProfileId || isLoading" title="Переименовать" @click="startEditingProfile">
+                <button class="btn-icon btn-edit" :disabled="!selectedProfileId || isLoading" :title="t('rules.profile.rename')" @click="startEditingProfile">
                   <i class="pi pi-pencil" />
                 </button>
-                <button class="btn-icon btn-delete" :disabled="!selectedProfileId || isLoading" title="Удалить" @click="deleteProfile">
+                <button class="btn-icon btn-delete" :disabled="!selectedProfileId || isLoading" :title="t('rules.profile.delete')" @click="deleteProfile">
                   <i class="pi pi-trash" />
                 </button>
               </div>
@@ -387,13 +386,13 @@ onMounted(loadProfiles)
                   @keyup.enter="saveProfileName"
                   @keyup.esc="cancelEditing"
                 />
-                <label>Новое имя профиля...</label>
+                <label>{{ t("rules.profile.renameLabel") }}</label>
               </div>
               <div class="constructor-item item-button-group">
-                <button class="btn-icon btn-confirm" :disabled="!editingProfileName" title="Сохранить" @click="saveProfileName">
+                <button class="btn-icon btn-confirm" :disabled="!editingProfileName" :title="t('rules.profile.apply')" @click="saveProfileName">
                   <i class="pi pi-check" />
                 </button>
-                <button class="btn-icon btn-cancel" title="Отмена" @click="cancelEditing">
+                <button class="btn-icon btn-cancel" :title="t('rules.profile.cancel')" @click="cancelEditing">
                   <i class="pi pi-times" />
                 </button>
               </div>
@@ -407,15 +406,15 @@ onMounted(loadProfiles)
       <!-- Шаг 2: правила -->
       <div class="accordion-item">
         <button class="accordion-button" :class="{ active: openStep === 'rules' }" @click="toggleStep('rules')">
-          <span>Шаг 2: Правила для профиля «{{ selectedProfileName }}»</span>
+          <span>{{ t("rules.step.rules", { profile: selectedProfileName }) }}</span>
           <i class="pi pi-chevron-down acc-chevron" />
         </button>
         <div v-if="openStep === 'rules'" class="accordion-body">
           <div class="rules-toolbar">
-            <Button label="Добавить правило" icon="pi pi-plus-circle" size="small" @click="addRule" />
+            <Button :label="t('rules.rule.add')" icon="pi pi-plus-circle" size="small" @click="addRule" />
           </div>
           <div v-if="isLoading" class="parser-loading"><i class="pi pi-spin pi-spinner" style="font-size: 1.6rem" /></div>
-          <div v-else-if="rules.length === 0" class="parser-empty">Нет правил для этого профиля. Добавьте первое.</div>
+          <div v-else-if="rules.length === 0" class="parser-empty">{{ t("rules.rule.none") }}</div>
           <div v-else class="rules-list">
             <ParserRuleCard
               v-for="(rule, index) in rules"
@@ -436,7 +435,7 @@ onMounted(loadProfiles)
       <!-- Шаг 3: тест -->
       <div class="accordion-item">
         <button class="accordion-button" :class="{ active: openStep === 'test' }" @click="toggleStep('test')">
-          <span>Шаг 3: Тестирование профиля</span>
+          <span>{{ t("rules.step.test") }}</span>
           <i class="pi pi-chevron-down acc-chevron" />
         </button>
         <div v-show="openStep === 'test'" class="accordion-body">

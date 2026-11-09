@@ -9,6 +9,7 @@ import { useCompositionStore } from "../stores/composition"
 import type { components } from "../api/schema"
 import { useConformStore, type ConformSettingsView } from "../stores/conform"
 import { useVoicesStore, type VoiceSettingsView } from "../stores/voices"
+import { useSourcesStore, type SourcesSettingsView } from "../stores/sources"
 import { usePlanStore } from "../stores/plan"
 
 type Schemas = components["schemas"]
@@ -25,6 +26,7 @@ export function setupRealtime(): void {
   const reads = useSeriesReadsStore()
   const composition = useCompositionStore()
   const voices = useVoicesStore()
+  const sources = useSourcesStore()
   const plan = usePlanStore()
   const conform = useConformStore()
 
@@ -39,6 +41,7 @@ export function setupRealtime(): void {
   sse.on("conform_queue_update", (d) => queues.setConform(d as ConformPicture))
   sse.on("plan_update", (d) => plan.apply(d as Schemas["PlannerView"]))
   sse.on("voice_settings_update", (d) => voices.applySettings(d as VoiceSettingsView))
+  sse.on("sources_settings_update", (d) => sources.applySettings(d as SourcesSettingsView))
   sse.on("conform_settings_update", (d) => conform.applySettings(d as ConformSettingsView))
 
   sse.on("scanner_status_update", (d) => scanner.set(d as ScannerStatus))

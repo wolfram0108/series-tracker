@@ -32,16 +32,16 @@ const props = defineProps<{
 }>()
 
 const BLOCK_PALETTE: PaletteItem[] = [
-  { type: "text", label: "Текст", title: "Точный текст" },
+  { type: "text", label: t("rules.block.text.label"), title: t("rules.block.text.title") },
   { type: "or", label: t("rules.block.or.label"), title: t("rules.block.or.title") },
-  { type: "number", label: "Число", title: "Любое число (1, 2, 10, 155...)" },
-  { type: "range", label: "Диапазон", title: "Диапазон номеров (например, 1, 3-10 или 1-180)" },
-  { type: "add", label: "+", title: "Сложение" },
-  { type: "subtract", label: "-", title: "Вычитание" },
-  { type: "whitespace", label: "Пробел", title: "Один или несколько пробелов" },
-  { type: "any_text", label: "*", title: "Любой текст (нежадный поиск)" },
-  { type: "start_of_line", label: "Начало", title: "Соответствует началу названия" },
-  { type: "end_of_line", label: "Конец", title: "Соответствует концу названия" },
+  { type: "number", label: t("rules.block.number.label"), title: t("rules.block.number.title") },
+  { type: "range", label: t("rules.block.range.label"), title: t("rules.block.range.title") },
+  { type: "add", label: t("rules.block.add.label"), title: t("rules.block.add.title") },
+  { type: "subtract", label: t("rules.block.subtract.label"), title: t("rules.block.subtract.title") },
+  { type: "whitespace", label: t("rules.block.whitespace.label"), title: t("rules.block.whitespace.title") },
+  { type: "any_text", label: t("rules.block.any_text.label"), title: t("rules.block.any_text.title") },
+  { type: "start_of_line", label: t("rules.block.start_of_line.label"), title: t("rules.block.start_of_line.title") },
+  { type: "end_of_line", label: t("rules.block.end_of_line.label"), title: t("rules.block.end_of_line.title") },
 ]
 
 // 'if' context enables range filtering; 'then' context enables mathematical operations.
@@ -60,11 +60,11 @@ const palette = computed<PaletteItem[]>(() => {
 function disabledReason(type: string): string {
   const hasAttachment = attachmentBlockCount(props.blocks) > 0
   if (isAttachmentType(type)) {
-    if (hasAttachment) return "В шаблоне уже есть блок-приложение"
-    if (numberBlockCount(props.blocks) >= 2) return "В шаблоне уже два числа"
+    if (hasAttachment) return t("rules.block.attachmentTaken")
+    if (numberBlockCount(props.blocks) >= 2) return t("rules.block.twoNumbers")
     return ""
   }
-  if (type === "number" && hasAttachment) return "В шаблоне уже есть блок-приложение"
+  if (type === "number" && hasAttachment) return t("rules.block.attachmentTaken")
   return ""
 }
 
@@ -97,9 +97,9 @@ function getBlockDisplayText(block: PatternBlock): string {
   if (block.type === "number" && props.context === "then") {
     const numberBlocks = props.blocks.filter((b) => b.type === "number")
     const captureIndex = numberBlocks.indexOf(block) + 1
-    return `Число #${captureIndex}`
+    return t("rules.block.numberN", { n: captureIndex })
   }
-  return BLOCK_PALETTE.find((p) => p.type === block.type)?.label || "Неизвестный"
+  return BLOCK_PALETTE.find((p) => p.type === block.type)?.label || t("rules.block.unknown")
 }
 
 function updateBlockValue(block: PatternBlock, newText: string): void {
@@ -166,7 +166,7 @@ function checkMove(evt: any): boolean {
             >{{ element.value }}</div>
           </template>
           <template v-else-if="element.type === 'range'">
-            <span class="range-prefix">диапазон:</span>
+            <span class="range-prefix">{{ t("rules.block.rangePrefix") }}</span>
             <div
               contenteditable="true"
               class="pattern-block-input range-value"
@@ -187,8 +187,8 @@ function checkMove(evt: any): boolean {
             :class="{ 'is-disabled': carriesAttachment(props.blocks, index) }"
             :disabled="carriesAttachment(props.blocks, index)"
             :title="carriesAttachment(props.blocks, index)
-              ? 'У числа прикреплён блок-приложение — удалите приложение'
-              : 'Удалить блок'"
+              ? t('rules.block.removeAttachmentFirst')
+              : t('rules.block.remove')"
             @click="removeBlock(index)"
           />
         </div>

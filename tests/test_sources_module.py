@@ -1,5 +1,6 @@
 """The module `sources` on the bus: the queries about the sites it reads, the stream of a candidate, and the class guards of its code (phases worded, no blocking disk call in async code)."""
 import ast
+import asyncio
 import re
 from pathlib import Path
 
@@ -50,17 +51,22 @@ def test_a_module_given_no_sites_reads_the_builtin_ones_and_each_module_has_its_
     assert ruchime.players is channel.players is first.sites.find(DOLLS).players is first.players
 
 
-async def test_the_domains_read_now_are_every_tracker_with_its_mirrors_and_every_site_of_the_registry(stand):
+async def test_the_settings_of_the_sources_are_the_mirrors_of_each_tracker_and_every_domain_read_now_announced_on_a_save(stand):
     sources, probe = stand
     await sources.repo._db.execute(
         "INSERT INTO trackers (id, canonical_name, display_name, mirrors, parser_class, auth_type, ui_features) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (3, "kinozal", "Kinozal.me", '["kinozal.me"]', "KinozalParser", "kinozal", "{}"))
+    announced = sources.bus.subscribe("sources.settings.changed")
     await probe.request("sources.tracker.set_mirrors", {"tracker_id": 3, "mirrors": ["kinozal.me", "kinozal.new"]}, timeout=5)
-    readers = (await probe.request("sources.domains.list", {}, timeout=5))["readers"]
+    view = await probe.request("sources.settings.get", {}, timeout=5)
+    # The save is announced with the screen whole, the same the query gives: an open screen asks nothing back.
+    assert (await asyncio.wait_for(announced.queue.get(), 5)).payload == view
 
+    assert {each["id"]: each["mirrors"] for each in view["trackers"]}[3] == ["kinozal.me", "kinozal.new"]
+    readers = view["readers"]
     trackers = [each for each in readers if each["kind"] == "tracker"]
     assert {each["name"]: each["domains"] for each in trackers}["Kinozal.me"] == ["kinozal.me", "kinozal.new"]
-    assert len(trackers) == len(await sources.repo.all_trackers())
+    assert len(trackers) == len(view["trackers"]) == len(await sources.repo.all_trackers())
     # The sites follow the registry: a site registered is listed with no change here.
     assert [(each["name"], each["domains"]) for each in readers if each["kind"] == "site"] == [
         (site.name, list(site.domains)) for site in sources.sites]

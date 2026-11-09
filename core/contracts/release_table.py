@@ -175,10 +175,20 @@ class ParsedDomains(BaseModel):
     domains: list[str] = Field(default_factory=list)
 
 
-class DomainsReply(BaseModel):
-    """`sources.domains.list`: every reader of pages the service has now, trackers first, then the sites in the order of
-    their registry."""
+class TrackerMirrors(BaseModel):
+    """A tracker as the settings of the sources show it: the domain and the mirrors its pages are read on."""
 
+    id: int
+    display_name: str
+    mirrors: list[str] = Field(default_factory=list)
+
+
+class SourcesSettingsView(BaseModel):
+    """`sources.settings.get` and the event `sources.settings.changed`: the settings screen of the sources whole — the
+    trackers with their mirrors, and every reader of pages the service has now (trackers first, then the sites in the
+    order of their registry)."""
+
+    trackers: list[TrackerMirrors] = Field(default_factory=list)
     readers: list[ParsedDomains] = Field(default_factory=list)
 
 
