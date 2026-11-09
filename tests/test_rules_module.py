@@ -767,3 +767,31 @@ async def test_a_table_with_an_empty_row_is_refused_and_nothing_is_saved(system)
         await probe.request("rules.rules.add", {"profile_id": profile, "data": {"name": "Озвучки", "rule_table": table}},
                             timeout=5)
     assert await probe.request("rules.rules.list", {"profile_id": profile}, timeout=5) == []
+
+
+@pytest.mark.asyncio
+async def test_the_rules_are_compiled_and_applied_off_the_loop_of_the_service(system, monkeypatch):
+    """A page holds thousands of lines: the work of the rules runs in a thread, not in the loop every module shares."""
+    import threading
+
+    import modules.rules.module as module
+    loop_thread = threading.current_thread()
+    seen: list[threading.Thread] = []
+
+    def watched(real):
+        def call(*args, **kwargs):
+            seen.append(threading.current_thread())
+            return real(*args, **kwargs)
+        return call
+
+    monkeypatch.setattr(module, "compile_profile", watched(module.compile_profile))
+    monkeypatch.setattr(module, "process_title", watched(module.process_title))
+    probe = system.probe
+    profile = await new_profile(probe)
+    await new_rule(probe, profile, "серия", [extract("extract_single", "серия ", "N")])
+    stored = await apply(probe, profile, {f"k{n}": f"серия {n}" for n in range(1, 41)})
+    taken = (await probe.request("rules.profiles.export", {"profile_ids": [profile]}, timeout=5))["profiles"]
+    by_run = await apply(probe, profile, {"a": "серия 4"}, rules=taken.get(str(profile), taken.get(profile)))
+    assert stored["results"]["k40"]["episode"] == 40 and by_run["results"]["a"]["episode"] == 4
+    assert len(seen) == 2 + 41  # two compilations (the stored profile, the profile of the run), 41 lines
+    assert loop_thread not in seen and all(each.name.startswith("compute") for each in seen)
