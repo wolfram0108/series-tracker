@@ -161,6 +161,7 @@ describe("the bodies of the commands", () => {
     expect(resetBody({ season: 2 })).toStrictEqual({ season: 2 })
     expect(resetBody({ season: 2, episode: 5 }, "voice.take")).toStrictEqual({ season: 2, episode: 5, lever: "voice.take" })
     expect(resetBody({}, "voice.take", null)).toStrictEqual({ lever: "voice.take", target: null })
+    expect(resetBody({ season: 1 }, undefined, undefined, "markup")).toStrictEqual({ season: 1, queue: "markup" })
   })
 })
 
@@ -383,6 +384,7 @@ describe("the levers of a queue", () => {
     expect(queueLevers(SPECS, "reference")).toEqual({ order: "reference.order", allow: "reference.allow", take: undefined })
     expect(queueLevers(SPECS, "voice")).toEqual({ order: "voice.order", allow: "voice.allow", take: "voice.take" })
     expect(queueLevers([], "voice")).toEqual({ order: undefined, allow: undefined, take: undefined })
+    expect(queueLevers(SPECS, "markup")).toEqual({ order: "markup.order", allow: "markup.allow", take: undefined })
   })
 
   it("makes the value of an order from the rows in the order the user put them", () => {
@@ -393,6 +395,7 @@ describe("the levers of a queue", () => {
     expect(orderValue("reference", rows)).toEqual([
       { group: "A", source_id: 2, player: "kodik" }, { group: "B", source_id: 1, player: "vk" }])
     expect(orderValue("voice", rows)).toEqual([{ source_id: 2, player: "kodik" }, { source_id: 1, player: "vk" }])
+    expect(orderValue("markup", rows)).toEqual(orderValue("reference", rows))
   })
 })
 

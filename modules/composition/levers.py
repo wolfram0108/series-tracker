@@ -8,7 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW,
+from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS, MARKUP_ALLOW, MARKUP_ORDER, REFERENCE_ALLOW,
+                            REFERENCE_ORDER, VOICE_ALLOW,
                             VOICE_ORDER, VOICE_TAKE, LeverSpec, Queue, TargetKind, ValueShape, parse_compilation_key,
                             parse_group_target, parse_variant_target)
 
@@ -151,3 +152,6 @@ register(Lever(VOICE_ALLOW, TargetKind.VARIANT, ValueShape.FLAG, True, "voices",
 register(Lever(COMPILATION_MEMBER, TargetKind.NONE, ValueShape.COMPILATION, None, "composition", Queue.COMPILATION,
                _compilation_sources))
 register(Lever(COMPILATION_TAKE, TargetKind.NONE, ValueShape.FLAG, True, "composition", Queue.COMPILATION))
+# Stage 14: the queue of the markup reference, of the form of the queue of the reference.
+register(Lever(MARKUP_ORDER, TargetKind.NONE, ValueShape.VARIANT_ORDER, [], "planner", Queue.MARKUP, _order_sources))
+register(Lever(MARKUP_ALLOW, TargetKind.VARIANT, ValueShape.FLAG, True, "planner", Queue.MARKUP))

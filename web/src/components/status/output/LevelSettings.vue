@@ -80,6 +80,9 @@ const countText = (state: TrackState | "reference", count: number): string => st
         <button type="button" class="st-tab" :class="{ active: tab === 'reference' }" @click="tab = 'reference'">
           {{ compilation ? t("output.tab.ref2") : t("output.tab.reference") }}
         </button>
+        <button v-if="!compilation" type="button" class="st-tab" :class="{ active: tab === 'markup' }" @click="tab = 'markup'">
+          {{ t("output.tab.markup") }}
+        </button>
         <button v-for="(group, index) in groups" :key="group" type="button" class="st-tab" :class="{ active: tab === group }" @click="tab = group">
           <VoiceMark :n="index + 1" :online="online[group]" />{{ group }}
         </button>
@@ -129,6 +132,12 @@ const countText = (state: TrackState | "reference", count: number): string => st
         :hint="compilation ? t('output.queue.hintRef2Level') : undefined"
         @order="emit('order', 'reference', null, $event)" @allow="(row, allowed) => emit('allow', 'reference', row, allowed)"
         @reset="emit('reset', 'reference', null)"
+      />
+      <QueuePanel
+        v-else-if="tab === 'markup'" queue="markup" :level="level" :view="queues?.markup" :follows="queues?.markup_follows"
+        :marks="marks" :busy="busy"
+        @order="emit('order', 'markup', null, $event)" @allow="(row, allowed) => emit('allow', 'markup', row, allowed)"
+        @reset="emit('reset', 'markup', null)"
       />
       <QueuePanel
         v-else queue="voice" :level="level" :view="groupQueue(tab)" :marks="marks" :busy="busy"

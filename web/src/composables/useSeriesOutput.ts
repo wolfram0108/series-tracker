@@ -116,8 +116,8 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const set = (scope: Scope, lever: string, target: string | null, value: unknown): Promise<string | null> =>
     act(() => setLever(seriesId, setBody(scope, lever, target, value)), busy)
 
-  const reset = (scope: Scope, lever?: string, target?: string | null): Promise<string | null> =>
-    act(() => resetLever(seriesId, resetBody(scope, lever, target)), busy)
+  const reset = (scope: Scope, lever?: string, target?: string | null, queue?: QueueName): Promise<string | null> =>
+    act(() => resetLever(seriesId, resetBody(scope, lever, target, queue)), busy)
 
   // An episode, or a whole season (no episode in the scope), off or on; the references that follow come as events.
   const switchTo = (season: number, episode: number | null, off: boolean): Promise<string | null> =>
@@ -190,8 +190,10 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     const lever = leversOf("voice").take
     return lever ? set(scope, lever, groupTarget(group), taken) : Promise.resolve(null)
   }
-  // "As the level above": the order of the queue on this level goes back to the level above.
+  // "As the level above": the order of the queue on this level goes back to the level above; the markup reference goes
+  // back whole, its order and its boxes, so that with nothing above it follows the reference again (stage 14).
   const resetOrder = (scope: Scope, queue: QueueName, group: string | null): Promise<string | null> => {
+    if (queue === "markup") return reset(scope, undefined, undefined, "markup")
     const lever = leversOf(queue).order
     if (!lever) return Promise.resolve(null)
     return reset(scope, lever, queue === "voice" && group !== null ? groupTarget(group) : null)

@@ -84,6 +84,17 @@ class TrackWay:
 
 
 @dataclass(frozen=True)
+class Markup:
+    """The markup reference of an episode (stage 14): the single video whose timeline the episode's video lies on. `row`
+    is its row as the layout has it now; none for a timeline only a file of the library is on (the source forgot it)."""
+
+    id: RowId
+    group: str | None
+    height: int
+    row: OnlineRow | None = None
+
+
+@dataclass(frozen=True)
 class Goal:
     slot: Slot
     video: VideoWay
@@ -97,8 +108,8 @@ class Goal:
     own_at: int = 0
     # The user's names of the sounds of the file (voice-over group, title), as the container is to bear them.
     titles: tuple[tuple[str, str], ...] = ()
-    # The row of the markup reference that gives the episode its timeline (stage 14); its sound is the last of the file.
-    markup: OnlineRow | None = None
+    # The markup reference that gives the episode its timeline (stage 14); its sound is the last of the file.
+    markup: Markup | None = None
 
 
 @dataclass(frozen=True)
@@ -275,19 +286,24 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
     candidates: list[tuple[tuple, VideoWay]] = []
     seen: set[tuple] = set()
     singles = by_slot.rows.get(slot, [])
-    markup = _markup_of(inputs, singles, video_rank, denied)
+    markup = _markup_of(inputs, episode, singles, [each for each in by_slot.files.get(slot, [])
+                                                   if each.name not in by_slot.deleted], criteria, position)
+    # The queue of the reference leaves a variant out as a picture; the markup reference is a queue of its own, so the
+    # video of its row stays a way to the timeline whatever the reference says of it.
+    timeline = ("row", markup.id) if markup is not None else None
     for container in by_slot.files.get(slot, []):
         video = container.video
         source = video.cut_of or video.id
         variant = (video.snapshot.variant_label, source.source_id, video.snapshot.player)
-        if video.key in seen or variant in denied:
+        if video.key in seen or (variant in denied and video.key != timeline):
             continue
         seen.add(video.key)
         way = VideoWay("asset", video.key, video.timeline, video.snapshot, container=container)
         candidates.append((video_rank(variant, video.snapshot.height, True, source, gone(way)), way))
     if not off:
         for row in singles:
-            if not row.playable or ("download", row.id) in inputs.failed or row.variant in denied:
+            if not row.playable or ("download", row.id) in inputs.failed or (row.variant in denied and
+                                                                              ("row", row.id) != timeline):
                 continue
             held = next((way for _, way in candidates if way.key == ("row", row.id) and not gone(way)), None)
             if held is not None and held.snapshot.height >= row.height:
@@ -386,16 +402,40 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
     return Goal(slot, video, tuple(tracks), namer(slot, video, off), off, frozenset(taken_off), own_at, titles, markup)
 
 
-def _markup_of(inputs: Inputs, singles: list[OnlineRow], video_rank, denied) -> OnlineRow | None:
-    """The row of the markup reference that gives the episode its timeline (stage 14): of the rows of the marked source in
-    the place of the episode, the first by the rule of the reference that plays, did not fail to download, has a voice-over
-    group (an unknown one takes no work, Р-77) and is not left out. None: the episode goes by the rule with no markup."""
-    source = inputs.choices.markup
-    if source is None:
+def _markup_of(inputs: Inputs, episode, singles: list[OnlineRow], files: list[Container], criteria,
+               position) -> Markup | None:
+    """The markup reference of the episode (stage 14) by its queue: the user's order, then the service's rule, then what
+    the library holds (a timeline goes only for a better one, as a video does), then the place of the row. Its candidates
+    are the rows of the place of the episode that play, did not fail to download, have a voice-over group (an unknown one
+    takes no work, Р-77) and are not left out of the queue, and the timelines the files of the episode lie on (a source
+    that forgets a row does not move the timeline). None: the episode follows its reference."""
+    order = inputs.choices.markup.get(episode)
+    if order is None:
         return None
-    rows = [row for row in singles if row.id.source_id == source and row.playable and row.group is not None
-            and ("download", row.id) not in inputs.failed and row.variant not in denied]
-    return min(rows, key=lambda row: video_rank(row.variant, row.height, False, row.id), default=None)
+    denied = inputs.choices.markup_deny.get(episode, frozenset())
+
+    def rank(variant: tuple[str, int, str], height: int, player: str, row_id: RowId, held: bool) -> tuple:
+        return (order.index(variant) if variant in order else len(order),
+                *criteria(REFERENCE_RANKING, height, player, row_id.source_id), 0 if held else 1, position(row_id),
+                repr(row_id))
+
+    found: list[tuple[tuple, Markup]] = []
+    for row in singles:
+        if row.playable and row.group is not None and row.variant not in denied and ("download", row.id) not in inputs.failed:
+            found.append((rank(row.variant, row.height, row.player, row.id, False), Markup(row.id, row.group, row.height, row)))
+    online = {row.id: row for row in singles}
+    for container in files:
+        timeline = container.video.timeline
+        # What the timeline is: the video itself, or for a cut the sound of its timeline the file holds.
+        shot = container.video.snapshot if container.video.cut_of is None else next(
+            (track.snapshot for track in container.tracks if track.dub == timeline), None)
+        if shot is None or shot.group is None:
+            continue
+        variant = (shot.variant_label, timeline.source_id, shot.player)
+        if variant not in denied:
+            found.append((rank(variant, shot.height, shot.player, timeline, True),
+                          Markup(timeline, shot.group, shot.height, online.get(timeline))))
+    return min(found, key=lambda each: each[0])[1] if found else None
 
 
 def _cuts(slot, inputs, compilations, singles, candidates, video_rank, denied, markup) -> list[tuple[tuple, VideoWay]]:

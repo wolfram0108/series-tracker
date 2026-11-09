@@ -13,4 +13,6 @@ export const SPECS: LeverSpec[] = [
   { name: "voice.take", target: "group", shape: "flag", default: true, consumer: "voices", queue: "voice" },
   { name: "voice.order", target: "group", shape: "variant_order", default: [], consumer: "voices", queue: "voice" },
   { name: "voice.allow", target: "variant", shape: "flag", default: true, consumer: "voices", queue: "voice" },
+  { name: "markup.order", target: "none", shape: "variant_order", default: [], consumer: "planner", queue: "markup" },
+  { name: "markup.allow", target: "variant", shape: "flag", default: true, consumer: "planner", queue: "markup" },
 ]

@@ -96,7 +96,7 @@ class FakeCatalog(BaseModule):
         found = self.find(source_id)
         found.update(fields)
         self.publish_event("series.source.updated", {"series_id": found["series_id"], "source_id": source_id,
-                                                     "source": dict(found)})
+                                                     "source": dict(found), "changed": sorted(fields)})
 
     def remove_source(self, source_id: int) -> None:
         found = self.find(source_id)

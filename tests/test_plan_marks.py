@@ -1,6 +1,6 @@
 """Why the video of an episode is the one the plan takes (core/plan/marks.py): the reference the window shows is told by the
 plan itself, from the rows of the layout, the levers of the episode, the failures and the episodes switched off."""
-from core.contracts import (REFERENCE_ORDER, EffectiveLever, EpisodeSettings, Level, ReferenceMark, RowState)
+from core.contracts import (MARKUP_ORDER, REFERENCE_ORDER, EffectiveLever, EpisodeSettings, Level, ReferenceMark, RowState)
 from core.plan.inputs import choices_of, online_of
 from core.plan.marks import references_of
 from core.plan.planner import plan
@@ -13,18 +13,17 @@ PRIORITY = ("vk", "cvh", "kodik")
 SOURCES = (1, 2, 3)
 
 
-def told(rows, settings=(), *, failed=frozenset(), off=(), markup=None):
+def told(rows, settings=(), *, failed=frozenset(), off=()):
     online = online_of(rows)
     choices = choices_of(rows, online, [(each.season, each.episode, each.levers) for each in settings], [],
-                         players=PRIORITY, player_groups=NO_GROUPS, sources=SOURCES, voice_order={}, off_episodes=off,
-                         markup=markup)
+                         players=PRIORITY, player_groups=NO_GROUPS, sources=SOURCES, voice_order={}, off_episodes=off)
     inputs = Inputs(online, (), choices, frozenset(failed))
     return {(each.season, each.episode): each for each in references_of(inputs, plan(inputs))}
 
 
-def order(level: Level, *variants):
+def order(level: Level, *variants, lever: str = REFERENCE_ORDER):
     return [EpisodeSettings(season=1, episode=1, levers=[EffectiveLever(
-        lever=REFERENCE_ORDER, value=[{"group": g, "source_id": s, "player": p} for g, s, p in variants], level=level)])]
+        lever=lever, value=[{"group": g, "source_id": s, "player": p} for g, s, p in variants], level=level)])]
 
 
 def test_the_head_of_the_rule_is_the_reference_by_the_levels_above():
@@ -78,8 +77,15 @@ def test_an_episode_switched_off_is_off():
 def test_with_a_markup_reference_the_reference_is_its_row_and_the_picture_is_the_higher_one():
     rows = [row(1, 1, "pva", 1, 1, player="vk", height=2160, voice="ПВА"),
             row(1, 3, "orig", 1, 1, player="cvh", height=1080, voice="Оригинал")]
-    found = told(rows, markup=3)[(1, 1)]
+    found = told(rows, order(Level.SERIES, ("Оригинал", 3, "cvh"), lever=MARKUP_ORDER))[(1, 1)]
     assert (found.source_id, found.row_key, found.markup) == (3, "orig", True)
     assert found.picture.model_dump() == {"source_id": 1, "player": "vk", "height": 2160, "voice_group": "ПВА"}
     plain = told(rows)[(1, 1)]
     assert (plain.row_key, plain.markup, plain.picture) == ("pva", False, None)
+
+
+def test_a_markup_lever_with_only_its_default_follows_the_reference():
+    rows = [row(1, 1, "pva", 1, 1, player="vk", height=2160, voice="ПВА"),
+            row(1, 3, "orig", 1, 1, player="cvh", height=1080, voice="Оригинал")]
+    found = told(rows, order(Level.DEFAULT, lever=MARKUP_ORDER))[(1, 1)]
+    assert (found.row_key, found.markup, found.picture) == ("pva", False, None)

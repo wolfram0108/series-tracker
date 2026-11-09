@@ -183,7 +183,7 @@ def build_router(gw) -> APIRouter:  # gw: GatewayModule
     @r.post("/api/series/{series_id}/output/settings/reset", response_model=OkResponse,
             response_model_exclude_none=True, responses=_ERR)
     async def reset_output_settings(series_id: int, body: OutputSettingsReset):
-        """Takes the levers of a level (or the one named) back to the level above."""
+        """Takes the levers of a level (or the one named, or those of the queue named) back to the level above."""
         command = _contract(SettingsReset, series_id=series_id, **body.model_dump())
         try:
             async with admitted(gw, series_id):

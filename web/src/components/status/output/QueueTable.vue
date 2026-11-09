@@ -26,7 +26,8 @@ const keyOf = (row: QueueRow): string => JSON.stringify([row.group, row.source_i
 const isFirst = (row: QueueRow, rows: readonly QueueRow[]): boolean => rows.find((each) => each.allowed) === row
 
 const markOf = (row: QueueRow, rows: readonly QueueRow[]): string => !row.allowed ? t("output.queue.skipped")
-  : isFirst(row, rows) ? t(props.queue === "reference" ? "output.queue.reference" : "output.queue.taken") : ""
+  : isFirst(row, rows) ? t(props.queue === "reference" ? "output.queue.reference"
+    : props.queue === "markup" ? "output.queue.markup" : "output.queue.taken") : ""
 const height = (row: QueueRow): string => row.height == null ? "—"
   : t(props.level ? "output.heightUpTo" : "output.height", { height: row.height })
 const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" : t(`output.level.${row.allowed_level}`)
@@ -41,7 +42,7 @@ const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" 
         <th>{{ t("output.queue.source") }}</th>
         <th>{{ t("output.queue.player") }}</th>
         <th>{{ t("output.queue.height") }}</th>
-        <th v-if="queue === 'reference'">{{ t("output.queue.group") }}</th>
+        <th v-if="queue !== 'voice'">{{ t("output.queue.group") }}</th>
         <th v-if="level">{{ t("output.queue.episodes") }}</th>
         <th />
       </tr>
@@ -61,10 +62,10 @@ const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" 
           <td><span class="queue-source"><SourceMark :mark="marks[row.source_id]" /><span class="queue-place">{{ marks[row.source_id]?.place }}</span></span></td>
           <td class="queue-player">{{ row.player_label }}</td>
           <td>{{ height(row) }}</td>
-          <td v-if="queue === 'reference'">{{ row.group }}</td>
+          <td v-if="queue !== 'voice'">{{ row.group }}</td>
           <td v-if="level">{{ row.episodes }}</td>
           <td class="queue-mark-cell"><span class="queue-mark">
-            <span v-if="markOf(row, items)" class="pill" :class="row.allowed ? (queue === 'reference' ? 'pill-primary' : 'pill-success') : 'pill-secondary'">{{ markOf(row, items) }}</span>
+            <span v-if="markOf(row, items)" class="pill" :class="row.allowed ? (queue !== 'voice' ? 'pill-primary' : 'pill-success') : 'pill-secondary'">{{ markOf(row, items) }}</span>
             <span v-if="levelOf(row)" class="queue-level">{{ levelOf(row) }}</span>
           </span></td>
         </tr>

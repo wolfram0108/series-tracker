@@ -6,7 +6,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Iterable, Mapping, Sequence
 
-from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW,
+from core.contracts import (COMPILATION_MEMBER, COMPILATION_TAKE, MARKUP_ALLOW, MARKUP_ORDER, REFERENCE_ALLOW, REFERENCE_ORDER,
+                            VOICE_ALLOW,
                             VOICE_ORDER, VOICE_TAKE, CompositionRow, EffectiveLever, Level, RowState, compilation_key,
                             parse_group_target, parse_variant_target)
 from core.voice_names import Groups
@@ -63,13 +64,13 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
                compilation_levers: Iterable[tuple[str, Iterable[EffectiveLever]]], *,
                players: Sequence[str], player_groups: Groups, sources: Sequence[int],
                voice_order: Mapping[int, Sequence[str]],
-               off_episodes: Iterable[tuple[int, int]], titles: Mapping[str, str] | None = None,
-               markup: int | None = None) -> Choices:
+               off_episodes: Iterable[tuple[int, int]], titles: Mapping[str, str] | None = None) -> Choices:
     """What the user chose. `episodes` are the levers of every episode as its levels give them (season, episode, levers),
     `compilation_levers` those of every compilation (its key, levers); `titles` the user's names of the tracks of the
     voice-over groups."""
     by_key = compilations_of(rows, online)
     reference, reference_deny, voice_orders, voice_deny, voice_off, member = {}, {}, {}, {}, {}, {}
+    markup, markup_deny = {}, {}
     own_reference: set = set()
     for season, episode, levers in episodes:
         slot = (season, episode)
@@ -83,6 +84,14 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
                 variant = parse_variant_target(lever.target)
                 if variant is not None:
                     reference_deny[slot] = reference_deny.get(slot, frozenset()) | {variant}
+            elif lever.lever == MARKUP_ORDER and isinstance(lever.value, list) and lever.level != Level.DEFAULT:
+                # A level of the chain has a queue of the markup reference of its own; with none it follows the reference.
+                markup[slot] = tuple((each["group"], each["source_id"], each["player"]) for each in lever.value
+                                     if isinstance(each, dict) and {"group", "source_id", "player"} <= set(each))
+            elif lever.lever == MARKUP_ALLOW and lever.value is False and lever.target:
+                variant = parse_variant_target(lever.target)
+                if variant is not None:
+                    markup_deny[slot] = markup_deny.get(slot, frozenset()) | {variant}
             elif lever.lever == VOICE_ORDER and isinstance(lever.value, list) and lever.target:
                 group = parse_group_target(lever.target)
                 if group is not None:
@@ -104,4 +113,4 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
                    off_episodes=frozenset(off_episodes), off_compilations=off_compilations, reference=reference,
                    reference_deny=reference_deny, voice_order=voice_orders, voice_deny=voice_deny, voice_off=voice_off,
                    member=member, own_reference=frozenset(own_reference), titles=dict(titles or {}),
-                   markup=markup)
+                   markup=markup, markup_deny=markup_deny)

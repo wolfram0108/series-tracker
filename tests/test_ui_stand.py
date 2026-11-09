@@ -447,10 +447,11 @@ async def test_the_name_of_a_track_given_on_its_chip_is_its_title_in_the_file_af
     await expect(page.locator(".output-failure")).to_have_count(0)
 
 
-async def test_a_source_marked_the_markup_reference_lays_the_episode_onto_it_and_its_sound_goes_last(ui):
-    """Stage 14: a high picture (ПВА 2160p) and the original in the right structure (1080p). The user marks the original
-    the markup reference on its card: the sync cuts the picture onto the original's timeline, the original's sound is the
-    last of the file and the card names the markup reference; taking the mark off does no work but the order of sounds."""
+async def test_the_markup_reference_set_in_its_tab_lays_the_episode_onto_it_and_its_sound_goes_last(ui):
+    """Stage 14: a high picture (ПВА 2160p) and the original in the right structure (1080p). In the settings of the series
+    the tab «Эталон» follows the reference until the user moves the original first: the sync cuts the picture onto the
+    original's timeline, the original's sound is the last of the file and the card names the markup reference;
+    «как уровнем выше» makes the markup follow the reference again and does no work but the order of the sounds."""
     ui.site.release("pva", "ПВА")
     ui.site.release("orig", "Оригинал")
     ui.site.release("dub", "AnimeVost")
@@ -460,18 +461,29 @@ async def test_a_source_marked_the_markup_reference_lays_the_episode_onto_it_and
     series_id = await ui.make_series(["pva", "orig", "dub"])
     page = ui.page
     await ui.open_output(SERIES)
-    await ui.tab("Свойства")
-    original = page.locator(".source-card").filter(has=page.locator(f"input[value='{ui.site.releases['orig'].url}']"))
-    switch = original.locator(".markup-switch input")
-    await expect(switch).not_to_be_checked()
-    await original.locator(".markup-switch").click()
-    await expect(switch).to_be_checked()
-    await ui.shot("60-markup-marked")
-    sources = {each["url"]: each for each in (await ui.call("GET", f"/api/series/{series_id}"))["sources"]}
-    assert [each["markup"] for each in sources.values()].count(True) == 1
-    assert sources[ui.site.releases["orig"].url]["markup"] is True
 
-    await ui.tab(text("output.tab"))
+    async def markup_tab():
+        await page.locator(".output-series-settings").click()
+        await page.locator(".st-tab", has_text=text("output.tab.markup")).last.click()
+        rows = page.locator(".level-settings .queue-table .variant-row")
+        await expect(rows).to_have_count(3)
+        return rows, rows.locator("td:nth-child(6)")
+
+    async def close():
+        await page.locator("button.level-footer", has_text="Закрыть").click()
+        await expect(page.locator(".level-settings")).to_have_count(0)
+
+    rows, groups = await markup_tab()
+    await expect(page.locator(".level-settings .queue-follows")).to_have_text(text("output.queue.followsReference"))
+    await expect(groups).to_have_text(["ПВА", "Оригинал", "AnimeVost"])  # the queue of the reference itself
+    async with page.expect_response(lambda response: "/output/queues" in response.url):
+        await rows.nth(1).locator(".order-handle").press("ArrowUp")
+    await expect(groups).to_have_text(["Оригинал", "ПВА", "AnimeVost"])
+    await expect(page.locator(".level-settings .queue-follows")).to_have_count(0)
+    await expect(page.locator(".level-settings .queue-back")).to_have_count(1)
+    await ui.shot("60-markup-set")
+    await close()
+
     await ui.press_sync(series_id)
     card = page.locator(".episode-card[data-episode='1']")
     await expect(card).to_have_class(re.compile("is-ready"))
@@ -484,23 +496,25 @@ async def test_a_source_marked_the_markup_reference_lays_the_episode_onto_it_and
     await expect(card.locator(".is-done")).to_have_count(3)
     await expect(card.locator(".is-done.is-reference")).to_have_count(1)
     await ui.shot("61-markup-synced")
+    sources = {each["url"]: each["id"] for each in (await ui.call("GET", f"/api/series/{series_id}"))["sources"]}
     view = await ui.check(series_id)
     (asset,) = view["assets"]
     video = asset["video"]
-    assert video["cut_of"]["source_id"] == sources[ui.site.releases["pva"].url]["id"]
+    assert video["cut_of"]["source_id"] == sources[ui.site.releases["pva"].url]
     (goal,) = view["episodes"]
-    assert goal["video"]["row"]["source_id"] == sources[ui.site.releases["orig"].url]["id"]  # the timeline
+    assert goal["video"]["row"]["source_id"] == sources[ui.site.releases["orig"].url]  # the timeline
     held = await mkv.contents(os.path.join(ui.library, asset["name"]))
     assert [each.label for each in held.audio][-1] == "Оригинал"
     jobs = len(ui.daemon.jobs)
 
-    await ui.tab("Свойства")
-    await original.locator(".markup-switch").click()
-    await expect(switch).not_to_be_checked()
-    await ui.tab(text("output.tab"))
+    await markup_tab()
+    async with page.expect_response(lambda response: "/output/queues" in response.url):
+        await page.locator(".level-settings .queue-back").click()
+    await expect(page.locator(".level-settings .queue-follows")).to_have_count(1)
+    await close()
     await ui.press_sync(series_id)
     await expect(card.locator(".card-ref-shown .ref-markup")).to_have_count(0)
     view = await ui.check(series_id)
     (after,) = view["assets"]
     assert after["video"] == video and len(ui.daemon.jobs) == jobs  # no cut, no alignment: only the order of the sounds
-    await ui.shot("62-markup-taken-off")
+    await ui.shot("62-markup-follows-again")

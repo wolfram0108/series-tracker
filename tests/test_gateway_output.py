@@ -188,9 +188,10 @@ async def test_a_level_is_reset_with_the_series_of_the_path(tmp_path):
             "season": 2, "episode": 3, "lever": "voice.order", "target": "group:Group"})
     assert response.status_code == 200 and response.json() == {"success": True}
     assert owners.asked("composition.settings.reset") == [
-        {"series_id": 1, "season": 2, "episode": None, "compilation": None, "lever": None, "target": None},
-        {"series_id": 1, "season": None, "episode": None, "compilation": None, "lever": None, "target": None},
-        {"series_id": 1, "season": 2, "episode": 3, "compilation": None, "lever": "voice.order", "target": "group:Group"}]
+        {"series_id": 1, "season": 2, "episode": None, "compilation": None, "lever": None, "target": None, "queue": None},
+        {"series_id": 1, "season": None, "episode": None, "compilation": None, "lever": None, "target": None, "queue": None},
+        {"series_id": 1, "season": 2, "episode": 3, "compilation": None, "lever": "voice.order", "target": "group:Group",
+         "queue": None}]
 
 
 async def test_a_reset_the_registry_refuses_is_a_400_with_the_code(tmp_path):
@@ -252,7 +253,7 @@ async def test_a_request_for_the_sources_only_reaches_composition_as_it_is(tmp_p
 
 async def test_the_queues_of_a_level_are_the_answer_of_composition(tmp_path):
     queues = {"series_id": 1, "season": 4, "episode": 11, "compilation": None, "reference": {"rows": [], "order_level": "default"},
-              "groups": []}
+              "groups": [], "markup": {"rows": [], "order_level": "default"}, "markup_follows": True}
     async with serving(tmp_path, {"composition.queues.get": queues}) as (client, owners, _, spy):
         response = await client.get("/api/series/1/output/queues", params={"season": 4, "episode": 11})
         alone = await client.get("/api/series/1/output/queues", params={"episode": 11})

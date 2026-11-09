@@ -388,7 +388,7 @@ class Chaos:
                "wrong_number", "higher", "swap_video", "delete_video", "delete_track", "off", "on", "off_group",
                "off_compilation", "reference_order", "shuffle_voices", "title", "read_fail", "download_fail", "transient",
                "answer", "cut_answer", "lose_file", "reset", "reference_deny", "voice_order", "voice_deny", "voice_off",
-               "member", "levers_reset", "put_parts", "markup", "put_high")
+               "member", "levers_reset", "put_parts", "markup", "markup_deny", "put_high")
 
     def __init__(self, world: World, rng, seasons=(1, 2), episodes=(1, 2, 3, 4), reference: str = "AniStar",
                  groups: tuple[str, ...] | None = None, actions: tuple[str, ...] | None = None) -> None:
@@ -492,15 +492,25 @@ class Chaos:
                 world.put(rng.choice((1, 3)), self._key("p"), episode, season=season, group=self.reference,
                           player=rng.choice(("vk", "cvh")), part=part)
                 world.put(2, self._key("q"), episode, season=season, group=rng.choice(self.groups), player="kodik", part=part)
-        elif action == "markup":
-            # The owner marks a source the markup reference, moves the mark or takes it off (stage 14).
-            world.choose(markup=rng.choice((None, 1, 3)))
+        elif action in ("markup", "markup_deny"):
+            # The owner gives the series or an episode a queue of the markup reference of its own, leaves a variant out of
+            # it, or takes the queue back: the markup follows the reference again (stage 14).
+            variants = sorted({each.row.variant for _, each in rows if not each.row.compilation}) or [(self.reference, 3, "cvh")]
+            variant = rng.choice(variants)
+            if action == "markup_deny":
+                world.choose(markup_deny={**world.choices.markup_deny, (season, episode): frozenset({variant})})
+            else:
+                kind = rng.choice(("back", "series", "episode"))
+                world.choose(markup={} if kind == "back" else {**world.choices.markup, (season, episode): (variant,)}
+                             if kind == "episode" else {(each, number): (variant,) for each in self.seasons
+                                                        for number in self.episodes})
         elif action == "put_high":
             # A single video higher than the references: a picture to cut onto the timeline of the markup reference.
             world.put(rng.choice((1, 3)), self._key("h"), episode, season=season, group=rng.choice((self.reference, "A")),
                       player="vk", height=2160)
         elif action == "levers_reset":
-            world.choose(reference={}, reference_deny={}, voice_order={}, voice_deny={}, voice_off={}, member={})
+            world.choose(reference={}, reference_deny={}, voice_order={}, voice_deny={}, voice_off={}, member={}, markup={},
+                         markup_deny={})
         elif action == "shuffle_voices":
             voices = [self.reference, *self.groups]
             rng.shuffle(voices)

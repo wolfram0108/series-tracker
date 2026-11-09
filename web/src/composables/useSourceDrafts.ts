@@ -28,7 +28,7 @@ interface Draft {
   handled: PageStatus | null
 }
 
-export type DraftPatch = Partial<Pick<SourceItem, "url" | "profileId" | "vibixSeason" | "playersOff">> & { markup?: boolean }
+export type DraftPatch = Partial<Pick<SourceItem, "url" | "profileId" | "vibixSeason" | "playersOff">>
 /** `kind`: the address is no site's, so it is not a video source (the window goes on as with a torrent). */
 export type AddOutcome = { kind: "added" } | { kind: "other" } | { kind: "refused"; text: string }
 
@@ -53,7 +53,6 @@ export function useSourceDrafts() {
     vibixSeason: draft.vibixSeason,
     playersOff: draft.playersOff,
     color: null,
-    markup: null,
     view: viewOf({
       summary: draft.summary, playersOff: draft.playersOff, rows: draft.rows, live: tables.forUrl(draft.canonical),
       asked: draft.asked,

@@ -130,14 +130,6 @@ async function copyAddress(): Promise<void> {
         />
       </StGroup>
       <small v-if="item.profileId === null && !isTorrent" class="muted">{{ t("sources.profile.hint") }}</small>
-      <div v-if="item.markup !== null && !isTorrent" class="source-markup">
-        <span class="source-markup-name">{{ t("sources.markup.label") }}</span>
-        <small class="muted">{{ t("sources.markup.hint") }}</small>
-        <PowerSwitch
-          class="markup-switch" :on="item.markup" :busy="busy" :label="t(item.markup ? 'sources.markup.off' : 'sources.markup.on')"
-          @toggle="emit('change', { markup: $event })"
-        />
-      </div>
       <div v-if="view.reason" class="source-reason">{{ reasonText(view.reason) }}</div>
       <div v-for="line in view.unread" :key="line" class="source-reason" :title="t('sources.unread.hint')">{{ line }}</div>
 
@@ -235,9 +227,6 @@ async function copyAddress(): Promise<void> {
 .source-actions .action-btn:disabled { opacity: 0.5; cursor: default; }
 .source-body { padding: var(--space); }
 .source-reason { color: var(--color-red-1); overflow-wrap: anywhere; }
-.source-markup { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.9rem; font-size: 0.875rem; }
-.source-markup-name { font-weight: 600; color: #2c3e50; }
-.markup-switch { margin-inline-start: auto; }
 .muted { color: var(--text-muted); font-size: smaller; }
 .player-tabs { flex-wrap: wrap; align-self: flex-start; }
 .player-tab { padding-block: 0.3rem; font-size: 0.85rem; }

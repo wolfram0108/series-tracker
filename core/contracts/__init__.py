@@ -11,7 +11,7 @@ from .composition import (CompositionChanged, CompositionFailed, CompositionGetR
 from .compilation import (Absence, CompilationEpisode, CompilationRef, CompilationView, compilation_key,
                           parse_compilation_key)
 from .conform_settings import ConformSettingsDraft, ConformSettingsSaved, ConformSettingsView
-from .output_settings import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, GroupQueue, GroupVariant, PlayerVariant, Queue, QueueRow, QueueView, QueuesGet, QueuesReply, EffectiveLever, EpisodeSettings, LeverSpec,
+from .output_settings import (COMPILATION_MEMBER, COMPILATION_TAKE, LEVER_FORMS, MARKUP_ALLOW, MARKUP_ORDER, REFERENCE_ALLOW, REFERENCE_ORDER, VOICE_ALLOW, VOICE_ORDER, VOICE_TAKE, GroupQueue, GroupVariant, PlayerVariant, Queue, QueueRow, QueueView, QueuesGet, QueuesReply, EffectiveLever, EpisodeSettings, LeverSpec,
                               Level, LevelSettings, SettingRecord, SettingsReset, SettingsSet,
                               TargetKind, ValueShape, group_target, parse_group_target, parse_variant_target, variant_target)
 from .reference import CutPicture, OutputSwitch, Reference, ReferenceChanged, ReferenceMark
@@ -39,7 +39,7 @@ __all__ = ["Absence", "CompilationEpisode", "CompilationRef", "CompilationView",
            "CompositionChanged", "CompositionFailed", "CompositionGetRequest", "CompositionPreviewReply", "CompositionPreviewRequest",
            "CompositionReply", "CompositionRow", "PreviewLine", "SeasonVoiceOrder", "VoiceOrderSet", "VoiceSpan", "VoiceTitleSet",
            "EpisodeRef", "Exclusion", "PlayerSummary", "SourceStatus", "SourceSummary",
-           "REFERENCE_ALLOW", "REFERENCE_ORDER", "VOICE_ALLOW", "VOICE_ORDER", "VOICE_TAKE", "GroupQueue", "GroupVariant", "PlayerVariant", "Queue", "QueueRow", "QueueView", "QueuesGet", "QueuesReply", "EffectiveLever", "EpisodeSettings", "LeverSpec", "Level", "LevelSettings", "SettingRecord", "SettingsReset", "SettingsSet",
+           "MARKUP_ALLOW", "MARKUP_ORDER", "REFERENCE_ALLOW", "REFERENCE_ORDER", "VOICE_ALLOW", "VOICE_ORDER", "VOICE_TAKE", "GroupQueue", "GroupVariant", "PlayerVariant", "Queue", "QueueRow", "QueueView", "QueuesGet", "QueuesReply", "EffectiveLever", "EpisodeSettings", "LeverSpec", "Level", "LevelSettings", "SettingRecord", "SettingsReset", "SettingsSet",
            "TargetKind", "ValueShape",
            "group_target", "parse_group_target", "parse_variant_target", "variant_target",
            "CutPicture", "OutputSwitch", "Reference", "ReferenceChanged", "ReferenceMark",

@@ -77,6 +77,9 @@ const PILL: Record<EpisodeStatus, string> = {
         <button type="button" class="st-tab" :class="{ active: tab === 'reference' }" role="tab" :aria-selected="tab === 'reference'" @click="tab = 'reference'">
           {{ t("output.tab.reference") }}
         </button>
+        <button type="button" class="st-tab" :class="{ active: tab === 'markup' }" role="tab" :aria-selected="tab === 'markup'" @click="tab = 'markup'">
+          {{ t("output.tab.markup") }}
+        </button>
         <button
           v-for="(group, index) in groups" :key="group" type="button" class="st-tab" :class="{ active: tab === group }" role="tab"
           :aria-selected="tab === group" @click="tab = group"
@@ -96,6 +99,12 @@ const PILL: Record<EpisodeStatus, string> = {
         :hint="compilations ? t('output.queue.hintRef2') : undefined"
         @order="emit('order', 'reference', null, $event)" @allow="(row, allowed) => emit('allow', 'reference', row, allowed)"
         @reset="emit('reset', 'reference', null)"
+      />
+      <QueuePanel
+        v-else-if="tab === 'markup'" queue="markup" level="episode" :view="queues?.markup" :follows="queues?.markup_follows"
+        :marks="marks" :busy="busy"
+        @order="emit('order', 'markup', null, $event)" @allow="(row, allowed) => emit('allow', 'markup', row, allowed)"
+        @reset="emit('reset', 'markup', null)"
       />
       <QueuePanel
         v-else queue="voice" level="episode" :view="groupQueue(tab)" :marks="marks" :busy="busy" :from-reference="tab === referenceGroup"

@@ -103,7 +103,6 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     ...(patch.profileId !== undefined && { parser_profile_id: patch.profileId }),
     ...(patch.vibixSeason !== undefined && { vibix_season: patch.vibixSeason }),
     ...(patch.playersOff !== undefined && { players_off: patch.playersOff }),
-    ...(patch.markup !== undefined && { markup: patch.markup }),
   })
 
   async function change(id: string | number, patch: DraftPatch): Promise<void> {
@@ -111,8 +110,6 @@ export function useSeriesSources(seriesId: number, kind: "torrent" | "video", in
     if (!source) return
     const done = await act(() => changeSource(seriesId, source.id, fieldsOf(patch)))
     if (!done) return
-    // The mark of the markup reference is one per series: marking one unmarks another, which the core tells.
-    if (patch.markup !== undefined) return void await load()
     Object.assign(source, fieldsOf(patch))
     if (patch.url !== undefined) {
       const rest = { ...canonical.value }

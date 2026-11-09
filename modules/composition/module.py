@@ -43,11 +43,16 @@ Queries:
       each with the answer of the profile when one is given.
   composition.queues.get {series_id, season?, episode?} → QueuesReply: the queue of the reference and of the voice-over of
       each group of a level, in the order the core tries their variants (`core.variant_queue`), with the value and the
-      level of every lever of the level that acts on them (`queues.py`). The order of players is asked of voices.
+      level of every lever of the level that acts on them (`queues.py`). The order of players is asked of voices. Also the
+      queue of the markup reference (stage 14) and `markup_follows`: with no `markup.order` on the chain of levels it is
+      the queue of the reference itself.
   composition.settings.set {series_id, season?, episode?, lever, target?, value} → {ok}: sets the value of a lever
       at a level. Refused with ValueError(reason) — `unknown_lever`, `bad_target` or `bad_value` — and nothing is stored.
-  composition.settings.reset {series_id, season?, episode?, lever?, target?} → {ok}: the levers of the level (or the
-      one named) go back to the level above. Refused the same way when the lever or the target is not the registry's.
+      The first edit of the markup reference on a level that follows the reference writes the queue shown (the order of
+      the reference and the variants it leaves out) with the edit, in one write.
+  composition.settings.reset {series_id, season?, episode?, lever?, target?, queue?} → {ok}: the levers of the level
+      (or the one named, or those of the queue named) go back to the level above. Refused the same way when the lever or
+      the target is not the registry's.
 
 Events (outgoing):
   composition.changed {series_id, rev, episodes, summary_only} — the layout, its summaries or the settings changed.
@@ -91,11 +96,11 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from core import BaseModule
-from core.contracts import (COMPILATION_MEMBER, REFERENCE_ORDER, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
+from core.contracts import (COMPILATION_MEMBER, MARKUP_ALLOW, MARKUP_ORDER, REFERENCE_ORDER, SettingRecord, variant_target, RUN_CHANGED, parse_compilation_key, VOICE_ORDER, RunChanged, RunSnapshot, availability, parse_group_target, CompositionChanged, CompositionFailed, CompositionGetRequest, CompositionPreviewReply,
                             CompositionPreviewRequest, CompositionReply, EpisodeRef, EpisodeSettings,
                             GroupsResolveReply, GroupsResolveRequest, PreviewLine, ReleaseTable, RowState, RulesApplyReply,
                             RuleLine, RulesApplyRequest, RulesProfileChanged, SeriesSource, SettingsReset, SettingsSet,
-                            QueuesGet, QueuesReply, SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState,
+                            QueuesGet, QueuesReply, SourceEvent, SourceStatus, SourceType, TableGetReply, TableGetRequest, TableState,
                             VoiceOrderSet, VoiceSettingsView, VoiceTitleSet)
 from core.db import Database
 from core.envelope import Envelope
@@ -108,6 +113,8 @@ from .project import SourceInput
 from .repository import CompositionRepository, StoredSource
 
 OWNER = "composition"
+# The fields of a source that change what is read of its page: a change of any other is no new read.
+READ_FIELDS = frozenset({"url", "players_off", "vibix_season"})
 
 
 class _Unavailable(Exception):
@@ -240,31 +247,37 @@ class CompositionModule(BaseModule):
         of sources, and the same levers the choice of the reference and the plan of voice-overs read."""
         request = QueuesGet.model_validate(env.payload)
         stored = await self.repo.stored(request.series_id)
+        lines, levers, order, groups = await self._level_of(stored, settings.canonical(stored.records), request)
+        reference, by_group = queues.build(lines, levers, order, groups, request.episode)
+        markup, follows = queues.markup(lines, levers, order, request.episode)
+        return QueuesReply(series_id=request.series_id, season=request.season, episode=request.episode,
+                           compilation=request.compilation, reference=reference, groups=by_group, markup=markup,
+                           markup_follows=follows).model_dump(mode="json")
+
+    async def _level_of(self, stored, records, scope) -> tuple[list, list, Order, list[str]]:
+        """The lines of a level, its levers as it inherits them, the order of players and sources and the groups of its
+        tracks: what its queues are made of."""
         voices = VoiceSettingsView.model_validate(await self.request("voices.settings.get", {}))
         order = Order(tuple(voices.priority), {each.summary.source_id: place for place, each in enumerate(stored.sources)},
                       Groups.of(voices.player_groups))
         orders = project.season_orders(stored.orders, stored.rows, {})
-        groups = (orders.get(request.season, []) if request.season is not None
+        groups = (orders.get(scope.season, []) if scope.season is not None
                   else [label for season in sorted(orders) for label in orders[season]])
-        records = settings.canonical(stored.records)
-        lines = availability.lines_of_level(stored.rows, request.season, request.episode)
-        compilation = request.compilation
-        if request.episode is not None and compilation is None:
+        lines = availability.lines_of_level(stored.rows, scope.season, scope.episode)
+        compilation = scope.compilation
+        if scope.episode is not None and compilation is None:
             # An episode inherits from the compilation it stands in: its queues read the levers of that level.
             member = compilations.resolve(stored.rows, records, _source_order(stored)).members.get(
-                (request.season, request.episode))
+                (scope.season, scope.episode))
             compilation = member.key if member is not None else None
         elif compilation is not None:
             found = parse_compilation_key(compilation)
-            if found is None or found[3] != request.season:
+            if found is None or found[3] != scope.season:
                 raise ValueError(reason("bad_target", lever=""))
             lines = [row for row in lines if row.episode_start is not None and found[4] <= row.episode_start <= found[5]
                      and not row.is_compilation]
-        reference, by_group = queues.build(
-            lines, settings.effective(records, request.season, request.episode, compilation),
-            order, list(dict.fromkeys(groups)), request.episode)
-        return QueuesReply(series_id=request.series_id, season=request.season, episode=request.episode,
-                           compilation=request.compilation, reference=reference, groups=by_group).model_dump(mode="json")
+        return (lines, settings.effective(records, scope.season, scope.episode, compilation), order,
+                list(dict.fromkeys(groups)))
 
     async def on_voice_order_set(self, env: Envelope) -> dict:
         """The user's order of the voice-overs of a season: the order of the tracks in its containers (ЭТАП_11). It is a
@@ -392,7 +405,32 @@ class CompositionModule(BaseModule):
             if not compilations.fits(stored.rows, settings.canonical(stored.records), record.season, record.episode,
                                      record.value, _source_order(stored)):
                 raise ValueError(reason("compilation_not_better"))
+        if record.lever in (MARKUP_ORDER, MARKUP_ALLOW):
+            return await self._set_markup(record)
         return await self._edit(record.series_id, lambda records: settings.apply_set(records, record))
+
+    async def _set_markup(self, record: SettingsSet) -> dict:
+        """A lever of the markup reference (stage 14). While the level follows the reference, the first edit makes its
+        queue its own: the queue of the reference as the level shows it — its order and the variants it leaves out — is
+        written as the order of the markup reference, then the edit; from then on the two queues are apart."""
+        stored = await self.repo.stored(record.series_id)
+        lines, levers, order, _ = await self._level_of(stored, settings.canonical(stored.records), record)
+        copied: list[SettingRecord] = []
+        if queues.follows_reference(levers):
+            shown, _ = queues.markup(lines, levers, order, record.episode)
+            scope = dict(series_id=record.series_id, season=record.season, episode=record.episode,
+                         compilation=record.compilation)
+            copied.append(SettingRecord(**scope, lever=MARKUP_ORDER, value=[
+                {"group": row.group, "source_id": row.source_id, "player": row.player} for row in shown.rows]))
+            copied += [SettingRecord(**scope, lever=MARKUP_ALLOW, target=variant_target(row.group, row.source_id, row.player),
+                                     value=False) for row in shown.rows if not row.allowed]
+
+        def change(records):
+            for each in copied:
+                records = settings.apply_set(records, each)
+            return settings.apply_set(records, record)
+
+        return await self._edit(record.series_id, change)
 
     def _require_editable(self, series_id: int) -> None:
         """A lever of a series whose sync is under way is not changed: the sync works by what it found (the table of
@@ -403,14 +441,16 @@ class CompositionModule(BaseModule):
     async def _require_pickable(self, record: SettingsSet) -> None:
         """A variant is put into the order of the reference, or of a group, only where the table of what is allowed lets
         it: the same rule the window lists the variants of a queue by."""
-        if not isinstance(record.value, list) or not record.value or record.lever not in (REFERENCE_ORDER, VOICE_ORDER):
+        if not isinstance(record.value, list) or not record.value or record.lever not in (REFERENCE_ORDER, MARKUP_ORDER,
+                                                                                          VOICE_ORDER):
             return
-        action = availability.Action.CHOOSE_REFERENCE if record.lever == REFERENCE_ORDER else availability.Action.PREFER_VARIANT
+        single = record.lever in (REFERENCE_ORDER, MARKUP_ORDER)
+        action = availability.Action.CHOOSE_REFERENCE if single else availability.Action.PREFER_VARIANT
         stored = await self.repo.stored(record.series_id)
         # The state is that of the level the setting is for, as the window shows it: the lines of that season or episode.
         lines = availability.lines_of_level(stored.rows, record.season, record.episode)
         for item in record.value:
-            group = item.get("group") if record.lever == REFERENCE_ORDER else parse_group_target(record.target or "")
+            group = item.get("group") if single else parse_group_target(record.target or "")
             found = [row for row in lines if row.voice_label == group and row.source_id == item.get("source_id")
                      and row.player == item.get("player")]
             availability.require(action, availability.variant_state(found))
@@ -464,8 +504,11 @@ class CompositionModule(BaseModule):
         self.publish_event("series.purged", {"series_id": series_id, "owner": OWNER})
 
     def on_source_changed(self, env: Envelope) -> None:
-        refresh = () if env.topic.endswith(".removed") else (env.payload["source_id"],)
-        self._schedule(env.payload["series_id"], refresh)
+        """A source came, went or changed: the layout is counted again. Its page is read anew only when it is new or an
+        update changed what is read of it; any other field (its profile, its place, its colour) needs no read."""
+        event = SourceEvent.model_validate(env.payload)
+        fresh = env.topic.endswith(".added") or (env.topic.endswith(".updated") and bool(set(event.changed) & READ_FIELDS))
+        self._schedule(event.series_id, (event.source_id,) if fresh else ())
 
     def on_table_ready(self, env: Envelope) -> None:
         self._wake(env.payload["url"])

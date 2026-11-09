@@ -64,10 +64,3 @@ def test_two_parts_of_one_voice_over_are_two_rows_and_a_part_is_one_row(conn):
     conn.execute(add, (2,))
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(add, (2,))
-
-
-def test_a_series_has_at_most_one_markup_reference(conn):
-    conn.execute("INSERT INTO series_sources (series_id, url, source_type, markup) VALUES (5, 'a', 'web_video', 1)")
-    conn.execute("INSERT INTO series_sources (series_id, url, source_type, markup) VALUES (5, 'b', 'web_video', 0)")
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute("UPDATE series_sources SET markup = 1 WHERE url = 'b'")

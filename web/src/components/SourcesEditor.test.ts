@@ -12,7 +12,7 @@ vi.mock("../composables/sourceAddress")
 const PAGE = "https://1.ruchime.org/release/test"
 const stored = (over: Partial<SeriesSource> = {}): SeriesSource => ({
   id: 7, series_id: 1, position: 0, url: PAGE, source_type: "web_video", parser_profile_id: null,
-  vibix_season: null, players_off: [], color: 0, markup: false, ...over,
+  vibix_season: null, players_off: [], color: 0, ...over,
 })
 const summary: SourceSummary = {
   source_id: 7, url: PAGE, status: "no_profile", read_at: "2026-11-01T10:00:00Z", players: [
@@ -97,16 +97,6 @@ describe("SourcesEditor", () => {
     await w.findAll(".player-tab")[0].trigger("click")
     await w.find(".player-switch input").setValue(false)
     expect(w.emitted("change")?.[0]).toEqual([7, { playersOff: ["kodik", "vk"] }])
-  })
-
-  it("marks a stored source the markup reference, and has no such switch for a draft", async () => {
-    const w = mountEditor([itemOfSource(stored(), summary, null)])
-    await w.find(".markup-switch input").setValue(true)
-    expect(w.emitted("change")?.[0]).toEqual([7, { markup: true }])
-    const marked = mountEditor([itemOfSource(stored({ markup: true }), summary, null)])
-    expect((marked.find(".markup-switch input").element as HTMLInputElement).checked).toBe(true)
-    const draft = mountEditor([{ ...itemOfSource(stored(), summary, null), markup: null }])
-    expect(draft.find(".markup-switch").exists()).toBe(false)
   })
 
   it("asks to remove a source by its id", async () => {

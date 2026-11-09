@@ -20,7 +20,9 @@ const props = withDefaults(defineProps<{
   busy?: boolean
   /** The words over the queue, when they are not those of its kind (REF 2 of a compilation, stage 12). */
   hint?: string
-}>(), { fromReference: false, busy: false, hint: undefined })
+  /** The queue of the markup reference follows the reference: no level has an order of its own (stage 14). */
+  follows?: boolean
+}>(), { fromReference: false, busy: false, hint: undefined, follows: false })
 
 const emit = defineEmits<{
   (e: "order", rows: QueueRow[]): void
@@ -31,7 +33,8 @@ const emit = defineEmits<{
 
 const own = computed(() => props.view?.order_level === props.level)
 const hint = computed(() => props.hint ?? (props.queue === "reference" ? t("output.queue.hintReference")
-  : t("output.queue.hintVoice", { group: props.view?.group ?? "" })))
+  : props.queue === "markup" ? t(props.follows ? "output.queue.hintMarkupFollows" : "output.queue.hintMarkup")
+    : t("output.queue.hintVoice", { group: props.view?.group ?? "" })))
 </script>
 
 <template>
@@ -45,7 +48,8 @@ const hint = computed(() => props.hint ?? (props.queue === "reference" ? t("outp
         {{ t("output.queue.takeVoice") }}
         <span v-if="view.take_level && view.take_level !== 'default'" class="queue-level">{{ t(`output.level.${view.take_level}`) }}</span>
       </label>
-      <span v-if="view" class="queue-level" :class="{ 'is-own': own }">{{ t(`output.level.${view.order_level}`) }}</span>
+      <span v-if="view && follows" class="queue-level queue-follows">{{ t("output.queue.followsReference") }}</span>
+      <span v-else-if="view" class="queue-level" :class="{ 'is-own': own }">{{ t(`output.level.${view.order_level}`) }}</span>
       <button v-if="own" type="button" class="queue-back" data-lever :disabled="busy" @click="emit('reset')">{{ t("output.lever.reset") }}</button>
     </div>
     <p v-if="fromReference" class="queue-note">{{ t("output.queue.fromReference") }}</p>

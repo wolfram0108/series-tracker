@@ -12,7 +12,7 @@ from core.reasons import reason
 REMOVED_FIELDS = ("url", "source_type", "parser_profile_id", "vk_search_mode", "vk_quality_priority")
 
 # What a caller may write to a source; `id` and `series_id` belong to the table.
-SOURCE_FIELDS = ("position", "url", "source_type", "parser_profile_id", "vibix_season", "players_off", "markup")
+SOURCE_FIELDS = ("position", "url", "source_type", "parser_profile_id", "vibix_season", "players_off")
 
 
 def kind_of_type(source_type: str) -> str:
@@ -71,8 +71,6 @@ def checked_sources(raw: object) -> list[dict]:
     for index, source in enumerate(raw):
         drafts.append({"position": index, **checked_fields(source)})
     refuse_mixed_kinds([draft["source_type"] for draft in drafts])
-    if sum(bool(draft.get("markup")) for draft in drafts) > 1:
-        raise ValueError(reason("markup_twice"))
     urls = [draft["url"] for draft in drafts]
     for url in urls:
         if urls.count(url) > 1:

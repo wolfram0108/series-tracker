@@ -32,9 +32,6 @@ class SeriesSource(BaseModel):
     players_off: list[str] = Field(default_factory=list)
     # The colour of the source in its series (0–15 of the palette of the interface): given once when it comes, kept by it.
     color: int = 0
-    # The owner's markup reference of the series (stage 14): its episodes give the timeline every video is laid on.
-    # At most one source of a series is it; marking one unmarks the other.
-    markup: bool = False
 
 
 class SourceEvent(BaseModel):
@@ -44,6 +41,9 @@ class SourceEvent(BaseModel):
     series_id: int
     source_id: int
     source: SeriesSource | None = None
+    # The fields an update changed: whoever reads the page of the source reads it again only for those that change what
+    # is read (the address, the players, the season of a catalog).
+    changed: list[str] = Field(default_factory=list)
 
 
 class SourceChanged(SourceEvent):

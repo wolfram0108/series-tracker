@@ -44,7 +44,9 @@ def validate(record: SettingRecord) -> str | None:
 
 
 def validate_reset(scope: SettingsReset) -> str | None:
-    """None when a reset names no lever, or a lever of the registry with the target it points at."""
+    """None when a reset names no lever, a queue, or a lever of the registry with the target it points at."""
+    if scope.queue is not None:
+        return None if scope.target is None else reason("bad_target", lever="")
     if scope.lever is None:
         return reason("bad_target", lever="") if scope.target is not None else None
     lever = levers.get(scope.lever)
@@ -96,8 +98,12 @@ def apply_reset(records: Sequence[SettingRecord], scope: SettingsReset) -> list[
     level = (scope.series_id, scope.season, scope.episode, scope.compilation)
 
     def gone(each: SettingRecord) -> bool:
-        return (each.series_id, each.season, each.episode, each.compilation) == level and (
-            scope.lever is None or (each.lever, each.target) == (scope.lever, scope.target))
+        if (each.series_id, each.season, each.episode, each.compilation) != level:
+            return False
+        if scope.queue is not None:
+            lever = levers.get(each.lever)
+            return lever is not None and lever.queue == scope.queue
+        return scope.lever is None or (each.lever, each.target) == (scope.lever, scope.target)
 
     return canonical([each for each in records if not gone(each)])
 

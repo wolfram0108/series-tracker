@@ -10,9 +10,15 @@ from plan_world import Chaos, World
 
 PVA, ORIGINAL = "ПВА", "Оригинал"
 PICTURE, MARKUP, DUBS, OTHER = 1, 3, 2, 5  # the sources: the high picture, the markup reference, voice-overs, a second original
+THE_ORIGINAL = (ORIGINAL, MARKUP, "cvh")  # the variant the owner puts first in the queue of the markup reference
 
 
-def world_of(*, markup: int | None = MARKUP, dubs: int = 2, episodes=(1,), pva: int = 2160, original: int = 1080) -> World:
+def queue(*variants, episodes=(1, 2, 3)) -> dict:
+    """The queue of the markup reference set on the series: every episode inherits it."""
+    return {(1, episode): tuple(variants) for episode in episodes}
+
+
+def world_of(*, markup: tuple | None = THE_ORIGINAL, dubs: int = 2, episodes=(1,), pva: int = 2160, original: int = 1080) -> World:
     """A series of the owner's kind: a high picture (ПВА) and the original in the right structure, a few voice-overs;
     the order of the season puts the original first, so that its place last is the markup's own rule."""
     world = World()
@@ -23,7 +29,7 @@ def world_of(*, markup: int | None = MARKUP, dubs: int = 2, episodes=(1,), pva: 
         world.put(MARKUP, f"orig{episode}", episode, group=ORIGINAL, player="cvh", height=original)
         for number in range(1, dubs + 1):
             world.put(DUBS, f"g{number}e{episode}", episode, group=f"G{number}", player="kodik")
-    world.choose(markup=markup)
+    world.choose(markup=queue(markup) if markup is not None else {})
     return world
 
 
@@ -72,7 +78,7 @@ def test_marked_when_the_picture_is_already_in_the_library_the_cut_takes_that_fi
     world = world_of(markup=None)
     synced(world, "без эталона")
     assert file_of(world).video.id == row(PICTURE, "pva1")
-    world.choose(markup=MARKUP)
+    world.choose(markup=queue(THE_ORIGINAL))
     step = synced(world, "пометка")
     assert "download_picture" not in op_kinds(step)
     assert step.plan.goal((1, 1)).video.picture is not None
@@ -90,11 +96,11 @@ def test_marked_when_the_markup_is_the_best_video_it_is_the_video_and_its_sound_
     assert sounds_of(container)[-1] == ORIGINAL and container.own_at == len(container.tracks)
 
 
-def test_a_markup_row_of_an_unknown_voice_over_gives_no_timeline():
+def test_a_markup_row_of_an_unknown_voice_over_is_passed_over_for_the_next_of_the_queue():
     world = world_of()
     world.put(MARKUP, "orig1", 1, group=None, player="cvh", height=1080)
     step = synced(world, "озвучка эталона без группы")
-    assert step.plan.goal((1, 1)).markup is None
+    assert step.plan.goal((1, 1)).markup.id == row(PICTURE, "pva1")  # the queue goes on by the rule: the highest
     assert file_of(world).video.id == row(PICTURE, "pva1")
 
 
@@ -111,11 +117,11 @@ def test_a_higher_picture_on_the_same_timeline_only_repacks():
 
 # --- С-4…С-7: failures -------------------------------------------------------------------------------------------
 
-def test_a_markup_that_fails_to_download_leaves_the_episode_by_the_rule_without_it():
+def test_a_markup_that_fails_to_download_gives_way_to_the_next_of_its_queue():
     world = world_of()
     world.download_fails.add(row(MARKUP, "orig1"))
     step = synced(world, "эталон не скачался")
-    assert step.plan.goal((1, 1)).markup is None
+    assert step.plan.goal((1, 1)).markup.id == row(PICTURE, "pva1")
     assert file_of(world).video.id == row(PICTURE, "pva1")
 
 
@@ -144,7 +150,7 @@ def test_a_cut_whose_answer_never_came_changes_nothing_and_comes_next_time():
     world = world_of(markup=None)
     synced(world, "без эталона")
     before = dict(world.containers)
-    world.choose(markup=MARKUP)
+    world.choose(markup=queue(THE_ORIGINAL))
     world.cut_answers[(1, 1)] = "lost"
     step = synced(world, "ответа нет")
     assert not step.applied and world.containers == before
@@ -158,7 +164,7 @@ def test_a_cut_whose_answer_never_came_changes_nothing_and_comes_next_time():
 def test_the_mark_taken_off_keeps_the_cut_and_only_puts_the_original_in_the_order_of_the_season():
     world = world_of()
     synced(world, "пометка")
-    world.choose(markup=None)
+    world.choose(markup={})
     step = synced(world, "пометка снята")
     assert op_kinds(step) == ["build"]
     container = file_of(world)
@@ -170,7 +176,7 @@ def test_the_mark_moved_to_another_source_lays_the_episode_onto_its_timeline():
     world = world_of()
     world.put(OTHER, "dub1", 1, group=ORIGINAL, player="cvh", height=720)
     synced(world, "эталон 3")
-    world.choose(markup=OTHER)
+    world.choose(markup=queue((ORIGINAL, OTHER, "cvh")))
     synced(world, "эталон 5")
     container = file_of(world)
     assert container.video.timeline == row(OTHER, "dub1") and container.video.cut_of == row(PICTURE, "pva1")
@@ -186,13 +192,18 @@ def test_a_markup_row_the_source_forgot_keeps_what_is_held():
     assert file_of(world).video.timeline == row(MARKUP, "orig1")
 
 
-def test_another_video_behind_the_markup_row_is_another_timeline():
+def test_another_video_behind_the_markup_row_is_another_timeline_taken_only_when_it_is_better():
+    """As for the reference (В-6): on a tie the timeline the library holds stays; a higher one is taken, and the
+    voice-overs are aligned to it anew."""
     world = world_of()
     synced(world, "пометка")
     world.put(MARKUP, "orig1", 1, group=ORIGINAL, player="cvh", height=1080, video="v2")
-    step = synced(world, "площадка перезалила")
+    step = synced(world, "площадка перезалила той же высоты")
+    assert op_kinds(step) == []
+    world.put(MARKUP, "orig1", 1, group=ORIGINAL, player="cvh", height=1440, video="v3")
+    step = synced(world, "площадка перезалила выше")
     assert "cut" in op_kinds(step) and "align" in op_kinds(step)
-    assert file_of(world).video.timeline == RowId(MARKUP, "orig1", "v2")
+    assert file_of(world).video.timeline == RowId(MARKUP, "orig1", "v3")
 
 
 # --- С-14, С-15: the picture gone, «Удалить» ---------------------------------------------------------------------
@@ -259,8 +270,35 @@ ACTIONS = ("markup", "markup", "put_high", "put_high", "put_ref", "put_dub", "pu
            "lose_file", "reset", "shuffle_voices")
 
 
+def test_with_no_queue_of_its_own_the_markup_follows_the_reference():
+    world = world_of(markup=None)
+    step = synced(world, "эталон следует за РЕФ")
+    assert step.plan.goal((1, 1)).markup is None and "cut" not in op_kinds(step)
+    assert file_of(world).video.id == row(PICTURE, "pva1")
+
+
+def test_the_first_variant_of_the_queue_the_episode_has_is_its_markup_and_one_left_out_is_passed_over():
+    world = world_of(markup=None, episodes=(1, 2))
+    world.put(OTHER, "alt1", 1, group=ORIGINAL, player="cvh", height=720)
+    world.choose(markup=queue((ORIGINAL, OTHER, "cvh"), THE_ORIGINAL, episodes=(1, 2)))
+    synced(world, "очередь эталона")
+    assert file_of(world, 1).video.timeline == row(OTHER, "alt1")  # the first of the queue
+    assert file_of(world, 2).video.timeline == row(MARKUP, "orig2")  # episode 2 has not the first: the second
+    world.choose(markup_deny={(1, 1): frozenset({(ORIGINAL, OTHER, "cvh")})})
+    synced(world, "первый снят")
+    assert file_of(world, 1).video.timeline == row(MARKUP, "orig1")
+
+
+def test_a_markup_the_reference_leaves_out_as_a_picture_is_still_the_timeline():
+    world = world_of()
+    world.choose(reference_deny={(1, 1): frozenset({THE_ORIGINAL})})
+    synced(world, "эталон снят в РЕФ")
+    container = file_of(world)
+    assert container.video.timeline == row(MARKUP, "orig1") and container.video.cut_of == row(PICTURE, "pva1")
+
+
 @pytest.mark.parametrize("seed", range(80))
 def test_random_histories_around_the_mark_keep_the_invariants_and_come_to_rest(seed):
     world = World()
-    world.choose(markup=3)
+    world.choose(markup={(season, episode): (("AniStar", 3, "cvh"),) for season in (1, 2) for episode in (1, 2, 3, 4)})
     Chaos(world, random.Random(seed), actions=ACTIONS).history(14)

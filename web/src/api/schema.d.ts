@@ -708,7 +708,7 @@ export interface paths {
         put?: never;
         /**
          * Reset Output Settings
-         * @description Takes the levers of a level (or the one named) back to the level above.
+         * @description Takes the levers of a level (or the one named, or those of the queue named) back to the level above.
          */
         post: operations["reset_output_settings_api_series__series_id__output_settings_reset_post"];
         delete?: never;
@@ -2228,7 +2228,8 @@ export interface components {
         };
         /**
          * OutputSettingsReset
-         * @description The body of the command `composition.settings.reset` without the series.
+         * @description The body of the command `composition.settings.reset` without the series; `queue` takes every lever of that queue
+         *     on the level back (the markup reference, stage 14).
          */
         OutputSettingsReset: {
             /** Season */
@@ -2241,6 +2242,8 @@ export interface components {
             lever?: string | null;
             /** Target */
             target?: string | null;
+            /** Queue */
+            queue?: string | null;
         };
         /**
          * OutputSettingsSet
@@ -2679,7 +2682,7 @@ export interface components {
          *     levers of a queue on its tab.
          * @enum {string}
          */
-        Queue: "reference" | "voice" | "compilation";
+        Queue: "reference" | "voice" | "compilation" | "markup";
         /**
          * QueueRow
          * @description A variant of a queue in its place: a voice-over group at a player of a source, the best height it has on the level,
@@ -2744,6 +2747,12 @@ export interface components {
             reference?: components["schemas"]["QueueView"];
             /** Groups */
             groups?: components["schemas"]["GroupQueue"][];
+            markup?: components["schemas"]["QueueView"];
+            /**
+             * Markup Follows
+             * @default true
+             */
+            markup_follows: boolean;
         };
         /**
          * Reason
@@ -3035,11 +3044,6 @@ export interface components {
              * @default 0
              */
             color: number;
-            /**
-             * Markup
-             * @default false
-             */
-            markup: boolean;
         };
         /**
          * SeriesUpdate
@@ -3113,11 +3117,6 @@ export interface components {
             vibix_season?: number | null;
             /** Players Off */
             players_off?: string[];
-            /**
-             * Markup
-             * @default false
-             */
-            markup: boolean;
             /** Position */
             position?: number | null;
         };
@@ -3136,8 +3135,6 @@ export interface components {
             players_off?: string[] | null;
             /** Position */
             position?: number | null;
-            /** Markup */
-            markup?: boolean | null;
         };
         /**
          * SourceDraft
@@ -3153,11 +3150,6 @@ export interface components {
             vibix_season?: number | null;
             /** Players Off */
             players_off?: string[];
-            /**
-             * Markup
-             * @default false
-             */
-            markup: boolean;
         };
         /**
          * SourceStatus
@@ -3432,6 +3424,8 @@ export interface components {
             source_id: number;
             /** @default null */
             source: components["schemas"]["SeriesSource"] | null;
+            /** Changed */
+            changed?: string[];
             /** What */
             what: string;
         };

@@ -65,8 +65,6 @@ export interface SourceItem {
   playersOff: string[]
   /** The colour the catalog gave the source in its series (0–15 of the palette); none for a draft not saved yet. */
   color: number | null
-  /** The source is the markup reference of its series (stage 14); none for a draft not saved yet. */
-  markup: boolean | null
   view: SourceView
 }
 
@@ -371,7 +369,6 @@ export function draftBody(item: Pick<SourceItem, "url" | "sourceType" | "profile
     parser_profile_id: item.profileId,
     vibix_season: item.vibixSeason,
     players_off: item.playersOff,
-    markup: false,
   }
 }
 
@@ -387,7 +384,6 @@ export function itemOfSource(
     vibixSeason: source.vibix_season ?? null,
     playersOff,
     color: source.color ?? null,
-    markup: source.markup ?? false,
     view: viewOf({ summary, playersOff, live, rows: layout.filter((row) => row.source_id === source.id) }),
   }
 }

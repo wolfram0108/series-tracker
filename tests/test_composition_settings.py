@@ -33,7 +33,8 @@ def rec(lever, value, season=None, episode=None, target=None, series_id=1) -> Se
 
 # The levers of compilations (stage 12) have no target: every episode lists them with their defaults.
 COMPILATION_DEFAULTS = [EffectiveLever(lever="compilation.member", target=None, value=None, level=Level.DEFAULT),
-                        EffectiveLever(lever="compilation.take", target=None, value=True, level=Level.DEFAULT)]
+                        EffectiveLever(lever="compilation.take", target=None, value=True, level=Level.DEFAULT),
+                        EffectiveLever(lever="markup.order", target=None, value=[], level=Level.DEFAULT)]
 
 
 def touched_by(before, after, episodes):
@@ -43,7 +44,7 @@ def touched_by(before, after, episodes):
 
 def levers_of(records, season, episode):
     return {(each.lever, each.target): (each.value, each.level) for each in effective(records, season, episode)
-            if not each.lever.startswith("compilation.")}
+            if not each.lever.startswith(("compilation.", "markup."))}
 
 
 @pytest.fixture
@@ -447,7 +448,7 @@ def test_the_headers_show_the_series_and_each_season_by_the_value_of_the_level_i
     shown = levels(records, [2, 1, 1])
     assert [each.season for each in shown] == [None, 1, 2]
     by_level = {each.season: {(x.lever, x.target): (x.value, x.level) for x in each.levers
-                              if not x.lever.startswith("compilation.")} for each in shown}
+                              if not x.lever.startswith(("compilation.", "markup."))} for each in shown}
     assert by_level[None] == {(CHOICE, None): ([], Level.DEFAULT), (TAKE, GROUP): (False, Level.SERIES)}
     assert by_level[1] == {(CHOICE, None): ([], Level.DEFAULT), (TAKE, GROUP): (True, Level.SEASON)}
     assert by_level[2] == {(CHOICE, None): (CHOICE_KODIK, Level.SEASON), (TAKE, GROUP): (False, Level.SERIES)}

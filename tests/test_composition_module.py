@@ -479,7 +479,7 @@ def rich_standard(url: str = PAGE) -> ReleaseTable:
 
 
 def levers_by_episode(reply: CompositionReply) -> dict:
-    return {(e.season, e.episode): {x.lever: x for x in e.levers if not x.lever.startswith("compilation.")}
+    return {(e.season, e.episode): {x.lever: x for x in e.levers if not x.lever.startswith(("compilation.", "markup."))}
             for e in reply.settings}
 
 
@@ -816,7 +816,8 @@ async def test_a_read_that_failed_is_not_followed_by_another_read_of_a_recount_w
     await s.counted(lambda: s.sources.fail(PAGE, reason("read_failed")))
     await s.counted(lambda: s.voices.set_groups({}))
     await s.counted(s.profile_changed)
-    await s.counted(lambda: s.catalog.update_source(only_source(s, series_id)))  # asks for a read: a fresh table is none
+    # A change of what is read of the page asks for a read: a fresh table is none.
+    await s.counted(lambda: s.catalog.update_source(only_source(s, series_id), vibix_season=2))
     assert s.sources.reads_begun == [PAGE, PAGE]
     await s.counted(lambda: s.sources.fail(PAGE, reason("read_failed")))
     await s.counted(lambda: s.voices.set_groups({}))
@@ -1563,3 +1564,64 @@ async def test_the_queues_of_a_level_follow_the_order_of_players_and_then_the_or
     assert [(each.player, each.allowed, each.allowed_level) for each in episode.groups[0].rows] == [
         ("vk", False, Level.EPISODE), ("kodik", True, Level.DEFAULT)]
     assert [each.player for each in (await queues()).reference.rows] == ["vk", "kodik"]  # the series keeps the rule
+
+
+@pytest.mark.asyncio
+async def test_the_markup_follows_the_reference_until_its_first_edit_copies_it_and_then_stands_apart(system):
+    """Stage 14: an untouched queue of the markup reference is the queue of the reference, however it changes; the first
+    edit on a level writes the queue as it was shown (its order and the variants left out) and the edit; after it a new
+    order of the reference does not move the markup; «как уровнем выше» takes the level back to following."""
+    s = system
+    series_id = await laid_out(s, page(row("a", "Серия 1"), row("b", "Серия 1", player="kodik"), row("c", "Серия 2")))
+    source_id = only_source(s, series_id)
+    await s.counted(lambda: s.voices.set_groups({"Рутина": ["ruchime"]}))
+    vk, kodik = ({"group": "Рутина", "source_id": source_id, "player": player} for player in ("vk", "kodik"))
+
+    async def queues(**level):
+        return QueuesReply.model_validate(await s.probe.request(
+            "composition.queues.get", {"series_id": series_id, **level}, timeout=STUCK_S))
+
+    def players(view):
+        return [(each.player, each.allowed) for each in view.rows]
+
+    shown = await queues(season=1)
+    assert shown.markup_follows and players(shown.markup) == players(shown.reference) == [("vk", True), ("kodik", True)]
+    await s.set(series_id, "reference.order", [kodik], season=1)
+    await s.set(series_id, "reference.allow", False, season=1, target=variant_target("Рутина", source_id, "vk"))
+    shown = await queues(season=1)
+    assert shown.markup_follows and players(shown.markup) == [("kodik", True), ("vk", False)]  # it follows the reference
+
+    # The first edit: the box of kodik. The copy keeps the order and the box of vk the reference had.
+    await s.set(series_id, "markup.allow", False, season=1, target=variant_target("Рутина", source_id, "kodik"))
+    shown = await queues(season=1)
+    assert not shown.markup_follows and shown.markup.order_level == Level.SEASON
+    assert players(shown.markup) == [("kodik", False), ("vk", False)]
+    await s.set(series_id, "reference.order", [vk], season=1)
+    await s.set(series_id, "reference.allow", True, season=1, target=variant_target("Рутина", source_id, "vk"))
+    shown = await queues(season=1)
+    assert players(shown.reference) == [("vk", True), ("kodik", True)]
+    assert players(shown.markup) == [("kodik", False), ("vk", False)]  # apart from the reference now
+    assert not (await queues(season=1, episode=1)).markup_follows  # an episode inherits the queue of its season
+    assert (await queues()).markup_follows  # the series above still follows
+
+    await s.probe.request("composition.settings.reset", SettingsReset(
+        series_id=series_id, season=1, queue="markup").model_dump(mode="json"), timeout=STUCK_S)
+    shown = await queues(season=1)
+    assert shown.markup_follows and players(shown.markup) == players(shown.reference)
+
+
+@pytest.mark.asyncio
+async def test_a_change_of_a_source_that_does_not_change_what_is_read_reads_nothing(system):
+    """Its profile, its place or its colour only count the layout again; the address, the players and the season of a
+    catalog read the page anew."""
+    s = system
+    series_id = await laid_out(s, page(*season_rows(1, range(1, 4))))
+    def reads() -> int:
+        return sum(1 for each in s.sources.requests if each.refresh)
+
+    before = reads()
+    for fields in ({"parser_profile_id": 7}, {"position": 3}, {"color": 5}):
+        await s.counted(lambda: s.catalog.update_source(only_source(s, series_id), **fields))
+    assert reads() == before
+    await s.counted(lambda: s.catalog.update_source(only_source(s, series_id), players_off=["vk"]))
+    assert reads() == before + 1

@@ -52,9 +52,8 @@ Events out:
       series is at (the card of the series), told when it changes; all false when the sync ends.
   work.series.state (owner `planner`).
 Events in: downloads.fetch.finished, conform.job.finished, conform.job.removed, system.started (syncs under way are taken up
-  again, a journal a stop cut short is carried out), series.deleted, composition.changed, voices.settings.changed,
-  series.source.updated (the markup reference of the series, stage 14: the source whose rows give the timeline of every
-  episode, read with the card of the series) and series.updated with the episodes switched off (the plan is counted again from the tables and the window told: nothing on
+  again, a journal a stop cut short is carried out), series.deleted, composition.changed, voices.settings.changed and
+  series.updated with the episodes switched off (the plan is counted again from the tables and the window told: nothing on
   disk changes between syncs).
 """
 from __future__ import annotations
@@ -506,7 +505,6 @@ class PlannerModule(BaseModule):
         self.handle("series.deleted", self.on_series_deleted)
         self.handle("composition.changed", self.on_layout_changed)
         self.handle("series.updated", self.on_series_updated)
-        self.handle("series.source.updated", self.on_source_updated)
         self.handle("voices.settings.changed", self.on_voice_settings_changed)
 
     # --- the sync -----------------------------------------------------------------------------------------------
@@ -625,14 +623,11 @@ class PlannerModule(BaseModule):
         slots = {row.slot[:2] for row in online if not row.compilation}
         off = {slot for slot in slots if slot[0] in ignored_seasons or slot[1] in ignored.get(slot[0], set())}
         order = {each.season: [span.label for span in each.voices] for each in layout.voice_orders}
-        stored = [SeriesSource.model_validate(each) for each in series.get("sources", [])]
-        sources = [each.id for each in stored]
-        markup = next((each.id for each in stored if each.markup), None)
+        sources = [SeriesSource.model_validate(each).id for each in series.get("sources", [])]
         choices = choices_of(layout.rows, online, [(each.season, each.episode, each.levers) for each in layout.settings],
                              [(each.compilation, each.levers) for each in layout.levels if each.compilation],
                              players=voices.get("priority") or [], player_groups=Groups.of(voices.get("player_groups") or {}),
-                             sources=sources, voice_order=order, off_episodes=off, titles=layout.voice_titles,
-                             markup=markup)
+                             sources=sources, voice_order=order, off_episodes=off, titles=layout.voice_titles)
         return online, choices
 
     # --- the journal ---------------------------------------------------------------------------------------------
@@ -969,11 +964,6 @@ class PlannerModule(BaseModule):
         """The user switched an episode or a season off or on (the memory of the series): the plan is counted again."""
         if {"ignored_seasons", "ignored_episodes"} & set(env.payload or {}):
             await self._publish_view(int(env.payload["series_id"]))
-
-    async def on_source_updated(self, env: Envelope) -> None:
-        """A source of the series changed — its mark of the markup reference among them (stage 14), which the plan reads
-        with the card of the series: the plan is counted again and the window told."""
-        await self._publish_view(int(env.payload["series_id"]))
 
     async def on_voice_settings_changed(self, env: Envelope) -> None:
         for series_id in await self.repo.series_with_assets():

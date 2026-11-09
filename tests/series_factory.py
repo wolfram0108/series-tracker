@@ -44,7 +44,6 @@ SOURCE_DEFAULTS = {
     "parser_profile_id": None,
     "vibix_season": None,
     "players_off": [],
-    "markup": False,
 }
 
 

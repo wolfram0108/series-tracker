@@ -29,6 +29,10 @@ VOICE_TAKE = "voice.take"
 # Stage 12: the compilation an episode stands in (its key, or "" for none), and whether a compilation takes episodes at all.
 COMPILATION_MEMBER = "compilation.member"
 COMPILATION_TAKE = "compilation.take"
+# Stage 14: the queue of the markup reference — the variant whose single video gives an episode its timeline. With no
+# `markup.order` on the episode's chain of levels the markup reference follows the reference.
+MARKUP_ORDER = "markup.order"
+MARKUP_ALLOW = "markup.allow"
 
 
 class Level(StrEnum):
@@ -63,6 +67,7 @@ class Queue(StrEnum):
     REFERENCE = "reference"
     VOICE = "voice"
     COMPILATION = "compilation"
+    MARKUP = "markup"
 
 
 # The forms a window knows how to draw. A lever of another form is refused when it is registered, so that no registered
@@ -171,10 +176,17 @@ class SettingsReset(_Scope):
     """The command `composition.settings.reset`: the levers of the level go back to the level above.
 
     Without `lever` every lever of the level goes back; with `lever` (and `target` for a lever that has one)
-    only that one does."""
+    only that one does; with `queue` every lever of that queue does (its order and the flags of its variants)."""
 
     lever: str | None = None
     target: str | None = None
+    queue: Queue | None = None
+
+    @model_validator(mode="after")
+    def _lever_or_queue(self):
+        if self.queue is not None and self.lever is not None:
+            raise ValueError("a reset names a lever or a queue, not both")
+        return self
 
 
 class EffectiveLever(BaseModel):
@@ -247,3 +259,7 @@ class QueuesReply(BaseModel):
     compilation: str | None = None
     reference: QueueView = Field(default_factory=QueueView)
     groups: list[GroupQueue] = Field(default_factory=list)
+    # The queue of the markup reference (stage 14); while `markup_follows` it is the queue of the reference itself: no
+    # level of the chain has an order of its own, and the timeline is the video the reference takes.
+    markup: QueueView = Field(default_factory=QueueView)
+    markup_follows: bool = True

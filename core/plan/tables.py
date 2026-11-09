@@ -170,9 +170,12 @@ class Choices:
     delete: frozenset[tuple] = frozenset()
     # The episodes whose levers of the reference are their own (set on the episode itself, not on a level above it).
     own_reference: frozenset[Slot] = frozenset()
-    # The source the owner marked the markup reference of the series (stage 14): its row of an episode is the timeline
-    # of the episode's video, and a higher video is cut onto it.
-    markup: int | None = None
+    # The queue of the markup reference of every episode that has one of its own on a level (stage 14): the variants the
+    # user put first, in his order, and those he left out. An episode without an entry follows its reference: its video
+    # is on the timeline of the single video the reference takes. With one, the first variant of the queue the episode
+    # has is the timeline, and a higher video is cut onto it.
+    markup: Mapping[Slot, tuple[tuple[str, int, str], ...]] = field(default_factory=dict)
+    markup_deny: Mapping[Slot, frozenset[tuple[str, int, str]]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

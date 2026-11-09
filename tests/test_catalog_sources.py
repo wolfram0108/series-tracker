@@ -91,7 +91,7 @@ async def test_a_series_is_given_with_its_kind_and_its_sources(system):
     assert [s["id"] for s in two["sources"]] == list(video.source_ids)
     assert two["sources"][0] == {"id": video.source_ids[0], "series_id": video.series_id, "position": 0,
                                  "url": RUCHIME, "source_type": "web_video", "parser_profile_id": 2,
-                                 "vibix_season": 2, "players_off": ["vk"], "color": 0, "markup": False}
+                                 "vibix_season": 2, "players_off": ["vk"], "color": 0}
     assert two["sources"][1]["url"] == VK
     for each in (*one["sources"], *two["sources"]):
         assert list(each) == list(SeriesSource.model_fields)
@@ -313,10 +313,11 @@ async def test_a_source_is_added_at_the_end_and_announced(system):
     assert set(reply) == {"id"}
     told = drain(sub)
     added = (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[-1]
-    assert told == [("series.source.added", {"series_id": made.series_id, "source_id": reply["id"], "source": added})]
+    assert told == [("series.source.added", {"series_id": made.series_id, "source_id": reply["id"], "source": added,
+                                             "changed": []})]
     assert added == {"id": reply["id"], "series_id": made.series_id, "position": 1, "url": RUCHIME,
                      "source_type": "web_video", "parser_profile_id": 2,
-                     "vibix_season": None, "players_off": ["vk"], "color": 1, "markup": False}
+                     "vibix_season": None, "players_off": ["vk"], "color": 1}
 
 
 @pytest.mark.asyncio
@@ -368,7 +369,8 @@ async def test_update_applies_what_changed_and_announces_it_once(system):
     assert reply == {"applied": {"parser_profile_id": 2, "vibix_season": 3, "players_off": ["vibix"]}}
     told = drain(sub)
     stored = (await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5))[0]
-    assert told == [("series.source.updated", {"series_id": made.series_id, "source_id": made.source_id, "source": stored})]
+    assert told == [("series.source.updated", {"series_id": made.series_id, "source_id": made.source_id, "source": stored,
+                                               "changed": ["parser_profile_id", "players_off", "vibix_season"]})]
     assert (stored["parser_profile_id"], stored["vibix_season"], stored["players_off"]) == (2, 3, ["vibix"])
 
 
@@ -575,44 +577,3 @@ async def test_a_source_takes_the_first_colour_its_series_has_free_and_keeps_it(
     assert by_id == {made.source_ids[0]: 0, third["id"]: 2, fourth["id"]: 1}  # the freed colour, the others kept
     with pytest.raises(BusRequestError):
         await probe.request("catalog.sources.update", {"source_id": third["id"], "fields": {"color": 5}}, timeout=5)
-
-
-# --- the markup reference (stage 14) --------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_marking_a_source_the_markup_reference_unmarks_the_other_and_tells_of_both(system):
-    bus, probe = system
-    made = await create_series(probe, sources=[source(url=RUCHIME), source(url=DUNHUATV)])
-    first, second = (each["id"] for each in await probe.request("catalog.sources.list", {"series_id": made.series_id},
-                                                                timeout=5))
-    await probe.request("catalog.sources.update", {"source_id": first, "fields": {"markup": True}}, timeout=5)
-    sub = bus.subscribe("series.source.*")
-    changed = await probe.request("catalog.sources.update", {"source_id": second, "fields": {"markup": True}}, timeout=5)
-    assert changed["applied"] == {"markup": True}
-    told = drain(sub)
-    assert [(topic, payload["source_id"], payload["source"]["markup"]) for topic, payload in told] == [
-        ("series.source.updated", first, False), ("series.source.updated", second, True)]
-    listed = await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5)
-    assert [each["markup"] for each in listed] == [False, True]
-
-
-@pytest.mark.asyncio
-async def test_a_source_added_as_the_markup_reference_unmarks_the_other(system):
-    bus, probe = system
-    made = await create_series(probe, sources=[{**source(url=RUCHIME), "markup": True}])
-    sub = bus.subscribe("series.source.*")
-    reply = await probe.request("catalog.sources.add", {
-        "series_id": made.series_id, "source": {**source(url=DUNHUATV), "markup": True}}, timeout=5)
-    told = [(topic, payload["source_id"]) for topic, payload in drain(sub)]
-    listed = await probe.request("catalog.sources.list", {"series_id": made.series_id}, timeout=5)
-    assert [each["markup"] for each in listed] == [False, True]
-    assert told == [("series.source.added", reply["id"]), ("series.source.updated", listed[0]["id"])]
-
-
-@pytest.mark.asyncio
-async def test_a_new_series_with_two_markup_references_is_refused(system):
-    _, probe = system
-    with pytest.raises(BusRequestError) as refused:
-        await create_series(probe, sources=[{**source(url=RUCHIME), "markup": True},
-                                            {**source(url=DUNHUATV), "markup": True}])
-    assert code_of(refused.value) == "markup_twice"
