@@ -85,6 +85,9 @@ class Goal:
     off: bool
     # The voice-over groups the user switched off for the episode: no track of theirs is taken, by the user's word.
     voices_off: frozenset[str] = frozenset()
+    # The place of the video's own sound among the tracks, by the order of the season the user set: the voice-over of the
+    # reference is first only when it stands first there (ЭТАП_11). A voice-over the order does not name keeps it first.
+    own_at: int = 0
 
 
 @dataclass(frozen=True)
@@ -191,6 +194,11 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
         places = voices_order.get(season, {})
         return (places.get(voice, len(places)), voice)
 
+    def own_place(season: int, own: str, voices: Iterable[str]) -> int:
+        if own not in voices_order.get(season, {}):
+            return 0
+        return sum(1 for voice in voices if group_rank(season, voice) < group_rank(season, own))
+
     # Everything laid out by episode once: a goal reads its own episode's rows, files and tracks.
     by_slot = Index()
     for row in singles:
@@ -216,7 +224,7 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
     slots = sorted(set(by_slot.rows) | set(by_slot.files))
     namer = namer or (lambda slot, video, off: name_of(slot, video.snapshot, off))
     goals = [goal for slot in slots if (goal := _goal(slot, inputs, namer, by_slot, criteria, position,
-                                                      group_rank)) is not None]
+                                                      group_rank, own_place)) is not None]
     ops = _ops(goals, containers)
     groups = _groups(goals, ops, containers, deleted_videos, video_slot, track_slot,
                      lambda track, slot: switched_off(choices, track, slot))
@@ -235,7 +243,7 @@ class Index:
         self.deleted: set[str] = set()  # the files of the videos the user deleted
 
 
-def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank) -> Goal | None:
+def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, own_place) -> Goal | None:
     choices = inputs.choices
     episode = episode_of(slot)  # the levers are the episode's, for all its parts
     off = episode in choices.off_episodes
@@ -343,7 +351,8 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank) -
         if waiting:
             container, track, is_own, _ = waiting[0]
             tracks.append(TrackWay(voice, track.dub, track.snapshot, "reuse", container=container, own=is_own))
-    return Goal(slot, video, tuple(tracks), namer(slot, video, off), off, frozenset(taken_off))
+    return Goal(slot, video, tuple(tracks), namer(slot, video, off), off, frozenset(taken_off),
+                own_place(slot[0], own, (way.voice for way in tracks)))
 
 
 def _cut(slot, inputs, compilations, candidates, video_rank, denied=frozenset()):
@@ -387,7 +396,7 @@ def _satisfied_by(goal: Goal) -> Container | None:
         return None
     if tuple(track.dub for track in container.tracks) != tuple(way.dub for way in goal.tracks):
         return None
-    return container
+    return container if container.own_at == goal.own_at else None
 
 
 def _ops(goals: Iterable[Goal], containers) -> list[Op]:

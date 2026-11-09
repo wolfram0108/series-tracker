@@ -313,13 +313,14 @@ class World(SeriesSync):
             fixpoint = plan(Inputs(step.online, step.after, step.choices_after or step.choices, step.failed_rows))
             assert not fixpoint.ops, f"after a sync that did everything the plan still has work: {[op.id for op in fixpoint.ops]}"
             assert not any(group.remove or group.hide for group in fixpoint.groups), "after a sync files still move"
-            # The own sound of the video is first; the tracks of every visible file follow the order of its season.
+            # The sounds of every visible file, the own sound of its video among them, follow the order of its season.
             order = (step.choices_after or step.choices).groups
             for container in step.after:
                 if container.off:
                     continue
                 places = {voice: place for place, voice in enumerate(order.get(_slot_of_video(container.video, online)[0], ()))}
                 sounds = [voice_of(track.group, track.dub) for track in container.tracks]
+                sounds.insert(container.own_at, voice_of(container.video.snapshot.group, container.video.timeline))
                 ranks = [places[voice] for voice in sounds if voice in places]
                 assert ranks == sorted(ranks), f"{container.name}: the sounds {sounds} are out of the order of the season"
 
@@ -448,7 +449,7 @@ class Chaos:
         elif action == "levers_reset":
             world.choose(reference={}, reference_deny={}, voice_order={}, voice_deny={}, voice_off={}, member={})
         elif action == "shuffle_voices":
-            voices = list(self.groups)
+            voices = [self.reference, *self.groups]
             rng.shuffle(voices)
             world.choose(groups={**world.choices.groups, season: tuple(voices)})
         elif action == "read_fail":

@@ -239,7 +239,8 @@ async def test_a_row_the_source_forgot_and_gave_again_is_online_again_with_no_wo
 
 async def test_a_voice_over_only_its_file_holds_is_moved_in_the_order_of_the_season_with_no_refusal(ui):
     """The source of a voice-over is taken out: its track stays in the file and in the order of the season, where the user
-    moves it like any other with no refusal; the voice-over of the reference stays the first sound of the file."""
+    moves it like any other with no refusal; the next sync puts the sounds of the file in that order, the voice-over of
+    the reference among them."""
     series_id = await synced(ui, ["ref", "dub"], (1,))
     await ui.remove_source("dub")
     await ui.tab(text("output.tab"))
@@ -257,6 +258,6 @@ async def test_a_voice_over_only_its_file_holds_is_moved_in_the_order_of_the_sea
     view = await ui.check(series_id)
     (asset,) = view["assets"]
     held = await mkv.contents(os.path.join(ui.library, asset["name"]))
-    assert [track.label for track in held.audio] == ["AniStar", "AnimeVost"]
+    assert [track.label for track in held.audio] == ["AnimeVost", "AniStar"]
     assert held.audio[0].default
     await ui.shot("s10-held-voice-moved")

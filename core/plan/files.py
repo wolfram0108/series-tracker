@@ -34,7 +34,7 @@ def container_json(container: Container) -> dict:
         "tracks": [{"dub": asdict(track.dub), "snapshot": asdict(track.snapshot), "episode": list(track.episode),
                     "aligned_to": asdict(track.aligned_to), **({"tag": track.tag} if track.tag else {}),
                     **({"file": track.file} if track.file else {})}
-                   for track in container.tracks]}
+                   for track in container.tracks], **({"own_at": container.own_at} if container.own_at else {})}
 
 
 def container_of(data: dict) -> Container:
@@ -44,7 +44,7 @@ def container_of(data: dict) -> Container:
                      tuple(Track(RowId(**track["dub"]), Snapshot(**track["snapshot"]), tuple(track["episode"]),
                                  RowId(**track["aligned_to"]), track.get("tag", ""), track.get("file", ""))
                            for track in data["tracks"]),
-                     data["off"])
+                     data["off"], data.get("own_at", 0))
 
 
 def label_of(slot) -> str:
@@ -71,7 +71,10 @@ async def as_in_file(files: "Library", container: Container) -> Container:
     if held is None:
         return container
     place = {each.key: number for number, each in enumerate(held.audio) if each.key}
-    return replace(container, tracks=tuple(sorted(container.tracks, key=lambda track: place.get(track.tag or "", len(place)))))
+    own_at = next((sum(1 for other in held.audio[:number] if not other.own) for number, each in enumerate(held.audio)
+                   if each.own), 0)
+    return replace(container, tracks=tuple(sorted(container.tracks, key=lambda track: place.get(track.tag or "", len(place)))),
+                   own_at=own_at)
 
 
 class Library:
@@ -121,8 +124,8 @@ class Library:
             video_path = self.video_path(goal, results)
             identity = mkv.identity(video.timeline.source_id, video.timeline.row_key)
             own_stream = await self.stream_of(goal.video.container, video.id, True) if goal.video.kind == "asset" else 0
-            tracks = [mkv.AudioIn(video.snapshot.group or "—", video_path, own_stream, identity, own=True)]
-            made_tracks, packed = [], []
+            sound = mkv.AudioIn(video.snapshot.group or "—", video_path, own_stream, identity, own=True)
+            tracks, made_tracks, packed = [], [], []
             for way in goal.tracks:
                 if way.kind == "reuse":
                     path, stream = await self.source_of(way.container, way.dub, way.own)
@@ -134,7 +137,8 @@ class Library:
                     path, stream = aligned.file, 0
                     made_tracks.append(aligned.value)
                 tracks.append(mkv.AudioIn(way.snapshot.group or way.voice, path, stream, identity, key=dub_key(way.dub)))
-            built = Container(goal.name, replace(video, episode=slot), tuple(made_tracks), goal.off)
+            tracks.insert(goal.own_at, sound)  # the own sound of the video in the place the order of the season gives it
+            built = Container(goal.name, replace(video, episode=slot), tuple(made_tracks), goal.off, goal.own_at)
             staging = self.staging(goal.name)
             os.makedirs(os.path.dirname(staging), exist_ok=True)
             problem = await mkv.build(staging, video_path, identity, tracks, provenance=container_json(built))

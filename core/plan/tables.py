@@ -129,12 +129,14 @@ class Track:
 
 @dataclass(frozen=True)
 class Container:
-    """A file of the library: one video and its tracks, under a name; `off` hides it from the media server."""
+    """A file of the library: one video and its tracks, under a name; `off` hides it from the media server. `own_at` is the
+    place of the video's own sound among the sounds of the file (0: first, the default one)."""
 
     name: str
     video: Video
     tracks: tuple[Track, ...] = ()
     off: bool = False
+    own_at: int = 0
 
 
 @dataclass(frozen=True)
