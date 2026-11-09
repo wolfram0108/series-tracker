@@ -275,6 +275,7 @@ async def test_submit_sends_the_episode_with_daemon_paths_and_returns_the_job():
         assert sent["ref"] == "/mnt/meganas/media/lib/S/ep1.mp4"
         assert sent["dubs"] == ["/mnt/meganas/media/torrents/series-tracker/7/s01e01/a.mp4"]
         assert sent["out_dir"].endswith("/7/s01e01/_aligned") and sent["keep_tmp"] is False
+        assert sent["audio_method"] == "muq"  # the owner's meter of the audio layer
         assert sent["label"] == "S s01e01"
     finally:
         await runner.stop()
@@ -736,6 +737,7 @@ async def test_a_batch_of_cuts_goes_with_daemon_paths_and_the_keys_find_their_jo
         assert sent["compilation"] == "/mnt/meganas/media/torrents/series-tracker/_cuts/7/c1/comp.mp4"
         assert sent["episodes"][0].endswith("/S s01e02 #k2/ep2.mkv") and sent["episodes"][0].startswith("/mnt/meganas/")
         assert sent["extend_edges"] is True and sent["dub_atracks"] == [1, 0] and sent["keep_tmp"] is False
+        assert sent["audio_method"] == "muq"
     finally:
         await runner.stop()
 

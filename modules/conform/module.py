@@ -143,6 +143,10 @@ def split_label(label: str | None) -> tuple[str | None, str | None]:
     return ((label or "")[:found.start()], found.group(1)) if found else (label, None)
 
 
+# The meter of the audio layer of every job (the service's `audio_method`: band or muq): the owner's choice.
+AUDIO_METHOD = "muq"
+
+
 def finished_view(job: dict[str, Any], to_local: dict[str, str]) -> dict[str, Any]:
     """How a job ended, with the output paths translated back to this server."""
     def local(path: str | None) -> str | None:
@@ -292,7 +296,7 @@ class ConformModule(BaseModule):
             body = {"compilation": translate(request.compilation, mapping),
                     "episodes": [translate(each.path, mapping) for each in request.episodes],
                     "out_dir": translate(request.out_dir, mapping), "extend_edges": True, "keep_tmp": False,
-                    "label": label, "dub_atracks": [each.atrack for each in request.episodes]}
+                    "label": label, "dub_atracks": [each.atrack for each in request.episodes], "audio_method": AUDIO_METHOD}
         except ValueError as exc:
             self.log.warning("conform: разбор %s отклонён: %s", label, describe(str(exc)))
             return ReverseReply(outcome=SubmitOutcome.REJECTED, reason=str(exc)).model_dump()
@@ -318,7 +322,7 @@ class ConformModule(BaseModule):
                 "dubs": [translate(path, mapping) for path in payload["dubs"]],
                 "out_dir": translate(payload["out_dir"], mapping),
                 "cache_dir": translate(payload["cache_dir"], mapping),
-                "keep_tmp": False, "label": job_label(payload.get("label"), payload.get("key")),
+                "keep_tmp": False, "label": job_label(payload.get("label"), payload.get("key")), "audio_method": AUDIO_METHOD,
                 # A voice-over that is a container gives the track of its number (a track aligned out of an old file).
                 **({"dub_atracks": [int(each) for each in payload["dub_atracks"]]} if payload.get("dub_atracks") else {}),
                 # A reference that is a container holds several tracks: the alignment listens to the video's own sound.
