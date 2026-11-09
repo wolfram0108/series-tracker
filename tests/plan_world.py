@@ -313,6 +313,15 @@ class World(SeriesSync):
             fixpoint = plan(Inputs(step.online, step.after, step.choices_after or step.choices, step.failed_rows))
             assert not fixpoint.ops, f"after a sync that did everything the plan still has work: {[op.id for op in fixpoint.ops]}"
             assert not any(group.remove or group.hide for group in fixpoint.groups), "after a sync files still move"
+            # The own sound of the video is first; the tracks of every visible file follow the order of its season.
+            order = (step.choices_after or step.choices).groups
+            for container in step.after:
+                if container.off:
+                    continue
+                places = {voice: place for place, voice in enumerate(order.get(_slot_of_video(container.video, online)[0], ()))}
+                sounds = [voice_of(track.group, track.dub) for track in container.tracks]
+                ranks = [places[voice] for voice in sounds if voice in places]
+                assert ranks == sorted(ranks), f"{container.name}: the sounds {sounds} are out of the order of the season"
 
 
 def _slot_of_video(video: Video, online: dict[RowId, OnlineRow]) -> Slot:
@@ -441,7 +450,7 @@ class Chaos:
         elif action == "shuffle_voices":
             voices = list(self.groups)
             rng.shuffle(voices)
-            world.choose(groups=tuple(voices))
+            world.choose(groups={**world.choices.groups, season: tuple(voices)})
         elif action == "read_fail":
             world.read_fails = {rng.choice((1, 2, 3, 4))}
         elif action == "download_fail" and rows:

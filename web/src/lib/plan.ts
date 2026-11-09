@@ -55,9 +55,10 @@ const passing = (reason: string) => ({ code: "plan_passing", params: { reason } 
 const sameSlot = (row: number[], episode: number[]): boolean =>
   row[0] === episode[0] && row[1] === episode[1] && partOf(row) === partOf(episode)
 
-/** The order of the voice-overs of every season as the window shows it: the layout's, then the voice-overs the files of the
- *  season hold by the plan that no source gives any more (a source taken out, a compilation gone), in the order the plan
- *  meets them, each with the episodes that hold it: no track of a file is left out of the window. */
+/** The order of the voice-overs of every season as the window shows it: the layout's whole order (the containers follow
+ *  it), of which the voice-overs the rows give or the files of the season hold by the plan; a voice-over in the files the
+ *  order does not know yet comes last. Each has the episodes that give it, else those whose files hold it: no track of a
+ *  file is left out of the window, and every one is in the place it takes in the containers. */
 export function seasonVoiceOrders(orders: readonly SeasonVoiceOrder[], view: PlannerView | undefined): SeasonVoiceOrder[] {
   const held = new Map<number, Map<string, number[]>>()
   for (const goal of view?.episodes ?? []) {
@@ -71,11 +72,14 @@ export function seasonVoiceOrders(orders: readonly SeasonVoiceOrder[], view: Pla
   const seasons = [...new Set([...orders.map((each) => each.season), ...held.keys()])].sort((a, b) => a - b)
   return seasons.map((season) => {
     const known = orders.find((each) => each.season === season)?.voices ?? []
+    const here = held.get(season) ?? new Map<string, number[]>()
     const named = new Set(known.map((voice) => voice.label))
-    const more = [...(held.get(season) ?? new Map<string, number[]>()).entries()]
+    const shown = known.flatMap((voice) => voice.episodes ? [voice]
+      : here.has(voice.label) ? [{ label: voice.label, episodes: spansOf(here.get(voice.label) ?? []) }] : [])
+    const more = [...here.entries()]
       .filter(([voice]) => !named.has(voice)).map(([label, episodes]) => ({ label, episodes: spansOf(episodes) }))
-    return { season, voices: [...known, ...more] }
-  })
+    return { season, voices: [...shown, ...more] }
+  }).filter((each) => each.voices.length > 0)
 }
 
 /** The file of an episode as the plan makes it: the name its goal has, by the slot of the episode. */

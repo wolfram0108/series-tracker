@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .compilation import CompilationView
 from .output_settings import EpisodeSettings, LeverSpec, LevelSettings
@@ -145,11 +145,19 @@ class SeasonVoiceOrder(BaseModel):
 
 
 class VoiceOrderSet(BaseModel):
-    """The command `composition.voice_order.set`: the user's order of the voice-overs a season has now."""
+    """The command `composition.voice_order.set`: the user's order of the voice-overs the window shows of a season (its
+    rows and its files); the others keep their places."""
 
     series_id: int
     season: int
     labels: list[str]
+
+    @field_validator("labels")
+    @classmethod
+    def _distinct(cls, labels: list[str]) -> list[str]:
+        if len(set(labels)) != len(labels):
+            raise ValueError("a voice-over is named twice")
+        return labels
 
 
 class CompositionReply(BaseModel):

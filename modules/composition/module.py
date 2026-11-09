@@ -273,11 +273,8 @@ class CompositionModule(BaseModule):
         async with self._lock(command.series_id):
             stored = await self.repo.stored(command.series_id)
             orders = project.season_orders(stored.orders, stored.rows, {})
-            shown = next((each for each in project.season_voices(orders, stored.rows) if each.season == command.season), None)
             current = orders.get(command.season, [])
-            wanted = project.reorder(current, [voice.label for voice in shown.voices] if shown else [], command.labels)
-            if wanted is None:
-                raise ValueError(reason("voice_order_mismatch", season=command.season))
+            wanted = project.reorder(current, command.labels)
             if wanted == current and orders == stored.orders:
                 return {"ok": True}
             orders[command.season] = wanted

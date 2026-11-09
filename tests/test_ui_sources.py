@@ -1,9 +1,12 @@
 """Sources that lose what they gave, in a browser (tests/ui_stand.py): a row, a part of the list, the whole page, the source
 itself, a compilation; what the files keep, what is made anew and what the window says. The work of the service is counted
 by its models: the files the site gave out (`host.served`) and the jobs of the alignment service (`daemon.jobs`)."""
+import os
+
 import pytest
 from playwright.async_api import expect
 
+from core import container as mkv
 from ui_stand import text, ui  # noqa: F401 - the fixture
 
 pytestmark = pytest.mark.ui
@@ -231,3 +234,24 @@ async def test_a_row_the_source_forgot_and_gave_again_is_online_again_with_no_wo
     await expect(row(ui, 1, "AnimeVost").locator(".track-offline")).to_have_count(0)
     assert ui.files() == files and made(ui) == before
     await ui.check(series_id)
+
+
+async def test_a_voice_over_only_its_file_holds_is_moved_in_the_order_of_the_season_with_no_refusal(ui):
+    """The source of a voice-over is taken out: its track stays in the file and in the order of the season, where the user
+    moves it like any other with no refusal; the voice-over of the reference stays the first sound of the file."""
+    series_id = await synced(ui, ["ref", "dub"], (1,))
+    await ui.remove_source("dub")
+    await ui.tab(text("output.tab"))
+    items = ui.page.locator(".voice-order-item")
+    labels = items.locator("span:nth-child(2)")
+    await expect(labels).to_have_text(["AniStar", "AnimeVost"])
+    await items.nth(1).drag_to(items.nth(0))
+    await expect(labels).to_have_text(["AnimeVost", "AniStar"])
+    await expect(ui.page.locator(".output-failure")).to_have_count(0)
+    await ui.press_sync(series_id)
+    view = await ui.check(series_id)
+    (asset,) = view["assets"]
+    held = await mkv.contents(os.path.join(ui.library, asset["name"]))
+    assert [track.label for track in held.audio] == ["AniStar", "AnimeVost"]
+    assert held.audio[0].default
+    await ui.shot("s10-held-voice-moved")

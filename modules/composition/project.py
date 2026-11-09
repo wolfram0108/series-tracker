@@ -276,16 +276,17 @@ def season_orders(previous: Mapping[int, Sequence[str]], rows: Sequence[Composit
 
 
 def season_voices(orders: Mapping[int, Sequence[str]], rows: Sequence[CompositionRow]) -> list[SeasonVoiceOrder]:
-    """What the window shows of the orders: the groups each season has now, in their order, with their episodes."""
+    """The whole order of every season, the one the containers follow: each group with the episodes its rows have now,
+    none for a group with no row (its track may still be in the files, which the planner knows, and the window shows
+    it there)."""
     episodes: dict[tuple[int, str], set[int]] = {}
     for row in rows:
         if row.excluded or row.season is None or not row.voice_label:
             continue
         episodes.setdefault((row.season, row.voice_label), set()).update(number for _, number in _covered(row))
-    seasons = sorted({season for season, _ in episodes})
     return [SeasonVoiceOrder(season=season, voices=[
-        VoiceSpan(label=label, episodes=spans(episodes[(season, label)]))
-        for label in orders.get(season, ()) if (season, label) in episodes]) for season in seasons]
+        VoiceSpan(label=label, episodes=spans(episodes.get((season, label), ()))) for label in orders[season]])
+        for season in sorted(orders) if orders[season]]
 
 
 def spans(numbers: Iterable[int]) -> str:
@@ -299,10 +300,9 @@ def spans(numbers: Iterable[int]) -> str:
     return ", ".join(str(first) if first == last else f"{first}–{last}" for first, last in runs)
 
 
-def reorder(stored: Sequence[str], shown: Sequence[str], wanted: Sequence[str]) -> list[str] | None:
-    """The stored order with the groups the window shows put in the user's order, the hidden ones in their places;
-    None when `wanted` is not the groups shown."""
-    if sorted(wanted) != sorted(shown) or len(set(wanted)) != len(wanted):
-        return None
-    queue = list(wanted)
-    return [queue.pop(0) if label in shown else label for label in stored]
+def reorder(stored: Sequence[str], wanted: Sequence[str]) -> list[str]:
+    """The stored order with the groups the window shows put in the user's order in the places they take, the others in
+    theirs. The window shows what the rows and the files hold, so a group the order does not know yet takes the end."""
+    base = list(stored) + [label for label in wanted if label not in stored]
+    chosen, queue = set(wanted), list(wanted)
+    return [queue.pop(0) if label in chosen else label for label in base]

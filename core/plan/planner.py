@@ -172,7 +172,7 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
 
     order = Order(tuple(choices.players), {source_id: place for place, source_id in enumerate(choices.sources)},
                   choices.player_groups)
-    voices_order = {voice: place for place, voice in enumerate(choices.groups)}
+    voices_order = {season: {voice: place for place, voice in enumerate(order)} for season, order in choices.groups.items()}
     last = len(inputs.online)
 
     def criteria(ranking, height: int, player: str, source_id: int) -> tuple:
@@ -184,8 +184,9 @@ def plan(inputs: Inputs, namer: Callable[[Slot, VideoWay, bool], str] | None = N
         row = online.get(row_id)
         return row.position if row is not None else last
 
-    def group_rank(voice: str) -> tuple:
-        return (voices_order.get(voice, len(voices_order)), voice)
+    def group_rank(season: int, voice: str) -> tuple:
+        places = voices_order.get(season, {})
+        return (places.get(voice, len(places)), voice)
 
     # Everything laid out by episode once: a goal reads its own episode's rows, files and tracks.
     by_slot = Index()
@@ -309,7 +310,7 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank) -
             voices.setdefault(voice, [])
 
     tracks: list[TrackWay] = []
-    for voice in sorted(voices, key=group_rank):
+    for voice in sorted(voices, key=lambda voice: group_rank(slot[0], voice)):
         mine = [each for each in held_tracks if voice_of(each[1].group, each[1].dub) == voice]
         reuse = sorted((each for each in mine if each[1].aligned_to == video.timeline and not each[3]),
                        key=lambda each: (each[0] is not video.container, each[2], each[0].name))

@@ -6,8 +6,8 @@ from core.plan.tables import Inputs
 from core.voice_names import NO_GROUPS
 
 
-def goals(rows, settings=(), *, players, sources, groups=NO_GROUPS, order=()):
+def goals(rows, settings=(), *, players, sources, groups=NO_GROUPS, order=None):
     online = online_of(rows)
     choices = choices_of(rows, online, [(each.season, each.episode, each.levers) for each in settings], [],
-                         players=players, player_groups=groups, sources=sources, voice_order=order, off_episodes=())
+                         players=players, player_groups=groups, sources=sources, voice_order=order or {}, off_episodes=())
     return {goal.slot: goal for goal in plan(Inputs(online, (), choices)).goals}

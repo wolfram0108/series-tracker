@@ -1495,9 +1495,15 @@ async def test_the_order_of_the_voices_of_a_season_is_shown_kept_and_set_by_the_
     assert [voice.label for voice in (await s.get(series_id)).voice_orders[0].voices] == wanted
     assert s.taken(changed)  # the containers follow the order at the next sync: consumers hear of it
 
-    with pytest.raises(BusRequestError, match="voice_order_mismatch"):
-        await s.probe.request("composition.voice_order.set", {"series_id": series_id, "season": 1, "labels": ["nobody"]},
-                              timeout=STUCK_S)
+    with pytest.raises(BusRequestError, match="named twice"):
+        await s.probe.request("composition.voice_order.set", {"series_id": series_id, "season": 1,
+                                                               "labels": [labels[0], labels[0]]}, timeout=STUCK_S)
+    # A voice-over no source gives may still be in the files: the window shows it and the user moves it too.
+    await s.probe.request("composition.voice_order.set", {"series_id": series_id, "season": 1,
+                                                           "labels": ["Held", *labels]}, timeout=STUCK_S)
+    [order] = (await s.get(series_id)).voice_orders
+    assert [(voice.label, bool(voice.episodes)) for voice in order.voices] == [
+        ("Held", False), *((label, True) for label in labels)]
     s.probe.publish_event(RUN_CHANGED, {"series_id": series_id, "active": True})
     await s.bus.settled()
     with pytest.raises(BusRequestError, match="not_allowed"):

@@ -449,11 +449,24 @@ def test_the_order_of_voices_changed_again_and_again_only_repacks():
     world = World()
     episode_with_dubs(world, 1, 3)
     for order in (("G3", "G2", "G1"), ("G2", "G3", "G1"), ("G1", "G2", "G3"), ("G3", "G1", "G2")):
-        world.choose(groups=order)
+        world.choose(groups={1: order})
         step = world.sync(f"порядок озвучек {order}")
         world.check(step)
         assert {op.kind for op in step.plan.ops} == {"build"}
         assert [track.group for track in container_of(world, 1).tracks] == list(order)
+
+
+def test_every_season_orders_its_tracks_by_its_own_order():
+    world = World()
+    for season in (1, 2):
+        world.put(1, f"ref{season}", 1, season=season, group=REF)
+        for group in ("G1", "G2"):
+            world.put(2, f"{group}s{season}", 1, season=season, group=group, player="kodik")
+    world.choose(groups={1: ("G2", "G1"), 2: ("G1", "G2")})
+    step = world.sync("порядки сезонов")
+    world.check(step)
+    tracks = {each.video.episode[0]: [track.group for track in each.tracks] for each in world.containers.values()}
+    assert tracks == {1: ["G2", "G1"], 2: ["G1", "G2"]}
 
 
 def test_switching_on_and_off_back_and_forth_does_no_work():

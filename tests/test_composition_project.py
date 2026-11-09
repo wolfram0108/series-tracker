@@ -692,8 +692,9 @@ def test_the_default_order_is_the_order_of_the_layout_and_a_group_absent_now_kee
     assert season_orders({}, rows, {}) == {1: ["Ruchime", "ПВА", "Anistar"]}
     kept = season_orders({1: ["X", "ПВА", "Ruchime"]}, rows, {})
     assert kept == {1: ["X", "ПВА", "Ruchime", "Anistar"]}
-    shown = season_voices(kept, rows)[0]
-    assert [(voice.label, voice.episodes) for voice in shown.voices] == [("ПВА", "1"), ("Ruchime", "1–2"), ("Anistar", "3")]
+    shown = season_voices(kept, rows)[0]  # the whole order: a group with no row keeps its place, with no episode
+    assert [(voice.label, voice.episodes) for voice in shown.voices] == [
+        ("X", ""), ("ПВА", "1"), ("Ruchime", "1–2"), ("Anistar", "3")]
 
 
 def test_a_renamed_group_keeps_its_place_and_two_groups_made_one_keep_the_higher_place():
@@ -718,6 +719,6 @@ def test_the_episodes_of_a_voice_are_worded_as_runs(numbers, text):
 
 def test_the_user_orders_the_voices_shown_and_the_hidden_keep_their_places():
     from modules.composition.project import reorder
-    assert reorder(["A", "X", "B", "C"], ["A", "B", "C"], ["C", "A", "B"]) == ["C", "X", "A", "B"]
-    assert reorder(["A", "B"], ["A", "B"], ["A"]) is None
-    assert reorder(["A", "B"], ["A", "B"], ["A", "A"]) is None
+    assert reorder(["A", "X", "B", "C"], ["C", "A", "B"]) == ["C", "X", "A", "B"]
+    assert reorder(["A", "X", "B"], ["B", "X"]) == ["A", "B", "X"]  # a group with no row the files hold moves too
+    assert reorder(["A", "B"], ["B", "Held", "A"]) == ["B", "Held", "A"]  # one the order does not know takes its place

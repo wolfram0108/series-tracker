@@ -61,7 +61,8 @@ def compilations_of(rows: Iterable[CompositionRow], online: Iterable[OnlineRow])
 def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
                episodes: Iterable[tuple[int, int, Iterable[EffectiveLever]]],
                compilation_levers: Iterable[tuple[str, Iterable[EffectiveLever]]], *,
-               players: Sequence[str], player_groups: Groups, sources: Sequence[int], voice_order: Sequence[str],
+               players: Sequence[str], player_groups: Groups, sources: Sequence[int],
+               voice_order: Mapping[int, Sequence[str]],
                off_episodes: Iterable[tuple[int, int]]) -> Choices:
     """What the user chose. `episodes` are the levers of every episode as its levels give them (season, episode, levers),
     `compilation_levers` those of every compilation (its key, levers)."""
@@ -97,7 +98,7 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
                 member[slot] = by_key.get(lever.value) if lever.value else None
     off_compilations = frozenset(by_key[key] for key, levers in compilation_levers if key in by_key and any(
         lever.lever == COMPILATION_TAKE and lever.value is False for lever in levers))
-    return Choices(players=tuple(players), sources=tuple(sources), groups=tuple(voice_order), player_groups=player_groups,
+    return Choices(players=tuple(players), sources=tuple(sources), groups={season: tuple(order) for season, order in voice_order.items()}, player_groups=player_groups,
                    off_episodes=frozenset(off_episodes), off_compilations=off_compilations, reference=reference,
                    reference_deny=reference_deny, voice_order=voice_orders, voice_deny=voice_deny, voice_off=voice_off,
                    member=member, own_reference=frozenset(own_reference))

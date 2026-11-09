@@ -476,7 +476,7 @@ class PlannerModule(BaseModule):
             ignored = {}
         slots = {row.slot[:2] for row in online if not row.compilation}
         off = {slot for slot in slots if slot[0] in ignored_seasons or slot[1] in ignored.get(slot[0], set())}
-        order = [span.label for each in sorted(layout.voice_orders, key=lambda item: item.season) for span in each.voices]
+        order = {each.season: [span.label for span in each.voices] for each in layout.voice_orders}
         sources = [SeriesSource.model_validate(each).id for each in series.get("sources", [])]
         choices = choices_of(layout.rows, online, [(each.season, each.episode, each.levers) for each in layout.settings],
                              [(each.compilation, each.levers) for each in layout.levels if each.compilation],

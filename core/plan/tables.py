@@ -137,7 +137,7 @@ class Container:
 @dataclass(frozen=True)
 class Choices:
     """What the user chose. `players` and `sources` are the orders of priority, best first, `player_groups` the players
-    the user called the same; `groups` the order of the tracks of a container. The levers of every episode as they come
+    the user called the same; `groups` the order of the tracks of a container, season by season. The levers of every episode as they come
     out of its levels (episode, compilation, season, series): `reference` puts variants (voice-over, source id, player)
     first in that order, `reference_deny` leaves variants out of the queue of the reference; `voice_order` puts variants
     (source id, player) of a voice-over first, `voice_deny` leaves variants (voice-over, source id, player) out,
@@ -147,7 +147,7 @@ class Choices:
 
     players: tuple[str, ...] = ()
     sources: tuple[int, ...] = ()
-    groups: tuple[str, ...] = ()
+    groups: Mapping[int, tuple[str, ...]] = field(default_factory=dict)
     player_groups: Groups = NO_GROUPS
     off_episodes: frozenset[Slot] = frozenset()
     off_groups: frozenset[str] = frozenset()
