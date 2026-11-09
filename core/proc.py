@@ -15,7 +15,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import shutil
 import signal
+import sys
 
 from . import storage
 from .logging import get_logger
@@ -25,6 +27,13 @@ REAP_TIMEOUT_S = 5.0
 LOST = 255
 
 _log = get_logger("proc")
+
+
+def program(name: str) -> str | None:
+    """The path of an external program; None when there is none. A program the project installs as its own dependency
+    (yt-dlp, requirements.txt) lies beside the interpreter and is found there whatever PATH says; the rest come from PATH."""
+    beside = os.path.join(os.path.dirname(sys.executable), name)
+    return beside if os.access(beside, os.X_OK) and os.path.isfile(beside) else shutil.which(name)
 
 
 async def spawn(*cmd: str, **kwargs) -> asyncio.subprocess.Process:

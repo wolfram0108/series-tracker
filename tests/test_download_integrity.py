@@ -81,7 +81,7 @@ async def test_a_look_that_could_not_be_made_is_told_as_such_and_not_as_a_file_w
     for path in (broken, tmp_path / "missing.mp4"):
         seen = await video_gaps(str(path), longer_than=1.0)
         assert not seen.checked and seen.holes == () and seen.reason
-    monkeypatch.setattr(ffprobe.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(ffprobe, "program", lambda _name: None)
     seen = await video_gaps(str(broken), longer_than=1.0)
     assert not seen.checked and "ffprobe" in seen.reason
 

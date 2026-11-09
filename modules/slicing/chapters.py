@@ -9,9 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import shutil
 
-from core.proc import run_capture
+from core.proc import program, run_capture
 
 YTDLP_TIMEOUT = 180.0
 
@@ -122,7 +121,7 @@ def mark_manually(chapters: list[dict],
 async def fetch_chapters(video_url: str) -> list[dict]:
     """yt-dlp --print %(chapters)j -> [{'time': 'HH:MM:SS', 'title': str}].
     Пустой список — глав нет; исключение — реальная ошибка."""
-    executable = shutil.which("yt-dlp")
+    executable = program("yt-dlp")
     if not executable:
         raise RuntimeError("yt-dlp не найден в PATH")
     try:

@@ -14,12 +14,11 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 from dataclasses import dataclass, field
 from typing import Sequence
 
 from .ffprobe import film_stream, streams_of
-from .proc import LOST, run_capture
+from .proc import LOST, program, run_capture
 
 LANGUAGE = "rus"
 
@@ -104,7 +103,7 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
     """Write the container at `output` (an .mkv the caller puts in place); None when it was built and reads back as asked,
     else the reason. The video is the film of `video` (core.ffprobe.film_stream); a track of the same file is taken
     from it."""
-    executable = shutil.which("ffmpeg")
+    executable = program("ffmpeg")
     if executable is None:
         return "ffmpeg_missing"
     film = film_stream(await streams_of(video, timeout=READ_TIMEOUT_S) or [])
@@ -154,7 +153,7 @@ async def build(output: str, video: str, video_identity: str, tracks: Sequence[A
 
 async def provenance_of(path: str, *, timeout: float = READ_TIMEOUT_S) -> dict | None:
     """The provenance a container carries (`build(provenance=...)`); None when it carries none or cannot be read."""
-    executable = shutil.which("ffmpeg")
+    executable = program("ffmpeg")
     if executable is None:
         return None
     dumped = path + ".provenance.read"
@@ -197,7 +196,7 @@ def problem_of(made: Contents | None, video_identity: str, signature: Sequence[t
 async def contents(path: str, *, timeout: float = READ_TIMEOUT_S) -> Contents | None:
     """What a media file holds, by its tags; None when it cannot be read. A file not built here has no tags: its video
     identity is empty and its audio tracks are labelled by their titles."""
-    executable = shutil.which("ffprobe")
+    executable = program("ffprobe")
     if executable is None:
         return None
     cmd = [executable, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path]

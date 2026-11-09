@@ -57,7 +57,7 @@ async def test_duration_of_a_real_file_and_of_what_cannot_be_read(tmp_path):
 
 @pytest.mark.asyncio
 async def test_without_ffprobe_the_duration_is_unknown_not_an_error():
-    with patch("core.ffprobe.shutil.which", return_value=None):
+    with patch("core.ffprobe.program", return_value=None):
         assert await duration_of("/any/file.mp4") == 0.0
 
 
@@ -66,7 +66,7 @@ async def test_the_duration_query_of_a_stalled_downloader_ends_with_unknown_and_
     from modules.downloads import ytdlp
     spy = Spy()
     with patch("core.proc.asyncio.create_subprocess_exec", spy), \
-            patch.object(ytdlp.shutil, "which", return_value=stalled_downloader(tmp_path)), \
+            patch.object(ytdlp, "program", return_value=stalled_downloader(tmp_path)), \
             patch.object(ytdlp, "PROBE_TIMEOUT_S", 0.3):
         assert await asyncio.wait_for(ytdlp._probe_duration("https://example.test/v"), 10) == 0.0
     assert not alive(spy.started[0].pid)
@@ -77,7 +77,7 @@ async def test_the_chapters_query_of_a_stalled_downloader_fails_and_stops_it(tmp
     from modules.slicing import chapters
     spy = Spy()
     with patch("core.proc.asyncio.create_subprocess_exec", spy), \
-            patch.object(chapters.shutil, "which", return_value=stalled_downloader(tmp_path)), \
+            patch.object(chapters, "program", return_value=stalled_downloader(tmp_path)), \
             patch.object(chapters, "YTDLP_TIMEOUT", 0.3):
         with pytest.raises(RuntimeError):
             await chapters.fetch_chapters("https://example.test/v")
@@ -106,6 +106,29 @@ def test_programs_are_started_only_through_core_proc():
                  if path.name != "proc.py" and any(call in path.read_text(encoding="utf-8") for call in (
                      "create_subprocess_exec", "create_subprocess_shell", "subprocess.Popen", "subprocess.run"))]
     assert offenders == [], "a program that starts elsewhere escapes the holds of its task"
+
+
+def test_programs_are_found_only_through_core_proc():
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    offenders = [str(path.relative_to(root)) for folder in ("core", "modules") for path in (root / folder).rglob("*.py")
+                 if path.name != "proc.py" and "shutil.which" in path.read_text(encoding="utf-8")]
+    assert offenders == [], "a program looked up on PATH alone misses the one the project installs beside its interpreter"
+
+
+def test_a_program_beside_the_interpreter_is_taken_before_the_one_on_path(tmp_path, monkeypatch):
+    beside, elsewhere = tmp_path / "venv", tmp_path / "path"
+    for folder in (beside, elsewhere):
+        folder.mkdir()
+        tool = folder / "tool"
+        tool.write_text("#!/bin/sh\n")
+        tool.chmod(0o755)
+    monkeypatch.setattr(proc.sys, "executable", str(beside / "python"))
+    monkeypatch.setenv("PATH", str(elsewhere))
+    assert proc.program("tool") == str(beside / "tool")
+    (beside / "tool").unlink()
+    assert proc.program("tool") == str(elsewhere / "tool")
+    assert proc.program("absent") is None
 
 
 # --- the end of a program is known whoever reaps it --------------------------------------------------------------------

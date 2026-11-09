@@ -5,11 +5,10 @@ front, a Matroska written to the end once), so what a file holds is told by the 
 from __future__ import annotations
 
 import json
-import shutil
 import statistics
 from dataclasses import dataclass
 
-from .proc import LOST, run_capture
+from .proc import LOST, program, run_capture
 
 DEFAULT_TIMEOUT_S = 30.0
 # A pause is a hole only when it is also long against the pace of the video: a video of a frame in two seconds has no hole.
@@ -48,7 +47,7 @@ async def streams_of(target: str, *, input_args: list[str] | None = None,
                      timeout: float = DEFAULT_TIMEOUT_S) -> list[dict] | None:
     """The streams of a file or a stream, with their kinds, heights and dispositions; None when they cannot be read.
     `input_args` go before the target (the headers of a stream)."""
-    executable = shutil.which("ffprobe")
+    executable = program("ffprobe")
     if not executable:
         return None
     try:
@@ -67,7 +66,7 @@ async def duration_of(target: str, *, input_args: list[str] | None = None,
     """Seconds of a file or stream; 0 when ffprobe is missing or cannot read the target.
 
     `input_args` go before the target (protocol whitelist, headers of a stream)."""
-    executable = shutil.which("ffprobe")
+    executable = program("ffprobe")
     if not executable:
         return 0.0
     cmd = [executable, "-v", "error", *(input_args or []), "-show_entries", "format=duration",
@@ -86,7 +85,7 @@ async def readable_length(path: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> f
     a stream whose data stop short of it is where the file is cut. A file whose streams all reach their ends is as long as
     its header says; one with a stream cut short is as long as the earliest cut. A file whose streams state no end of
     their own is held to the end of the file by its longest stream."""
-    executable = shutil.which("ffprobe")
+    executable = program("ffprobe")
     if not executable:
         return 0.0
     try:
@@ -168,7 +167,7 @@ async def video_gaps(path: str, *, longer_than: float, timeout: float = 120.0) -
     `PACE_FACTOR` times the usual interval between its frames: a piece the download lost leaves such a pause, while the
     audio and the length of the file stay whole. A loss at the very end of the video leaves no pause to see: that is the
     check of the readable length the download makes (`readable_length`)."""
-    executable = shutil.which("ffprobe")
+    executable = program("ffprobe")
     if not executable:
         return Gaps(False, reason="ffprobe не найден")
     streams = await streams_of(path, timeout=timeout)

@@ -32,12 +32,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shutil
 from datetime import datetime
 
 from core import BaseModule
 from core import storage
-from core.proc import run_capture
+from core.proc import program, run_capture
 from core.db import Database
 from core.envelope import Envelope
 
@@ -58,7 +57,7 @@ async def run_ffmpeg(source: str, start: str, duration: str | None,
     именем — и при повторе _init_progress усыновляет его как готовый эпизод
     (битый файл принимается за нарезанный). tmp под нефинальным именем такой
     усыновлятор обойдёт; при любом неуспехе tmp сносится."""
-    executable = shutil.which("ffmpeg")
+    executable = program("ffmpeg")
     if not executable:
         return False, "ffmpeg не найден в PATH"
     _, ext = os.path.splitext(output)

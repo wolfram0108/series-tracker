@@ -21,14 +21,13 @@ import asyncio
 import contextlib
 import os
 import re
-import shutil
 import time
 from typing import Awaitable, Callable
 from urllib.parse import urlsplit
 
 from core import storage
 from core.ffprobe import duration_of, readable_length, video_gaps
-from core.proc import LOST, REAP_TIMEOUT_S, exited, run_capture, spawn, stop
+from core.proc import LOST, REAP_TIMEOUT_S, exited, program, run_capture, spawn, stop
 from core.retry import UNTIMED, Budget, retrying
 
 from . import ranged
@@ -216,7 +215,7 @@ async def _probe_duration(video_url: str) -> float:
     ffprobe промежуточного MPEG-TS даёт заниженную длительность (находка
     52: 7343с вместо реальных 102787с), из-за чего процент remux был бы
     100% сразу. yt-dlp --print даёт точное значение из метаданных VK."""
-    executable = shutil.which("yt-dlp")
+    executable = program("yt-dlp")
     if not executable:
         return 0.0
     try:
@@ -315,7 +314,7 @@ async def _local_duration(path: str) -> float:
 async def _download_direct_ffmpeg(stream_url: str, headers: dict,
                                   full_output_path: str,
                                   on_progress: ProgressCb, announced: float | None = None) -> tuple[bool, str]:
-    executable = shutil.which("ffmpeg")
+    executable = program("ffmpeg")
     if not executable:
         return False, "ffmpeg не найден в PATH"
     duration = announced if announced is not None else await _probe_duration_ffprobe(stream_url, headers)
@@ -539,7 +538,7 @@ async def _phase_download(video_url: str, full_output_path: str,
     """yt-dlp (формат — вызывающая сторона: HLS или DASH-фолбэк), без
     постобработки. Возвращает путь промежуточного файла (str) или
     (False, error)."""
-    executable = shutil.which("yt-dlp")
+    executable = program("yt-dlp")
     if not executable:
         return False, "yt-dlp не найден в PATH"
     out_template = full_output_path + ".download.%(ext)s"
@@ -598,7 +597,7 @@ async def _phase_remux(raw: str, full_output_path: str,
     """Наш ffmpeg -c copy с -progress pipe:1: remux в mp4, прогресс и ETA
     из метрик ffmpeg (out_time/длительность, speed). duration — из
     yt-dlp (надёжно), не из промежуточного TS (находка 52)."""
-    executable = shutil.which("ffmpeg")
+    executable = program("ffmpeg")
     if not executable:
         return False, "ffmpeg не найден в PATH"
     await on_progress({"phase": "remux", "progress": 0, "eta": 0,

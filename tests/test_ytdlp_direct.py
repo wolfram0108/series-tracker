@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from core.proc import program
 from modules.downloads import ytdlp
 from modules.downloads.module import _transient_download_error
 from proc_helpers import Spy, alive, stalled_downloader
@@ -214,7 +215,7 @@ async def test_a_silent_downloader_is_stopped_and_counted_as_a_transient_failure
     spy = Spy()
     monkeypatch.setattr(ytdlp, "STALL_TIMEOUT_S", 0.3)
     with patch("modules.downloads.ytdlp.asyncio.create_subprocess_exec", spy), \
-            patch.object(ytdlp.shutil, "which", return_value=stalled_downloader(tmp_path)):
+            patch.object(ytdlp, "program", return_value=stalled_downloader(tmp_path)):
         result = await asyncio.wait_for(
             ytdlp._phase_download("https://vk.test/v", str(tmp_path / "e.mp4"), noop, 1, ytdlp.HLS_FORMAT), 10)
     assert result[0] is False and "нет прогресса" in result[1] and _transient_download_error(result[1])
@@ -227,7 +228,7 @@ async def test_a_silent_remux_is_stopped_and_leaves_no_partial_file(tmp_path, mo
     monkeypatch.setattr(ytdlp, "STALL_TIMEOUT_S", 0.3)
     target = str(tmp_path / "e.mp4")
     with patch("modules.downloads.ytdlp.asyncio.create_subprocess_exec", spy), \
-            patch.object(ytdlp.shutil, "which", return_value=stalled_downloader(tmp_path, "ffmpeg")):
+            patch.object(ytdlp, "program", return_value=stalled_downloader(tmp_path, "ffmpeg")):
         ok, error = await asyncio.wait_for(ytdlp._phase_remux(str(tmp_path / "raw.ts"), target, noop, 10.0), 10)
     assert not ok and "нет прогресса" in error and _transient_download_error(error)
     assert not alive(spy.started[0].pid) and not os.path.exists(target + ".remux.mp4")
@@ -339,12 +340,11 @@ PAGE_FORMATS = [
 def picked(tmp_path, selector: str, formats=PAGE_FORMATS) -> str:
     """The format the real yt-dlp picks by the selector from the formats of a page, with no network."""
     import json
-    import shutil
     import subprocess
     info = tmp_path / "info.json"
     info.write_text(json.dumps({"id": "x", "title": "x", "extractor": "generic", "extractor_key": "Generic",
                                 "webpage_url": "https://vk.test/v", "formats": formats}))
-    out = subprocess.run([shutil.which("yt-dlp"), "--no-warnings", "--load-info-json", str(info), "-f", selector,
+    out = subprocess.run([program("yt-dlp"), "--no-warnings", "--load-info-json", str(info), "-f", selector,
                           "--simulate", "--print", "format_id"], capture_output=True, text=True, timeout=60)
     return out.stdout.strip()
 
