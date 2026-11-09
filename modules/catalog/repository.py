@@ -30,7 +30,7 @@ _WRITABLE = {"name", "name_en", "site", "save_path", "season", "quality",
              "ignored_seasons", "ignored_episodes"}
 
 _SOURCE_COLUMNS = ("id, series_id, position, url, source_type, parser_profile_id, "
-                   "vibix_season, players_off, color")
+                   "vibix_season, players_off, color, markup")
 
 # The colours of the palette of the interface a source may take.
 COLORS = 16
@@ -41,25 +41,29 @@ _FREE_COLOR = ("(SELECT COALESCE(MIN(color), (SELECT COUNT(*) FROM series_source
                f"{COLORS}) FROM ({_EVERY_COLOR}) WHERE color NOT IN (SELECT color FROM series_sources WHERE series_id=?))")
 
 _ADD_SOURCE = ("INSERT INTO series_sources (series_id, position, url, source_type, parser_profile_id, "
-               "vibix_season, players_off, color) "
+               "vibix_season, players_off, markup, color) "
                "VALUES (?, COALESCE(?, (SELECT MAX(position) + 1 FROM series_sources WHERE series_id=?), 0), "
-               f"?, ?, ?, ?, ?, {_FREE_COLOR})")
+               f"?, ?, ?, ?, ?, ?, {_FREE_COLOR})")
+# The markup reference is one per series: the others are unmarked in the transaction that marks one.
+_UNMARK = "UPDATE series_sources SET markup=0 WHERE series_id=? AND id<>? AND markup=1 RETURNING id"
 
 
 def _source(row: dict) -> dict:
     """A stored source in the shape of the contract."""
-    return SeriesSource.model_validate({**row, "players_off": json.loads(row["players_off"])}).model_dump(mode="json")
+    return SeriesSource.model_validate({**row, "players_off": json.loads(row["players_off"]),
+                                        "markup": bool(row["markup"])}).model_dump(mode="json")
 
 
 def _stored(values: dict) -> dict:
-    return {name: json.dumps(value, ensure_ascii=False) if name == "players_off" else value
-            for name, value in values.items()}
+    return {name: json.dumps(value, ensure_ascii=False) if name == "players_off" else
+            int(value) if name == "markup" else value for name, value in values.items()}
 
 
 def _add_source_args(series_id: int, values: dict) -> tuple:
     stored = _stored(values)
     return (series_id, stored.get("position"), series_id, stored["url"], stored["source_type"],
-            stored["parser_profile_id"], stored["vibix_season"], stored["players_off"], series_id, series_id)
+            stored["parser_profile_id"], stored["vibix_season"], stored["players_off"], stored.get("markup", 0),
+            series_id, series_id)
 
 
 def _refusal(exc: sqlite3.IntegrityError, values: dict) -> Exception:
@@ -187,18 +191,29 @@ class CatalogRepository:
             f"SELECT {_SOURCE_COLUMNS} FROM series_sources WHERE id=?", (source_id,))
         return _source(row) if row else None
 
-    async def add_source(self, series_id: int, values: dict) -> int:
-        """The source goes to the end of the series' list unless it brings a position."""
+    async def add_source(self, series_id: int, values: dict) -> tuple[int, list[int]]:
+        """The source goes to the end of the series' list unless it brings a position. Returns its id and the sources
+        it unmarked, when it comes as the markup reference."""
+        def write(conn: sqlite3.Connection) -> tuple[int, list[int]]:
+            unmarked = [row[0] for row in conn.execute(_UNMARK, (series_id, 0))] if values.get("markup") else []
+            return conn.execute(_ADD_SOURCE, _add_source_args(series_id, values)).lastrowid, unmarked
+
         try:
-            return await self._db.insert(_ADD_SOURCE, _add_source_args(series_id, values))
+            return await self._db.transaction(write)
         except sqlite3.IntegrityError as exc:
             raise _refusal(exc, values) from exc
 
-    async def update_source(self, source_id: int, values: dict) -> None:
+    async def update_source(self, series_id: int, source_id: int, values: dict) -> list[int]:
+        """Returns the sources unmarked by marking this one the markup reference."""
         sets = ", ".join(f"{name}=?" for name in values)
+
+        def write(conn: sqlite3.Connection) -> list[int]:
+            unmarked = [row[0] for row in conn.execute(_UNMARK, (series_id, source_id))] if values.get("markup") else []
+            conn.execute(f"UPDATE series_sources SET {sets} WHERE id=?", (*_stored(values).values(), source_id))
+            return unmarked
+
         try:
-            await self._db.execute(f"UPDATE series_sources SET {sets} WHERE id=?",
-                                   (*_stored(values).values(), source_id))
+            return await self._db.transaction(write)
         except sqlite3.IntegrityError as exc:
             raise _refusal(exc, values) from exc
 

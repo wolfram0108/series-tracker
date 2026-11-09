@@ -57,6 +57,10 @@ Queries:
   catalog.sources.update {source_id, fields, series_id?} → {applied: {...}}  — только
       изменившиеся поля; без изменений событие не публикуется
       (+ событие series.source.updated)
+      Поле `markup` — эталон разметки сериала (этап 14): он один на сериал,
+      пометка источника снимает её с прежнего в той же транзакции (на него —
+      своё series.source.updated); у новых источников сериала двух эталонов
+      быть не может (`markup_twice`)
   catalog.sources.remove {source_id} → {ok}  — единственный источник
       сериала удалить нельзя (`last_source`); +series.source.removed
 
@@ -300,9 +304,11 @@ class CatalogModule(BaseModule):
         draft = checked_fields(env.payload["source"])
         refuse_mixed_kinds([each["source_type"] for each in await self.repo.list_sources(series_id)]
                            + [draft["source_type"]])
-        source_id = await self.repo.add_source(series_id, draft)
+        source_id, unmarked = await self.repo.add_source(series_id, draft)
         self.log.info("сериал %d: добавлен источник %d", series_id, source_id)
         await self._publish_source("added", series_id, source_id)
+        for other in unmarked:
+            await self._publish_source("updated", series_id, other)
         return {"id": source_id}
 
     async def on_source_update(self, env: Envelope) -> dict:
@@ -318,7 +324,9 @@ class CatalogModule(BaseModule):
         # A value equal to the stored one is no change, so it raises no event and no recount downstream.
         applied = {name: value for name, value in values.items() if value != stored[name]}
         if applied:
-            await self.repo.update_source(source_id, applied)
+            unmarked = await self.repo.update_source(stored["series_id"], source_id, applied)
+            for other in unmarked:
+                await self._publish_source("updated", stored["series_id"], other)
             await self._publish_source("updated", stored["series_id"], source_id)
         return {"applied": applied}
 
