@@ -293,16 +293,19 @@ async def test_a_download_does_not_start_a_program_where_an_operation_has_not_en
 
 
 class StartedSpy(Spy):
-    """A Spy that says when the writer has been started: ffprobe runs before it, and is not the one to be waited for."""
+    """A Spy that says when the writer has been started: ffprobe runs before it, and is not the one to be waited for (the
+    signal of Spy is set by every program, so the writer has a signal of its own)."""
 
     def __init__(self):
         super().__init__()
-        self.spawned = asyncio.Event()
+        self.writing = asyncio.Event()
+        self.writer = None
 
     async def __call__(self, *args, **kwargs):
         process = await super().__call__(*args, **kwargs)
         if os.path.basename(args[0]) == "ffmpeg":
-            self.spawned.set()
+            self.writer = process
+            self.writing.set()
         return process
 
 
@@ -315,8 +318,8 @@ async def test_a_cancelled_download_keeps_its_name_until_the_program_is_dead(fak
     target = str(tmp_path / "out" / "episode.mp4")
     with patch("modules.downloads.ytdlp.asyncio.create_subprocess_exec", spy):
         download = asyncio.create_task(ytdlp.download("https://cdn.test/e.mp4", target, noop))
-        await asyncio.wait_for(spy.spawned.wait(), 5)
-        writer = spy.started[-1]
+        await asyncio.wait_for(spy.writing.wait(), 5)
+        writer = spy.writer
         assert alive(writer.pid) and storage.busy(target)
         download.cancel()
         with pytest.raises(asyncio.CancelledError):

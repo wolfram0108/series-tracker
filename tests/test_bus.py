@@ -1,9 +1,11 @@
 """Тесты ядра: шина, шаблоны топиков, query/reply через BaseModule."""
 import asyncio
+import json
 
 import pytest
 
 from core import BaseModule, Bus, BusRequestError, Envelope, topic_matches
+from core.reasons import reason
 
 
 # --- сопоставление топиков ---------------------------------------------------
@@ -315,10 +317,30 @@ class Refuser(BaseModule):
 
     def register(self):
         self.handle("refuser.edit", self.on_edit)
+        self.handle("refuser.raise", self.on_raise)
 
     async def on_edit(self, env):
         from core.contracts.availability import Action, require
         require(Action.EDIT, "scanning")
+
+    async def on_raise(self, env):
+        RAISED[env.payload["kind"]]()
+
+
+def _raise(exc: Exception):
+    raise exc
+
+
+# What a handler may raise: the answers a module gives (a «not found», a value refused with a coded reason) and the slips of
+# code and libraries, which raise the same kinds or their kin.
+RAISED = {
+    "lookup": lambda: _raise(LookupError("сериал 7 не найден")),
+    "coded": lambda: _raise(ValueError(reason("voice_order_mismatch", season=6))),
+    "plain_value": lambda: int("слово"),
+    "key": lambda: {}["missing"],
+    "json": lambda: json.loads("<html>"),
+    "runtime": lambda: _raise(RuntimeError("сломалось")),
+}
 
 
 @pytest.mark.asyncio
@@ -335,6 +357,28 @@ async def test_a_refusal_is_the_answer_of_the_module_and_is_logged_without_a_tra
         await client.stop()
     found = [record for record in caplog.records if record.name == "refuser" and "refuser.edit" in record.getMessage()]
     assert found and all(record.levelname == "INFO" and record.exc_info is None for record in found)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("kind", "refused"), [("lookup", True), ("coded", True), ("plain_value", False), ("key", False),
+                                               ("json", False), ("runtime", False)])
+async def test_a_no_the_module_gives_is_a_refusal_and_a_slip_of_code_is_an_error_with_its_trace(caplog, kind, refused):
+    bus = Bus()
+    refuser, client = Refuser(bus), ClientModule(bus)
+    await refuser.start()
+    await client.start()
+    try:
+        with caplog.at_level("INFO"), pytest.raises(BusRequestError):
+            await client.request("refuser.raise", {"kind": kind}, timeout=2)
+    finally:
+        await refuser.stop()
+        await client.stop()
+    found = [record for record in caplog.records if record.name == "refuser" and "refuser.raise" in record.getMessage()]
+    assert len(found) == 1
+    if refused:
+        assert found[0].levelname == "INFO" and found[0].exc_info is None
+    else:
+        assert found[0].levelname == "ERROR" and found[0].exc_info is not None
 
 
 def test_a_process_without_a_folder_of_logs_writes_no_log_files(tmp_path):

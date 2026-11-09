@@ -25,7 +25,7 @@ from .contracts.availability import NotAllowed
 from .deadlines import deadline_of
 from .envelope import Envelope
 from .logging import get_logger
-from .reasons import describe
+from .reasons import EXTERNAL, describe, parse
 
 Handler = Callable[[Envelope], Awaitable[Any]]
 
@@ -36,6 +36,15 @@ NO_HANDLER = "нет обработчика"
 
 # The kinds of an answer that refuses rather than fails: a missing entity, a state that does not allow, a refused value.
 _REFUSALS = ("LookupError", "NotAllowed", "ValueError")
+
+
+def is_refusal(exc: BaseException) -> bool:
+    """A no the module gives as its answer, not its failure: a refusal of the table of what is allowed, a «not found» of
+    its own (LookupError itself; its KeyError and IndexError are slips of code), a value refused with a coded reason
+    (ValueError itself with a code of core.reasons; the ValueError of a library carries none)."""
+    if isinstance(exc, NotAllowed) or type(exc) is LookupError:
+        return True
+    return type(exc) is ValueError and (parse(str(exc)) or {}).get("code") not in (None, EXTERNAL)
 
 # `request` takes the fuse from the table of `core.deadlines` unless the caller names one (a test, a one-off wrapper).
 _FROM_TABLE: Any = object()
@@ -205,10 +214,6 @@ class BaseModule:
                 payload = result
             except asyncio.CancelledError:
                 raise
-            except NotAllowed as exc:
-                # A refusal by the table of what is allowed is the module's answer, not its failure: no trace is due.
-                self.log.info("отказ на топике '%s': %s", env.topic, describe(str(exc)))
-                payload = {ERROR_KEY: f"{type(exc).__name__}: {exc}"}
             except BusRequestError as exc:
                 # The answer of another module goes on as it came, its kind first: a "not found" relayed is still a
                 # "not found" to the caller. Its trace, if any, is in the journal of the module that failed.
@@ -217,8 +222,12 @@ class BaseModule:
                                                              env.topic, describe(str(exc)))
                 payload = {ERROR_KEY: str(exc)}
             except Exception as exc:  # noqa: BLE001 - a module does not die of one handler
-                self.log.exception("ошибка обработчика '%s' на топике '%s'",
-                                   getattr(handler, "__name__", "?"), env.topic)
+                if is_refusal(exc):
+                    # The module's answer, worded by its caller: no trace is due.
+                    self.log.info("отказ на топике '%s': %s", env.topic, describe(str(exc)))
+                else:
+                    self.log.exception("ошибка обработчика '%s' на топике '%s'",
+                                       getattr(handler, "__name__", "?"), env.topic)
                 payload = {ERROR_KEY: f"{type(exc).__name__}: {exc}"}
         finally:
             if context is not None:
