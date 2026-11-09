@@ -19,7 +19,7 @@ MAX_TEMP_KEY = "voices.max_temp_episodes"
 # Stage 12: the height the file of a compilation is downloaded at for its cuts (0 or unset: the best it has). A check of
 # the cuts sets it low (720) so that the service encodes fast; the product leaves it unset.
 CUT_HEIGHT_KEY = "voices.cut_max_height"
-# The language of the voice-over of each group ({group: ISO 639-2}), given when the group is made.
+# The language of the voice-over of each group ({group: ISO 639-2}), chosen in the editor of the group.
 LANGUAGES_KEY = "voices.languages"
 
 

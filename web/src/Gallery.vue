@@ -168,7 +168,7 @@ const queueMonitor = [
 const settingsTab = ref("auth")
 const settingsTabs = [
   { label: "Авторизация", value: "auth", icon: "pi-key" },
-  { label: "Трекеры", value: "trackers", icon: "pi-wifi" },
+  { label: "Источники", value: "sources", icon: "pi-wifi" },
   { label: "Фильтры VK", value: "parser", icon: "pi-filter" },
   { label: "Агенты", value: "agents", icon: "pi-server" },
   { label: "Отладка", value: "debug", icon: "pi-wrench" },
@@ -521,7 +521,7 @@ const rtPass = ref("password123")
           </div>
         </div>
         <div class="cell">
-          <label>Зеркало трекера (Трекеры)</label>
+          <label>Зеркало трекера (Источники)</label>
           <div class="row" style="gap: 8px">
             <span class="mirror-pill">anilibria.top <button class="mirror-pill-remove">&times;</button></span>
             <span class="mirror-pill">aniliberty.top <button class="mirror-pill-remove">&times;</button></span>

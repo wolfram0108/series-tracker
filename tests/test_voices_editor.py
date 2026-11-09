@@ -10,14 +10,14 @@ from modules.voices.settings import DEFAULT_PRIORITY, parse
 
 
 def draft(**changes) -> VoiceSettingsDraft:
-    """A form whose groups are given their language when made, unless the test says otherwise."""
+    """A form whose groups are given a language, unless the test says otherwise."""
     groups = changes.get("voice_groups", {})
     languages = {name.strip(): "rus" for name in groups if name.strip()}
     return VoiceSettingsDraft(**{"priority": ["kodik", "cvh"], "voice_groups": {}, "voice_languages": languages, **changes})
 
 
-def problems(form: VoiceSettingsDraft, player_groups=None, made=None) -> list[tuple[str, str]]:
-    return [(each.field, each.detail.code) for each in editor.check(form, player_groups or {}, made or {})]
+def problems(form: VoiceSettingsDraft, player_groups=None) -> list[tuple[str, str]]:
+    return [(each.field, each.detail.code) for each in editor.check(form, player_groups or {})]
 
 
 def test_a_good_form_has_no_problems():
@@ -83,13 +83,12 @@ def test_a_saved_form_is_stored_trimmed_without_blank_rows_and_only_these_three_
                                     "voices.languages": '{"AniLibria": "rus"}'}
 
 
-def test_a_group_is_made_with_the_language_of_its_voice_over():
-    # A new group without a language is refused; one made before languages were given keeps none until it is given one.
-    assert problems(draft(voice_groups={"Jisu": []}, voice_languages={})) == [("voice_languages", "group_language_missing")]
-    assert problems(draft(voice_groups={"Old": []}, voice_languages={}), made={"Old": []}) == []
+def test_a_group_is_kept_without_a_language_until_it_is_given_one_and_only_a_known_one():
+    assert problems(draft(voice_groups={"Jisu": []}, voice_languages={})) == []
     assert problems(draft(voice_groups={"Jisu": []}, voice_languages={"Jisu": "chi"})) == []
-    assert problems(draft(voice_groups={"Jisu": []}, voice_languages={"Jisu": "xx"}), made={"Jisu": []}) == [
-        ("voice_languages", "group_language_unknown")]
+    for code in ("xx", "ukr"):
+        assert problems(draft(voice_groups={"Jisu": []}, voice_languages={"Jisu": code})) == [
+            ("voice_languages", "group_language_unknown")]
 
 
 def test_the_language_of_a_group_is_read_back_and_shown_and_a_wrong_stored_one_is_refused():

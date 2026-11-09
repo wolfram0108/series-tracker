@@ -10,9 +10,9 @@ import { t } from "../../i18n"
 import { reasonText } from "../../lib/reason"
 import { LANGUAGES } from "../../lib/languages"
 
-// Groups of voice-overs. The top row (like step 1 of the VK filters) chooses, creates, renames and deletes a group; a
-// group is made with the language of its voice-over. Under it lie the language and the names of the chosen group, and the
-// last row of the names is the one a new name is written in.
+// Groups of voice-overs. The top row (like step 1 of the VK filters) chooses, creates, renames and deletes a group. Under
+// it lie the language of the chosen group, marked red until it is chosen, and its names; the last row of the names is the
+// one a new name is written in.
 type Problem = components["schemas"]["SettingProblem"]
 type Groups = Record<string, string[]>
 type Languages = Record<string, string>
@@ -39,7 +39,6 @@ const editText = ref("")
 const newText = ref("")
 const nameInput = ref<HTMLInputElement | null>(null)
 const newInput = ref<HTMLInputElement | null>(null)
-const newLanguage = ref<string | null>(null)
 
 const names = computed(() => Object.keys(props.groups))
 const rows = computed(() => (selected.value ? props.groups[selected.value] ?? [] : []))
@@ -68,12 +67,8 @@ function choose(name: string | null) {
 
 async function create() {
   const name = nameField.value.trim()
-  const language = newLanguage.value
-  if (!name || !language) return
-  if (name in props.groups || (await props.commit({ ...props.groups, [name]: [] }, { ...props.languages, [name]: language }))) {
-    newLanguage.value = null
-    choose(name)
-  }
+  if (!name) return
+  if (name in props.groups || (await props.commit({ ...props.groups, [name]: [] }, props.languages))) choose(name)
 }
 async function setLanguage(language: string | null) {
   const name = selected.value
@@ -164,12 +159,8 @@ async function addRow() {
           />
           <label :for="`${uid}-name`">{{ renaming ? t("voices.settings.group.renameLabel") : t("voices.settings.group.new") }}</label>
         </div>
-        <StSelect
-          v-if="!renaming" v-model="newLanguage" class="group-language-new" :options="languageOptions"
-          :placeholder="t('voices.settings.group.language')" :aria-label="t('voices.settings.group.newLanguage')"
-        />
         <div class="constructor-item item-button-group">
-          <button v-if="!renaming" class="btn-icon btn-add" :disabled="busy || !nameField.trim() || !newLanguage" :title="t('voices.settings.group.create')" :aria-label="t('voices.settings.group.create')" @click="create">
+          <button v-if="!renaming" class="btn-icon btn-add" :disabled="busy || !nameField.trim()" :title="t('voices.settings.group.create')" :aria-label="t('voices.settings.group.create')" @click="create">
             <i class="pi pi-plus" />
           </button>
           <button v-else class="btn-icon btn-cancel" :title="t('voices.settings.group.cancel')" :aria-label="t('voices.settings.group.cancel')" @click="cancelRename">
@@ -190,14 +181,14 @@ async function addRow() {
 
     <!-- The language and the names of the chosen group; the last row is the one a new name is written in -->
     <div v-if="selected" class="names-area">
-      <div class="name-row group-language">
-        <span class="name-text">{{ t("voices.settings.group.language") }}</span>
+      <StGroup class="group-language" :state="languages[selected] ? null : 'invalid'">
+        <StIcon icon="pi pi-globe" />
         <StSelect
           :model-value="languages[selected] ?? null" :options="languageOptions"
           :placeholder="t('voices.settings.group.languageNone')" :aria-label="t('voices.settings.group.language')"
           @update:model-value="setLanguage($event as string | null)"
         />
-      </div>
+      </StGroup>
       <div v-for="(name, index) in rows" :key="`${index}:${name}`" class="name-row">
         <template v-if="editing !== index">
           <span class="name-text">{{ name }}</span>

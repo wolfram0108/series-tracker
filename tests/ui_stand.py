@@ -141,7 +141,7 @@ class UiStand(AppStand):
 
     async def set_up(self, groups: list[str], languages: dict[str, str] | None = None) -> None:
         """What the user sets once: the address of the alignment service and its work folder, the groups of voice-overs,
-        each made with the language of its voice-over (`languages`: group → ISO 639-2; Russian for the others)."""
+        each given the language of its voice-over under it (`languages`: group → ISO 639-2; Russian for the others)."""
         page = self.page
         work = os.path.join(self.root, "work")
         connected = self.bus.subscribe("conform.daemon.up")
@@ -156,9 +156,9 @@ class UiStand(AppStand):
         for group in groups:
             await page.get_by_label(text("voices.settings.group.new")).fill(group)
             code = (languages or {}).get(group, "rus")
-            await _pick(page, page.locator(".groups-editor .group-language-new"), text(f"voices.language.{code}"))
             await page.get_by_role("button", name=text("voices.settings.group.create")).click()
             await expect(page.locator(".groups-editor .item-select").first.locator(".selected-value")).to_have_text(group)
+            await _pick(page, page.locator(".groups-editor .group-language .item-select"), text(f"voices.language.{code}"))
             await expect(page.locator(".groups-editor .group-language .selected-value")).to_have_text(
                 text(f"voices.language.{code}"))
         await self.close_settings()

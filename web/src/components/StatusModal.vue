@@ -7,13 +7,15 @@ import StatusComposition from "./status/StatusComposition.vue"
 import StatusOutput from "./status/StatusOutput.vue"
 import StatusSlicing from "./status/StatusSlicing.vue"
 import StatusHistory from "./status/StatusHistory.vue"
+import SettingsParser from "./settings/SettingsParser.vue"
 import { api } from "../api/client"
 import { useApi } from "../composables/useApi"
 import { useSeriesStore, type Series } from "../stores/series"
 import { t } from "../i18n"
 
 // Status window: the shell of the settings window (ModalShell xl, fixed height) with segment tabs (st-tabs); the
-// tabs depend on the kind of the series. The footer has "Save" on the Properties tab only.
+// tabs depend on the kind of the series. The footer has "Save" on the Properties tab only. The tab of the VK filters is
+// the configurator of the profiles of the rules, at hand from the series.
 const props = defineProps<{ seriesId: number }>()
 const emit = defineEmits<{ (e: "close"): void; (e: "updated"): void }>()
 const { request } = useApi()
@@ -30,12 +32,13 @@ const isBusy = computed(
 )
 const isVideo = computed(() => series.value?.kind === "video")
 
-type TabKey = "properties" | "composition" | "slicing" | "history"
+type TabKey = "properties" | "composition" | "slicing" | "parser" | "history"
 const tab = ref<TabKey>("properties")
 const tabs = computed(() => {
   const list = [{ value: "properties" as TabKey, label: "Свойства", icon: "pi-info-circle" }]
   list.push({ value: "composition", label: isVideo.value ? t("output.tab") : "Композиция", icon: "pi-sitemap" })
   if (isVideo.value) list.push({ value: "slicing", label: "Нарезка", icon: "pi-images" })
+  list.push({ value: "parser", label: t("status.tab.parser"), icon: "pi-filter" })
   list.push({ value: "history", label: "История", icon: "pi-history" })
   return list
 })
@@ -114,6 +117,7 @@ onMounted(load)
         :series-id="seriesId"
         :series-name="String(series.name ?? '')"
       />
+      <SettingsParser v-if="tab === 'parser'" />
       <StatusHistory v-show="tab === 'history'" :series-id="seriesId" :kind="series.kind ?? 'torrent'" />
     </template>
 

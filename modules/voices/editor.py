@@ -74,27 +74,17 @@ def player_names(player_groups: Mapping[str, list[str]]) -> list[str]:
     return list(named.values())
 
 
-def _language_problems(draft: VoiceSettingsDraft, made: Mapping[str, list[str]]) -> list[SettingProblem]:
-    """A group is given its language when it is made: a new group without one is refused, and so is a code that is not
-    one of `LANGUAGES`. A group made before languages were given keeps none until the user gives it one."""
+def _language_problems(draft: VoiceSettingsDraft) -> list[SettingProblem]:
+    """A code that is not one of `LANGUAGES` is refused. A group without a language is kept: the editor marks it until
+    the user gives it one, and a track of it is written without a language."""
     field = "voice_languages"
-    problems = []
-    known = {fold_name(name) for name in made}
     languages = {name.strip(): code for name, code in draft.voice_languages.items()}
-    for name in _cleaned(draft.voice_groups):
-        if not fold_name(name):
-            continue  # a group without a name is refused for that already
-        code = languages.get(name)
-        if code is not None and code not in LANGUAGES:
-            problems.append(_problem(field, reason("group_language_unknown", group=name, language=code)))
-        elif code is None and fold_name(name) not in known:
-            problems.append(_problem(field, reason("group_language_missing", group=name)))
-    return problems
+    return [_problem(field, reason("group_language_unknown", group=name, language=languages[name]))
+            for name in _cleaned(draft.voice_groups) if fold_name(name) and languages.get(name) not in (None, *LANGUAGES)]
 
 
-def check(draft: VoiceSettingsDraft, player_groups: Mapping[str, list[str]],
-          made: Mapping[str, list[str]] | None = None) -> list[SettingProblem]:
-    """Every reason this form cannot be saved; empty when it can. `made` are the groups saved before."""
+def check(draft: VoiceSettingsDraft, player_groups: Mapping[str, list[str]]) -> list[SettingProblem]:
+    """Every reason this form cannot be saved; empty when it can."""
     problems = []
     names = [name.strip() for name in draft.priority if name.strip()]
     if not names:
@@ -107,7 +97,7 @@ def check(draft: VoiceSettingsDraft, player_groups: Mapping[str, list[str]],
         elif fold_name(name) not in known:
             problems.append(_problem("priority", reason("priority_unknown_player", player=name)))
         seen.add(fold_name(name))
-    return problems + _group_problems(draft.voice_groups) + _language_problems(draft, made or {})
+    return problems + _group_problems(draft.voice_groups) + _language_problems(draft)
 
 
 def clean(draft: VoiceSettingsDraft) -> VoiceSettingsDraft:

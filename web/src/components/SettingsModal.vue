@@ -5,7 +5,7 @@ import ModalShell from "./ModalShell.vue"
 import SettingsAgents from "./settings/SettingsAgents.vue"
 import SettingsAuth from "./settings/SettingsAuth.vue"
 import SettingsAccount from "./settings/SettingsAccount.vue"
-import SettingsTrackers from "./settings/SettingsTrackers.vue"
+import SettingsSources from "./settings/SettingsSources.vue"
 import SettingsDebug from "./settings/SettingsDebug.vue"
 import SettingsParser from "./settings/SettingsParser.vue"
 import SettingsVoices from "./settings/SettingsVoices.vue"
@@ -15,7 +15,7 @@ import { t } from "../i18n"
 // активной вкладки + футер. Вкладка parser — конфигуратор «Фильтры VK».
 const emit = defineEmits<{ (e: "close"): void }>()
 
-const tab = ref<"auth" | "account" | "trackers" | "parser" | "voices" | "agents" | "debug">("auth")
+const tab = ref<"auth" | "account" | "sources" | "parser" | "voices" | "agents" | "debug">("auth")
 
 // ссылка на активную вкладку с методом save() (для кнопки в футере)
 const tabRef = ref<{ save?: () => Promise<boolean> } | null>(null)
@@ -33,7 +33,7 @@ async function onSave() {
 const tabs = [
   { label: "Авторизация", value: "auth", icon: "pi-key" },
   { label: "Аккаунт", value: "account", icon: "pi-user" },
-  { label: "Трекеры", value: "trackers", icon: "pi-wifi" },
+  { label: t("settings.tab.sources"), value: "sources", icon: "pi-wifi" },
   { label: "Фильтры VK", value: "parser", icon: "pi-filter" },
   { label: t("settings.tab.voices"), value: "voices", icon: "pi-volume-up" },
   { label: "Агенты", value: "agents", icon: "pi-server" },
@@ -63,7 +63,7 @@ const tabs = [
 
     <SettingsAuth v-if="tab === 'auth'" ref="tabRef" />
     <SettingsAccount v-else-if="tab === 'account'" />
-    <SettingsTrackers v-else-if="tab === 'trackers'" />
+    <SettingsSources v-else-if="tab === 'sources'" />
     <SettingsAgents v-else-if="tab === 'agents'" />
     <SettingsDebug v-else-if="tab === 'debug'" />
     <SettingsParser v-else-if="tab === 'parser'" />
