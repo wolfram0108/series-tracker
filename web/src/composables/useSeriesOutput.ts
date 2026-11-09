@@ -4,6 +4,7 @@ import {
   bySeason, groupTarget, joinEpisodes, orderValue, queueLevers, resetBody, setBody, sourceMarks, variantTarget,
   type QueueName, type QueueRow, type Reference, type Scope,
 } from "../lib/output"
+import { nextAnswer, type ChangeAnswer } from "../lib/changeAnswer"
 import { reasonText } from "../lib/reason"
 import { useCompositionStore } from "../stores/composition"
 import { useSeriesStore } from "../stores/series"
@@ -49,6 +50,8 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   const busy = ref(false)
   const syncing = ref(false)
   const stopping = ref(false)
+  // The answer of the core to every change the window sent: a list that shows a dragged order waits on it (OrderList).
+  const answer = ref<ChangeAnswer>({ n: 0, ok: true })
   // The name of the file of every episode is the plan's: it comes with every packet of the plan of the series.
   const names = computed(() => planNames(plan.forSeries(seriesId)))
 
@@ -95,12 +98,15 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   async function act(send: () => Promise<Answer<unknown>>, flag: Ref<boolean>): Promise<string | null> {
     failure.value = null
     flag.value = true
+    let ok = false
     try {
-      const answer = await send()
-      if (answer.ok) return null
-      failure.value = answer.text
-      return answer.text
+      const reply = await send()
+      ok = reply.ok
+      if (reply.ok) return null
+      failure.value = reply.text
+      return reply.text
     } finally {
+      answer.value = nextAnswer(answer.value, ok)
       flag.value = false
     }
   }
@@ -216,7 +222,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     })
   }
 
-  return { composition, references, loading, failure, busy, syncing, stopping, stop, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
+  return { composition, references, loading, failure, busy, answer, syncing, stopping, stop, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
     sync, retryFailed, voiceOrders, order, marks, loadQueues, queuesOf, setOrder, setAllowed, setTaken, resetOrder,
     retry, redo, refetch, compilations, cuts, member, takeCompilation, retryCut, labels }
 }

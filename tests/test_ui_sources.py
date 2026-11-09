@@ -251,7 +251,7 @@ async def test_a_voice_over_only_its_file_holds_is_moved_in_the_order_of_the_sea
     await expect(marks.nth(0)).to_have_class(re.compile(r"\bis-online\b"))
     await expect(marks.nth(1)).to_have_class(re.compile(r"\bis-offline\b"))
     await ui.shot("s10-held-voice-offline")
-    await items.nth(1).drag_to(items.nth(0))
+    await ui.drag(items.nth(1), items.nth(0))
     await expect(labels).to_have_text(["AnimeVost", "AniStar"])
     await expect(ui.page.locator(".output-failure")).to_have_count(0)
     await ui.press_sync(series_id)

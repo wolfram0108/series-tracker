@@ -567,8 +567,7 @@ export const ru = {
   "voices.settings.voices.hint": "Одна озвучка у разных плееров называется по-разному. Заведите группу и впишите в неё названия: озвучка с таким названием попадёт в группу, скачается и выровняется один раз. Названия, которые отличаются только регистром, пробелами и знаками (RedHeadSound и Red Head Sound), совпадают сами.",
   "voices.settings.priority.title": "Порядок источников",
   "voices.settings.priority.hint": "Выше в списке значит предпочтительнее: при равном разрешении референсом становится верхний плеер, он же первым пробуется при скачивании озвучки.",
-  "voices.settings.priority.up": "Выше",
-  "voices.settings.priority.down": "Ниже",
+  "voices.settings.priority.drag": "Перетащить",
   "voices.settings.priority.reset": "Порядок по умолчанию",
 } as const
 

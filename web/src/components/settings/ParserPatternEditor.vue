@@ -142,7 +142,7 @@ function checkMove(evt: any): boolean {
       group="blocks"
       handle=".drag-handle"
       item-key="id"
-      ghost-class="ghost-block"
+      ghost-class="drag-ghost"
       :animation="200"
       :data-context="context"
       :move="checkMove"

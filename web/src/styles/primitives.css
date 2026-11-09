@@ -12,3 +12,9 @@
   display: grid; gap: var(--space);
   grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--measure)), 1fr));
 }
+
+/* The lists the user puts in order (OrderList, the constructor of rules): the shadow at the place an item is dragged to,
+   and the handle a row is dragged by and moved with the arrow keys. */
+.drag-ghost { opacity: 0.5; background: #c8ebfb; }
+.order-handle { border: none; background: none; color: #adb5bd; cursor: grab; padding: 0.2rem; }
+.order-handle:focus-visible { outline: 0.125rem solid var(--color-blue); border-radius: 4px; }

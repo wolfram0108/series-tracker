@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onMounted, provide, ref, watch } from "vue"
 import Button from "primevue/button"
 import { api } from "../../api/client"
 import type { components } from "../../api/schema"
 import { useApi } from "../../composables/useApi"
 import { t } from "../../i18n"
+import { CHANGE_ANSWER, nextAnswer } from "../../lib/changeAnswer"
 import { reasonText } from "../../lib/reason"
 import { useVoicesStore } from "../../stores/voices"
+import OrderList from "../OrderList.vue"
 import VoiceGroupsEditor from "./VoiceGroupsEditor.vue"
 
 // Settings of the voices: groups of voice-overs and the order of the sources. Every action goes to the core at once and
@@ -21,6 +23,8 @@ const voicesStore = useVoicesStore()
 const view = ref<View | null>(null)
 const problems = ref<Problem[]>([])
 const busy = ref(false)
+const answer = ref({ n: 0, ok: true })
+provide(CHANGE_ANSWER, answer)
 
 async function load() {
   const next = await request(api.GET("/api/voices/settings"), { errorMessage: t("voices.settings.loadFailed") })
@@ -37,10 +41,12 @@ async function commit(change: { priority?: string[]; voice_groups?: Groups }): P
       }),
       { errorMessage: t("voices.settings.saveFailed") },
     )
-    if (!reply) return false
-    view.value = reply.settings
-    problems.value = reply.problems
-    return reply.saved
+    if (reply) {
+      view.value = reply.settings
+      problems.value = reply.problems
+    }
+    answer.value = nextAnswer(answer.value, !!reply?.saved)
+    return !!reply?.saved
   } finally {
     busy.value = false
   }
@@ -56,13 +62,7 @@ const rejected = (field: string) => !!view.value?.rejected.includes(field)
 
 const order = computed(() => view.value?.priority ?? [])
 
-function move(index: number, by: -1 | 1) {
-  const list = [...order.value]
-  const target = index + by
-  if (target < 0 || target >= list.length) return
-  ;[list[index], list[target]] = [list[target], list[index]]
-  void commit({ priority: list })
-}
+const keyOf = (name: string): string => name
 function resetOrder() {
   if (view.value) void commit({ priority: [...view.value.default_priority] })
 }
@@ -92,14 +92,18 @@ onMounted(load)
       <div class="fieldset-content">
         <p class="muted-hint">{{ t("voices.settings.priority.hint") }}</p>
         <p v-if="rejected('priority')" class="problem">{{ t("voices.settings.rejected") }}</p>
-        <ol class="priority-list">
-          <li v-for="(name, index) in order" :key="`${index}:${name}`" class="priority-row">
-            <span class="priority-place">{{ index + 1 }}</span>
-            <span class="priority-name">{{ name }}</span>
-            <Button icon="pi pi-arrow-up" text rounded :disabled="busy || index === 0" :title="t('voices.settings.priority.up')" :aria-label="t('voices.settings.priority.up')" @click="move(index, -1)" />
-            <Button icon="pi pi-arrow-down" text rounded :disabled="busy || index === order.length - 1" :title="t('voices.settings.priority.down')" :aria-label="t('voices.settings.priority.down')" @click="move(index, 1)" />
-          </li>
-        </ol>
+        <OrderList class="priority-list" :items="order" :item-key="keyOf" :busy="busy" handle=".order-handle"
+                   @order="commit({ priority: $event })">
+          <template #item="{ item, index, step }">
+            <li class="priority-row">
+              <button type="button" class="order-handle" :disabled="busy" :aria-label="t('voices.settings.priority.drag')" @keydown="step">
+                <i class="pi pi-bars" aria-hidden="true" />
+              </button>
+              <span class="priority-place">{{ index + 1 }}</span>
+              <span class="priority-name">{{ item }}</span>
+            </li>
+          </template>
+        </OrderList>
         <p v-for="(problem, index) in problemsOf('priority')" :key="index" class="problem">{{ reasonText(problem.detail) }}</p>
         <div class="actions-row">
           <Button :label="t('voices.settings.priority.reset')" icon="pi pi-undo" severity="secondary" size="small" text :disabled="busy" @click="resetOrder" />
@@ -115,7 +119,7 @@ onMounted(load)
 .problem { color: var(--color-red-1); margin: 0.4rem 0; }
 .actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin: 0.75rem 0 0; }
 .priority-list { list-style: none; margin: 0 0 0.5rem; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
-.priority-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0.4rem 0.15rem 0.8rem; background: var(--bg-light); border-radius: var(--border-radius); }
+.priority-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0.4rem; background: var(--bg-light); border-radius: var(--border-radius); }
 .priority-place { color: var(--text-muted); min-width: 1.5rem; }
 .priority-name { flex: 1 1 auto; font-weight: 600; }
 </style>

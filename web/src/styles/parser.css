@@ -314,7 +314,6 @@
 
 .drag-handle { cursor: grab; color: #9ca3af; padding: 0 4px; display: inline-flex; }
 .drag-handle:active { cursor: grabbing; }
-.ghost-block { opacity: 0.5; background: #c8ebfb; }
 
 .pattern-block .operation-sign { padding-right: 0.5rem; font-weight: bold; }
 .pattern-block .operation-value {

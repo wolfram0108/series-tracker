@@ -18,13 +18,9 @@
 }
 .queue-table td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
 .queue-table .variant-row:nth-child(odd) { background: rgba(0, 0, 0, 0.02); }
-.queue-table .variant-row { cursor: grab; }
 .queue-table .variant-row.is-first { background: rgba(25, 135, 84, 0.1); }
 .queue-table .variant-row.is-skipped td { color: #adb5bd; }
-.queue-table .variant-row.is-over td { box-shadow: inset 0 2px 0 var(--color-blue); }
 .queue-table .queue-take, .queue-table .queue-handle { inline-size: 1%; }
-.queue-drag { border: none; background: none; color: #adb5bd; cursor: grab; padding: 0.2rem; }
-.queue-drag:focus-visible { outline: 0.125rem solid var(--color-blue); border-radius: 4px; }
 .queue-player { font-weight: 600; }
 .queue-source { display: inline-flex; align-items: center; gap: 0.4rem; }
 .queue-place { color: var(--text-muted); }

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest"
 import { mount } from "@vue/test-utils"
+import draggable from "vuedraggable"
 import VoiceOrder from "./VoiceOrder.vue"
 
 const voices = [
@@ -24,24 +25,23 @@ describe("VoiceOrder", () => {
     ])
   })
 
-  it("puts a dragged voice-over where it is dropped and asks for that order", async () => {
+  it("is the list of the constructor's engine and asks for the order a voice-over is dragged into", async () => {
     const w = mount(VoiceOrder, { props: { voices } })
-    const items = w.findAll(".voice-order-item")
-    await items[1].trigger("dragstart")
-    await items[0].trigger("dragover")
-    await items[0].trigger("drop")
+    expect(w.findComponent({ name: "OrderList" }).exists()).toBe(true)
+    w.findComponent(draggable).vm.$emit("update:modelValue", [voices[1], voices[0], voices[2]])
     expect(w.emitted("order")).toEqual([[["ruchime", "ПВА ШОУ", "AniStar"]]])
-    await items[0].trigger("dragstart")
-    await items[2].trigger("drop")
-    expect(w.emitted("order")?.[1]).toEqual([["ruchime", "AniStar", "ПВА ШОУ"]])
+  })
+
+  it("moves a voice-over with the arrow keys", async () => {
+    const w = mount(VoiceOrder, { props: { voices } })
+    await w.findAll(".voice-order-item")[2].trigger("keydown", { key: "ArrowLeft" })
+    expect(w.emitted("order")).toEqual([[["ПВА ШОУ", "AniStar", "ruchime"]]])
   })
 
   it("takes no order while the series is busy", async () => {
     const w = mount(VoiceOrder, { props: { voices, busy: true } })
-    const items = w.findAll(".voice-order-item")
-    expect(items[0].attributes("draggable")).toBe("false")
-    await items[1].trigger("dragstart")
-    await items[0].trigger("drop")
+    w.findComponent(draggable).vm.$emit("update:modelValue", [voices[1], voices[0], voices[2]])
+    await w.findAll(".voice-order-item")[1].trigger("keydown", { key: "ArrowLeft" })
     expect(w.emitted("order")).toBeUndefined()
   })
 })

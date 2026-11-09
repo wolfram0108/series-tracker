@@ -266,6 +266,16 @@ class UiStand(AppStand):
         await self.page.locator(".series-card", has_text=name).first.locator("[title='Статус']").click()
         await self.tab(text("output.tab"))
 
+    async def drag(self, source, target) -> None:
+        """An item of an ordered list dragged as a hand does it: pressed on the source, carried over the target in steps
+        and let go on its first half, which puts it before the target (the engine moves an item once the pointer
+        crosses into the item it passes)."""
+        box = await target.bounding_box()
+        await source.hover()
+        await self.page.mouse.down()
+        await self.page.mouse.move(box["x"] + box["width"] / 4, box["y"] + box["height"] / 4, steps=12)
+        await self.page.mouse.up()
+
     async def press_sync(self, series_id: int) -> None:
         """«Синхронизировать» in the section «Выход», to the end of the run the service tells (the world's signal: the
         service said it is done); what the screen shows then is the check of the scenario."""

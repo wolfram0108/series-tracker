@@ -234,9 +234,7 @@ describe("StatusOutput", () => {
     await button(w, t("output.tab.reference"))!.trigger("click")
     const rows = w.findAll(".variant-row")
     expect(rows.map((each) => each.find(".queue-player").text())).toEqual(["Vibix", "Kodik"])
-    await rows[1].trigger("dragstart")
-    await rows[0].trigger("dragover")
-    await rows[0].trigger("drop")
+    await rows[1].find(".order-handle").trigger("keydown", { key: "ArrowUp" })
     await rows[0].find("input[type=checkbox]").setValue(false)
     expect(vi.mocked(calls.setLever).mock.calls).toEqual([
       [1, { season: 1, episode: 1, lever: "reference.order", target: null, value: [

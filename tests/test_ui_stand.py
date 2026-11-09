@@ -321,3 +321,85 @@ async def test_the_sync_stopped_by_its_button_cancels_its_work_applies_nothing_a
     card = ui.page.locator(".series-card", has_text=SERIES)
     await expect(card.locator(".btn-scan")).to_be_enabled()
     await expect(card.locator(".btn-stop")).to_have_count(0)
+
+
+# Every order the queue of the opened episode puts on the screen from now on (the voice-over of each row): a change of
+# the page is read at the frame it is drawn in, as the user sees it, not in the middle of the task that makes it.
+OBSERVE_QUEUE = """() => {
+    window.__orders = []
+    const body = document.querySelector('.episode-detail .queue-table tbody')
+    let asked = false
+    const draw = () => {
+        asked = false
+        window.__orders.push([...body.querySelectorAll('.variant-row td:nth-child(6)')].map((each) => each.textContent.trim()))
+    }
+    new MutationObserver(() => { if (!asked) { asked = true; requestAnimationFrame(draw) } })
+        .observe(body, { childList: true, subtree: true, characterData: true })
+}"""
+
+
+async def test_a_queue_dragged_by_its_handle_holds_the_new_order_until_the_core_answers_and_a_refusal_puts_it_back(ui):
+    """A row of the queue of the reference is dragged by its handle to the top, on the engine of the constructor of rules:
+    the queue shows the new order at once and keeps it while the answer of the core is held on its way (no jump back
+    to the old order), and a drag in that time is not taken. The core holds the order: a window opened anew shows it.
+    An order the core refuses goes back to the one the core holds."""
+    await synced_in_browser(ui, (1,))
+    page = ui.page
+
+    async def queue():
+        await page.locator(".episode-card").first.click()
+        detail = page.locator(".episode-detail")
+        await detail.locator(".st-tab", has_text=text("output.tab.reference")).click()
+        rows = detail.locator(".queue-table .variant-row")
+        await expect(rows).to_have_count(2)
+        return rows, rows.locator("td:nth-child(6)")  # the voice-over of each variant (both play on one player)
+
+    rows, groups = await queue()
+    before = await groups.all_inner_texts()
+    dragged = before[::-1]
+    await page.evaluate(OBSERVE_QUEUE)
+    sent, release = [], asyncio.get_running_loop().create_future()
+
+    async def held(route):
+        sent.append(route.request.post_data_json)
+        await release
+        await route.continue_()
+
+    await page.route("**/api/series/*/output/settings", held)
+    await ui.drag(rows.nth(1).locator(".order-handle"), rows.nth(0))
+    await expect(groups).to_have_text(dragged)
+    await ui.drag(rows.nth(1).locator(".order-handle"), rows.nth(0))  # the answer is on its way: not taken
+    await expect(groups).to_have_text(dragged)
+    await ui.shot("40-queue-dragged")
+    # The core's queue read again after the accepted order is the end of the wait.
+    async with page.expect_response(lambda response: "/output/queues" in response.url) as reread:
+        release.set_result(None)
+    await reread.value
+    await page.unroute("**/api/series/*/output/settings")
+    await page.evaluate("() => new Promise((done) => requestAnimationFrame(() => done()))")
+    await expect(groups).to_have_text(dragged)
+    await expect(page.locator(".output-failure")).to_have_count(0)
+    assert [(body["lever"], [each["group"] for each in body["value"]]) for body in sent] == [("reference.order", dragged)]
+    orders = await page.evaluate("() => window.__orders")
+    assert orders and before not in orders, orders
+
+    await page.reload()
+    await ui.open_output(SERIES)
+    rows, groups = await queue()
+    await expect(groups).to_have_text(dragged)
+
+    refusals, refuse = [], asyncio.get_running_loop().create_future()
+
+    async def refused(route):
+        refusals.append(route.request.post_data_json)
+        await refuse
+        await route.fulfill(status=409, json={"detail": "refused"})
+
+    await page.route("**/api/series/*/output/settings", refused)
+    await ui.drag(rows.nth(1).locator(".order-handle"), rows.nth(0))
+    await expect(groups).to_have_text(before)  # shown while on its way
+    refuse.set_result(None)
+    await expect(page.locator(".output-failure")).to_have_count(1)
+    await expect(groups).to_have_text(dragged)  # the core's order again
+    assert [[each["group"] for each in body["value"]] for body in refusals] == [before]
+    await ui.shot("41-queue-refused")

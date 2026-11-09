@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, provide, ref } from "vue"
 import Button from "primevue/button"
 import { useSeriesOutput } from "../../composables/useSeriesOutput"
 import { t } from "../../i18n"
@@ -7,6 +7,7 @@ import {
   allowedIn, episodeStatus, isDeviation, isOff, trackCells, type EpisodeStatus, type EpisodeView, type QueueName, type QueueRow,
   type Scope,
 } from "../../lib/output"
+import { CHANGE_ANSWER } from "../../lib/changeAnswer"
 import { HELD, holdLever } from "../../lib/lever"
 import { pageHost, progressText } from "../../lib/sources"
 import { useSeriesStore } from "../../stores/series"
@@ -29,6 +30,7 @@ const series = useSeriesStore()
 // (lib/lever.ts), so that a press does not make every control of the tab blink.
 const busy = computed(() => !!series.byId(props.seriesId)?.is_busy)
 const waiting = computed(() => output.busy.value)
+provide(CHANGE_ANSWER, output.answer)
 const hold = (event: Event): void => { if (waiting.value) holdLever(event) }
 const root = ref<HTMLElement | null>(null)
 onMounted(() => { for (const name of HELD) root.value?.addEventListener(name, hold, { capture: true }) })
