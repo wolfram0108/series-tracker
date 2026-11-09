@@ -32,7 +32,8 @@ def container_json(container: Container) -> dict:
         "episode": list(container.video.episode), "timeline": asdict(container.video.timeline),
         "cut_of": row_json(container.video.cut_of)},
         "tracks": [{"dub": asdict(track.dub), "snapshot": asdict(track.snapshot), "episode": list(track.episode),
-                    "aligned_to": asdict(track.aligned_to), **({"tag": track.tag} if track.tag else {})}
+                    "aligned_to": asdict(track.aligned_to), **({"tag": track.tag} if track.tag else {}),
+                    **({"file": track.file} if track.file else {})}
                    for track in container.tracks]}
 
 
@@ -41,7 +42,8 @@ def container_of(data: dict) -> Container:
     return Container(data["name"], Video(RowId(**video["id"]), Snapshot(**video["snapshot"]), tuple(video["episode"]),
                                          RowId(**video["timeline"]), RowId(**video["cut_of"]) if video["cut_of"] else None),
                      tuple(Track(RowId(**track["dub"]), Snapshot(**track["snapshot"]), tuple(track["episode"]),
-                                 RowId(**track["aligned_to"]), track.get("tag", "")) for track in data["tracks"]),
+                                 RowId(**track["aligned_to"]), track.get("tag", ""), track.get("file", ""))
+                           for track in data["tracks"]),
                      data["off"])
 
 
@@ -88,6 +90,14 @@ class Library:
     def staging(self, name: str) -> str:
         return os.path.join(self.root, STAGING, name.replace("/", "_") + ".building.mkv")
 
+    async def source_of(self, container: Container, dub: RowId, own: bool) -> tuple[str, int]:
+        """Where the sound of a track is: its own file beside the container (placed, never packed), else its stream in
+        the container."""
+        track = None if own else next((each for each in container.tracks if each.dub == dub), None)
+        if track is not None and track.file:
+            return self.path(track.file), 0
+        return self.path(container.name), await self.stream_of(container, dub, own)
+
     async def stream_of(self, container: Container, dub: RowId, own: bool) -> int:
         """The index of the audio stream of a track in a container, told by the container's own tags."""
         held = await mkv.contents(self.path(container.name))
@@ -112,12 +122,13 @@ class Library:
             identity = mkv.identity(video.timeline.source_id, video.timeline.row_key)
             own_stream = await self.stream_of(goal.video.container, video.id, True) if goal.video.kind == "asset" else 0
             tracks = [mkv.AudioIn(video.snapshot.group or "—", video_path, own_stream, identity, own=True)]
-            made_tracks = []
+            made_tracks, packed = [], []
             for way in goal.tracks:
                 if way.kind == "reuse":
-                    path = self.path(way.container.name)
-                    stream = await self.stream_of(way.container, way.dub, way.own)
+                    path, stream = await self.source_of(way.container, way.dub, way.own)
                     made_tracks.append(Track(way.dub, way.snapshot, slot, video.timeline))
+                    if path != self.path(way.container.name):
+                        packed.append(os.path.relpath(path, self.root))
                 else:
                     aligned = results[f"align:{slot}:{way.voice}"]
                     path, stream = aligned.file, 0
@@ -130,6 +141,7 @@ class Library:
             if problem is not None:
                 raise RuntimeError(f"{goal.name}: {problem}")
             steps.append(("publish", os.path.relpath(staging, self.root), goal.name))
+            steps += [("remove", name) for name in packed]  # the file now holds the track
         for slot, name in group.kept:
             goal = made.goal(slot)
             if goal.name != name:

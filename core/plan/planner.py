@@ -378,6 +378,8 @@ def _satisfied_by(goal: Goal) -> Container | None:
     if goal.video.kind != "asset":
         return None
     container = goal.video.container
+    if any(track.file for track in container.tracks):
+        return None  # a track still lies beside it: the container is to be built with it inside
     if any(way.kind != "reuse" or way.container is not container or way.own for way in goal.tracks):
         return None
     if tuple(track.dub for track in container.tracks) != tuple(way.dub for way in goal.tracks):

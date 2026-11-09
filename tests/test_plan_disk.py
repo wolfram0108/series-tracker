@@ -1,10 +1,16 @@
 """The planner of the table of an episode on a disk (tests/plan_disk.py): real files made by ffmpeg, the service's own
 downloader and container builder, the service's own client talking to a model of the alignment service, the journal of
 the application, crashes at every step, adoption from the files."""
+import asyncio
+import os
 import random
+import subprocess
+from dataclasses import replace
 
 import pytest
 
+from core import container as mkv
+from core.plan.files import dub_key
 from core.plan.tables import RowId
 from plan_disk import Crash, DiskWorld
 from plan_world import Chaos
@@ -81,6 +87,38 @@ def test_a_file_lost_from_disk_is_gone_from_the_table_and_made_again(disk):
     step = disk.sync("файл пропал")
     disk.check(step)
     assert step.plan.goal((1, 1)).video.kind == "download"
+
+
+def test_tracks_placed_beside_the_container_are_packed_into_it_and_their_files_go(disk):
+    """A file made before the planner may hold the video alone, its voice-overs placed beside it and never packed: the
+    table names their files. The next sync builds the container with them inside out of those files (nothing downloaded,
+    nothing aligned) and removes the files."""
+    episode(disk, 1, 2)
+    disk.check(disk.sync("исходно"))
+    container = visible(disk, 1)
+    path = disk.library(container.name)
+    held = asyncio.run(mkv.contents(path))
+    beside = []
+    for track in container.tracks:
+        stream = next(each.index for each in held.audio if each.key == dub_key(track.dub))
+        name = container.name.removesuffix(".mkv") + f".{track.group}.ru.mka"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-map", f"0:a:{stream}", "-c", "copy",
+                        disk.library(name)], check=True)
+        beside.append(replace(track, file=name))
+    own = next(each for each in held.audio if each.own)
+    alone = path + ".alone.mkv"
+    assert asyncio.run(mkv.build(alone, path, held.video, [
+        mkv.AudioIn(own.label, path, own.index, own.aligned_to, own=True)])) is None
+    os.replace(alone, path)
+    disk.containers[container.name] = replace(container, tracks=tuple(beside))
+    disk._write_table()
+
+    step = disk.sync("упаковка дорожек, лежащих рядом")
+    assert {op.kind for op in step.plan.ops} == {"build"}
+    disk.check(step)
+    assert len(asyncio.run(mkv.contents(path)).audio) == 3
+    assert not any(os.path.exists(disk.library(each.file)) for each in beside)
+    assert not any(track.file for track in visible(disk, 1).tracks)
 
 
 def _replacement(world) -> None:

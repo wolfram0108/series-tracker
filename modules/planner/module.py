@@ -283,8 +283,8 @@ class BusSync(SeriesSync):
             if not dub.startswith(self.downloads_dir):
                 dub = await self._copy(dub, os.path.join(folder, "dub"))
         else:
-            dub = await self._copy(self.files.path(way.container.name), os.path.join(folder, "dub"))
-            stream = await self.files.stream_of(way.container, way.dub, way.own)
+            path, stream = await self.files.source_of(way.container, way.dub, way.own)
+            dub = await self._copy(path, os.path.join(folder, "dub"))
         places = await self.m.request("conform.workspace", {"dub_folder": folder})
         out = await self.m.job(key, "conform.submit", {
             "ref": ref, "dubs": [dub], "dub_atracks": [stream], "out_dir": places["out_dir"],

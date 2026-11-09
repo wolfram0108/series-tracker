@@ -118,6 +118,9 @@ class Track:
     # The key of the track in its file's tags when it is not the key of its row (a file made before the planner keys its
     # tracks by the voice-over); not a part of what the track is.
     tag: str = field(default="", compare=False)
+    # A file of its own beside the container (relative to the library): a track the service placed before the planner and
+    # never packed. The container is not built yet: the next build takes the sound from that file and removes it.
+    file: str = field(default="", compare=False)
 
     @property
     def group(self) -> str | None:
