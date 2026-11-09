@@ -64,13 +64,19 @@ export function setupRealtime(): void {
   })
   // renaming_complete — обновление состава в статус-модалке (Ф4)
 
-  // A connection that came back may have missed the end of a read: the soft news of the pages are dropped and
-  // every open screen reads its API again (useSeriesSources / useSourceDrafts).
+  // A connection that came back may have missed events (the end of a read, of a sync, a restart of the service): the
+  // soft news of the pages are dropped, the list of series and the scanner are read again as at the start, and every
+  // open screen reads its API again (useSeriesSources / useSourceDrafts / useSeriesOutput).
+  let upBefore = false
   watch(sse.connected, (up) => {
-    if (up) {
-      tables.reset()
-      reads.reset()
+    if (!up) return
+    tables.reset()
+    reads.reset()
+    if (upBefore) {
+      void series.load()
+      void scanner.load()
     }
+    upBefore = true
   })
 
   sse.connect()
