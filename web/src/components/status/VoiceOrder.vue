@@ -30,7 +30,7 @@ function drop(target: number): void {
     <ol class="voice-order-list">
       <li
         v-for="(voice, index) in voices" :key="voice.label"
-        class="voice-order-item" :class="{ 'is-over': over === index, 'is-busy': busy }"
+        class="voice-order-item" data-lever :class="{ 'is-over': over === index, 'is-busy': busy }"
         :draggable="!busy"
         :aria-label="t('output.voices.item', { position: index + 1, label: voice.label, episodes: voice.episodes })"
         @dragstart="dragged = index" @dragover.prevent="over = index" @dragleave="over = null" @drop.prevent="drop(index)"

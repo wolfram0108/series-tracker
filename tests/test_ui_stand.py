@@ -141,8 +141,26 @@ async def test_an_episode_switched_off_on_its_card_hides_its_file_and_on_again_s
     series_id = await synced_in_browser(ui, (1, 2))
     page = ui.page
     second = page.locator(".episode-card[data-episode='2']")
+    # The answer to the press is held until the check is done: while it is on its way no switch of the tab fades, and a
+    # press of another one goes nowhere.
+    reached, release, sent = asyncio.Event(), asyncio.Event(), []
+
+    async def held(route):
+        sent.append(route.request.url)
+        reached.set()
+        await release.wait()
+        await route.continue_()
+    await page.route("**/output/switch", held)
     await second.locator(".power-switch").click()
+    await asyncio.wait_for(reached.wait(), STAND_LIMIT_S)
+    switches = page.locator(".power-switch")
+    assert set(await switches.evaluate_all("all => all.map((each) => getComputedStyle(each).opacity)")) == {"1"}
+    await ui.shot("29-switch-on-its-way")
+    await page.locator(".episode-card[data-episode='1'] .power-switch").click()
+    release.set()
     await expect(second).to_have_class(re.compile(r"\bis-off\b"))
+    await page.unroute("**/output/switch", held)
+    assert len(sent) == 1
     await ui.press_sync(series_id)
     await expect(second).to_have_class(re.compile(r"\bis-off\b"))
     await expect(page.locator(".episode-card.is-ready")).to_have_count(1)

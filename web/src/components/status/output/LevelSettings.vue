@@ -90,7 +90,7 @@ const countText = (state: TrackState | "reference", count: number): string => st
             {{ t(`output.cut.meter.${state}`, { n: count }) }}
           </span>
         </span>
-        <button v-if="compilation.cuts.error" type="button" class="level-action do-retry-cuts" :disabled="busy" @click="emit('retry-cuts')">
+        <button v-if="compilation.cuts.error" type="button" class="level-action do-retry-cuts" data-lever :disabled="busy" @click="emit('retry-cuts')">
           {{ t("output.cut.retryAll", { n: compilation.cuts.error }) }}
         </button>
       </div>
@@ -111,10 +111,10 @@ const countText = (state: TrackState | "reference", count: number): string => st
               <span v-for="(count, state) in track.counts" :key="state" class="pill" :class="PILL[state]">{{ countText(state, count!) }}</span>
             </td>
             <td class="narrow">
-              <button v-if="track.counts.error" type="button" class="level-action do-retry" :disabled="busy" @click="emit('retry', track.group)">
+              <button v-if="track.counts.error" type="button" class="level-action do-retry" data-lever :disabled="busy" @click="emit('retry', track.group)">
                 {{ t("output.action.retryAll", { n: track.counts.error }) }}
               </button>
-              <button v-if="track.counts.done" type="button" class="level-action do-redo" :disabled="busy" @click="emit('redo', track.group)">
+              <button v-if="track.counts.done" type="button" class="level-action do-redo" data-lever :disabled="busy" @click="emit('redo', track.group)">
                 {{ t("output.action.redoAll") }}
               </button>
             </td>
@@ -135,7 +135,7 @@ const countText = (state: TrackState | "reference", count: number): string => st
     </div>
 
     <template #footer>
-      <button type="button" class="level-footer" :disabled="busy" @click="emit('reset-level')">{{ t("output.settings.reset") }}</button>
+      <button type="button" class="level-footer" data-lever :disabled="busy" @click="emit('reset-level')">{{ t("output.settings.reset") }}</button>
       <button type="button" class="level-footer" @click="emit('close')">{{ t("output.settings.close") }}</button>
     </template>
   </ModalShell>

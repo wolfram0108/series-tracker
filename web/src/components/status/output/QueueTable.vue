@@ -69,7 +69,7 @@ const levelOf = (row: QueueRow): string => row.allowed_level === "default" ? "" 
     </thead>
     <tbody>
       <tr
-        v-for="(row, index) in rows" :key="keyOf(row)" draggable="true" class="variant-row"
+        v-for="(row, index) in rows" :key="keyOf(row)" draggable="true" class="variant-row" data-lever
         :class="{ 'is-first': first && keyOf(first) === keyOf(row), 'is-skipped': !row.allowed, 'is-over': over === index }"
         @dragstart="dragged = index" @dragover.prevent="over = index" @dragleave="over = null" @drop.prevent="drop(index)"
         @dragend="dragged = over = null"

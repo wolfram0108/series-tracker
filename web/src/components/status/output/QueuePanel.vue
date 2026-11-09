@@ -39,14 +39,14 @@ const hint = computed(() => props.hint ?? (props.queue === "reference" ? t("outp
     <div class="queue-tools">
       <span>{{ hint }}</span>
       <span class="queue-grow" />
-      <label v-if="queue === 'voice' && view" class="queue-take">
+      <label v-if="queue === 'voice' && view" class="queue-take" data-lever>
         <input type="checkbox" :checked="view.take !== false" :disabled="busy"
                @change="emit('take', ($event.target as HTMLInputElement).checked)" />
         {{ t("output.queue.takeVoice") }}
         <span v-if="view.take_level && view.take_level !== 'default'" class="queue-level">{{ t(`output.level.${view.take_level}`) }}</span>
       </label>
       <span v-if="view" class="queue-level" :class="{ 'is-own': own }">{{ t(`output.level.${view.order_level}`) }}</span>
-      <button v-if="own" type="button" class="queue-back" :disabled="busy" @click="emit('reset')">{{ t("output.lever.reset") }}</button>
+      <button v-if="own" type="button" class="queue-back" data-lever :disabled="busy" @click="emit('reset')">{{ t("output.lever.reset") }}</button>
     </div>
     <p v-if="fromReference" class="queue-note">{{ t("output.queue.fromReference") }}</p>
     <p v-if="view && (view.rows ?? []).length === 0" class="queue-note">{{ t("output.queue.empty") }}</p>

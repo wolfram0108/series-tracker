@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 import Button from "primevue/button"
 import { useSeriesOutput } from "../../composables/useSeriesOutput"
 import { t } from "../../i18n"
@@ -7,6 +7,7 @@ import {
   allowedIn, episodeStatus, isDeviation, isOff, trackCells, type EpisodeStatus, type EpisodeView, type QueueName, type QueueRow,
   type Scope,
 } from "../../lib/output"
+import { HELD, holdLever } from "../../lib/lever"
 import { pageHost, progressText } from "../../lib/sources"
 import { useSeriesStore } from "../../stores/series"
 import { useSeriesReadsStore } from "../../stores/seriesReads"
@@ -24,8 +25,14 @@ const props = defineProps<{ seriesId: number; seriesName: string }>()
 
 const output = useSeriesOutput(props.seriesId, "video")
 const series = useSeriesStore()
-const seriesBusy = computed(() => !!series.byId(props.seriesId)?.is_busy)
-const busy = computed(() => output.busy.value || seriesBusy.value)
+// A sync of the series holds the levers for real, and they fade; a change of the window on its way holds them without a fade
+// (lib/lever.ts), so that a press does not make every control of the tab blink.
+const busy = computed(() => !!series.byId(props.seriesId)?.is_busy)
+const waiting = computed(() => output.busy.value)
+const hold = (event: Event): void => { if (waiting.value) holdLever(event) }
+const root = ref<HTMLElement | null>(null)
+onMounted(() => { for (const name of HELD) root.value?.addEventListener(name, hold, { capture: true }) })
+onBeforeUnmount(() => { for (const name of HELD) root.value?.removeEventListener(name, hold, { capture: true }) })
 const passing = computed(() => output.syncing.value || (series.byId(props.seriesId)?.statuses ?? []).includes("scanning"))
 const canSync = computed(() => {
   const table = output.composition.value?.availability
@@ -121,7 +128,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
 </script>
 
 <template>
-  <div class="status-output">
+  <div ref="root" class="status-output" :class="{ 'is-waiting': waiting }">
     <div class="output-bar output-actions">
       <Button :label="t('output.settings.series')" icon="pi pi-sliders-h" size="small" severity="info" class="output-series-settings"
               @click="openSettings(null)" />
@@ -213,6 +220,7 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
 
 <style scoped>
 .status-output { display: flex; flex-direction: column; gap: 0.9rem; }
+.status-output.is-waiting :deep([data-lever]), .status-output.is-waiting :deep([data-lever] *) { cursor: progress; }
 .output-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }
 .output-grow { flex: 1 1 auto; }
 .output-filters { display: flex; flex-wrap: wrap; gap: 0.3rem; }

@@ -6,7 +6,7 @@ const emit = defineEmits<{ (e: "toggle", on: boolean): void }>()
 </script>
 
 <template>
-  <label class="switch power-switch" :class="{ 'is-busy': busy }" :title="label" @click.stop>
+  <label class="switch power-switch" data-lever :class="{ 'is-busy': busy }" :title="label" @click.stop>
     <input type="checkbox" :checked="on" :disabled="busy" :aria-label="label" @change="emit('toggle', ($event.target as HTMLInputElement).checked)" />
     <span class="slider" />
   </label>

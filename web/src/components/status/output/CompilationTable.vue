@@ -66,7 +66,7 @@ const CUT_PILL: Record<CutState, string> = {
           <td>
             <template v-if="row.member && row.cut">
               <span class="pill" :class="CUT_PILL[row.cut]">{{ t(`output.cut.${row.cut}`) }}</span>
-              <button v-if="row.cut === 'error'" type="button" class="action-btn btn-scan do-retry-cut" :disabled="busy"
+              <button v-if="row.cut === 'error'" type="button" class="action-btn btn-scan do-retry-cut" data-lever :disabled="busy"
                       @click="emit('retry')">{{ t("output.cut.retry") }}</button>
             </template>
             <span v-else class="muted">—</span>
