@@ -141,12 +141,19 @@ class DubsSnapshot(BaseModel):
     items: list[SnapshotItem]
 
 
+# The languages a voice-over is given when its group is made (ISO 639-2, as Matroska tags a track); the interface words
+# each as `voices.language.<code>`.
+LANGUAGES = ("rus", "ukr", "eng", "chi", "jpn", "kor")
+
+
 class VoiceSettingsDraft(BaseModel):
-    """What the settings screen of the voices sends: the order of the sources and the groups of voice-overs.
-    A group is a name with the list of names that put a voice-over into it; a save replaces both values."""
+    """What the settings screen of the voices sends: the order of the sources, the groups of voice-overs and the language
+    of each group. A group is a name with the list of names that put a voice-over into it; a save replaces every value."""
 
     priority: list[str]
     voice_groups: dict[str, list[str]]
+    # The language of the voice-over of each group, given when the group is made (`LANGUAGES`).
+    voice_languages: dict[str, str] = Field(default_factory=dict)
 
 
 class SettingProblem(BaseModel):

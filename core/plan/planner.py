@@ -110,6 +110,8 @@ class Goal:
     titles: tuple[tuple[str, str], ...] = ()
     # The markup reference that gives the episode its timeline (stage 14); its sound is the last of the file.
     markup: Markup | None = None
+    # The languages of the sounds of the file (voice-over group, ISO 639-2), as the container is to bear them.
+    languages: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -396,10 +398,12 @@ def _goal(slot, inputs, namer, by_slot: Index, criteria, position, group_rank, o
     # The names of the sounds the user gave; an idle file keeps the names it was written under (no new work).
     sounds = {video.snapshot.group or "—"} | {way.snapshot.group or way.voice for way in tracks}
     titles = tuple(sorted((label, title) for label, title in choices.titles.items() if label in sounds))
+    languages = tuple(sorted((label, code) for label, code in choices.languages.items() if label in sounds))
     if idle and video.container is not None:
-        titles = video.container.titles
+        titles, languages = video.container.titles, video.container.languages
     own_at = len(tracks) if own == last else own_place(slot[0], own, (way.voice for way in tracks if way.voice != last))
-    return Goal(slot, video, tuple(tracks), namer(slot, video, off), off, frozenset(taken_off), own_at, titles, markup)
+    return Goal(slot, video, tuple(tracks), namer(slot, video, off), off, frozenset(taken_off), own_at, titles, markup,
+                languages)
 
 
 def _markup_of(inputs: Inputs, episode, singles: list[OnlineRow], files: list[Container], criteria,
@@ -497,7 +501,8 @@ def _satisfied_by(goal: Goal) -> Container | None:
         return None
     if tuple(track.dub for track in container.tracks) != tuple(way.dub for way in goal.tracks):
         return None
-    return container if (container.own_at, container.titles) == (goal.own_at, goal.titles) else None
+    held = (container.own_at, container.titles, container.languages)
+    return container if held == (goal.own_at, goal.titles, goal.languages) else None
 
 
 def _ops(goals: Iterable[Goal], containers) -> list[Op]:

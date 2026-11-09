@@ -127,7 +127,7 @@ def table_after(containers: dict[str, Container], made: Plan, group: Group, resu
                 tracks.append(Track(way.dub, way.snapshot, slot, video.timeline))
             else:
                 tracks.append(results[f"align:{slot}:{way.voice}"].value)
-        built[goal.name] = Container(goal.name, video, tuple(tracks), goal.off, goal.own_at, goal.titles)
+        built[goal.name] = Container(goal.name, video, tuple(tracks), goal.off, goal.own_at, goal.titles, goal.languages)
     renamed: dict[str, Container] = {}
     for slot, name in group.kept:
         goal = made.goal(slot)

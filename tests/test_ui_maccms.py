@@ -10,6 +10,8 @@ import subprocess
 import pytest
 from playwright.async_api import expect
 
+from core import container as mkv
+
 from ui_stand import SERIES, SERIES_EN, lines_of, ui  # noqa: F401 - the fixture
 
 pytestmark = pytest.mark.ui
@@ -32,7 +34,7 @@ async def test_a_title_of_jisu_is_the_reference_its_frames_measured_once_through
         ui.site.episode("dub", episode, height=480)
 
     await ui.first_run()
-    await ui.set_up([ORIGINAL, "AnimeVost"])
+    await ui.set_up([ORIGINAL, "AnimeVost"], languages={ORIGINAL: "chi", "AnimeVost": "rus"})
     await ui.profile("серии Jisu", [{"name": "серия", "if": LABEL,
                                      "then": [("extract_single", LABEL), ("assign_voiceover", ORIGINAL)]}])
     await ui.profile("серии AnimeVost", lines_of("AnimeVost"))
@@ -46,6 +48,10 @@ async def test_a_title_of_jisu_is_the_reference_its_frames_measured_once_through
     view = await ui.check(series_id)
     # The picture of every file is the one of Jisu: its frame, measured on the picture, beats the label of the voice-over.
     assert [frame_height(os.path.join(ui.library, asset["name"])) for asset in view["assets"]] == [1080, 1080]
+    # Each track bears the language its voice-over was made with: the original sound of Jisu Chinese, the voice-over Russian.
+    for asset in view["assets"]:
+        held = await mkv.contents(os.path.join(ui.library, asset["name"]))
+        assert {track.label: track.language for track in held.audio} == {ORIGINAL: "chi", "AnimeVost": "rus"}
     measured = list(ui.site.heads)
     assert sorted(measured) == ["jisu-4794-ep1/seg0.ts", "jisu-4794-ep2/seg0.ts"]
 

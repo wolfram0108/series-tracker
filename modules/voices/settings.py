@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Mapping
 
+from core.contracts.voices import LANGUAGES
 from core.voice_names import NO_GROUPS, Groups, usable_groups
 
 # Source priority, most preferred first; empirical, by bitrate. The first one wins a resolution tie.
@@ -18,6 +19,8 @@ MAX_TEMP_KEY = "voices.max_temp_episodes"
 # Stage 12: the height the file of a compilation is downloaded at for its cuts (0 or unset: the best it has). A check of
 # the cuts sets it low (720) so that the service encodes fast; the product leaves it unset.
 CUT_HEIGHT_KEY = "voices.cut_max_height"
+# The language of the voice-over of each group ({group: ISO 639-2}), given when the group is made.
+LANGUAGES_KEY = "voices.languages"
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,7 @@ class VoiceSettings:
     voice_groups: Mapping[str, list[str]] = field(default_factory=dict)
     player_groups: Mapping[str, list[str]] = field(default_factory=dict)
     rejected: tuple[str, ...] = ()
+    voice_languages: Mapping[str, str] = field(default_factory=dict)
 
 
 def _json(raw: str | None, key: str, problems: list[str], rejected: list[str]) -> object:
@@ -78,6 +82,17 @@ def _count(raw: str | None, key: str, problems: list[str], rejected: list[str]) 
     return value
 
 
+def _languages(raw: str | None, key: str, problems: list[str], rejected: list[str]) -> dict[str, str]:
+    value = _json(raw, key, problems, rejected)
+    if value is None:
+        return {}
+    if not isinstance(value, dict) or not all(isinstance(name, str) and code in LANGUAGES for name, code in value.items()):
+        problems.append(f"{key}: ожидается объект {{группа: код языка из {', '.join(LANGUAGES)}}}, настройка не применена")
+        rejected.append(key)
+        return {}
+    return dict(value)
+
+
 def parse(values: Mapping[str, str | None]) -> VoiceSettings:
     """Typed settings from the raw values; a wrong value falls back to the default and is named."""
     problems: list[str] = []
@@ -92,8 +107,10 @@ def parse(values: Mapping[str, str | None]) -> VoiceSettings:
     cut_height = _count(values.get(CUT_HEIGHT_KEY), CUT_HEIGHT_KEY, problems, rejected)
     voices = _groups(values.get(VOICE_GROUPS_KEY), VOICE_GROUPS_KEY, problems, rejected) or {}
     players = _groups(values.get(PLAYER_GROUPS_KEY), PLAYER_GROUPS_KEY, problems, rejected) or {}
+    languages = _languages(values.get(LANGUAGES_KEY), LANGUAGES_KEY, problems, rejected)
     return VoiceSettings(
         priority=tuple(priority) if priority else tuple(DEFAULT_PRIORITY),
         voices=Groups.of(voices), players=Groups.of(players),
         max_temp_episodes=cap, cut_max_height=cut_height, problems=tuple(problems),
-        voice_groups=voices, player_groups=players, rejected=tuple(rejected))
+        voice_groups=voices, player_groups=players, rejected=tuple(rejected),
+        voice_languages={name: code for name, code in languages.items() if name in voices})

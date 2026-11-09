@@ -10,11 +10,14 @@ from modules.voices.settings import DEFAULT_PRIORITY, parse
 
 
 def draft(**changes) -> VoiceSettingsDraft:
-    return VoiceSettingsDraft(**{"priority": ["kodik", "cvh"], "voice_groups": {}, **changes})
+    """A form whose groups are given their language when made, unless the test says otherwise."""
+    groups = changes.get("voice_groups", {})
+    languages = {name.strip(): "rus" for name in groups if name.strip()}
+    return VoiceSettingsDraft(**{"priority": ["kodik", "cvh"], "voice_groups": {}, "voice_languages": languages, **changes})
 
 
-def problems(form: VoiceSettingsDraft, player_groups=None) -> list[tuple[str, str]]:
-    return [(each.field, each.detail.code) for each in editor.check(form, player_groups or {})]
+def problems(form: VoiceSettingsDraft, player_groups=None, made=None) -> list[tuple[str, str]]:
+    return [(each.field, each.detail.code) for each in editor.check(form, player_groups or {}, made or {})]
 
 
 def test_a_good_form_has_no_problems():
@@ -72,10 +75,29 @@ def test_a_trigger_written_twice_in_one_group_is_kept_once():
     assert problems(form) == [] and editor.clean(form).voice_groups == {"AniLibria": ["aniliberty"]}
 
 
-def test_a_saved_form_is_stored_trimmed_without_blank_rows_and_only_these_two_values_are_written():
-    clean = editor.clean(draft(priority=[" kodik ", "kodik", "cvh"], voice_groups={" AniLibria ": [" aniliberty ", ""], "": []}))
+def test_a_saved_form_is_stored_trimmed_without_blank_rows_and_only_these_three_values_are_written():
+    clean = editor.clean(draft(priority=[" kodik ", "kodik", "cvh"], voice_groups={" AniLibria ": [" aniliberty ", ""], "": []},
+                               voice_languages={" AniLibria ": "rus", "Gone": "jpn"}))
     assert clean.priority == ["kodik", "cvh"] and clean.voice_groups == {"AniLibria": ["aniliberty"]}
-    assert editor.stored(clean) == {"voices.source_priority": '["kodik", "cvh"]', "voices.groups": '{"AniLibria": ["aniliberty"]}'}
+    assert editor.stored(clean) == {"voices.source_priority": '["kodik", "cvh"]', "voices.groups": '{"AniLibria": ["aniliberty"]}',
+                                    "voices.languages": '{"AniLibria": "rus"}'}
+
+
+def test_a_group_is_made_with_the_language_of_its_voice_over():
+    # A new group without a language is refused; one made before languages were given keeps none until it is given one.
+    assert problems(draft(voice_groups={"Jisu": []}, voice_languages={})) == [("voice_languages", "group_language_missing")]
+    assert problems(draft(voice_groups={"Old": []}, voice_languages={}), made={"Old": []}) == []
+    assert problems(draft(voice_groups={"Jisu": []}, voice_languages={"Jisu": "chi"})) == []
+    assert problems(draft(voice_groups={"Jisu": []}, voice_languages={"Jisu": "xx"}), made={"Jisu": []}) == [
+        ("voice_languages", "group_language_unknown")]
+
+
+def test_the_language_of_a_group_is_read_back_and_shown_and_a_wrong_stored_one_is_refused():
+    saved = draft(voice_groups={"Jisu": [], "Old": []}, voice_languages={"Jisu": "chi"})
+    settings = parse(editor.stored(editor.clean(saved)))
+    assert settings.voice_languages == {"Jisu": "chi"} and editor.view(settings).voice_languages == {"Jisu": "chi"}
+    broken = parse({"voices.groups": '{"Jisu": []}', "voices.languages": '{"Jisu": "xx"}'})
+    assert broken.voice_languages == {} and editor.view(broken).rejected == ["voice_languages"]
 
 
 def test_what_the_editor_stores_is_read_back_by_the_module_as_it_was_written_even_an_empty_group():

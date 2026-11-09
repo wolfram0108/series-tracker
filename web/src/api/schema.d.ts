@@ -3276,8 +3276,8 @@ export interface components {
         };
         /**
          * VoiceSettingsDraft
-         * @description What the settings screen of the voices sends: the order of the sources and the groups of voice-overs.
-         *     A group is a name with the list of names that put a voice-over into it; a save replaces both values.
+         * @description What the settings screen of the voices sends: the order of the sources, the groups of voice-overs and the language
+         *     of each group. A group is a name with the list of names that put a voice-over into it; a save replaces every value.
          */
         VoiceSettingsDraft: {
             /** Priority */
@@ -3285,6 +3285,10 @@ export interface components {
             /** Voice Groups */
             voice_groups: {
                 [key: string]: string[];
+            };
+            /** Voice Languages */
+            voice_languages?: {
+                [key: string]: string;
             };
         };
         /**
@@ -3309,6 +3313,10 @@ export interface components {
             /** Voice Groups */
             voice_groups: {
                 [key: string]: string[];
+            };
+            /** Voice Languages */
+            voice_languages?: {
+                [key: string]: string;
             };
             /** Default Priority */
             default_priority: string[];

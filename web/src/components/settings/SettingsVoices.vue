@@ -32,13 +32,14 @@ async function load() {
   if (next) view.value = next
 }
 
-async function commit(change: { priority?: string[]; voice_groups?: Groups }): Promise<boolean> {
+async function commit(change: { priority?: string[]; voice_groups?: Groups; voice_languages?: Record<string, string> }): Promise<boolean> {
   if (!view.value) return false
   busy.value = true
   try {
     const reply = await request(
       api.PUT("/api/voices/settings", {
-        body: { priority: view.value.priority, voice_groups: view.value.voice_groups, ...change },
+        body: { priority: view.value.priority, voice_groups: view.value.voice_groups,
+                voice_languages: view.value.voice_languages ?? {}, ...change },
       }),
       { errorMessage: t("voices.settings.saveFailed") },
     )
@@ -84,8 +85,9 @@ onMounted(load)
           v-if="view"
           :groups="view.voice_groups"
           :busy="busy"
-          :commit="(next: Groups) => commit({ voice_groups: next })"
-          :problems="problemsOf('voice_groups')"
+          :languages="view.voice_languages ?? {}"
+          :commit="(next: Groups, languages: Record<string, string>) => commit({ voice_groups: next, voice_languages: languages })"
+          :problems="[...problemsOf('voice_groups'), ...problemsOf('voice_languages')]"
           :rejected="rejected('voice_groups')"
         />
       </div>

@@ -17,9 +17,9 @@ Queries:
       when a run took them.
   voices.settings.export {} -> {values}: the stored settings as they are, for the snapshot of a run.
 Command:
-  voices.settings.set VoiceSettingsDraft -> VoiceSettingsSaved: groups and order are checked (editor.check) and written in
-      one step through settings.values.set_many, or refused with coded problems and nothing written; the next read of the
-      settings uses the new values, no restart.
+  voices.settings.set VoiceSettingsDraft -> VoiceSettingsSaved: groups, their languages and order are checked
+      (editor.check: a group is made with its language) and written in one step through settings.values.set_many, or
+      refused with coded problems and nothing written; the next read of the settings uses the new values, no restart.
 Events out:
   voices.settings.changed VoiceSettingsView — the settings as they apply after a save, so that every open settings screen
       shows them without asking back.
@@ -72,7 +72,8 @@ class VoicesModule(BaseModule):
 
     async def on_settings_set(self, env: Envelope) -> dict:
         draft = VoiceSettingsDraft.model_validate(env.payload)
-        problems = editor.check(draft, (await self._settings()).player_groups)
+        current = await self._settings()
+        problems = editor.check(draft, current.player_groups, current.voice_groups)
         if not problems:
             await self.request("settings.values.set_many", {"values": editor.stored(editor.clean(draft))})
         view = editor.view(await self._settings())

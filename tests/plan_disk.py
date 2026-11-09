@@ -558,6 +558,11 @@ class DiskWorld(World):
             titles = dict(self.containers[name].titles)
             assert [track.title for track in held.audio] == [titles.get(track.label, track.label) for track in held.audio], \
                 f"{name}: the titles of its sounds are not the table's"
+            # Every sound bears the language its table gives its group; one the user gave none claims none.
+            languages = dict(self.containers[name].languages)
+            assert [track.language for track in held.audio] == [languages.get(track.label, mkv.UNSTATED)
+                                                                for track in held.audio], \
+                f"{name}: the languages of its sounds are not the table's"
             provenance = asyncio.run(mkv.provenance_of(path))
             assert provenance == container_json(self.containers[name]), f"{name}: its provenance is not the table"
             adopted.append(container_of(provenance))

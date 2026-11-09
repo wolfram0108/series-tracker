@@ -400,16 +400,19 @@ class AppStand:
         assert response.status_code < 400, (method, path, response.status_code, response.text[:400])
         return response.json() if response.content else {}
 
-    async def configure(self, groups: list[str]) -> None:
+    async def configure(self, groups: list[str], languages: dict[str, str] | None = None) -> None:
         """The settings the user makes once: the work folder and the address of the alignment service, the groups of
-        the voice-overs."""
+        the voice-overs, each made with the language of its voice-over (`languages`: group → ISO 639-2; Russian for the
+        others)."""
         work = os.path.join(self.root, "work")
         connected = self.bus.subscribe("conform.daemon.up")
         await self.call("PUT", "/api/conform/settings", {"url": self.daemon_http.url, "work_dir": work,
                                                           "work_dir_remote": work})
         await asyncio.wait_for(connected.queue.get(), STAND_LIMIT_S)
         saved = await self.call("PUT", "/api/voices/settings", {"priority": ["vk", "cvh", "allvideo", "kodik"],
-                                                         "voice_groups": {each: [] for each in groups}})
+                                                         "voice_groups": {each: [] for each in groups},
+                                                         "voice_languages": {each: (languages or {}).get(each, "rus")
+                                                                             for each in groups}})
         assert saved["saved"], saved["problems"]
 
     async def profile(self, voice: str) -> int:

@@ -478,6 +478,21 @@ def test_the_name_of_a_track_given_and_taken_back_only_repacks_and_a_file_switch
     assert dict(container_of(world, 2).titles) == {"G2": "ПМ_G2"}
 
 
+def test_the_language_of_a_voice_over_is_the_language_of_its_tracks_and_a_change_of_it_only_repacks():
+    world = World()
+    episode_with_dubs(world, 1, 2)
+    world.check(world.sync("без языков"))
+    assert container_of(world, 1).languages == ()  # a group the user gave no language to: none is claimed
+    for languages in ({"G1": "rus", REF: "chi"}, {"G1": "jpn", REF: "chi"}):
+        world.choose(languages=languages)
+        step = world.sync(f"языки {languages}")
+        world.check(step)
+        assert {op.kind for op in step.plan.ops} == {"build"}  # the tracks are copied: nothing downloaded, nothing aligned
+        assert dict(container_of(world, 1).languages) == languages
+    step = world.sync("ничего не изменилось")
+    assert not step.plan.ops
+
+
 def test_every_season_orders_its_tracks_by_its_own_order():
     world = World()
     for season in (1, 2):

@@ -64,10 +64,11 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
                compilation_levers: Iterable[tuple[str, Iterable[EffectiveLever]]], *,
                players: Sequence[str], player_groups: Groups, sources: Sequence[int],
                voice_order: Mapping[int, Sequence[str]],
-               off_episodes: Iterable[tuple[int, int]], titles: Mapping[str, str] | None = None) -> Choices:
+               off_episodes: Iterable[tuple[int, int]], titles: Mapping[str, str] | None = None,
+               languages: Mapping[str, str] | None = None) -> Choices:
     """What the user chose. `episodes` are the levers of every episode as its levels give them (season, episode, levers),
     `compilation_levers` those of every compilation (its key, levers); `titles` the user's names of the tracks of the
-    voice-over groups."""
+    voice-over groups, `languages` the language the user gave each group."""
     by_key = compilations_of(rows, online)
     reference, reference_deny, voice_orders, voice_deny, voice_off, member = {}, {}, {}, {}, {}, {}
     markup, markup_deny = {}, {}
@@ -112,5 +113,5 @@ def choices_of(rows: Sequence[CompositionRow], online: Sequence[OnlineRow],
     return Choices(players=tuple(players), sources=tuple(sources), groups={season: tuple(order) for season, order in voice_order.items()}, player_groups=player_groups,
                    off_episodes=frozenset(off_episodes), off_compilations=off_compilations, reference=reference,
                    reference_deny=reference_deny, voice_order=voice_orders, voice_deny=voice_deny, voice_off=voice_off,
-                   member=member, own_reference=frozenset(own_reference), titles=dict(titles or {}),
+                   member=member, own_reference=frozenset(own_reference), titles=dict(titles or {}), languages=dict(languages or {}),
                    markup=markup, markup_deny=markup_deny)

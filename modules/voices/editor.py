@@ -13,10 +13,12 @@ from core.contracts import Reason, SettingProblem, VoiceSettingsDraft, VoiceSett
 from core.reasons import parse as parse_reason, reason
 from core.voice_names import fold_name
 
-from .settings import DEFAULT_PRIORITY, PRIORITY_KEY, VOICE_GROUPS_KEY, VoiceSettings
+from core.contracts.voices import LANGUAGES
+
+from .settings import DEFAULT_PRIORITY, LANGUAGES_KEY, PRIORITY_KEY, VOICE_GROUPS_KEY, VoiceSettings
 
 # The field of the screen behind each stored key, for naming the stored value that was refused.
-_FIELD_OF_KEY = {PRIORITY_KEY: "priority", VOICE_GROUPS_KEY: "voice_groups"}
+_FIELD_OF_KEY = {PRIORITY_KEY: "priority", VOICE_GROUPS_KEY: "voice_groups", LANGUAGES_KEY: "voice_languages"}
 
 
 def _problem(field: str, stored: str) -> SettingProblem:
@@ -72,8 +74,27 @@ def player_names(player_groups: Mapping[str, list[str]]) -> list[str]:
     return list(named.values())
 
 
-def check(draft: VoiceSettingsDraft, player_groups: Mapping[str, list[str]]) -> list[SettingProblem]:
-    """Every reason this form cannot be saved; empty when it can."""
+def _language_problems(draft: VoiceSettingsDraft, made: Mapping[str, list[str]]) -> list[SettingProblem]:
+    """A group is given its language when it is made: a new group without one is refused, and so is a code that is not
+    one of `LANGUAGES`. A group made before languages were given keeps none until the user gives it one."""
+    field = "voice_languages"
+    problems = []
+    known = {fold_name(name) for name in made}
+    languages = {name.strip(): code for name, code in draft.voice_languages.items()}
+    for name in _cleaned(draft.voice_groups):
+        if not fold_name(name):
+            continue  # a group without a name is refused for that already
+        code = languages.get(name)
+        if code is not None and code not in LANGUAGES:
+            problems.append(_problem(field, reason("group_language_unknown", group=name, language=code)))
+        elif code is None and fold_name(name) not in known:
+            problems.append(_problem(field, reason("group_language_missing", group=name)))
+    return problems
+
+
+def check(draft: VoiceSettingsDraft, player_groups: Mapping[str, list[str]],
+          made: Mapping[str, list[str]] | None = None) -> list[SettingProblem]:
+    """Every reason this form cannot be saved; empty when it can. `made` are the groups saved before."""
     problems = []
     names = [name.strip() for name in draft.priority if name.strip()]
     if not names:
@@ -86,20 +107,23 @@ def check(draft: VoiceSettingsDraft, player_groups: Mapping[str, list[str]]) -> 
         elif fold_name(name) not in known:
             problems.append(_problem("priority", reason("priority_unknown_player", player=name)))
         seen.add(fold_name(name))
-    return problems + _group_problems(draft.voice_groups)
+    return problems + _group_problems(draft.voice_groups) + _language_problems(draft, made or {})
 
 
 def clean(draft: VoiceSettingsDraft) -> VoiceSettingsDraft:
     """The draft as it is stored: trimmed, without blank rows or repeated names."""
     priority = list(dict.fromkeys(name.strip() for name in draft.priority if name.strip()))
-    return VoiceSettingsDraft(priority=priority, voice_groups=_cleaned(draft.voice_groups))
+    groups = _cleaned(draft.voice_groups)
+    languages = {name.strip(): code for name, code in draft.voice_languages.items() if name.strip() in groups}
+    return VoiceSettingsDraft(priority=priority, voice_groups=groups, voice_languages=languages)
 
 
 def stored(draft: VoiceSettingsDraft) -> dict[str, str]:
     """The values to write, keyed as the settings table holds them."""
     def dump(value: object) -> str:
         return json.dumps(value, ensure_ascii=False)
-    return {PRIORITY_KEY: dump(draft.priority), VOICE_GROUPS_KEY: dump(draft.voice_groups)}
+    return {PRIORITY_KEY: dump(draft.priority), VOICE_GROUPS_KEY: dump(draft.voice_groups),
+            LANGUAGES_KEY: dump(draft.voice_languages)}
 
 
 def view(settings: VoiceSettings) -> VoiceSettingsView:
@@ -107,6 +131,7 @@ def view(settings: VoiceSettings) -> VoiceSettingsView:
     return VoiceSettingsView(
         priority=list(settings.priority),
         voice_groups={name: list(triggers) for name, triggers in settings.voice_groups.items()},
+        voice_languages=dict(settings.voice_languages),
         default_priority=list(DEFAULT_PRIORITY),
         player_groups={name: list(triggers) for name, triggers in settings.player_groups.items()},
         rejected=[_FIELD_OF_KEY[key] for key in settings.rejected if key in _FIELD_OF_KEY],

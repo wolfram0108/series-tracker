@@ -39,14 +39,15 @@ def codecs(path) -> list[str]:
 def test_a_container_holds_the_video_and_the_tracks_in_the_order_given_copied_as_they_are(media):
     tmp, video, dubs, _ = media
     out = str(tmp / "ep.mkv")
-    tracks = [AudioIn("ruchime", dubs["ruchime"], 0, "1:a"), AudioIn("ПВА ШОУ", video, 0, "1:a"),
+    tracks = [AudioIn("ruchime", dubs["ruchime"], 0, "1:a", language="rus"), AudioIn("ПВА ШОУ", video, 0, "1:a", language="chi"),
               AudioIn("anistar", dubs["anistar"], 0, "1:a")]
     assert asyncio.run(container.build(out, video, "1:a", tracks)) is None
     made = asyncio.run(container.contents(out))
     assert made.video == "1:a" and made.labels == ["ruchime", "ПВА ШОУ", "anistar"]
     assert [track.default for track in made.audio] == [True, False, False]
     assert [track.aligned_to for track in made.audio] == ["1:a"] * 3
-    assert {track.language for track in made.audio} == {"rus"}
+    # Each track bears the language of its voice-over; one nobody gave a language to claims none (Matroska's «und»).
+    assert [track.language for track in made.audio] == ["rus", "chi", "und"]
     assert codecs(out) == ["mpeg4", "flac", "aac", "flac"]  # nothing encoded again
 
 
@@ -87,20 +88,21 @@ def test_the_title_of_a_track_is_the_users_name_and_its_group_stays_the_tag(medi
                                                          AudioIn("ruchime", dubs["ruchime"], 0, "1:a", title="ПМ_ruchime")])) is None
     found = asyncio.run(container.contents(out))
     assert [(track.label, track.title) for track in found.audio] == [("ПВА ШОУ", "ПВА ШОУ"), ("ruchime", "ПМ_ruchime")]
-    assert container.problem_of(found, "1:a", [("ПВА ШОУ", "ПВА ШОУ", "", True), ("ruchime", "ruchime", "", False)],
+    assert container.problem_of(found, "1:a", [("ПВА ШОУ", "ПВА ШОУ", "", True, "und"), ("ruchime", "ruchime", "", False, "und")],
                                 None) == "container_tracks_wrong"  # a file with another title is not the one asked for
 
 
 @pytest.mark.parametrize("case, expected", [
     ("unreadable", "container_unreadable"), ("video", "container_video_wrong"), ("tracks", "container_tracks_wrong"),
-    ("length", "container_length_wrong"), ("good", None)])
+    ("language", "container_tracks_wrong"), ("length", "container_length_wrong"), ("good", None)])
 def test_a_build_that_is_not_what_was_asked_says_why(media, case, expected):
     tmp, video, dubs, other = media
     out = str(tmp / "ep.mkv")
     asyncio.run(container.build(out, video, "1:a", [AudioIn("ПВА ШОУ", video, 0, "1:a")]))
     made = None if case == "unreadable" else asyncio.run(container.contents(out))
     identity = "2:b" if case == "video" else "1:a"
-    signature = [("ruchime", "ruchime", "", False)] if case == "tracks" else [("ПВА ШОУ", "ПВА ШОУ", "", False)]
+    signature = ([("ruchime", "ruchime", "", False, "und")] if case == "tracks" else [("ПВА ШОУ", "ПВА ШОУ", "", False, "und")]
+                 if case != "language" else [("ПВА ШОУ", "ПВА ШОУ", "", False, "rus")])
     duration = 5.0 if case == "length" else 3.0
     assert container.problem_of(made, identity, signature, duration) == expected
 

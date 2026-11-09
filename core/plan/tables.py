@@ -131,7 +131,9 @@ class Track:
 class Container:
     """A file of the library: one video and its tracks, under a name; `off` hides it from the media server. `own_at` is the
     place of the video's own sound among the sounds of the file (0: first, the default one). `titles` are the user's
-    names its sounds were written under (voice-over group, title); a sound not named there bears the name of its group."""
+    names its sounds were written under (voice-over group, title); a sound not named there bears the name of its group.
+    `languages` are the languages its sounds were written with (voice-over group, ISO 639-2): the language the user gave
+    each group; a sound not named there was written with none."""
 
     name: str
     video: Video
@@ -139,6 +141,7 @@ class Container:
     off: bool = False
     own_at: int = 0
     titles: tuple[tuple[str, str], ...] = ()
+    languages: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -167,6 +170,8 @@ class Choices:
     member: Mapping[Slot, RowId | None] = field(default_factory=dict)
     # The user's name of the track of a voice-over group in every container of the series (its title there).
     titles: Mapping[str, str] = field(default_factory=dict)
+    # The language the user gave each voice-over group when making it (ISO 639-2): the language of its tracks.
+    languages: Mapping[str, str] = field(default_factory=dict)
     delete: frozenset[tuple] = frozenset()
     # The episodes whose levers of the reference are their own (set on the episode itself, not on a level above it).
     own_reference: frozenset[Slot] = frozenset()
