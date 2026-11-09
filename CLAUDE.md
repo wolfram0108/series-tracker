@@ -119,6 +119,7 @@ HTTP/SSE-точка; событие шины → SSE по таблице `SSE_MA
 | Тесты модуля | `.venv/bin/python -m pytest -q tests/test_<модуль>*.py` |
 | Приёмка в браузере | `cd web && npm run build`, затем по файлу: `systemd-run --scope -q -p MemoryMax=1800M -p MemorySwapMax=0 .venv/bin/python -m pytest -q -m ui -n 2 tests/test_ui_stand.py` и то же для `tests/test_ui_sources.py` и `tests/test_ui_maccms.py` (по ~2,5 мин; `test_ui_stand.py` — двумя частями по `-k`, целиком он дольше предохранителя; два Firefox в 1300 МБ не помещаются) — всё приложение на стенде с моделями сайта, плеера и демона, пользователь — Firefox (`tests/ui_stand.py`): путь пользователя и работа сериала; источники, теряющие строки, страницу, компиляцию, сами себя; в общий набор не входит |
 | Один тест | `… -n0 -k "имя_теста"` (`-n0` — без параллельных процессов) |
+| Живая проверка на проде | `.venv/bin/python tools/checks/live_api.py preview <адрес> [--now]` и `… sync <номер сериала>` — вход, кука, события, журнал запросов: [docs/deployment.md](docs/deployment.md), «Проверка на живом сервисе через API» |
 | Миграции БД | `.venv/bin/alembic upgrade head` |
 | Запуск (dev) | `.venv/bin/uvicorn run:app --port 5000` (без `ST_QBIT_URL` модуль torrents не стартует) |
 | Сборка фронта | `cd web && npm run build` |
