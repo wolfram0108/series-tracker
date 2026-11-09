@@ -158,7 +158,10 @@
 .option.selected { font-weight: 600; background: #e9f2ff; }
 
 /* группа иконочных кнопок внутри группы (item-button-group + btn-icon) */
-.item-button-group { display: flex; align-items: stretch; flex-shrink: 0; gap: 2px; overflow: hidden; }
+.item-button-group {
+  display: flex; align-items: stretch; flex-shrink: 0; gap: 2px; overflow: hidden;
+  border-radius: var(--inner-border-radius); /* the corners of every item of a group, its buttons too */
+}
 .btn-icon {
   display: flex; align-items: center; justify-content: center;
   width: 50px; height: 100%; border: none; border-radius: 0;
