@@ -11,7 +11,7 @@ import { usePlanStore } from "../stores/plan"
 import { fileOf, planCuts, planDubs, planFiles, planNames, seasonVoiceOrders, trackOf, type CompilationKey } from "../lib/plan"
 import {
   deleteFromPlan, fetchComposition, fetchPlan, fetchQueues, resetFailures,
-  resetLever, setLever, setVoiceOrder, switchOutput, syncSeries, type Composition, type MediaFile,
+  cancelSync, resetLever, setLever, setVoiceOrder, switchOutput, syncSeries, type Composition, type MediaFile,
   type Queues,
 } from "./outputCalls"
 import type { Answer } from "./sourceCalls"
@@ -48,6 +48,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
   // A lever is on its way to the core / a pass over the series is running: the controls that start them wait.
   const busy = ref(false)
   const syncing = ref(false)
+  const stopping = ref(false)
   // The name of the file of every episode is the plan's: it comes with every packet of the plan of the series.
   const names = computed(() => planNames(plan.forSeries(seriesId)))
 
@@ -116,6 +117,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     act(() => switchOutput(seriesId, { season, ...(episode === null ? {} : { episode }), off }), busy)
 
   const sync = (): Promise<string | null> => act(() => syncSeries(seriesId), syncing)
+  const stop = (): Promise<string | null> => act(() => cancelSync(seriesId), stopping)
   // A change of the series like a lever, not a pass: it starts no sync.
   const retryFailed = (): Promise<string | null> => act(() => resetFailures(seriesId), busy)
 
@@ -214,7 +216,7 @@ export function useSeriesOutput(seriesId: number, kind: "torrent" | "video") {
     })
   }
 
-  return { composition, references, loading, failure, busy, syncing, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
+  return { composition, references, loading, failure, busy, syncing, stopping, stop, names, views, levels, sources, specs, layoutFailure, seasons, load, set, reset, switchTo,
     sync, retryFailed, voiceOrders, order, marks, loadQueues, queuesOf, setOrder, setAllowed, setTaken, resetOrder,
     retry, redo, refetch, compilations, cuts, member, takeCompilation, retryCut, labels }
 }

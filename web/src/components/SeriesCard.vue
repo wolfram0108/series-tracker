@@ -12,6 +12,7 @@ const props = defineProps<{ series: Series; saving?: boolean }>()
 const emit = defineEmits<{
   (e: "open-status", id: number): void
   (e: "scan", id: number): void
+  (e: "cancel-scan", id: number): void
   (e: "delete", id: number): void
   (e: "toggle-auto-scan", id: number, enabled: boolean): void
 }>()
@@ -197,7 +198,11 @@ const scanTime = computed(() => {
         <button class="action-btn btn-status" title="Статус" @click="emit('open-status', series.id)">
           <i class="pi pi-info-circle" />
         </button>
-        <button class="action-btn btn-scan" title="Сканировать" :disabled="busy" @click="emit('scan', series.id)">
+        <button v-if="series.is_busy && !saving" class="action-btn btn-stop" :title="t('sync.stop')"
+                @click="emit('cancel-scan', series.id)">
+          <i class="pi pi-stop-circle" />
+        </button>
+        <button v-else class="action-btn btn-scan" title="Сканировать" :disabled="busy" @click="emit('scan', series.id)">
           <i class="pi pi-refresh" />
         </button>
         <button class="action-btn btn-delete" title="Удалить" :disabled="busy" @click="emit('delete', series.id)">

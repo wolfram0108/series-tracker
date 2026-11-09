@@ -2,6 +2,7 @@
 import Toast from "primevue/toast"
 import { useToast } from "primevue/usetoast"
 import { ref } from "vue"
+import { t } from "./i18n"
 import AppHeader from "./components/AppHeader.vue"
 import SeriesCard from "./components/SeriesCard.vue"
 import ConfirmDialog from "./components/ConfirmDialog.vue"
@@ -51,13 +52,21 @@ async function onLogout() {
 // через ui.activeSeriesId (его ставит ui.openStatus + viewing).
 const openModal = ref<null | "settings" | "logs" | "add">(null)
 
+async function onCancelScan(id: number) {
+  const r = (await request(
+    api.POST("/api/series/{series_id}/scan/cancel", { params: { path: { series_id: id } } } as never),
+  )) as { cancelled?: boolean } | null
+  if (r === null) return
+  toast.add({ severity: "info", summary: t(r.cancelled ? "sync.stopped" : "sync.notRunning"), life: 3000 })
+}
+
 async function onScan(id: number) {
   // Ручной скан (по кнопке) уведомляет о результате; ошибку покажет useApi.
   // Автоскан — в фоне и молча (решение пользователя).
   const r = (await request(
     api.POST("/api/series/{series_id}/scan", { params: { path: { series_id: id } } } as never),
-  )) as { changed?: boolean } | null
-  if (r === null) return
+  )) as { changed?: boolean; cancelled?: boolean } | null
+  if (r === null || r.cancelled) return  // a stopped sync is told by its stop
   toast.add(
     r.changed
       ? { severity: "success", summary: "Сканирование завершено", life: 3000 }
@@ -117,6 +126,7 @@ async function onDelete(id: number) {
         :saving="seriesStore.isSaving(s.id)"
         @open-status="onOpenStatus"
         @scan="onScan"
+        @cancel-scan="onCancelScan"
         @delete="onDelete"
         @toggle-auto-scan="onToggle"
       />

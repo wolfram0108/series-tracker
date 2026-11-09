@@ -37,6 +37,13 @@ export function syncSeries(seriesId: number): Promise<Answer<unknown>> {
   return call(() => api.POST("/api/series/{series_id}/scan", { params: { path: { series_id: seriesId } } }), OUTPUT_WORDS)
 }
 
+/** The sync of the series stops: its reads, downloads, jobs of the alignment service and builds; nothing of it is applied.
+ * The core answers once every work of it has stopped; `cancelled` false when no sync went. */
+export function cancelSync(seriesId: number): Promise<Answer<{ cancelled?: boolean }>> {
+  return call(() => api.POST("/api/series/{series_id}/scan/cancel", { params: { path: { series_id: seriesId } } }),
+    OUTPUT_WORDS)
+}
+
 /** The failed attempts of the series are forgotten: a change of the series, not a sync. The voice-overs set back are
  * fetched by the next sync; what changes comes as events. */
 export function resetFailures(seriesId: number): Promise<Answer<unknown>> {

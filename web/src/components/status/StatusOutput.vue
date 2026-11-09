@@ -138,6 +138,8 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
               :disabled="!canSync" @click="output.retryFailed()" />
       <Button :label="t('output.sync')" :icon="passing ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'" size="small" severity="warn"
               class="output-sync" :disabled="!canSync" @click="output.sync()" />
+      <Button v-if="busy || passing" :label="t('sync.stop')" icon="pi pi-stop-circle" size="small" severity="danger"
+              class="output-stop" :disabled="output.stopping.value" @click="output.stop()" />
     </div>
     <div v-if="legend.length" class="output-bar output-legend">
       <span class="output-legend-name">{{ t("output.sources") }}</span>

@@ -301,3 +301,23 @@ async def test_the_card_of_the_series_tells_ready_error_and_the_date_of_its_new_
     shown = await pills(card)
     assert text("series.status.ready") in shown and text("series.status.error") not in shown, shown
     await ui.check(series_id)
+
+
+async def test_the_sync_stopped_by_its_button_cancels_its_work_applies_nothing_and_frees_the_series(ui):
+    """«Остановить синхронизацию» in the section «Выход» while the service aligns: the job of the service is cancelled,
+    no file is made, the button goes, and the card of the series offers a scan again."""
+    await series_in_browser(ui, (1,))
+    ui.daemon.hold = True
+    await ui.open_output(SERIES)
+    await ui.page.locator(".output-sync").click()
+    await asyncio.wait_for(asyncio.to_thread(ui.daemon.made.wait), STAND_LIMIT_S)
+    stop = ui.page.locator(".output-stop")
+    await ui.shot("80-sync-under-way")
+    await stop.click()
+    await expect(stop).to_have_count(0)
+    assert ui.daemon.jobs == {} and ui.files() == []
+    await ui.shot("81-sync-stopped")
+    await ui.page.locator(".modal-close, .p-dialog-close-button, button:has-text('Закрыть')").first.click()
+    card = ui.page.locator(".series-card", has_text=SERIES)
+    await expect(card.locator(".btn-scan")).to_be_enabled()
+    await expect(card.locator(".btn-stop")).to_have_count(0)

@@ -326,6 +326,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/series/{series_id}/scan/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Scan
+         * @description Остановить синхронизацию сериала: чтение страниц, загрузки, задачи сервиса выравнивания, сборку файлов.
+         *     Из остановленной синхронизации ничего не применяется; идущий журнал библиотеки она дожидается.
+         */
+        post: operations["cancel_scan_api_series__series_id__scan_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/series/{series_id}/failures/reset": {
         parameters: {
             query?: never;
@@ -3098,6 +3119,21 @@ export interface components {
          */
         SourceType: "torrent" | "vk_video" | "web_video";
         /**
+         * SyncCancelled
+         * @description Синхронизация сериала остановлена: всё, что она делала, прервано, ничего не применено; false — она не шла.
+         */
+        SyncCancelled: {
+            /** Success */
+            success: boolean;
+            /**
+             * Cancelled
+             * @default false
+             */
+            cancelled: boolean;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * TableReadRequest
          * @description Read the page of an address now.
          */
@@ -4123,6 +4159,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_scan_api_series__series_id__scan_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                series_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncCancelled"];
                 };
             };
             /** @description Validation Error */
