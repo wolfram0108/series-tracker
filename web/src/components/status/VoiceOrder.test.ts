@@ -4,9 +4,9 @@ import { mount } from "@vue/test-utils"
 import VoiceOrder from "./VoiceOrder.vue"
 
 const voices = [
-  { label: "ПВА ШОУ", episodes: "1–50" },
-  { label: "ruchime", episodes: "20–51" },
-  { label: "AniStar", episodes: "3" },
+  { label: "ПВА ШОУ", episodes: "1–50", online: true },
+  { label: "ruchime", episodes: "20–51", online: true },
+  { label: "AniStar", episodes: "3", online: false },
 ]
 
 describe("VoiceOrder", () => {
@@ -14,6 +14,13 @@ describe("VoiceOrder", () => {
     const w = mount(VoiceOrder, { props: { voices } })
     expect(w.findAll(".voice-order-item").map((item) => item.findAll("span").map((part) => part.text()))).toEqual([
       ["1", "ПВА ШОУ", "1–50"], ["2", "ruchime", "20–51"], ["3", "AniStar", "3"],
+    ])
+  })
+
+  it("tells on the number of each voice-over whether a source gives it or only the files hold it", () => {
+    const w = mount(VoiceOrder, { props: { voices } })
+    expect(w.findAll(".figure-mark").map((mark) => mark.classes().filter((name) => name.startsWith("is-")))).toEqual([
+      ["is-online"], ["is-online"], ["is-offline"],
     ])
   })
 

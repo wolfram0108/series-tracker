@@ -201,17 +201,19 @@ describe("seasonVoiceOrders", () => {
       goal([2, 1], goalVideo("download", rowRef(4, "n1"), null), [goalTrack("B", "download", rowRef(2, "b9"))]),
     ] })
     expect(seasonVoiceOrders([{ season: 1, voices: [{ label: "B", episodes: "1–2" }] }], view)).toEqual([
-      { season: 1, voices: [{ label: "B", episodes: "1–2" }, { label: "Gone", episodes: "1–2" }, { label: "Old", episodes: "2" }] },
-      { season: 2, voices: [{ label: "B", episodes: "1" }] },
+      { season: 1, voices: [{ label: "B", episodes: "1–2", online: true }, { label: "Gone", episodes: "1–2", online: false },
+        { label: "Old", episodes: "2", online: false }] },
+      { season: 2, voices: [{ label: "B", episodes: "1", online: false }] },
     ])
     expect(seasonVoiceOrders([{ season: 1, voices: [{ label: "B", episodes: "1" }] }], undefined))
-      .toEqual([{ season: 1, voices: [{ label: "B", episodes: "1" }] }])
+      .toEqual([{ season: 1, voices: [{ label: "B", episodes: "1", online: true }] }])
   })
 
   it("shows a voice-over of the order with no row in the place it takes when the files hold it, and not when they do not", () => {
     const view = planView({ episodes: [goal([1, 1], goalVideo("asset", rowRef(1, "r1"), "a.mkv"), [goalTrack("Kept", "reuse", rowRef(2, "k1"))])] })
     const order = [{ season: 1, voices: [{ label: "A", episodes: "1" }, { label: "Kept", episodes: "" }, { label: "Never", episodes: "" }] }]
-    expect(seasonVoiceOrders(order, view)).toEqual([{ season: 1, voices: [{ label: "A", episodes: "1" }, { label: "Kept", episodes: "1" }] }])
+    expect(seasonVoiceOrders(order, view)).toEqual([{ season: 1, voices: [{ label: "A", episodes: "1", online: true },
+      { label: "Kept", episodes: "1", online: false }] }])
     expect(seasonVoiceOrders([{ season: 2, voices: [{ label: "Never", episodes: "" }] }], undefined)).toEqual([])
   })
 })

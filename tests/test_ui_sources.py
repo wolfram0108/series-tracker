@@ -2,6 +2,7 @@
 itself, a compilation; what the files keep, what is made anew and what the window says. The work of the service is counted
 by its models: the files the site gave out (`host.served`) and the jobs of the alignment service (`daemon.jobs`)."""
 import os
+import re
 
 import pytest
 from playwright.async_api import expect
@@ -245,6 +246,10 @@ async def test_a_voice_over_only_its_file_holds_is_moved_in_the_order_of_the_sea
     items = ui.page.locator(".voice-order-item")
     labels = items.locator("span:nth-child(2)")
     await expect(labels).to_have_text(["AniStar", "AnimeVost"])
+    marks = items.locator(".figure-mark")
+    await expect(marks.nth(0)).to_have_class(re.compile(r"\bis-online\b"))
+    await expect(marks.nth(1)).to_have_class(re.compile(r"\bis-offline\b"))
+    await ui.shot("s10-held-voice-offline")
     await items.nth(1).drag_to(items.nth(0))
     await expect(labels).to_have_text(["AnimeVost", "AniStar"])
     await expect(ui.page.locator(".output-failure")).to_have_count(0)

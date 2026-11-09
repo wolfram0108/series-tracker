@@ -6,6 +6,7 @@ import { t } from "../../../i18n"
 import type { CutState } from "../../../lib/compilations"
 import { trackCells, type EpisodeView, type QueueName, type QueueRow, type SourceMark as Mark, type TrackState } from "../../../lib/output"
 import QueuePanel from "./QueuePanel.vue"
+import VoiceMark from "./VoiceMark.vue"
 
 // The settings of a level — a season, or the whole series — as one table per queue, the order set for all of its
 // episodes at once; a season also has its tracks, with the actions that mend all the episodes of a group.
@@ -14,12 +15,14 @@ const props = withDefaults(defineProps<{
   /** The episodes of the season (none for the series): what the tab of the tracks counts. */
   episodes?: EpisodeView[]
   order: string[]
+  /** The presence of each voice-over of the order: a source gives it, or only the files hold it. */
+  online?: Record<string, boolean>
   marks: Record<number, Mark>
   queues?: Queues
   busy?: boolean
   /** The level of a compilation of the season (stage 12): its title, and how many of its episodes are cut, by state. */
   compilation?: { title: string; cuts: Partial<Record<CutState, number>> }
-}>(), { episodes: () => [], busy: false, compilation: undefined })
+}>(), { episodes: () => [], online: () => ({}), busy: false, compilation: undefined })
 
 const emit = defineEmits<{
   (e: "close"): void
@@ -78,7 +81,7 @@ const countText = (state: TrackState | "reference", count: number): string => st
           {{ compilation ? t("output.tab.ref2") : t("output.tab.reference") }}
         </button>
         <button v-for="(group, index) in groups" :key="group" type="button" class="st-tab" :class="{ active: tab === group }" @click="tab = group">
-          <span class="figure-mark">{{ index + 1 }}</span>{{ group }}
+          <VoiceMark :n="index + 1" :online="online[group]" />{{ group }}
         </button>
       </div>
     </template>
@@ -105,7 +108,7 @@ const countText = (state: TrackState | "reference", count: number): string => st
         </thead>
         <tbody>
           <tr v-for="track in tracks" :key="track.group" :data-group="track.group">
-            <td><span class="figure-mark">{{ track.pos }}</span></td>
+            <td><VoiceMark :n="track.pos" :online="online[track.group]" /></td>
             <td><b>{{ track.group }}</b></td>
             <td class="level-counts">
               <span v-for="(count, state) in track.counts" :key="state" class="pill" :class="PILL[state]">{{ countText(state, count!) }}</span>

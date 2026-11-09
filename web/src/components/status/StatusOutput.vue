@@ -51,6 +51,8 @@ const settingsOf = ref<{ season: number | null; compilation?: string } | null>(n
 
 const orderOf = (season: number): string[] =>
   (output.voiceOrders.value.find((each) => each.season === season)?.voices ?? []).map((voice) => voice.label)
+const onlineOf = (season: number): Record<string, boolean> => Object.fromEntries(
+  (output.voiceOrders.value.find((each) => each.season === season)?.voices ?? []).map((voice) => [voice.label, voice.online]))
 const statusOf = (view: EpisodeView): EpisodeStatus => cutOverride(cutOf(cuts.value, view.season, view.episode))
   ?? episodeStatus(view, trackCells(view, orderOf(view.season)))
 const PASS: Record<Filter, (view: EpisodeView) => boolean> = {
@@ -203,7 +205,8 @@ const settingsEpisodes = computed(() => settingsSeason.value === null ? []
 
     <LevelSettings
       v-if="settingsOf" :key="`${settingsSeason}:${settingsKey}`" :season="settingsSeason" :episodes="settingsEpisodes"
-      :order="settingsSeason === null ? [] : orderOf(settingsSeason)" :marks="output.marks.value"
+      :order="settingsSeason === null ? [] : orderOf(settingsSeason)"
+      :online="settingsSeason === null ? {} : onlineOf(settingsSeason)" :marks="output.marks.value"
       :queues="output.queuesOf(settingsSeason, null, settingsKey)" :busy="busy" :compilation="settingsCompilation"
       @close="settingsOf = null"
       @order="(queue, group, rows) => queueOrder(scopeOf(settingsSeason, null, settingsKey), queue, group, rows)"

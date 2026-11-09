@@ -57,9 +57,12 @@ const sameSlot = (row: number[], episode: number[]): boolean =>
 
 /** The order of the voice-overs of every season as the window shows it: the layout's whole order (the containers follow
  *  it), of which the voice-overs the rows give or the files of the season hold by the plan; a voice-over in the files the
- *  order does not know yet comes last. Each has the episodes that give it, else those whose files hold it: no track of a
- *  file is left out of the window, and every one is in the place it takes in the containers. */
-export function seasonVoiceOrders(orders: readonly SeasonVoiceOrder[], view: PlannerView | undefined): SeasonVoiceOrder[] {
+ *  order does not know yet comes last. Each has the episodes that give it, online, else those whose files hold it, offline:
+ *  no track of a file is left out of the window, and every one is in the place it takes in the containers. */
+export interface ShownVoice { label: string; episodes: string; online: boolean }
+export interface ShownOrder { season: number; voices: ShownVoice[] }
+
+export function seasonVoiceOrders(orders: readonly SeasonVoiceOrder[], view: PlannerView | undefined): ShownOrder[] {
   const held = new Map<number, Map<string, number[]>>()
   for (const goal of view?.episodes ?? []) {
     const [season, episode] = goal.slot
@@ -74,10 +77,10 @@ export function seasonVoiceOrders(orders: readonly SeasonVoiceOrder[], view: Pla
     const known = orders.find((each) => each.season === season)?.voices ?? []
     const here = held.get(season) ?? new Map<string, number[]>()
     const named = new Set(known.map((voice) => voice.label))
-    const shown = known.flatMap((voice) => voice.episodes ? [voice]
-      : here.has(voice.label) ? [{ label: voice.label, episodes: spansOf(here.get(voice.label) ?? []) }] : [])
+    const shown = known.flatMap((voice) => voice.episodes ? [{ label: voice.label, episodes: voice.episodes, online: true }]
+      : here.has(voice.label) ? [{ label: voice.label, episodes: spansOf(here.get(voice.label) ?? []), online: false }] : [])
     const more = [...here.entries()]
-      .filter(([voice]) => !named.has(voice)).map(([label, episodes]) => ({ label, episodes: spansOf(episodes) }))
+      .filter(([voice]) => !named.has(voice)).map(([label, episodes]) => ({ label, episodes: spansOf(episodes), online: false }))
     return { season, voices: [...shown, ...more] }
   }).filter((each) => each.voices.length > 0)
 }

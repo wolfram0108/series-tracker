@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { ref } from "vue"
 import { t } from "../../i18n"
-import type { components } from "../../api/schema"
-
-type VoiceSpan = components["schemas"]["VoiceSpan"]
+import type { ShownVoice } from "../../lib/plan"
+import VoiceMark from "./output/VoiceMark.vue"
 
 // The order of the voice-overs of a season: the order of the tracks in the container of every episode, the first being
 // the default one. The user drags a voice-over to its place; the core keeps the order and sends it back as an event.
-const props = withDefaults(defineProps<{ voices: VoiceSpan[]; busy?: boolean }>(), { busy: false })
+const props = withDefaults(defineProps<{ voices: ShownVoice[]; busy?: boolean }>(), { busy: false })
 const emit = defineEmits<{ (e: "order", labels: string[]): void }>()
 
 const dragged = ref<number | null>(null)
@@ -36,7 +35,7 @@ function drop(target: number): void {
         @dragstart="dragged = index" @dragover.prevent="over = index" @dragleave="over = null" @drop.prevent="drop(index)"
         @dragend="dragged = over = null"
       >
-        <span class="figure-mark">{{ index + 1 }}</span>
+        <VoiceMark :n="index + 1" :online="voice.online" />
         <span>{{ voice.label }}</span>
         <span class="voice-order-episodes">{{ voice.episodes }}</span>
       </li>

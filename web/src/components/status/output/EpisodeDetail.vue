@@ -7,6 +7,7 @@ import CompilationTable, { type CompilationRow } from "./CompilationTable.vue"
 import PowerSwitch from "./PowerSwitch.vue"
 import QueuePanel from "./QueuePanel.vue"
 import TrackTable from "./TrackTable.vue"
+import VoiceMark from "./VoiceMark.vue"
 
 // An episode opened below its row: the tracks with the actions that mend them, and the queues — of the reference and of
 // each voice-over — whose order the user changes for this episode only.
@@ -79,7 +80,7 @@ const PILL: Record<EpisodeStatus, string> = {
         <button
           v-for="(group, index) in groups" :key="group" type="button" class="st-tab" :class="{ active: tab === group }" role="tab"
           :aria-selected="tab === group" @click="tab = group"
-        ><span class="figure-mark">{{ index + 1 }}</span>{{ group }}</button>
+        ><VoiceMark :n="index + 1" :online="cells[index]?.online" />{{ group }}</button>
       </div>
 
       <CompilationTable

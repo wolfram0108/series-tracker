@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import type { components } from "../../../api/schema"
+import type { ShownVoice } from "../../../lib/plan"
 import type { Queues } from "../../../composables/outputCalls"
 import { t } from "../../../i18n"
 import {
@@ -23,7 +23,7 @@ const props = withDefaults(defineProps<{
   /** The episodes shown (a filter may hide some); `total` is how many the season has. */
   episodes: EpisodeView[]
   total: number
-  voices: components["schemas"]["VoiceSpan"][]
+  voices: ShownVoice[]
   marks: Record<number, Mark>
   names?: { season?: number | null; episode?: number | null; part?: number | null; name?: string | null }[]
   mode?: "cards" | "tiles"
